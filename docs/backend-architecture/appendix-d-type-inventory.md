@@ -1,0 +1,187 @@
+# Appendix D — Type inventory
+
+Code samples in this document are excerpts, not compilable units. This appendix
+is the index of the types they reference, so a reader can tell at a glance
+whether a name is defined somewhere in the document, deliberately elided, or a
+framework type.
+
+It exists because of a specific failure mode: a sample that calls
+`ProjectionInvoker.InvokeAsync(...)` reads as complete, and nothing catches that
+no such method was ever defined. Grepping this table against the samples is a
+repeatable check; noticing by eye is not.
+
+## D.1 Application ports — defined here
+
+| Type | Section | Purpose |
+|---|---|---|
+| `ICommand<T>`, `IQuery<T>` | [§6.2](06-cqrs.md) | Request marker interfaces |
+| `ICommandHandler<,>`, `IQueryHandler<,>` | §6.2 | Request handlers |
+| `IPipelineBehavior<,>`, `NextDelegate<T>` | §6.2 | Cross-cutting pipeline |
+| `IDispatcher` | §6.2 | Entry point for commands and queries |
+| `IUnitOfWork` | §6.3 | Transaction boundary; EF sealed in Infrastructure |
+| `Error`, `ErrorType` | [§10.5](10-api-gateway.md) | `Code`, `Description`, `Type`. `Code` is a metric dimension ([§9.8](09-messaging.md)), so it is a closed set by construction |
+| `OrderErrors` | §10.5 | Ordering's catalogue — the only place an `Error` is constructed |
+| `IIdempotencyStore`, `IdempotencyEntry` | [§8.5](08-caching-redis.md) | Idempotency-key claim, Redis-backed |
+| `IIdempotentCommand` | §8.5 | Opts a command into `IdempotencyBehavior`; carries `CommandId` |
+| `IDomainEventCollector` | [§7.5](07-persistence.md) | Reads the change tracker without exposing it |
+| `IDomainEventDispatcher` | §7.5 | Stages outbox rows; runs no handlers |
+| `IProjectionRegistry` | §7.5 | Which event types have projection handlers |
+| `IProductPriceReader` | §6.4 | Prices from the **local** projection — never a remote call |
+| `ICurrentUser` | [§11.4](11-identity-authorization.md) | The caller, for resource-level checks. `IsAuthenticated` is false on the consumer path |
+| `CancelOrderCommand`, `CancelOrderRequest`, `CancelOrderHandler` | §11.4 | The slice both entry paths converge on — HTTP and `CommandConsumer` (§9.4) |
+| `CancellationReasons` | §11.4 | Wire code → `CancellationReason`; the single parse both paths call |
+| `OrderMetrics` | [§13.3](13-observability.md) | Instruments on `Ordering.Orders`. **Application**, not `Common.*`: it takes `Money`. Recorded only from §6.6's projection, on the committed path |
+| `ICommandMessageMapper<,>` | §6.2 | Wire contract → application command |
+| `IIntegrationEvent` | §9.1 | The three envelope fields every contract carries; the constraint that lets the consumer read `OccurredAt` |
+| `ServiceIdentityOptions` | [§15.4](15-cicd-deployment.md) | Bound to `Identity:Client`, `ValidateOnStart`-checked. Registered by the BFF alone (§9.7) |
+| `ServiceOptions` | §15.4 | Static constants only — not bound, not validated, not deployable |
+| `PluggableInterfaces`, `AddPluggableFrom` | §6.2 | The one list of scanned interfaces, and the per-assembly scan that reads it |
+| `IIntegrationEventMapper` | §9.3 | Domain → integration allow-list |
+| `IIntegrationEventPublisher` | §9.3 | Stages outbox rows on the current transaction |
+| `IProjectionHandler<T>` | §9.4 | Reacts to own events, local lane, after commit |
+| `IIntegrationEventHandler<T>` | §9.4 | Reacts to another service's events |
+| `OutboxLane` | §9.3 | `Broker` \| `Local` |
+
+## D.2 Domain model — defined in §5
+
+The sample domain. All of these live in `Ordering.Domain` and reference nothing
+outside it ([§4.2](04-solution-structure.md)).
+
+| Type | Section | Kind |
+|---|---|---|
+| `Entity<TId>`, `AggregateRoot<TId>` | [§5.5](05-tactical-ddd.md) | Base types; `AggregateRoot` carries `DomainEvents` and `Version` |
+| `IDomainEvent`, `IHasDomainEvents` | §5.5 | Domain event contracts |
+| `Order`, `OrderLine` | §5.4 | The aggregate and its child entity |
+| `OrderId`, `CustomerId`, `ProductId` | §5.2 | Strongly typed identifiers |
+| `Money`, `Address` | §5.3 | Value objects |
+| `OrderStatus`, `CancellationReason` | §5.4 | Enumerations |
+| `PaymentReference`, `TrackingNumber` | §5.4 | Value objects referenced by aggregate methods |
+| `DomainException` | §5.3 | Signals a broken invariant — a bug, not user input (§5.7) |
+| `IOrderRepository` | §5.6 | Aggregate persistence port |
+| `OrderPlacedDomainEvent`, `OrderCancelledDomainEvent` | §5.5 | Declared in full; carry domain types (`Money`, `OrderLineSnapshot`) |
+| `OrderLineSnapshot` | §5.5 | Immutable copy of a line at the moment an event was raised — events must not alias the aggregate's live list |
+| `OrderStockConfirmedDomainEvent`, `OrderConfirmedDomainEvent`, `OrderShippedDomainEvent` | §5.4 | Raised by `Order`; same shape, suffix per §5.5 |
+| `V1.OrderPlaced`, `PlacedLine`, `V1.OrderConfirmed`, `ConfirmedLine` | §9.1 | Published event contracts — primitives only, each owning its line type |
+| `ReserveStock`, `ReleaseStock`, `StockLine` | §9.6 | Inventory's command contracts |
+| `AuthorisePayment` | §9.6 | Payments' command contract |
+| `CancelOrder`, `ConfirmOrder`, `MarkOrderShipped`, `FlagOrderForReview`, `CancelReasons`, `ReviewReasons` | §9.6 | Ordering's command contracts; reason codes are strings, not domain enums |
+
+## D.3 Outbox types — two, deliberately
+
+The distinction that finding this appendix's first defect depended on:
+
+| Type | Layer | Columns | Written by | Read by |
+|---|---|---|---|---|
+| `OutboxMessage` | EF entity, §9.4 | All eleven | `IIntegrationEventPublisher` staging; test fixtures | `db.OutboxMessages`, alerts, purge |
+| `OutboxClaim` | Dapper record, §9.4 | The eight the `OUTPUT` clause returns | — | `OutboxDispatcher.ProcessBatchAsync` |
+| `MessageTypeMap` | Singleton, §9.4 | Neither — it maps `MessageType` values to types | Built at startup from `MessageTypeSource` | `Stage` on the way in, `DeliverAsync` on the way out, [§12.4](12-test-strategy.md)'s round-trip |
+| `MessageTypeSource` | Singleton, §9.4 | The assembly list behind the map | §4.2's registration; §12.4's fixture `Add`s the test assembly | `MessageTypeMap`'s factory |
+| `OutboxJson` | Static, §9.4 | Neither — the one `JsonSerializerOptions` both ends of the lane use | — | `Stage` and `DeliverAsync`, and §12.4's round-trip test |
+| `InboxMessage` | EF entity, §9.5 | `(MessageId, Endpoint)` composite key, `HandledAt` | `InboxFilter<T>` | duplicate suppression, retention purge |
+
+`OutboxClaim` has no `ProcessedAt`, `LastError` or `LockedUntil` — a claimed row
+is unprocessed by definition, and the dispatcher writes those columns rather
+than reading them. Using one type for both produces properties that are
+structurally always null on one path.
+
+## D.4 Infrastructure implementations — defined here
+
+| Type | Section | Implements |
+|---|---|---|
+| `Dispatcher` | §6.2 | `IDispatcher` |
+| `EfUnitOfWork` | §6.3 | `IUnitOfWork` |
+| `EfDomainEventCollector` | §7.5 | `IDomainEventCollector` |
+| `DomainEventDispatcher`, `ProjectionRegistry` | §7.5 | Application ports |
+| `RedisIdempotencyStore` | §8.5 | `IIdempotencyStore` |
+| `OrderingIntegrationEventMapper` | §9.3 | `IIntegrationEventMapper` |
+| `OutboxDispatcher` | §9.4 | `BackgroundService`; `ProcessBatchAsync` is public for tests |
+| `ProjectionInvoker` | §9.4 | Cached-delegate handler resolution |
+| `IntegrationEventConsumer<T>` | §9.4 | `IConsumer<T>` for **events** → `IIntegrationEventHandler` |
+| `CommandConsumer<TMessage,TCommand>` | §9.4 | `IConsumer<T>` for **commands** → the application dispatcher |
+| `InboxFilter<T>` | §9.5 | `IFilter<ConsumeContext<T>>` |
+| `ProjectedPriceReader` | §6.4 | `IProductPriceReader` over `ordering.ProductPrices` |
+| `HttpContextCurrentUser` | §11.4 | `ICurrentUser` over `IHttpContextAccessor`; reads `ClaimTypes.NameIdentifier` and `permission` claims |
+| `SensitiveDataRedactor` | §13.4 | `BaseProcessor<LogRecord>`; enforces the never-log list on the pipeline §13.2 builds |
+| `OutboxMetrics` | §13.6 | Observable gauges on the `Ordering.Outbox` meter; singleton, eagerly constructed |
+| `RequestMetrics` | §13.3 | `request.duration` on `Commerce.Requests`; injected by `LoggingBehavior`, so no forcing needed |
+| `MessagingMetrics` | §13.3 | Three instruments on `Commerce.Messaging`: `messaging.delivery.lag` and `projection.lag` histograms, and the `command.domain_rejected` counter `Rejected` writes (§9.8). Injected by `IntegrationEventConsumer<T>` and `CommandConsumer<,>`; resolved from the provider by the static `ProjectionInvoker` |
+| `IOutboxStats`, `OutboxStats` | §13.6 | Backlog age and abandoned count, read per-scope from a singleton |
+| `MetricsInitialiser` | §13.6 | `IHostedService` whose only job is forcing the metrics singletons to be constructed |
+| `OrderFulfilmentState` | §9.6 | `SagaStateMachineInstance`; persisted to `ordering.OrderFulfilmentStates` |
+| `ProductPriceProjection` | §6.6 | Writes `ordering.ProductPrices` from Catalog's three product events |
+| `OrderSummaryProjection` | §6.6 | Writes `ordering.OrderSummaries` |
+| `PriceChangedCacheInvalidator` | §8.4 | Ordering's second `PriceChanged` handler — cache only |
+| `ClientCredentialsHandler` | §11.5 | `DelegatingHandler`; attaches the M2M bearer token to the BFF's outbound calls |
+| `ValidationBehavior<,>`, `TransactionBehavior<,>` | §6.3 | `IPipelineBehavior<,>` |
+| `LoggingBehavior<,>` | §13.3 | `IPipelineBehavior<,>`; outermost — pushes the request scope, logs the outcome and records `request.duration` |
+| `IdempotencyBehavior<,>` | §8.5 | `IPipelineBehavior<,>` over `IIdempotencyStore` |
+| `UseCorrelationId`, `MapCommonHealthEndpoints`, `AddCommonWebDefaults` | §10.4, §13.5, §13.2 | `Common.Web` host extensions |
+| `OrderFulfilmentSaga`, `Endpoints` | §9.6 | Saga and its command destinations |
+| `ServiceFixture` | §12.4 | Testcontainers `IAsyncLifetime` fixture; owns the `WebApplicationFactory`. Lives in `Ordering.TestSupport` (§4.1) |
+| `TestAuthHandler` | §12.4 | `AuthenticationHandler<AuthenticationSchemeOptions>`; issues the principal a test names in headers. Also `Ordering.TestSupport` |
+
+## D.5 Referenced but deliberately not shown
+
+These are named in samples and left undefined on purpose. They are ordinary,
+and writing them out would add length without insight.
+
+**The rule: any project-specific name a sample references — type *or* member —
+that is not defined in D.1–D.4 must appear here.** If it is in neither, it is a
+defect rather than an omission. Framework and BCL names (D.6) are out of scope;
+so are members of types the document does define, since those are visible at
+their declaration.
+
+| Name | What it is |
+|---|---|
+| `IDbConnectionFactory`, `SqlConnectionFactory` | Opens a `SqlConnection` for Dapper reads |
+| `OrderingDbContext` | The service `DbContext`; configuration in §7.2 |
+| `OutboxPublisher` | `IIntegrationEventPublisher` writing `OutboxMessage` rows; resolves `MessageTypeMap` and hands it to `Stage` |
+| `Result`, `Result<T>` | Non-generic `Result` is the void case — there is no `Unit` — and `Result<T>` derives from it, which is what lets `TransactionBehavior` test any command's outcome with one pattern (§6.3). `IsSuccess`/`IsFailure`, `Error`, and the `Success`/`Failure` factories |
+| `ToHttpResult()` | Extension on `Result`/`Result<T>` mapping `ErrorType` to a status (§10.5) and the value to a 200 body |
+| `CursorPage<T>`, `Cursor` | The pagination envelope and the opaque cursor codec (§6.5) |
+| `AddCommonWebDefaults`, `AddRedisConnections`, `AddMassTransitMessaging` | `Common.Web` / Infrastructure registration helpers |
+| `RedisConnections` | Keyed-service names for the cache and coordination connections (§8.1) |
+| `BuildInfo` | Assembly version stamped onto OTel resource attributes (§13.2) |
+| `OrderBuilder`, `AddressBuilder`, `CommandBuilder`, `SeedData` | Test data builders (§12.3) |
+| `Poison`, `Healthy`, `LocalRowFor<T>`, `TestClock` | Outbox test builders (§12.4) |
+| `Contracts`, `ContractSamples` | Test builders for `required`-member contract messages — one sample per contract type, and the reason the §12.6 suite cannot silently skip a new one |
+| `AlwaysThrows`, `NoOpEvent`, `UnhandledEvent` | Test event types with throwing / no-op / no handler |
+| `IntegrationCollection` (xUnit) | The `[CollectionDefinition]` sharing one `ServiceFixture` across test classes — declared once **per test assembly** (§12.4). Named for what it groups, and deliberately not `ServiceCollection`: that name is taken by `Microsoft.Extensions.DependencyInjection`, and the local type would win in every test file that also builds a provider |
+| `ICommandMessageMapper<TMessage,TCommand>` implementations | One per command contract — e.g. parsing `CancelOrder.Reason` back to `CancellationReason` (§9.4) |
+| `ConfirmOrderCommand`, `MarkOrderShippedCommand`, `FlagOrderForReviewCommand` | The other three message-borne slices, same shape as `CancelOrderCommand` (§9.4, §9.6) |
+| `OrderRepository` | `IOrderRepository` over EF; also the Infrastructure assembly marker for the §6.2 scan |
+| `ContractMappingException` | Thrown by an `ICommandMessageMapper` on a value it cannot map; ignored by the retry policy so it reaches the error queue immediately (§9.4, §11.4) |
+| `StartHarnessAsync` | Test helper returning a started MassTransit harness (§12.5) |
+| `Realm`, `Catalog`, `Audiences()` | Fixture handles on the Keycloak and Catalog containers, and a `aud`-claim reader over the decoded token — the realm-configuration assertions in §11.5 |
+| `MessageTypes` | Fixture handle on the real `MessageTypeMap` (§12.4). **Not `Types`**: that name belongs to `NetArchTest.Rules.Types`, which §4.2's architecture tests call as `Types.InAssembly(...)`, and a fixture member would shadow it in any file holding both — the `ServiceCollection` collision again, two rows above |
+| `TestTypeMap` | A `MessageTypeMap` over the contract and test assemblies, built once as a static in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture |
+| `DomainEventSamples` | One sample per stageable domain event, so a new event without one fails §12.4's round-trip rather than being skipped — `ContractSamples`' counterpart for the Local lane |
+| `ConcurrentRequestException` | Thrown when an idempotency key is claimed but unfinished (§8.5) |
+| `InvariantViolationException` | Thrown when a command modifies more than one aggregate root (§6.3, principle 3) |
+| `IAggregateRoot` | Non-generic marker on `AggregateRoot<TId>`, so the change tracker can count roots without knowing their key type |
+| `StockReservationExpired`, `PaymentAuthorisationExpired`, `DespatchExpired`, `StockReleaseExpired` | Saga schedule messages — one per wait, and §9.6 has four (§9.6) |
+| `FlagOrderForReviewHandler` | Writes the `OrderReviews` row; loads no aggregate (§9.6) |
+| `ITokenCache`, `CachingTokenClient` | Acquires and caches the M2M access token until shortly before expiry; BFF-only (§11.5) |
+| `PriceRow` | Dapper row shape behind `ProjectedPriceReader` (§6.4) |
+| `SummaryRow` | Dapper row shape behind the escalated summaries query, `Products` still JSON (§6.6) |
+| `FulfilmentFact` | Dapper row shape behind §6.6's fulfilment claim — `(PlacedAt, ConfirmedAt)`, non-nullable because the claim's predicate tests both columns for `IS NOT NULL` |
+| `PlacedFact` | `(TotalAmount, Currency)` behind the placement claim. Non-nullable for a **weaker** reason: the predicate tests `PlacedAt`, and these are non-null only because the `MERGE` that sets `PlacedAt` sets all three together (§6.6). Splitting that statement would break these members without touching the predicate that appears to guarantee them |
+| `ConcurrencyMode` | MassTransit enum selecting the saga repository's locking strategy (§9.6) |
+| `GetConfiguredOptions` | Test helper returning the resilience options under assertion (§9.7) |
+| `BuildServices`, `BuildProvider` | Test helpers running **both** real registration helpers — `AddOrderingApplication` and `AddOrderingInfrastructure` (§6.2, §6.3, §13.6). `BuildServices` returns the populated `IServiceCollection`; `BuildProvider` is `BuildServices().BuildServiceProvider()`. Two helpers because registrations can only be enumerated before the build |
+| `OutboxBacklogHealthCheck` | Reports outbox depth as an `observe`-tagged check (§13.5) |
+| `PlaceOrderCommand`, `PlaceOrderItem`, `PlaceOrderValidator`, `PlaceOrderHandler` | The worked command slice (§6.4) |
+| `GetOrderSummariesQuery`, `OrderSummaryDto`, `SummaryProduct`, `OrderSummaryProjection` | The worked query and projection slice — the DTO shown at level 1 (§6.5) and rewritten at level 2 (§6.6) |
+| `ProductPublished` | Catalog contract, envelope (§9.1) plus `ProductId`, `Name`, `ThumbnailUrl`, `Currency`, `Amount` — the last two so a projection has a price the moment the product exists, without waiting for a `PriceChanged` that may never come |
+| `ProductDiscontinued` | Catalog contract, envelope plus `ProductId`. No reason code: §6.6 flips `IsAvailable` either way |
+| `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | The saga's integration events ([§3.2](03-bounded-contexts.md), §9.6, `Common.Contracts`), each carrying the §9.1 envelope plus `OrderId` and what its own step decided. `PriceChanged` is not here — §9.1 declares it |
+
+## D.6 Framework types
+
+Not listed individually: ASP.NET Core, EF Core, MassTransit, StackExchange.Redis,
+Dapper, Polly, OpenTelemetry, xUnit, Shouldly, NSubstitute, Testcontainers,
+Respawn, Scrutor and FluentValidation types are assumed. Licences in [Appendix B](appendix-b-licences.md).
+
+---
+
+[← Appendix C](appendix-c-delivery-plan.md) · [Index](README.md)

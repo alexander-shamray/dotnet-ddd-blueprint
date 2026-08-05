@@ -1,0 +1,1425 @@
+# 6. CQRS
+
+## 6.1 What CQRS means here
+
+Command Query Responsibility Segregation means the write path and the read path
+use different models. It does not require different databases, event sourcing,
+or eventual consistency. Those are options that CQRS *enables*, not requirements
+it imposes.
+
+The blueprint uses two levels and shows how to move between them:
+
+| | Level 1 — Logical CQRS | Level 2 — Physical split |
+|---|---|---|
+| Write model | EF Core, aggregates | EF Core, aggregates |
+| Read model | Dapper over the same tables/views | Dedicated denormalised tables or Redis |
+| Store | One database | Write DB + read store |
+| Sync | None needed | Projections from events |
+| Consistency | Strong | Eventual |
+| Used by | Catalog, Inventory, Payments, Shipping | Ordering (section 6.6) |
+
+**Start at level 1.** It gives most of the benefit — the write model stays
+clean, queries stay fast — at none of the operational cost. Escalate only where
+measurement justifies it.
+
+## 6.2 The dispatcher
+
+MediatR is the conventional choice and moved to a commercial licence in 2025.
+The functionality it provides here is roughly eighty lines. Writing them removes
+a licence obligation, a dependency, and a layer of reflection-driven indirection
+that makes stack traces harder to read.
+
+```csharp
+namespace Common.Application;
+
+public interface ICommand<out TResult>;
+public interface IQuery<out TResult>;
+
+public interface ICommandHandler<in TCommand, TResult>
+    where TCommand : ICommand<TResult>
+{
+    Task<TResult> HandleAsync(TCommand command, CancellationToken ct);
+}
+
+public interface IQueryHandler<in TQuery, TResult>
+    where TQuery : IQuery<TResult>
+{
+    Task<TResult> HandleAsync(TQuery query, CancellationToken ct);
+}
+
+public delegate Task<TResult> NextDelegate<TResult>();
+
+public interface IPipelineBehavior<in TRequest, TResult>
+{
+    Task<TResult> HandleAsync(TRequest request, NextDelegate<TResult> next,
+                              CancellationToken ct);
+}
+
+public interface IDispatcher
+{
+    Task<TResult> SendAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default);
+    Task<TResult> QueryAsync<TResult>(IQuery<TResult> query, CancellationToken ct = default);
+}
+```
+
+The implementation caches one invoker instance per concrete request type, so the
+reflection cost is paid once per type rather than per call.
+
+```csharp
+internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
+{
+    private static readonly ConcurrentDictionary<Type, object> Invokers = new();
+
+    public Task<TResult> SendAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default)
+        => GetInvoker<TResult>(command.GetType(), typeof(CommandInvoker<,>))
+              .InvokeAsync(services, command, ct);
+
+    public Task<TResult> QueryAsync<TResult>(IQuery<TResult> query, CancellationToken ct = default)
+        => GetInvoker<TResult>(query.GetType(), typeof(QueryInvoker<,>))
+              .InvokeAsync(services, query, ct);
+
+    private static Invoker<TResult> GetInvoker<TResult>(Type requestType, Type openInvoker)
+        => (Invoker<TResult>)Invokers.GetOrAdd(requestType, _ =>
+               Activator.CreateInstance(
+                   openInvoker.MakeGenericType(requestType, typeof(TResult)))!);
+
+    private abstract class Invoker<TResult>
+    {
+        public abstract Task<TResult> InvokeAsync(
+            IServiceProvider services, object request, CancellationToken ct);
+    }
+
+    private sealed class CommandInvoker<TCommand, TResult> : Invoker<TResult>
+        where TCommand : ICommand<TResult>
+    {
+        public override Task<TResult> InvokeAsync(
+            IServiceProvider services, object request, CancellationToken ct)
+        {
+            var typed   = (TCommand)request;
+            var handler = services.GetRequiredService<ICommandHandler<TCommand, TResult>>();
+
+            NextDelegate<TResult> pipeline = () => handler.HandleAsync(typed, ct);
+
+            // Reversed so the first-registered behaviour is the outermost.
+            foreach (var behavior in services
+                         .GetServices<IPipelineBehavior<TCommand, TResult>>()
+                         .Reverse())
+            {
+                var next = pipeline;
+                pipeline = () => behavior.HandleAsync(typed, next, ct);
+            }
+
+            return pipeline();
+        }
+    }
+
+    // QueryInvoker<TQuery, TResult> is identical but resolves IQueryHandler<,>.
+}
+```
+
+Registration scans the assembly once at startup. Every pluggable interface must
+be scanned — one that exists but is never registered resolves to an empty
+collection or throws at first use, and neither failure points at the omission.
+
+The list is declared **once**, in `Common.Application`, and both the scan and
+the test below read it. That is the point: the previous version kept two copies,
+and adding a fifth interface meant remembering both:
+
+```csharp
+namespace Common.Application;
+
+/// <summary>
+/// Every open generic the container is expected to discover by convention.
+/// Adding a pluggable interface means adding it here — and nowhere else.
+/// </summary>
+public static class PluggableInterfaces
+{
+    public static readonly IReadOnlyList<Type> All =
+    [
+        typeof(ICommandHandler<,>),          // §6.2 — HTTP and message-borne
+        typeof(IQueryHandler<,>),            // §6.5
+        typeof(IProjectionHandler<>),        // §7.5 — local outbox lane
+        typeof(IIntegrationEventHandler<>),  // §9.4 — broker lane
+        typeof(ICommandMessageMapper<,>)     // §9.4 — wire contract → command
+
+        // IPipelineBehavior<,> is deliberately absent. Registration order is
+        // pipeline order (§6.3), and a scan gives no ordering guarantee —
+        // behaviours are registered explicitly and asserted by a test.
+    ];
+}
+
+/// <summary>Maps an inbound command contract to its application command.</summary>
+public interface ICommandMessageMapper<in TMessage, out TCommand>
+    where TMessage : class
+{
+    TCommand Map(TMessage message);
+}
+```
+
+```csharp
+public static IServiceCollection AddPluggableFrom(
+    this IServiceCollection services, Assembly assembly)
+    => services.Scan(scan =>
+    {
+        var from = scan.FromAssemblies(assembly);
+
+        foreach (var contract in PluggableInterfaces.All)
+            from.AddClasses(c => c.AssignableTo(contract))
+                .AsImplementedInterfaces()
+                .WithScopedLifetime();
+    });
+```
+
+**Each layer scans itself.** Handlers do not all live in Application: the
+projections in §6.6 write SQL, `PriceChangedCacheInvalidator` ([§8.4](08-caching-redis.md)) sits in
+`Ordering.Infrastructure.Caching`, and the command mappers convert wire
+contracts. Scanning one assembly registers some handlers and silently skips the
+rest, which is the §6.2 trap with a wider blast radius — so both registration
+methods call it:
+
+```csharp
+// Ordering.Application/DependencyInjection.cs
+services.AddPluggableFrom(typeof(PlaceOrderCommand).Assembly);
+
+// Ordering.Infrastructure/DependencyInjection.cs
+services.AddPluggableFrom(typeof(OrderRepository).Assembly);
+```
+
+> **Trap — the handler that was never registered.** Nothing in C# requires an
+> implemented interface to be resolvable. `GetServices<IProjectionHandler<T>>()`
+> returning empty is indistinguishable from "this event has no projection", so
+> the message is marked processed having done nothing and the monitoring stays
+> green. [§9.4](09-messaging.md) closes this by throwing when a `Local` row finds no handler, and
+> the registration test below catches it at build time instead.
+>
+> The trap has a second form worth naming, because this document fell into it:
+> a *list* of interfaces duplicated between the registration and the test that
+> guards it. Both copies drift together or not at all, and the guard silently
+> stops covering whatever the newest interface is. One list, two readers.
+
+Three mechanisms guard wiring, and none subsumes the others:
+
+| | Catches | Misses |
+|---|---|---|
+| **`ValidateOnBuild`** ([§4.2](04-solution-structure.md)) | Anything *depended upon* but unregistered — ports, stores, clients — at startup, for the whole graph | A type nothing depends on. An unregistered `IProjectionHandler` breaks no constructor, so the container starts happily |
+| **The registration test** below | An implementation of a scanned interface that never got registered, whether or not anything depends on it | Plain ports — not open generics, so not in `PluggableInterfaces` |
+| **`ValidateOnStart`** ([§15.4](15-cicd-deployment.md)) | An options type that is never bound, or bound but missing a `[Required]` value | Anything that is not configuration |
+
+They cover three different failure shapes, and the third is the least obvious:
+`IOptions<T>` resolves whether or not it was bound, handing back an empty
+instance. So a forgotten `AddOptions` satisfies `ValidateOnBuild`, passes the
+registration test, starts the service, and fails as *behaviour* — an empty
+Redis key prefix, a token request with no scope.
+
+Worked examples of each: `IProductPriceReader` unregistered fails
+`ValidateOnBuild`, because `PlaceOrderHandler` needs it. `ProductPriceProjection`
+unregistered fails only the test — nothing constructs it, it is simply never
+called. `ServiceIdentityOptions` unbound fails only `ValidateOnStart` — the
+container resolves `IOptions<T>` happily and hands back an empty instance.
+
+```csharp
+[Fact]
+public void Every_handler_implementation_is_registered()
+{
+    // BuildProvider() — the real registration path, not a test-only container,
+    // and the same helper §6.3 and §13.6 use rather than a second copy of the
+    // three calls. It runs BOTH AddOrderingApplication and
+    // AddOrderingInfrastructure, which is the property this test depends on:
+    // a hand-rolled version that ran only the Application half would find the
+    // Infrastructure handlers absent and report the layer it forgot to build
+    // as an unregistered handler.
+    //
+    // Handlers are scoped; resolving them from the root provider throws.
+    using var scope = BuildProvider().CreateScope();
+
+    // Every service assembly, not just Application. Building the provider above
+    // has forced both to load, and deriving the set here means a new layer is
+    // covered without editing this test — the same reason the interface list
+    // is not duplicated either.
+    var assemblies = AppDomain.CurrentDomain.GetAssemblies()
+        .Where(a => a.GetName().Name?.StartsWith("Ordering.") == true);
+
+    // Same list the scan uses — a new interface is covered the moment it is
+    // added to PluggableInterfaces, with no second place to remember.
+    var implementations = assemblies.SelectMany(a => a.GetTypes())
+        .Where(t => t is { IsAbstract: false, IsInterface: false })
+        .SelectMany(t => t.GetInterfaces()
+            .Where(i => i.IsGenericType
+                     && PluggableInterfaces.All.Contains(i.GetGenericTypeDefinition()))
+            .Select(i => (Implementation: t, Service: i)));
+
+    foreach (var (implementation, service) in implementations)
+        scope.ServiceProvider.GetServices(service).ShouldContain(
+            s => s!.GetType() == implementation,
+            $"{implementation.Name} implements {service.Name} but is not registered.");
+}
+```
+
+> **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
+
+## 6.3 Pipeline behaviours
+
+Cross-cutting concerns are behaviours, registered once and applied to every
+command. Order matters — they nest outermost-first.
+
+```
+Request
+  → Logging          (correlation id, timing, outcome)
+  → Validation       (FluentValidation; fails fast before any I/O)
+  → Idempotency      (has this command id been processed?)
+  → Transaction      (open, handle, dispatch domain events, commit)
+      → Handler
+```
+
+**Behaviours are registered explicitly, in order, and are deliberately not part
+of the §6.2 convention scan:**
+
+```csharp
+// In AddOrderingApplication, after AddPluggableFrom.
+//
+// Registration order IS pipeline order — the dispatcher reverses this list so
+// the first registered ends up outermost (§6.2). A scan would register them in
+// whatever order reflection returns types, which is unspecified, so this one
+// interface is excluded from PluggableInterfaces on purpose.
+services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+services.AddScoped(typeof(IPipelineBehavior<,>), typeof(IdempotencyBehavior<,>));
+services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
+```
+
+> **Unregistered, this fails silently and completely.** `GetServices<IPipelineBehavior<…>>()`
+> returning empty is indistinguishable from "no behaviours configured", so the
+> dispatcher invokes the handler alone. `SaveChangesAsync` has exactly one call
+> site — inside `TransactionBehavior` — so a missing registration means
+> `PlaceOrderHandler` calls `orders.Add(order)`, returns `Result.Success`, and
+> **nothing is ever written**: no order, no outbox row, no saga. The request
+> returns 200.
+>
+> That is the argument for the ordered-registration test below rather than
+> trusting four lines to survive a refactor.
+
+```csharp
+[Fact]
+public void Command_behaviours_are_registered_in_the_documented_order()
+{
+    using var scope = BuildProvider().CreateScope();
+
+    var actual = scope.ServiceProvider
+        .GetServices<IPipelineBehavior<PlaceOrderCommand, Result<Guid>>>()
+        .Select(b => b.GetType().GetGenericTypeDefinition())
+        .ToArray();
+
+    actual.ShouldBe([
+        typeof(LoggingBehavior<,>),
+        typeof(ValidationBehavior<,>),
+        typeof(IdempotencyBehavior<,>),
+        typeof(TransactionBehavior<,>)
+    ], "outermost first — see the pipeline diagram above");
+}
+```
+
+The generic constraints do the rest of the work: `IdempotencyBehavior` requires
+`IIdempotentCommand` (§8.5) and `TransactionBehavior` requires
+`ICommand<TResult>`, so both are skipped for queries and for commands that have
+not opted in, without either behaviour needing to check.
+
+That skipping is a container feature, not a language one — `Microsoft.Extensions
+.DependencyInjection` has honoured constraints on open generic registrations
+since .NET 7, and on an older container the same registration throws when the
+first query resolves rather than quietly omitting the behaviour. A blueprint
+that leaves it at "the constraints do the work" is trusting a version note, so
+the assertion above has a mirror:
+
+```csharp
+[Fact]
+public void Queries_run_without_the_transaction_and_idempotency_behaviours()
+{
+    using var scope = BuildProvider().CreateScope();
+
+    var actual = scope.ServiceProvider
+        // The query's own result type (§6.5) — CursorPage, not Result. A
+        // closed IPipelineBehavior<,> asked for with the wrong TResult resolves
+        // to an empty sequence, and an empty sequence passes any assertion
+        // about what is absent.
+        .GetServices<IPipelineBehavior<GetOrderSummariesQuery,
+                                       CursorPage<OrderSummaryDto>>>()
+        .Select(b => b.GetType().GetGenericTypeDefinition())
+        .ToArray();
+
+    // A query opening a transaction is the defect this catches: harmless in
+    // a test, and a held connection per read under load.
+    actual.ShouldBe([
+        typeof(LoggingBehavior<,>),
+        typeof(ValidationBehavior<,>)
+    ], "queries get logging and validation only — §6.3");
+}
+```
+
+Validation:
+
+```csharp
+public sealed class ValidationBehavior<TRequest, TResult>(
+    IEnumerable<IValidator<TRequest>> validators)
+    : IPipelineBehavior<TRequest, TResult>
+{
+    public async Task<TResult> HandleAsync(
+        TRequest request, NextDelegate<TResult> next, CancellationToken ct)
+    {
+        if (!validators.Any())
+            return await next();
+
+        var context = new ValidationContext<TRequest>(request);
+        var failures = (await Task.WhenAll(
+                validators.Select(v => v.ValidateAsync(context, ct))))
+            .SelectMany(r => r.Errors)
+            .Where(f => f is not null)
+            .ToArray();
+
+        if (failures.Length > 0)
+            throw new ValidationException(failures);
+
+        return await next();
+    }
+}
+```
+
+Transaction — this is the behaviour that makes the domain-event and outbox
+mechanism work, and it is the one worth reading closely.
+
+It must not reference EF Core, because it lives in `Common.Application` and
+§4.2 forbids it. The transaction boundary is therefore expressed as a port:
+
+```csharp
+namespace Common.Application;
+
+/// <summary>
+/// The command transaction boundary. Implemented in Infrastructure over the
+/// service DbContext; Application never sees EF Core.
+/// </summary>
+public interface IUnitOfWork
+{
+    bool HasActiveTransaction { get; }
+
+    /// <summary>
+    /// Runs <paramref name="operation"/> inside one atomic unit, retrying the
+    /// whole unit on transient faults. Persists aggregate changes, domain-event
+    /// side effects and outbox rows together, or none of them.
+    /// </summary>
+    Task<TResult> ExecuteAsync<TResult>(
+        Func<CancellationToken, Task<TResult>> operation, CancellationToken ct);
+
+    Task<int> SaveChangesAsync(CancellationToken ct);
+}
+```
+
+The behaviour depends only on that:
+
+```csharp
+public sealed class TransactionBehavior<TCommand, TResult>(
+    IUnitOfWork unitOfWork,
+    IDomainEventDispatcher domainEvents)
+    : IPipelineBehavior<TCommand, TResult>
+    where TCommand : ICommand<TResult>
+{
+    public async Task<TResult> HandleAsync(
+        TCommand command, NextDelegate<TResult> next, CancellationToken ct)
+    {
+        // Already inside a transaction (nested dispatch) — do not open another.
+        if (unitOfWork.HasActiveTransaction)
+            return await next();
+
+        return await unitOfWork.ExecuteAsync(async token =>
+        {
+            var result = await next();
+
+            // A handler that returns a failed Result has rejected the command.
+            // Returning here skips both the staging and the save, so the
+            // transaction commits nothing and no outbox row announces a state
+            // change that did not happen. Result<T> derives from Result, so one
+            // pattern covers every command shape without reflection.
+            if (result is Result { IsFailure: true })
+                return result;
+
+            // Stages outbox rows only — no handler runs here (§7.5).
+            // Reactions happen after commit, driven by the outbox.
+            await domainEvents.DispatchAsync(token);
+
+            // Principle 3 (§2.3), asserted rather than trusted — see below for
+            // why it is here and not in a code review checklist. After
+            // dispatch, so the staged rows of a legitimate single-root command
+            // are already in the tracker and not miscounted.
+            if (unitOfWork.ModifiedAggregateCount > 1)
+                throw new InvariantViolationException(
+                    $"{typeof(TCommand).Name} modified {unitOfWork.ModifiedAggregateCount} " +
+                    "aggregate roots. One transaction, one aggregate (§2.3 principle 3) — " +
+                    "the second aggregate should react to a domain event after commit (§7.5).");
+
+            await unitOfWork.SaveChangesAsync(token);
+
+            return result;
+        }, ct);
+    }
+}
+```
+
+**This is the whole behaviour.** Nothing below adds to it. Every sample in this
+document that shows part of a pipeline is an excerpt of something, and the one
+place that matters is this one — because a behaviour assembled from fragments
+loses whichever fragment the reader did not scroll to, and the missing piece is
+silent in all three cases: no failure guard commits rejected commands, no
+dispatch publishes nothing, no count check makes principle 3 advisory.
+
+> **A rejected command must not have written anything, and one guard is not
+> enough to promise that.** This one skips the staging and the save, which
+> covers everything EF is tracking. It does nothing about a write that already
+> reached the connection — `ExecuteRawAsync` (below) executes immediately, and
+> no amount of not-calling-`SaveChanges` takes it back. That is why
+> `EfUnitOfWork.ExecuteAsync` carries the *same* check before `CommitAsync`
+> (§6.3): the two together mean a failed command commits nothing by either
+> route.
+>
+> **Validate first, mutate second** remains the rule, because the guards make
+> breaking it cost a discarded write rather than a committed lie — but a rule
+> whose enforcement is two checks in two types is a rule worth testing. PR-09
+> covers both: `SaveChanges` once on success and never on failure, and a
+> handler that calls `ExecuteRawAsync` and then returns `Result.Failure` leaves
+> no row behind.
+
+> **Nothing inside this transaction may make a network call to another
+> service.** The behaviour wraps the whole handler, so any remote call a handler
+> makes is held open across the wire. With §9.7's 5-second client budget, a
+> single slow peer can pin a SQL Server transaction — and its pooled connection
+> — for five seconds per request. Under load that is connection-pool exhaustion
+> and lock contention, and it converts "Catalog is slow" into "Ordering is
+> down", which is precisely what ADR-002 exists to prevent.
+>
+> A command handler may therefore read only its **own** database. Data owned by
+> another service must already be present locally, projected from that service's
+> events (§6.6). §9.7 states the general rule; this is where violating it hurts
+> most, because the transaction makes the coupling invisible at the call site.
+
+### One aggregate per transaction
+
+Principle 3 ([§2.3](02-architecture-at-a-glance.md)) says a transaction never spans two aggregates, and nothing
+about `SaveChangesAsync` objects if a handler loads two — one save, one commit,
+no complaint. The count in the behaviour above is what makes the rule
+observable, and it needs two members on the port:
+
+```csharp
+public interface IUnitOfWork
+{
+    // ... as above
+
+    /// <summary>Distinct aggregate roots with pending changes.</summary>
+    int ModifiedAggregateCount { get; }
+
+    /// <summary>
+    /// Raw SQL on the transaction's own connection, for the rare table with no
+    /// aggregate behind it (§9.6's OrderReviews). A command handler must not
+    /// open its own connection — that write would commit outside this
+    /// transaction.
+    /// </summary>
+    Task ExecuteRawAsync(string sql, object parameters, CancellationToken ct);
+}
+```
+
+The EF implementation of both new members is in `EfUnitOfWork` below. Owned
+children (`OrderLine`) do not count — they are part of their root, which is the
+whole reason an aggregate is a consistency boundary rather than a table.
+
+**Why a runtime check rather than an architecture test.** The violation is not
+structural: nothing in a handler's *type* says how many aggregates it will
+touch, and the second one is usually loaded conditionally, three calls deep.
+An assertion at the transaction boundary catches it on the first execution that
+does it — in a unit test, in CI, or on the developer's machine — with the
+command name and the count in the message.
+
+**When it fires, the fix is almost never to relax it.** A command that must
+change two aggregates is describing a process, not a transaction: the second
+aggregate reacts to the first one's domain event after commit (ADR-018), or the
+two belong in one aggregate and the boundary is drawn in the wrong place. Both
+are [§5.4](05-tactical-ddd.md) problems, and the exception says which sections to read.
+
+Query handlers must never resolve `IUnitOfWork`. The behaviour is constrained to
+`ICommand<TResult>` precisely so the read path cannot open a write transaction
+or touch the outbox.
+
+The EF Core implementation lives in Infrastructure:
+
+```csharp
+namespace Ordering.Infrastructure.Persistence;
+
+internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
+{
+    public bool HasActiveTransaction => db.Database.CurrentTransaction is not null;
+
+    public async Task<TResult> ExecuteAsync<TResult>(
+        Func<CancellationToken, Task<TResult>> operation, CancellationToken ct)
+    {
+        var strategy = db.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            var result = await operation(ct);
+
+            // The commit decision belongs with the commit. §6.3's behaviour
+            // declines to SaveChanges on a failed Result, which is enough for
+            // tracked changes — but ExecuteRawAsync writes on this
+            // transaction's connection immediately, and only a rollback undoes
+            // that. Returning without committing disposes the transaction,
+            // which rolls it back.
+            if (result is Result { IsFailure: true })
+                return result;
+
+            await tx.CommitAsync(ct);
+            return result;
+        });
+    }
+
+    public Task<int> SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
+
+    // Owned children (OrderLine) are not roots and do not count — that is the
+    // difference between an aggregate and a table (§6.3, principle 3).
+    public int ModifiedAggregateCount => db.ChangeTracker
+        .Entries()
+        .Count(e => e.Entity is IAggregateRoot &&
+                    e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted);
+
+    // The transaction's own connection and transaction, explicitly passed —
+    // this is what makes a raw write part of the command rather than beside it.
+    public Task ExecuteRawAsync(string sql, object parameters, CancellationToken ct) =>
+        db.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
+            sql, parameters,
+            transaction: db.Database.CurrentTransaction?.GetDbTransaction(),
+            cancellationToken: ct));
+}
+```
+
+Two details worth keeping:
+
+**`CreateExecutionStrategy` is not optional.** With SQL Server retry-on-failure
+enabled, EF Core refuses to retry a user-initiated transaction unless the whole
+unit is wrapped in the strategy. Omitting it produces an exception the first
+time a transient network fault occurs in production. Note that the operation may
+therefore run **more than once** — it must not have side effects outside the
+transaction, which is another reason the outbox exists.
+
+**`DbContext` never leaves Infrastructure.** An `IApplicationDbContext`
+interface exposing `DbSet<T>` is a common shortcut and is explicitly rejected
+here: it puts EF Core types in the Application signature, which defeats the
+boundary while appearing to respect it. Aggregates are reached through
+repositories; the transaction through `IUnitOfWork`; nothing else.
+
+## 6.4 A command
+
+Commands are imperative, named for the business intent, and immutable.
+
+```csharp
+namespace Ordering.Application.Orders.PlaceOrder;
+
+// IIdempotentCommand is what puts this command through IdempotencyBehavior
+// (§8.5). Carrying a CommandId is not enough — the behaviour is constrained on
+// the interface, so a command with the field and not the interface is
+// unprotected, and a retried POST creates a second order.
+public sealed record PlaceOrderCommand(
+    Guid CommandId,
+    Guid CustomerId,
+    IReadOnlyList<PlaceOrderItem> Items,
+    AddressDto ShippingAddress,
+    string Currency) : ICommand<Result<Guid>>, IIdempotentCommand;
+
+public sealed record PlaceOrderItem(Guid ProductId, int Quantity);
+
+public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
+{
+    public PlaceOrderValidator()
+    {
+        RuleFor(x => x.CustomerId).NotEmpty();
+        RuleFor(x => x.Currency).Length(3);
+        RuleFor(x => x.Items).NotEmpty();
+        RuleForEach(x => x.Items).ChildRules(item =>
+        {
+            item.RuleFor(i => i.ProductId).NotEmpty();
+            item.RuleFor(i => i.Quantity).GreaterThan(0).LessThanOrEqualTo(999);
+        });
+    }
+}
+
+public sealed class PlaceOrderHandler(
+    IOrderRepository orders,
+    IProductPriceReader prices,
+    TimeProvider clock)
+    : ICommandHandler<PlaceOrderCommand, Result<Guid>>
+{
+    public async Task<Result<Guid>> HandleAsync(
+        PlaceOrderCommand command, CancellationToken ct)
+    {
+        var productIds = command.Items.Select(i => new ProductId(i.ProductId)).ToArray();
+        var priceList  = await prices.GetAsync(productIds, command.Currency, ct);
+
+        var missing = productIds.Where(id => !priceList.ContainsKey(id)).ToArray();
+        if (missing.Length > 0)
+            return Result.Failure<Guid>(OrderErrors.ProductsUnavailable(missing));
+
+        var items = command.Items.Select(i =>
+        {
+            var id = new ProductId(i.ProductId);
+            return (id, i.Quantity, priceList[id]);
+        });
+
+        var order = Order.Place(
+            new CustomerId(command.CustomerId),
+            command.ShippingAddress.ToDomain(),
+            items,
+            command.Currency,
+            clock.GetUtcNow());
+
+        orders.Add(order);
+
+        // No metric here. "Orders placed" is a count of orders that committed,
+        // and this line runs inside a transaction that may still roll back —
+        // or be replayed whole by EF's retrying execution strategy (§6.3),
+        // which would count the same order once per attempt. It is recorded by
+        // the projection instead (§13.3).
+        return Result.Success(order.Id.Value);
+    }
+}
+```
+
+The handler is thin by design. It loads what the domain needs, calls one domain
+operation, and returns. All the business rules — line merging, currency
+consistency, minimum one line — live in `Order`. If a handler grows past about
+forty lines, logic has usually leaked out of the aggregate.
+
+Note the handler does not call `SaveChanges`. The transaction behaviour owns
+that. And note `TimeProvider` — the .NET abstraction for the clock, which makes
+`FakeTimeProvider` available in tests.
+
+### Where the prices come from
+
+`IProductPriceReader` is the one part of this handler worth dwelling on, because
+the obvious implementation is wrong.
+
+Prices are owned by **Catalog**. The tempting implementation calls Catalog over
+gRPC — and it would run inside the write transaction (§6.3), holding a database
+transaction open across a network call to another service.
+
+Instead, `IProductPriceReader` reads a **local projection** in Ordering's own
+database, kept current by Catalog's `PriceChanged` and `ProductPublished`
+events (§6.6):
+
+```csharp
+internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
+    : IProductPriceReader
+{
+    private const string Sql =
+        """
+        SELECT ProductId, Amount, Currency
+        FROM   ordering.ProductPrices
+        WHERE  ProductId IN @ProductIds
+          AND  Currency = @Currency
+          AND  IsAvailable = 1;
+        """;
+
+    public async Task<IReadOnlyDictionary<ProductId, Money>> GetAsync(
+        IReadOnlyCollection<ProductId> productIds, string currency, CancellationToken ct)
+    {
+        using var connection = connections.Create();
+        var rows = await connection.QueryAsync<PriceRow>(new CommandDefinition(
+            Sql, new { ProductIds = productIds.Select(p => p.Value), Currency = currency },
+            cancellationToken: ct));
+
+        return rows.ToDictionary(r => new ProductId(r.ProductId),
+                                 r => Money.Of(r.Amount, r.Currency));
+    }
+}
+```
+
+Three consequences, and the middle one is the point:
+
+- **No network call inside the transaction.** The read is local, and a missing
+  product is a plain validation failure rather than a timeout.
+- **Catalog can be down and orders still get placed.** Availability stops
+  multiplying, which is the whole argument of §2.3 principle 4 and ADR-002.
+- **Prices can be stale by the projection's lag** — typically milliseconds.
+  Where that is unacceptable, the order captures the price it used and payment
+  reconciles against it; that is a business rule, not a reason to make the
+  write path depend on another service being up.
+
+§9.7's gRPC pricing client is a different caller: the **BFF**, reading prices to
+render the order form before anything is submitted. A display read may be
+synchronous and may fail with a spinner. The write path may not.
+
+## 6.5 A query
+
+Queries bypass the domain model entirely. There is no benefit to loading an
+aggregate, enforcing its invariants, and mapping it to a DTO in order to display
+a list.
+
+```csharp
+namespace Ordering.Application.Orders.GetOrderSummaries;
+
+public sealed record GetOrderSummariesQuery(Guid CustomerId, string? Cursor, int Limit)
+    : IQuery<CursorPage<OrderSummaryDto>>;
+
+// Level 1. §6.6 rewrites this pair in place when the projection arrives —
+// they are one slice at two points in its life, not two slices.
+public sealed record OrderSummaryDto(
+    Guid OrderId, string Status, decimal Total, string Currency,
+    int LineCount, DateTimeOffset PlacedAt);
+
+public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
+    : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
+{
+    private const string Sql =
+        """
+        SELECT TOP (@Take)
+                o.Id            AS OrderId,
+                o.Status        AS Status,
+                o.TotalAmount   AS Total,
+                o.Currency      AS Currency,
+                COUNT(l.Id)     AS LineCount,
+                o.PlacedAt      AS PlacedAt
+        FROM    ordering.Orders      o
+        JOIN    ordering.OrderLines  l ON l.OrderId = o.Id
+        WHERE   o.CustomerId = @CustomerId
+          AND   (@AfterPlacedAt IS NULL
+                 OR o.PlacedAt < @AfterPlacedAt
+                 OR (o.PlacedAt = @AfterPlacedAt AND o.Id < @AfterId))
+        GROUP BY o.Id, o.Status, o.TotalAmount, o.Currency, o.PlacedAt
+        ORDER BY o.PlacedAt DESC, o.Id DESC;
+        """;
+
+    public async Task<CursorPage<OrderSummaryDto>> HandleAsync(
+        GetOrderSummariesQuery query, CancellationToken ct)
+    {
+        var limit  = Math.Clamp(query.Limit, 1, 100);
+        var after  = Cursor.Decode(query.Cursor);
+        using var connection = connections.Create();
+
+        // Fetch one extra row to determine whether a next page exists,
+        // without a second COUNT(*) over the whole table.
+        var rows = (await connection.QueryAsync<OrderSummaryDto>(
+            new CommandDefinition(Sql, new
+            {
+                query.CustomerId,
+                Take          = limit + 1,
+                AfterPlacedAt = after?.PlacedAt,
+                AfterId       = after?.Id
+            }, cancellationToken: ct))).AsList();
+
+        var hasMore = rows.Count > limit;
+        var items   = hasMore ? rows.GetRange(0, limit) : rows;
+        var next    = hasMore && items.Count > 0
+            ? Cursor.Encode(items[^1].PlacedAt, items[^1].OrderId)
+            : null;
+
+        return new CursorPage<OrderSummaryDto>(items, next);
+    }
+}
+```
+
+> **Decision — cursor pagination is the default; `page`/`pageSize` is not.** See [ADR-016](appendix-a-adrs.md#adr-016--cursor-pagination-by-default).
+> `OFFSET @n ROWS` requires SQL Server to produce and discard every skipped row,
+> so page 500 costs roughly 500 times page 1. Worse, rows inserted while a user
+> pages cause items to be skipped or repeated. A keyset cursor over
+> `(PlacedAt DESC, Id DESC)` reads the same number of rows for every page and is
+> stable under concurrent inserts.
+>
+> The cursor is **opaque** — base64 of the sort key plus the tiebreaker ID — so
+> the sort strategy stays an implementation detail rather than a public contract.
+> The tiebreaker is required: without it, rows sharing a `PlacedAt` value
+> straddle the page boundary unpredictably.
+>
+> Offset pagination remains acceptable for a genuinely bounded admin list where
+> jumping to an arbitrary page number is a real requirement. It is not the
+> default.
+
+Rules for the read side:
+
+- Dapper, not EF Core. No change tracking, no lazy loading, no accidental N+1.
+- The query returns exactly the shape the caller needs. No generic DTO reused
+  across six endpoints.
+- Never `SELECT *`. Column lists are a contract.
+- Pagination is mandatory on any collection endpoint, and cursor-based by
+  default. There is no such thing as a small table in production.
+- `limit` is clamped server-side. A client asking for 100,000 rows gets 100.
+- Avoid `COUNT(*)` alongside a page. Fetching `limit + 1` rows answers "is there
+  more?" without scanning the table. Return a total only where the UI genuinely
+  displays one.
+- Query handlers never mutate anything and never run inside the transaction
+  behaviour.
+
+## 6.6 The progression — escalating Ordering to a physical split
+
+Level 1 stops working when one of these becomes true, and not before:
+
+- The read query needs data the write model does not store in a queryable shape.
+- Read load contends with write load on the same tables.
+- The query joins across so many tables that it cannot be made fast.
+- Reads and writes need to scale independently.
+
+For **Ordering**, the trigger is the customer order history screen: it needs
+product names and images, which live in Catalog and are not in the Ordering
+database at all. Joining across services is impossible; calling Catalog per row
+is an N+1 over the network.
+
+The upgrade adds denormalised tables inside Ordering's own database, kept
+current by projections. Two of them, serving different paths:
+
+| Table | Fed by | Read by |
+|---|---|---|
+| `ordering.OrderSummaries` | Ordering's own `OrderPlacedDomainEvent` + Catalog's `ProductPublished` | The escalated history query, below — **not** §6.5's, which stays at level 1 |
+| `ordering.ProductPrices` | Catalog's `PriceChanged`, `ProductPublished`, `ProductDiscontinued` | `IProductPriceReader`, on the **write** path (§6.4) |
+
+The second is the more consequential. A read model that only backs a screen can
+be stale with mild consequences; one that backs a command handler is what keeps
+that handler from making a network call inside a transaction.
+
+```mermaid
+graph LR
+    subgraph Ordering
+        CMD[Command handlers] --> WDB[(Write tables<br/>Orders, OrderLines)]
+        CMD --> OB[(Outbox)]
+        OB -.->|local lane, after commit| PROJ[OrderSummaryProjection]
+        CAT_EV[[ProductPublished<br/>PriceChanged<br/>ProductDiscontinued]] --> PROJ
+        CAT_EV --> PP[ProductPriceProjection]
+        PROJ --> RDB[(OrderSummaries)]
+        PP --> PDB[(ProductPrices)]
+        RDB --> QRY[Query handlers]
+        PDB --> CMD
+    end
+```
+
+Note the direction of that last edge: `ProductPrices` feeds the **command**
+side. It is the only read model in this design that a write path depends on,
+which is why the next section treats its staleness as a business question
+rather than a display one.
+
+The read table carries denormalised copies of the fields it needs:
+
+```sql
+-- Only the three columns every event carries are NOT NULL. The rest arrive
+-- with OrderPlaced, and §9.4 does not guarantee that OrderPlaced is claimed
+-- first: a status event that beats it inserts a row identified only by id,
+-- status and time. PlacedAt IS NULL is what marks such a row incomplete.
+CREATE TABLE ordering.OrderSummaries
+(
+    OrderId         UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    Status          VARCHAR(32)      NOT NULL,
+    UpdatedAt       DATETIMEOFFSET   NOT NULL,
+
+    CustomerId      UNIQUEIDENTIFIER NULL,
+    TotalAmount     DECIMAL(19,4)    NULL,
+    Currency        CHAR(3)          NULL,
+    LineCount       INT              NULL,
+    -- One JSON array of {id, name, thumb}, not three parallel arrays: the
+    -- ProductPublished handler has to find the element for a given product id
+    -- and update it in place, which needs the id alongside the copied fields.
+    Products        NVARCHAR(MAX)    NULL,
+    PlacedAt        DATETIMEOFFSET   NULL,
+
+    -- Set when the order reaches those states. ConfirmedAt is what makes
+    -- fulfilment duration measurable from the row rather than from whichever
+    -- handler happened to see both ends; CancelReason is the metric's tag, and
+    -- is worth a column anyway — "why was my order cancelled" is a question the
+    -- history screen should answer.
+    ConfirmedAt     DATETIMEOFFSET   NULL,
+    CancelReason    VARCHAR(32)      NULL,
+
+    -- Counted-once flags (§13.3). A business counter is not idempotent, so the
+    -- fact that it fired is state like any other.
+    PlacedCounted     BIT NOT NULL CONSTRAINT DF_Summaries_Placed     DEFAULT 0,
+    CancelledCounted  BIT NOT NULL CONSTRAINT DF_Summaries_Cancelled  DEFAULT 0,
+    FulfilmentCounted BIT NOT NULL CONSTRAINT DF_Summaries_Fulfilment DEFAULT 0
+);
+
+CREATE INDEX IX_OrderSummaries_Customer_PlacedAt
+    ON ordering.OrderSummaries (CustomerId, PlacedAt DESC)
+    INCLUDE (Status, TotalAmount, Currency, LineCount);
+```
+
+The price table is smaller and hotter — it is read on every `PlaceOrder`:
+
+```sql
+CREATE TABLE ordering.ProductPrices
+(
+    ProductId    UNIQUEIDENTIFIER NOT NULL,
+    Currency     CHAR(3)          NOT NULL,
+    Amount       DECIMAL(19,4)    NOT NULL,
+    IsAvailable  BIT              NOT NULL DEFAULT 1,
+    UpdatedAt    DATETIMEOFFSET   NOT NULL,
+    CONSTRAINT PK_ProductPrices PRIMARY KEY (ProductId, Currency)
+);
+```
+
+`IsAvailable` rather than deleting on `ProductDiscontinued`: an order already
+placed must still be explicable months later, and a row that vanishes takes its
+price history with it.
+
+```csharp
+// Infrastructure, not Application: raw SQL and a connection factory. Registered
+// by AddOrderingInfrastructure's scan (§6.2) — Application's scan would not
+// see it.
+namespace Ordering.Infrastructure.Projections;
+
+public sealed class ProductPriceProjection(IDbConnectionFactory connections)
+    : IIntegrationEventHandler<ProductPublished>,
+      IIntegrationEventHandler<PriceChanged>,
+      IIntegrationEventHandler<ProductDiscontinued>
+{
+    private const string UpsertSql =
+        """
+        MERGE ordering.ProductPrices AS target
+        USING (SELECT @ProductId AS ProductId, @Currency AS Currency) AS source
+           ON target.ProductId = source.ProductId AND target.Currency = source.Currency
+        WHEN NOT MATCHED THEN
+            INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
+            VALUES (@ProductId, @Currency, @Amount, 1, @OccurredAt)
+        -- Same out-of-order guard as OrderSummaries: a retried stale event
+        -- must not overwrite a newer price.
+        WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
+            UPDATE SET Amount = @Amount, IsAvailable = 1, UpdatedAt = @OccurredAt;
+        """;
+
+    private const string DiscontinueSql =
+        """
+        UPDATE ordering.ProductPrices
+        SET    IsAvailable = 0, UpdatedAt = @OccurredAt
+        WHERE  ProductId = @ProductId AND UpdatedAt < @OccurredAt;
+        """;
+
+    public Task HandleAsync(ProductPublished e, CancellationToken ct) =>
+        ExecuteAsync(UpsertSql, new { e.ProductId, e.Currency, e.Amount, e.OccurredAt }, ct);
+
+    public Task HandleAsync(PriceChanged e, CancellationToken ct) =>
+        ExecuteAsync(UpsertSql, new { e.ProductId, e.Currency, e.Amount, e.OccurredAt }, ct);
+
+    public Task HandleAsync(ProductDiscontinued e, CancellationToken ct) =>
+        ExecuteAsync(DiscontinueSql, new { e.ProductId, e.OccurredAt }, ct);
+
+    private async Task ExecuteAsync(string sql, object parameters, CancellationToken ct)
+    {
+        using var connection = connections.Create();
+        await connection.ExecuteAsync(new CommandDefinition(sql, parameters, cancellationToken: ct));
+    }
+}
+```
+
+`ProjectedPriceReader` (§6.4) filters on `IsAvailable = 1`, so a discontinued
+product produces the same `ProductsUnavailable` failure as one that was never
+published — which is what the customer experiences either way.
+
+> **A projection with no publisher is worse than a remote call.** If Catalog has
+> never emitted `ProductPublished` for a product, this table has no row for it
+> and every order containing it fails — silently, with a plain validation
+> message and no error in any log. Two mitigations, both worth having: Catalog
+> republishes its full catalogue on demand (an operational task, not a code
+> path), and the [§13.6](13-observability.md) alert on business volume catches the case where orders
+> stop for a reason no technical metric shows.
+
+The projection reacts to two different sources, so it implements two different
+interfaces (§9.4): `IProjectionHandler<T>` for this service's own events,
+arriving after commit through the local outbox lane, and
+`IIntegrationEventHandler<T>` for Catalog's events, arriving from the broker.
+
+Both run **after** the originating transaction has committed, on their own
+connection. That is deliberate — a projection must never run inside the write
+transaction ([§7.5](07-persistence.md)), because it would deadlock against the locks that
+transaction still holds and would turn a read-model bug into a write-path
+failure. The cost is a few milliseconds of lag; the benefit is that a broken
+projection can be fixed and replayed without touching the write path.
+
+Both must therefore be idempotent:
+
+```csharp
+namespace Ordering.Infrastructure.Projections;
+
+public sealed class OrderSummaryProjection(
+    IDbConnectionFactory connections, OrderMetrics metrics)
+    // Every lifecycle event, not just the first. A projection that handles
+    // only creation shows a status frozen at whatever the aggregate was when
+    // it was born — and the SQL still looks correct, because the UPDATE branch
+    // exists and simply never fires.
+    : IProjectionHandler<OrderPlacedDomainEvent>,
+      IProjectionHandler<OrderStockConfirmedDomainEvent>,
+      IProjectionHandler<OrderConfirmedDomainEvent>,
+      IProjectionHandler<OrderShippedDomainEvent>,
+      IProjectionHandler<OrderCancelledDomainEvent>,
+      IIntegrationEventHandler<ProductPublished>  // Catalog's event, from the broker
+{
+    public async Task HandleAsync(OrderPlacedDomainEvent e, CancellationToken ct)
+    {
+        using var connection = connections.Create();
+        await connection.ExecuteAsync(
+            """
+            MERGE ordering.OrderSummaries AS target
+            USING (SELECT @OrderId AS OrderId) AS source
+               ON target.OrderId = source.OrderId
+            WHEN NOT MATCHED THEN
+                INSERT (OrderId, CustomerId, Status, TotalAmount, Currency,
+                        LineCount, Products, PlacedAt, UpdatedAt)
+                VALUES (@OrderId, @CustomerId, @Status, @Total, @Currency,
+                        @LineCount, @Products, @PlacedAt, @UpdatedAt)
+            -- PlacedAt IS NULL, not an UpdatedAt guard: the row exists because
+            -- a status event arrived first, and the descriptive columns have
+            -- never been written. Matching on that condition fires exactly
+            -- once — a redelivery finds PlacedAt set and does nothing, which
+            -- is what keeps the counter below honest.
+            WHEN MATCHED AND target.PlacedAt IS NULL THEN
+                UPDATE SET CustomerId  = @CustomerId,
+                           TotalAmount = @Total,
+                           Currency    = @Currency,
+                           LineCount   = @LineCount,
+                           Products    = @Products,
+                           PlacedAt    = @PlacedAt,
+                           -- The facts above are immutable and always safe to
+                           -- write. Status is not: something later already set
+                           -- it, and this event is the older one.
+                           Status      = CASE WHEN target.UpdatedAt < @UpdatedAt
+                                              THEN @Status ELSE target.Status END,
+                           UpdatedAt   = CASE WHEN target.UpdatedAt < @UpdatedAt
+                                              THEN @UpdatedAt ELSE target.UpdatedAt END;
+            """,
+            new
+            {
+                OrderId    = e.OrderId.Value,
+                CustomerId = e.CustomerId.Value,
+                Status     = nameof(OrderStatus.AwaitingStock),
+                Total      = e.Total.Amount,
+                Currency   = e.Total.Currency,
+                LineCount  = e.Lines.Count,
+                // Ids are known now; name and thumbnail arrive with
+                // ProductPublished and are patched in below.
+                Products   = JsonSerializer.Serialize(
+                                 e.Lines.Select(l => new { id = l.ProductId.Value,
+                                                           name = "", thumb = "" })),
+                PlacedAt   = e.OccurredAt,
+                UpdatedAt  = e.OccurredAt
+            });
+
+        // Not "if (applied > 0) metrics.Placed(...)". This row may have been
+        // created by a status event that outran its OrderPlaced, in which case
+        // a cancellation is already sitting on it uncounted — and an
+        // OrderConfirmed may be too. One call records whatever is now true.
+        await RecordPendingFactsAsync(connection, e.OrderId);
+    }
+
+    // The status transitions. One statement, because they differ only in the
+    // value written — and because a per-event copy is how one of them ends up
+    // missing the out-of-order guard.
+    //
+    // OrderStockConfirmed is handled here but deliberately absent from §9.3's
+    // publish allow-list: AwaitingPayment is a state the customer sees on their
+    // own history screen and no other service has any business knowing.
+    public Task HandleAsync(OrderStockConfirmedDomainEvent e, CancellationToken ct) =>
+        SetStatusAsync(e.OrderId, OrderStatus.AwaitingPayment, e.OccurredAt);
+
+    public Task HandleAsync(OrderConfirmedDomainEvent e, CancellationToken ct) =>
+        SetStatusAsync(e.OrderId, OrderStatus.Confirmed, e.OccurredAt,
+                       confirmedAt: e.OccurredAt);
+
+    public Task HandleAsync(OrderShippedDomainEvent e, CancellationToken ct) =>
+        SetStatusAsync(e.OrderId, OrderStatus.Shipped, e.OccurredAt);
+
+    public Task HandleAsync(OrderCancelledDomainEvent e, CancellationToken ct) =>
+        // The wire code, not the enum: a metric tag is a string either way, and
+        // ToString() on an enum makes its member names the dimension values —
+        // renaming a member would silently split the series in two (§13.3).
+        SetStatusAsync(e.OrderId, OrderStatus.Cancelled, e.OccurredAt,
+                       cancelReason: CancellationReasons.ToCode(e.Reason));
+
+    // Returns nothing. It used to return rows affected, for callers that
+    // decided whether to count a metric from it — and that is precisely the
+    // reasoning RecordPendingFactsAsync replaced. Handing the next reader an
+    // `applied` on a status write is an invitation to write `if (applied > 0)`
+    // again, which is the bug, not the fix.
+    private async Task SetStatusAsync(
+        OrderId orderId, OrderStatus status, DateTimeOffset occurredAt,
+        DateTimeOffset? confirmedAt = null, string? cancelReason = null)
+    {
+        using var connection = connections.Create();
+
+        await connection.ExecuteAsync(
+            """
+            MERGE ordering.OrderSummaries AS target
+            USING (SELECT @OrderId AS OrderId) AS source
+               ON target.OrderId = source.OrderId
+            -- An UPDATE here would be the whole defect: §9.4 claims ordering
+            -- is not required, and a Cancelled claimed before its OrderPlaced
+            -- would match no row, change nothing, and be marked processed. The
+            -- order would read AwaitingStock for ever, with no error anywhere.
+            WHEN NOT MATCHED THEN
+                INSERT (OrderId, Status, UpdatedAt, ConfirmedAt, CancelReason)
+                VALUES (@OrderId, @Status, @OccurredAt, @ConfirmedAt, @CancelReason)
+            -- The guard that makes this safe under at-least-once delivery:
+            -- a redelivered Confirmed must not undo a Shipped that followed.
+            WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
+                UPDATE SET Status       = @Status,
+                           UpdatedAt    = @OccurredAt,
+                           -- COALESCE, not assignment: Shipped follows
+                           -- Confirmed and passes NULL, and overwriting would
+                           -- erase the timestamp the duration is measured from.
+                           ConfirmedAt  = COALESCE(@ConfirmedAt,  target.ConfirmedAt),
+                           CancelReason = COALESCE(@CancelReason, target.CancelReason);
+            """,
+            new { OrderId = orderId.Value, Status = status.ToString(),
+                  occurredAt, confirmedAt, cancelReason });
+
+        await RecordPendingFactsAsync(connection, orderId);
+    }
+
+    /// <summary>
+    /// Records every business fact the row now supports and has not yet been
+    /// counted for. Called after each write, because any write can be the one
+    /// that completes a pair.
+    /// </summary>
+    private async Task RecordPendingFactsAsync(IDbConnection connection, OrderId orderId)
+    {
+        // Each statement is an atomic claim: the flag flips and the values come
+        // back in one UPDATE, so two dispatcher replicas racing the same order
+        // record it once. This is the outbox's lease idiom (§9.4) applied to a
+        // counter — a metric is not idempotent, so "it already fired" is state.
+        var args = new { OrderId = orderId.Value };
+
+        // PlacedAt is the predicate, but TotalAmount and Currency are what come
+        // back — non-null only because the MERGE above writes all three in one
+        // statement. Keep them in one statement: a future split that sets
+        // PlacedAt earlier would hand this a NULL decimal, and PlacedFact has
+        // nowhere to put it (Appendix D.5).
+        var placed = await connection.QuerySingleOrDefaultAsync<PlacedFact>(
+            """
+            UPDATE ordering.OrderSummaries SET PlacedCounted = 1
+            OUTPUT inserted.TotalAmount, inserted.Currency
+            WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL AND PlacedCounted = 0;
+            """, args);
+
+        // Money.Of, not new Money: the constructor is private (§5.3) and Of is
+        // the normalising way in. CHAR(3) comes back space-padded, which is
+        // exactly the input the factory exists to clean.
+        if (placed is not null)
+            metrics.Placed(Money.Of(placed.TotalAmount, placed.Currency.Trim()));
+
+        // PlacedCounted = 1 in the predicate, not merely PlacedAt IS NOT NULL:
+        // a cancellation must never be counted before the placement it belongs
+        // to. Ordering is not guaranteed on the lane (§9.4), and `cancelled`
+        // exceeding `placed` is a state the write model cannot reach — a
+        // reconciliation that finds it should be finding a real defect.
+        var cancelled = await connection.QuerySingleOrDefaultAsync<string>(
+            """
+            UPDATE ordering.OrderSummaries SET CancelledCounted = 1
+            OUTPUT inserted.CancelReason
+            WHERE  OrderId = @OrderId AND PlacedCounted = 1
+                   AND CancelReason IS NOT NULL AND CancelledCounted = 0;
+            """, args);
+
+        if (cancelled is not null)
+            metrics.Cancelled(cancelled);
+
+        var fulfilment = await connection.QuerySingleOrDefaultAsync<FulfilmentFact>(
+            """
+            UPDATE ordering.OrderSummaries SET FulfilmentCounted = 1
+            OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
+            WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL
+                   AND ConfirmedAt IS NOT NULL AND FulfilmentCounted = 0;
+            """, args);
+
+        if (fulfilment is not null)
+            metrics.Fulfilled(fulfilment.ConfirmedAt - fulfilment.PlacedAt);
+    }
+
+    public async Task HandleAsync(ProductPublished e, CancellationToken ct)
+    {
+        // Patch the element for this product in place, in every summary that
+        // contains it. OPENJSON gives the array index; JSON_MODIFY needs it.
+        // The UpdatedAt guard keeps a stale republish from overwriting a
+        // newer name, as everywhere else in §6.6.
+        using var connection = connections.Create();
+        await connection.ExecuteAsync(
+            """
+            UPDATE s
+            SET    s.Products = JSON_MODIFY(
+                                    JSON_MODIFY(s.Products,
+                                        '$[' + CAST(j.[key] AS varchar(10)) + '].name',  @Name),
+                                        '$[' + CAST(j.[key] AS varchar(10)) + '].thumb', @Thumbnail),
+                   s.UpdatedAt = @OccurredAt
+            FROM   ordering.OrderSummaries s
+            CROSS APPLY OPENJSON(s.Products) j
+            WHERE  JSON_VALUE(j.value, '$.id') = @ProductId
+              AND  s.UpdatedAt < @OccurredAt;
+            """,
+            new { ProductId = e.ProductId, Name = e.Name, Thumbnail = e.ThumbnailUrl, e.OccurredAt });
+    }
+}
+```
+
+> **This handler is the expensive one, and the reason to think twice before
+> denormalising a name.** `OrderPlacedDomainEvent` writes one row; a single
+> `ProductPublished` scans every summary that ever contained that product.
+> Joining at read time is not an option — the products live in Catalog — so
+> denormalisation moved the cost from every read to every rename. That is the
+> right trade only while renames are rare, and this is the first thing that
+> breaks if they stop being.
+
+Three details that are easy to miss and expensive to discover later:
+
+- **The `MERGE` is idempotent.** Redelivery of `OrderPlacedDomainEvent` inserts
+  nothing new.
+- **`UpdatedAt < @UpdatedAt` guards against out-of-order delivery.** Messages
+  can and do arrive out of sequence, especially after a retry. Without this
+  check a redelivered `AwaitingPayment` overwrites a `Confirmed` that already
+  followed it — and because all five lifecycle events now feed this table
+  (above), that is a sequence the projection genuinely sees rather than a
+  hypothetical.
+- **Every statement here inserts when the row is absent.** Redelivery and
+  reordering are different problems, and the `UpdatedAt` guard only solves the
+  first. An event that arrives *early* matches nothing, and an `UPDATE` would
+  discard it in silence — no error, no retry, and a summary frozen at whatever
+  state it reached. The `WHEN NOT MATCHED` branch is what lets §9.4 keep saying
+  ordering is not required.
+
+### Counting is a claim, not a call
+
+The counters in `RecordPendingFactsAsync` deserve their own note, because the
+shape looks like ceremony until the alternative is written out.
+
+An event handler that increments a counter is recording *"this message
+arrived"*. The business wants *"this order was placed"*, and those two coincide
+only when delivery is exactly-once and ordered — which §9.4 states it is not.
+Every simpler version of this code fails one of the two:
+
+| Approach | Fails on |
+|---|---|
+| Count in the handler | Redelivery. Two messages, two increments, one order |
+| Count on rows-affected | Reordering. A cancellation counted before the placement it belongs to, and permanently orphaned if that placement is later abandoned |
+| Count on rows-affected, plus an ordering assumption | Nothing, until the assumption stops holding — silently, and only under the load that makes the metric interesting |
+
+The claim pattern survives all three, because it asks the row rather than the
+message. Its cost is honest and worth stating: **three extra statements per
+projection write**, on the same connection, none of them indexed lookups beyond
+the primary key. That is real, and it buys a number a finance team can reconcile
+against the write model. If the write volume ever makes it not worth paying,
+the thing to change is the frequency — a periodic sweep claiming in batches —
+not the correctness.
+
+**It does not survive everything, and the case it loses is worth naming.** The
+cancellation claim requires `PlacedCounted = 1`. If the `OrderPlaced` row is
+abandoned after `MaxAttempts` (§9.4 permits this and alerts on it), that flag
+never flips, and the cancellation is never counted at all. A phantom
+cancellation was traded for a missing one.
+
+That is the right direction to fail in — `cancelled > placed` is a state the
+write model cannot reach, and a metric that reports it is worse than one that
+under-reports — but "the right direction" is not "no consequence", and a
+permanent silent drop is the same defect §13.3 describes the old fulfilment
+guard having. The difference is that this one is bounded by an alert that
+already exists: a row reaches `MaxAttempts` only by failing ten times (§9.4),
+across ten leases with a growing gap between them, which the abandoned-row
+alert (§13.6) pages on. Ten dispatcher attempts, not the five of
+`UseMessageRetry` (§9.8) — that limit governs a consumer redelivering a message
+it already received, and a row that never left the outbox has not reached one. **The metric's correctness therefore
+depends on that alert being answered**, which is a dependency worth stating out
+loud rather than a property of the pattern.
+
+Replaying an abandoned row after the fix is what closes it, and the claims make
+that safe: replay flips `PlacedCounted`, the next write claims the cancellation
+behind it, and nothing double-counts because every flag is already set.
+
+### The read side, which is the point
+
+A projection nothing queries is cost without benefit. §6.5's handler is the
+level-1 version — it joins the write tables and returns no product data,
+because it has none to return. Escalating replaces it:
+
+```csharp
+// EDITS the types in §6.5 — same namespace, same names. Escalating a query is
+// a change to one slice, not a second slice alongside it. After this, the
+// level-1 versions no longer exist.
+namespace Ordering.Application.Orders.GetOrderSummaries;
+
+// The fields §6.6 exists for. Level 1 could not return these at any price:
+// the names and images live in Catalog.
+public sealed record OrderSummaryDto(
+    Guid OrderId, string Status, decimal Total, string Currency,
+    int LineCount, DateTimeOffset PlacedAt,
+    IReadOnlyList<SummaryProduct> Products);
+
+public sealed record SummaryProduct(Guid Id, string Name, string Thumb);
+
+public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
+    : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
+{
+    // One table, no joins, no aggregation — the projection did that work once
+    // at write time. Compare the level-1 query in §6.5, which groups over
+    // OrderLines on every read.
+    private const string Sql =
+        """
+        SELECT TOP (@Take)
+               OrderId, Status, TotalAmount AS Total, Currency,
+               LineCount, PlacedAt, Products
+        FROM   ordering.OrderSummaries
+        -- Also excludes incomplete rows: a summary created by a status event
+        -- that outran its OrderPlaced has a NULL CustomerId and matches no
+        -- customer, so a half-built order is never returned. It becomes
+        -- visible the moment the MERGE above fills it in.
+        WHERE  CustomerId = @CustomerId
+          AND  (@AfterPlacedAt IS NULL
+                OR PlacedAt < @AfterPlacedAt
+                OR (PlacedAt = @AfterPlacedAt AND OrderId < @AfterId))
+        ORDER BY PlacedAt DESC, OrderId DESC;
+        """;
+
+    public async Task<CursorPage<OrderSummaryDto>> HandleAsync(
+        GetOrderSummariesQuery query, CancellationToken ct)
+    {
+        var limit = Math.Clamp(query.Limit, 1, 100);
+        var after = Cursor.Decode(query.Cursor);
+        using var connection = connections.Create();
+
+        var rows = (await connection.QueryAsync<SummaryRow>(new CommandDefinition(
+            Sql, new { query.CustomerId, Take = limit + 1,
+                       AfterPlacedAt = after?.PlacedAt, AfterId = after?.Id },
+            cancellationToken: ct))).AsList();
+
+        var hasMore = rows.Count > limit;
+        var items = (hasMore ? rows.GetRange(0, limit) : rows)
+            .Select(r => new OrderSummaryDto(
+                r.OrderId, r.Status, r.Total, r.Currency, r.LineCount, r.PlacedAt,
+                JsonSerializer.Deserialize<SummaryProduct[]>(r.Products)!))
+            .ToArray();
+
+        var next = hasMore && items.Length > 0
+            ? Cursor.Encode(items[^1].PlacedAt, items[^1].OrderId)
+            : null;
+
+        return new CursorPage<OrderSummaryDto>(items, next);
+    }
+}
+```
+
+The index from the DDL above — `(CustomerId, PlacedAt DESC)` including the
+scalar columns — serves the seek, the ordering and the cursor predicate. It is
+**not** fully covering: `Products` is `NVARCHAR(MAX)` and is left out
+deliberately, so each row costs a lookup. That is the right trade at a page of
+twenty and the wrong one at a page of a thousand, which is another reason the
+`limit` is clamped (§6.5).
+
+The benefit being bought is visible in the shape of the query: one table, no
+join, no `GROUP BY`, and a page size that bounds the work. Level 1 aggregates
+`OrderLines` on every read and still cannot return a product name at any price.
+
+The API must now expose the staleness rather than hide it — for example, by
+returning the write-model status on the order detail endpoint (strongly
+consistent, single-row read) while the list endpoint serves from the projection.
+
+> **Trap — projecting everything by default.** Each projection is a second copy
+> of the truth, with its own bugs, its own rebuild procedure and its own
+> monitoring. Add one when a measurement demands it. Keep the rebuild script in
+> source control from day one, because you will need it.
+
+---
+
+---
+
+[← §5 Tactical DDD](05-tactical-ddd.md) · [Index](README.md) · [§7 Persistence →](07-persistence.md)
