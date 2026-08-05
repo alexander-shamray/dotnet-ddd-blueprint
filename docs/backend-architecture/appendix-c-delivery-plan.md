@@ -179,6 +179,4 @@ code has never been observed failing.
 
 ---
 
----
-
 [← Appendix B](appendix-b-licences.md) · [Index](README.md) · [Appendix D →](appendix-d-type-inventory.md)

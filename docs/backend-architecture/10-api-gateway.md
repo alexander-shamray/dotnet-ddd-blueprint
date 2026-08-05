@@ -511,6 +511,4 @@ for by the concurrency case, and a domain refusal is not a race.
 
 ---
 
----
-
 [← §9 Messaging](09-messaging.md) · [Index](README.md) · [§11 Identity →](11-identity-authorization.md)

@@ -2014,6 +2014,4 @@ alert.
 
 ---
 
----
-
 [← §8 Caching](08-caching-redis.md) · [Index](README.md) · [§10 API Gateway →](10-api-gateway.md)

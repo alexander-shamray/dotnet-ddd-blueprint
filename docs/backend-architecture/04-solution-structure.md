@@ -66,7 +66,7 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/
-│   ├── backend-architecture.md         This document
+│   ├── backend-architecture/           This document, one file per chapter
 │   └── adr/                            One file per decision
 │
 ├── Directory.Build.props               Shared MSBuild settings
@@ -635,8 +635,6 @@ cannot keep them accurate; the SCA step below is what keeps them honest.
 Back this with a CI step that fails the build on any package licence outside an
 allow-list. Licence drift is only caught reliably by tooling; a convention will
 not survive the twentieth dependency.
-
----
 
 ---
 

@@ -112,6 +112,4 @@ services later is straightforward; splitting one that shares a database is not.
 
 ---
 
----
-
 [← §2 At a glance](02-architecture-at-a-glance.md) · [Index](README.md) · [§4 Solution structure →](04-solution-structure.md)

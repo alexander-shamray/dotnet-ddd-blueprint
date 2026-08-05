@@ -54,6 +54,4 @@ than discovering it at build time.
 
 ---
 
----
-
 [← Appendix A](appendix-a-adrs.md) · [Index](README.md) · [Appendix C →](appendix-c-delivery-plan.md)

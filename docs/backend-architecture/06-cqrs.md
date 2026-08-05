@@ -1420,6 +1420,4 @@ consistent, single-row read) while the list endpoint serves from the projection.
 
 ---
 
----
-
 [← §5 Tactical DDD](05-tactical-ddd.md) · [Index](README.md) · [§7 Persistence →](07-persistence.md)

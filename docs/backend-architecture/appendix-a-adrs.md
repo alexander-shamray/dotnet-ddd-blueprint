@@ -224,6 +224,4 @@ staleness.
 
 ---
 
----
-
 [← §15 CI/CD](15-cicd-deployment.md) · [Index](README.md) · [Appendix B →](appendix-b-licences.md)

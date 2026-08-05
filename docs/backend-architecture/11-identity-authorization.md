@@ -495,6 +495,4 @@ which is the only place it can be reliably erased.
 
 ---
 
----
-
 [← §10 API Gateway](10-api-gateway.md) · [Index](README.md) · [§12 Test strategy →](12-test-strategy.md)

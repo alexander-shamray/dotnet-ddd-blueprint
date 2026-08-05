@@ -500,6 +500,4 @@ commit — not to an in-memory object mid-transaction.
 
 ---
 
----
-
 [← §6 CQRS](06-cqrs.md) · [Index](README.md) · [§8 Caching →](08-caching-redis.md)

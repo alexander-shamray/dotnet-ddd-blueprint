@@ -574,6 +574,4 @@ kill switch that does not require a rollback.
 
 ---
 
----
-
 [← §14 Local development](14-local-development.md) · [Index](README.md) · [Appendix A →](appendix-a-adrs.md)

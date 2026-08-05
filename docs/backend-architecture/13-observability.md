@@ -1024,6 +1024,4 @@ fires.
 
 ---
 
----
-
 [← §12 Test strategy](12-test-strategy.md) · [Index](README.md) · [§14 Local development →](14-local-development.md)

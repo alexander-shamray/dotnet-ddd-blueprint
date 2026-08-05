@@ -48,6 +48,4 @@ random produces something worse than picking none.
 
 ---
 
----
-
 [Index](README.md) · [§2 At a glance →](02-architecture-at-a-glance.md)

@@ -411,6 +411,4 @@ for the purpose of changing them.
 
 ---
 
----
-
 [← §4 Solution structure](04-solution-structure.md) · [Index](README.md) · [§6 CQRS →](06-cqrs.md)

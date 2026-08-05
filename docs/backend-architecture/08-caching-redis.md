@@ -381,6 +381,4 @@ public void Commands_carrying_a_CommandId_declare_IIdempotentCommand()
 
 ---
 
----
-
 [← §7 Persistence](07-persistence.md) · [Index](README.md) · [§9 Messaging →](09-messaging.md)

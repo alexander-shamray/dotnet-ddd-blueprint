@@ -152,6 +152,4 @@ strong evidence the data belongs inside a single aggregate.
 
 ---
 
----
-
 [← §1 Purpose](01-purpose.md) · [Index](README.md) · [§3 Bounded contexts →](03-bounded-contexts.md)
