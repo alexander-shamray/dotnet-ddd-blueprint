@@ -1,0 +1,182 @@
+# Appendix C — Delivery plan
+
+An architecture document that does not say what to build first is a description,
+not a plan. This appendix sequences the work into independently reviewable pull
+requests. Every PR leaves `main` building and green.
+
+## C.1 Service build order
+
+Two orderings matter and they are different. The **platform** is built in the PR
+sequence below. The **services** are built in this order, and not in parallel:
+
+1. **Notifications** — no domain logic, pure event consumer, no public API.
+   Proves messaging, observability and the deployment pipeline end to end while
+   there is nothing else to debug.
+2. **Catalog** — simple domain. Establishes the CQRS structure, caching, and the
+   query patterns.
+3. **Ordering** — the core domain. Rich aggregate, outbox, saga.
+4. **Inventory and Payments** — concurrency and third-party integration, once
+   the surrounding patterns have settled.
+5. **Shipping** — last, because it depends on everything upstream being stable.
+
+The first service through the pipeline finds every gap in deployment,
+observability and testing. Fixing those once is far cheaper than fixing them
+again for each of the seven deployables behind it — the five remaining services
+plus the gateway and the BFF, which take the same pipeline ([§15.1](15-cicd-deployment.md)).
+
+## C.2 Pull request sequence
+
+Phase names map to the `phase` column. Dependencies are PR numbers.
+
+### Foundation
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **01** | `chore: solution structure, SDK pin, central package management, CI skeleton` | — | `global.json`, `Directory.Build.props`, `Directory.Packages.props` with **exact** versions, `.editorconfig`, solution, CI running `dotnet test`, **licence allow-list gate** |
+| **02** | `feat(common): Result, Error, and domain primitives` | 01 | `Result`/`Result<T>`, `Error`, `Entity<TId>`, `AggregateRoot<TId>`, `IDomainEvent`, typed-ID pattern. **Unit tests ship in this PR** — the convention starts here |
+| **03** | `feat(common): ProblemDetails, error catalogue, correlation middleware` | 02 | RFC 9457 mapping, the status-code table from [§10.5](10-api-gateway.md), `X-Correlation-Id` middleware, `ToHttpResult()` |
+| **04** | `feat(common): CQRS dispatcher and pipeline behaviours` | 02 | The dispatcher from [§6.2](06-cqrs.md), logging and validation behaviours, tests asserting behaviour **ordering**. No transaction behaviour yet |
+| **05** | `feat(common): OpenTelemetry and structured logging defaults` | 03 | `Common.Web`: OTLP export, resource attributes, health endpoint wiring, log redaction policy |
+| **06** | `feat(dev): Docker Compose — SQL Server, Redis, RabbitMQ, Keycloak, OTel` | 01 | The Compose file from [§14.1](14-local-development.md), `.env.example`, documented ports, healthchecks |
+
+### Service template
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **07** | `feat(template): service skeleton and architecture test gate` | 02–06 | Compilable empty service across five projects ([§4.1](04-solution-structure.md)), Minimal API host, health endpoints, OpenAPI. **NetArchTest gate from this PR**: domain isolation, Application ↛ EF Core, endpoints ↛ Infrastructure, Application and Domain ↛ MassTransit (§4.2, [§9.3](09-messaging.md)) |
+| **08** | `feat(template): EF Core, repositories, IUnitOfWork, migrator host` | 07, 06 | `DbContext` sealed in Infrastructure, `IUnitOfWork` port, `*.Migrator` project, **dual connection strings** ([§7.1](07-persistence.md)), Testcontainers smoke test |
+| **09** | `feat(common): TransactionBehavior over IUnitOfWork` | 04, 08 | §6.3 behaviour. Tests proving `SaveChanges` is called once on success and never on failure, that a handler which writes through `ExecuteRawAsync` and then returns `Result.Failure` leaves no row, and that queries never open a transaction |
+| **10** | `feat(catalog): first vertical slice — command, query, cursor pagination` | 07–09 | One aggregate, one command, one cursor-paginated query. **Endpoints are deliberately unauthenticated and this is stated in the README** — closed by PR-16 |
+| **11** | `feat(tooling): new-service scaffold script` | 07, 10 | Copies and renames the template: ports, database name, solution entries, Compose block. Dogfooded by PR-18 |
+
+### Data, cache, messaging
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **12** | `feat(common): Redis helpers — HybridCache, key namespaces, distributed locks` | 06, 08 | Key-naming helper, **mandatory TTL enforced in code**, `{service}:cache\|lock\|idem\|denylist:` namespaces, the eviction-policy isolation from [§8.1](08-caching-redis.md), Testcontainers Redis tests |
+| **13** | `feat(template): MassTransit RabbitMQ registration and harness smoke` | 08, 06 | Bus connects, publish/consume proven with the in-memory harness. **Split from the outbox deliberately** to keep the review readable |
+| **14** | `feat(template): transactional outbox and allow-list event mapper` | 09, 13, 10 | Outbox table and dispatcher (§9.4), `IIntegrationEventMapper` allow-list, `IIntegrationEventPublisher` with the §9.3 contract. **`MessageTypeMap` and `OutboxJson` land here, not later**: both halves of what the `MessageType` and `Payload` columns mean, and a column whose format is decided after rows exist in it is a migration nobody wants. Integration tests proving aggregate row and outbox row commit in **one** transaction, that `Stage` copies the envelope's `MessageId`, and that every stageable domain event round-trips through `OutboxJson.Options` ([§12.4](12-test-strategy.md)) |
+| **15** | `feat(messaging): Contracts, inbox consumers, inbox + outbox retention purge` | 14, 12 | `Common.Contracts` with versioned records, inbox filter (§9.5), the `IntegrationEventConsumer<T>` adapter (§9.4), one purge hosted service covering **both** tables. **`Platform.IntegrationTests` starts here** with the §12.6 contract suite — no domain reference, versioned namespace, round-trip — because the rules arrive with the assembly they constrain |
+
+### Edge and security
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **16** | `feat(security): JWT bearer with mandatory per-service re-validation` | 03, 10 | Keycloak realm import, JWT validation in `Common.Web`, permission policies, test auth handler. **Security tests: forged header without a token → 401; user A reading user B's resource → 404** |
+| **17** | `feat(gateway): YARP routing, JWT, rate limiting, CORS` | 06, 16, 10 | The gateway from §10, dual-version route example with matched prefix strips, rate-limit policies, the gateway's own `inventory:admin` authorization policy, correlation ID assignment. **Two config tests, both on `ReverseProxy:Routes`: every `AuthorizationPolicy` and `RateLimiterPolicy` named resolves — an unresolvable one drops the route silently — and every route's match minus its `PathRemovePrefix` equals the group its service maps (§10.2), which the in-process API tests cannot see** |
+| **18** | `feat(ordering): second service from the scaffold` | 11, 08, 16 | Proves the scaffold. Own database, own migrator, gateway route |
+
+### Integration and operations
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **19** | `feat(bff): the BFF host, its gRPC client and the one permitted sync hop` | 05, 12, 17, 18 | `Web.Bff` (§4.1), `AddStandardResilienceHandler` defaults, the timeout hierarchy asserted at startup, one deliberate **BFF → Catalog** pricing call demonstrating ADR-017. **The only host that gets an `Identity:Client`** ([§11.5](11-identity-authorization.md)) — the Keycloak client and secret arrive here and nowhere else |
+| **20** | `feat(ordering): consume Catalog events into a local projection` | 15, 18, 17 | The full async path. Projection with **idempotent `MERGE` and the out-of-order guard** from §6.6 |
+| **21** | `feat(ordering): order fulfilment saga` | 20, 14 | The state machine from §9.6, compensation paths, **a timeout on every wait state**, harness tests including the payment-declined compensation ordering |
+| **22** | `test: expand architecture rules and document the test strategy` | 07, 10, 14 | Full composition-root rules, `docs/testing.md`, Testcontainers categories, coverage reported on the domain layer specifically |
+| **23** | `feat(deploy): Helm charts, migration hooks, probes` | 17, 20, 08 | Chart per service, umbrella chart, migration job as a `pre-upgrade` hook, the probe and resource shape from §15.3 |
+| **24** | `docs(ops): runbooks, secrets, dashboards-as-code, the SLO run` | 15, 20, 21 | The twelve runbooks from [§13.9](13-observability.md) — one per alert, checked both ways — per-lane outbox alerts (§13.6), `docs/secrets.md`, Grafana JSON in `deploy/observability/`, and the k6 **SLO run** against staging (§13.7, §15.1) — named for what it asserts, because §15.1 deliberately has no smoke stage |
+| **25** | `ci: integration categories, canary deploy, quality gates` | 20, 22, 17 | Path-filtered per-service builds, containerised integration tests in CI, canary with automated rollback on error rate or p99 |
+
+### Optional
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **26** | `chore(optional): consumer-driven contract tests` | 25 | Pact, only if a consumer relationship becomes contentious. Not required for completeness |
+
+## C.3 Dependency graph
+
+```mermaid
+flowchart TD
+    P01[01 Foundation] --> P02[02 Result/Domain]
+    P01 --> P06[06 Compose]
+    P02 --> P03[03 Error catalogue]
+    P02 --> P04[04 Dispatcher]
+    P03 --> P05[05 OTel]
+    P02 --> P07[07 Template + arch gate]
+    P03 --> P07
+    P04 --> P07
+    P05 --> P07
+    P06 --> P07
+    P07 --> P08[08 EF + UoW + Migrator]
+    P06 --> P08
+    P04 --> P09[09 TransactionBehavior]
+    P08 --> P09
+    P07 --> P10[10 Catalog slice]
+    P08 --> P10
+    P09 --> P10
+    P07 --> P11[11 Scaffold]
+    P10 --> P11
+    P06 --> P12[12 Redis]
+    P08 --> P12
+    P08 --> P13[13 Bus smoke]
+    P06 --> P13
+    P09 --> P14[14 Outbox + mapper]
+    P13 --> P14
+    P10 --> P14
+    P14 --> P15[15 Inbox + Contracts]
+    P12 --> P15
+    P03 --> P16[16 JWT]
+    P10 --> P16
+    P16 --> P17[17 Gateway]
+    P06 --> P17
+    P10 --> P17
+    P11 --> P18[18 Ordering service]
+    P16 --> P18
+    P08 --> P18
+    P17 --> P19[19 Sync hop]
+    P18 --> P19
+    P12 --> P19
+    P05 --> P19
+    P15 --> P20[20 Projection]
+    P18 --> P20
+    P17 --> P20
+    P20 --> P21[21 Saga]
+    P14 --> P21
+    P07 --> P22[22 Arch + test docs]
+    P14 --> P22
+    P10 --> P22
+    P17 --> P23[23 Helm]
+    P20 --> P23
+    P08 --> P23
+    P21 --> P24[24 Runbooks + SLO]
+    P15 --> P24
+    P20 --> P24
+    P20 --> P25[25 CI + canary]
+    P22 --> P25
+    P17 --> P25
+    P25 --> P26[26 Optional: Pact]
+```
+
+The graph carries every edge in the tables above and no others. It is a
+transcription, so it can drift silently — a missing edge suggests two PRs are
+independent when the table says one blocks the other, which is the direction
+that costs a wasted branch rather than a wrong build.
+
+## C.4 Sequencing rules worth preserving
+
+Three choices in the ordering above are deliberate and easy to lose in
+replanning:
+
+**PR-13 is split from PR-14.** Getting a bus connection working and getting the
+outbox transactionally correct are separate problems. Reviewing them together
+means the interesting half gets skimmed.
+
+**PR-10 ships with unauthenticated endpoints, and says so.** Security lands in
+PR-16. Naming a temporary gap in the README and scheduling its closure is
+honest; discovering it in a pen test six months later is not. The alternative —
+blocking the first vertical slice on the full auth stack — delays the feedback
+that the slice exists to provide.
+
+**PR-11 is dogfooded by PR-18.** The scaffold script is proven by the next real
+service, not by intent. If the script cannot produce Ordering, it is not
+finished.
+
+And one rule about the whole sequence: **from PR-02 onward, production code
+lands with its tests in the same pull request.** Not "tests to follow" — the
+follow-up PR is the one that gets deprioritised, and a test written after the
+code has never been observed failing.
+
+---
+
+[← Appendix B](appendix-b-licences.md) · [Index](README.md) · [Appendix D →](appendix-d-type-inventory.md)
