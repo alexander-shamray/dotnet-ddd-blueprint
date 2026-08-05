@@ -66,8 +66,8 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/
-│   ├── backend-architecture/           This document, one file per chapter
-│   └── adr/                            One file per decision
+│   └── backend-architecture/           This document, one file
+│                                       per chapter; ADRs in Appendix A
 │
 ├── Directory.Build.props               Shared MSBuild settings
 ├── Directory.Packages.props            Central package version management
