@@ -65,7 +65,7 @@ subscriber silently executing your business commands.
 Every cell enumerates. "All customer-relevant events" would be shorter and is
 not a contract: it cannot be versioned, reviewed, or checked against what
 publishers actually emit, and Notifications is the service the delivery plan
-says to build first ([Appendix C](appendix-c-delivery-plan.md).1). A subscription list that grows silently is
+says to build first ([Appendix C.1](appendix-c-delivery-plan.md#c1-service-build-order)). A subscription list that grows silently is
 how a consumer ends up bound to a type nobody meant to give it.
 
 **The table closes in both directions, and the second one is easier to lose.**
