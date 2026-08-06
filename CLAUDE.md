@@ -44,7 +44,26 @@ docs/backend-architecture/
   appendix-c-delivery-plan.md    PR sequencing plan
   appendix-d-type-inventory.md   type inventory
 docs/roadmap.md                  estimates and calendar over Appendix C
+
+global.json                      SDK pin (§4.4)
+Directory.Build.props            shared MSBuild settings, ADR-019's policy
+Directory.Packages.props         central package management, exact pins
+Platform.slnx                    no projects yet — PR-02 adds the first
+.editorconfig                    house style; a build input, not a hint
+.github/workflows/ci.yml         licence gate, then restore/build/test
+.github/licence-gate/            the gate, its allow-list and its tests
 ```
+
+The second block is PR-01's. It carries no C#: the solution file is empty and
+`dotnet test` passes vacuously until PR-02 ships the first tests alongside the
+code they cover.
+
+The licence gate lives under `.github/` rather than a `build/` directory
+because it is CI-only and §4.1 draws no such tree. It is stdlib Python, reads
+`Directory.Packages.props` and Appendix B as text, and needs no restore — the
+reason §15.1 can put it ahead of the build. **Adding a package means adding its
+backticked identity to Appendix B in the same change**, or the gate fails the
+build before anything compiles.
 
 `docs/roadmap.md` sits outside the blueprint tree deliberately — it is a
 schedule, not a specification, and it goes stale on a different clock. Nothing

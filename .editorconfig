@@ -37,6 +37,15 @@ indent_size = 2
 [*.{json,yml,yaml}]
 indent_size = 2
 
+# The one file type that overrides end_of_line above, and it is not a
+# preference. The licence gate (.github/licence-gate/) runs on a Linux runner,
+# and a CRLF shebang makes the kernel look for an interpreter named
+# `python3\r` — "bad interpreter", on a line that looks correct in every editor.
+# Python itself reads CRLF source happily; it is the execute bit that does not.
+[*.py]
+end_of_line = lf
+indent_size = 4
+
 [*.{cs,csx}]
 indent_size = 4
 tab_width = 4

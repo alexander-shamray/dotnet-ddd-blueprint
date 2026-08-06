@@ -1,0 +1,9 @@
+# core.autocrlf is on, which would store the licence gate's Python with CRLF and
+# check it out the same way. On the Linux runner that CI uses, a CRLF shebang
+# makes the kernel look for an interpreter named `python3\r` — "bad
+# interpreter", from a line that looks correct in every editor.
+#
+# Narrow on purpose. A blanket `* text=auto` here would renormalise every file
+# in the repository in a commit that is supposed to be about something else;
+# .editorconfig already carries the CRLF rule for everything but this.
+*.py text eol=lf

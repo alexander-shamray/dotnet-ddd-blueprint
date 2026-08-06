@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only by default. A job needing more says so, and none here does.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Ahead of the build, not after it (§15.1). The gate reads
+  # Directory.Packages.props and Appendix B as text, so it needs neither a
+  # restore nor an SDK — which is exactly why it can run here. Scanning that
+  # sits downstream of a build is scanning that a build failure skips.
+  #
+  # This is the licence half of §15.1's "SCA + secret scan" node. The secret
+  # scan is not in PR-01's scope and joins this job when it lands.
+  licence-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The gate's own tests first. Run against this repository it passes, which
+      # says nothing about what it would catch — the carve-outs of §4.4 are
+      # branches that only a negative case exercises.
+      - name: Test the gate
+        working-directory: .github/licence-gate
+        run: python -m unittest
+
+      - name: Check every pin against the licence register
+        working-directory: .github/licence-gate
+        run: python licence_gate.py
+
+  build:
+    needs: licence-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No version named here. global.json is the pin (§4.4), and a version in
+      # two places is a version that drifts.
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - run: dotnet restore Platform.slnx
+
+      - run: dotnet build Platform.slnx --no-restore -c Release
+
+      # Vacuous until PR-02, which ships the first tests along with the code
+      # they cover. The step is here from the start so that the PR adding tests
+      # adds tests, and not the pipeline that runs them.
+      - run: dotnet test Platform.slnx --no-build -c Release

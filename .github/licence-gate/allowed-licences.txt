@@ -1,0 +1,12 @@
+# Licences a pinned package may carry, as SPDX identifiers, one per line.
+#
+# A package whose Appendix B row names a licence outside this list fails the
+# build. A dual-licensed package passes if either half is here, because a dual
+# licence is a choice the consumer makes.
+#
+# Adding a line is a decision about every future dependency, not about the one
+# in front of you. It belongs in an ADR.
+
+MIT
+Apache-2.0
+BSD-3-Clause
