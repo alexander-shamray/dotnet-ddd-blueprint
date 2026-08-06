@@ -504,6 +504,15 @@ logger.LogInformation(
 logger.LogInformation($"Order {order.Id} placed for {order.Total}");
 ```
 
+Both halves call `LogInformation` directly, and that is deliberate — the pair
+is about message templates, and a `LoggerMessage.Define` field either side of
+it would bury the one difference the reader is meant to see. Every logging call
+site the solution actually builds takes the compiled form instead, because
+CA1848 is enforced (ADR-019) and the classes that log are the ones that run per
+request or per message: §13.3's `LoggingBehavior`, and `OutboxDispatcher` and
+`CommandConsumer` in [§9.4](09-messaging.md). Fragments here teach the
+template; those three show the shape.
+
 Levels, applied consistently:
 
 | Level | Use | Example |
