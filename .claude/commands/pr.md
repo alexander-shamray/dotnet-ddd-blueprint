@@ -14,19 +14,31 @@ Read `git status -sb` and do the least that is needed:
 | State | Action |
 |---|---|
 | No upstream | `git push -u origin <branch>` |
-| Tracking, ahead | `git push` |
+| Tracking, ahead | `git push origin <branch>` |
 | In sync | Nothing |
+
+Name the remote and the branch in both cases. A bare `git push` relies on the
+branch's tracking config to say where it goes, and it matches neither allow
+rule in `.claude/settings.json` — so it prompts, which is the one thing an
+unattended chain must not do.
 
 Say which of the three it was. A push is the first thing in this command that
 another person can see, so it is worth one line of report rather than
 happening silently.
 
-**Two pushes are denied in `.claude/settings.json`, and neither is a step to
-work around:** `--force` (and `-f`, and `--delete`) and any push to `main`. A
-branch wanting either is raising a decision — stop and say so. Do not reach
-for `gh pr create`'s own offer to push either: it is the same action by a route
-that skips the upstream check above, so it pushes without ever reporting that
-it did.
+**Two kinds of push are denied in `.claude/settings.json`, and neither is a
+step to work around:** rewriting history (`--force`, `-f`, `--force-with-lease`,
+`--delete`) and anything landing on `main`. A branch wanting either is raising
+a decision — stop and say so. Do not reach for `gh pr create`'s own offer to
+push either: it is the same action by a route that skips the upstream check
+above, so it pushes without ever reporting that it did.
+
+**The deny list is defence in depth, not the guard.** It matches on command
+prefixes, and a refspec has more spellings than a prefix list can hold —
+`origin main`, `origin HEAD:main` and `origin <branch>:main` are three ways to
+say one thing, and only the first two are enumerated. What actually keeps this
+safe is the rule above: push the **current branch, by name**, and nothing else.
+A push whose destination is not the branch you are on is not this step.
 
 ## Title
 

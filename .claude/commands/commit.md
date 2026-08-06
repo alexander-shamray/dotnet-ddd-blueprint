@@ -71,4 +71,6 @@ British spelling in prose, identifiers left alone.>
 ## Report
 
 The commits made, one line each, and anything left uncommitted with the reason.
-Do not push — `/pr` handles that, and `git push` is denied to you regardless.
+Do not push. `/pr` owns that step and reports which of its three states it
+found; a push issued from here reaches the remote out of a command whose report
+says nothing about having done so.
