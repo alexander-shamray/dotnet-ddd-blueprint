@@ -1,0 +1,57 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup Label="Runtime">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
+    <PackageVersion Include="Dapper" Version="2.1.66" />
+    <!-- Exact major. v9 is commercially licensed — see ADR-003. -->
+    <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
+    <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
+    <PackageVersion Include="FluentValidation" Version="12.0.0" />
+    <PackageVersion Include="Scrutor" Version="6.1.0" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
+    <!-- The BFF's one synchronous hop (§9.7). Grpc.* majors move on their own
+         schedule, independent of the .NET release — exactly the case for
+         pinning rather than trusting the SDK to carry a compatible version. -->
+    <PackageVersion Include="Grpc.Net.ClientFactory" Version="2.71.0" />
+    <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
+    <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
+    <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+  </ItemGroup>
+  <ItemGroup Label="Telemetry">
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.13.1" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.13.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.13.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.13.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.13.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.13.0-beta.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.13.0-beta.1" />
+    <PackageVersion Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
+    <PackageVersion Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
+    <PackageVersion Include="AspNetCore.HealthChecks.Rabbitmq" Version="9.0.0" />
+  </ItemGroup>
+  <ItemGroup Label="Test">
+    <!-- Test packages are pinned for exactly the same reason as runtime ones.
+         xUnit v2 → v3 changed IAsyncLifetime from Task to ValueTask (§12.4):
+         a major that drifts in silently breaks every fixture in the repo. -->
+    <PackageVersion Include="xunit.v3" Version="3.1.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <PackageVersion Include="Testcontainers.MsSql" Version="4.6.0" />
+    <PackageVersion Include="Testcontainers.Redis" Version="4.6.0" />
+    <PackageVersion Include="Testcontainers.RabbitMq" Version="4.6.0" />
+    <PackageVersion Include="Respawn" Version="6.2.1" />
+    <PackageVersion Include="WireMock.Net" Version="1.8.11" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.9.0" />
+    <!-- The architecture gates of §4.2, which PR-07 turns from a review
+         comment into a build failure. A major bump can change which rules
+         exist, so it fails loudly rather than quietly stopping to enforce. -->
+    <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,51 @@
+<Project>
+
+  <!--
+    Shared MSBuild settings for every project in the repository (§4.1). The
+    target framework lives here rather than in each csproj because it is a
+    platform-wide decision: .NET 10 (LTS) and C# 14, settled in CLAUDE.md and
+    not a per-project choice.
+  -->
+  <PropertyGroup Label="Target">
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!--
+    The analyser policy of ADR-019. TreatWarningsAsErrors is what makes the
+    other two lines mean anything: without it a violation is a message in a
+    build log nobody reads, and the log is longest on the pull request that
+    introduced the most of them.
+
+    EnforceCodeStyleInBuild promotes the .editorconfig from an editor
+    convenience to a build input — but only for rules configured at warning or
+    above. Three are, and .editorconfig says which and why. The rest stay
+    suggestions deliberately; a style rule with a documented exception it cannot
+    express is a rule that must not fail a build.
+
+    latest-Recommended rather than latest-All: the All mode turns on every
+    CAxxxx analyser including the documentation and globalisation categories,
+    which produce hundreds of diagnostics on a codebase that has made no
+    commitment to either.
+  -->
+  <PropertyGroup Label="Analysis">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-Recommended</AnalysisLevel>
+  </PropertyGroup>
+
+  <!--
+    Deterministic builds everywhere; path normalisation only on CI, because
+    ContinuousIntegrationBuild rewrites source paths in the PDB to be
+    repository-relative and that breaks local step-through debugging. The CI
+    environment variable is set by GitHub Actions on every runner.
+  -->
+  <PropertyGroup Label="Build">
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>

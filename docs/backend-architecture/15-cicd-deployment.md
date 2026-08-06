@@ -23,8 +23,10 @@ graph LR
 the image build, which put `deploy/**` — the directory most likely to receive a
 pasted credential — on the only path that skipped it. Neither half needs a
 build to run: the secret scan reads the diff, and the licence gate reads
-`Directory.Packages.props`, which is the practical argument for central pinning
-that [§4.4](04-solution-structure.md) makes on other grounds. Cheapest and least dependent goes first.
+`Directory.Packages.props` against [Appendix B](appendix-b-licences.md) as
+text — which is the practical argument for central pinning that
+[§4.4](04-solution-structure.md) makes on other grounds. Cheapest and least
+dependent goes first.
 
 Only services whose files changed are built and deployed. Path filters are what
 make a monorepo practical at this size:

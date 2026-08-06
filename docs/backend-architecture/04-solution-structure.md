@@ -559,11 +559,20 @@ reviewed.
 ```json
 {
   "sdk": {
-    "version": "10.0.100",
+    "version": "10.0.300",
     "rollForward": "latestPatch"
   }
 }
 ```
+
+> **Trap — `latestPatch` does not roll across feature bands.** The third digit
+> of an SDK version is a feature band, and `latestPatch` stays inside the one it
+> is given: `10.0.100` accepts any `10.0.1xx` and rejects `10.0.302`. That is the
+> strictness the pin is for, but it means the number here has to name the band
+> the team actually installs. Get it wrong and `dotnet` does not fall back — it
+> refuses to run at all, on every machine, with a message about an SDK nobody
+> asked for. Bumping the band is a deliberate change to this file, which is the
+> intended cost.
 
 `Directory.Packages.props` pins every package version once for the whole
 repository. This prevents the situation where two services depend on different
@@ -634,8 +643,10 @@ the version numbers here came from, and the list is the same set [Appendix B](ap
 registers. The two files answer different questions about the same dependencies:
 Appendix B says whether a licence is acceptable, this file says which version CI
 will actually resolve. A package in one and not the other is how a licence
-boundary gets crossed by a restore, and it is worth a CI check that the two
-lists match.
+boundary gets crossed by a restore, so PR-01 ships that check:
+`.github/licence-gate/` reads this file and [Appendix B](appendix-b-licences.md)
+as text, matches on the backticked package identities the register carries, and
+fails on a pin nobody cleared.
 
 Appendix B is the wider list, though, and three kinds of row in it will never
 have a pin here. A check that does not know them reports false positives until
@@ -660,7 +671,9 @@ somebody stops reading its output:
   ignored.
 
 The versions are those current at the review date in the header. A blueprint
-cannot keep them accurate; the SCA step below is what keeps them honest.
+cannot keep them accurate, and neither does the gate below — it reads package
+identities and never a `Version`. Currency and vulnerability scanning are a
+separate obligation, and the tooling for them is not yet in this repository.
 
 > **Trap — pinning floors instead of versions.** Writing `Version="8.*"`, or
 > treating the file as a set of minimums to be "reviewed quarterly", means a
@@ -669,9 +682,24 @@ cannot keep them accurate; the SCA step below is what keeps them honest.
 > example (Appendix B) — the obligation is acquired by a restore rather than by a
 > decision. Pin exact versions and upgrade deliberately.
 
-Back this with a CI step that fails the build on any package licence outside an
-allow-list. Licence drift is only caught reliably by tooling; a convention will
-not survive the twentieth dependency.
+What the gate does enforce is narrower, and the line matters. It fails the build
+on a pin [Appendix B](appendix-b-licences.md) does not register, on a registered
+licence outside `.github/licence-gate/allowed-licences.txt`, and on a registered
+identity that is pinned nowhere. All three are questions about **identity and
+licence**; none is a question about whether a version is current or safe.
+
+Licence drift is only caught reliably by tooling — a convention will not survive
+the twentieth dependency. The gate runs ahead of the build rather than after it
+([§15.1](15-cicd-deployment.md)), which is what this file's central pinning
+buys: every dependency the repository has is declared in one place, so nothing
+needs restoring before the list can be read.
+
+> **Trap — the sample above is a copy.** The gate reads
+> `Directory.Packages.props`; the fenced block in this section is a second
+> transcription of it, and nothing about a passing build proves the two agree.
+> The gate closes that itself by comparing them — but the failure it reports is
+> against this chapter, not the props file, because the file is what CI
+> restores and the chapter is what a reader believes.
 
 ---
 

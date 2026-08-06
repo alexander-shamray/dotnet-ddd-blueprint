@@ -24,3 +24,7 @@ appsettings.*.local.json
 !.env.example
 *.pfx
 *.p12
+
+# Python — the licence gate in .github/licence-gate/ is a script, not a package.
+__pycache__/
+*.py[cod]
