@@ -50,6 +50,25 @@
       around.
     -->
     <NoWarn>$(NoWarn);CA1716</NoWarn>
+
+    <!--
+      CA1711 bans a reserved suffix on a type name, so that a consumer is not
+      misled about what the type derives from. It fires on `NextDelegate`
+      (§6.2), where the suffix is not incorrect at all: the type is a delegate,
+      and saying so is the whole of the name.
+
+      This is the CA1716 argument again, and it is admitted on the same terms.
+      Both rules protect a consumer of a published library from a name they
+      cannot change, and there is no such consumer here — every project is
+      referenced by C# inside this repository, and §4.3 permits exactly one
+      assembly to cross a service boundary.
+
+      What it costs is real and worth writing down: the rule is off everywhere,
+      so a later `OrderCollection` that is not a collection stops being caught.
+      That is the trade this file is the right place to make, because it is a
+      decision about the whole corpus rather than about one type.
+    -->
+    <NoWarn>$(NoWarn);CA1711</NoWarn>
   </PropertyGroup>
 
   <!--
