@@ -41,7 +41,17 @@ docs/backend-architecture/
   appendix-b-licences.md         dependency licence register
   appendix-c-delivery-plan.md    PR sequencing plan
   appendix-d-type-inventory.md   type inventory
+docs/roadmap.md                  estimates and calendar over Appendix C
 ```
+
+`docs/roadmap.md` sits outside the blueprint tree deliberately — it is a
+schedule, not a specification, and it goes stale on a different clock. Nothing
+in it states a requirement: it prices Appendix C's 26 PRs in ideal
+engineer-days and derives a calendar from one stated ratio. **Where the two
+disagree, Appendix C wins**, always. Because it is outside the tree, no nav
+footer or index row will catch its drift — `/validate-blueprint` check 10 is
+the only thing that does, which is why the roadmap is named in that command's
+scope rather than left to the directory glob.
 
 Planned, per §4.1 — do not invent a different shape for it:
 
@@ -602,7 +612,7 @@ Content:
 
 | | |
 |---|---|
-| `/validate-blueprint` | Multi-pass self-consistency audit; also code ↔ docs drift once `src/` exists |
+| `/validate-blueprint` | Multi-pass self-consistency audit across the blueprint and `docs/roadmap.md`; also code ↔ docs drift once `src/` exists |
 | `/check-links` | Link, cross-reference and nav-footer integrity |
 | `/new-chapter` | Scaffold a chapter and rewire its neighbours |
 | `/new-adr` | Append an ADR in the established form |
