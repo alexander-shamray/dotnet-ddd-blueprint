@@ -229,7 +229,9 @@ public static IServiceCollection AddOrderingApplication(this IServiceCollection 
     services.AddSingleton<OrderMetrics>();
     services.AddSingleton<RequestMetrics>();                             // §13.3
 
-    services.AddScoped<IDispatcher, Dispatcher>();
+    // Not AddScoped<IDispatcher, Dispatcher>: Dispatcher is internal to
+    // Common.Application (§6.2), so this assembly cannot name it.
+    services.AddDispatcher();
     services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
     services.AddScoped<IProjectionRegistry, ProjectionRegistry>();      // §7.5
 

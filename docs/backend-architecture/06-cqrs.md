@@ -115,6 +115,23 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 }
 ```
 
+`Dispatcher` is `internal`, so a service cannot name the type and cannot write
+its own `AddScoped` line. `Common.Application` registers it:
+
+```csharp
+public static IServiceCollection AddDispatcher(this IServiceCollection services)
+{
+    services.AddScoped<IDispatcher, Dispatcher>();
+    return services;
+}
+```
+
+Scoped, because handlers are. A singleton dispatcher would capture the root
+provider, and every request would share one handler instance — and one
+`DbContext` behind it once [§7.2](07-persistence.md) puts one there. The
+constructor takes an `IServiceProvider` and the scope it is resolved from is
+the one it hands to the invokers, so the lifetime is not a preference.
+
 Registration scans the assembly once at startup. Every pluggable interface must
 be scanned — one that exists but is never registered resolves to an empty
 collection or throws at first use, and neither failure points at the omission.
@@ -375,13 +392,11 @@ public sealed class ValidationBehavior<TRequest, TResult>(IEnumerable<IValidator
         if (!validators.Any())
             return await next();
 
-        ValidationContext<TRequest> context = new(request);
-        ValidationFailure[] failures =
-        [
-            .. (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
-                .SelectMany(r => r.Errors)
-                .Where(f => f is not null)
-        ];
+        // One context per validator, not one shared between them. See below.
+        ValidationResult[] results = await Task.WhenAll(
+            validators.Select(v => v.ValidateAsync(new ValidationContext<TRequest>(request), ct)));
+
+        ValidationFailure[] failures = [.. results.SelectMany(r => r.Errors).Where(f => f is not null)];
 
         if (failures.Length > 0)
             throw new ValidationException(failures);
@@ -390,6 +405,19 @@ public sealed class ValidationBehavior<TRequest, TResult>(IEnumerable<IValidator
     }
 }
 ```
+
+> **A `ValidationContext<T>` is not a value to share across validators.** It
+> carries the failure list, and every `ValidationResult` built from it reports
+> that whole list as its own — so two validators over one context each come back
+> holding both failures, `SelectMany` counts each twice, and the caller is told
+> its one empty field is two empty fields. `Task.WhenAll` runs the validators
+> concurrently besides, which makes the shared list a race as well as a
+> duplication. A context per validator costs an allocation per rule set and
+> removes both.
+>
+> This was written the other way first and a test found it — two validators, one
+> empty string, four failures. It is the kind of defect that is invisible in the
+> single-validator case every sample uses.
 
 Transaction — this is the behaviour that makes the domain-event and outbox
 mechanism work, and it is the one worth reading closely.

@@ -57,19 +57,22 @@ Platform.slnx                    the six projects below
 src/BuildingBlocks/
   Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,
                                  IHasDomainEvents, IAggregateRoot — no packages
-  Common.Application/            Result, Result<T>, Error, ErrorType
+  Common.Application/            Result, Result<T>, Error, ErrorType; the §6.2
+                                 dispatcher and its two behaviours, plus
+                                 RequestMetrics and PluggableInterfaces
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
                                  ToHttpResult — the only project referencing
                                  another, and the only one with a
                                  FrameworkReference
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
-  Common.Application.Tests/      anonymous sample types both suites build on
+  Common.Application.Tests/      anonymous sample types both suites build on;
+                                 TestContainer.cs is the one registration path
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
 ```
 
-The second block is PR-01's, the third PR-02's and PR-03's.
+The second block is PR-01's, the third PR-02's, PR-03's and PR-04's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it and PR-09's `TransactionBehavior` will need it, but an unused
 project reference is a claim about the dependency graph that nothing yet
@@ -121,12 +124,13 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds six projects and `dotnet test` runs 60 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 88 tests, so the
 build rules and the drift rules below are live and a green run now means
-something. **PR-04 is next** (`feat(common): CQRS dispatcher and pipeline
-behaviours`), which depends on PR-02 alone — PR-05 is the one that builds on
-what PR-03 just landed, composing `AddCommonProblemDetails` into
-`AddCommonWebDefaults` (§13.2).
+something. **PR-05 is next** (`feat(common): OpenTelemetry and structured
+logging defaults`), which builds on PR-03 — it composes
+`AddCommonProblemDetails` into `AddCommonWebDefaults` (§13.2) and wires the
+OTLP export that the `request.duration` histogram PR-04 just landed currently
+records into nothing.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
@@ -134,6 +138,15 @@ them is a change that belongs in the PR that creates it (Appendix C), not in a
 project invented early. `Common.Web` now does exist, and the same rule applies
 inside it: it holds §10.4 and §10.5 and nothing else until PR-05 adds
 observability and PR-16 adds JWT validation.
+
+`Common.Application` is the same story one layer down. The pipeline is two
+behaviours of four: **`IdempotencyBehavior` (§8.5) and `TransactionBehavior`
+(§6.3) do not exist**, and PR-09 is the PR that adds the second one. So is
+`PluggableInterfaces.All`, which lists two of its eventual five — the three
+missing entries name interfaces §7.5 and §9.4 have not defined yet, and the
+list is built to be appended to. Adding an interface there and nowhere else is
+the design; adding one before its PR is inventing a project early by another
+route.
 
 The commands are the ones the target solution uses:
 

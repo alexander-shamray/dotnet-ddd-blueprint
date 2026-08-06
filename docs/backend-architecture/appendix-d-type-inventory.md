@@ -36,6 +36,7 @@ repeatable check; noticing by eye is not.
 | `ServiceIdentityOptions` | [§15.4](15-cicd-deployment.md) | Bound to `Identity:Client`, `ValidateOnStart`-checked. Registered by the BFF alone (§9.7) |
 | `ServiceOptions` | §15.4 | Static constants only — not bound, not validated, not deployable |
 | `PluggableInterfaces`, `AddPluggableFrom` | §6.2 | The one list of scanned interfaces, and the per-assembly scan that reads it |
+| `AddDispatcher` | §6.2 | Registers `IDispatcher`. It exists because `Dispatcher` is internal to `Common.Application`, so no service can write the `AddScoped` line itself |
 | `IIntegrationEventMapper` | §9.3 | Domain → integration allow-list |
 | `IIntegrationEventPublisher` | §9.3 | Stages outbox rows on the current transaction |
 | `IProjectionHandler<T>` | §9.4 | Reacts to own events, local lane, after commit |

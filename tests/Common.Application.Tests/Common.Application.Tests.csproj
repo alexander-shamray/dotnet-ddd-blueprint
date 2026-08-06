@@ -12,6 +12,18 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Shouldly" />
+    <!-- The real container. Dispatcher is internal to Common.Application
+         (§6.2), so every dispatcher test goes through AddDispatcher and
+         resolves IDispatcher — which is the registration path a service uses
+         and not a second copy of it. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <!-- ValidationBehavior's validators are written, not faked: an
+         AbstractValidator that really fails is the only way to see the
+         ValidationException carry its failures (§6.3). -->
+    <PackageReference Include="FluentValidation" />
+    <!-- FakeTimeProvider. §13.3 records an elapsed time, and a test that
+         asserted on the wall clock would assert on the build agent. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <ItemGroup>
