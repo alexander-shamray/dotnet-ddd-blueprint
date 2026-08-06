@@ -619,12 +619,18 @@ Delivery:
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting |
 | `/review-grok` | Triage an external review into a resolution record |
 
-`git push` is denied to Claude in `.claude/settings.json`, so `/pr` stops and
-asks the user to run `! git push -u origin <branch>` before it opens anything.
-That is deliberate; `gh pr create`'s offer to push the branch is the same hole
-by another route and is not to be used either. `/ship` inherits the stop rather
-than routing around it, which is why it is written to resume: re-running it
-after the push continues from where it halted.
+`/pr` pushes the branch itself, and `/ship` therefore runs all the way to an
+open PR. What `.claude/settings.json` still denies is the narrow set that is a
+decision rather than a step: `--force`, `-f`, `--delete`, and any push to
+`main`. A branch wanting one of those is raising a question, not running a
+command. `gh pr create`'s own offer to push is not used either — it is the
+same action by a route that skips the upstream check `/pr` makes first, so it
+reaches the remote without reporting that it did.
+
+This replaced a blanket `Bash(git push:*)` deny, under which `/pr` stopped and
+asked the user to push. Worth knowing what that cost: the stop was the last
+moment the work was still cheap to change, and **the checks in `/ship` step 2
+now carry that weight alone.** They are the only thing that halts the chain.
 
 **File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
 covers every file-editing tool, `Write` included; a `Write(path)` rule matches

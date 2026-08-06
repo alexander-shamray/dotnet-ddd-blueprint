@@ -1,7 +1,7 @@
 ---
-description: Branch, commit and open a PR in one pass, stopping only where a human must act
+description: Branch, commit, push and open a PR in one pass, stopping only on a check finding
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -15,18 +15,23 @@ restate them here** — a fourth copy of the naming table is exactly the drift
 this repo exists to close, and a chainer that paraphrases the steps it calls is
 the worst place for that copy to live.
 
-What this command adds is the handoffs: which steps are still owed, and what to
-do at the two places the sequence cannot continue on its own.
+What this command adds is the handoffs: which steps are still owed, and where
+the sequence is allowed to stop.
 
-## It cannot run to the end
+## It runs to the end
 
-`git push` is denied to Claude in `.claude/settings.json`. `/pr` already stops
-for it and prints the line to run; that stop is inherited here, not worked
-around. Do not let `gh pr create` offer to push the branch instead.
+`/pr` pushes the branch itself, so the chain reaches an open PR without waiting
+for anyone. **Step 2 is now the only thing that stops it** — a check that
+finds something halts the run and hands the finding back, because fixing it is
+the user's call.
 
-The stop is the point of the command rather than a limitation of it: it is the
-last moment where the work is still cheap to change. Re-run `/ship` after
-pushing and it picks up where it left off.
+That is a real change in character and worth naming. Under the old blanket
+`Bash(git push:*)` deny this command could not finish: it stopped before the
+push, and that stop was the last cheap moment to change the work. The narrow
+denies that replaced it — `--force`, `--delete`, any push to `main` — keep
+the cases that are decisions rather than steps. Everything else now proceeds,
+which means **the checks are carrying the weight the stop used to.** Skipping
+them to save a minute is no longer a small thing.
 
 ## Resume, don't restart
 
@@ -36,8 +41,9 @@ skippable because an earlier run already did it:
 | State | What is owed |
 |---|---|
 | On `main` | All of it — start at step 1 |
-| On a branch, tree dirty | Checks, `/commit`, `/pr` |
-| On a branch, tree clean | `/pr` — which stops for the push if the branch is unpushed or ahead |
+| On a branch, tree dirty | Checks, `/commit`, push, `/pr` |
+| On a branch, tree clean, unpushed or ahead | Push, `/pr` |
+| On a branch, tree clean and pushed | `/pr` |
 | On a branch with an open PR | Nothing. Say so and stop — `/pr` treats this as an update, and updating is a decision, not a default |
 
 `git status -sb`, `git branch --show-current` and `gh pr list --state open`
@@ -71,17 +77,23 @@ answer all four. Read them before doing anything.
    Do not collapse the split to save a step. The commits are what `/pr` writes
    its body from, so a single lumped commit costs twice.
 
-4. **`/pr`**. It derives its own title from the commits; $ARGUMENTS described
-   the branch, not the PR.
+4. **Push, then `/pr`.** Both belong to `/pr` — it reads `git status -sb` and
+   pushes only what is owed, then opens the PR, deriving its own title from the
+   commits. $ARGUMENTS described the branch, not the PR.
 
-   This is where the push stop lands. If `/pr` stops, that is the chain
-   finishing correctly — report it as a stop, not a failure.
+   The push is called out here rather than left inside step 4's prose because
+   it is the only action in the whole sequence that another person can see.
+   A chain that reaches the remote silently is a chain nobody audits, so it
+   gets a line in the report whether or not it did anything.
+
+   `/pr` stops on one thing: an open PR already exists from this branch.
+   Updating it is a decision, not a default.
 
 ## Report
 
-One line per step: done, skipped and why, or stopped and what is needed. End
-with the PR URL, or with the single command the user has to run to get past the
-current stop.
+One line per step: done, skipped and why, or stopped and what is needed —
+including the push, which reports which of its three states it found even when
+that state was "nothing to do". End with the PR URL.
 
 A step skipped on an assumption gets its assumption restated here rather than
 left in the middle of the run, and a check that did not run is named. The whole

@@ -1,27 +1,32 @@
 ---
 description: Open a pull request with a body in the house form
 argument-hint: "[title — omit to derive it from the commits]"
-allowed-tools: Read, Grep, Glob, Write, Bash(git status:*), Bash(git log:*), Bash(git diff:*), Bash(git branch:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*)
+allowed-tools: Read, Grep, Glob, Write, Bash(git status:*), Bash(git log:*), Bash(git diff:*), Bash(git branch:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*)
 ---
 
 Open a PR for the current branch. Title: $1 — if empty, derive it from the
 commits.
 
-## The push is the user's to run
+## Push the branch first
 
-`git push` is denied in `.claude/settings.json`, and that is deliberate — do
-not route around it, and do not let `gh pr create` offer to push the branch on
-your behalf.
+Read `git status -sb` and do the least that is needed:
 
-Check `git status -sb` for an upstream. If there is none, or the branch is
-ahead, print the exact line for the user to run and stop until it has:
+| State | Action |
+|---|---|
+| No upstream | `git push -u origin <branch>` |
+| Tracking, ahead | `git push` |
+| In sync | Nothing |
 
-```
-! git push -u origin <branch>
-```
+Say which of the three it was. A push is the first thing in this command that
+another person can see, so it is worth one line of report rather than
+happening silently.
 
-Then continue. Nothing below needs write access to the remote except
-`gh pr create` itself.
+**Two pushes are denied in `.claude/settings.json`, and neither is a step to
+work around:** `--force` (and `-f`, and `--delete`) and any push to `main`. A
+branch wanting either is raising a decision — stop and say so. Do not reach
+for `gh pr create`'s own offer to push either: it is the same action by a route
+that skips the upstream check above, so it pushes without ever reporting that
+it did.
 
 ## Title
 
