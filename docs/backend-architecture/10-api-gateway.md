@@ -236,7 +236,7 @@ app
     .AddEndpointFilter(async (ctx, next) =>
     {
         ctx.HttpContext.Response.Headers["Deprecation"] = "true";
-        ctx.HttpContext.Response.Headers["Sunset"] = "Wed, 31 Dec 2026 23:59:59 GMT";
+        ctx.HttpContext.Response.Headers["Sunset"] = "Thu, 31 Dec 2026 23:59:59 GMT";
         ctx.HttpContext.Response.Headers["Link"] =
             "</api/v2/orders>; rel=\"successor-version\"";
         return await next(ctx);
