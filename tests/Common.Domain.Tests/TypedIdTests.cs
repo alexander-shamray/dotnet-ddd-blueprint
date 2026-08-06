@@ -17,7 +17,10 @@ public class TypedIdTests
     {
         var id = TestId.New();
 
-        // Time-ordered rather than random, so inserts cluster (§5.2).
+        // v7 rather than v4 — the factory's one observable commitment.
+        // Whether a time-ordered Guid actually helps SQL Server's clustered
+        // index is §5.2's separate claim, and an open one; nothing here
+        // asserts it.
         id.Value.Version.ShouldBe(7);
     }
 

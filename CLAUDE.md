@@ -355,10 +355,12 @@ already written against it.
   which is which.** `{` is not a review rule at all: the C# default for
   `csharp_new_line_before_open_brace` is `all`, IDE0055 reports a trailing one
   as a formatting violation, and ADR-019 turns that into a failed build. Write
-  `new Options {` and the compiler stops you. `[` has no such backing —
-  Roslyn has no opinion on bracket placement, `dotnet format` neither
-  introduces nor removes the break, and IDE0055 is silent. That half is
-  carried by review and by this file alone.
+  `new Options {` and the build fails — on an analyser diagnostic rather than
+  a language error, which is the whole reason `.editorconfig` gets to decide
+  it.
+  `[` has no such backing: Roslyn has no opinion on bracket placement,
+  `dotnet format` neither introduces nor removes the break, and IDE0055 is
+  silent. That half is carried by review and by this file alone.
 
   In argument position the two rules compose rather than fight: `(` ends its
   line, arguments go one per line at + 4, and a collection expression among

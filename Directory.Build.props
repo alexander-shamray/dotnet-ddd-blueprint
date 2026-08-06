@@ -53,10 +53,12 @@
   </PropertyGroup>
 
   <!--
-    The one suppression in the repository, and the only place ADR-019 permits
-    one: CA1707 forbids underscores in member names, and every test name in §12
-    is a sentence written with them — `Cannot_cancel_an_order_that_has_shipped`.
-    The two rules are in direct conflict and one of them has to give.
+    The second of this file's two suppressions — CA1716 above is the other —
+    and this file is the only place ADR-019 permits either, since `#pragma` is
+    forbidden. CA1707 bans underscores in member names, and every test name in
+    §12 is a sentence written with them —
+    `Cannot_cancel_an_order_that_has_shipped`. The two rules are in direct
+    conflict and one of them has to give.
 
     It is the analyser that gives, because the convention is load-bearing: a
     test name is read in a failure report by someone who is not looking at the
