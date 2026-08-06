@@ -338,7 +338,7 @@ public sealed class RequestMetrics
 
 ```csharp
 // Common.Infrastructure — registered by AddOrderingInfrastructure, because
-// both call sites are Infrastructure types (§9.4).
+// all three call sites are Infrastructure types (§9.4).
 public sealed class MessagingMetrics
 {
     private readonly Histogram<double> _deliveryLag;
@@ -403,13 +403,16 @@ instrument, `command.domain_rejected`, is a plain counter with no such
 caveat — it is recorded by `CommandConsumer` at the moment the dispatcher
 returns a failure, on the same machine (§9.8).
 
-> **These need no `MetricsInitialiser` entry (§13.6), and the difference is the
-> instrument kind.** An observable gauge is pull-based — the collector asks, and
-> if nothing ever constructed the class there is nothing to ask, which is why
-> the outbox gauges are forced. A histogram is pushed from a live call site, so
-> anything recording it has already resolved the class. Forcing construction is
-> the fix for a *pull* instrument with no consumer, not a habit to apply to all
-> of them.
+> **These get a `MetricsInitialiser` entry too (§13.6), and the tempting reason
+> not to is the instrument kind.** An observable gauge is pull-based — the
+> collector asks, and if nothing ever constructed the class there is nothing to
+> ask — which makes forcing the outbox gauges obviously necessary. A histogram
+> is pushed from a live call site, so anything recording it has already resolved
+> the class, and it looks safe to leave out. It is not: the call site has to be
+> *reached*, and a consumer is constructed when a message arrives, so on a quiet
+> service these instruments still do not exist. §13.6 states the test that
+> actually decides membership — can this service run for an hour without
+> constructing it — and all four types fail it.
 
 The behaviour that records the first of these is the one behaviour §6.3 never
 showed:

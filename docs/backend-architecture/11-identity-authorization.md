@@ -238,7 +238,7 @@ internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser c
         }
 
         // The aggregate still owns the transition — this handler decides who
-        // may ask, not whether the order is in a state that permits it (§5.3).
+        // may ask, not whether the order is in a state that permits it (§5.4).
         order.Cancel(command.Reason, clock.GetUtcNow());
 
         // No metric here, for the reason §6.4 gives: this runs inside the

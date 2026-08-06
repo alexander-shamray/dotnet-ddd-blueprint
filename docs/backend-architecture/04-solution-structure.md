@@ -148,7 +148,7 @@ silently licenses an endpoint to inject a `DbContext`.
 public void Endpoints_do_not_depend_on_infrastructure()
 {
     TestResult result = Types
-        .InAssembly(typeof(OrdersEndpoints).Assembly)
+        .InAssembly(typeof(OrderEndpoints).Assembly)
         .That().ResideInNamespaceContaining(".Endpoints")
         .ShouldNot().HaveDependencyOn("Ordering.Infrastructure")
         .GetResult();

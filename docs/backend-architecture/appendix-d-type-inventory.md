@@ -103,7 +103,7 @@ structurally always null on one path.
 | `HttpContextCurrentUser` | §11.4 | `ICurrentUser` over `IHttpContextAccessor`; reads `ClaimTypes.NameIdentifier` and `permission` claims |
 | `SensitiveDataRedactor` | §13.4 | `BaseProcessor<LogRecord>`; enforces the never-log list on the pipeline §13.2 builds |
 | `OutboxMetrics` | §13.6 | Observable gauges on the `Ordering.Outbox` meter; singleton, eagerly constructed |
-| `RequestMetrics` | §13.3 | `request.duration` on `Commerce.Requests`; injected by `LoggingBehavior`, so no forcing needed |
+| `RequestMetrics` | §13.3 | `request.duration` on `Commerce.Requests`; injected by `LoggingBehavior` and still forced by `MetricsInitialiser` (§13.6) — a health probe never enters the pipeline |
 | `MessagingMetrics` | §13.3 | Three instruments on `Commerce.Messaging`: `messaging.delivery.lag` and `projection.lag` histograms, and the `command.domain_rejected` counter `Rejected` writes (§9.8). Injected by `IntegrationEventConsumer<T>` and `CommandConsumer<,>`; resolved from the provider by the static `ProjectionInvoker` |
 | `IOutboxStats`, `OutboxStats` | §13.6 | Backlog age and abandoned count, read per-scope from a singleton |
 | `MetricsInitialiser` | §13.6 | `IHostedService` whose only job is forcing the metrics singletons to be constructed |
@@ -171,7 +171,10 @@ their declaration.
 | `BuildServices`, `BuildProvider` | Test helpers running **both** real registration helpers — `AddOrderingApplication` and `AddOrderingInfrastructure` (§6.2, §6.3, §13.6). `BuildServices` returns the populated `IServiceCollection`; `BuildProvider` is `BuildServices().BuildServiceProvider()`. Two helpers because registrations can only be enumerated before the build |
 | `OutboxBacklogHealthCheck` | Reports outbox depth as an `observe`-tagged check (§13.5) |
 | `PlaceOrderCommand`, `PlaceOrderItem`, `PlaceOrderValidator`, `PlaceOrderHandler` | The worked command slice (§6.4) |
-| `GetOrderSummariesQuery`, `OrderSummaryDto`, `SummaryProduct`, `OrderSummaryProjection` | The worked query and projection slice — the DTO shown at level 1 (§6.5) and rewritten at level 2 (§6.6) |
+| `AddressDto`, its `ToDomain()` | The shipping address as `PlaceOrderCommand` carries it, and the map to the `Address` value object (§6.4). Built by `AddressBuilder.ValidDto()` in §12.4. An application DTO, unrelated to `ShippingAddressV1` below — a wire contract and a command payload version on different schedules (§4.3) |
+| `GetOrderSummariesQuery`, `GetOrderSummariesHandler`, `OrderSummaryDto`, `SummaryProduct` | The worked query slice — shown at level 1 (§6.5) and rewritten in place at level 2 (§6.6). The projection feeding it is `OrderSummaryProjection`, defined in D.4 |
+| `GetProductDetailQuery`, `GetProductDetailHandler`, `ProductDetailDto`, `ProductSql` | Catalog's cached read slice — the `HybridCache` worked example (§8.2), and the one sample here belonging to a service other than Ordering |
+| `ShippingAddressV1` | The address `V1.OrderConfirmed` carries (§9.1) — primitives only, and versioned with the contract that owns it, exactly as `PlacedLine` and `ConfirmedLine` are |
 | `ProductPublished` | Catalog contract, envelope (§9.1) plus `ProductId`, `Name`, `ThumbnailUrl`, `Currency`, `Amount` — the last two so a projection has a price the moment the product exists, without waiting for a `PriceChanged` that may never come |
 | `ProductDiscontinued` | Catalog contract, envelope plus `ProductId`. No reason code: §6.6 flips `IsAvailable` either way |
 | `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | The saga's integration events ([§3.2](03-bounded-contexts.md), §9.6, `Common.Contracts`), each carrying the §9.1 envelope plus `OrderId` and what its own step decided. `PriceChanged` is not here — §9.1 declares it |

@@ -489,7 +489,7 @@ public sealed class MessageTypeMap
     {
         // FullName, not AssemblyQualifiedName: namespace and type name, no
         // version and no assembly. For contracts the namespace is already
-        // versioned (§9.1), so this IS the contract. For domain events it is
+        // versioned (§9.2), so this IS the contract. For domain events it is
         // internal, and a rename is then a migration the team chose rather than
         // one a build number made for it.
         (string Name, Type Type)[] pairs = assemblies
@@ -599,7 +599,7 @@ costs nothing; discovering afterwards that yesterday's rows deserialise with a
 > disagree. The `Local` lane is drained in seconds, which is what makes the
 > cheaper option viable: the exposure is one batch, not one release cycle.
 > That reasoning stops holding the moment the lane backs up for hours, so if the
-> §13.7 outbox-age alert becomes routine rather than exceptional, revisit this
+> §13.6 outbox-age alert becomes routine rather than exceptional, revisit this
 > before the backlog makes the decision for you.
 
 The dispatcher runs as a background service in two phases: an atomic **claim**

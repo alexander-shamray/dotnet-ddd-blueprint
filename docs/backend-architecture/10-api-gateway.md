@@ -223,9 +223,9 @@ is a public, unlimited copy of an authenticated, limited endpoint:
 > **The in-process API tests do not catch this.** They call the service
 > directly, on `/v1/orders/...` ([§12.4](12-test-strategy.md)), so they exercise everything after the
 > strip and nothing before it. Path composition is gateway configuration, and
-> [§15.1](15-cicd-deployment.md)'s config test — every route's policies resolve — is the only place it
-> is checked; extend it to assert each route's stripped path against the group
-> its service maps.
+> PR-17's config test ([Appendix C](appendix-c-delivery-plan.md)) — every route's policies resolve — is the only
+> place it is checked; it also asserts each route's stripped path against the
+> group its service maps.
 
 Deprecation is signalled with standard headers rather than a changelog nobody
 reads (RFC 8594 / RFC 9745):

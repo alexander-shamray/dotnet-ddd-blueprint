@@ -993,7 +993,7 @@ public async Task Commands_are_sent_and_events_are_published()
 The saga tests above prove one service's coordination. The only thing left that
 is genuinely *between* services is the contract assembly, and its rules are all
 stated elsewhere as things reviewers should notice: §9.6's "a contract may not
-name a domain type", §9.1's versioned namespace, `required` members. Each is
+name a domain type", §9.2's versioned namespace, `required` members. Each is
 mechanical, so each is a test rather than a review note.
 
 This is the one suite that references every service, which is why it has its own
@@ -1030,7 +1030,7 @@ public class ContractTests
     [Fact]
     public void Every_contract_lives_in_a_versioned_namespace()
     {
-        // Common.Contracts.<Service>.V<n> — §9.1. A contract that lands one
+        // Common.Contracts.<Service>.V<n> — §9.2. A contract that lands one
         // namespace short is a v1 that can never be superseded.
         Contracts.ShouldAllBe(t =>
             Regex.IsMatch(t.Namespace!, @"^Common\.Contracts\.[A-Za-z]+\.V\d+$"));
