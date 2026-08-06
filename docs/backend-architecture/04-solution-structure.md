@@ -595,6 +595,13 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
+    <!-- The container and logging contracts Common.Application compiles
+         against (§6.2, §13.3). ASP.NET Core's shared framework carries both,
+         but Application takes no FrameworkReference — §4.2 puts the web on the
+         other side of the boundary, and the building block that defines
+         IPipelineBehavior sits on this one. -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Dapper" Version="2.1.66" />
     <!-- Exact major. v9 is commercially licensed — see ADR-003. -->
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
@@ -647,6 +654,10 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Respawn" Version="6.2.1" />
     <PackageVersion Include="WireMock.Net" Version="1.8.11" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.9.0" />
+    <!-- ServiceCollection itself. §6.2's registration test and §6.3's ordering
+         test resolve from a real container, and the abstractions package the
+         source references has none to build — it is contracts only. -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <!-- The architecture gates of §4.2, which PR-07 turns from a review
          comment into a build failure. A major bump can change which rules
          exist, so it fails loudly rather than quietly stopping to enforce. -->

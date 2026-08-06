@@ -22,6 +22,7 @@ Adding a dependency means adding its identity here, not just its name.
 | Package | Licence | Role |
 |---|---|---|
 | ASP.NET Core, EF Core (`Microsoft.EntityFrameworkCore.SqlServer`), YARP (`Yarp.ReverseProxy`), HybridCache (`Microsoft.Extensions.Caching.Hybrid`) | MIT | Framework. ASP.NET Core is the one name in this row with no identity beside it, because it is a framework reference rather than a package and has nothing to pin |
+| `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions` | MIT | The container and logging contracts `Common.Application` compiles against ([§6.2](06-cqrs.md), [§13.3](13-observability.md)). Both ride in ASP.NET Core's shared framework, which is why the row above needs no identity for them — but Application takes no framework reference ([§4.2](04-solution-structure.md)), so it pays for them as packages |
 | `Dapper` | Apache 2.0 | Read-side data access |
 | MassTransit **8.x** (`MassTransit.RabbitMQ`) | Apache 2.0 | Messaging |
 | `StackExchange.Redis` | MIT | Redis client |
@@ -41,6 +42,7 @@ Adding a dependency means adding its identity here, not just its name.
 | `WireMock.Net` | Apache 2.0 | HTTP stubbing |
 | `Microsoft.NET.Test.Sdk` | MIT | The test host every test project needs; pinned because a major bump changes discovery |
 | `Microsoft.Extensions.TimeProvider.Testing` | MIT | `FakeTimeProvider` — the clock seam §12.7 requires |
+| `Microsoft.Extensions.DependencyInjection` | MIT | `ServiceCollection` for the registration and behaviour-ordering tests of [§6.2](06-cqrs.md) and [§6.3](06-cqrs.md). A separate identity from the abstractions row above, and not a redundant one: that package is contracts, with no container in it to build |
 | `NetArchTest.Rules` | MIT | The architecture gates ([§4.2](04-solution-structure.md)) that PR-07 makes a build failure rather than a review comment ([Appendix C](appendix-c-delivery-plan.md)) |
 | `Aspire.Hosting.*` (`AppHost`, `SqlServer`, `Redis`, `RabbitMQ`, `Keycloak`) | MIT | Topology for the optional AppHost of [§14.2](14-local-development.md). Registered ahead of use: Compose is the baseline (§14.1) and Aspire is not adopted. **If** it is, `src/AppHost` is the only project taking these, which is what keeps it deletable. **Not pinned in [§4.4](04-solution-structure.md)** — see the carve-out there; adopting Aspire means adding the pins in the same change |
 | `Aspire.*` client integrations (one per resource a service consumes) | MIT | The service-side half of §14.2. Registered ahead of use: **if** Aspire is adopted each service takes the integrations for its own resources, which is why backing it out costs a line per resource per service rather than deleting one project. Unpinned on the same terms as the row above |
