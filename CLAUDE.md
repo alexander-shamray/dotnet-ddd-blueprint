@@ -5,8 +5,10 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. It is currently in its **documentation phase**:
-the only artefact so far is the blueprint under `docs/backend-architecture/`.
+built with DDD, CQRS and TDD. **PR-01 has landed**, so the repo is the blueprint
+under `docs/backend-architecture/` plus the foundation that blueprint specifies:
+SDK pin, central package management, the solution file, CI and the licence gate.
+There is **no C# yet** — the first project arrives with PR-02.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -37,7 +39,7 @@ Present:
 docs/backend-architecture/
   README.md                      index and chapter table
   01-purpose.md .. 15-cicd-deployment.md
-  appendix-a-adrs.md             ADR-001 .. ADR-018
+  appendix-a-adrs.md             ADR-001 .. ADR-019
   appendix-b-licences.md         dependency licence register
   appendix-c-delivery-plan.md    PR sequencing plan
   appendix-d-type-inventory.md   type inventory
@@ -80,11 +82,12 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-Check before assuming. If `Platform.slnx` exists, code is present and both the
-build rules and the drift rules below are live. If it does not, this is still a
-docs change and there is nothing to compile.
+`Platform.slnx` exists, so the build rules and the drift rules below are live.
+It holds **no projects yet** — PR-02 adds the first — which makes this the one
+awkward moment where the solution builds and proves nothing. Do not read a green
+`dotnet test` as coverage until there is something in the file.
 
-Once code exists, the commands are the ones the target solution uses:
+The commands are the ones the target solution uses:
 
 ```bash
 dotnet restore Platform.slnx
@@ -95,11 +98,20 @@ dotnet test  Platform.slnx
 Central package management means versions live in `Directory.Packages.props`
 with **exact** pins — never add a `Version=` attribute to a `PackageReference`.
 
-PR-01 also ships `Directory.Build.props`, but the blueprint does not say what
-goes in it beyond "shared MSBuild settings" (§4.1). An analyzer policy —
-`TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, a StyleCop package — is the
-obvious candidate and **has not been decided**. Do not assert one; if you need
-it settled, that is an ADR.
+`Directory.Build.props` carries the analyzer policy of **ADR-019**:
+`TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, `AnalysisLevel
+latest-Recommended`, and no StyleCop. A warning stops the build, so a change
+that provokes one is not done until the warning is gone — and `#pragma` is not
+the way out. A genuinely warranted suppression goes in `Directory.Build.props`
+with a comment.
+
+`EnforceCodeStyleInBuild` only bites on rules set to `warning` or above, and
+exactly three are: **IDE0055** (formatting), **IDE0065** (`using` placement) and
+**IDE0161** (file-scoped namespaces). The rest of `.editorconfig` is documented
+and unenforced on purpose — the four `var` carve-outs above are the reason, and
+raising a rule whose exception lives in prose would fail builds that are
+correct. Verified end to end: each of the three fails a build, and a compliant
+file is clean.
 
 ## The one rule that matters
 
@@ -571,7 +583,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-019) and keep the
+  (currently ADR-020) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

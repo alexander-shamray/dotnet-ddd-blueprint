@@ -7,6 +7,18 @@ root = true
 # might otherwise try to "correct".
 #
 # This is the .editorconfig delivery-plan PR-01 ships. Treat it as source.
+#
+# PR-01 also sets EnforceCodeStyleInBuild (ADR-019), which promotes this file
+# from an editor convenience to a build input — but only for rules configured
+# at `warning` or above. A rule left at `suggestion` or `silent` is documented
+# here and enforced by nothing.
+#
+# Three are at warning: IDE0055 (formatting), IDE0065 (using placement) and
+# IDE0161 (file-scoped namespaces). Each is stated without exception in
+# CLAUDE.md, so a violation is always a defect. Everything else stays a
+# suggestion on purpose — the `var` rules below carry a documented exception
+# Roslyn cannot express, and a rule whose carve-out lives in prose must not
+# fail a build it cannot evaluate.
 
 [*]
 charset = utf-8
@@ -97,7 +109,10 @@ csharp_new_line_before_members_in_anonymous_types = true
 # only one in this file's remit that is.
 
 # --- .NET / C# style ---
-csharp_using_directive_placement = outside_namespace:silent
+# At warning, so EnforceCodeStyleInBuild fails on it. CLAUDE.md states this one
+# without exception and notes it binds source only — the samples carry no using
+# directives at all, so there is nothing here for the rule to argue with.
+csharp_using_directive_placement = outside_namespace:warning
 csharp_space_around_binary_operators = before_and_after
 csharp_indent_labels = one_less_than_current
 csharp_prefer_simple_using_statement = true:suggestion
@@ -140,7 +155,9 @@ csharp_style_deconstructed_variable_declaration = true:suggestion
 # only — hence silent, with CLAUDE.md carrying the real rule.
 csharp_prefer_braces = false:silent
 
-csharp_style_namespace_declarations = file_scoped:suggestion
+# At warning for the same reason: "file-scoped, never block-scoped" is one of
+# the four settled choices, with no case in the corpus going the other way.
+csharp_style_namespace_declarations = file_scoped:warning
 
 # Expression bodies for one-line members but not constructors. Stated as one
 # block rather than left to inherited defaults, so the policy reads whole.
@@ -151,6 +168,17 @@ csharp_style_expression_bodied_accessors = true:silent
 csharp_style_expression_bodied_lambdas = true:silent
 
 [*.cs]
+# The formatting rule, and the third of the three at warning. IDE0055 is an
+# aggregate: it reports every formatting option in this file that a source file
+# disagrees with, which is what turns the indent, spacing and single-line
+# settings above into build failures rather than editor hints.
+#
+# It reaches only as far as Roslyn's formatter does. The wrapping rules have no
+# engine behind them (see the note above max_line_length), so IDE0055 will not
+# break an over-wide list and will not join a ragged one. Those stay a review
+# rule; this covers everything else.
+dotnet_diagnostic.IDE0055.severity = warning
+
 # Trailing, not leading. A wrapped condition reads as a sequence of lines each
 # announcing "and there is more"; the alternative buries that signal at the
 # start of the next line, where it also collides with the four-space body

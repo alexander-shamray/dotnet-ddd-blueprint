@@ -237,12 +237,13 @@ from a checked-in file that works the first time. Realm imports are reliably
 worse than expected, and PR-16 sits one hop off the critical path — close
 enough that a bad week there reaches the end date through PR-17 and PR-18.
 
-**The `Directory.Build.props` analyzer policy is undecided.** PR-01 ships the
-file; the blueprint does not say whether it carries `TreatWarningsAsErrors`,
-`EnforceCodeStyleInBuild` and a StyleCop package. Adopting a strict policy at
-PR-01 adds perhaps half a day there and a tax on every pull request afterwards
-— small per pull request, 25 pull requests wide. Adopting it later costs a
-sweep. This is an ADR, not an estimate.
+**The `Directory.Build.props` analyzer policy is settled, and it is a tax.**
+[ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)
+takes `TreatWarningsAsErrors` and `EnforceCodeStyleInBuild` from PR-01 and
+declines StyleCop. The half day it adds to PR-01 is inside that estimate. What
+is **not** priced anywhere below is the per-pull-request cost — small each time,
+24 pull requests wide — which lands as slippage spread thin rather than as a
+line item. The alternative was a sweep, which at least would have had a number.
 
 **Aspire.** Not adopted; Compose is the baseline
 ([§14.1](backend-architecture/14-local-development.md)) and no `Aspire.*`

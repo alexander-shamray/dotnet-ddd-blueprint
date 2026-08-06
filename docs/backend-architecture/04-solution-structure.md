@@ -559,11 +559,20 @@ reviewed.
 ```json
 {
   "sdk": {
-    "version": "10.0.100",
+    "version": "10.0.300",
     "rollForward": "latestPatch"
   }
 }
 ```
+
+> **Trap — `latestPatch` does not roll across feature bands.** The third digit
+> of an SDK version is a feature band, and `latestPatch` stays inside the one it
+> is given: `10.0.100` accepts any `10.0.1xx` and rejects `10.0.302`. That is the
+> strictness the pin is for, but it means the number here has to name the band
+> the team actually installs. Get it wrong and `dotnet` does not fall back — it
+> refuses to run at all, on every machine, with a message about an SDK nobody
+> asked for. Bumping the band is a deliberate change to this file, which is the
+> intended cost.
 
 `Directory.Packages.props` pins every package version once for the whole
 repository. This prevents the situation where two services depend on different
