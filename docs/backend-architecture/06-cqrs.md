@@ -433,6 +433,15 @@ public sealed class ValidationBehavior<TRequest, TResult>(IEnumerable<IValidator
 > empty string, four failures. It is the kind of defect that is invisible in the
 > single-validator case every sample uses.
 
+**The sequence is read twice — `Any()` and then `Select` — and that is not a
+double resolution.** `Microsoft.Extensions.DependencyInjection` materialises an
+`IEnumerable<T>` into an array while building the constructor's arguments, so
+the validators exist before `HandleAsync` is entered and both reads walk the
+same array. Materialising it again inside the method would buy nothing. This is
+the same shape as the constraint note above — a library behaviour the code
+leans on with nothing in the C# to say so — so it is pinned by a test rather
+than left to be re-argued in review, which it has been once already.
+
 Transaction — this is the behaviour that makes the domain-event and outbox
 mechanism work, and it is the one worth reading closely.
 

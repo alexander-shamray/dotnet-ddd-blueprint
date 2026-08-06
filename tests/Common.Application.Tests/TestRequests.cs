@@ -126,6 +126,25 @@ public sealed class PingLengthValidator : AbstractValidator<Ping>
         RuleFor(x => x.Message).Must(message => message.Length >= 3).WithErrorCode("TooShort");
 }
 
+/// <summary>How many times a validator was constructed in one scope.</summary>
+public sealed class ValidatorConstructions
+{
+    public int Count { get; private set; }
+
+    public void Record() => Count++;
+}
+
+/// <summary>
+/// A validator with no rules, whose only job is to be counted. §6.3 enumerates
+/// the injected sequence twice — once for <c>Any()</c> and once for
+/// <c>Select</c> — and that is only safe because the container materialises
+/// <c>IEnumerable&lt;T&gt;</c> before it ever reaches the constructor.
+/// </summary>
+public sealed class CountingValidator : AbstractValidator<Ask>
+{
+    public CountingValidator(ValidatorConstructions constructions) => constructions.Record();
+}
+
 /// <summary>
 /// Which behaviours ran, in the order they were entered and left. Scoped, so
 /// one dispatch fills one log and a second scope starts empty.

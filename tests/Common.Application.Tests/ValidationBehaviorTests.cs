@@ -57,6 +57,33 @@ public class ValidationBehaviorTests
     }
 
     [Fact]
+    public async Task Enumerating_the_injected_validators_twice_constructs_them_once()
+    {
+        // §6.3 reads the sequence twice — Any() to bail out early, then Select
+        // to run them — and that is safe because Microsoft.Extensions
+        // .DependencyInjection resolves IEnumerable<T> into an array when it
+        // builds the constructor's arguments, not lazily on enumeration. The
+        // validators therefore exist before HandleAsync is entered at all.
+        //
+        // Pinned rather than assumed, for the same reason §6.3 pins the
+        // container honouring generic constraints: the behaviour belongs to a
+        // library, the code leans on it, and nothing in the C# says so.
+        using ServiceProvider provider = TestContainer.Build(services =>
+        {
+            services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+            services.AddScoped<ValidatorConstructions>();
+            services.AddScoped<IValidator<Ask>, CountingValidator>();
+        });
+
+        using IServiceScope scope = provider.CreateScope();
+        IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
+
+        await dispatcher.QueryAsync(new Ask("why"), TestContext.Current.CancellationToken);
+
+        scope.ServiceProvider.GetRequiredService<ValidatorConstructions>().Count.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task A_request_with_no_validator_passes_straight_through()
     {
         // Nothing registers IValidator<Ask>, so the behaviour is in the
