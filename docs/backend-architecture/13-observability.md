@@ -64,7 +64,7 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
     builder.Logging.AddOpenTelemetry(logging =>
     {
         logging.IncludeFormattedMessage = true;
-        logging.IncludeScopes           = true;
+        logging.IncludeScopes = true;
 
         // §13.4's "never log a secret" rule, given a mechanism. Registered
         // here because this is the only logging pipeline the host has — a
@@ -141,8 +141,8 @@ namespace Ordering.Application.Orders;
 
 public sealed class OrderMetrics
 {
-    private readonly Counter<long>   _placed;
-    private readonly Counter<long>   _cancelled;
+    private readonly Counter<long> _placed;
+    private readonly Counter<long> _cancelled;
     private readonly Histogram<double> _value;
     private readonly Histogram<double> _fulfilmentSeconds;
 
@@ -150,12 +150,12 @@ public sealed class OrderMetrics
     {
         Meter meter = factory.Create("Ordering.Orders");
 
-        _placed    = meter.CreateCounter<long>(
+        _placed = meter.CreateCounter<long>(
             "orders.placed",
             unit: "{order}",
             description: "Orders successfully placed.");
         _cancelled = meter.CreateCounter<long>("orders.cancelled", unit: "{order}");
-        _value     = meter.CreateHistogram<double>("orders.value", unit: "EUR");
+        _value = meter.CreateHistogram<double>("orders.value", unit: "EUR");
         _fulfilmentSeconds = meter.CreateHistogram<double>(
             "orders.fulfilment.duration",
             unit: "s",
@@ -341,13 +341,13 @@ public sealed class MessagingMetrics
 {
     private readonly Histogram<double> _deliveryLag;
     private readonly Histogram<double> _projectionLag;
-    private readonly Counter<long>     _rejected;
+    private readonly Counter<long> _rejected;
 
     public MessagingMetrics(IMeterFactory factory)
     {
         Meter meter = factory.Create("Commerce.Messaging");
 
-        _deliveryLag   = meter.CreateHistogram<double>(
+        _deliveryLag = meter.CreateHistogram<double>(
             "messaging.delivery.lag",
             unit: "s",
             description: "OccurredAt to consumer start.");
@@ -355,7 +355,7 @@ public sealed class MessagingMetrics
             "projection.lag",
             unit: "s",
             description: "Event raised to projection applied.");
-        _rejected      = meter.CreateCounter<long>(
+        _rejected = meter.CreateCounter<long>(
             "command.domain_rejected",
             description: "Message-borne commands the domain refused (§9.8).");
     }
@@ -426,8 +426,8 @@ public sealed class LoggingBehavior<TRequest, TResult>(
 {
     public async Task<TResult> HandleAsync(TRequest request, NextDelegate<TResult> next, CancellationToken ct)
     {
-        string name  = typeof(TRequest).Name;
-        long   start = clock.GetTimestamp();
+        string name = typeof(TRequest).Name;
+        long start = clock.GetTimestamp();
 
         // A scope, not a log property: everything written inside the handler
         // inherits it, including EF Core's and MassTransit's own logging.
@@ -634,11 +634,11 @@ public static IEndpointRouteBuilder MapCommonHealthEndpoints(this IEndpointRoute
     // AllowAnonymous is required, not cosmetic: the kubelet sends no token,
     // so an authenticated probe fails and the pod is restarted in a loop.
     app
-        .MapHealthChecks("/health/live",    new() { Predicate = _ => false })
+        .MapHealthChecks("/health/live", new() { Predicate = _ => false })
         .AllowAnonymous();
 
     app
-        .MapHealthChecks("/health/ready",   new() { Predicate = c => c.Tags.Contains("ready") })
+        .MapHealthChecks("/health/ready", new() { Predicate = c => c.Tags.Contains("ready") })
         .AllowAnonymous();
 
     app
@@ -756,7 +756,7 @@ public sealed class OutboxMetrics
             () => new[]
             {
                 new Measurement<double>(stats.OldestAgeSeconds(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<double>(stats.OldestAgeSeconds(OutboxLane.Local),  Tag(OutboxLane.Local))
+                new Measurement<double>(stats.OldestAgeSeconds(OutboxLane.Local), Tag(OutboxLane.Local))
             },
             unit: "s");
 
@@ -768,7 +768,7 @@ public sealed class OutboxMetrics
             () => new[]
             {
                 new Measurement<int>(stats.PendingCount(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<int>(stats.PendingCount(OutboxLane.Local),  Tag(OutboxLane.Local))
+                new Measurement<int>(stats.PendingCount(OutboxLane.Local), Tag(OutboxLane.Local))
             },
             unit: "{message}");
 
@@ -782,7 +782,7 @@ public sealed class OutboxMetrics
             () => new[]
             {
                 new Measurement<int>(stats.AbandonedCount(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<int>(stats.AbandonedCount(OutboxLane.Local),  Tag(OutboxLane.Local))
+                new Measurement<int>(stats.AbandonedCount(OutboxLane.Local), Tag(OutboxLane.Local))
             },
             unit: "{message}");
     }

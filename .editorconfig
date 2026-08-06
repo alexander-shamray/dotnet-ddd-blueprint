@@ -123,6 +123,11 @@ csharp_new_line_before_members_in_anonymous_types = true
 #     run will not introduce this and will not undo it. Unlike the three
 #     settings above, nothing has to be pinned to keep the run idempotent —
 #     this one is carried by review and CLAUDE.md alone.
+#   - The whitespace between a type and its identifier — `Counter<long>   _placed`,
+#     `long   start` — which IDE0055 does NOT report, though it reports every
+#     other alignment (see the note beside its severity below). The corpus
+#     collapses it anyway so that one dialect governs the whole file; that half,
+#     like the bracket rule above, is review's.
 # dotnet_style_operator_placement_when_wrapping (below, in [*.cs]) is the
 # closest thing to enforcement, and it governs binary operators only — not `=>`.
 
@@ -206,6 +211,15 @@ csharp_style_expression_bodied_lambdas = true:silent
 # engine behind them (see the note above max_line_length), so IDE0055 will not
 # break an over-wide list and will not join a ragged one. Those stay a review
 # rule; this covers everything else.
+#
+# The one it covers that is worth naming, because the corpus was written the
+# other way for months: COLUMN ALIGNMENT. Padding a token out to line up with
+# the one above it — `TotalAmount  { get; init; }`, `Expiration     = …`,
+# `ErrorType.Rule        => …` — is a formatting violation and therefore a
+# build error. A trailing `//` comment is untouched by the rule and may sit in
+# any column, and `dotnet format` normalises the code padding while leaving the
+# comment column alone, so the run is idempotent either way. Both halves
+# verified against the tools, not inferred.
 dotnet_diagnostic.IDE0055.severity = warning
 
 # Trailing, not leading. A wrapped condition reads as a sequence of lines each

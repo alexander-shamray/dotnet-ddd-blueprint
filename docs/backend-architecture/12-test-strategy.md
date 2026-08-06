@@ -149,7 +149,7 @@ public class OrderTests
             AddressBuilder.Valid(),
             [
                 (ProductId.New(), 2, Money.Of(10.00m, "EUR")),
-                (ProductId.New(), 1, Money.Of(5.50m,  "EUR"))
+                (ProductId.New(), 1, Money.Of(5.50m, "EUR"))
             ],
             "EUR",
             Now);
@@ -326,7 +326,7 @@ public sealed class ServiceFixture : IAsyncLifetime
                     services.Configure<AuthenticationOptions>(o =>
                     {
                         o.DefaultAuthenticateScheme = TestAuthHandler.Scheme;
-                        o.DefaultChallengeScheme    = TestAuthHandler.Scheme;
+                        o.DefaultChallengeScheme = TestAuthHandler.Scheme;
                     });
                     services
                         .AddAuthentication()
@@ -488,8 +488,8 @@ public sealed class TestAuthHandler(
     UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
-    public const string Scheme         = "Test";
-    public const string UserHeader     = "X-Test-User";
+    public const string Scheme = "Test";
+    public const string UserHeader = "X-Test-User";
     public const string PermissionsHeader = "X-Test-Permissions";
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -552,11 +552,11 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
 
         Result<Guid> result = await dispatcher.SendAsync(
             new PlaceOrderCommand(
-                CommandId:       Guid.CreateVersion7(),
-                CustomerId:      Guid.CreateVersion7(),
-                Items:           [ new PlaceOrderItem(SeedData.ProductId, 2) ],
+                CommandId: Guid.CreateVersion7(),
+                CustomerId: Guid.CreateVersion7(),
+                Items: [ new PlaceOrderItem(SeedData.ProductId, 2) ],
                 ShippingAddress: AddressBuilder.ValidDto(),
-                Currency:        "EUR"));
+                Currency: "EUR"));
 
         result.IsSuccess.ShouldBeTrue();
 
@@ -599,7 +599,7 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         IDispatcher dispatcher =
             scope.ServiceProvider.GetRequiredService<IDispatcher>();
 
-        Result<Guid> first  = await dispatcher.SendAsync(command);
+        Result<Guid> first = await dispatcher.SendAsync(command);
         Result<Guid> second = await dispatcher.SendAsync(command);
 
         second.Value.ShouldBe(first.Value);
@@ -690,14 +690,14 @@ internal static class Contracts
 {
     public static V1.OrderPlaced OrderPlaced(Guid orderId, decimal total = 25.00m, string currency = "EUR") => new()
     {
-        MessageId     = Guid.CreateVersion7(),
+        MessageId = Guid.CreateVersion7(),
         CorrelationId = orderId,
-        OccurredAt    = TestClock.Now,
-        OrderId       = orderId,
-        CustomerId    = Guid.CreateVersion7(),
-        TotalAmount   = total,
-        Currency      = currency,
-        Lines         = [new V1.PlacedLine(SeedData.ProductId, 1, total)]
+        OccurredAt = TestClock.Now,
+        OrderId = orderId,
+        CustomerId = Guid.CreateVersion7(),
+        TotalAmount = total,
+        Currency = currency,
+        Lines = [new V1.PlacedLine(SeedData.ProductId, 1, total)]
     };
 }
 ```
@@ -985,7 +985,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     // on and `Any<CancelOrder>` alone would not.
     (await harness.Sent.Any<CancelOrder>(m =>
         m.Context.Message.OrderId == orderId &&
-        m.Context.Message.Reason  == CancelReasons.PaymentDeclined))
+        m.Context.Message.Reason == CancelReasons.PaymentDeclined))
             .ShouldBeTrue();
 }
 

@@ -59,18 +59,18 @@ builder.Services
     .AddJwtBearer(options =>
     {
         options.Authority = builder.Configuration["Identity:Authority"];
-        options.Audience  = "commerce-api";
+        options.Audience = "commerce-api";
         options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
 
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateIssuer           = true,
-            ValidateAudience         = true,
-            ValidateLifetime         = true,
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ClockSkew                = TimeSpan.FromSeconds(30),
-            NameClaimType            = "preferred_username",
-            RoleClaimType            = "roles"
+            ClockSkew = TimeSpan.FromSeconds(30),
+            NameClaimType = "preferred_username",
+            RoleClaimType = "roles"
         };
     });
 ```
@@ -92,8 +92,8 @@ roles to permissions in one place.
 // ASP.NET Core checks them.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy("orders:read",   p => p.RequireClaim("permission", "orders:read"))
-    .AddPolicy("orders:write",  p => p.RequireClaim("permission", "orders:write"))
+    .AddPolicy("orders:read", p => p.RequireClaim("permission", "orders:read"))
+    .AddPolicy("orders:write", p => p.RequireClaim("permission", "orders:write"))
     .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
 ```
 
@@ -194,10 +194,10 @@ public static class CancellationReasons
     private static readonly FrozenDictionary<string, CancellationReason> ByCode =
         new Dictionary<string, CancellationReason>(StringComparer.Ordinal)
         {
-            [CancelReasons.OutOfStock]      = CancellationReason.OutOfStock,
-            [CancelReasons.StockTimeout]    = CancellationReason.StockTimeout,
+            [CancelReasons.OutOfStock] = CancellationReason.OutOfStock,
+            [CancelReasons.StockTimeout] = CancellationReason.StockTimeout,
             [CancelReasons.PaymentDeclined] = CancellationReason.PaymentDeclined,
-            [CancelReasons.PaymentTimeout]  = CancellationReason.PaymentTimeout,
+            [CancelReasons.PaymentTimeout] = CancellationReason.PaymentTimeout,
             [CancelReasons.CustomerRequest] = CancellationReason.CustomerRequest
         }.ToFrozenDictionary();
 

@@ -231,7 +231,7 @@ var mq = builder.AddRabbitMQ("RabbitMq").WithManagementPlugin();
 // without the service and migrator that own it creates a schema nothing
 // maintains, which is the shape §4.1 rules out.
 var orderingDb = sql.AddDatabase("Ordering");
-var catalogDb  = sql.AddDatabase("Catalog");
+var catalogDb = sql.AddDatabase("Catalog");
 
 var keycloak = builder
     .AddKeycloak("keycloak", 8080)
