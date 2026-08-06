@@ -358,7 +358,7 @@ already written against it.
   ```csharp
   options.DefaultEntryOptions = new HybridCacheEntryOptions
   {
-      Expiration           = TimeSpan.FromMinutes(10),  // L2, Redis
+      Expiration = TimeSpan.FromMinutes(10),            // L2, Redis
       LocalCacheExpiration = TimeSpan.FromMinutes(1)    // L1, in-process
   };
   ```
@@ -570,6 +570,46 @@ already written against it.
   e.Lines` over two lines). And a spread frequently brings the whole statement
   back under 120, in which case the one-line rule applies and the `[` does not
   get its own line after all.
+- **One space before `=`, `=>` and `{` — never a column of them.** Padding a
+  token out to line up with the one above it fails the build: IDE0055 reports
+  it as a formatting violation and ADR-019 makes that an error. This was found
+  the only way it could be, by compiling a sample that had been written the
+  other way since before there was a compiler in this repo:
+
+  ```csharp
+  // Fails the build. Every line but the longest carries the diagnostic.
+  public required Guid MessageId       { get; init; }
+  public required decimal TotalAmount  { get; init; }
+
+  // Correct.
+  public required Guid MessageId { get; init; }
+  public required decimal TotalAmount { get; init; }
+  ```
+
+  **A trailing `//` comment is the carve-out, and it is a real one.** IDE0055
+  does not govern the whitespace in front of a comment at all, so a comment may
+  sit in whatever column the block reads best in — the sweep that removed 133
+  alignments left every comment column exactly where it was:
+
+  ```csharp
+  options.Retry.MaxRetryAttempts = 2;            // 3 attempts in total
+  options.Retry.BackoffType = DelayBackoffType.Exponential;
+  ```
+
+  `dotnet format` agrees with both halves — it collapses the code padding and
+  leaves the comment column untouched — so a format run neither introduces this
+  nor undoes it, and nothing has to be pinned to keep it idempotent. Checked
+  against the tool rather than assumed.
+
+  **Two places the analyser does not reach, and they are opposites.** Padding
+  between a type and its identifier — `private readonly Counter<long>   _placed;`,
+  `long   start = …` — is *not* reported, and was swept anyway: one dialect
+  beats a rule that stops halfway, and that half is carried by review, like the
+  `[` rule above. **SQL is the other way round and keeps its alignment.** It
+  lives inside raw string literals, which no analyser and no formatter reads,
+  and the SQL section below argues its columns on their own terms rather than
+  by parity with C#.
+
 - **No `#pragma` suppressions** — there are none in the corpus and a sample that
   needs one is a sample whose design is wrong. If a suppression is genuinely
   warranted in source, it belongs in `Directory.Build.props` with a comment
@@ -659,9 +699,13 @@ UPDATE SET
     LineCount   = @LineCount,
 ```
 
-The `=` signs line up in a column here, and that alignment is deliberate — it is
-the same one the C# initialisers use, and it survives because these are one
-element per line rather than a wrapped list.
+The `=` signs line up in a column here, and that alignment is deliberate. It
+used to be justified by parity with the C# initialisers; that argument is gone,
+because IDE0055 forbids the C# form and the C# section above now says so. SQL
+keeps the column on its own merits: a statement inside a raw string literal is
+invisible to every analyser and formatter in the toolchain, so nothing will
+fight it, and one assignment per line with the names in a column is what makes
+`SET` read as the row shape it produces rather than as a wrapped list.
 
 **A SQL list obeys the same rule as a C# one: one line, or one element per
 line, never a ragged middle.** That covers the column list after `INSERT`, the
