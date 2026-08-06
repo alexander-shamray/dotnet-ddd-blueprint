@@ -77,9 +77,7 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
         .AddOpenTelemetry()
         .ConfigureResource(r => r
             .AddService(serviceName, serviceVersion: BuildInfo.Version)
-            .AddAttributes([
-                new("deployment.environment", builder.Environment.EnvironmentName)
-            ]))
+            .AddAttributes([new("deployment.environment", builder.Environment.EnvironmentName)]))
         .WithMetrics(m => m
             .AddAspNetCoreInstrumentation()
             .AddHttpClientInstrumentation()

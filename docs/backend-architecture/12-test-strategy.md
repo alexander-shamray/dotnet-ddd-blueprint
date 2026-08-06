@@ -47,6 +47,15 @@ Every row above names a project **and has an example in this section**. Both
 halves are the rule: a level with no home is a level nobody writes, and a level
 whose home is empty is one nobody notices is missing.
 
+> **A suite that never ran looks exactly like a suite that passed.** `dotnet
+> test` discovers through a VSTest adapter, and `xunit.v3` does not carry one:
+> `xunit.runner.visualstudio` is a separate package ([Appendix B](appendix-b-licences.md)).
+> Leave it off a test project and the build succeeds, the run reports no tests,
+> and the process exits **zero** — green CI over a suite nothing executed. Every
+> project under `tests/` references all three of `xunit.v3`, the adapter and
+> `Microsoft.NET.Test.Sdk`, and the one that goes missing is the one nothing
+> turns red about.
+
 ## 12.2 The TDD cycle applied
 
 Red, green, refactor — with a worked example, because the discipline is easier
@@ -76,6 +85,15 @@ public class OrderCancellationTests
 Run it. It fails because `Cancel` does not check status yet — not because
 `OrderBuilder.Shipped()` does not compile. A test failing to compile is not a
 red test; make it compile first, then watch it fail.
+
+> **Test names are sentences, and that costs exactly one analyser rule.** CA1707
+> forbids underscores in member names and [ADR-019](appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)
+> makes every warning an error, so the name above fails the build until the rule
+> is turned off. `Directory.Build.props` turns it off for projects whose name
+> ends `Tests` and nowhere else. The convention wins because a test name is read
+> in a failure report by somebody who is not looking at the code, and
+> `CannotCancelAnOrderThatHasShipped` is worse at that job than the underscores
+> are at anything.
 
 **Green** — the minimum change that passes:
 
@@ -1008,12 +1026,13 @@ public class ContractTests
     // versioned namespace of an interface that is deliberately shared across
     // all of them — and then ask ContractSamples for an instance of it.
     private static readonly Type[] Contracts =
-        typeof(OrderPlaced).Assembly
+    [
+        .. typeof(OrderPlaced).Assembly
             .GetTypes()
             .Where(t => t.IsPublic &&
                 t is { IsInterface: false, IsAbstract: false } &&
                 t.Namespace?.StartsWith("Common.Contracts.") == true)
-            .ToArray();
+    ];
 
     [Fact]
     public void No_contract_names_a_domain_type()

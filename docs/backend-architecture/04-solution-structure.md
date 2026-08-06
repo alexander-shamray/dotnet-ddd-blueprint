@@ -10,7 +10,7 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 /
 ├── src/
 │   ├── BuildingBlocks/
-│   │   ├── Common.Domain/              Entity, AggregateRoot, ValueObject, IDomainEvent
+│   │   ├── Common.Domain/              Entity, AggregateRoot, IDomainEvent (§5.5)
 │   │   ├── Common.Application/         Dispatcher, pipeline behaviours, Result<T>
 │   │   ├── Common.Infrastructure/      Outbox, inbox, EF conventions, Redis
 │   │   ├── Common.Web/                 Host defaults: OTel, health, auth, ProblemDetails,
@@ -49,6 +49,9 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │       └── Notifications/              (Application, Infrastructure, Migrator, Worker)
 │
 ├── tests/
+│   ├── Common.Domain.Tests/            The building blocks, under the same
+│   ├── Common.Application.Tests/       *.Domain.Tests / *.Application.Tests
+│   │                                   convention the services use (§12.1)
 │   ├── Catalog.Domain.Tests/
 │   ├── Catalog.Application.Tests/
 │   ├── Catalog.Api.Tests/
@@ -114,7 +117,8 @@ test rather than a code review convention:
 [Fact]
 public void Domain_has_no_infrastructure_dependencies()
 {
-    string[] forbidden = [
+    string[] forbidden =
+    [
         "Microsoft.EntityFrameworkCore",
         "MassTransit",
         "StackExchange.Redis",
@@ -620,6 +624,11 @@ EF Core minor versions and behave differently under identical code.
          xUnit v2 → v3 changed IAsyncLifetime from Task to ValueTask (§12.4):
          a major that drifts in silently breaks every fixture in the repo. -->
     <PackageVersion Include="xunit.v3" Version="3.1.0" />
+    <!-- The VSTest adapter, and the reason `dotnet test` discovers anything.
+         Microsoft.NET.Test.Sdk is the host; it finds tests through an adapter,
+         and xunit.v3 does not carry one. Without this line the build succeeds,
+         the run reports zero tests, and CI is green on a suite it never ran. -->
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />

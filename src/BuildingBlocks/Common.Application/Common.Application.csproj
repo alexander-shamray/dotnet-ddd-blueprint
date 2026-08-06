@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    No reference to Common.Domain yet. §4.2 permits one, and the pipeline
+    behaviours will need it — TransactionBehavior counts IAggregateRoot (§6.3)
+    — but that arrives with PR-09. An unused project reference is a claim about
+    the dependency graph that nothing in this PR makes true.
+  -->
+
+</Project>

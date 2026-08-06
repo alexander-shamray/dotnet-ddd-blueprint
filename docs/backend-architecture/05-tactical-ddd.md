@@ -23,13 +23,31 @@ namespace Ordering.Domain.Orders;
 
 public readonly record struct OrderId(Guid Value)
 {
-    // Version 7 GUIDs are time-ordered, which keeps SQL Server's clustered
-    // index append-only instead of fragmenting on every insert.
+    // Version 7 rather than 4: the leading 48 bits are a millisecond
+    // timestamp, so every identifier carries when it was made. Read the trap
+    // below before assuming that also makes it a sequential key.
     public static OrderId New() => new(Guid.CreateVersion7());
 
     public override string ToString() => Value.ToString();
 }
 ```
+
+> **Trap — a time-ordered Guid is not a sequential key in SQL Server.** UUIDv7
+> puts its timestamp in the **first** six bytes. `uniqueidentifier` compares the
+> **last** six first and works backwards from there, so it never reaches the
+> timestamp until every random byte has already decided the order. Version 7
+> values therefore arrive in a clustered index as scattered as version 4 ones,
+> and the page splits the version was reached for happen anyway.
+>
+> This is the shape the blueprint deploys, not a hypothetical:
+> `HasKey(o => o.Id)` ([§7.2](07-persistence.md)) leaves SQL Server to make
+> that primary key clustered, which it does by default.
+>
+> What version 7 actually buys is a creation time readable inside every
+> identifier, which earns its place for support and forensics on its own. If
+> insert locality ever becomes the binding constraint, the fix is a physical
+> one — a different column type, or a clustered key that is not the identifier
+> — and it belongs in §7 with the rest of the storage shape rather than here.
 
 ## 5.3 Value objects
 
@@ -110,9 +128,7 @@ public sealed class Order : AggregateRoot<OrderId>
     /// next.
     /// </summary>
     private IReadOnlyList<OrderLineSnapshot> SnapshotLines() =>
-        _lines
-            .Select(l => new OrderLineSnapshot(l.ProductId, l.Quantity, l.UnitPrice))
-            .ToArray();
+        [.. _lines.Select(l => new OrderLineSnapshot(l.ProductId, l.Quantity, l.UnitPrice))];
 
     private readonly string _currency;
 
@@ -249,6 +265,40 @@ public interface IHasDomainEvents
 }
 
 public interface IAggregateRoot;
+
+/// <summary>
+/// §5.1's first row, made executable: identity persists through change, so two
+/// entities of the same type with the same Id are the same thing however much
+/// else differs between them.
+/// </summary>
+public abstract class Entity<TId> : IEquatable<Entity<TId>>
+    where TId : struct
+{
+    // Assigned by whatever creates the entity — a factory after the base
+    // constructor has run, or EF Core materialising through a private
+    // parameterless one (§5.4). Hence a protected setter rather than `init`.
+    public TId Id { get; protected set; }
+
+    // Type as well as identifier. A comparison that comes down to the Id alone
+    // makes an OrderLine equal to the Order it belongs to the moment the two
+    // share a key type, and nothing about that reads as wrong at the call site.
+    public bool Equals(Entity<TId>? other) =>
+        other is not null &&
+        GetType() == other.GetType() &&
+        EqualityComparer<TId>.Default.Equals(Id, other.Id);
+
+    public override bool Equals(object? obj) => Equals(obj as Entity<TId>);
+
+    public override int GetHashCode() => HashCode.Combine(GetType(), Id);
+
+    // Declared, not inherited. Without these two, `==` goes on comparing
+    // references while `Equals` compares identifiers — the same pair equal by
+    // one operator and not the other, in a language where both read the same.
+    public static bool operator ==(Entity<TId>? left, Entity<TId>? right) =>
+        left is null ? right is null : left.Equals(right);
+
+    public static bool operator !=(Entity<TId>? left, Entity<TId>? right) => !(left == right);
+}
 
 public abstract class AggregateRoot<TId>
     : Entity<TId>, IAggregateRoot, IHasDomainEvents

@@ -1,2 +1,11 @@
 <Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/Common.Application/Common.Application.csproj" />
+    <Project Path="src/BuildingBlocks/Common.Domain/Common.Domain.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Common.Application.Tests/Common.Application.Tests.csproj" />
+    <Project Path="tests/Common.Domain.Tests/Common.Domain.Tests.csproj" />
+  </Folder>
 </Solution>

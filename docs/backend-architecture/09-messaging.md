@@ -205,9 +205,7 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
         Currency      = e.Total.Currency,
         // PlacedLine, not ConfirmedLine — OrderPlaced owns its own line type
         // so the two contracts can version independently (§9.1).
-        Lines         = e.Lines
-            .Select(l => new V1.PlacedLine(l.ProductId.Value, l.Quantity, l.UnitPrice.Amount))
-            .ToArray()
+        Lines         = [.. e.Lines.Select(l => new V1.PlacedLine(l.ProductId.Value, l.Quantity, l.UnitPrice.Amount))]
     };
 
     public IReadOnlyList<object> Map(IReadOnlyList<IDomainEvent> domainEvents)
@@ -492,13 +490,15 @@ public sealed class MessageTypeMap
         // versioned (§9.2), so this IS the contract. For domain events it is
         // internal, and a rename is then a migration the team chose rather than
         // one a build number made for it.
-        (string Name, Type Type)[] pairs = assemblies
-            .SelectMany(a => a.GetTypes())
-            .Where(t => t is { IsClass: true, IsAbstract: false } &&
-                (t.IsAssignableTo(typeof(IIntegrationEvent)) ||
-                    t.IsAssignableTo(typeof(IDomainEvent))))
-            .Select(t => (Name: t.FullName!, Type: t))
-            .ToArray();
+        (string Name, Type Type)[] pairs =
+        [
+            .. assemblies
+                .SelectMany(a => a.GetTypes())
+                .Where(t => t is { IsClass: true, IsAbstract: false } &&
+                    (t.IsAssignableTo(typeof(IIntegrationEvent)) ||
+                        t.IsAssignableTo(typeof(IDomainEvent))))
+                .Select(t => (Name: t.FullName!, Type: t))
+        ];
 
         IGrouping<string, (string Name, Type Type)>? clash =
             pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);
@@ -797,8 +797,7 @@ internal static class ProjectionInvoker
             IServiceProvider sp, object payload,
             DateTimeOffset occurredAt, CancellationToken ct)
         {
-            IProjectionHandler<TEvent>[] handlers =
-                sp.GetServices<IProjectionHandler<TEvent>>().ToArray();
+            IProjectionHandler<TEvent>[] handlers = [.. sp.GetServices<IProjectionHandler<TEvent>>()];
 
             // A Local row is staged only when IProjectionRegistry found a
             // handler (§7.5). Finding none here means the handler was
@@ -1405,9 +1404,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(InventoryQueue, ctx =>
                     new ReserveStock(
                         ctx.Saga.OrderId,
-                        ctx.Message.Lines
-                            .Select(l => new StockLine(l.ProductId, l.Quantity))
-                            .ToArray()))
+                        [.. ctx.Message.Lines.Select(l => new StockLine(l.ProductId, l.Quantity))]))
                 .TransitionTo(AwaitingStock));
 
         During(

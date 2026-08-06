@@ -35,6 +35,43 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-Recommended</AnalysisLevel>
+
+    <!--
+      CA1716 flags a type or member whose name is a reserved word in another
+      .NET language, so that a VB or F# consumer does not have to escape it. It
+      fires on `Error` (§10.5), and would fire again on any of the short,
+      obvious names a domain model reaches for.
+
+      The rule protects a scenario this platform does not have. Nothing here is
+      a published library: every project is consumed by C# inside this
+      repository, and §4.3 permits exactly one assembly to cross a service
+      boundary at all. Renaming `Error` to satisfy a VB caller that will never
+      exist would cost the one name the whole error catalogue is written
+      around.
+    -->
+    <NoWarn>$(NoWarn);CA1716</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    The second of this file's two suppressions — CA1716 above is the other —
+    and this file is the only place ADR-019 permits either, since `#pragma` is
+    forbidden. CA1707 bans underscores in member names, and every test name in
+    §12 is a sentence written with them —
+    `Cannot_cancel_an_order_that_has_shipped`. The two rules are in direct
+    conflict and one of them has to give.
+
+    It is the analyser that gives, because the convention is load-bearing: a
+    test name is read in a failure report by someone who is not looking at the
+    code, and `CannotCancelAnOrderThatHasShipped` is worse at that job. Scoped
+    to test projects by name, so a `_`-laden member in production code still
+    fails the build.
+
+    EndsWith('Tests') rather than '.Tests': Platform.IntegrationTests (§12.6)
+    ends with the word and not the dotted suffix, and would otherwise be the one
+    test project the carve-out missed.
+  -->
+  <PropertyGroup Label="Test analysis" Condition="$(MSBuildProjectName.EndsWith('Tests'))">
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
 
   <!--
