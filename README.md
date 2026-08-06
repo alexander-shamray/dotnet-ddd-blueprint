@@ -6,7 +6,7 @@ A reference architecture for ASP.NET Core microservices using DDD, CQRS and TDD.
 
 | | |
 |---|---|
-| **Status** | Reference blueprint — adapt, don't copy wholesale |
+| **Status** | Reference blueprint — adapt, don't copy wholesale. The C# solution it specifies will be built in this repository ([delivery plan](docs/backend-architecture/appendix-c-delivery-plan.md)) |
 | **Target runtime** | .NET 10 (LTS), C# 14 |
 | **Sample domain** | E-commerce (illustrative only) |
 
