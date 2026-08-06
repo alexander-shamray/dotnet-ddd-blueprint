@@ -625,3 +625,20 @@ That is deliberate; `gh pr create`'s offer to push the branch is the same hole
 by another route and is not to be used either. `/ship` inherits the stop rather
 than routing around it, which is why it is written to resume: re-running it
 after the push continues from where it halted.
+
+**File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
+covers every file-editing tool, `Write` included; a `Write(path)` rule matches
+nothing and Claude Code refuses to start until it is removed:
+
+```
+Permission deny rule (.claude\settings.json): Write(.remember/**) is not matched
+by file permission checks — only Edit(path) rules are.
+```
+
+So `Edit(.remember/**)` and `Edit(./.remember/**)` are the whole of the
+`.remember/` protection, and the absence of a `Write` twin beside them is
+correct rather than a gap. This has now been "fixed" twice by adding the twin
+back — once by an external reviewer reading the deny list as incomplete, once
+by acting on that review — and both times it broke startup. A reviewer who has
+not run the harness cannot see this; check a permission claim against the
+harness before acting on it.

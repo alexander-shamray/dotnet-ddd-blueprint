@@ -22,9 +22,7 @@
     ],
     "deny": [
       "Edit(.remember/**)",
-      "Write(.remember/**)",
       "Edit(./.remember/**)",
-      "Write(./.remember/**)",
       "Bash(git push:*)",
       "Bash(git reset --hard:*)",
       "Bash(git clean:*)",
