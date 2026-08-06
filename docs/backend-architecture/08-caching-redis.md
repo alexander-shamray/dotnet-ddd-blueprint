@@ -187,7 +187,7 @@ sequenceDiagram
     C->>DB: INSERT outbox: Broker (PriceChanged)
     C->>DB: COMMIT
     end
-    C-->>A: 202 Accepted
+    C-->>A: 204 No Content
 
     Note over C,MQ: Outbox dispatcher, after commit
     C->>R: Local lane → RemoveByTag("product:{id}")

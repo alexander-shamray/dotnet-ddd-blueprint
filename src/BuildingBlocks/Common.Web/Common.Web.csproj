@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    Microsoft.NET.Sdk with a framework reference, not Microsoft.NET.Sdk.Web:
+    this is the library every host references (§4.1), not a host. The Web SDK
+    would add an entry point, static web assets and a launch profile to an
+    assembly that has none of the three.
+  -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Result, Error and ErrorType: ToHttpResult maps them to a status
+         (§10.5). The first project reference in the repo, and one the
+         dependency graph §4.2 draws now actually makes true. -->
+    <ProjectReference Include="..\Common.Application\Common.Application.csproj" />
+  </ItemGroup>
+
+</Project>
