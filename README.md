@@ -2,7 +2,8 @@
 
 A reference architecture for ASP.NET Core microservices using DDD, CQRS and TDD.
 
-**[→ Read the blueprint](docs/backend-architecture/README.md)**
+**[→ Read the blueprint](docs/backend-architecture/README.md)** ·
+[Delivery roadmap](docs/roadmap.md)
 
 | | |
 |---|---|
