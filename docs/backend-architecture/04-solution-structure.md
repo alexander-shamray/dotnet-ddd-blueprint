@@ -51,7 +51,10 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 ├── tests/
 │   ├── Common.Domain.Tests/            The building blocks, under the same
 │   ├── Common.Application.Tests/       *.Domain.Tests / *.Application.Tests
-│   │                                   convention the services use (§12.1)
+│   ├── Common.Web.Tests/               convention the services use (§12.1).
+│   │                                   Common.Web is a library with no entry
+│   │                                   point, so its suite drives a TestServer
+│   │                                   rather than a WebApplicationFactory
 │   ├── Catalog.Domain.Tests/
 │   ├── Catalog.Application.Tests/
 │   ├── Catalog.Api.Tests/
@@ -631,6 +634,11 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <!-- TestServer without a host project. Mvc.Testing carries this
+         transitively, but WebApplicationFactory<T> needs an entry point and
+         Common.Web has none — it is a library (§4.1). Referencing what is
+         actually used keeps the register honest. -->
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <PackageVersion Include="Testcontainers.MsSql" Version="4.6.0" />

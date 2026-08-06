@@ -40,7 +40,7 @@ public static IHostApplicationBuilder AddCommonWebDefaults(this IHostApplication
         .AddAuthorizationBuilder()
         .AddPolicy("authenticated", p => p.RequireAuthenticatedUser());
 
-    builder.Services.AddProblemDetails(o => { /* §10.5 */ });
+    builder.Services.AddCommonProblemDetails();                    // §10.5
 
     // Liveness only — it must not touch dependencies (§13.5), and Common.Web
     // has no connection strings anyway. Readiness checks are registered by

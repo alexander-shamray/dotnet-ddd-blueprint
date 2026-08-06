@@ -120,6 +120,8 @@ structurally always null on one path.
 | `LoggingBehavior<,>` | §13.3 | `IPipelineBehavior<,>`; outermost — pushes the request scope, logs the outcome and records `request.duration` |
 | `IdempotencyBehavior<,>` | §8.5 | `IPipelineBehavior<,>` over `IIdempotencyStore` |
 | `UseCorrelationId`, `MapCommonHealthEndpoints`, `AddCommonWebDefaults` | §10.4, §13.5, §13.2 | `Common.Web` host extensions |
+| `AddCommonProblemDetails` | §10.5 | `Common.Web`; the RFC 9457 customisation `AddCommonWebDefaults` composes |
+| `ToHttpResult` | §10.5 | `Common.Web`; extension on `Result` and `Result<T>` — 204 or the value, and `ErrorType` to a status otherwise |
 | `OrderFulfilmentSaga`, `Endpoints` | §9.6 | Saga and its command destinations |
 | `ServiceFixture` | §12.4 | Testcontainers `IAsyncLifetime` fixture; owns the `WebApplicationFactory`. Lives in `Ordering.TestSupport` (§4.1) |
 | `TestAuthHandler` | §12.4 | `AuthenticationHandler<AuthenticationSchemeOptions>`; issues the principal a test names in headers. Also `Ordering.TestSupport` |
@@ -141,9 +143,8 @@ their declaration.
 | `OrderingDbContext` | The service `DbContext`; configuration in §7.2 |
 | `OutboxPublisher` | `IIntegrationEventPublisher` writing `OutboxMessage` rows; resolves `MessageTypeMap` and hands it to `Stage` |
 | `Result`, `Result<T>` | Non-generic `Result` is the void case — there is no `Unit` — and `Result<T>` derives from it, which is what lets `TransactionBehavior` test any command's outcome with one pattern (§6.3). `IsSuccess`/`IsFailure`, `Error`, and the `Success`/`Failure` factories |
-| `ToHttpResult()` | Extension on `Result`/`Result<T>` mapping `ErrorType` to a status (§10.5) and the value to a 200 body |
 | `CursorPage<T>`, `Cursor` | The pagination envelope and the opaque cursor codec (§6.5) |
-| `AddCommonWebDefaults`, `AddRedisConnections`, `AddMassTransitMessaging` | `Common.Web` / Infrastructure registration helpers |
+| `AddRedisConnections`, `AddMassTransitMessaging` | Infrastructure registration helpers |
 | `RedisConnections` | Keyed-service names for the cache and coordination connections (§8.1) |
 | `BuildInfo` | Assembly version stamped onto OTel resource attributes (§13.2) |
 | `OrderBuilder`, `AddressBuilder`, `CommandBuilder`, `SeedData` | Test data builders (§12.3) |

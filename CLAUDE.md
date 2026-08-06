@@ -49,7 +49,7 @@ docs/roadmap.md                  estimates and calendar over Appendix C
 global.json                      SDK pin (§4.4)
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the four projects below
+Platform.slnx                    the six projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate, then restore/build/test
 .github/licence-gate/            the gate, its allow-list and its tests
@@ -58,15 +58,24 @@ src/BuildingBlocks/
   Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,
                                  IHasDomainEvents, IAggregateRoot — no packages
   Common.Application/            Result, Result<T>, Error, ErrorType
+  Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
+                                 ToHttpResult — the only project referencing
+                                 another, and the only one with a
+                                 FrameworkReference
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on
+  Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
+                                 starts the real middleware pipeline in memory
 ```
 
-The second block is PR-01's and the third is PR-02's. `Common.Application` does
-**not** reference `Common.Domain` yet — §4.2 permits it and PR-09's
-`TransactionBehavior` will need it, but an unused project reference is a claim
-about the dependency graph that nothing yet makes true.
+The second block is PR-01's, the third PR-02's and PR-03's.
+`Common.Application` does **not** reference `Common.Domain` yet — §4.2
+permits it and PR-09's `TransactionBehavior` will need it, but an unused
+project reference is a claim about the dependency graph that nothing yet
+makes true.
+`Common.Web → Common.Application` is the one edge that has been drawn, because
+`ToHttpResult` maps an `Error` and cannot be written without one.
 
 The licence gate lives under `.github/` rather than a `build/` directory
 because it is CI-only and §4.1 draws no such tree. It is stdlib Python, reads
@@ -112,16 +121,19 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds four projects and `dotnet test` runs 36 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 60 tests, so the
 build rules and the drift rules below are live and a green run now means
-something. **PR-03 is next** (`feat(common): ProblemDetails, error catalogue,
-correlation middleware`), and it is the first PR whose dependencies are
-satisfied by what is already here rather than by a plan.
+something. **PR-04 is next** (`feat(common): CQRS dispatcher and pipeline
+behaviours`), which depends on PR-02 alone — PR-05 is the one that builds on
+what PR-03 just landed, composing `AddCommonProblemDetails` into
+`AddCommonWebDefaults` (§13.2).
 
-The building blocks are two of five. `Common.Infrastructure`, `Common.Web` and
+The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
 them is a change that belongs in the PR that creates it (Appendix C), not in a
-project invented early.
+project invented early. `Common.Web` now does exist, and the same rule applies
+inside it: it holds §10.4 and §10.5 and nothing else until PR-05 adds
+observability and PR-16 adds JWT validation.
 
 The commands are the ones the target solution uses:
 

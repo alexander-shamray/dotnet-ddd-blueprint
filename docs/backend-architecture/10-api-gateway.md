@@ -383,21 +383,28 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
 Every service returns RFC 9457 `application/problem+json`, so clients handle one
 error shape regardless of which service produced it.
 
+It ships in `Common.Web` as one extension, which `AddCommonWebDefaults`
+composes ([§13.2](13-observability.md)) rather than each host calling it:
+
 ```csharp
-builder.Services.AddProblemDetails(options =>
-{
-    options.CustomizeProblemDetails = context =>
-    {
-        context.ProblemDetails.Instance =
-            $"{context.HttpContext.Request.Method} {context.HttpContext.Request.Path}";
+namespace Common.Web;
 
-        context.ProblemDetails.Extensions["correlationId"] =
-            context.HttpContext.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+public static IServiceCollection AddCommonProblemDetails(this IServiceCollection services) =>
+    services.AddProblemDetails(options =>
+        options.CustomizeProblemDetails = context =>
+        {
+            context.ProblemDetails.Instance =
+                $"{context.HttpContext.Request.Method} {context.HttpContext.Request.Path}";
 
-        context.ProblemDetails.Extensions["traceId"] =
-            Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
-    };
-});
+            // Read from the request rather than the log scope: this is the one
+            // path §10.4's middleware keeps alive through an unwinding
+            // exception, and an error response is exactly when it matters.
+            context.ProblemDetails.Extensions["correlationId"] =
+                context.HttpContext.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+
+            context.ProblemDetails.Extensions["traceId"] =
+                Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
+        });
 ```
 
 | Situation | Status | Notes |
@@ -486,12 +493,63 @@ description that varies.
 is executed rather than remembered:
 
 ```csharp
-// Result.ToHttpResult() (§11.4's endpoints call it) — the whole reason
-// ErrorType exists rather than each endpoint deciding.
-ErrorType.NotFound    => Results.Problem(statusCode: 404),
-ErrorType.Rule        => Results.Problem(statusCode: 422),
-ErrorType.Unavailable => Results.Problem(statusCode: 503),
+namespace Common.Web;
+
+// §11.4's endpoints call this, and it is the whole reason ErrorType exists
+// rather than each endpoint deciding.
+public static IResult ToHttpResult(this Result result) =>
+    result.IsSuccess ? Results.NoContent() : Problem(result.Error);
+
+public static IResult ToHttpResult<TValue>(this Result<TValue> result) =>
+    result.IsSuccess ? Results.Ok(result.Value) : Problem(result.Error);
+
+private static IResult Problem(Error error) =>
+    Results.Problem(
+        detail: error.Description,
+        statusCode: StatusFor(error.Type),
+        extensions: new Dictionary<string, object?> { ["code"] = error.Code });
+
+private static int StatusFor(ErrorType type) => type switch
+{
+    ErrorType.NotFound => StatusCodes.Status404NotFound,
+    ErrorType.Rule => StatusCodes.Status422UnprocessableEntity,
+    ErrorType.Unavailable => StatusCodes.Status503ServiceUnavailable,
+    _ => throw new ArgumentOutOfRangeException(nameof(type), type, "No status is mapped for this type.")
+};
 ```
+
+**Both halves of an `Error` cross the wire, and they go to different readers.**
+`Description` becomes `detail`, which is where a person looks. `Code` becomes an
+extension member, which is where a client switches — and it is an extension
+rather than the `title` because `title` already has a job: RFC 9457's status
+phrase, the one vocabulary every service and every framework agrees on. A title
+carrying `order.already_shipped` would make each client parse prose to find the
+identifier that was sitting one field away:
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.21",
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "A shipped order cannot be cancelled.",
+  "instance": "POST /orders/018f.../cancel",
+  "code": "order.already_shipped",
+  "correlationId": "018f4c2e-...",
+  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+}
+```
+
+The last three come from the customisation above, which runs on this response
+because `Results.Problem` writes through `IProblemDetailsService` — the same
+path `UseExceptionHandler` takes, which is why an unhandled 500 and a returned
+422 carry the same three fields.
+
+> **`Result<T>` derives from `Result`, so both overloads apply to it.** Only the
+> identity conversion makes the generic one win, and that is enough — until a
+> value result is held in a `Result`-typed local, where it takes the void
+> overload and 204s its payload away. No status code can report a body the
+> caller never asked for, so the test that pins overload resolution is the only
+> thing standing between that and a silently empty response.
 
 **Three of the table's rows are not reachable from here, and that is the point.**
 Each belongs to a mechanism that runs before or beside a handler, and giving
