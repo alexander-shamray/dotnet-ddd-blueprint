@@ -95,17 +95,18 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
         public override Task<TResult> InvokeAsync(
             IServiceProvider services, object request, CancellationToken ct)
         {
-            var typed   = (TCommand)request;
-            var handler = services.GetRequiredService<ICommandHandler<TCommand, TResult>>();
+            TCommand typed = (TCommand)request;
+            ICommandHandler<TCommand, TResult> handler =
+                services.GetRequiredService<ICommandHandler<TCommand, TResult>>();
 
             NextDelegate<TResult> pipeline = () => handler.HandleAsync(typed, ct);
 
             // Reversed so the first-registered behaviour is the outermost.
-            foreach (var behavior in services
+            foreach (IPipelineBehavior<TCommand, TResult> behavior in services
                          .GetServices<IPipelineBehavior<TCommand, TResult>>()
                          .Reverse())
             {
-                var next = pipeline;
+                NextDelegate<TResult> next = pipeline;
                 pipeline = () => behavior.HandleAsync(typed, next, ct);
             }
 
@@ -161,9 +162,9 @@ public static IServiceCollection AddPluggableFrom(
     this IServiceCollection services, Assembly assembly)
     => services.Scan(scan =>
     {
-        var from = scan.FromAssemblies(assembly);
+        IImplementationTypeSelector from = scan.FromAssemblies(assembly);
 
-        foreach (var contract in PluggableInterfaces.All)
+        foreach (Type contract in PluggableInterfaces.All)
             from.AddClasses(c => c.AssignableTo(contract))
                 .AsImplementedInterfaces()
                 .WithScopedLifetime();
@@ -230,23 +231,24 @@ public void Every_handler_implementation_is_registered()
     // as an unregistered handler.
     //
     // Handlers are scoped; resolving them from the root provider throws.
-    using var scope = BuildProvider().CreateScope();
+    using IServiceScope scope = BuildProvider().CreateScope();
 
     // Every service assembly, not just Application. Building the provider above
     // has forced both to load, and deriving the set here means a new layer is
     // covered without editing this test — the same reason the interface list
     // is not duplicated either.
-    var assemblies = AppDomain.CurrentDomain.GetAssemblies()
+    IEnumerable<Assembly> assemblies = AppDomain.CurrentDomain.GetAssemblies()
         .Where(a => a.GetName().Name?.StartsWith("Ordering.") == true);
 
     // Same list the scan uses — a new interface is covered the moment it is
     // added to PluggableInterfaces, with no second place to remember.
-    var implementations = assemblies.SelectMany(a => a.GetTypes())
-        .Where(t => t is { IsAbstract: false, IsInterface: false })
-        .SelectMany(t => t.GetInterfaces()
-            .Where(i => i.IsGenericType
-                     && PluggableInterfaces.All.Contains(i.GetGenericTypeDefinition()))
-            .Select(i => (Implementation: t, Service: i)));
+    IEnumerable<(Type Implementation, Type Service)> implementations =
+        assemblies.SelectMany(a => a.GetTypes())
+            .Where(t => t is { IsAbstract: false, IsInterface: false })
+            .SelectMany(t => t.GetInterfaces()
+                .Where(i => i.IsGenericType
+                         && PluggableInterfaces.All.Contains(i.GetGenericTypeDefinition()))
+                .Select(i => (Implementation: t, Service: i)));
 
     foreach (var (implementation, service) in implementations)
         scope.ServiceProvider.GetServices(service).ShouldContain(
@@ -302,9 +304,9 @@ services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>))
 [Fact]
 public void Command_behaviours_are_registered_in_the_documented_order()
 {
-    using var scope = BuildProvider().CreateScope();
+    using IServiceScope scope = BuildProvider().CreateScope();
 
-    var actual = scope.ServiceProvider
+    Type[] actual = scope.ServiceProvider
         .GetServices<IPipelineBehavior<PlaceOrderCommand, Result<Guid>>>()
         .Select(b => b.GetType().GetGenericTypeDefinition())
         .ToArray();
@@ -334,9 +336,9 @@ the assertion above has a mirror:
 [Fact]
 public void Queries_run_without_the_transaction_and_idempotency_behaviours()
 {
-    using var scope = BuildProvider().CreateScope();
+    using IServiceScope scope = BuildProvider().CreateScope();
 
-    var actual = scope.ServiceProvider
+    Type[] actual = scope.ServiceProvider
         // The query's own result type (§6.5) — CursorPage, not Result. A
         // closed IPipelineBehavior<,> asked for with the wrong TResult resolves
         // to an empty sequence, and an empty sequence passes any assertion
@@ -368,8 +370,8 @@ public sealed class ValidationBehavior<TRequest, TResult>(
         if (!validators.Any())
             return await next();
 
-        var context = new ValidationContext<TRequest>(request);
-        var failures = (await Task.WhenAll(
+        ValidationContext<TRequest> context = new(request);
+        ValidationFailure[] failures = (await Task.WhenAll(
                 validators.Select(v => v.ValidateAsync(context, ct))))
             .SelectMany(r => r.Errors)
             .Where(f => f is not null)
@@ -430,7 +432,7 @@ public sealed class TransactionBehavior<TCommand, TResult>(
 
         return await unitOfWork.ExecuteAsync(async token =>
         {
-            var result = await next();
+            TResult result = await next();
 
             // A handler that returns a failed Result has rejected the command.
             // Returning here skips both the staging and the save, so the
@@ -556,12 +558,13 @@ internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
     public async Task<TResult> ExecuteAsync<TResult>(
         Func<CancellationToken, Task<TResult>> operation, CancellationToken ct)
     {
-        var strategy = db.Database.CreateExecutionStrategy();
+        IExecutionStrategy strategy = db.Database.CreateExecutionStrategy();
 
         return await strategy.ExecuteAsync(async () =>
         {
-            await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var result = await operation(ct);
+            await using IDbContextTransaction tx =
+                await db.Database.BeginTransactionAsync(ct);
+            TResult result = await operation(ct);
 
             // The commit decision belongs with the commit. §6.3's behaviour
             // declines to SaveChanges on a failed Result, which is enough for
@@ -655,18 +658,22 @@ public sealed class PlaceOrderHandler(
     public async Task<Result<Guid>> HandleAsync(
         PlaceOrderCommand command, CancellationToken ct)
     {
-        var productIds = command.Items.Select(i => new ProductId(i.ProductId)).ToArray();
-        var priceList  = await prices.GetAsync(productIds, command.Currency, ct);
+        ProductId[] productIds =
+            command.Items.Select(i => new ProductId(i.ProductId)).ToArray();
+        IReadOnlyDictionary<ProductId, Money> priceList =
+            await prices.GetAsync(productIds, command.Currency, ct);
 
-        var missing = productIds.Where(id => !priceList.ContainsKey(id)).ToArray();
+        ProductId[] missing =
+            productIds.Where(id => !priceList.ContainsKey(id)).ToArray();
         if (missing.Length > 0)
             return Result.Failure<Guid>(OrderErrors.ProductsUnavailable(missing));
 
-        var items = command.Items.Select(i =>
-        {
-            var id = new ProductId(i.ProductId);
-            return (id, i.Quantity, priceList[id]);
-        });
+        IEnumerable<(ProductId Product, int Quantity, Money UnitPrice)> items =
+            command.Items.Select(i =>
+            {
+                var id = new ProductId(i.ProductId);
+                return (id, i.Quantity, priceList[id]);
+            });
 
         var order = Order.Place(
             new CustomerId(command.CustomerId),
@@ -725,10 +732,12 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
     public async Task<IReadOnlyDictionary<ProductId, Money>> GetAsync(
         IReadOnlyCollection<ProductId> productIds, string currency, CancellationToken ct)
     {
-        using var connection = connections.Create();
-        var rows = await connection.QueryAsync<PriceRow>(new CommandDefinition(
-            Sql, new { ProductIds = productIds.Select(p => p.Value), Currency = currency },
-            cancellationToken: ct));
+        using IDbConnection connection = connections.Create();
+        IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
+            new CommandDefinition(
+                Sql,
+                new { ProductIds = productIds.Select(p => p.Value), Currency = currency },
+                cancellationToken: ct));
 
         return rows.ToDictionary(r => new ProductId(r.ProductId),
                                  r => Money.Of(r.Amount, r.Currency));
@@ -794,13 +803,13 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
     public async Task<CursorPage<OrderSummaryDto>> HandleAsync(
         GetOrderSummariesQuery query, CancellationToken ct)
     {
-        var limit  = Math.Clamp(query.Limit, 1, 100);
-        var after  = Cursor.Decode(query.Cursor);
-        using var connection = connections.Create();
+        int limit = Math.Clamp(query.Limit, 1, 100);
+        (DateTimeOffset PlacedAt, Guid Id)? after = Cursor.Decode(query.Cursor);
+        using IDbConnection connection = connections.Create();
 
         // Fetch one extra row to determine whether a next page exists,
         // without a second COUNT(*) over the whole table.
-        var rows = (await connection.QueryAsync<OrderSummaryDto>(
+        List<OrderSummaryDto> rows = (await connection.QueryAsync<OrderSummaryDto>(
             new CommandDefinition(Sql, new
             {
                 query.CustomerId,
@@ -809,9 +818,9 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
                 AfterId       = after?.Id
             }, cancellationToken: ct))).AsList();
 
-        var hasMore = rows.Count > limit;
-        var items   = hasMore ? rows.GetRange(0, limit) : rows;
-        var next    = hasMore && items.Count > 0
+        bool hasMore = rows.Count > limit;
+        List<OrderSummaryDto> items = hasMore ? rows.GetRange(0, limit) : rows;
+        string? next = hasMore && items.Count > 0
             ? Cursor.Encode(items[^1].PlacedAt, items[^1].OrderId)
             : null;
 
@@ -1001,7 +1010,7 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
 
     private async Task ExecuteAsync(string sql, object parameters, CancellationToken ct)
     {
-        using var connection = connections.Create();
+        using IDbConnection connection = connections.Create();
         await connection.ExecuteAsync(new CommandDefinition(sql, parameters, cancellationToken: ct));
     }
 }
@@ -1051,7 +1060,7 @@ public sealed class OrderSummaryProjection(
 {
     public async Task HandleAsync(OrderPlacedDomainEvent e, CancellationToken ct)
     {
-        using var connection = connections.Create();
+        using IDbConnection connection = connections.Create();
         await connection.ExecuteAsync(
             """
             MERGE ordering.OrderSummaries AS target
@@ -1139,7 +1148,7 @@ public sealed class OrderSummaryProjection(
         OrderId orderId, OrderStatus status, DateTimeOffset occurredAt,
         DateTimeOffset? confirmedAt = null, string? cancelReason = null)
     {
-        using var connection = connections.Create();
+        using IDbConnection connection = connections.Create();
 
         await connection.ExecuteAsync(
             """
@@ -1188,7 +1197,7 @@ public sealed class OrderSummaryProjection(
         // statement. Keep them in one statement: a future split that sets
         // PlacedAt earlier would hand this a NULL decimal, and PlacedFact has
         // nowhere to put it (Appendix D.5).
-        var placed = await connection.QuerySingleOrDefaultAsync<PlacedFact>(
+        PlacedFact? placed = await connection.QuerySingleOrDefaultAsync<PlacedFact>(
             """
             UPDATE ordering.OrderSummaries SET PlacedCounted = 1
             OUTPUT inserted.TotalAmount, inserted.Currency
@@ -1206,7 +1215,7 @@ public sealed class OrderSummaryProjection(
         // to. Ordering is not guaranteed on the lane (§9.4), and `cancelled`
         // exceeding `placed` is a state the write model cannot reach — a
         // reconciliation that finds it should be finding a real defect.
-        var cancelled = await connection.QuerySingleOrDefaultAsync<string>(
+        string? cancelled = await connection.QuerySingleOrDefaultAsync<string>(
             """
             UPDATE ordering.OrderSummaries SET CancelledCounted = 1
             OUTPUT inserted.CancelReason
@@ -1217,13 +1226,14 @@ public sealed class OrderSummaryProjection(
         if (cancelled is not null)
             metrics.Cancelled(cancelled);
 
-        var fulfilment = await connection.QuerySingleOrDefaultAsync<FulfilmentFact>(
-            """
-            UPDATE ordering.OrderSummaries SET FulfilmentCounted = 1
-            OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
-            WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL
-                   AND ConfirmedAt IS NOT NULL AND FulfilmentCounted = 0;
-            """, args);
+        FulfilmentFact? fulfilment =
+            await connection.QuerySingleOrDefaultAsync<FulfilmentFact>(
+                """
+                UPDATE ordering.OrderSummaries SET FulfilmentCounted = 1
+                OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
+                WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL
+                       AND ConfirmedAt IS NOT NULL AND FulfilmentCounted = 0;
+                """, args);
 
         if (fulfilment is not null)
             metrics.Fulfilled(fulfilment.ConfirmedAt - fulfilment.PlacedAt);
@@ -1235,7 +1245,7 @@ public sealed class OrderSummaryProjection(
         // contains it. OPENJSON gives the array index; JSON_MODIFY needs it.
         // The UpdatedAt guard keeps a stale republish from overwriting a
         // newer name, as everywhere else in §6.6.
-        using var connection = connections.Create();
+        using IDbConnection connection = connections.Create();
         await connection.ExecuteAsync(
             """
             UPDATE s
@@ -1373,23 +1383,24 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
     public async Task<CursorPage<OrderSummaryDto>> HandleAsync(
         GetOrderSummariesQuery query, CancellationToken ct)
     {
-        var limit = Math.Clamp(query.Limit, 1, 100);
-        var after = Cursor.Decode(query.Cursor);
-        using var connection = connections.Create();
+        int limit = Math.Clamp(query.Limit, 1, 100);
+        (DateTimeOffset PlacedAt, Guid Id)? after = Cursor.Decode(query.Cursor);
+        using IDbConnection connection = connections.Create();
 
-        var rows = (await connection.QueryAsync<SummaryRow>(new CommandDefinition(
-            Sql, new { query.CustomerId, Take = limit + 1,
-                       AfterPlacedAt = after?.PlacedAt, AfterId = after?.Id },
-            cancellationToken: ct))).AsList();
+        List<SummaryRow> rows = (await connection.QueryAsync<SummaryRow>(
+            new CommandDefinition(
+                Sql, new { query.CustomerId, Take = limit + 1,
+                           AfterPlacedAt = after?.PlacedAt, AfterId = after?.Id },
+                cancellationToken: ct))).AsList();
 
-        var hasMore = rows.Count > limit;
-        var items = (hasMore ? rows.GetRange(0, limit) : rows)
+        bool hasMore = rows.Count > limit;
+        OrderSummaryDto[] items = (hasMore ? rows.GetRange(0, limit) : rows)
             .Select(r => new OrderSummaryDto(
                 r.OrderId, r.Status, r.Total, r.Currency, r.LineCount, r.PlacedAt,
                 JsonSerializer.Deserialize<SummaryProduct[]>(r.Products)!))
             .ToArray();
 
-        var next = hasMore && items.Length > 0
+        string? next = hasMore && items.Length > 0
             ? Cursor.Encode(items[^1].PlacedAt, items[^1].OrderId)
             : null;
 

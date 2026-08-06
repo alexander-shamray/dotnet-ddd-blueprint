@@ -1,1 +1,26 @@
 .remember/
+
+# Claude Code — shared config is committed, per-developer overrides are not.
+.claude/settings.local.json
+
+# .NET — the solution described in docs/backend-architecture/ lands here.
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Tt]est[Rr]esults/
+artifacts/
+*.user
+*.suo
+*.userprefs
+.vs/
+.idea/
+*.received.*
+
+# Local configuration and secrets — never commit these.
+appsettings.*.local.json
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12

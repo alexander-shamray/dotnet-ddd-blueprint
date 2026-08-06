@@ -279,7 +279,7 @@ builder.Services.AddRateLimiter(options =>
 
     options.OnRejected = async (context, ct) =>
     {
-        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
             context.HttpContext.Response.Headers.RetryAfter =
                 ((int)retryAfter.TotalSeconds).ToString();
 
@@ -348,9 +348,9 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
 {
     // Resolved once, outside the delegate: this runs on every request, and
     // ILoggerFactory is a singleton whose per-request lookup buys nothing.
-    var logger = app.ApplicationServices
-                    .GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("Common.Web.CorrelationId");
+    ILogger logger = app.ApplicationServices
+                        .GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("Common.Web.CorrelationId");
 
     return app.Use(async (context, next) =>
     {
@@ -358,9 +358,9 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
 
         // FirstOrDefault on absent headers is null; an empty header value is
         // not, and would otherwise become a correlation ID of "".
-        var supplied = context.Request.Headers[Header].FirstOrDefault();
+        string? supplied = context.Request.Headers[Header].FirstOrDefault();
 
-        var correlationId = string.IsNullOrWhiteSpace(supplied)
+        string correlationId = string.IsNullOrWhiteSpace(supplied)
             ? Activity.Current?.TraceId.ToString() ?? Guid.CreateVersion7().ToString()
             : supplied;
 

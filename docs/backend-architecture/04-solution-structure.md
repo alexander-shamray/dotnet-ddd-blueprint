@@ -114,10 +114,10 @@ test rather than a code review convention:
 [Fact]
 public void Domain_has_no_infrastructure_dependencies()
 {
-    var forbidden = new[] { "Microsoft.EntityFrameworkCore", "MassTransit",
-                            "StackExchange.Redis", "Microsoft.AspNetCore" };
+    string[] forbidden = ["Microsoft.EntityFrameworkCore", "MassTransit",
+                          "StackExchange.Redis", "Microsoft.AspNetCore"];
 
-    var referenced = typeof(Order).Assembly
+    IEnumerable<string> referenced = typeof(Order).Assembly
         .GetReferencedAssemblies()
         .Select(a => a.Name!);
 
@@ -143,7 +143,7 @@ silently licenses an endpoint to inject a `DbContext`.
 [Fact]
 public void Endpoints_do_not_depend_on_infrastructure()
 {
-    var result = Types.InAssembly(typeof(OrdersEndpoints).Assembly)
+    TestResult result = Types.InAssembly(typeof(OrdersEndpoints).Assembly)
         .That().ResideInNamespaceContaining(".Endpoints")
         .ShouldNot().HaveDependencyOn("Ordering.Infrastructure")
         .GetResult();
@@ -167,8 +167,8 @@ public void Application_and_domain_do_not_reference_masstransit()
     // guarantee that exists on the consume pipeline and nowhere else. A handler
     // that copies the saga's style gets a dual write with no outbox behind it,
     // and it works in every test where the broker is up.
-    foreach (var assembly in new[] { typeof(PlaceOrderHandler).Assembly,
-                                     typeof(Order).Assembly })
+    foreach (Assembly assembly in new[] { typeof(PlaceOrderHandler).Assembly,
+                                          typeof(Order).Assembly })
         Types.InAssembly(assembly)
             .ShouldNot().HaveDependencyOn("MassTransit")
             .GetResult().IsSuccessful.ShouldBeTrue(assembly.GetName().Name);
@@ -337,7 +337,7 @@ public static IServiceCollection AddOrderingInfrastructure(
 
 ```csharp
 // Ordering.Api/Program.cs — the only file that may reference Infrastructure.
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Refuse to start if any registered service has a dependency the container
 // cannot satisfy, or if a singleton captures a scoped one. Both are otherwise
@@ -361,7 +361,7 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("orders:write",  p => p.RequireClaim("permission", "orders:write"))
     .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting. Each line below depends on
 // the ones above it, and getting it wrong fails silently rather than loudly.
@@ -405,7 +405,7 @@ applied (§10.1); a service behind it does not call `UseRateLimiter`:
 
 ```csharp
 // Gateway.Api/Program.cs
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.AddCommonWebDefaults();                                  // §13.2
 
@@ -429,8 +429,8 @@ builder.Services.AddAuthorizationBuilder()
 // Both of the following are conditional on the deployment shape, and each is
 // REQUIRED once switched on. "Off" and "on but unconfigured" are different
 // states: the first is a valid topology, the second is a silent defect.
-var behindProxy = builder.Configuration.GetValue<bool>("Ingress:Enabled");
-var corsEnabled = builder.Configuration.GetValue<bool>("Cors:Enabled");
+bool behindProxy = builder.Configuration.GetValue<bool>("Ingress:Enabled");
+bool corsEnabled = builder.Configuration.GetValue<bool>("Cors:Enabled");
 
 if (behindProxy)
 {
@@ -448,7 +448,7 @@ if (behindProxy)
         // all, any client can spoof its partition key and bypass the limit.
         o.KnownNetworks.Clear();
         o.KnownProxies.Clear();
-        foreach (var cidr in builder.Configuration
+        foreach (string cidr in builder.Configuration
                      .GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!)
             o.KnownNetworks.Add(IPNetwork.Parse(cidr));
     });
@@ -467,7 +467,7 @@ if (corsEnabled)
         .AllowCredentials()));
 }
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // First when present: everything below reads the client address, and until
 // this runs it is the proxy's. Skipped when the gateway IS the edge (Compose),
@@ -610,6 +610,10 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Respawn" Version="6.2.1" />
     <PackageVersion Include="WireMock.Net" Version="1.8.11" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.9.0" />
+    <!-- The architecture gates of §4.2, which PR-07 turns from a review
+         comment into a build failure. A major bump can change which rules
+         exist, so it fails loudly rather than quietly stopping to enforce. -->
+    <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
   </ItemGroup>
 </Project>
 ```
@@ -621,6 +625,28 @@ Appendix B says whether a licence is acceptable, this file says which version CI
 will actually resolve. A package in one and not the other is how a licence
 boundary gets crossed by a restore, and it is worth a CI check that the two
 lists match.
+
+Appendix B is the wider list, though, and three kinds of row in it will never
+have a pin here. A check that does not know them reports false positives until
+somebody stops reading its output:
+
+- **Infrastructure products** — SQL Server, Redis, RabbitMQ, Keycloak — are
+  licensable in their own right but are containers, not packages. The
+  `StackExchange.Redis`, `Testcontainers.*` and `AspNetCore.HealthChecks.*` pins
+  above are the *client libraries* that talk to them: a different artefact under
+  a different licence. Match on package identity, never on the product a package
+  is named after.
+- **The Aspire packages** of [§14.2](14-local-development.md) are deliberately
+  unpinned. Aspire is optional, nothing references it until the AppHost is
+  adopted, and its API has moved fast enough that pinning a version this
+  document cannot keep current would be worse than pinning none. Adopting
+  Aspire means adding the pins here in the same change — the licence rows
+  already exist, so the gap this file shows is the reminder.
+- **Either/or rows** — `Shouldly` *or* `AwesomeAssertions` — pin only the chosen
+  library. Clearing a licence for an alternative is not a commitment to restore
+  it. Keep such rows rare and word them as alternatives, because a row that
+  reads as two dependencies when it means one is how this check starts being
+  ignored.
 
 The versions are those current at the review date in the header. A blueprint
 cannot keep them accurate; the SCA step below is what keeps them honest.

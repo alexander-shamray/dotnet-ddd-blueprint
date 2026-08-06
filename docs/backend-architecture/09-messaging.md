@@ -211,11 +211,12 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
 
     public IReadOnlyList<object> Map(IReadOnlyList<IDomainEvent> domainEvents)
     {
-        var mapped = new List<object>();
+        List<object> mapped = [];
 
-        foreach (var domainEvent in domainEvents)
+        foreach (IDomainEvent domainEvent in domainEvents)
         {
-            if (!Registry.TryGetValue(domainEvent.GetType(), out var map))
+            if (!Registry.TryGetValue(domainEvent.GetType(),
+                                      out Func<IDomainEvent, object> map))
                 continue;                       // Unregistered → local-only. Not an error.
 
             mapped.Add(map(domainEvent));       // Registered and throwing → fails the command.
@@ -487,7 +488,7 @@ public sealed class MessageTypeMap
         // versioned (§9.1), so this IS the contract. For domain events it is
         // internal, and a rename is then a migration the team chose rather than
         // one a build number made for it.
-        var pairs = assemblies
+        (string Name, Type Type)[] pairs = assemblies
             .SelectMany(a => a.GetTypes())
             .Where(t => t is { IsClass: true, IsAbstract: false }
                      && (t.IsAssignableTo(typeof(IIntegrationEvent))
@@ -495,7 +496,8 @@ public sealed class MessageTypeMap
             .Select(t => (Name: t.FullName!, Type: t))
             .ToArray();
 
-        var clash = pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);
+        IGrouping<string, (string Name, Type Type)>? clash =
+            pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);
         if (clash is not null)
             throw new InvalidOperationException(
                 $"Two staged types share the name '{clash.Key}'. The outbox " +
@@ -506,7 +508,7 @@ public sealed class MessageTypeMap
     }
 
     public string NameOf(Type type) =>
-        _byType.TryGetValue(type, out var name) ? name
+        _byType.TryGetValue(type, out string? name) ? name
             : throw new InvalidOperationException(
                 $"{type.Name} is not a stageable message type. Staging it would " +
                 "write a row the dispatcher cannot resolve.");
@@ -516,7 +518,7 @@ public sealed class MessageTypeMap
         _byType.Keys.Where(t => t.IsAssignableTo(typeof(IDomainEvent)));
 
     public Type Resolve(string name) =>
-        _byName.TryGetValue(name, out var type) ? type
+        _byName.TryGetValue(name, out Type? type) ? type
             : throw new InvalidOperationException(
                 $"Unknown message type '{name}'. A type was renamed or removed " +
                 "while rows naming it were still unprocessed — drain the outbox " +
@@ -656,7 +658,7 @@ public sealed class OutboxDispatcher(
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
+        using PeriodicTimer timer = new(TimeSpan.FromMilliseconds(500));
 
         while (await timer.WaitForNextTickAsync(ct))
         {
@@ -678,21 +680,22 @@ public sealed class OutboxDispatcher(
     /// </summary>
     public async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
-        await using var scope = scopes.CreateAsyncScope();
-        var sp = scope.ServiceProvider;
+        await using AsyncServiceScope scope = scopes.CreateAsyncScope();
+        IServiceProvider sp = scope.ServiceProvider;
 
         // Disposed every pass — the loop runs twice a second, so a leaked
         // connection here exhausts the pool within a minute.
-        using var connection = sp.GetRequiredService<IDbConnectionFactory>().Create();
+        using IDbConnection connection =
+            sp.GetRequiredService<IDbConnectionFactory>().Create();
 
         // OutboxClaim, not OutboxMessage — the claim projects only the columns
         // the OUTPUT clause returns. See Appendix D.
-        var claimed = (await connection.QueryAsync<OutboxClaim>(
+        List<OutboxClaim> claimed = (await connection.QueryAsync<OutboxClaim>(
             ClaimSql, new { MaxAttempts })).AsList();
 
-        var completed = 0;
+        int completed = 0;
 
-        foreach (var message in claimed)
+        foreach (OutboxClaim message in claimed)
         {
             try
             {
@@ -721,9 +724,10 @@ public sealed class OutboxDispatcher(
         // Through the map, not Type.GetType: the column holds a name this code
         // chose, and it has to survive the version bump of the assembly that
         // wrote it.
-        var type    = sp.GetRequiredService<MessageTypeMap>().Resolve(message.MessageType);
-        var payload = JsonSerializer.Deserialize(
-                          message.Payload, type, OutboxJson.Options)!;
+        Type type = sp.GetRequiredService<MessageTypeMap>()
+                      .Resolve(message.MessageType);
+        object payload = JsonSerializer.Deserialize(
+                             message.Payload, type, OutboxJson.Options)!;
 
         if (message.Lane is "Broker")
         {
@@ -778,7 +782,8 @@ internal static class ProjectionInvoker
             IServiceProvider sp, object payload,
             DateTimeOffset occurredAt, CancellationToken ct)
         {
-            var handlers = sp.GetServices<IProjectionHandler<TEvent>>().ToArray();
+            IProjectionHandler<TEvent>[] handlers =
+                sp.GetServices<IProjectionHandler<TEvent>>().ToArray();
 
             // A Local row is staged only when IProjectionRegistry found a
             // handler (§7.5). Finding none here means the handler was
@@ -791,7 +796,7 @@ internal static class ProjectionInvoker
 
             // Sequential, not concurrent: two projections writing the same read
             // table in parallel is a deadlock waiting for load to find it.
-            foreach (var handler in handlers)
+            foreach (IProjectionHandler<TEvent> handler in handlers)
                 await handler.HandleAsync((TEvent)payload, ct);
 
             // Raised-to-applied (§13.7), recorded after the handlers rather
@@ -919,7 +924,7 @@ public sealed class IntegrationEventConsumer<TEvent>(
 
         // Duplicate suppression happens in the inbox filter (§9.5), which is
         // configured on the receive endpoint ahead of this consumer.
-        foreach (var handler in handlers)
+        foreach (IIntegrationEventHandler<TEvent> handler in handlers)
             await handler.HandleAsync(context.Message, context.CancellationToken);
     }
 }
@@ -951,9 +956,10 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         // Mapping is explicit: the wire type is a contract, the command is an
         // application type, and CancelOrder.Reason is a string that has to be
         // parsed back into CancellationReason (§9.6).
-        var command = mapper.Map(context.Message);
+        TCommand command = mapper.Map(context.Message);
 
-        var result = await dispatcher.SendAsync(command, context.CancellationToken);
+        Result result =
+            await dispatcher.SendAsync(command, context.CancellationToken);
 
         // A domain rejection is an answer, not a delivery failure. The message
         // was received, understood and refused, and no redelivery changes that
@@ -1121,14 +1127,15 @@ public sealed class InboxFilter<T>(OrderingDbContext db) : IFilter<ConsumeContex
 {
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
     {
-        var messageId = context.MessageId
+        Guid messageId = context.MessageId
             ?? throw new InvalidOperationException("Message has no MessageId.");
 
         // The queue this message arrived on — the same type on a different
         // endpoint is a different unit of work.
-        var endpoint = context.ReceiveContext.InputAddress.AbsolutePath.TrimStart('/');
+        string endpoint =
+            context.ReceiveContext.InputAddress.AbsolutePath.TrimStart('/');
 
-        var alreadyHandled = await db.InboxMessages
+        bool alreadyHandled = await db.InboxMessages
             .AnyAsync(m => m.MessageId == messageId && m.Endpoint == endpoint);
 
         if (alreadyHandled)
@@ -1831,15 +1838,16 @@ Assert this at startup rather than trusting review:
 [Fact]
 public void Resilience_timeouts_respect_the_hierarchy()
 {
-    var o = GetConfiguredOptions();
+    HttpStandardResilienceOptions o = GetConfiguredOptions();
 
-    var attempts = o.AttemptTimeout.Timeout * (o.Retry.MaxRetryAttempts + 1);
+    TimeSpan attempts =
+        o.AttemptTimeout.Timeout * (o.Retry.MaxRetryAttempts + 1);
 
     // The waits between attempts, not just the attempts. Exponential backoff
     // from a base d over n retries sums to d × (2ⁿ − 1); a linear or constant
     // policy would be d × n. Omitting this term is what lets a configuration
     // that overruns its own ceiling pass a test written to prevent exactly that.
-    var backoff = o.Retry.BackoffType switch
+    TimeSpan backoff = o.Retry.BackoffType switch
     {
         DelayBackoffType.Exponential =>
             o.Retry.Delay * ((1 << o.Retry.MaxRetryAttempts) - 1),

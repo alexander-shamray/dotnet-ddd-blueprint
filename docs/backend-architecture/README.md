@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Status** | Reference blueprint — adapt, don't copy wholesale |
+| **Status** | Reference blueprint — adapt, don't copy wholesale. The C# solution it specifies will be built in this repository ([Appendix C](appendix-c-delivery-plan.md)) |
 | **Target runtime** | .NET 10 (LTS), C# 14 |
 | **Last reviewed** | 2026-08-02 |
 | **Availability figures** | Illustrative. The arithmetic of compounding is the point; the inputs are round numbers, not measurements |

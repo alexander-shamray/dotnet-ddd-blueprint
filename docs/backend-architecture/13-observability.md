@@ -58,7 +58,7 @@ outbox checks in §13.5 — belongs in `AddOrderingInfrastructure`, because
 ```csharp
 public static IHostApplicationBuilder AddObservability(this IHostApplicationBuilder builder)
 {
-    var serviceName = builder.Environment.ApplicationName;
+    string serviceName = builder.Environment.ApplicationName;
 
     builder.Logging.AddOpenTelemetry(logging =>
     {
@@ -148,7 +148,7 @@ public sealed class OrderMetrics
 
     public OrderMetrics(IMeterFactory factory)
     {
-        var meter = factory.Create("Ordering.Orders");
+        Meter meter = factory.Create("Ordering.Orders");
 
         _placed    = meter.CreateCounter<long>("orders.placed",
                         unit: "{order}", description: "Orders successfully placed.");
@@ -230,13 +230,14 @@ placed:
 
 ```csharp
 // OrderSummaryProjection.RecordPendingFactsAsync (§6.6), one of three claims.
-var fulfilment = await connection.QuerySingleOrDefaultAsync<FulfilmentFact>(
-    """
-    UPDATE ordering.OrderSummaries SET FulfilmentCounted = 1
-    OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
-    WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL
-           AND ConfirmedAt IS NOT NULL AND FulfilmentCounted = 0;
-    """, args);
+FulfilmentFact? fulfilment =
+    await connection.QuerySingleOrDefaultAsync<FulfilmentFact>(
+        """
+        UPDATE ordering.OrderSummaries SET FulfilmentCounted = 1
+        OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
+        WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL
+               AND ConfirmedAt IS NOT NULL AND FulfilmentCounted = 0;
+        """, args);
 
 if (fulfilment is not null)
     metrics.Fulfilled(fulfilment.ConfirmedAt - fulfilment.PlacedAt);
@@ -314,7 +315,7 @@ public sealed class RequestMetrics
 
     public RequestMetrics(IMeterFactory factory)
     {
-        var meter = factory.Create("Commerce.Requests");
+        Meter meter = factory.Create("Commerce.Requests");
         _duration = meter.CreateHistogram<double>("request.duration",
                         unit: "s", description: "Dispatcher entry to result.");
     }
@@ -337,7 +338,7 @@ public sealed class MessagingMetrics
 
     public MessagingMetrics(IMeterFactory factory)
     {
-        var meter = factory.Create("Commerce.Messaging");
+        Meter meter = factory.Create("Commerce.Messaging");
 
         _deliveryLag   = meter.CreateHistogram<double>("messaging.delivery.lag",
                              unit: "s", description: "OccurredAt to consumer start.");
@@ -412,19 +413,19 @@ public sealed class LoggingBehavior<TRequest, TResult>(
     public async Task<TResult> HandleAsync(
         TRequest request, NextDelegate<TResult> next, CancellationToken ct)
     {
-        var name  = typeof(TRequest).Name;
-        var start = clock.GetTimestamp();
+        string name  = typeof(TRequest).Name;
+        long   start = clock.GetTimestamp();
 
         // A scope, not a log property: everything written inside the handler
         // inherits it, including EF Core's and MassTransit's own logging.
-        using var scope = logger.BeginScope(new Dictionary<string, object>
+        using IDisposable? scope = logger.BeginScope(new Dictionary<string, object>
         {
             ["RequestType"] = name
         });
 
         try
         {
-            var result = await next();
+            TResult result = await next();
 
             logger.LogInformation("{RequestType} completed in {ElapsedMs} ms",
                 name, clock.GetElapsedTime(start).TotalMilliseconds);
@@ -509,9 +510,9 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 
         List<KeyValuePair<string, object?>>? scrubbed = null;
 
-        for (var i = 0; i < record.Attributes.Count; i++)
+        for (int i = 0; i < record.Attributes.Count; i++)
         {
-            var attribute = record.Attributes[i];
+            KeyValuePair<string, object?> attribute = record.Attributes[i];
             if (!IsSensitive(attribute.Key)) continue;
 
             // Copy only when something actually matches — the common case is
@@ -553,11 +554,11 @@ away underneath it:
 [Fact]
 public void Sensitive_attributes_are_redacted()
 {
-    var exported = new List<LogRecord>();
+    List<LogRecord> exported = [];
 
     // Built exactly as AddObservability builds it (§13.2) — ILoggingBuilder,
     // the same extension, so the test covers the seam the host uses.
-    using var factory = LoggerFactory.Create(b => b.AddOpenTelemetry(o =>
+    using ILoggerFactory factory = LoggerFactory.Create(b => b.AddOpenTelemetry(o =>
     {
         o.AddProcessor(new SensitiveDataRedactor());
         o.AddInMemoryExporter(exported);
@@ -566,7 +567,8 @@ public void Sensitive_attributes_are_redacted()
     factory.CreateLogger("test").LogInformation(
         "Login for {User} with {Password}", "ada", "hunter2");
 
-    var attributes = exported.Single().Attributes!;
+    IReadOnlyList<KeyValuePair<string, object?>> attributes =
+        exported.Single().Attributes!;
     attributes.Single(a => a.Key == "Password").Value.ShouldBe("[redacted]");
 
     // The other half of the assertion, and the one that catches a deny-list
@@ -723,7 +725,7 @@ public sealed class OutboxMetrics
 
     public OutboxMetrics(IMeterFactory factory, IOutboxStats stats)
     {
-        var meter = factory.Create(MeterName);
+        Meter meter = factory.Create(MeterName);
 
         meter.CreateObservableGauge(
             "outbox.oldest.age",
@@ -786,8 +788,8 @@ internal sealed class OutboxStats(IServiceScopeFactory scopes) : IOutboxStats
         $"oldest:{lane}", e =>
         {
             e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5);
-            using var scope = scopes.CreateScope();
-            using var connection = scope.ServiceProvider
+            using IServiceScope scope = scopes.CreateScope();
+            using IDbConnection connection = scope.ServiceProvider
                 .GetRequiredService<IDbConnectionFactory>().Create();
 
             return connection.ExecuteScalar<double?>(
@@ -900,12 +902,12 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
     // MessagingMetrics). A helper that ran only the Application half would see
     // two of four and fail against a correct MetricsInitialiser — the test
     // reporting a defect in the thing it is guarding.
-    var registered = BuildServices()
+    IEnumerable<Type> registered = BuildServices()
         .Select(d => d.ServiceType)
         .Where(t => t.Name.EndsWith("Metrics"))
         .Distinct();
 
-    var forced = typeof(MetricsInitialiser)
+    HashSet<Type> forced = typeof(MetricsInitialiser)
         .GetConstructors().Single()
         .GetParameters().Select(p => p.ParameterType).ToHashSet();
 

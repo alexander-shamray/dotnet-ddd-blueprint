@@ -28,6 +28,9 @@ goes stale.
 | WireMock.Net | Apache 2.0 | HTTP stubbing |
 | `Microsoft.NET.Test.Sdk` | MIT | The test host every test project needs; pinned because a major bump changes discovery |
 | `Microsoft.Extensions.TimeProvider.Testing` | MIT | `FakeTimeProvider` — the clock seam §12.7 requires |
+| `NetArchTest.Rules` | MIT | The architecture gates ([§4.2](04-solution-structure.md)) that PR-07 makes a build failure rather than a review comment ([Appendix C](appendix-c-delivery-plan.md)) |
+| `Aspire.Hosting.*` (`AppHost`, `SqlServer`, `Redis`, `RabbitMQ`, `Keycloak`) | MIT | Topology for the optional AppHost of [§14.2](14-local-development.md). Registered ahead of use: Compose is the baseline (§14.1) and Aspire is not adopted. **If** it is, `src/AppHost` is the only project taking these, which is what keeps it deletable. **Not pinned in [§4.4](04-solution-structure.md)** — see the carve-out there; adopting Aspire means adding the pins in the same change |
+| `Aspire.*` client integrations (one per resource a service consumes) | MIT | The service-side half of §14.2. Registered ahead of use: **if** Aspire is adopted each service takes the integrations for its own resources, which is why backing it out costs a line per resource per service rather than deleting one project. Unpinned on the same terms as the row above |
 | Keycloak | Apache 2.0 | Identity provider |
 | RabbitMQ | MPL 2.0 | Message broker |
 
