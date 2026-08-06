@@ -57,7 +57,10 @@ jobs:
 
       - run: dotnet build Platform.slnx --no-restore -c Release
 
-      # Vacuous until PR-02, which ships the first tests along with the code
-      # they cover. The step is here from the start so that the PR adding tests
-      # adds tests, and not the pipeline that runs them.
+      # Real from PR-02, which shipped the first tests alongside the code they
+      # cover. The step predates them on purpose, so that the PR adding tests
+      # added tests and not the pipeline that runs them.
+      #
+      # This step passes on zero discovered tests (§12.1) — asserting a floor on
+      # the count is PR-25's quality gates, not this skeleton's job.
       - run: dotnet test Platform.slnx --no-build -c Release
