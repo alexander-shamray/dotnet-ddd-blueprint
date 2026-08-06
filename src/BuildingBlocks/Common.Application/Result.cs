@@ -54,9 +54,19 @@ public class Result
 /// <summary>
 /// The outcome of a command that returns a value. Constructed through
 /// <see cref="Result.Success{TValue}"/> and <see cref="Result.Failure{TValue}"/>
-/// so that the two states cannot be assembled independently — a failure with a
-/// value, or a success without one, are not representable.
+/// so that the two states cannot be assembled independently: no result can
+/// report success while carrying an error, or failure while carrying a value.
 /// </summary>
+/// <remarks>
+/// That guarantee is about the state, not the payload, and the asymmetry with
+/// <see cref="Result.Failure{TValue}"/> is deliberate. An <see cref="Error"/>
+/// is what <em>makes</em> a result a failure — <see cref="Result.IsSuccess"/>
+/// is defined by its absence — so a null one would silently produce a success
+/// and is refused at run time. A value is only payload: a null one leaves a
+/// success a success. The nullable annotation on the factory already rejects
+/// <c>Success&lt;string&gt;(null)</c> at compile time, and a caller who asks
+/// for <c>Result&lt;string?&gt;</c> has said what they meant.
+/// </remarks>
 public sealed class Result<TValue> : Result
 {
     private readonly TValue? _value;
