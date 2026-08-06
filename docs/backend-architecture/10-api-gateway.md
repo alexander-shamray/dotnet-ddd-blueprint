@@ -260,8 +260,8 @@ builder.Services.AddRateLimiter(options =>
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 100,
-                Window      = TimeSpan.FromMinutes(1),
-                QueueLimit  = 0
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
             }));
 
     options.AddPolicy("authenticated", context =>
@@ -271,11 +271,11 @@ builder.Services.AddRateLimiter(options =>
                 "unknown",
             factory: _ => new TokenBucketRateLimiterOptions
             {
-                TokenLimit          = 300,
-                TokensPerPeriod     = 300,
+                TokenLimit = 300,
+                TokensPerPeriod = 300,
                 ReplenishmentPeriod = TimeSpan.FromMinutes(1),
-                QueueLimit          = 10,
-                AutoReplenishment   = true
+                QueueLimit = 10,
+                AutoReplenishment = true
             }));
 
     options.OnRejected = async (context, ct) =>
@@ -287,8 +287,8 @@ builder.Services.AddRateLimiter(options =>
         await context.HttpContext.Response.WriteAsJsonAsync(new ProblemDetails
         {
             Status = StatusCodes.Status429TooManyRequests,
-            Title  = "Too many requests",
-            Type   = "https://tools.ietf.org/html/rfc6585#section-4"
+            Title = "Too many requests",
+            Type = "https://tools.ietf.org/html/rfc6585#section-4"
         }, ct);
     };
 });

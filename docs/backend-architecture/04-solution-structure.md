@@ -357,7 +357,7 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Host.UseDefaultServiceProvider(o =>
 {
     o.ValidateOnBuild = true;
-    o.ValidateScopes  = true;
+    o.ValidateScopes = true;
 });
 
 builder.AddCommonWebDefaults();                                     // §13.2
@@ -370,8 +370,8 @@ builder.Services.AddOrderingInfrastructure(builder.Configuration);  // above
 // throws on the first request that reaches it — never at startup.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy("orders:read",   p => p.RequireClaim("permission", "orders:read"))
-    .AddPolicy("orders:write",  p => p.RequireClaim("permission", "orders:write"))
+    .AddPolicy("orders:read", p => p.RequireClaim("permission", "orders:read"))
+    .AddPolicy("orders:write", p => p.RequireClaim("permission", "orders:write"))
     .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
 
 WebApplication app = builder.Build();

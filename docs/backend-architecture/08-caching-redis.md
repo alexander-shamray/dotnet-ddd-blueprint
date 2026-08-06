@@ -101,7 +101,7 @@ public static IServiceCollection AddRedisConnections(this IServiceCollection ser
     {
         options.DefaultEntryOptions = new HybridCacheEntryOptions
         {
-            Expiration           = TimeSpan.FromMinutes(10),  // L2, Redis
+            Expiration = TimeSpan.FromMinutes(10),            // L2, Redis
             LocalCacheExpiration = TimeSpan.FromMinutes(1)    // L1, in-process
         };
         options.MaximumPayloadBytes = 1024 * 1024;

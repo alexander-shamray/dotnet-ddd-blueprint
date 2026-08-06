@@ -819,9 +819,9 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
                 new
                 {
                     query.CustomerId,
-                    Take          = limit + 1,
+                    Take = limit + 1,
                     AfterPlacedAt = after?.PlacedAt,
-                    AfterId       = after?.Id
+                    AfterId = after?.Id
                 },
                 cancellationToken: ct))).AsList();
 
@@ -1100,18 +1100,18 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
             """,
             new
             {
-                OrderId    = e.OrderId.Value,
+                OrderId = e.OrderId.Value,
                 CustomerId = e.CustomerId.Value,
-                Status     = nameof(OrderStatus.AwaitingStock),
-                Total      = e.Total.Amount,
-                Currency   = e.Total.Currency,
-                LineCount  = e.Lines.Count,
+                Status = nameof(OrderStatus.AwaitingStock),
+                Total = e.Total.Amount,
+                Currency = e.Total.Currency,
+                LineCount = e.Lines.Count,
                 // Ids are known now; name and thumbnail arrive with
                 // ProductPublished and are patched in below.
-                Products   = JsonSerializer.Serialize(
+                Products = JsonSerializer.Serialize(
                     e.Lines.Select(l => new { id = l.ProductId.Value, name = "", thumb = "" })),
-                PlacedAt   = e.OccurredAt,
-                UpdatedAt  = e.OccurredAt
+                PlacedAt = e.OccurredAt,
+                UpdatedAt = e.OccurredAt
             });
 
         // Not "if (applied > 0) metrics.Placed(...)". This row may have been

@@ -20,8 +20,8 @@ namespace Common.Contracts;
 /// </summary>
 public interface IIntegrationEvent
 {
-    Guid MessageId            { get; }
-    Guid CorrelationId        { get; }
+    Guid MessageId { get; }
+    Guid CorrelationId { get; }
     DateTimeOffset OccurredAt { get; }
 }
 ```
@@ -48,16 +48,16 @@ namespace Common.Contracts.Ordering.V1;
 
 public sealed record OrderConfirmed : IIntegrationEvent
 {
-    public required Guid MessageId       { get; init; }
-    public required Guid CorrelationId   { get; init; }
+    public required Guid MessageId { get; init; }
+    public required Guid CorrelationId { get; init; }
     public required DateTimeOffset OccurredAt { get; init; }
 
-    public required Guid OrderId         { get; init; }
-    public required Guid CustomerId      { get; init; }
-    public required decimal TotalAmount  { get; init; }
-    public required string Currency      { get; init; }
+    public required Guid OrderId { get; init; }
+    public required Guid CustomerId { get; init; }
+    public required decimal TotalAmount { get; init; }
+    public required string Currency { get; init; }
     public required IReadOnlyList<ConfirmedLine> Lines { get; init; }
-    public required ShippingAddressV1 ShippingAddress  { get; init; }
+    public required ShippingAddressV1 ShippingAddress { get; init; }
 }
 
 public sealed record ConfirmedLine(Guid ProductId, int Quantity, decimal UnitPrice);
@@ -71,14 +71,14 @@ namespace Common.Contracts.Ordering.V1;
 
 public sealed record OrderPlaced : IIntegrationEvent
 {
-    public required Guid MessageId       { get; init; }
-    public required Guid CorrelationId   { get; init; }
+    public required Guid MessageId { get; init; }
+    public required Guid CorrelationId { get; init; }
     public required DateTimeOffset OccurredAt { get; init; }
 
-    public required Guid OrderId         { get; init; }
-    public required Guid CustomerId      { get; init; }
-    public required decimal TotalAmount  { get; init; }
-    public required string Currency      { get; init; }
+    public required Guid OrderId { get; init; }
+    public required Guid CustomerId { get; init; }
+    public required decimal TotalAmount { get; init; }
+    public required string Currency { get; init; }
     public required IReadOnlyList<PlacedLine> Lines { get; init; }
 }
 
@@ -94,13 +94,13 @@ namespace Common.Contracts.Catalog.V1;
 
 public sealed record PriceChanged : IIntegrationEvent
 {
-    public required Guid MessageId            { get; init; }
-    public required Guid CorrelationId        { get; init; }
+    public required Guid MessageId { get; init; }
+    public required Guid CorrelationId { get; init; }
     public required DateTimeOffset OccurredAt { get; init; }
 
-    public required Guid ProductId            { get; init; }
-    public required decimal Amount            { get; init; }
-    public required string Currency           { get; init; }
+    public required Guid ProductId { get; init; }
+    public required decimal Amount { get; init; }
+    public required string Currency { get; init; }
 }
 
 // ProductPublished and ProductDiscontinued repeat the same three envelope
@@ -186,7 +186,7 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
     {
         // Domain type in, contract type out. The suffix (§5.5) is what makes
         // that visible — with one name for both, this reads as identity.
-        [typeof(OrderPlacedDomainEvent)]    = e => ToContract((OrderPlacedDomainEvent)e),
+        [typeof(OrderPlacedDomainEvent)] = e => ToContract((OrderPlacedDomainEvent)e),
         [typeof(OrderConfirmedDomainEvent)] = e => ToContract((OrderConfirmedDomainEvent)e),
         [typeof(OrderCancelledDomainEvent)] = e => ToContract((OrderCancelledDomainEvent)e),
         // OrderStockConfirmedDomainEvent is deliberately absent — internal only.
@@ -196,16 +196,16 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
     // decimal and an ISO code, because a contract may not carry domain types.
     private static V1.OrderPlaced ToContract(OrderPlacedDomainEvent e) => new()
     {
-        MessageId     = Guid.CreateVersion7(),
+        MessageId = Guid.CreateVersion7(),
         CorrelationId = e.OrderId.Value,
-        OccurredAt    = e.OccurredAt,
-        OrderId       = e.OrderId.Value,
-        CustomerId    = e.CustomerId.Value,
-        TotalAmount   = e.Total.Amount,
-        Currency      = e.Total.Currency,
+        OccurredAt = e.OccurredAt,
+        OrderId = e.OrderId.Value,
+        CustomerId = e.CustomerId.Value,
+        TotalAmount = e.Total.Amount,
+        Currency = e.Total.Currency,
         // PlacedLine, not ConfirmedLine — OrderPlaced owns its own line type
         // so the two contracts can version independently (§9.1).
-        Lines         = [.. e.Lines.Select(l => new V1.PlacedLine(l.ProductId.Value, l.Quantity, l.UnitPrice.Amount))]
+        Lines = [.. e.Lines.Select(l => new V1.PlacedLine(l.ProductId.Value, l.Quantity, l.UnitPrice.Amount))]
     };
 
     public IReadOnlyList<object> Map(IReadOnlyList<IDomainEvent> domainEvents)
@@ -404,12 +404,12 @@ public sealed class OutboxMessage
         //
         // A Local-lane row carries a domain event, which has no envelope and
         // never reaches a broker, so the row mints both.
-        MessageId     = message is IIntegrationEvent e ? e.MessageId     : Guid.CreateVersion7(),
+        MessageId = message is IIntegrationEvent e ? e.MessageId : Guid.CreateVersion7(),
         CorrelationId = message is IIntegrationEvent c ? c.CorrelationId : correlationId,
-        MessageType   = types.NameOf(message.GetType()),
-        Payload       = JsonSerializer.Serialize(message, message.GetType(), OutboxJson.Options),
-        Lane          = lane,
-        OccurredAt    = now
+        MessageType = types.NameOf(message.GetType()),
+        Payload = JsonSerializer.Serialize(message, message.GetType(), OutboxJson.Options),
+        Lane = lane,
+        OccurredAt = now
     };
 }
 
@@ -569,9 +569,9 @@ public static class OutboxJson
         // property names as declared, numbers as numbers, no case-insensitive
         // rescue on the way back in — a payload that only round-trips because
         // matching is lenient is a payload that will not survive a rename.
-        PropertyNamingPolicy      = null,
+        PropertyNamingPolicy = null,
         PropertyNameCaseInsensitive = false,
-        NumberHandling            = JsonNumberHandling.Strict
+        NumberHandling = JsonNumberHandling.Strict
     };
 }
 ```
@@ -746,7 +746,7 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
         {
             await sp.GetRequiredService<IPublishEndpoint>().Publish(payload, type, c =>
             {
-                c.MessageId     = message.MessageId;
+                c.MessageId = message.MessageId;
                 c.CorrelationId = message.CorrelationId;
             }, ct);
             return;
@@ -1261,8 +1261,8 @@ public sealed record FlagOrderForReview(Guid OrderId, string Reason);
 
 public static class ReviewReasons
 {
-    public const string NotDespatched     = "not_despatched";
-    public const string StockNotReleased  = "stock_not_released";
+    public const string NotDespatched = "not_despatched";
+    public const string StockNotReleased = "stock_not_released";
 }
 
 /// <summary>
@@ -1272,14 +1272,14 @@ public static class ReviewReasons
 /// </summary>
 public static class CancelReasons
 {
-    public const string OutOfStock      = "out_of_stock";
-    public const string StockTimeout    = "stock_timeout";
+    public const string OutOfStock = "out_of_stock";
+    public const string StockTimeout = "stock_timeout";
     public const string PaymentDeclined = "payment_declined";
     // A declined payment and one that never answered compensate identically
     // and mean opposite things: the first is the customer's bank saying no,
     // the second is the PSP saying nothing. They are one dimension value apart
     // on orders.cancelled (§13.3) and a different incident.
-    public const string PaymentTimeout  = "payment_timeout";
+    public const string PaymentTimeout = "payment_timeout";
     public const string CustomerRequest = "customer_request";
 }
 
@@ -1306,8 +1306,8 @@ internal static class Endpoints
     // configured transport. Names must match the ReceiveEndpoint declarations
     // in each owning service.
     public static readonly Uri InventoryQueue = new("queue:inventory-commands");
-    public static readonly Uri PaymentsQueue  = new("queue:payments-commands");
-    public static readonly Uri OrderingQueue  = new("queue:ordering-commands");
+    public static readonly Uri PaymentsQueue = new("queue:payments-commands");
+    public static readonly Uri OrderingQueue = new("queue:ordering-commands");
 }
 ```
 
@@ -1326,18 +1326,18 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // technically skip by finalising early. Confirmed exists because the order
     // is not done at payment — it is waiting for despatch, and a wait the
     // machine cannot represent is a wait it cannot time out.
-    public State AwaitingStock   { get; private set; } = null!;
+    public State AwaitingStock { get; private set; } = null!;
     public State AwaitingPayment { get; private set; } = null!;
-    public State Confirmed       { get; private set; } = null!;
-    public State Compensating    { get; private set; } = null!;
+    public State Confirmed { get; private set; } = null!;
+    public State Compensating { get; private set; } = null!;
 
-    public Event<OrderPlaced>              OrderPlaced             { get; private set; } = null!;
-    public Event<StockReserved>            StockReserved           { get; private set; } = null!;
-    public Event<StockReservationFailed>   StockReservationFailed  { get; private set; } = null!;
-    public Event<PaymentAuthorised>        PaymentAuthorised       { get; private set; } = null!;
-    public Event<PaymentDeclined>          PaymentDeclined         { get; private set; } = null!;
-    public Event<StockReleased>            StockReleased           { get; private set; } = null!;
-    public Event<ShipmentDispatched>       ShipmentDispatched      { get; private set; } = null!;
+    public Event<OrderPlaced> OrderPlaced { get; private set; } = null!;
+    public Event<StockReserved> StockReserved { get; private set; } = null!;
+    public Event<StockReservationFailed> StockReservationFailed { get; private set; } = null!;
+    public Event<PaymentAuthorised> PaymentAuthorised { get; private set; } = null!;
+    public Event<PaymentDeclined> PaymentDeclined { get; private set; } = null!;
+    public Event<StockReleased> StockReleased { get; private set; } = null!;
+    public Event<ShipmentDispatched> ShipmentDispatched { get; private set; } = null!;
 
     // One schedule per wait. "Every wait has a timeout" is a rule the machine
     // must be able to express, not a habit to remember at each transition.
@@ -1350,7 +1350,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     {
         InstanceState(x => x.CurrentState);
 
-        Event(() => OrderPlaced,   x => x.CorrelateById(m => m.Message.OrderId));
+        Event(() => OrderPlaced, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
         // ... remaining correlations
 
@@ -1391,11 +1391,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             When(OrderPlaced)
                 .Then(ctx =>
                 {
-                    ctx.Saga.OrderId    = ctx.Message.OrderId;
+                    ctx.Saga.OrderId = ctx.Message.OrderId;
                     ctx.Saga.CustomerId = ctx.Message.CustomerId;
-                    ctx.Saga.Total      = ctx.Message.TotalAmount;
-                    ctx.Saga.Currency   = ctx.Message.Currency;
-                    ctx.Saga.StartedAt  = ctx.Message.OccurredAt;
+                    ctx.Saga.Total = ctx.Message.TotalAmount;
+                    ctx.Saga.Currency = ctx.Message.Currency;
+                    ctx.Saga.StartedAt = ctx.Message.OccurredAt;
                 })
                 .Schedule(StockTimeout, ctx => new StockReservationExpired(ctx.Saga.OrderId))
                 // Send, not Publish — these are commands with one owner.
@@ -1818,18 +1818,18 @@ services
         // Outermost bound. Defaults to 30s, which would breach the hierarchy.
         options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(5);
 
-        options.Retry.MaxRetryAttempts   = 2;          // 3 attempts in total
-        options.Retry.BackoffType        = DelayBackoffType.Exponential;
-        options.Retry.UseJitter          = true;
-        options.Retry.Delay              = TimeSpan.FromMilliseconds(150);
+        options.Retry.MaxRetryAttempts = 2;            // 3 attempts in total
+        options.Retry.BackoffType = DelayBackoffType.Exponential;
+        options.Retry.UseJitter = true;
+        options.Retry.Delay = TimeSpan.FromMilliseconds(150);
 
         // 3 × 1.4 s + 150 ms + 300 ms = 4.65 s. The delays are part of the
         // budget, not an extra on top of it — see the trap below.
-        options.AttemptTimeout.Timeout   = TimeSpan.FromSeconds(1.4);
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(1.4);
 
-        options.CircuitBreaker.FailureRatio      = 0.5;
+        options.CircuitBreaker.FailureRatio = 0.5;
         options.CircuitBreaker.MinimumThroughput = 10;
-        options.CircuitBreaker.BreakDuration     = TimeSpan.FromSeconds(15);
+        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(15);
     })
     // Registered AFTER resilience, so it sits inside it (§11.5).
     .AddHttpMessageHandler<ClientCredentialsHandler>();
