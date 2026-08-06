@@ -23,13 +23,31 @@ namespace Ordering.Domain.Orders;
 
 public readonly record struct OrderId(Guid Value)
 {
-    // Version 7 GUIDs are time-ordered, which keeps SQL Server's clustered
-    // index append-only instead of fragmenting on every insert.
+    // Version 7 rather than 4: the leading 48 bits are a millisecond
+    // timestamp, so every identifier carries when it was made. Read the trap
+    // below before assuming that also makes it a sequential key.
     public static OrderId New() => new(Guid.CreateVersion7());
 
     public override string ToString() => Value.ToString();
 }
 ```
+
+> **Trap — a time-ordered Guid is not a sequential key in SQL Server.** UUIDv7
+> puts its timestamp in the **first** six bytes. `uniqueidentifier` compares the
+> **last** six first and works backwards from there, so it never reaches the
+> timestamp until every random byte has already decided the order. Version 7
+> values therefore arrive in a clustered index as scattered as version 4 ones,
+> and the page splits the version was reached for happen anyway.
+>
+> This is the shape the blueprint deploys, not a hypothetical:
+> `HasKey(o => o.Id)` ([§7.2](07-persistence.md)) leaves SQL Server to make
+> that primary key clustered, which it does by default.
+>
+> What version 7 actually buys is a creation time readable inside every
+> identifier, which earns its place for support and forensics on its own. If
+> insert locality ever becomes the binding constraint, the fix is a physical
+> one — a different column type, or a clustered key that is not the identifier
+> — and it belongs in §7 with the rest of the storage shape rather than here.
 
 ## 5.3 Value objects
 

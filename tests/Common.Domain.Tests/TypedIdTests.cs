@@ -17,10 +17,9 @@ public class TypedIdTests
     {
         var id = TestId.New();
 
-        // v7 rather than v4 — the factory's one observable commitment.
-        // Whether a time-ordered Guid actually helps SQL Server's clustered
-        // index is §5.2's separate claim, and an open one; nothing here
-        // asserts it.
+        // v7 rather than v4 — the factory's one observable commitment. The
+        // embedded timestamp does not make the key sequential in SQL Server
+        // (§5.2's trap), and nothing here claims otherwise.
         id.Value.Version.ShouldBe(7);
     }
 
