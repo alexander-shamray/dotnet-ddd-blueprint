@@ -124,9 +124,9 @@ public static class OrderEndpoints
 {
     public static void MapOrderEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/v1/orders")
-                       .WithTags("Orders")
-                       .RequireAuthorization();
+        RouteGroupBuilder group = app.MapGroup("/v1/orders")
+                                     .WithTags("Orders")
+                                     .RequireAuthorization();
 
         group.MapPost("/{id:guid}/cancel",
             async (Guid id, CancelOrderRequest request,
@@ -137,13 +137,14 @@ public static class OrderEndpoints
                 // JSON would publish the enum's member names as API surface,
                 // and an unknown value would surface as a model-binding error
                 // rather than a 400 naming the field.
-                if (!CancellationReasons.TryParse(request.Reason, out var reason))
+                if (!CancellationReasons.TryParse(
+                        request.Reason, out CancellationReason reason))
                     return Results.ValidationProblem(new Dictionary<string, string[]>
                     {
                         ["reason"] = [$"Unknown cancellation reason '{request.Reason}'."]
                     });
 
-                var result = await dispatcher.SendAsync(
+                Result result = await dispatcher.SendAsync(
                     new CancelOrderCommand(id, reason), ct);
 
                 return result.ToHttpResult();
@@ -225,7 +226,7 @@ internal sealed class CancelOrderHandler(
     public async Task<Result> HandleAsync(
         CancelOrderCommand command, CancellationToken ct)
     {
-        var order = await orders.GetAsync(new OrderId(command.OrderId), ct);
+        Order? order = await orders.GetAsync(new OrderId(command.OrderId), ct);
         if (order is null)
             return Result.Failure(OrderErrors.NotFound);
 
@@ -340,7 +341,7 @@ public sealed class ClientCredentialsHandler(
         HttpRequestMessage request, CancellationToken ct)
     {
         // Cached until shortly before expiry; one token fetch serves many calls.
-        var token = await tokens.GetAsync(identity.Value.Scope, ct);
+        string token = await tokens.GetAsync(identity.Value.Scope, ct);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         return await base.SendAsync(request, ct);
@@ -387,7 +388,7 @@ the Keycloak container with the realm import from §14.1 and the real JWT scheme
 [Fact]
 public async Task Bff_client_credentials_token_is_accepted_by_a_service()
 {
-    var token = await Realm.ClientCredentialsAsync("web-bff");
+    string token = await Realm.ClientCredentialsAsync("web-bff");
 
     token.Audiences().ShouldContain("commerce-api");
     (await Catalog.GetAsync("/products/1", token)).StatusCode
@@ -400,7 +401,7 @@ public async Task A_client_without_the_scope_is_rejected()
     // The negative half matters more: a mapper that adds the audience to every
     // token would pass the test above and grant the platform to any client the
     // realm happens to hold.
-    var token = await Realm.ClientCredentialsAsync("unrelated-client");
+    string token = await Realm.ClientCredentialsAsync("unrelated-client");
 
     (await Catalog.GetAsync("/products/1", token)).StatusCode
         .ShouldBe(HttpStatusCode.Unauthorized);

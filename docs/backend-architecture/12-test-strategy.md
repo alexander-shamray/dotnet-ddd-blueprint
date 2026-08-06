@@ -62,9 +62,10 @@ public class OrderCancellationTests
     [Fact]
     public void Cannot_cancel_an_order_that_has_shipped()
     {
-        var order = OrderBuilder.Shipped();
+        Order order = OrderBuilder.Shipped();
 
-        var act = () => order.Cancel(CancellationReason.CustomerRequest, DateTimeOffset.UtcNow);
+        Action act = () => order.Cancel(
+            CancellationReason.CustomerRequest, DateTimeOffset.UtcNow);
 
         act.ShouldThrow<DomainException>()
            .Message.ShouldContain("cannot be cancelled");
@@ -96,7 +97,7 @@ add the idempotency case as its own test first:
 [Fact]
 public void Cancelling_twice_is_idempotent()
 {
-    var order = OrderBuilder.AwaitingPayment();
+    Order order = OrderBuilder.AwaitingPayment();
     order.Cancel(CancellationReason.CustomerRequest, Now);
 
     order.Cancel(CancellationReason.CustomerRequest, Now);
@@ -140,9 +141,10 @@ public class OrderTests
     [Fact]
     public void Placing_an_order_raises_OrderPlacedDomainEvent()
     {
-        var order = OrderBuilder.Placed();
+        Order order = OrderBuilder.Placed();
 
-        var placed = order.DomainEvents.OfType<OrderPlacedDomainEvent>().ShouldHaveSingleItem();
+        OrderPlacedDomainEvent placed = order.DomainEvents
+            .OfType<OrderPlacedDomainEvent>().ShouldHaveSingleItem();
         placed.OrderId.ShouldBe(order.Id);
         placed.Total.ShouldBe(order.Total);
     }
@@ -150,8 +152,8 @@ public class OrderTests
     [Fact]
     public void An_order_must_have_at_least_one_line()
     {
-        var act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(),
-                                    [], "EUR", Now);
+        Action act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(),
+                                       [], "EUR", Now);
 
         act.ShouldThrow<DomainException>();
     }
@@ -166,14 +168,14 @@ public class OrderTests
               (product, 3, Money.Of(10m, "EUR")) ],
             "EUR", Now);
 
-        var line = order.Lines.ShouldHaveSingleItem();
+        OrderLine line = order.Lines.ShouldHaveSingleItem();
         line.Quantity.ShouldBe(5);
     }
 
     [Fact]
     public void All_lines_must_share_the_order_currency()
     {
-        var act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(),
+        Action act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(),
             [ (ProductId.New(), 1, Money.Of(10m, "USD")) ],
             "EUR", Now);
 
@@ -205,14 +207,14 @@ internal static class OrderBuilder
 
     public static Order AwaitingPayment()
     {
-        var order = Placed();
+        Order order = Placed();
         order.ConfirmStock(DefaultNow);
         return order;
     }
 
     public static Order Shipped()
     {
-        var order = AwaitingPayment();
+        Order order = AwaitingPayment();
         order.ConfirmPayment(PaymentReference.From("test-ref"), DefaultNow);
         order.MarkShipped(TrackingNumber.From("TRK1"), DefaultNow);
         return order;
@@ -309,7 +311,7 @@ public sealed class ServiceFixture : IAsyncLifetime
                     // The dispatcher polls every 500 ms; left running it drains
                     // outbox rows underneath assertions about them. Tests that
                     // want it call fixture.ProcessOutboxBatchAsync() explicitly.
-                    var hosted = services.Single(
+                    ServiceDescriptor hosted = services.Single(
                         d => d.ServiceType == typeof(IHostedService)
                           && d.ImplementationType == typeof(OutboxDispatcher));
                     services.Remove(hosted);
@@ -321,7 +323,7 @@ public sealed class ServiceFixture : IAsyncLifetime
         // Tests deliberately collapse the two database identities of §7.1 —
         // the container's sa login holds both DML and DDL. Production keeps
         // them separate, and migrations run as a job, never from a host (ADR-007).
-        using var scope = Factory.Services.CreateScope();
+        using IServiceScope scope = Factory.Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<OrderingDbContext>()
                    .Database.MigrateAsync();
 
@@ -347,7 +349,7 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// </summary>
     public async Task SeedPriceAsync(Guid productId, decimal amount, string currency = "EUR")
     {
-        using var connection = CreateConnection();
+        using IDbConnection connection = CreateConnection();
         await connection.ExecuteAsync(
             """
             MERGE ordering.ProductPrices AS t
@@ -369,10 +371,11 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// </summary>
     public async Task<Guid> SeedOrderAsync(Guid customerId)
     {
-        using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        using IServiceScope scope = Factory.Services.CreateScope();
+        OrderingDbContext db =
+            scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
 
-        var order = OrderBuilder.Placed(customer: new CustomerId(customerId));
+        Order order = OrderBuilder.Placed(customer: new CustomerId(customerId));
         db.Orders.Add(order);
         await db.SaveChangesAsync();
         return order.Id.Value;
@@ -380,15 +383,16 @@ public sealed class ServiceFixture : IAsyncLifetime
 
     public async Task<IReadOnlyList<OutboxMessage>> OutboxAsync()
     {
-        using var scope = Factory.Services.CreateScope();
+        using IServiceScope scope = Factory.Services.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<OrderingDbContext>()
                           .OutboxMessages.AsNoTracking().ToListAsync();
     }
 
     public async Task StageOutboxAsync(params OutboxMessage[] rows)
     {
-        using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        using IServiceScope scope = Factory.Services.CreateScope();
+        OrderingDbContext db =
+            scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
         db.OutboxMessages.AddRange(rows);
         await db.SaveChangesAsync();
     }
@@ -400,7 +404,7 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// </summary>
     public async Task SetOutboxAttemptsAsync(Guid messageId, int attempts)
     {
-        using var connection = CreateConnection();
+        using IDbConnection connection = CreateConnection();
         await connection.ExecuteAsync(
             "UPDATE ordering.OutboxMessages SET Attempts = @attempts WHERE MessageId = @messageId;",
             new { attempts, messageId });
@@ -413,7 +417,7 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// </summary>
     public async Task ExpireOutboxLeasesAsync()
     {
-        using var connection = CreateConnection();
+        using IDbConnection connection = CreateConnection();
         await connection.ExecuteAsync(
             "UPDATE ordering.OutboxMessages SET LockedUntil = NULL WHERE ProcessedAt IS NULL;");
     }
@@ -457,19 +461,19 @@ public sealed class TestAuthHandler(
     {
         // No header means anonymous, not "authenticated as nobody" — otherwise
         // every 401 test silently passes.
-        if (!Request.Headers.TryGetValue(UserHeader, out var userId))
+        if (!Request.Headers.TryGetValue(UserHeader, out StringValues userId))
             return Task.FromResult(AuthenticateResult.NoResult());
 
         List<Claim> claims = [new(ClaimTypes.NameIdentifier, userId.ToString())];
 
         // The same claim type §11.4's policies require. A test that grants
         // itself "orders:cancel" is exercising the policy, not bypassing it.
-        if (Request.Headers.TryGetValue(PermissionsHeader, out var granted))
+        if (Request.Headers.TryGetValue(PermissionsHeader, out StringValues granted))
             claims.AddRange(granted.ToString()
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries)
                 .Select(p => new Claim("permission", p)));
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme));
+        ClaimsPrincipal principal = new(new ClaimsIdentity(claims, Scheme));
         return Task.FromResult(
             AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme)));
     }
@@ -503,11 +507,13 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task Placing_an_order_persists_it_and_writes_an_outbox_message()
     {
-        using var scope = fixture.Factory.Services.CreateScope();
-        var dispatcher  = scope.ServiceProvider.GetRequiredService<IDispatcher>();
-        var db          = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        IDispatcher dispatcher =
+            scope.ServiceProvider.GetRequiredService<IDispatcher>();
+        OrderingDbContext db =
+            scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
 
-        var result = await dispatcher.SendAsync(new PlaceOrderCommand(
+        Result<Guid> result = await dispatcher.SendAsync(new PlaceOrderCommand(
             CommandId:       Guid.CreateVersion7(),
             CustomerId:      Guid.CreateVersion7(),
             Items:           [ new PlaceOrderItem(SeedData.ProductId, 2) ],
@@ -516,7 +522,8 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
 
         result.IsSuccess.ShouldBeTrue();
 
-        var order = await db.Orders.SingleAsync(o => o.Id == new OrderId(result.Value));
+        Order order =
+            await db.Orders.SingleAsync(o => o.Id == new OrderId(result.Value));
         order.Status.ShouldBe(OrderStatus.AwaitingStock);
         order.Lines.ShouldHaveSingleItem().Quantity.ShouldBe(2);
 
@@ -524,7 +531,7 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         // staged atomically with the state change, and that nothing has run yet.
         // Only meaningful because the fixture removed the dispatcher — otherwise
         // this races a background service that drains these rows twice a second.
-        var outbox = await db.OutboxMessages.ToListAsync();
+        List<OutboxMessage> outbox = await db.OutboxMessages.ToListAsync();
         outbox.ShouldAllBe(m => m.ProcessedAt == null);
 
         // Broker lane carries the CONTRACT type (§9.3 allow-list)...
@@ -547,17 +554,20 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
     public async Task The_same_command_id_is_processed_once()
     {
         var commandId = Guid.CreateVersion7();
-        var command   = CommandBuilder.PlaceOrder() with { CommandId = commandId };
+        PlaceOrderCommand command =
+            CommandBuilder.PlaceOrder() with { CommandId = commandId };
 
-        using var scope = fixture.Factory.Services.CreateScope();
-        var dispatcher  = scope.ServiceProvider.GetRequiredService<IDispatcher>();
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        IDispatcher dispatcher =
+            scope.ServiceProvider.GetRequiredService<IDispatcher>();
 
-        var first  = await dispatcher.SendAsync(command);
-        var second = await dispatcher.SendAsync(command);
+        Result<Guid> first  = await dispatcher.SendAsync(command);
+        Result<Guid> second = await dispatcher.SendAsync(command);
 
         second.Value.ShouldBe(first.Value);
 
-        var db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        OrderingDbContext db =
+            scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
         (await db.Orders.CountAsync()).ShouldBe(1);
     }
 }
@@ -584,11 +594,11 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
 
         await fixture.ProcessOutboxBatchAsync();
 
-        var rows = await fixture.OutboxAsync();
+        IReadOnlyList<OutboxMessage> rows = await fixture.OutboxAsync();
 
         rows.Count(r => r.ProcessedAt is not null).ShouldBe(2);
 
-        var poison = rows.Single(r => r.ProcessedAt is null);
+        OutboxMessage poison = rows.Single(r => r.ProcessedAt is null);
         poison.Attempts.ShouldBe(1);
         poison.LastError.ShouldNotBeNullOrEmpty();
         poison.LockedUntil.ShouldNotBeNull();     // backed off, not abandoned
@@ -597,7 +607,7 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task A_row_stops_being_claimed_at_the_attempt_cap()
     {
-        var poison = Poison.Row(fixture.MessageTypes);
+        OutboxMessage poison = Poison.Row(fixture.MessageTypes);
         await fixture.StageOutboxAsync(poison);
         await fixture.SetOutboxAttemptsAsync(poison.MessageId, 9);
 
@@ -610,7 +620,7 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
 
         (await fixture.ProcessOutboxBatchAsync()).ShouldBe(0);
 
-        var row = (await fixture.OutboxAsync()).Single();
+        OutboxMessage row = (await fixture.OutboxAsync()).Single();
         row.Attempts.ShouldBe(10);                // not 11 — never re-claimed
         row.ProcessedAt.ShouldBeNull();           // visible to the §13.6 alert
     }
@@ -622,7 +632,7 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
 
         await fixture.ProcessOutboxBatchAsync();
 
-        var row = (await fixture.OutboxAsync()).Single();
+        OutboxMessage row = (await fixture.OutboxAsync()).Single();
         row.ProcessedAt.ShouldBeNull();           // NOT silently completed
         row.LastError.ShouldContain("IProjectionHandler");
     }
@@ -711,7 +721,7 @@ can regress is a pure function:
 [Fact]
 public void Stage_takes_the_message_id_from_the_envelope()
 {
-    var placed = Contracts.OrderPlaced(SeedData.OrderId);
+    V1.OrderPlaced placed = Contracts.OrderPlaced(SeedData.OrderId);
 
     var row = OutboxMessage.Stage(
         placed, OutboxLane.Broker, correlationId: Guid.CreateVersion7(),
@@ -753,10 +763,10 @@ public void Every_stageable_domain_event_round_trips_through_the_outbox_options(
 {
     // Not "every IDomainEvent": the map is the set the outbox can actually
     // carry, and a type it does not know cannot reach a payload column.
-    foreach (var type in fixture.MessageTypes.StageableDomainEvents)
+    foreach (Type type in fixture.MessageTypes.StageableDomainEvents)
     {
-        var sample = DomainEventSamples.Create(type);
-        var json   = JsonSerializer.Serialize(sample, type, OutboxJson.Options);
+        object sample = DomainEventSamples.Create(type);
+        string json = JsonSerializer.Serialize(sample, type, OutboxJson.Options);
 
         JsonSerializer.Deserialize(json, type, OutboxJson.Options)
             .ShouldBeEquivalentTo(sample, $"{type.Name} cannot survive the Local lane");
@@ -823,7 +833,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
         // No X-Test-User header, so TestAuthHandler returns NoResult and the
         // challenge stands. This is the test that catches UseAuthentication
         // being dropped from the pipeline (§4.2).
-        var response = await _client.PostAsJsonAsync(
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
             $"/v1/orders/{Guid.CreateVersion7()}/cancel",
             new CancelOrderRequest(CancelReasons.CustomerRequest));
 
@@ -835,7 +845,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     {
         // Authenticated, but with orders:read where the endpoint wants
         // orders:cancel — the case a fixture that grants everything hides.
-        var response = await SendAsAsync(
+        HttpResponseMessage response = await SendAsAsync(
             Guid.CreateVersion7(), "orders:read", Guid.CreateVersion7());
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -845,9 +855,9 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     public async Task Hides_another_customers_order_behind_a_404()
     {
         var owner = Guid.CreateVersion7();
-        var orderId = await fixture.SeedOrderAsync(customerId: owner);
+        Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
 
-        var response = await SendAsAsync(
+        HttpResponseMessage response = await SendAsAsync(
             Guid.CreateVersion7(), "orders:cancel", orderId);   // a different customer
 
         // 404, not 403 — §11.4. A 403 here would confirm the order exists,
@@ -859,7 +869,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task Rejects_a_reason_outside_the_wire_vocabulary()
     {
-        var request = new HttpRequestMessage(
+        HttpRequestMessage request = new(
             HttpMethod.Post, $"/v1/orders/{Guid.CreateVersion7()}/cancel")
         {
             // The enum's member name, not the wire code — accepted by
@@ -869,7 +879,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
         request.Headers.Add(TestAuthHandler.UserHeader, Guid.CreateVersion7().ToString());
         request.Headers.Add(TestAuthHandler.PermissionsHeader, "orders:cancel");
 
-        var response = await _client.SendAsync(request);
+        HttpResponseMessage response = await _client.SendAsync(request);
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
@@ -877,7 +887,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     private Task<HttpResponseMessage> SendAsAsync(
         Guid userId, string permissions, Guid orderId)
     {
-        var request = new HttpRequestMessage(
+        HttpRequestMessage request = new(
             HttpMethod.Post, $"/v1/orders/{orderId}/cancel")
         {
             Content = JsonContent.Create(new CancelOrderRequest(CancelReasons.CustomerRequest))
@@ -907,13 +917,13 @@ harness makes it testable without any infrastructure at all.
 [Fact]
 public async Task Payment_declined_releases_stock_before_cancelling()
 {
-    await using var provider = new ServiceCollection()
+    await using ServiceProvider provider = new ServiceCollection()
         .AddMassTransitTestHarness(cfg =>
             cfg.AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
                .InMemoryRepository())
         .BuildServiceProvider(true);
 
-    var harness = provider.GetRequiredService<ITestHarness>();
+    ITestHarness harness = provider.GetRequiredService<ITestHarness>();
     await harness.Start();
 
     var orderId = Guid.CreateVersion7();
@@ -952,7 +962,7 @@ public async Task Commands_are_sent_and_events_are_published()
     // The distinction §9.6 rests on, asserted directly: publishing a command
     // would deliver it to every subscriber, and nothing else in the suite
     // would notice.
-    var harness = await StartHarnessAsync();
+    ITestHarness harness = await StartHarnessAsync();
     var orderId = Guid.CreateVersion7();
 
     // Every member of V1.OrderPlaced is `required`, so there is no partial
@@ -1016,10 +1026,10 @@ public class ContractTests
         // Catches the member type System.Text.Json cannot handle — the failure
         // that otherwise appears as a message in the error queue, in staging,
         // with a deserialisation stack trace and no obvious owner.
-        foreach (var type in Contracts)
+        foreach (Type type in Contracts)
         {
-            var instance = ContractSamples.Create(type);
-            var json     = JsonSerializer.Serialize(instance, type);
+            object instance = ContractSamples.Create(type);
+            string json = JsonSerializer.Serialize(instance, type);
 
             JsonSerializer.Deserialize(json, type).ShouldBeEquivalentTo(instance);
         }

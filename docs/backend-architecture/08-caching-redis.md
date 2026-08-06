@@ -128,7 +128,7 @@ public sealed class GetProductDetailHandler(
             query,
             static async (q, token) =>
             {
-                using var connection = connections.Create();
+                using IDbConnection connection = connections.Create();
                 return await connection.QuerySingleOrDefaultAsync<ProductDetailDto>(
                     ProductSql, new { q.ProductId });
             },
@@ -280,11 +280,11 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
         TCommand command, NextDelegate<TResult> next, CancellationToken ct)
     {
         // Key shape only — the store owns the service prefix and namespace.
-        var key = $"{typeof(TCommand).Name}:{command.CommandId}";
+        string key = $"{typeof(TCommand).Name}:{command.CommandId}";
 
         if (!await store.TryClaimAsync(key, Retention, ct))
         {
-            var existing = await store.GetAsync(key, ct);
+            IdempotencyEntry? existing = await store.GetAsync(key, ct);
 
             if (existing is null || existing.InProgress)
                 throw new ConcurrentRequestException(command.CommandId);
@@ -294,7 +294,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 
         try
         {
-            var result = await next();
+            TResult result = await next();
             await store.CompleteAsync(key, JsonSerializer.Serialize(result), Retention, ct);
             return result;
         }
@@ -346,7 +346,7 @@ command rather than trusting the author to have opted in:
 [Fact]
 public void Commands_carrying_a_CommandId_declare_IIdempotentCommand()
 {
-    var offenders = typeof(PlaceOrderCommand).Assembly.GetTypes()
+    IEnumerable<string> offenders = typeof(PlaceOrderCommand).Assembly.GetTypes()
         .Where(t => t.GetInterfaces().Any(i =>
                         i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>)))
         .Where(t => t.GetProperty("CommandId") is not null)

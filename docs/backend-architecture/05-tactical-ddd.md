@@ -164,7 +164,7 @@ public sealed class Order : AggregateRoot<OrderId>
         if (unitPrice.Currency != _currency)
             throw new DomainException("All lines must share the order currency.");
 
-        var existing = _lines.SingleOrDefault(l => l.ProductId == product);
+        OrderLine? existing = _lines.SingleOrDefault(l => l.ProductId == product);
         if (existing is not null)
             existing.IncreaseQuantity(quantity);
         else

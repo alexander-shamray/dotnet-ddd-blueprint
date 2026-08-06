@@ -317,18 +317,18 @@ internal sealed class EfDomainEventCollector(OrderingDbContext db) : IDomainEven
 {
     public IReadOnlyList<IDomainEvent> CollectAndClear()
     {
-        var aggregates = db.ChangeTracker
+        IHasDomainEvents[] aggregates = db.ChangeTracker
             .Entries<IHasDomainEvents>()
             .Where(e => e.Entity.DomainEvents.Count > 0)
             .Select(e => e.Entity)
             .ToArray();
 
-        var events = aggregates.SelectMany(a => a.DomainEvents).ToArray();
+        IDomainEvent[] events = aggregates.SelectMany(a => a.DomainEvents).ToArray();
 
         // Cleared as they are collected, so a nested dispatch (§6.3's
         // HasActiveTransaction path) sees only events raised since the last
         // call rather than staging these a second time.
-        foreach (var aggregate in aggregates)
+        foreach (IHasDomainEvents aggregate in aggregates)
             aggregate.ClearDomainEvents();
 
         return events;
@@ -381,17 +381,17 @@ internal sealed class DomainEventDispatcher(
 {
     public async Task DispatchAsync(CancellationToken ct)
     {
-        var events = collector.CollectAndClear();
+        IReadOnlyList<IDomainEvent> events = collector.CollectAndClear();
         if (events.Count == 0)
             return;
 
         // Broker lane: allow-listed events become integration events (§9.3).
-        foreach (var integrationEvent in mapper.Map(events))
+        foreach (object integrationEvent in mapper.Map(events))
             await publisher.StageAsync(integrationEvent, OutboxLane.Broker, ct);
 
         // Local lane: events with a registered projection handler are staged
         // too, so the projection survives a crash immediately after commit.
-        foreach (var domainEvent in events.Where(projections.HasHandler))
+        foreach (IDomainEvent domainEvent in events.Where(projections.HasHandler))
             await publisher.StageAsync(domainEvent, OutboxLane.Local, ct);
     }
 }

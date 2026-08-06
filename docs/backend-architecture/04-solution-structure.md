@@ -114,10 +114,10 @@ test rather than a code review convention:
 [Fact]
 public void Domain_has_no_infrastructure_dependencies()
 {
-    var forbidden = new[] { "Microsoft.EntityFrameworkCore", "MassTransit",
-                            "StackExchange.Redis", "Microsoft.AspNetCore" };
+    string[] forbidden = ["Microsoft.EntityFrameworkCore", "MassTransit",
+                          "StackExchange.Redis", "Microsoft.AspNetCore"];
 
-    var referenced = typeof(Order).Assembly
+    IEnumerable<string> referenced = typeof(Order).Assembly
         .GetReferencedAssemblies()
         .Select(a => a.Name!);
 
@@ -143,7 +143,7 @@ silently licenses an endpoint to inject a `DbContext`.
 [Fact]
 public void Endpoints_do_not_depend_on_infrastructure()
 {
-    var result = Types.InAssembly(typeof(OrdersEndpoints).Assembly)
+    TestResult result = Types.InAssembly(typeof(OrdersEndpoints).Assembly)
         .That().ResideInNamespaceContaining(".Endpoints")
         .ShouldNot().HaveDependencyOn("Ordering.Infrastructure")
         .GetResult();
@@ -167,8 +167,8 @@ public void Application_and_domain_do_not_reference_masstransit()
     // guarantee that exists on the consume pipeline and nowhere else. A handler
     // that copies the saga's style gets a dual write with no outbox behind it,
     // and it works in every test where the broker is up.
-    foreach (var assembly in new[] { typeof(PlaceOrderHandler).Assembly,
-                                     typeof(Order).Assembly })
+    foreach (Assembly assembly in new[] { typeof(PlaceOrderHandler).Assembly,
+                                          typeof(Order).Assembly })
         Types.InAssembly(assembly)
             .ShouldNot().HaveDependencyOn("MassTransit")
             .GetResult().IsSuccessful.ShouldBeTrue(assembly.GetName().Name);
@@ -337,7 +337,7 @@ public static IServiceCollection AddOrderingInfrastructure(
 
 ```csharp
 // Ordering.Api/Program.cs — the only file that may reference Infrastructure.
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Refuse to start if any registered service has a dependency the container
 // cannot satisfy, or if a singleton captures a scoped one. Both are otherwise
@@ -361,7 +361,7 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("orders:write",  p => p.RequireClaim("permission", "orders:write"))
     .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting. Each line below depends on
 // the ones above it, and getting it wrong fails silently rather than loudly.
@@ -405,7 +405,7 @@ applied (§10.1); a service behind it does not call `UseRateLimiter`:
 
 ```csharp
 // Gateway.Api/Program.cs
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.AddCommonWebDefaults();                                  // §13.2
 
@@ -429,8 +429,8 @@ builder.Services.AddAuthorizationBuilder()
 // Both of the following are conditional on the deployment shape, and each is
 // REQUIRED once switched on. "Off" and "on but unconfigured" are different
 // states: the first is a valid topology, the second is a silent defect.
-var behindProxy = builder.Configuration.GetValue<bool>("Ingress:Enabled");
-var corsEnabled = builder.Configuration.GetValue<bool>("Cors:Enabled");
+bool behindProxy = builder.Configuration.GetValue<bool>("Ingress:Enabled");
+bool corsEnabled = builder.Configuration.GetValue<bool>("Cors:Enabled");
 
 if (behindProxy)
 {
@@ -448,7 +448,7 @@ if (behindProxy)
         // all, any client can spoof its partition key and bypass the limit.
         o.KnownNetworks.Clear();
         o.KnownProxies.Clear();
-        foreach (var cidr in builder.Configuration
+        foreach (string cidr in builder.Configuration
                      .GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!)
             o.KnownNetworks.Add(IPNetwork.Parse(cidr));
     });
@@ -467,7 +467,7 @@ if (corsEnabled)
         .AllowCredentials()));
 }
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // First when present: everything below reads the client address, and until
 // this runs it is the proxy's. Skipped when the gateway IS the edge (Compose),
