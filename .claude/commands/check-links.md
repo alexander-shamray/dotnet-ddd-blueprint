@@ -1,6 +1,6 @@
 ---
 description: Verify links, section cross-references and nav footers across the blueprint
-allowed-tools: Read, Grep, Glob, Edit, Bash(ls:*), Bash(wc:*), Bash(sort:*), Bash(uniq:*), Bash(comm:*)
+allowed-tools: Read, Grep, Glob, Edit, Bash(ls:*), Bash(wc:*), Bash(comm:*)
 ---
 
 Check navigational integrity across `docs/backend-architecture/`. Structural
