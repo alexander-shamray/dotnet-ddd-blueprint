@@ -90,7 +90,8 @@ roles to permissions in one place.
 // because this is where the permission model is explained. The permission
 // STRINGS are the contract with Keycloak's claim mapper; the policies are how
 // ASP.NET Core checks them.
-builder.Services.AddAuthorizationBuilder()
+builder.Services
+    .AddAuthorizationBuilder()
     .AddPolicy("orders:read",   p => p.RequireClaim("permission", "orders:read"))
     .AddPolicy("orders:write",  p => p.RequireClaim("permission", "orders:write"))
     .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
@@ -124,31 +125,31 @@ public static class OrderEndpoints
 {
     public static void MapOrderEndpoints(this IEndpointRouteBuilder app)
     {
-        RouteGroupBuilder group = app.MapGroup("/v1/orders")
-                                     .WithTags("Orders")
-                                     .RequireAuthorization();
+        RouteGroupBuilder group = app
+            .MapGroup("/v1/orders")
+            .WithTags("Orders")
+            .RequireAuthorization();
 
-        group.MapPost("/{id:guid}/cancel",
-            async (Guid id, CancelOrderRequest request,
-                   IDispatcher dispatcher, CancellationToken ct) =>
-            {
-                // Parse at the boundary, through the same method the message
-                // path uses (§9.4). Binding CancellationReason straight from
-                // JSON would publish the enum's member names as API surface,
-                // and an unknown value would surface as a model-binding error
-                // rather than a 400 naming the field.
-                if (!CancellationReasons.TryParse(
-                        request.Reason, out CancellationReason reason))
-                    return Results.ValidationProblem(new Dictionary<string, string[]>
-                    {
-                        ["reason"] = [$"Unknown cancellation reason '{request.Reason}'."]
-                    });
+        group
+            .MapPost(
+                "/{id:guid}/cancel",
+                async (Guid id, CancelOrderRequest request, IDispatcher dispatcher, CancellationToken ct) =>
+                {
+                    // Parse at the boundary, through the same method the message
+                    // path uses (§9.4). Binding CancellationReason straight from
+                    // JSON would publish the enum's member names as API surface,
+                    // and an unknown value would surface as a model-binding error
+                    // rather than a 400 naming the field.
+                    if (!CancellationReasons.TryParse(request.Reason, out CancellationReason reason))
+                        return Results.ValidationProblem(new Dictionary<string, string[]>
+                        {
+                            ["reason"] = [$"Unknown cancellation reason '{request.Reason}'."]
+                        });
 
-                Result result = await dispatcher.SendAsync(
-                    new CancelOrderCommand(id, reason), ct);
+                    Result result = await dispatcher.SendAsync(new CancelOrderCommand(id, reason), ct);
 
-                return result.ToHttpResult();
-            })
+                    return result.ToHttpResult();
+                })
             .RequireAuthorization("orders:cancel")
             .WithName("CancelOrder");
     }
@@ -219,25 +220,25 @@ this the customer's own order?" — belong in the handler**, where the data is
 available:
 
 ```csharp
-internal sealed class CancelOrderHandler(
-    IOrderRepository orders, ICurrentUser currentUser, TimeProvider clock)
+internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser currentUser, TimeProvider clock)
     : ICommandHandler<CancelOrderCommand, Result>
 {
-    public async Task<Result> HandleAsync(
-        CancelOrderCommand command, CancellationToken ct)
+    public async Task<Result> HandleAsync(CancelOrderCommand command, CancellationToken ct)
     {
         Order? order = await orders.GetAsync(new OrderId(command.OrderId), ct);
         if (order is null)
             return Result.Failure(OrderErrors.NotFound);
 
         // Deliberately a 404, not a 403 — a 403 confirms the order exists.
-        if (currentUser.IsAuthenticated
-            && order.CustomerId.Value != currentUser.Id
-            && !currentUser.HasPermission("orders:admin"))
+        if (currentUser.IsAuthenticated &&
+            order.CustomerId.Value != currentUser.Id &&
+            !currentUser.HasPermission("orders:admin"))
+        {
             return Result.Failure(OrderErrors.NotFound);
+        }
 
         // The aggregate still owns the transition — this handler decides who
-        // may ask, not whether the order is in a state that permits it (§5.3).
+        // may ask, not whether the order is in a state that permits it (§5.4).
         order.Cancel(command.Reason, clock.GetUtcNow());
 
         // No metric here, for the reason §6.4 gives: this runs inside the
@@ -282,10 +283,10 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
     public bool IsAuthenticated => User?.Identity?.IsAuthenticated == true;
 
     public Guid Id => Guid.Parse(
-        User?.FindFirstValue(ClaimTypes.NameIdentifier)
-        ?? throw new InvalidOperationException(
-            "No authenticated caller. Guard with IsAuthenticated — a handler " +
-            "reached by a consumer (§9.4) has no HttpContext."));
+        User?.FindFirstValue(ClaimTypes.NameIdentifier) ??
+            throw new InvalidOperationException(
+                "No authenticated caller. Guard with IsAuthenticated — a handler " +
+                "reached by a consumer (§9.4) has no HttpContext."));
 
     // The same claim type §11.4's policies require, so an endpoint policy and
     // a resource check can never disagree about what a permission is.
@@ -333,12 +334,10 @@ Mechanically this is a `DelegatingHandler` attached to every outbound client
 (§9.7), so no call site has to remember it:
 
 ```csharp
-public sealed class ClientCredentialsHandler(
-    ITokenCache tokens, IOptions<ServiceIdentityOptions> identity)
+public sealed class ClientCredentialsHandler(ITokenCache tokens, IOptions<ServiceIdentityOptions> identity)
     : DelegatingHandler
 {
-    protected override async Task<HttpResponseMessage> SendAsync(
-        HttpRequestMessage request, CancellationToken ct)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         // Cached until shortly before expiry; one token fetch serves many calls.
         string token = await tokens.GetAsync(identity.Value.Scope, ct);

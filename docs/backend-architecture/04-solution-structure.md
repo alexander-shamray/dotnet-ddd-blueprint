@@ -114,8 +114,12 @@ test rather than a code review convention:
 [Fact]
 public void Domain_has_no_infrastructure_dependencies()
 {
-    string[] forbidden = ["Microsoft.EntityFrameworkCore", "MassTransit",
-                          "StackExchange.Redis", "Microsoft.AspNetCore"];
+    string[] forbidden = [
+        "Microsoft.EntityFrameworkCore",
+        "MassTransit",
+        "StackExchange.Redis",
+        "Microsoft.AspNetCore"
+    ];
 
     IEnumerable<string> referenced = typeof(Order).Assembly
         .GetReferencedAssemblies()
@@ -143,7 +147,8 @@ silently licenses an endpoint to inject a `DbContext`.
 [Fact]
 public void Endpoints_do_not_depend_on_infrastructure()
 {
-    TestResult result = Types.InAssembly(typeof(OrdersEndpoints).Assembly)
+    TestResult result = Types
+        .InAssembly(typeof(OrderEndpoints).Assembly)
         .That().ResideInNamespaceContaining(".Endpoints")
         .ShouldNot().HaveDependencyOn("Ordering.Infrastructure")
         .GetResult();
@@ -167,9 +172,9 @@ public void Application_and_domain_do_not_reference_masstransit()
     // guarantee that exists on the consume pipeline and nowhere else. A handler
     // that copies the saga's style gets a dual write with no outbox behind it,
     // and it works in every test where the broker is up.
-    foreach (Assembly assembly in new[] { typeof(PlaceOrderHandler).Assembly,
-                                          typeof(Order).Assembly })
-        Types.InAssembly(assembly)
+    foreach (Assembly assembly in new[] { typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly })
+        Types
+            .InAssembly(assembly)
             .ShouldNot().HaveDependencyOn("MassTransit")
             .GetResult().IsSuccessful.ShouldBeTrue(assembly.GetName().Name);
 }
@@ -240,11 +245,13 @@ public static IServiceCollection AddOrderingApplication(this IServiceCollection 
 ```csharp
 // Ordering.Infrastructure/DependencyInjection.cs
 public static IServiceCollection AddOrderingInfrastructure(
-    this IServiceCollection services, IConfiguration configuration)
+    this IServiceCollection services,
+    IConfiguration configuration)
 {
     services.AddDbContext<OrderingDbContext>(o =>
-        o.UseSqlServer(configuration.GetConnectionString("Ordering"),   // runtime identity, §7.1
-                       sql => sql.EnableRetryOnFailure()));
+        o.UseSqlServer(
+            configuration.GetConnectionString("Ordering"),   // runtime identity, §7.1
+            sql => sql.EnableRetryOnFailure()));
 
     // Projections, cache invalidators and command mappers live here, not in
     // Application — scanning only Application would skip them all (§6.2).
@@ -266,8 +273,8 @@ public static IServiceCollection AddOrderingInfrastructure(
     // line leaves no way to. Adding to the source is not the same as replacing
     // the map: the production assemblies stay in the list, so a test still
     // cannot stage something the real host would reject.
-    services.AddSingleton<MessageTypeSource>(_ => new MessageTypeSource(
-        typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly));
+    services.AddSingleton<MessageTypeSource>(_ =>
+        new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly));
 
     services.AddSingleton(sp =>
         new MessageTypeMap(sp.GetRequiredService<MessageTypeSource>().Assemblies));
@@ -321,13 +328,11 @@ public static IServiceCollection AddOrderingInfrastructure(
 
     // Readiness checks live here, not in Common.Web — they need connection
     // strings, which the shared host package does not have (§13.5).
-    services.AddHealthChecks()
-        .AddSqlServer(configuration.GetConnectionString("Ordering")!,
-                      name: "sql", tags: ["ready"])
-        .AddRedis(configuration.GetConnectionString("RedisCache")!,
-                  name: "redis-cache", tags: ["ready"])
-        .AddRedis(configuration.GetConnectionString("RedisCoordination")!,
-                  name: "redis-coordination", tags: ["ready"])
+    services
+        .AddHealthChecks()
+        .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
+        .AddRedis(configuration.GetConnectionString("RedisCache")!, name: "redis-cache", tags: ["ready"])
+        .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"])
         .AddRabbitMQ(name: "rabbitmq", tags: ["ready"])
         .AddCheck<OutboxBacklogHealthCheck>("outbox", tags: ["observe"]);
 
@@ -356,7 +361,8 @@ builder.Services.AddOrderingInfrastructure(builder.Configuration);  // above
 // helper: Application knows nothing about HTTP, and Common.Web must not know
 // Ordering's names. A policy named by an endpoint and registered nowhere
 // throws on the first request that reaches it — never at startup.
-builder.Services.AddAuthorizationBuilder()
+builder.Services
+    .AddAuthorizationBuilder()
     .AddPolicy("orders:read",   p => p.RequireClaim("permission", "orders:read"))
     .AddPolicy("orders:write",  p => p.RequireClaim("permission", "orders:write"))
     .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
@@ -412,8 +418,9 @@ builder.AddCommonWebDefaults();                                  // §13.2
 // YARP is registered here and configured from the "ReverseProxy" section
 // shown in §10.2. Without this, MapReverseProxy() throws at startup and the
 // entire routing configuration is inert.
-builder.Services.AddReverseProxy()
-       .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+builder.Services
+    .AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
 builder.Services.AddRateLimiter(/* §10.3 */);
 
@@ -423,7 +430,8 @@ builder.Services.AddRateLimiter(/* §10.3 */);
 // §11.4 gives. A route naming a policy nobody registered does not fail closed:
 // YARP rejects the route at config load and drops it, so that path 404s while
 // every other route keeps serving.
-builder.Services.AddAuthorizationBuilder()
+builder.Services
+    .AddAuthorizationBuilder()
     .AddPolicy("inventory:admin", p => p.RequireClaim("permission", "inventory:admin"));
 
 // Both of the following are conditional on the deployment shape, and each is
@@ -448,8 +456,7 @@ if (behindProxy)
         // all, any client can spoof its partition key and bypass the limit.
         o.KnownNetworks.Clear();
         o.KnownProxies.Clear();
-        foreach (string cidr in builder.Configuration
-                     .GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!)
+        foreach (string cidr in builder.Configuration.GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!)
             o.KnownNetworks.Add(IPNetwork.Parse(cidr));
     });
 }
@@ -460,11 +467,13 @@ if (behindProxy)
 // CORS error in a console rather than as the missing setting it is (§15.4).
 if (corsEnabled)
 {
-    builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
-        .WithOrigins(builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!)
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials()));
+    builder.Services
+        .AddCors(o =>
+            o.AddDefaultPolicy(p => p
+                .WithOrigins(builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials()));
 }
 
 WebApplication app = builder.Build();
@@ -473,11 +482,13 @@ WebApplication app = builder.Build();
 // this runs it is the proxy's. Skipped when the gateway IS the edge (Compose),
 // where RemoteIpAddress is already the client and trusting a forwarded header
 // would let any caller choose its own rate-limit bucket.
-if (behindProxy) app.UseForwardedHeaders();
+if (behindProxy)
+    app.UseForwardedHeaders();
 
 app.UseExceptionHandler();
 app.UseCorrelationId();           // assigns the ID if the client sent none
-if (corsEnabled) app.UseCors();
+if (corsEnabled)
+    app.UseCors();
 
 // Authentication FIRST, then the limiter, then authorization. §10.3's
 // "authenticated" policy partitions on the subject claim, and until this line

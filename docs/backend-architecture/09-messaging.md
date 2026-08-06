@@ -205,8 +205,9 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
         Currency      = e.Total.Currency,
         // PlacedLine, not ConfirmedLine — OrderPlaced owns its own line type
         // so the two contracts can version independently (§9.1).
-        Lines         = e.Lines.Select(l => new V1.PlacedLine(
-                            l.ProductId.Value, l.Quantity, l.UnitPrice.Amount)).ToArray()
+        Lines         = e.Lines
+            .Select(l => new V1.PlacedLine(l.ProductId.Value, l.Quantity, l.UnitPrice.Amount))
+            .ToArray()
     };
 
     public IReadOnlyList<object> Map(IReadOnlyList<IDomainEvent> domainEvents)
@@ -215,8 +216,7 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
 
         foreach (IDomainEvent domainEvent in domainEvents)
         {
-            if (!Registry.TryGetValue(domainEvent.GetType(),
-                                      out Func<IDomainEvent, object> map))
+            if (!Registry.TryGetValue(domainEvent.GetType(), out Func<IDomainEvent, object> map))
                 continue;                       // Unregistered → local-only. Not an error.
 
             mapped.Add(map(domainEvent));       // Registered and throwing → fails the command.
@@ -409,8 +409,7 @@ public sealed class OutboxMessage
         MessageId     = message is IIntegrationEvent e ? e.MessageId     : Guid.CreateVersion7(),
         CorrelationId = message is IIntegrationEvent c ? c.CorrelationId : correlationId,
         MessageType   = types.NameOf(message.GetType()),
-        Payload       = JsonSerializer.Serialize(
-                            message, message.GetType(), OutboxJson.Options),
+        Payload       = JsonSerializer.Serialize(message, message.GetType(), OutboxJson.Options),
         Lane          = lane,
         OccurredAt    = now
     };
@@ -423,8 +422,13 @@ public sealed class OutboxMessage
 /// DateTimeOffset.MinValue nobody notices until a metric reads 55 years.
 /// </summary>
 public sealed record OutboxClaim(
-    long Id, Guid MessageId, Guid CorrelationId,
-    string MessageType, string Payload, string Lane, int Attempts,
+    long Id,
+    Guid MessageId,
+    Guid CorrelationId,
+    string MessageType,
+    string Payload,
+    string Lane,
+    int Attempts,
     DateTimeOffset OccurredAt);
 ```
 
@@ -485,14 +489,14 @@ public sealed class MessageTypeMap
     {
         // FullName, not AssemblyQualifiedName: namespace and type name, no
         // version and no assembly. For contracts the namespace is already
-        // versioned (§9.1), so this IS the contract. For domain events it is
+        // versioned (§9.2), so this IS the contract. For domain events it is
         // internal, and a rename is then a migration the team chose rather than
         // one a build number made for it.
         (string Name, Type Type)[] pairs = assemblies
             .SelectMany(a => a.GetTypes())
-            .Where(t => t is { IsClass: true, IsAbstract: false }
-                     && (t.IsAssignableTo(typeof(IIntegrationEvent))
-                      || t.IsAssignableTo(typeof(IDomainEvent))))
+            .Where(t => t is { IsClass: true, IsAbstract: false } &&
+                (t.IsAssignableTo(typeof(IIntegrationEvent)) ||
+                    t.IsAssignableTo(typeof(IDomainEvent))))
             .Select(t => (Name: t.FullName!, Type: t))
             .ToArray();
 
@@ -595,7 +599,7 @@ costs nothing; discovering afterwards that yesterday's rows deserialise with a
 > disagree. The `Local` lane is drained in seconds, which is what makes the
 > cheaper option viable: the exposure is one batch, not one release cycle.
 > That reasoning stops holding the moment the lane backs up for hours, so if the
-> §13.7 outbox-age alert becomes routine rather than exceptional, revisit this
+> §13.6 outbox-age alert becomes routine rather than exceptional, revisit this
 > before the backlog makes the decision for you.
 
 The dispatcher runs as a background service in two phases: an atomic **claim**
@@ -610,8 +614,7 @@ succeeds or fails on its own.
 > they can actually fail separately.
 
 ```csharp
-public sealed class OutboxDispatcher(
-    IServiceScopeFactory scopes, ILogger<OutboxDispatcher> log)
+public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<OutboxDispatcher> log)
     : BackgroundService
 {
     private const int MaxAttempts = 10;
@@ -622,24 +625,30 @@ public sealed class OutboxDispatcher(
         """
         WITH claimable AS (
             SELECT TOP (100) *
-            FROM   ordering.OutboxMessages WITH (UPDLOCK, READPAST, ROWLOCK)
-            WHERE  ProcessedAt IS NULL
-              AND  Attempts < @MaxAttempts
-              AND  (LockedUntil IS NULL OR LockedUntil < SYSDATETIMEOFFSET())
+            FROM ordering.OutboxMessages WITH (UPDLOCK, READPAST, ROWLOCK)
+            WHERE ProcessedAt IS NULL
+                AND Attempts < @MaxAttempts
+                AND (LockedUntil IS NULL OR LockedUntil < SYSDATETIMEOFFSET())
             ORDER BY OccurredAt
         )
         UPDATE claimable
-        SET    LockedUntil = DATEADD(second, 60, SYSDATETIMEOFFSET())
-        OUTPUT inserted.Id, inserted.MessageId, inserted.CorrelationId,
-               inserted.MessageType, inserted.Payload, inserted.Lane,
-               inserted.Attempts, inserted.OccurredAt;
+        SET LockedUntil = DATEADD(second, 60, SYSDATETIMEOFFSET())
+        OUTPUT
+            inserted.Id,
+            inserted.MessageId,
+            inserted.CorrelationId,
+            inserted.MessageType,
+            inserted.Payload,
+            inserted.Lane,
+            inserted.Attempts,
+            inserted.OccurredAt;
         """;
 
     private const string CompleteSql =
         """
         UPDATE ordering.OutboxMessages
-        SET    ProcessedAt = SYSDATETIMEOFFSET(), LockedUntil = NULL
-        WHERE  Id = @Id;
+        SET ProcessedAt = SYSDATETIMEOFFSET(), LockedUntil = NULL
+        WHERE Id = @Id;
         """;
 
     // Increments the attempt counter and backs off exponentially by pushing
@@ -648,12 +657,14 @@ public sealed class OutboxDispatcher(
     private const string FailSql =
         """
         UPDATE ordering.OutboxMessages
-        SET    Attempts    = Attempts + 1,
-               LastError   = LEFT(@Error, 2000),
-               LockedUntil = DATEADD(second,
-                                     POWER(2, CASE WHEN Attempts > 8 THEN 8 ELSE Attempts END) * 5,
-                                     SYSDATETIMEOFFSET())
-        WHERE  Id = @Id;
+        SET
+            Attempts    = Attempts + 1,
+            LastError   = LEFT(@Error, 2000),
+            LockedUntil = DATEADD(
+                second,
+                POWER(2, CASE WHEN Attempts > 8 THEN 8 ELSE Attempts END) * 5,
+                SYSDATETIMEOFFSET())
+        WHERE Id = @Id;
         """;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -690,8 +701,8 @@ public sealed class OutboxDispatcher(
 
         // OutboxClaim, not OutboxMessage — the claim projects only the columns
         // the OUTPUT clause returns. See Appendix D.
-        List<OutboxClaim> claimed = (await connection.QueryAsync<OutboxClaim>(
-            ClaimSql, new { MaxAttempts })).AsList();
+        List<OutboxClaim> claimed =
+            (await connection.QueryAsync<OutboxClaim>(ClaimSql, new { MaxAttempts })).AsList();
 
         int completed = 0;
 
@@ -706,28 +717,30 @@ public sealed class OutboxDispatcher(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // One bad message does not affect the other 99.
-                await connection.ExecuteAsync(FailSql,
-                    new { message.Id, Error = ex.ToString() });
+                await connection.ExecuteAsync(FailSql, new { message.Id, Error = ex.ToString() });
 
-                log.LogError(ex,
+                log.LogError(
+                    ex,
                     "Outbox message {MessageId} on lane {Lane} failed, attempt {Attempt} of {Max}.",
-                    message.MessageId, message.Lane, message.Attempts + 1, MaxAttempts);
+                    message.MessageId,
+                    message.Lane,
+                    message.Attempts + 1,
+                    MaxAttempts);
             }
         }
 
         return completed;
     }
 
-    private static async Task DeliverAsync(
-        IServiceProvider sp, OutboxClaim message, CancellationToken ct)
+    private static async Task DeliverAsync(IServiceProvider sp, OutboxClaim message, CancellationToken ct)
     {
         // Through the map, not Type.GetType: the column holds a name this code
         // chose, and it has to survive the version bump of the assembly that
         // wrote it.
-        Type type = sp.GetRequiredService<MessageTypeMap>()
-                      .Resolve(message.MessageType);
-        object payload = JsonSerializer.Deserialize(
-                             message.Payload, type, OutboxJson.Options)!;
+        Type type = sp
+            .GetRequiredService<MessageTypeMap>()
+            .Resolve(message.MessageType);
+        object payload = JsonSerializer.Deserialize(message.Payload, type, OutboxJson.Options)!;
 
         if (message.Lane is "Broker")
         {
@@ -762,12 +775,14 @@ internal static class ProjectionInvoker
     private static readonly ConcurrentDictionary<Type, Invoker> Cache = new();
 
     public static Task InvokeAllAsync(
-        IServiceProvider sp, object payload, Type eventType,
-        DateTimeOffset occurredAt, CancellationToken ct)
-        => Cache.GetOrAdd(eventType, static t =>
-               (Invoker)Activator.CreateInstance(
-                   typeof(Invoker<>).MakeGenericType(t))!)
-           .InvokeAllAsync(sp, payload, occurredAt, ct);
+        IServiceProvider sp,
+        object payload,
+        Type eventType,
+        DateTimeOffset occurredAt,
+        CancellationToken ct) =>
+        Cache
+            .GetOrAdd(eventType, static t => (Invoker)Activator.CreateInstance(typeof(Invoker<>).MakeGenericType(t))!)
+            .InvokeAllAsync(sp, payload, occurredAt, ct);
 
     private abstract class Invoker
     {
@@ -899,7 +914,8 @@ namespace Ordering.Infrastructure.Messaging;
 
 public sealed class IntegrationEventConsumer<TEvent>(
     IEnumerable<IIntegrationEventHandler<TEvent>> handlers,
-    MessagingMetrics metrics, TimeProvider clock)
+    MessagingMetrics metrics,
+    TimeProvider clock)
     : IConsumer<TEvent>
     where TEvent : class, IIntegrationEvent
 {
@@ -908,8 +924,7 @@ public sealed class IntegrationEventConsumer<TEvent>(
         // Publish-to-consume lag, read straight off the message (§13.3). The
         // IIntegrationEvent constraint is what makes OccurredAt reachable here
         // — without it this method sees only `object`-shaped generics.
-        metrics.Delivered(typeof(TEvent).Name,
-            clock.GetUtcNow() - context.Message.OccurredAt);
+        metrics.Delivered(typeof(TEvent).Name, clock.GetUtcNow() - context.Message.OccurredAt);
 
         // Configuring this consumer for TEvent is a statement that something
         // handles TEvent. Zero handlers is a misconfiguration, and acking the
@@ -998,9 +1013,7 @@ cfg.ReceiveEndpoint("ordering-commands", e =>
         // rather than for outcomes that are not faults at all.
         r.Ignore<ContractMappingException>();
 
-        r.Exponential(5, TimeSpan.FromSeconds(1),
-                         TimeSpan.FromMinutes(1),
-                         TimeSpan.FromSeconds(2));
+        r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
     });
     e.UseInMemoryOutbox();
     e.UseConsumeFilter(typeof(InboxFilter<>), context);
@@ -1049,8 +1062,8 @@ degrades the filtered index scan.
 -- that the §13.6 alert exists to surface — turning permanent data loss into
 -- a clean, empty table.
 DELETE TOP (5000) FROM ordering.OutboxMessages
-WHERE  ProcessedAt IS NOT NULL
-  AND  ProcessedAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
+WHERE ProcessedAt IS NOT NULL
+    AND ProcessedAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
 ```
 
 ## 9.5 Idempotent consumers — the inbox
@@ -1097,7 +1110,7 @@ degrades with it:
 -- let a late redelivery through as if it were new, which is exactly the
 -- duplicate this table exists to stop.
 DELETE TOP (5000) FROM ordering.InboxMessages
-WHERE  HandledAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
+WHERE HandledAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
 ```
 
 The window is a real constraint, not a round number: it must exceed the
@@ -1127,8 +1140,8 @@ public sealed class InboxFilter<T>(OrderingDbContext db) : IFilter<ConsumeContex
 {
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
     {
-        Guid messageId = context.MessageId
-            ?? throw new InvalidOperationException("Message has no MessageId.");
+        Guid messageId = context.MessageId ??
+            throw new InvalidOperationException("Message has no MessageId.");
 
         // The queue this message arrived on — the same type on a different
         // endpoint is a different unit of work.
@@ -1224,8 +1237,7 @@ public sealed record StockLine(Guid ProductId, int Quantity);
 ```csharp
 namespace Common.Contracts.Payments.V1;
 
-public sealed record AuthorisePayment(
-    Guid OrderId, Guid CustomerId, decimal Amount, string Currency);
+public sealed record AuthorisePayment(Guid OrderId, Guid CustomerId, decimal Amount, string Currency);
 ```
 
 ```csharp
@@ -1390,21 +1402,26 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 // Send, not Publish — these are commands with one owner.
                 // Mapped, not forwarded: ReserveStock owns its line type, so
                 // versioning OrderPlaced does not version Inventory's command.
-                .Send(InventoryQueue, ctx => new ReserveStock(
-                    ctx.Saga.OrderId,
-                    ctx.Message.Lines
-                       .Select(l => new StockLine(l.ProductId, l.Quantity))
-                       .ToArray()))
+                .Send(InventoryQueue, ctx =>
+                    new ReserveStock(
+                        ctx.Saga.OrderId,
+                        ctx.Message.Lines
+                            .Select(l => new StockLine(l.ProductId, l.Quantity))
+                            .ToArray()))
                 .TransitionTo(AwaitingStock));
 
-        During(AwaitingStock,
+        During(
+            AwaitingStock,
             When(StockReserved)
                 .Unschedule(StockTimeout)
                 // Currency travels with the amount — a bare decimal is a
                 // charge waiting to be made in the wrong denomination.
-                .Send(PaymentsQueue, ctx => new AuthorisePayment(
-                    ctx.Saga.OrderId, ctx.Saga.CustomerId,
-                    ctx.Saga.Total, ctx.Saga.Currency))
+                .Send(PaymentsQueue, ctx =>
+                    new AuthorisePayment(
+                        ctx.Saga.OrderId,
+                        ctx.Saga.CustomerId,
+                        ctx.Saga.Total,
+                        ctx.Saga.Currency))
                 // Arm the next wait in the same activity that begins it.
                 .Schedule(PaymentTimeout, ctx => new PaymentAuthorisationExpired(ctx.Saga.OrderId))
                 .TransitionTo(AwaitingPayment),
@@ -1412,20 +1429,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             When(StockReservationFailed)
                 .Unschedule(StockTimeout)
                 // String codes, not the domain enum — see the contracts above.
-                .Send(OrderingQueue, ctx => new CancelOrder(
-                    ctx.Saga.OrderId, CancelReasons.OutOfStock))
+                .Send(OrderingQueue, ctx =>
+                    new CancelOrder(ctx.Saga.OrderId, CancelReasons.OutOfStock))
                 .Finalize(),
 
             When(StockTimeout.Received)
-                .Send(OrderingQueue, ctx => new CancelOrder(
-                    ctx.Saga.OrderId, CancelReasons.StockTimeout))
+                .Send(OrderingQueue, ctx =>
+                    new CancelOrder(ctx.Saga.OrderId, CancelReasons.StockTimeout))
                 .Finalize());
 
-        During(AwaitingPayment,
+        During(
+            AwaitingPayment,
             When(PaymentAuthorised)
                 .Unschedule(PaymentTimeout)
-                .Send(OrderingQueue, ctx => new ConfirmOrder(
-                    ctx.Saga.OrderId, ctx.Message.Reference))
+                .Send(OrderingQueue, ctx =>
+                    new ConfirmOrder(ctx.Saga.OrderId, ctx.Message.Reference))
                 // Not Finalize: the order is confirmed, not finished. It is now
                 // waiting on Shipping, and that wait needs a state to live in.
                 .Schedule(DespatchTimeout, ctx => new DespatchExpired(ctx.Saga.OrderId))
@@ -1455,37 +1473,39 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
 
-        During(Confirmed,
+        During(
+            Confirmed,
             When(ShipmentDispatched)
                 .Unschedule(DespatchTimeout)
-                .Send(OrderingQueue, ctx => new MarkOrderShipped(
-                    ctx.Saga.OrderId, ctx.Message.TrackingNumber))
+                .Send(OrderingQueue, ctx =>
+                    new MarkOrderShipped(ctx.Saga.OrderId, ctx.Message.TrackingNumber))
                 .Finalize(),
 
             When(DespatchTimeout.Received)
                 // Escalation, not compensation. The saga finalises because it
                 // has nothing further to coordinate; a human now owns the order.
-                .Send(OrderingQueue, ctx => new FlagOrderForReview(
-                    ctx.Saga.OrderId, ReviewReasons.NotDespatched))
+                .Send(OrderingQueue, ctx =>
+                    new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotDespatched))
                 .Finalize());
 
-        During(Compensating,
+        During(
+            Compensating,
             When(StockReleased)
                 .Unschedule(ReleaseTimeout)
                 // The reason recorded on entry, not a literal: this transition
                 // is reached from a decline and from a timeout alike.
-                .Send(OrderingQueue, ctx => new CancelOrder(
-                    ctx.Saga.OrderId, ctx.Saga.CancelReason))
+                .Send(OrderingQueue, ctx =>
+                    new CancelOrder(ctx.Saga.OrderId, ctx.Saga.CancelReason))
                 .Finalize(),
 
             When(ReleaseTimeout.Received)
                 // Cancel the order regardless — the customer must not be left
                 // waiting on Inventory. The stranded reservation is escalated
                 // separately, because it is Inventory's to resolve.
-                .Send(OrderingQueue, ctx => new CancelOrder(
-                    ctx.Saga.OrderId, ctx.Saga.CancelReason))
-                .Send(OrderingQueue, ctx => new FlagOrderForReview(
-                    ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
+                .Send(OrderingQueue, ctx =>
+                    new CancelOrder(ctx.Saga.OrderId, ctx.Saga.CancelReason))
+                .Send(OrderingQueue, ctx =>
+                    new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
                 .Finalize());
 
         SetCompletedWhenFinalized();
@@ -1536,8 +1556,7 @@ CREATE INDEX IX_OrderReviews_RaisedAt ON ordering.OrderReviews (RaisedAt);
 public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork)
     : ICommandHandler<FlagOrderForReviewCommand, Result>
 {
-    public async Task<Result> HandleAsync(
-        FlagOrderForReviewCommand command, CancellationToken ct)
+    public async Task<Result> HandleAsync(FlagOrderForReviewCommand command, CancellationToken ct)
     {
         // Written through the unit of work, not a second Dapper connection.
         // Every command runs inside TransactionBehavior (§6.3); a handler that
@@ -1548,7 +1567,8 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork)
         await unitOfWork.ExecuteRawAsync(
             """
             IF NOT EXISTS (SELECT 1 FROM ordering.OrderReviews
-                           WHERE OrderId = @OrderId AND Reason = @Reason)
+                           WHERE OrderId = @OrderId
+                               AND Reason = @Reason)
                 INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)
                 VALUES (@OrderId, @Reason, SYSDATETIMEOFFSET());
             """,
@@ -1668,15 +1688,16 @@ CREATE INDEX IX_OrderFulfilmentStates_StartedAt
 // In AddMassTransitMessaging (§4.2). The repository is not optional:
 // MassTransit throws at startup without one, and the in-memory repository
 // used in tests (§12.5) discards every in-flight order on restart.
-cfg.AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
-   .EntityFrameworkRepository(r =>
-   {
-       r.ExistingDbContext<OrderingDbContext>();
-       // Pessimistic: two events for the same order can arrive concurrently
-       // (StockReserved and a timeout), and optimistic retry on a state
-       // machine replays transitions that already ran.
-       r.ConcurrencyMode = ConcurrencyMode.Pessimistic;
-   });
+cfg
+    .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
+    .EntityFrameworkRepository(r =>
+    {
+        r.ExistingDbContext<OrderingDbContext>();
+        // Pessimistic: two events for the same order can arrive concurrently
+        // (StockReserved and a timeout), and optimistic retry on a state
+        // machine replays transitions that already ran.
+        r.ConcurrencyMode = ConcurrencyMode.Pessimistic;
+    });
 ```
 
 Because the repository shares `OrderingDbContext`, the saga table lives in the
@@ -1778,10 +1799,11 @@ room for jitter to widen the delays:
 // the only one holding client credentials (§11.5).
 services.AddTransient<ClientCredentialsHandler>();
 services.AddSingleton<ITokenCache, CachingTokenClient>();
-services.AddOptions<ServiceIdentityOptions>()
-        .BindConfiguration("Identity:Client")
-        .ValidateDataAnnotations()
-        .ValidateOnStart();
+services
+    .AddOptions<ServiceIdentityOptions>()
+    .BindConfiguration("Identity:Client")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 services
     // http, not https: TLS terminates at the ingress and traffic inside the
@@ -1883,11 +1905,12 @@ carrying Catalog's events into local read models:
 ```csharp
 cfg.ReceiveEndpoint("ordering-catalog-events", e =>
 {
-    e.UseMessageRetry(r => r.Exponential(
-        retryLimit: 5,
-        minInterval: TimeSpan.FromSeconds(1),
-        maxInterval: TimeSpan.FromMinutes(1),
-        intervalDelta: TimeSpan.FromSeconds(2)));
+    e.UseMessageRetry(r =>
+        r.Exponential(
+            retryLimit: 5,
+            minInterval: TimeSpan.FromSeconds(1),
+            maxInterval: TimeSpan.FromMinutes(1),
+            intervalDelta: TimeSpan.FromSeconds(2)));
 
     // Defers any Publish/Send until the consumer completes, so a retry does
     // not re-emit messages the failed attempt already sent.
@@ -1910,11 +1933,12 @@ And the **saga** endpoint, which receives the fulfilment events (§9.6):
 ```csharp
 cfg.ReceiveEndpoint("ordering-fulfilment-saga", e =>
 {
-    e.UseMessageRetry(r => r.Exponential(
-        retryLimit: 5,
-        minInterval: TimeSpan.FromSeconds(1),
-        maxInterval: TimeSpan.FromMinutes(1),
-        intervalDelta: TimeSpan.FromSeconds(2)));
+    e.UseMessageRetry(r =>
+        r.Exponential(
+            retryLimit: 5,
+            minInterval: TimeSpan.FromSeconds(1),
+            maxInterval: TimeSpan.FromMinutes(1),
+            intervalDelta: TimeSpan.FromSeconds(2)));
 
     e.UseInMemoryOutbox();
 
@@ -1942,8 +1966,7 @@ e.UseMessageRetry(r =>
 {
     // A malformed contract does not become well-formed on the fourth attempt.
     r.Ignore<ContractMappingException>();
-    r.Exponential(5, TimeSpan.FromSeconds(1),
-                     TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
+    r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
 });
 ```
 

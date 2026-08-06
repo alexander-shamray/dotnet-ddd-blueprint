@@ -191,7 +191,8 @@ already written against it.
 - Pascal case for types, properties, methods and events; `I` prefix on
   interfaces; namespace matches folder.
 - **A single statement may omit braces; two or more always take them.** The
-  statement goes on the following line, and it may wrap:
+  statement goes on the following line — never beside the condition — and it may
+  wrap:
 
   ```csharp
   if (amount < 0)
@@ -201,8 +202,12 @@ already written against it.
       await publisher.StageAsync(domainEvent, OutboxLane.Local, ct);
   ```
 
-  This holds across all 42 braceless bodies in the blueprint — 15 guard-clause
-  `throw`s and 27 `return`s and single calls.
+  This holds across all 53 braceless bodies in the blueprint — 15 guard-clause
+  `throw`s, 13 `return`s, and 25 single calls and `continue`s.
+  `csharp_preserve_single_line_statements = false` keeps a format run from
+  pulling any of them back up onto the condition's line. The one exception is a
+  **wrapped** condition, which takes braces — see the multi-line condition rule
+  below.
 
 - **Explicit types for locals**, except where the right-hand side names the
   type.
@@ -230,8 +235,174 @@ already written against it.
   | Anonymous types | `var args = new { OrderId = orderId.Value };` |
   | Tuple deconstruction | `foreach (var (product, qty, price) in items)` |
   | Fluent resource DSLs | The whole Aspire AppHost block in §14.2 — eleven of its thirteen locals are an `IResourceBuilder<T>` whose name only repeats what the `Add*` call already said. Explicit types are possible there and read worse; keep the block uniform rather than typing part of it |
-- Binary operators spaced; wrapped operators go at the **beginning** of the
-  continuation line.
+- Binary operators spaced. Where a wrapped one goes is the operator-placement
+  rule below, which states it once.
+- **A list is on one line, or one element per line. Never a ragged middle.**
+  "List" means anything comma-separated inside brackets — parameters,
+  arguments, collection expressions, initialisers, tuple members. The budget is
+  **120 columns** (`max_line_length` in `.editorconfig`); within it the list
+  stays on one line, and past it every element gets its own:
+
+  ```csharp
+  string[] forbidden = [
+      "Microsoft.EntityFrameworkCore",
+      "MassTransit",
+      "StackExchange.Redis",
+      "Microsoft.AspNetCore"
+  ];
+  ```
+
+  `[` and `{` end the line they open and their closer sits on its own line at
+  the opening construct's column. `(` also ends its line, but `)` trails the
+  last element — `);`, not a line of its own:
+
+  ```csharp
+  _deliveryLag = meter.CreateHistogram<double>(
+      "messaging.delivery.lag",
+      unit: "s",
+      description: "OccurredAt to consumer start.");
+  ```
+
+  Continuations indent **four**, never to a bracket column. A list too wide for
+  one line was previously wrapped under its opening bracket
+  (`string[] forbidden = ["…",` / 26 spaces / `"…"];`); that form is gone and a
+  surviving one is a leftover. Two things keep it from being mechanical: a line
+  comment on an element forces the broken form regardless of width, and the
+  four `var` cases above still apply inside the elements.
+- **A broken fluent chain puts every call on its own line**, at head + 4, never
+  aligned under the receiver's dot. That includes the *first* call: if the chain
+  breaks at all, nothing stays on the head's line. The head is whatever contains
+  no invocation, so it is often a bare identifier sitting alone:
+
+  ```csharp
+  builder.Services
+      .AddReverseProxy()
+      .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
+  builder
+      .Property(o => o.Id)
+      .HasConversion(id => id.Value, value => new OrderId(value))
+      .ValueGeneratedNever();
+  ```
+
+  Unlike a list, a chain is **never joined back up to fit** — it is broken for
+  reading order, not for width, and the example above is 100 columns broken
+  across three lines on purpose. One exception: a short qualifier and its
+  subject count as one call (`.That().ResideInNamespaceContaining(…)`,
+  `.ShouldNot().HaveDependencyOn(…)` — NetArchTest's idiom reads as pairs).
+
+  **The head is the line the chain starts on, which is not always the statement's
+  first line.** When a declaration's initialiser wraps, that wrapped line is the
+  head and the chain indents four past *it* — eight from the declaration:
+
+  ```csharp
+  ValidationFailure[] failures =
+      (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
+          .SelectMany(r => r.Errors)
+          .Where(f => f is not null)
+          .ToArray();
+  ```
+
+  Measuring from the declaration instead would put `.SelectMany` level with the
+  expression it is chained onto, and the chain would read as a sibling of the
+  initialiser rather than as applied to it. A `})` closing a lambda mid-chain is
+  a continuation, not a head — the calls after it keep the chain's indent.
+
+  **"Contains no invocation" means no *dotted* call, and a receiver never
+  outranks that.** `Types`, `app`, `_lines`, `from` and `Enumerable` all sit
+  alone as heads, static classes and fields alike — `Types.InAssembly(a)` and
+  `Enumerable.Range(0, n)` break after the receiver just as `builder.Services`
+  does. What stays on the head is whatever has nothing to strand in front of
+  it: object creation (`new MsSqlBuilder()`), a call with no receiver
+  (`When(OrderPlaced)`, `GetInvoker<TResult>(…)`, `BuildServices()`), and a
+  parenthesised expression (`(await Task.WhenAll(…))`). Splitting those would
+  leave a `new` or a bare `(` on a line of its own, which is the thing the rule
+  is trying to avoid.
+- **A lambda body that is itself a call goes on its own line**, at + 4, rather
+  than trailing after the `=>`. A bare parameter re-mention is not a call and
+  stays — `p => p` heading its own chain is the fluent-DSL idiom, and moving it
+  down would strand a single letter on a line:
+
+  ```csharp
+  builder.Services
+      .AddCors(o =>
+          o.AddDefaultPolicy(p => p
+              .WithOrigins(builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials()));
+  ```
+
+  So `o => o.AddDefaultPolicy(…)` breaks and `p => p` does not, in the same
+  statement. Each nesting level is then one indent, and the reader can see which
+  builder each call belongs to. This applies only when the construct is already
+  broken across lines; inside 120 columns it stays on one.
+
+  An **expression-bodied member** is not a lambda for this purpose:
+  `public Money Total => _lines.Aggregate(…)` keeps its body on the `=>` line,
+  because there is no nesting for the break to clarify. When such a member's
+  body *does* need its own line, `=>` still trails the signature — it is an
+  operator, and the rule above applies to it too:
+
+  ```csharp
+  public Task<TResult> SendAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default) =>
+      GetInvoker<TResult>(command.GetType(), typeof(CommandInvoker<,>))
+          .InvokeAsync(services, command, ct);
+  ```
+
+  The body sits at the **declaration's** indent + 4, which is not necessarily
+  the `=>` line's + 4: a signature that itself wraps puts its parameters at + 4
+  already, and measuring from there would indent the body to match them. Join
+  the signature where it fits inside 120 and the question does not arise.
+- **Break at the outermost bracket, never a nested one.** When a call's argument
+  is itself a call, it is the outer parenthesis that opens the line — reaching
+  past it to break the inner one leaves the outer call glued to its argument and
+  reads as though the inner list were the outer's:
+
+  ```csharp
+  // Wrong — the break is inside OrderPlacedDomainEvent, and Raise( is stranded.
+  order.Raise(new OrderPlacedDomainEvent(
+      order.Id, customerId, order.Total, order.SnapshotLines(), now));
+
+  // Right.
+  order.Raise(
+      new OrderPlacedDomainEvent(order.Id, customerId, order.Total, order.SnapshotLines(), now));
+  ```
+
+  The argument moves to the next line **whole**; break it further only if it
+  still does not fit, and then one element per line as usual. This is the same
+  principle as the lambda rule above — a nested construct starts its own line —
+  and it is why `.Send(queue, ctx => new CancelOrder(…))` breaks after `ctx =>`
+  rather than after `CancelOrder(`.
+- **A multi-line condition takes trailing operators, four-space continuations,
+  and braces on its body.** The braces are what make four safe: without them the
+  last `&&` line and the body sit in the same column and the reader cannot see
+  where the condition stops.
+
+  ```csharp
+  if (currentUser.IsAuthenticated &&
+      order.CustomerId.Value != currentUser.Id &&
+      !currentUser.HasPermission("orders:admin"))
+  {
+      return Result.Failure(OrderErrors.NotFound);
+  }
+  ```
+
+  This is the **one exception to the braces rule above** — a single statement may
+  omit braces, unless the condition it hangs off is wrapped. Prefer not to wrap
+  at all; joining is the better fix, and it has already been applied everywhere
+  it fits. The block above is the corpus: one wrapped header, in §11.4, kept
+  because the three clauses of an ownership check do not join inside 120. A
+  second one appearing is a signal to join, not a precedent.
+- **Operators go at the end of the line they continue from**, not the start of
+  the next (`dotnet_style_operator_placement_when_wrapping = end_of_line`). Each
+  line then ends by announcing that more is coming. This holds for `&&`, `||`,
+  `??` and `+`, in conditions and in expressions alike; a leading `&&` or `??` is
+  a leftover from the previous style. It governs wrapped lambda predicates as
+  much as `if` headers.
+- A base-type list is the one continuation that is **not** covered by any of the
+  above: it has no bracket to hang off and no operator, and it is already one
+  entry per line. Leave it aligned under the `:`.
 - Prefer collection expressions, `is null` over `ReferenceEquals`, null
   propagation, compound assignment, simplified interpolation, primary
   constructors.
@@ -268,6 +439,119 @@ whole corpus, not about the file in front of you.
 **Fence languages in use:** `csharp`, `sql`, `yaml`, `bash`, `json`, `mermaid`,
 `dockerfile`, `xml`, and bare ``` for trees and console output. Always tag a
 fence that contains a real language.
+
+## SQL style
+
+Most of the SQL lives inside C# raw string literals rather than `sql` fences, so
+"the statement's own left margin" below means the literal's indent, not column
+zero.
+
+**Clause keywords start their own line at that margin, one space before what
+follows; continuations indent four.** Continuations are the connectors that
+extend a clause — `AND`, `OR`, and a `MERGE`'s `ON`. Each predicate gets its own
+line: a chain packed onto one line hides the shape of the condition, which in
+this blueprint is usually the point being made.
+
+**An `AND` extending an `ON` aligns with the `ON`**, rather than indenting
+another four. `ON` is itself a continuation — of `MERGE … USING` or of a
+`JOIN` — so its predicates sit at the level it already occupies, and a second
+indent would imply a nesting that is not there:
+
+```sql
+MERGE ordering.ProductPrices AS target
+USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
+    ON target.ProductId = source.ProductId
+    AND target.Currency = source.Currency
+```
+
+This is the one place `AND` does not indent past the keyword it extends; under
+`WHERE`, which is a clause keyword at the margin, it still does.
+
+```sql
+UPDATE ordering.OrderSummaries
+SET FulfilmentCounted = 1
+OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
+WHERE OrderId = @OrderId
+    AND PlacedAt IS NOT NULL
+    AND ConfirmedAt IS NOT NULL
+    AND FulfilmentCounted = 0;
+```
+
+One space means one, `WHERE` included — it used to be written `WHERE  ` and no
+longer is.
+
+`UPDATE <table>` and `SET` are separate lines. The exception is `MERGE`'s
+`UPDATE SET`, which names no table and stays one token.
+
+**A `SET` that breaks keeps nothing on the keyword's line.** Like a fluent
+chain, if the assignment list does not fit it goes below whole — the first
+assignment does not stay up beside `SET` with the rest hanging under it:
+
+```sql
+UPDATE SET
+    CustomerId  = @CustomerId,
+    TotalAmount = @Total,
+    Currency    = @Currency,
+    LineCount   = @LineCount,
+```
+
+The `=` signs line up in a column here, and that alignment is deliberate — it is
+the same one the C# initialisers use, and it survives because these are one
+element per line rather than a wrapped list.
+
+**A SQL list obeys the same rule as a C# one: one line, or one element per
+line, never a ragged middle.** That covers the column list after `INSERT`, the
+values after `VALUES`, the columns after `OUTPUT` and `GROUP BY`, and a
+function's arguments. The budget is the same 120 columns, measured from the
+literal's margin:
+
+```sql
+INSERT (OrderId, CustomerId, Status, TotalAmount, Currency, LineCount, Products, PlacedAt, UpdatedAt)
+VALUES (@OrderId, @CustomerId, @Status, @Total, @Currency, @LineCount, @Products, @PlacedAt, @UpdatedAt)
+```
+
+Past the budget the `(` ends its line and each element takes one, indented four
+— **not** aligned under the first argument. `DATEADD(second, …)` wrapping its
+arguments into a column under `second` is the keyword river again, one scope in.
+
+The single exception is a **DDL body**, where alignment is a table rather than a
+wrapped list: `CREATE TABLE` and `CREATE INDEX` keep their aligned type and
+constraint columns, because there the columns carry the meaning.
+
+A parenthesised sub-expression short enough for one line stays on one line;
+`AND (LockedUntil IS NULL OR LockedUntil < SYSDATETIMEOFFSET())` is one
+predicate, not two. A parenthesised group that *does* break indents its `OR`s a
+further four, so nesting depth is visible:
+
+```sql
+WHERE o.CustomerId = @CustomerId
+    AND (@AfterPlacedAt IS NULL
+        OR o.PlacedAt < @AfterPlacedAt
+        OR (o.PlacedAt = @AfterPlacedAt AND o.Id < @AfterId))
+```
+
+**Column aliases are assignments, not `AS`** — `Total = o.TotalAmount`, never
+`o.TotalAmount AS Total`. The name being defined then starts the line, so a
+projection reads as the row shape it produces, and the `=` column lines up the
+way `SET`'s does. This is the SELECT list only: `MERGE … AS target`,
+`USING (…) AS source`, `WITH claimable AS (` and `CAST(x AS varchar(10))` are
+required syntax and keep `AS`.
+
+**`INNER JOIN` is spelled in full, and its `ON` gets its own line** at + 4. The
+join condition is a predicate and belongs where predicates go, not trailing off
+the end of a table name:
+
+```sql
+FROM ordering.Orders o
+INNER JOIN ordering.OrderLines l
+    ON l.OrderId = o.Id
+```
+
+An alias follows its table after one space. Padding table names into a column
+(`FROM ordering.Orders      o`) is the old keyword river in another costume.
+
+This replaced a right-aligned keyword river (`FROM   `, `WHERE  `, `  AND  `,
+every argument at column 7). If you find one, it is a leftover — convert it.
 
 ## Working in this repo
 
@@ -314,9 +598,53 @@ Once code is present, additionally:
 
 ## Available commands
 
+Content:
+
 | | |
 |---|---|
 | `/validate-blueprint` | Multi-pass self-consistency audit; also code ↔ docs drift once `src/` exists |
 | `/check-links` | Link, cross-reference and nav-footer integrity |
 | `/new-chapter` | Scaffold a chapter and rewire its neighbours |
 | `/new-adr` | Append an ADR in the established form |
+| `/style-pass` | Apply one corrected code form corpus-wide, then record it in `CLAUDE.md` and `.editorconfig` |
+
+Delivery:
+
+| | |
+|---|---|
+| `/ship` | Run the three below in sequence, resuming where a previous run stopped |
+| `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
+| `/commit` | Split the working tree into semantic commits with arguing bodies |
+| `/pr` | Open a PR in the house body form |
+| `/review-copilot` | Triage Copilot's PR comments — verify each before acting |
+| `/review-grok` | Triage an external review into a resolution record |
+
+`/pr` pushes the branch itself, and `/ship` therefore runs all the way to an
+open PR. What `.claude/settings.json` still denies is the narrow set that is a
+decision rather than a step: `--force`, `-f`, `--delete`, and any push to
+`main`. A branch wanting one of those is raising a question, not running a
+command. `gh pr create`'s own offer to push is not used either — it is the
+same action by a route that skips the upstream check `/pr` makes first, so it
+reaches the remote without reporting that it did.
+
+This replaced a blanket `Bash(git push:*)` deny, under which `/pr` stopped and
+asked the user to push. Worth knowing what that cost: the stop was the last
+moment the work was still cheap to change, and **the checks in `/ship` step 2
+now carry that weight alone.** They are the only thing that halts the chain.
+
+**File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
+covers every file-editing tool, `Write` included; a `Write(path)` rule matches
+nothing and Claude Code refuses to start until it is removed:
+
+```
+Permission deny rule (.claude\settings.json): Write(.remember/**) is not matched
+by file permission checks — only Edit(path) rules are.
+```
+
+So `Edit(.remember/**)` and `Edit(./.remember/**)` are the whole of the
+`.remember/` protection, and the absence of a `Write` twin beside them is
+correct rather than a gap. This has now been "fixed" twice by adding the twin
+back — once by an external reviewer reading the deny list as incomplete, once
+by acting on that review — and both times it broke startup. A reviewer who has
+not run the harness cannot see this; check a permission claim against the
+harness before acting on it.

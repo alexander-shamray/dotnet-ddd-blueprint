@@ -223,23 +223,24 @@ is a public, unlimited copy of an authenticated, limited endpoint:
 > **The in-process API tests do not catch this.** They call the service
 > directly, on `/v1/orders/...` ([§12.4](12-test-strategy.md)), so they exercise everything after the
 > strip and nothing before it. Path composition is gateway configuration, and
-> [§15.1](15-cicd-deployment.md)'s config test — every route's policies resolve — is the only place it
-> is checked; extend it to assert each route's stripped path against the group
-> its service maps.
+> PR-17's config test ([Appendix C](appendix-c-delivery-plan.md)) — every route's policies resolve — is the only
+> place it is checked; it also asserts each route's stripped path against the
+> group its service maps.
 
 Deprecation is signalled with standard headers rather than a changelog nobody
 reads (RFC 8594 / RFC 9745):
 
 ```csharp
-app.MapGroup("/v1")
-   .AddEndpointFilter(async (ctx, next) =>
-   {
-       ctx.HttpContext.Response.Headers["Deprecation"] = "true";
-       ctx.HttpContext.Response.Headers["Sunset"] = "Wed, 31 Dec 2026 23:59:59 GMT";
-       ctx.HttpContext.Response.Headers["Link"] =
-           "</api/v2/orders>; rel=\"successor-version\"";
-       return await next(ctx);
-   });
+app
+    .MapGroup("/v1")
+    .AddEndpointFilter(async (ctx, next) =>
+    {
+        ctx.HttpContext.Response.Headers["Deprecation"] = "true";
+        ctx.HttpContext.Response.Headers["Sunset"] = "Thu, 31 Dec 2026 23:59:59 GMT";
+        ctx.HttpContext.Response.Headers["Link"] =
+            "</api/v2/orders>; rel=\"successor-version\"";
+        return await next(ctx);
+    });
 ```
 
 Retire v1 only when telemetry confirms no traffic remains on it — not when the
@@ -265,9 +266,9 @@ builder.Services.AddRateLimiter(options =>
 
     options.AddPolicy("authenticated", context =>
         RateLimitPartition.GetTokenBucketLimiter(
-            partitionKey: context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-                          ?? context.Connection.RemoteIpAddress?.ToString()
-                          ?? "unknown",
+            partitionKey: context.User.FindFirstValue(ClaimTypes.NameIdentifier) ??
+                context.Connection.RemoteIpAddress?.ToString() ??
+                "unknown",
             factory: _ => new TokenBucketRateLimiterOptions
             {
                 TokenLimit          = 300,
@@ -349,8 +350,8 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
     // Resolved once, outside the delegate: this runs on every request, and
     // ILoggerFactory is a singleton whose per-request lookup buys nothing.
     ILogger logger = app.ApplicationServices
-                        .GetRequiredService<ILoggerFactory>()
-                        .CreateLogger("Common.Web.CorrelationId");
+        .GetRequiredService<ILoggerFactory>()
+        .CreateLogger("Common.Web.CorrelationId");
 
     return app.Use(async (context, next) =>
     {
@@ -371,10 +372,7 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
         // Serilog's LogContext. OpenTelemetry is the whole logging stack here
         // (Appendix B), and it reads scopes; §13.3's LoggingBehavior uses the
         // same call for the same reason.
-        using (logger.BeginScope(new Dictionary<string, object>
-               {
-                   ["CorrelationId"] = correlationId
-               }))
+        using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
             await next();
     });
 }
@@ -467,8 +465,7 @@ public static class OrderErrors
     // The products are unpriceable, which is a fact about this service's state
     // and not something the caller phrased wrongly.
     public static Error ProductsUnavailable(IReadOnlyList<ProductId> missing) =>
-        Error.Rule("order.products_unavailable",
-            $"No price for {missing.Count} product(s).");
+        Error.Rule("order.products_unavailable", $"No price for {missing.Count} product(s).");
 }
 ```
 

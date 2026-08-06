@@ -29,6 +29,73 @@ indent_size = 2
 indent_size = 4
 tab_width = 4
 
+# The budget a list has before it must break. Unlike [*.md] above, a number is
+# worth setting here: it is the threshold the wrapping rule turns on, so an
+# editor ruler at 120 shows the same boundary the rule is written against.
+#
+# Roslyn will not enforce the rule. There is no wrapping engine — no setting
+# reflows a list to fit, or breaks one that does not, so `dotnet format` leaves
+# both alone. Like csharp_prefer_braces below, this value is a declaration and
+# CLAUDE.md carries the rule itself.
+#
+# csharp_new_line_before_open_brace is deliberately NOT set. Its categories are
+# all-or-nothing: naming `lambdas` would be right for the block-bodied ones the
+# corpus writes Allman, and wrong for `o => { /* §11.3 */ }`; naming
+# `object_collection_array_initializers` would explode every short `new { … }`
+# the one-line rule exists to keep. The C# default already matches the dominant
+# style, and the short forms are the wrapping rule's job, not a formatter's.
+max_line_length = 120
+
+# --- Wrapping: what a formatter must not undo ---
+# The rules above are declarative, but three of `dotnet format`'s defaults would
+# actively rewrite code that already follows them. These three are not
+# preferences; they are the settings that keep a format run idempotent.
+
+# The braceless body goes on the line AFTER its condition, never beside it —
+# 53 sites, and the rule that makes csharp_prefer_braces = false readable.
+# Left at the default (true), a formatter would pull `app.UseCors();` back up
+# onto its `if (corsEnabled)` line and undo the distinction.
+csharp_preserve_single_line_statements = false
+
+# ...but a one-line BLOCK stays one line: `{ get; init; }` on 85 members, and
+# `o => { /* §11.3 */ }` where the elision is the point.
+csharp_preserve_single_line_blocks = true
+
+# Extra spaces before `=` are alignment, not accident: 78 declarations and
+# initialiser members line their values up in a column (§8.2's HybridCache
+# options, §6.6's anonymous parameter objects). `false` here would collapse
+# every one of them to a single space.
+csharp_space_around_declaration_statements = ignore
+
+# Members of a multi-line initialiser get one line each — the list rule, in the
+# one place Roslyn can state it. Stated rather than inherited, because
+# csharp_preserve_single_line_blocks above is what keeps `new { q.ProductId }`
+# and `new { MaxAttempts }` from being exploded by it, and the two are only
+# legible as a pair.
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+
+# No setting expresses these; CLAUDE.md carries them and a reviewer should not
+# go looking for a key that does not exist:
+#   - `=>` trails the signature of an expression-bodied member, with the body
+#     at the DECLARATION's indent + 4 (not the `=>` line's).
+#   - A broken fluent chain puts every call on its own line, first one included.
+#   - A break goes at the outermost bracket, never a nested one.
+#   - A wrapped condition takes braces on its body.
+# dotnet_style_operator_placement_when_wrapping (below, in [*.cs]) is the
+# closest thing to enforcement, and it governs binary operators only — not `=>`.
+
+# There is deliberately NO [*.sql] section, and adding one would be a mistake
+# rather than an omission. §7.4 is normative: hand-written DDL ships inside a
+# migration's `migrationBuilder.Sql("""…""")`, and "there is no second
+# mechanism" — so the solution has no .sql files for a section to match.
+#
+# That puts every statement inside a C# raw string literal, which no formatter
+# reads or rewrites. The SQL conventions in CLAUDE.md are therefore both
+# unenforceable and unbreakable by tooling: `dotnet format` will not fix a
+# keyword river and will not introduce one. They are a review rule, and the
+# only one in this file's remit that is.
+
 # --- .NET / C# style ---
 csharp_using_directive_placement = outside_namespace:silent
 csharp_space_around_binary_operators = before_and_after
@@ -68,7 +135,7 @@ csharp_style_deconstructed_variable_declaration = true:suggestion
 # corpus. CLAUDE.md tabulates four — the three expressible ones below, plus the
 # .NET 10 / C# 14 target, which is a csproj concern rather than a style setting.
 
-# A single statement may omit braces, and 42 sites in the blueprint do. Roslyn
+# A single statement may omit braces, and 53 sites in the blueprint do. Roslyn
 # cannot express "one statement, wrapped or not", so this value is declarative
 # only — hence silent, with CLAUDE.md carrying the real rule.
 csharp_prefer_braces = false:silent
@@ -84,7 +151,11 @@ csharp_style_expression_bodied_accessors = true:silent
 csharp_style_expression_bodied_lambdas = true:silent
 
 [*.cs]
-dotnet_style_operator_placement_when_wrapping = beginning_of_line
+# Trailing, not leading. A wrapped condition reads as a sequence of lines each
+# announcing "and there is more"; the alternative buries that signal at the
+# start of the next line, where it also collides with the four-space body
+# indent.
+dotnet_style_operator_placement_when_wrapping = end_of_line
 dotnet_style_coalesce_expression = true:suggestion
 dotnet_style_null_propagation = true:suggestion
 dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion

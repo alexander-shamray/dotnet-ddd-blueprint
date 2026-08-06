@@ -216,11 +216,13 @@ var sql = builder.AddSqlServer("sql").WithDataVolume();
 
 // Two Redis resources, mirroring §8.1 — the eviction policies are
 // incompatible, so a single instance would silently evict held locks.
-var cache = builder.AddRedis("RedisCache")
-                   .WithRedisCommander();
-var coordination = builder.AddRedis("RedisCoordination")
-                          .WithDataVolume()       // locks must survive a restart
-                          .WithPersistence();
+var cache = builder
+    .AddRedis("RedisCache")
+    .WithRedisCommander();
+var coordination = builder
+    .AddRedis("RedisCoordination")
+    .WithDataVolume()       // locks must survive a restart
+    .WithPersistence();
 
 var mq = builder.AddRabbitMQ("RabbitMq").WithManagementPlugin();
 
@@ -231,14 +233,14 @@ var mq = builder.AddRabbitMQ("RabbitMq").WithManagementPlugin();
 var orderingDb = sql.AddDatabase("Ordering");
 var catalogDb  = sql.AddDatabase("Catalog");
 
-var keycloak = builder.AddKeycloak("keycloak", 8080)
-                      .WithRealmImport("./keycloak/realm-export.json");
+var keycloak = builder
+    .AddKeycloak("keycloak", 8080)
+    .WithRealmImport("./keycloak/realm-export.json");
 
 // ReferenceExpression, not string concatenation: GetEndpoint() returns a
 // deferred reference — the port is not allocated yet. Concatenating it with +
 // would stringify the object and write a placeholder into the environment.
-var authority = ReferenceExpression.Create(
-    $"{keycloak.GetEndpoint("http")}/realms/commerce");
+var authority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/commerce");
 
 // Every host validates JWTs (§11.2), so every host needs the authority.
 // Applied by one helper rather than repeated per resource — the previous
@@ -250,13 +252,15 @@ var authority = ReferenceExpression.Create(
 // a host that makes no outbound call provisions a Keycloak client, prompts for
 // a secret and mounts it, all for credentials nothing ever sends.
 IResourceBuilder<ProjectResource> WithPlatformIdentity(
-    IResourceBuilder<ProjectResource> project, string? callerClientId = null)
+    IResourceBuilder<ProjectResource> project,
+    string? callerClientId = null)
 {
     project = project
         .WithEnvironment("Identity__Authority", authority)
         .WaitFor(keycloak);
 
-    if (callerClientId is null) return project;
+    if (callerClientId is null)
+        return project;
 
     return project
         .WithEnvironment("Identity__Client__ClientId", callerClientId)
@@ -264,7 +268,8 @@ IResourceBuilder<ProjectResource> WithPlatformIdentity(
         // issues distinct credentials, and a shared secret would let any
         // service present itself as any other (§11.5). Prompted once and
         // stored in user secrets; in Kubernetes each is its own Secret (§15.4).
-        .WithEnvironment("Identity__Client__ClientSecret",
+        .WithEnvironment(
+            "Identity__Client__ClientSecret",
             builder.AddParameter($"{callerClientId}-secret", secret: true))
         .WithEnvironment("Identity__Client__Scope", "commerce-api");
 }
@@ -273,11 +278,13 @@ IResourceBuilder<ProjectResource> WithPlatformIdentity(
 // ADR-007 forbids migrating at application startup, so without this the
 // schema is never created and every service fails on its first query.
 // One per service, because one database per service (§7.1).
-var orderingMigrator = builder.AddProject<Projects.Ordering_Migrator>("ordering-migrator")
+var orderingMigrator = builder
+    .AddProject<Projects.Ordering_Migrator>("ordering-migrator")
     .WithReference(orderingDb, connectionName: "OrderingMigrator")
     .WaitFor(sql);
 
-var catalogMigrator = builder.AddProject<Projects.Catalog_Migrator>("catalog-migrator")
+var catalogMigrator = builder
+    .AddProject<Projects.Catalog_Migrator>("catalog-migrator")
     .WithReference(catalogDb, connectionName: "CatalogMigrator")
     .WaitFor(sql);
 

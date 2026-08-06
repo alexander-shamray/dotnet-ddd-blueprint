@@ -54,8 +54,7 @@ public readonly record struct Money
         if (currency is not { Length: 3 })
             throw new DomainException("Currency must be a 3-letter ISO code.");
 
-        return new Money(decimal.Round(amount, 2, MidpointRounding.ToEven),
-                         currency.ToUpperInvariant());
+        return new Money(decimal.Round(amount, 2, MidpointRounding.ToEven), currency.ToUpperInvariant());
     }
 
     public static Money Zero(string currency) => Of(0m, currency);
@@ -102,8 +101,7 @@ public sealed class Order : AggregateRoot<OrderId>
     public DateTimeOffset PlacedAt { get; private set; }
     public IReadOnlyList<OrderLine> Lines => _lines.AsReadOnly();
 
-    public Money Total => _lines.Aggregate(
-        Money.Zero(_currency), (sum, line) => sum + line.LineTotal);
+    public Money Total => _lines.Aggregate(Money.Zero(_currency), (sum, line) => sum + line.LineTotal);
 
     /// <summary>
     /// An immutable copy of the lines, for events. `Lines` returns a read-only
@@ -112,16 +110,16 @@ public sealed class Order : AggregateRoot<OrderId>
     /// next.
     /// </summary>
     private IReadOnlyList<OrderLineSnapshot> SnapshotLines() =>
-        _lines.Select(l => new OrderLineSnapshot(l.ProductId, l.Quantity, l.UnitPrice))
-              .ToArray();
+        _lines
+            .Select(l => new OrderLineSnapshot(l.ProductId, l.Quantity, l.UnitPrice))
+            .ToArray();
 
     private readonly string _currency;
 
     // EF Core materialisation only.
     private Order() { }
 
-    private Order(OrderId id, CustomerId customerId, Address shippingAddress,
-                  string currency, DateTimeOffset placedAt)
+    private Order(OrderId id, CustomerId customerId, Address shippingAddress, string currency, DateTimeOffset placedAt)
     {
         Id = id;
         CustomerId = customerId;
@@ -138,8 +136,7 @@ public sealed class Order : AggregateRoot<OrderId>
         string currency,
         DateTimeOffset now)
     {
-        var order = new Order(OrderId.New(), customerId, shippingAddress,
-                              currency, now);
+        var order = new Order(OrderId.New(), customerId, shippingAddress, currency, now);
 
         foreach (var (product, quantity, unitPrice) in items)
             order.AddLine(product, quantity, unitPrice);
@@ -151,8 +148,8 @@ public sealed class Order : AggregateRoot<OrderId>
         // Lines travel with the event: the integration contract needs them so
         // Inventory can reserve stock (§9.6), and a handler must not have to
         // reload the aggregate to find out what was ordered.
-        order.Raise(new OrderPlacedDomainEvent(
-            order.Id, customerId, order.Total, order.SnapshotLines(), now));
+        order.Raise(
+            new OrderPlacedDomainEvent(order.Id, customerId, order.Total, order.SnapshotLines(), now));
 
         return order;
     }
@@ -184,8 +181,8 @@ public sealed class Order : AggregateRoot<OrderId>
         Status = OrderStatus.Confirmed;
         // Total and Lines are required by the V1.OrderConfirmed contract (§9.1);
         // the mapper has only the event to work from.
-        Raise(new OrderConfirmedDomainEvent(
-            Id, CustomerId, reference, ShippingAddress, Total, SnapshotLines(), now));
+        Raise(
+            new OrderConfirmedDomainEvent(Id, CustomerId, reference, ShippingAddress, Total, SnapshotLines(), now));
     }
 
     public void MarkShipped(TrackingNumber tracking, DateTimeOffset now)

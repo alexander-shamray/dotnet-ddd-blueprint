@@ -64,11 +64,11 @@ public class OrderCancellationTests
     {
         Order order = OrderBuilder.Shipped();
 
-        Action act = () => order.Cancel(
-            CancellationReason.CustomerRequest, DateTimeOffset.UtcNow);
+        Action act = () => order.Cancel(CancellationReason.CustomerRequest, DateTimeOffset.UtcNow);
 
-        act.ShouldThrow<DomainException>()
-           .Message.ShouldContain("cannot be cancelled");
+        act
+            .ShouldThrow<DomainException>()
+            .Message.ShouldContain("cannot be cancelled");
     }
 }
 ```
@@ -132,7 +132,8 @@ public class OrderTests
                 (ProductId.New(), 2, Money.Of(10.00m, "EUR")),
                 (ProductId.New(), 1, Money.Of(5.50m,  "EUR"))
             ],
-            "EUR", Now);
+            "EUR",
+            Now);
 
         order.Total.ShouldBe(Money.Of(25.50m, "EUR"));
         order.Status.ShouldBe(OrderStatus.AwaitingStock);
@@ -152,8 +153,7 @@ public class OrderTests
     [Fact]
     public void An_order_must_have_at_least_one_line()
     {
-        Action act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(),
-                                       [], "EUR", Now);
+        Action act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(), [], "EUR", Now);
 
         act.ShouldThrow<DomainException>();
     }
@@ -163,10 +163,15 @@ public class OrderTests
     {
         var product = ProductId.New();
 
-        var order = Order.Place(CustomerId.New(), AddressBuilder.Valid(),
-            [ (product, 2, Money.Of(10m, "EUR")),
-              (product, 3, Money.Of(10m, "EUR")) ],
-            "EUR", Now);
+        var order = Order.Place(
+            CustomerId.New(),
+            AddressBuilder.Valid(),
+            [
+                (product, 2, Money.Of(10m, "EUR")),
+                (product, 3, Money.Of(10m, "EUR"))
+            ],
+            "EUR",
+            Now);
 
         OrderLine line = order.Lines.ShouldHaveSingleItem();
         line.Quantity.ShouldBe(5);
@@ -175,12 +180,18 @@ public class OrderTests
     [Fact]
     public void All_lines_must_share_the_order_currency()
     {
-        Action act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(),
-            [ (ProductId.New(), 1, Money.Of(10m, "USD")) ],
-            "EUR", Now);
+        Action act = () => Order.Place(
+            CustomerId.New(),
+            AddressBuilder.Valid(),
+            [
+                (ProductId.New(), 1, Money.Of(10m, "USD"))
+            ],
+            "EUR",
+            Now);
 
-        act.ShouldThrow<DomainException>()
-           .Message.ShouldContain("currency");
+        act
+            .ShouldThrow<DomainException>()
+            .Message.ShouldContain("currency");
     }
 }
 ```
@@ -196,13 +207,13 @@ internal static class OrderBuilder
 
     // The customer is a parameter because ownership tests have to name it —
     // §12.4's 404-not-403 case turns entirely on who owns the order.
-    public static Order Placed(int lines = 1, string currency = "EUR",
-                               CustomerId? customer = null) =>
+    public static Order Placed(int lines = 1, string currency = "EUR", CustomerId? customer = null) =>
         Order.Place(
             customer ?? CustomerId.New(),
             AddressBuilder.Valid(),
-            Enumerable.Range(0, lines)
-                      .Select(_ => (ProductId.New(), 1, Money.Of(10m, currency))),
+            Enumerable
+                .Range(0, lines)
+                .Select(_ => (ProductId.New(), 1, Money.Of(10m, currency))),
             currency, DefaultNow);
 
     public static Order AwaitingPayment()
@@ -262,8 +273,7 @@ public sealed class ServiceFixture : IAsyncLifetime
     // ValueTask, not Task: xUnit v3 redefined IAsyncLifetime (see below).
     public async ValueTask InitializeAsync()
     {
-        await Task.WhenAll(_sql.StartAsync(), _cache.StartAsync(),
-                           _coordination.StartAsync(), _rabbit.StartAsync());
+        await Task.WhenAll(_sql.StartAsync(), _cache.StartAsync(), _coordination.StartAsync(), _rabbit.StartAsync());
 
         Factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b => b
@@ -299,9 +309,9 @@ public sealed class ServiceFixture : IAsyncLifetime
                         o.DefaultAuthenticateScheme = TestAuthHandler.Scheme;
                         o.DefaultChallengeScheme    = TestAuthHandler.Scheme;
                     });
-                    services.AddAuthentication()
-                            .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
-                                TestAuthHandler.Scheme, _ => { });
+                    services
+                        .AddAuthentication()
+                        .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.Scheme, _ => { });
 
                     // Remove ONLY the outbox dispatcher, not every hosted
                     // service: MassTransit registers its bus as one, so
@@ -312,8 +322,8 @@ public sealed class ServiceFixture : IAsyncLifetime
                     // outbox rows underneath assertions about them. Tests that
                     // want it call fixture.ProcessOutboxBatchAsync() explicitly.
                     ServiceDescriptor hosted = services.Single(
-                        d => d.ServiceType == typeof(IHostedService)
-                          && d.ImplementationType == typeof(OutboxDispatcher));
+                        d => d.ServiceType == typeof(IHostedService) &&
+                            d.ImplementationType == typeof(OutboxDispatcher));
                     services.Remove(hosted);
 
                     // Still resolvable directly, so tests can drive one pass.
@@ -324,21 +334,23 @@ public sealed class ServiceFixture : IAsyncLifetime
         // the container's sa login holds both DML and DDL. Production keeps
         // them separate, and migrations run as a job, never from a host (ADR-007).
         using IServiceScope scope = Factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<OrderingDbContext>()
-                   .Database.MigrateAsync();
+        await scope.ServiceProvider
+            .GetRequiredService<OrderingDbContext>()
+            .Database.MigrateAsync();
 
         // Reset between tests by truncating, which is far faster than
         // recreating the schema or wrapping every test in a rolled-back
         // transaction (which would hide transaction-related bugs).
-        _respawner = await Respawner.CreateAsync(_sql.GetConnectionString(),
+        _respawner = await Respawner.CreateAsync(
+            _sql.GetConnectionString(),
             new RespawnerOptions { SchemasToInclude = ["ordering"] });
     }
 
     public Task ResetAsync() => _respawner.ResetAsync(_sql.GetConnectionString());
 
     /// <summary>Runs exactly one claim-and-deliver pass. No timers, no waiting.</summary>
-    public Task<int> ProcessOutboxBatchAsync(CancellationToken ct = default)
-        => Factory.Services.GetRequiredService<OutboxDispatcher>().ProcessBatchAsync(ct);
+    public Task<int> ProcessOutboxBatchAsync(CancellationToken ct = default) =>
+        Factory.Services.GetRequiredService<OutboxDispatcher>().ProcessBatchAsync(ct);
 
     public IDbConnection CreateConnection() => new SqlConnection(_sql.GetConnectionString());
 
@@ -353,8 +365,9 @@ public sealed class ServiceFixture : IAsyncLifetime
         await connection.ExecuteAsync(
             """
             MERGE ordering.ProductPrices AS t
-            USING (SELECT @productId AS ProductId, @currency AS Currency) AS s
-               ON t.ProductId = s.ProductId AND t.Currency = s.Currency
+            USING (SELECT ProductId = @productId, Currency = @currency) AS s
+                ON t.ProductId = s.ProductId
+                AND t.Currency = s.Currency
             WHEN NOT MATCHED THEN
                 INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
                 VALUES (@productId, @currency, @amount, 1, SYSDATETIMEOFFSET())
@@ -384,8 +397,9 @@ public sealed class ServiceFixture : IAsyncLifetime
     public async Task<IReadOnlyList<OutboxMessage>> OutboxAsync()
     {
         using IServiceScope scope = Factory.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<OrderingDbContext>()
-                          .OutboxMessages.AsNoTracking().ToListAsync();
+        return await scope.ServiceProvider
+            .GetRequiredService<OrderingDbContext>()
+            .OutboxMessages.AsNoTracking().ToListAsync();
     }
 
     public async Task StageOutboxAsync(params OutboxMessage[] rows)
@@ -425,10 +439,11 @@ public sealed class ServiceFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         await Factory.DisposeAsync();
-        await Task.WhenAll(_sql.DisposeAsync().AsTask(),
-                           _cache.DisposeAsync().AsTask(),
-                           _coordination.DisposeAsync().AsTask(),
-                           _rabbit.DisposeAsync().AsTask());
+        await Task.WhenAll(
+            _sql.DisposeAsync().AsTask(),
+            _cache.DisposeAsync().AsTask(),
+            _coordination.DisposeAsync().AsTask(),
+            _rabbit.DisposeAsync().AsTask());
     }
 }
 ```
@@ -450,7 +465,8 @@ runs against a real principal rather than being switched off:
 ```csharp
 public sealed class TestAuthHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
-    ILoggerFactory logger, UrlEncoder encoder)
+    ILoggerFactory logger,
+    UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string Scheme         = "Test";
@@ -469,9 +485,11 @@ public sealed class TestAuthHandler(
         // The same claim type §11.4's policies require. A test that grants
         // itself "orders:cancel" is exercising the policy, not bypassing it.
         if (Request.Headers.TryGetValue(PermissionsHeader, out StringValues granted))
-            claims.AddRange(granted.ToString()
-                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Select(p => new Claim("permission", p)));
+            claims.AddRange(
+                granted
+                    .ToString()
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => new Claim("permission", p)));
 
         ClaimsPrincipal principal = new(new ClaimsIdentity(claims, Scheme));
         return Task.FromResult(
@@ -513,12 +531,13 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         OrderingDbContext db =
             scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
 
-        Result<Guid> result = await dispatcher.SendAsync(new PlaceOrderCommand(
-            CommandId:       Guid.CreateVersion7(),
-            CustomerId:      Guid.CreateVersion7(),
-            Items:           [ new PlaceOrderItem(SeedData.ProductId, 2) ],
-            ShippingAddress: AddressBuilder.ValidDto(),
-            Currency:        "EUR"));
+        Result<Guid> result = await dispatcher.SendAsync(
+            new PlaceOrderCommand(
+                CommandId:       Guid.CreateVersion7(),
+                CustomerId:      Guid.CreateVersion7(),
+                Items:           [ new PlaceOrderItem(SeedData.ProductId, 2) ],
+                ShippingAddress: AddressBuilder.ValidDto(),
+                Currency:        "EUR"));
 
         result.IsSuccess.ShouldBeTrue();
 
@@ -535,19 +554,19 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         outbox.ShouldAllBe(m => m.ProcessedAt == null);
 
         // Broker lane carries the CONTRACT type (§9.3 allow-list)...
-        outbox.ShouldContain(m => m.Lane == OutboxLane.Broker
-                               && m.MessageType.Contains(nameof(V1.OrderPlaced)));
+        outbox.ShouldContain(m => m.Lane == OutboxLane.Broker &&
+            m.MessageType.Contains(nameof(V1.OrderPlaced)));
 
         // ...and the Local lane carries the DOMAIN type (§7.5). Distinct names
         // are what make this an assertion about which type is on which lane,
         // rather than merely that both lanes got a row.
-        outbox.ShouldContain(m => m.Lane == OutboxLane.Local
-                               && m.MessageType.Contains(nameof(OrderPlacedDomainEvent)));
+        outbox.ShouldContain(m => m.Lane == OutboxLane.Local &&
+            m.MessageType.Contains(nameof(OrderPlacedDomainEvent)));
 
         // The domain type must never reach the broker — that is the leak §9.3
         // exists to prevent, and it is only checkable because the names differ.
-        outbox.ShouldNotContain(m => m.Lane == OutboxLane.Broker
-                                  && m.MessageType.Contains(nameof(OrderPlacedDomainEvent)));
+        outbox.ShouldNotContain(m => m.Lane == OutboxLane.Broker &&
+            m.MessageType.Contains(nameof(OrderPlacedDomainEvent)));
     }
 
     [Fact]
@@ -650,8 +669,7 @@ would otherwise repeat eight assignments to vary one:
 ```csharp
 internal static class Contracts
 {
-    public static V1.OrderPlaced OrderPlaced(
-        Guid orderId, decimal total = 25.00m, string currency = "EUR") => new()
+    public static V1.OrderPlaced OrderPlaced(Guid orderId, decimal total = 25.00m, string currency = "EUR") => new()
     {
         MessageId     = Guid.CreateVersion7(),
         CorrelationId = orderId,
@@ -676,21 +694,18 @@ The builders those tests use are ordinary factories over `OutboxMessage`
 internal static class Poison
 {
     public static OutboxMessage Row(MessageTypeMap types) =>
-        OutboxMessage.Stage(new AlwaysThrows(), OutboxLane.Local,
-                            Guid.CreateVersion7(), TestClock.Now, types);
+        OutboxMessage.Stage(new AlwaysThrows(), OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now, types);
 }
 
 internal static class Healthy
 {
     public static OutboxMessage Row(MessageTypeMap types) =>
-        OutboxMessage.Stage(new NoOpEvent(), OutboxLane.Local,
-                            Guid.CreateVersion7(), TestClock.Now, types);
+        OutboxMessage.Stage(new NoOpEvent(), OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now, types);
 }
 
 internal static OutboxMessage LocalRowFor<TEvent>(MessageTypeMap types)
     where TEvent : new() =>
-    OutboxMessage.Stage(new TEvent(), OutboxLane.Local,
-                        Guid.CreateVersion7(), TestClock.Now, types);
+    OutboxMessage.Stage(new TEvent(), OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now, types);
 ```
 
 `AlwaysThrows` has a registered `IProjectionHandler<AlwaysThrows>` that throws;
@@ -703,9 +718,9 @@ before the map is built — one line beside the `TestAuthHandler` replacement:
 // §9.4. Adding, not replacing: the production assemblies stay, so a test
 // cannot stage a type the real host would refuse. Without this, NameOf throws
 // on the first builder call and every outbox test fails before its assertion.
-services.AddSingleton(new MessageTypeSource(
-    typeof(V1.OrderPlaced).Assembly,
-    typeof(Order).Assembly).Add(typeof(AlwaysThrows).Assembly));
+services.AddSingleton(
+    new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
+        .Add(typeof(AlwaysThrows).Assembly));
 ```
 
 Two assertions belong beside these. The first is the cheapest guard on the
@@ -768,7 +783,8 @@ public void Every_stageable_domain_event_round_trips_through_the_outbox_options(
         object sample = DomainEventSamples.Create(type);
         string json = JsonSerializer.Serialize(sample, type, OutboxJson.Options);
 
-        JsonSerializer.Deserialize(json, type, OutboxJson.Options)
+        JsonSerializer
+            .Deserialize(json, type, OutboxJson.Options)
             .ShouldBeEquivalentTo(sample, $"{type.Name} cannot survive the Local lane");
     }
 }
@@ -845,8 +861,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     {
         // Authenticated, but with orders:read where the endpoint wants
         // orders:cancel — the case a fixture that grants everything hides.
-        HttpResponseMessage response = await SendAsAsync(
-            Guid.CreateVersion7(), "orders:read", Guid.CreateVersion7());
+        HttpResponseMessage response = await SendAsAsync(Guid.CreateVersion7(), "orders:read", Guid.CreateVersion7());
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
@@ -858,7 +873,9 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
         Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
 
         HttpResponseMessage response = await SendAsAsync(
-            Guid.CreateVersion7(), "orders:cancel", orderId);   // a different customer
+            Guid.CreateVersion7(),   // a different customer
+            "orders:cancel",
+            orderId);
 
         // 404, not 403 — §11.4. A 403 here would confirm the order exists,
         // which is the whole point of the check, and it is invisible to a
@@ -869,8 +886,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task Rejects_a_reason_outside_the_wire_vocabulary()
     {
-        HttpRequestMessage request = new(
-            HttpMethod.Post, $"/v1/orders/{Guid.CreateVersion7()}/cancel")
+        HttpRequestMessage request = new(HttpMethod.Post, $"/v1/orders/{Guid.CreateVersion7()}/cancel")
         {
             // The enum's member name, not the wire code — accepted by
             // Enum.TryParse and rejected here, which is the difference.
@@ -884,11 +900,9 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
-    private Task<HttpResponseMessage> SendAsAsync(
-        Guid userId, string permissions, Guid orderId)
+    private Task<HttpResponseMessage> SendAsAsync(Guid userId, string permissions, Guid orderId)
     {
-        HttpRequestMessage request = new(
-            HttpMethod.Post, $"/v1/orders/{orderId}/cancel")
+        HttpRequestMessage request = new(HttpMethod.Post, $"/v1/orders/{orderId}/cancel")
         {
             Content = JsonContent.Create(new CancelOrderRequest(CancelReasons.CustomerRequest))
         };
@@ -918,9 +932,9 @@ harness makes it testable without any infrastructure at all.
 public async Task Payment_declined_releases_stock_before_cancelling()
 {
     await using ServiceProvider provider = new ServiceCollection()
-        .AddMassTransitTestHarness(cfg =>
-            cfg.AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
-               .InMemoryRepository())
+        .AddMassTransitTestHarness(cfg => cfg
+            .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
+            .InMemoryRepository())
         .BuildServiceProvider(true);
 
     ITestHarness harness = provider.GetRequiredService<ITestHarness>();
@@ -979,7 +993,7 @@ public async Task Commands_are_sent_and_events_are_published()
 The saga tests above prove one service's coordination. The only thing left that
 is genuinely *between* services is the contract assembly, and its rules are all
 stated elsewhere as things reviewers should notice: §9.6's "a contract may not
-name a domain type", §9.1's versioned namespace, `required` members. Each is
+name a domain type", §9.2's versioned namespace, `required` members. Each is
 mechanical, so each is a test rather than a review note.
 
 This is the one suite that references every service, which is why it has its own
@@ -994,10 +1008,11 @@ public class ContractTests
     // versioned namespace of an interface that is deliberately shared across
     // all of them — and then ask ContractSamples for an instance of it.
     private static readonly Type[] Contracts =
-        typeof(OrderPlaced).Assembly.GetTypes()
-            .Where(t => t.IsPublic
-                     && t is { IsInterface: false, IsAbstract: false }
-                     && t.Namespace?.StartsWith("Common.Contracts.") == true)
+        typeof(OrderPlaced).Assembly
+            .GetTypes()
+            .Where(t => t.IsPublic &&
+                t is { IsInterface: false, IsAbstract: false } &&
+                t.Namespace?.StartsWith("Common.Contracts.") == true)
             .ToArray();
 
     [Fact]
@@ -1006,7 +1021,8 @@ public class ContractTests
         // §9.6's rule, and the one that silently drags Ordering.Domain into
         // every consuming service. Checked at the assembly level because a
         // contract cannot reference a domain type without the reference.
-        typeof(OrderPlaced).Assembly.GetReferencedAssemblies()
+        typeof(OrderPlaced).Assembly
+            .GetReferencedAssemblies()
             .Select(a => a.Name!)
             .ShouldNotContain(name => name.EndsWith(".Domain"));
     }
@@ -1014,7 +1030,7 @@ public class ContractTests
     [Fact]
     public void Every_contract_lives_in_a_versioned_namespace()
     {
-        // Common.Contracts.<Service>.V<n> — §9.1. A contract that lands one
+        // Common.Contracts.<Service>.V<n> — §9.2. A contract that lands one
         // namespace short is a v1 that can never be superseded.
         Contracts.ShouldAllBe(t =>
             Regex.IsMatch(t.Namespace!, @"^Common\.Contracts\.[A-Za-z]+\.V\d+$"));

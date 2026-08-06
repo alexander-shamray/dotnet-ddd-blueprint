@@ -24,6 +24,7 @@ graph LR
     ORD -->|OrderConfirmed| SHP
     SHP -->|ShipmentDispatched| ORD
     ORD -->|order events| NOT
+    PAY -->|payment events| NOT
     INV -->|StockLevelChanged| CAT
     SHP -->|shipment events| NOT
 ```
