@@ -1,0 +1,132 @@
+root = true
+
+# House style for .NET 10 and C# 14. This governs both the C# samples in
+# docs/backend-architecture/ and the solution that will be built in src/ and
+# tests/ — one dialect, so a sample and its implementation read identically.
+# CLAUDE.md carries the prose version, including the settled choices a reviewer
+# might otherwise try to "correct".
+#
+# This is the .editorconfig delivery-plan PR-01 ships. Treat it as source.
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.md]
+indent_size = 2
+# No max_line_length: prose wraps at 80 (see CLAUDE.md), but tables, links and
+# fenced code legitimately run past it — hundreds of lines in the blueprint do,
+# and a hard limit here would flag every one of them.
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.{cs,csx}]
+indent_size = 4
+tab_width = 4
+
+# --- .NET / C# style ---
+csharp_using_directive_placement = outside_namespace:silent
+csharp_space_around_binary_operators = before_and_after
+csharp_indent_labels = one_less_than_current
+csharp_prefer_simple_using_statement = true:suggestion
+csharp_prefer_simple_default_expression = true:suggestion
+csharp_style_throw_expression = true:suggestion
+csharp_style_prefer_null_check_over_type_check = true:suggestion
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_implicit_object_creation_when_type_is_apparent = true:suggestion
+csharp_style_prefer_index_operator = true:suggestion
+csharp_style_prefer_range_operator = true:suggestion
+csharp_style_inlined_variable_declaration = true:suggestion
+csharp_style_unused_value_assignment_preference = discard_variable:suggestion
+csharp_preferred_modifier_order = public, private, protected, internal, file, new, static, abstract, virtual, sealed, readonly, override, extern, unsafe, volatile, async, required:suggestion
+
+# Explicit types, except where the right-hand side already names the type.
+# `var order = new Order(...)` is fine; `var rows = await conn.QueryAsync(...)`
+# is not — a reader of a fenced code block has no hover to fall back on.
+#
+# CLAUDE.md lists four cases that keep `var`. Three need nothing here: an
+# apparent type is `when_type_is_apparent` below, deconstruction is
+# `deconstructed_variable_declaration`, and anonymous types make `var`
+# mandatory in the language. The fourth is the Aspire AppHost of §14.2, where
+# eleven of thirteen locals are an IResourceBuilder<T> — a wrapper whose name
+# repeats what the Add* call already said. Explicit types are possible there and
+# simply read worse, so the block stays uniform. That preference cannot be
+# expressed as a setting, which is why these stay at suggestion, not warning.
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+csharp_style_deconstructed_variable_declaration = true:suggestion
+
+# --- Settled choices ---
+# House style a reviewer might read as an oversight and "correct". They bind the
+# solution as much as the samples; changing one is a decision about the whole
+# corpus. CLAUDE.md tabulates four — the three expressible ones below, plus the
+# .NET 10 / C# 14 target, which is a csproj concern rather than a style setting.
+
+# A single statement may omit braces, and 42 sites in the blueprint do. Roslyn
+# cannot express "one statement, wrapped or not", so this value is declarative
+# only — hence silent, with CLAUDE.md carrying the real rule.
+csharp_prefer_braces = false:silent
+
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+# Expression bodies for one-line members but not constructors. Stated as one
+# block rather than left to inherited defaults, so the policy reads whole.
+csharp_style_expression_bodied_methods = true:silent
+csharp_style_expression_bodied_constructors = false:silent
+csharp_style_expression_bodied_properties = true:silent
+csharp_style_expression_bodied_accessors = true:silent
+csharp_style_expression_bodied_lambdas = true:silent
+
+[*.cs]
+dotnet_style_operator_placement_when_wrapping = beginning_of_line
+dotnet_style_coalesce_expression = true:suggestion
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion
+dotnet_style_prefer_auto_properties = true:silent
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
+dotnet_style_prefer_simplified_boolean_expressions = true:suggestion
+dotnet_style_prefer_compound_assignment = true:suggestion
+dotnet_style_prefer_simplified_interpolation = true:suggestion
+dotnet_style_explicit_tuple_names = true:suggestion
+dotnet_style_namespace_match_folder = true:suggestion
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
+dotnet_style_predefined_type_for_member_access = true:suggestion
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:suggestion
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+dotnet_naming_rule.interface_should_be_begins_with_i.severity = suggestion
+dotnet_naming_rule.interface_should_be_begins_with_i.symbols = interface
+dotnet_naming_rule.interface_should_be_begins_with_i.style = begins_with_i
+
+dotnet_naming_rule.types_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.types_should_be_pascal_case.symbols = types
+dotnet_naming_rule.types_should_be_pascal_case.style = pascal_case
+
+dotnet_naming_rule.non_field_members_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.non_field_members_should_be_pascal_case.symbols = non_field_members
+dotnet_naming_rule.non_field_members_should_be_pascal_case.style = pascal_case
+
+dotnet_naming_symbols.interface.applicable_kinds = interface
+dotnet_naming_symbols.interface.applicable_accessibilities = public, internal, private, protected, protected_internal, private_protected
+
+dotnet_naming_symbols.types.applicable_kinds = class, struct, interface, enum
+dotnet_naming_symbols.types.applicable_accessibilities = public, internal, private, protected, protected_internal, private_protected
+
+dotnet_naming_symbols.non_field_members.applicable_kinds = property, event, method
+dotnet_naming_symbols.non_field_members.applicable_accessibilities = public, internal, private, protected, protected_internal, private_protected
+
+dotnet_naming_style.begins_with_i.required_prefix = I
+dotnet_naming_style.begins_with_i.capitalization = pascal_case
+
+dotnet_naming_style.pascal_case.capitalization = pascal_case
