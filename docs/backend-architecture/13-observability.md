@@ -424,6 +424,21 @@ public sealed class LoggingBehavior<TRequest, TResult>(
     TimeProvider clock)
     : IPipelineBehavior<TRequest, TResult>
 {
+    // Compiled once per closed behaviour rather than parsed per request. CA1848
+    // is met rather than waived here: this behaviour is outermost on every
+    // dispatched request, which is exactly the hot path the rule is about.
+    private static readonly Action<ILogger, string, double, Exception?> Completed =
+        LoggerMessage.Define<string, double>(
+            LogLevel.Information,
+            new EventId(1, nameof(Completed)),
+            "{RequestType} completed in {ElapsedMs} ms");
+
+    private static readonly Action<ILogger, string, Exception?> Threw =
+        LoggerMessage.Define<string>(
+            LogLevel.Error,
+            new EventId(2, nameof(Threw)),
+            "{RequestType} threw");
+
     public async Task<TResult> HandleAsync(TRequest request, NextDelegate<TResult> next, CancellationToken ct)
     {
         string name = typeof(TRequest).Name;
@@ -440,17 +455,19 @@ public sealed class LoggingBehavior<TRequest, TResult>(
         {
             TResult result = await next();
 
-            logger.LogInformation(
-                "{RequestType} completed in {ElapsedMs} ms",
-                name,
-                clock.GetElapsedTime(start).TotalMilliseconds);
-            metrics.Recorded(name, "ok", clock.GetElapsedTime(start));
+            // Read once and used twice. Two calls to GetElapsedTime would put
+            // a different number in the log line and the histogram, and the
+            // one a reader trusts is whichever they looked at first.
+            TimeSpan elapsed = clock.GetElapsedTime(start);
+
+            Completed(logger, name, elapsed.TotalMilliseconds, null);
+            metrics.Recorded(name, "ok", elapsed);
 
             return result;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "{RequestType} threw", name);
+            Threw(logger, name, ex);
             metrics.Recorded(name, "error", clock.GetElapsedTime(start));
             throw;
         }
@@ -486,6 +503,15 @@ logger.LogInformation(
 // queried and every message is a distinct string.
 logger.LogInformation($"Order {order.Id} placed for {order.Total}");
 ```
+
+Both halves call `LogInformation` directly, and that is deliberate — the pair
+is about message templates, and a `LoggerMessage.Define` field either side of
+it would bury the one difference the reader is meant to see. Every logging call
+site the solution actually builds takes the compiled form instead, because
+CA1848 is enforced (ADR-019) and the classes that log are the ones that run per
+request or per message: §13.3's `LoggingBehavior`, and `OutboxDispatcher` and
+`CommandConsumer` in [§9.4](09-messaging.md). Fragments here teach the
+template; those three show the shape.
 
 Levels, applied consistently:
 

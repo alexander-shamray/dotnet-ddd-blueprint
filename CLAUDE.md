@@ -57,19 +57,22 @@ Platform.slnx                    the six projects below
 src/BuildingBlocks/
   Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,
                                  IHasDomainEvents, IAggregateRoot — no packages
-  Common.Application/            Result, Result<T>, Error, ErrorType
+  Common.Application/            Result, Result<T>, Error, ErrorType; the §6.2
+                                 dispatcher and its two behaviours, plus
+                                 RequestMetrics and PluggableInterfaces
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
                                  ToHttpResult — the only project referencing
                                  another, and the only one with a
                                  FrameworkReference
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
-  Common.Application.Tests/      anonymous sample types both suites build on
+  Common.Application.Tests/      anonymous sample types both suites build on;
+                                 TestContainer.cs is the one registration path
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
 ```
 
-The second block is PR-01's, the third PR-02's and PR-03's.
+The second block is PR-01's, the third PR-02's, PR-03's and PR-04's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it and PR-09's `TransactionBehavior` will need it, but an unused
 project reference is a claim about the dependency graph that nothing yet
@@ -121,12 +124,13 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds six projects and `dotnet test` runs 60 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 88 tests, so the
 build rules and the drift rules below are live and a green run now means
-something. **PR-04 is next** (`feat(common): CQRS dispatcher and pipeline
-behaviours`), which depends on PR-02 alone — PR-05 is the one that builds on
-what PR-03 just landed, composing `AddCommonProblemDetails` into
-`AddCommonWebDefaults` (§13.2).
+something. **PR-05 is next** (`feat(common): OpenTelemetry and structured
+logging defaults`), which builds on PR-03 — it composes
+`AddCommonProblemDetails` into `AddCommonWebDefaults` (§13.2) and wires the
+OTLP export that the `request.duration` histogram PR-04 just landed currently
+records into nothing.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
@@ -134,6 +138,15 @@ them is a change that belongs in the PR that creates it (Appendix C), not in a
 project invented early. `Common.Web` now does exist, and the same rule applies
 inside it: it holds §10.4 and §10.5 and nothing else until PR-05 adds
 observability and PR-16 adds JWT validation.
+
+`Common.Application` is the same story one layer down. The pipeline is two
+behaviours of four: **`IdempotencyBehavior` (§8.5) and `TransactionBehavior`
+(§6.3) do not exist**, and PR-09 is the PR that adds the second one. So is
+`PluggableInterfaces.All`, which lists two of its eventual five — the three
+missing entries name interfaces §7.5 and §9.4 have not defined yet, and the
+list is built to be appended to. Adding an interface there and nowhere else is
+the design; adding one before its PR is inventing a project early by another
+route.
 
 The commands are the ones the target solution uses:
 
@@ -146,14 +159,14 @@ dotnet test  Platform.slnx
 Central package management means versions live in `Directory.Packages.props`
 with **exact** pins — never add a `Version=` attribute to a `PackageReference`.
 
-`Directory.Build.props` carries the analyzer policy of **ADR-019**:
+`Directory.Build.props` carries the analyser policy of **ADR-019**:
 `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, `AnalysisLevel
 latest-Recommended`, and no StyleCop. A warning stops the build, so a change
 that provokes one is not done until the warning is gone — and `#pragma` is not
 the way out. A genuinely warranted suppression goes in `Directory.Build.props`
 with a comment.
 
-Two live there, both found by PR-02 and both arguing their case in the file:
+Three live there, each arguing its case in the file:
 
 - **CA1707** off for projects whose name ends `Tests`. §12's test names are
   sentences written with underscores, and the rule forbids them. Scoped by
@@ -163,9 +176,19 @@ Two live there, both found by PR-02 and both arguing their case in the file:
   another .NET language, and `Error` (§10.5) is one in VB. Nothing here is a
   published library — §4.3 lets exactly one assembly cross a service boundary —
   so the scenario the rule protects does not exist.
+- **CA1711** off repo-wide, added by PR-04. It bans a reserved suffix on a type
+  name and fires on `NextDelegate` (§6.2), where the suffix is not incorrect at
+  all — the type is a delegate. Admitted on CA1716's terms, and the two are
+  the same argument: both protect a consumer of a published library from a name
+  they cannot change, and there is no such consumer. It costs the rule
+  everywhere, so a later `OrderCollection` that is not a collection stops being
+  caught.
 
-A third suppression is a decision about the policy, not about the file in front
-of you. Argue it in the comment or do not add it.
+The first two were found by PR-02, the third by PR-04. **A fourth is a decision
+about the policy, not about the file in front of you.** Argue it in the comment
+or do not add it — and prefer changing the code: PR-04 met CA1848 by moving
+`LoggingBehavior` onto `LoggerMessage.Define` rather than waiving a rule whose
+whole subject is the hot path that behaviour sits on.
 
 `EnforceCodeStyleInBuild` only bites on rules set to `warning` or above, and
 exactly three are: **IDE0055** (formatting), **IDE0065** (`using` placement) and
@@ -274,6 +297,23 @@ already written against it.
   (Appendix D). Do not "complete" a sample by adding them.
 - Pascal case for types, properties, methods and events; `I` prefix on
   interfaces; namespace matches folder.
+- **A blank line always follows the namespace declaration.** `namespace X;` is a
+  statement about the whole file, not the first line of the type below it, and
+  the blank line is what says so:
+
+  ```csharp
+  namespace Common.Application;
+
+  public interface IDispatcher
+  ```
+
+  **IDE0055 enforces this and ADR-019 makes it an error**, so it is in the same
+  class as `{` placement rather than the review-carried `[` rule — write the
+  type straight under the semicolon and the build fails on
+  `ProbeStyle.cs(2,1): error IDE0055: Fix formatting`. Checked against the
+  compiler rather than assumed, the same way the alignment rule below was. Every
+  file in the repo and every sample in the blueprint already reads this way; a
+  new one that does not will not compile.
 - **A single statement may omit braces; two or more always take them.** The
   statement goes on the following line — never beside the condition — and it may
   wrap:

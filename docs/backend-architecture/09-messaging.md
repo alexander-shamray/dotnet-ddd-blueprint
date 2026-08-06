@@ -619,6 +619,21 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
 {
     private const int MaxAttempts = 10;
 
+    // Compiled once rather than parsed per call. CA1848 is enforced by ADR-019
+    // and this loop runs twice a second — see §13.3's LoggingBehavior, which
+    // takes the same shape for the same reason.
+    private static readonly Action<ILogger, Exception?> ClaimFailed =
+        LoggerMessage.Define(
+            LogLevel.Error,
+            new EventId(1, nameof(ClaimFailed)),
+            "Outbox claim failed; retrying next tick.");
+
+    private static readonly Action<ILogger, Guid, OutboxLane, int, int, Exception?> DeliveryFailed =
+        LoggerMessage.Define<Guid, OutboxLane, int, int>(
+            LogLevel.Error,
+            new EventId(2, nameof(DeliveryFailed)),
+            "Outbox message {MessageId} on lane {Lane} failed, attempt {Attempt} of {Max}.");
+
     // Atomic claim: selects and leases in one statement, so two replicas
     // cannot take the same row. READPAST skips rows another replica holds.
     private const string ClaimSql =
@@ -680,7 +695,7 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The claim itself failed — database unreachable. Next tick.
-                log.LogError(ex, "Outbox claim failed; retrying next tick.");
+                ClaimFailed(log, ex);
             }
         }
     }
@@ -719,13 +734,7 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
                 // One bad message does not affect the other 99.
                 await connection.ExecuteAsync(FailSql, new { message.Id, Error = ex.ToString() });
 
-                log.LogError(
-                    ex,
-                    "Outbox message {MessageId} on lane {Lane} failed, attempt {Attempt} of {Max}.",
-                    message.MessageId,
-                    message.Lane,
-                    message.Attempts + 1,
-                    MaxAttempts);
+                DeliveryFailed(log, message.MessageId, message.Lane, message.Attempts + 1, MaxAttempts, ex);
             }
         }
 
@@ -965,6 +974,16 @@ public sealed class CommandConsumer<TMessage, TCommand>(
     where TMessage : class
     where TCommand : ICommand<Result>
 {
+    // Compiled once per closed consumer. CA1848 (ADR-019) again, and required
+    // for the same reason as §13.3's LoggingBehavior: a consumer runs on every
+    // message that arrives.
+    private static readonly Action<ILogger, string, string, string, Guid?, Exception?> DomainRejected =
+        LoggerMessage.Define<string, string, string, Guid?>(
+            LogLevel.Warning,
+            new EventId(1, nameof(DomainRejected)),
+            "{MessageType} rejected by the domain: {ErrorCode} {ErrorDescription}. " +
+            "CorrelationId {CorrelationId}.");
+
     public async Task Consume(ConsumeContext<TMessage> context)
     {
         // Mapping is explicit: the wire type is a contract, the command is an
@@ -986,11 +1005,13 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         {
             metrics.Rejected(typeof(TMessage).Name, result.Error.Code);
 
-            log.LogWarning(
-                "{MessageType} rejected by the domain: {ErrorCode} {ErrorDescription}. " +
-                "CorrelationId {CorrelationId}.",
-                typeof(TMessage).Name, result.Error.Code, result.Error.Description,
-                context.CorrelationId);
+            DomainRejected(
+                log,
+                typeof(TMessage).Name,
+                result.Error.Code,
+                result.Error.Description,
+                context.CorrelationId,
+                null);
         }
     }
 }

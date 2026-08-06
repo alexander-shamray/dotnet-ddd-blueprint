@@ -191,6 +191,11 @@ csharp_prefer_braces = false:silent
 
 # At warning for the same reason: "file-scoped, never block-scoped" is one of
 # the four settled choices, with no case in the corpus going the other way.
+#
+# The blank line CLAUDE.md requires after `namespace X;` has no setting of its
+# own and needs none: IDE0055 already reports a type written straight under the
+# semicolon as a formatting violation, and ADR-019 makes that an error. Noted
+# here because this is the line a reader comes to looking for it.
 csharp_style_namespace_declarations = file_scoped:warning
 
 # Expression bodies for one-line members but not constructors. Stated as one
