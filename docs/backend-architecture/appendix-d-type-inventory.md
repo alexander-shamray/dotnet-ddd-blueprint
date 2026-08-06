@@ -44,13 +44,17 @@ repeatable check; noticing by eye is not.
 
 ## D.2 Domain model — defined in §5
 
-The sample domain. All of these live in `Ordering.Domain` and reference nothing
-outside it ([§4.2](04-solution-structure.md)).
+The sample domain. Everything from `Order` down lives in `Ordering.Domain` and
+references nothing outside it ([§4.2](04-solution-structure.md)). The first two
+rows are the exception and the reason that rule reads "`Common.Domain` and
+nothing else": they are shared *mechanism*, they live in `Common.Domain`
+([§4.1](04-solution-structure.md)), and they are the one reference a Domain
+project is permitted to carry.
 
 | Type | Section | Kind |
 |---|---|---|
-| `Entity<TId>`, `AggregateRoot<TId>` | [§5.5](05-tactical-ddd.md) | Base types; `AggregateRoot` carries `DomainEvents` and `Version` |
-| `IDomainEvent`, `IHasDomainEvents` | §5.5 | Domain event contracts |
+| `Entity<TId>`, `AggregateRoot<TId>` | [§5.5](05-tactical-ddd.md) | Base types in `Common.Domain`; `Entity` carries identity equality, `AggregateRoot` adds `DomainEvents` and `Version` |
+| `IDomainEvent`, `IHasDomainEvents`, `IAggregateRoot` | §5.5 | Domain event contracts and the two non-generic markers, also `Common.Domain` |
 | `Order`, `OrderLine` | §5.4 | The aggregate and its child entity |
 | `OrderId`, `CustomerId`, `ProductId` | §5.2 | Strongly typed identifiers |
 | `Money`, `Address` | §5.3 | Value objects |
@@ -158,7 +162,6 @@ their declaration.
 | `DomainEventSamples` | One sample per stageable domain event, so a new event without one fails §12.4's round-trip rather than being skipped — `ContractSamples`' counterpart for the Local lane |
 | `ConcurrentRequestException` | Thrown when an idempotency key is claimed but unfinished (§8.5) |
 | `InvariantViolationException` | Thrown when a command modifies more than one aggregate root (§6.3, principle 3) |
-| `IAggregateRoot` | Non-generic marker on `AggregateRoot<TId>`, so the change tracker can count roots without knowing their key type |
 | `StockReservationExpired`, `PaymentAuthorisationExpired`, `DespatchExpired`, `StockReleaseExpired` | Saga schedule messages — one per wait, and §9.6 has four (§9.6) |
 | `FlagOrderForReviewHandler` | Writes the `OrderReviews` row; loads no aggregate (§9.6) |
 | `ITokenCache`, `CachingTokenClient` | Acquires and caches the M2M access token until shortly before expiry; BFF-only (§11.5) |

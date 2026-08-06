@@ -5,10 +5,11 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 has landed**, so the repo is the blueprint
-under `docs/backend-architecture/` plus the foundation that blueprint specifies:
-SDK pin, central package management, the solution file, CI and the licence gate.
-There is **no C# yet** — the first project arrives with PR-02.
+built with DDD, CQRS and TDD. **PR-01 and PR-02 have landed**, so the repo is
+the blueprint under `docs/backend-architecture/`, the foundation that blueprint
+specifies — SDK pin, central package management, the solution file, CI and the
+licence gate — and the first C#: `Common.Domain` and `Common.Application`, each
+with its test project.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -48,15 +49,24 @@ docs/roadmap.md                  estimates and calendar over Appendix C
 global.json                      SDK pin (§4.4)
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    no projects yet — PR-02 adds the first
+Platform.slnx                    the four projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate, then restore/build/test
 .github/licence-gate/            the gate, its allow-list and its tests
+
+src/BuildingBlocks/
+  Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,
+                                 IHasDomainEvents, IAggregateRoot — no packages
+  Common.Application/            Result, Result<T>, Error, ErrorType
+tests/
+  Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
+  Common.Application.Tests/      anonymous sample types both suites build on
 ```
 
-The second block is PR-01's. It carries no C#: the solution file is empty and
-`dotnet test` passes vacuously until PR-02 ships the first tests alongside the
-code they cover.
+The second block is PR-01's and the third is PR-02's. `Common.Application` does
+**not** reference `Common.Domain` yet — §4.2 permits it and PR-09's
+`TransactionBehavior` will need it, but an unused project reference is a claim
+about the dependency graph that nothing yet makes true.
 
 The licence gate lives under `.github/` rather than a `build/` directory
 because it is CI-only and §4.1 draws no such tree. It is stdlib Python, reads
@@ -74,10 +84,11 @@ footer or index row will catch its drift — `/validate-blueprint` check 10 is
 the only thing that does, which is why the roadmap is named in that command's
 scope rather than left to the directory glob.
 
-Planned, per §4.1 — do not invent a different shape for it:
+Planned, per §4.1 — do not invent a different shape for it. The two building
+blocks PR-02 built are shown above; everything below is still ahead:
 
 ```
-src/BuildingBlocks/   Common.Domain, .Application, .Infrastructure, .Web, .Contracts
+src/BuildingBlocks/   .Infrastructure, .Web, .Contracts (Domain and Application exist)
 src/Gateway/          Gateway.Api (YARP)
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
@@ -101,10 +112,16 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` exists, so the build rules and the drift rules below are live.
-It holds **no projects yet** — PR-02 adds the first — which makes this the one
-awkward moment where the solution builds and proves nothing. Do not read a green
-`dotnet test` as coverage until there is something in the file.
+`Platform.slnx` holds four projects and `dotnet test` runs 36 tests, so the
+build rules and the drift rules below are live and a green run now means
+something. **PR-03 is next** (`feat(common): ProblemDetails, error catalogue,
+correlation middleware`), and it is the first PR whose dependencies are
+satisfied by what is already here rather than by a plan.
+
+The building blocks are two of five. `Common.Infrastructure`, `Common.Web` and
+`Common.Contracts` do not exist, so a change that "obviously belongs" in one of
+them is a change that belongs in the PR that creates it (Appendix C), not in a
+project invented early.
 
 The commands are the ones the target solution uses:
 
@@ -123,6 +140,20 @@ latest-Recommended`, and no StyleCop. A warning stops the build, so a change
 that provokes one is not done until the warning is gone — and `#pragma` is not
 the way out. A genuinely warranted suppression goes in `Directory.Build.props`
 with a comment.
+
+Two live there, both found by PR-02 and both arguing their case in the file:
+
+- **CA1707** off for projects whose name ends `Tests`. §12's test names are
+  sentences written with underscores, and the rule forbids them. Scoped by
+  name — `EndsWith('Tests')`, not `'.Tests'`, because `Platform.IntegrationTests`
+  ends with the word and not the dotted suffix.
+- **CA1716** off repo-wide. It flags a type whose name is a reserved word in
+  another .NET language, and `Error` (§10.5) is one in VB. Nothing here is a
+  published library — §4.3 lets exactly one assembly cross a service boundary —
+  so the scenario the rule protects does not exist.
+
+A third suppression is a decision about the policy, not about the file in front
+of you. Argue it in the comment or do not add it.
 
 `EnforceCodeStyleInBuild` only bites on rules set to `warning` or above, and
 exactly three are: **IDE0055** (formatting), **IDE0065** (`using` placement) and

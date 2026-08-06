@@ -250,6 +250,40 @@ public interface IHasDomainEvents
 
 public interface IAggregateRoot;
 
+/// <summary>
+/// §5.1's first row, made executable: identity persists through change, so two
+/// entities of the same type with the same Id are the same thing however much
+/// else differs between them.
+/// </summary>
+public abstract class Entity<TId> : IEquatable<Entity<TId>>
+    where TId : struct
+{
+    // Assigned by whatever creates the entity — a factory after the base
+    // constructor has run, or EF Core materialising through a private
+    // parameterless one (§5.4). Hence a protected setter rather than `init`.
+    public TId Id { get; protected set; }
+
+    // Type as well as identifier. A comparison that comes down to the Id alone
+    // makes an OrderLine equal to the Order it belongs to the moment the two
+    // share a key type, and nothing about that reads as wrong at the call site.
+    public bool Equals(Entity<TId>? other) =>
+        other is not null &&
+        GetType() == other.GetType() &&
+        EqualityComparer<TId>.Default.Equals(Id, other.Id);
+
+    public override bool Equals(object? obj) => Equals(obj as Entity<TId>);
+
+    public override int GetHashCode() => HashCode.Combine(GetType(), Id);
+
+    // Declared, not inherited. Without these two, `==` goes on comparing
+    // references while `Equals` compares identifiers — the same pair equal by
+    // one operator and not the other, in a language where both read the same.
+    public static bool operator ==(Entity<TId>? left, Entity<TId>? right) =>
+        left is null ? right is null : left.Equals(right);
+
+    public static bool operator !=(Entity<TId>? left, Entity<TId>? right) => !(left == right);
+}
+
 public abstract class AggregateRoot<TId>
     : Entity<TId>, IAggregateRoot, IHasDomainEvents
     where TId : struct

@@ -10,7 +10,7 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 /
 ├── src/
 │   ├── BuildingBlocks/
-│   │   ├── Common.Domain/              Entity, AggregateRoot, ValueObject, IDomainEvent
+│   │   ├── Common.Domain/              Entity, AggregateRoot, IDomainEvent (§5.5)
 │   │   ├── Common.Application/         Dispatcher, pipeline behaviours, Result<T>
 │   │   ├── Common.Infrastructure/      Outbox, inbox, EF conventions, Redis
 │   │   ├── Common.Web/                 Host defaults: OTel, health, auth, ProblemDetails,
@@ -49,6 +49,9 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │       └── Notifications/              (Application, Infrastructure, Migrator, Worker)
 │
 ├── tests/
+│   ├── Common.Domain.Tests/            The building blocks, under the same
+│   ├── Common.Application.Tests/       *.Domain.Tests / *.Application.Tests
+│   │                                   convention the services use (§12.1)
 │   ├── Catalog.Domain.Tests/
 │   ├── Catalog.Application.Tests/
 │   ├── Catalog.Api.Tests/
