@@ -57,15 +57,71 @@ So for each finding, before changing anything:
 | **Reject — wrong** | The claim does not hold. Say what you checked. |
 | **Ask** | Genuine design ambiguity. Surface it; do not pick silently. |
 
-## Replying
+## Replying, marking and resolving
 
-Draft replies for anything rejected — a rejection nobody reads is a comment
-that comes back on the next PR. Post with
-`gh api repos/:owner/:repo/pulls/<n>/comments/<id>/replies` only after showing
-the user the text. Accepted findings need no reply; the commit is the reply.
+**Every thread you triage ends closed, and it ends closed in three steps.** A
+thread left open reads as one nobody looked at, and the next reviewer — human
+or bot — re-opens the same argument on the next PR.
+
+1. **The reasoned reply.** Always for a rejection: a rejection nobody reads is
+   a comment that comes back. For an acceptance, only where the commit does not
+   already say it — a one-line fix needs no essay. Post with
+   `gh api repos/:owner/:repo/pulls/<n>/comments/<id>/replies -f body='…'`,
+   and only after showing the user the text.
+2. **The marker**, as its own reply on the same thread, one word and nothing
+   else: **`done`** if the finding was accepted and the fix is committed,
+   **`rejected`** if it was not. It goes last so the thread's final line states
+   the outcome without anyone reading the argument above it, and one word is
+   greppable across a PR's history in a way a paragraph is not.
+
+   `done` claims the work is committed. Post it after the commit exists, never
+   before — a marker that runs ahead of the fix is worse than no marker,
+   because it is the line a reviewer trusts instead of checking.
+3. **Resolve the thread.**
+
+### Resolving
+
+**REST cannot do this** — `/pulls/<n>/comments` has no resolve field, and there
+is no `gh pr` subcommand for it. It is a GraphQL mutation on a *thread* ID
+(`PRRT_…`), which is not the comment's `id`, so the mapping must be fetched:
+
+```bash
+gh api graphql -f query='
+query($owner:String!,$repo:String!,$pr:Int!){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$pr){
+      reviewThreads(first:50){
+        nodes{ id isResolved comments(first:1){ nodes{ databaseId path } } }
+      }
+    }
+  }
+}' -F owner=<owner> -F repo=<repo> -F pr=<n>
+```
+
+`comments.nodes[0].databaseId` is the inline comment's numeric id from the REST
+call above; `id` is the thread. Then, once the marker is posted:
+
+```bash
+gh api graphql -f query='mutation($id:ID!){
+  resolveReviewThread(input:{threadId:$id}){ thread{ isResolved } }
+}' -F id=<PRRT_…>
+```
+
+The mutation is idempotent — re-running it on a resolved thread returns
+`isResolved: true` and changes nothing — so a re-run after a partial pass is
+safe.
+
+**One verdict does not get this treatment: `Ask`.** A thread raising a genuine
+design ambiguity is unresolved by definition, and closing it would hide the
+question behind a green tick. Leave it open, with no marker, and put it in the
+report instead.
 
 ## Report
 
 A table of finding → verdict → sites touched, then the diff summary. State
 the count you rejected and why, separately from the count you fixed — a review
-where everything was accepted usually means the verification step was skipped.
+where everything was accepted usually means the verification step was skipped,
+and one where everything was rejected deserves the same suspicion.
+
+Finish with the thread state: how many were marked `done`, how many `rejected`,
+how many resolved, and — named individually — any left open as `Ask`.

@@ -824,7 +824,7 @@ Delivery:
 | `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
-| `/review-copilot` | Triage Copilot's PR comments — verify each before acting |
+| `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
 | `/review-grok` | Triage an external review into a resolution record |
 
 `/pr` pushes the branch itself, and `/ship` therefore runs all the way to an
