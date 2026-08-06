@@ -20,17 +20,19 @@ right — this file is an estimate laid over a plan, not a second plan.
 
 ## What these numbers are
 
-They are a price for code that does not exist yet, quoted against a
-specification that does. That is an unusually good position to estimate from —
-the blueprint names the types, the tests, the failure modes and the migration
+They were quoted before any of this code was written, against a specification
+that was already finished — an unusually good position to estimate from. The
+blueprint names the types, the tests, the failure modes and the migration
 shapes, so most of what normally hides inside an estimate has already been
 argued out in ~10,500 lines of prose.
 
 It is also the trap. A specification this precise makes an estimate feel
 measured when it is still a guess, and the numbers below have the same standing
 as any other pre-implementation estimate: they are an argument about relative
-size that happens to be denominated in days. The ranking of the pull requests
-is the durable part. The absolute total is the part that moves.
+size that happens to be denominated in days. None has been re-priced against a
+pull request that has actually landed. The ranking of the pull requests is the
+durable part; the absolute total is the part that moves, and delivered work is
+the only thing that should move it.
 
 > **Estimate the specification, not the aspiration.** Each figure prices what
 > Appendix C's *Delivers* column actually lists, including its tests. Where a
