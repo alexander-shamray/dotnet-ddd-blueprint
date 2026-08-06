@@ -117,7 +117,8 @@ test rather than a code review convention:
 [Fact]
 public void Domain_has_no_infrastructure_dependencies()
 {
-    string[] forbidden = [
+    string[] forbidden =
+    [
         "Microsoft.EntityFrameworkCore",
         "MassTransit",
         "StackExchange.Redis",

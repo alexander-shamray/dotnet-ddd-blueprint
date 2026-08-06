@@ -59,12 +59,22 @@ tab_width = 4
 # both alone. Like csharp_prefer_braces below, this value is a declaration and
 # CLAUDE.md carries the rule itself.
 #
-# csharp_new_line_before_open_brace is deliberately NOT set. Its categories are
-# all-or-nothing: naming `lambdas` would be right for the block-bodied ones the
-# corpus writes Allman, and wrong for `o => { /* §11.3 */ }`; naming
-# `object_collection_array_initializers` would explode every short `new { … }`
-# the one-line rule exists to keep. The C# default already matches the dominant
-# style, and the short forms are the wrapping rule's job, not a formatter's.
+# csharp_new_line_before_open_brace is deliberately NOT set, and leaving it
+# unset is what enforces the rule rather than a gap in it. The C# default is
+# `all` — every `{` on a line of its own — which is exactly the house rule
+# for braces, so naming the categories would restate the default and add a
+# second place for it to drift.
+#
+# Short forms survive it. csharp_preserve_single_line_blocks below keeps
+# `{ get; init; }`, `o => { /* §11.3 */ }` and `new { OrderId = … }` on one
+# line, so `all` does not explode them. That was measured, not assumed: a build
+# with these settings reports IDE0055 on `new Options {` and leaves
+# `new Options { Limit = 1 }` alone.
+#
+# The consequence is worth stating plainly, because it does not hold for the
+# bracket rule below: with IDE0055 at warning and ADR-019's
+# TreatWarningsAsErrors, a trailing `{` FAILS THE BUILD. Brace placement is
+# never a review matter here.
 max_line_length = 120
 
 # --- Wrapping: what a formatter must not undo ---
@@ -103,6 +113,16 @@ csharp_new_line_before_members_in_anonymous_types = true
 #   - A broken fluent chain puts every call on its own line, first one included.
 #   - A break goes at the outermost bracket, never a nested one.
 #   - A wrapped condition takes braces on its body.
+#   - `[` opens a line of its own at its construct's column, as `{` does and
+#     `(` does not. The brace half is enforced (see
+#     csharp_new_line_before_open_brace above); the bracket half is not, and
+#     there is no `csharp_new_line_before_open_bracket` to reach for — that
+#     setting governs braces only, and the bracket twin is a key nobody will
+#     find. Checked against the tools rather than assumed: `dotnet format`
+#     normalises NEITHER bracket form and IDE0055 reports neither, so a format
+#     run will not introduce this and will not undo it. Unlike the three
+#     settings above, nothing has to be pinned to keep the run idempotent —
+#     this one is carried by review and CLAUDE.md alone.
 # dotnet_style_operator_placement_when_wrapping (below, in [*.cs]) is the
 # closest thing to enforcement, and it governs binary operators only — not `=>`.
 
@@ -199,6 +219,12 @@ dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggesti
 dotnet_style_prefer_auto_properties = true:silent
 dotnet_style_object_initializer = true:suggestion
 dotnet_style_collection_initializer = true:suggestion
+# IDE0305 — the analyser behind CLAUDE.md's "materialise with a spread, not a
+# terminal .ToArray()". Left at suggestion with the other style preferences
+# rather than raised to warning, even though the rule now has no exception and
+# the corpus holds no `.ToArray()` at all. Raising it would make a fourth
+# enforced rule, and the enforced set is a deliberate three that ADR-019 names;
+# growing it is a decision about the policy, not about this line.
 dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
 dotnet_style_prefer_simplified_boolean_expressions = true:suggestion
 dotnet_style_prefer_compound_assignment = true:suggestion

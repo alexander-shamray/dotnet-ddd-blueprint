@@ -306,17 +306,21 @@ public void Command_behaviours_are_registered_in_the_documented_order()
 {
     using IServiceScope scope = BuildProvider().CreateScope();
 
-    Type[] actual = scope.ServiceProvider
-        .GetServices<IPipelineBehavior<PlaceOrderCommand, Result<Guid>>>()
-        .Select(b => b.GetType().GetGenericTypeDefinition())
-        .ToArray();
+    Type[] actual =
+    [
+        .. scope.ServiceProvider
+            .GetServices<IPipelineBehavior<PlaceOrderCommand, Result<Guid>>>()
+            .Select(b => b.GetType().GetGenericTypeDefinition())
+    ];
 
-    actual.ShouldBe([
-        typeof(LoggingBehavior<,>),
-        typeof(ValidationBehavior<,>),
-        typeof(IdempotencyBehavior<,>),
-        typeof(TransactionBehavior<,>)
-    ], "outermost first — see the pipeline diagram above");
+    actual.ShouldBe(
+        [
+            typeof(LoggingBehavior<,>),
+            typeof(ValidationBehavior<,>),
+            typeof(IdempotencyBehavior<,>),
+            typeof(TransactionBehavior<,>)
+        ],
+        "outermost first — see the pipeline diagram above");
 }
 ```
 
@@ -338,21 +342,25 @@ public void Queries_run_without_the_transaction_and_idempotency_behaviours()
 {
     using IServiceScope scope = BuildProvider().CreateScope();
 
-    Type[] actual = scope.ServiceProvider
-        // The query's own result type (§6.5) — CursorPage, not Result. A
-        // closed IPipelineBehavior<,> asked for with the wrong TResult resolves
-        // to an empty sequence, and an empty sequence passes any assertion
-        // about what is absent.
-        .GetServices<IPipelineBehavior<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>>()
-        .Select(b => b.GetType().GetGenericTypeDefinition())
-        .ToArray();
+    Type[] actual =
+    [
+        .. scope.ServiceProvider
+            // The query's own result type (§6.5) — CursorPage, not Result. A
+            // closed IPipelineBehavior<,> asked for with the wrong TResult resolves
+            // to an empty sequence, and an empty sequence passes any assertion
+            // about what is absent.
+            .GetServices<IPipelineBehavior<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>>()
+            .Select(b => b.GetType().GetGenericTypeDefinition())
+    ];
 
     // A query opening a transaction is the defect this catches: harmless in
     // a test, and a held connection per read under load.
-    actual.ShouldBe([
-        typeof(LoggingBehavior<,>),
-        typeof(ValidationBehavior<,>)
-    ], "queries get logging and validation only — §6.3");
+    actual.ShouldBe(
+        [
+            typeof(LoggingBehavior<,>),
+            typeof(ValidationBehavior<,>)
+        ],
+        "queries get logging and validation only — §6.3");
 }
 ```
 
@@ -369,10 +377,11 @@ public sealed class ValidationBehavior<TRequest, TResult>(IEnumerable<IValidator
 
         ValidationContext<TRequest> context = new(request);
         ValidationFailure[] failures =
-            (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
+        [
+            .. (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
                 .SelectMany(r => r.Errors)
                 .Where(f => f is not null)
-                .ToArray();
+        ];
 
         if (failures.Length > 0)
             throw new ValidationException(failures);
@@ -650,13 +659,11 @@ public sealed class PlaceOrderHandler(IOrderRepository orders, IProductPriceRead
 {
     public async Task<Result<Guid>> HandleAsync(PlaceOrderCommand command, CancellationToken ct)
     {
-        ProductId[] productIds =
-            command.Items.Select(i => new ProductId(i.ProductId)).ToArray();
+        ProductId[] productIds = [.. command.Items.Select(i => new ProductId(i.ProductId))];
         IReadOnlyDictionary<ProductId, Money> priceList =
             await prices.GetAsync(productIds, command.Currency, ct);
 
-        ProductId[] missing =
-            productIds.Where(id => !priceList.ContainsKey(id)).ToArray();
+        ProductId[] missing = [.. productIds.Where(id => !priceList.ContainsKey(id))];
         if (missing.Length > 0)
             return Result.Failure<Guid>(OrderErrors.ProductsUnavailable(missing));
 
@@ -1412,17 +1419,19 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
                 cancellationToken: ct))).AsList();
 
         bool hasMore = rows.Count > limit;
-        OrderSummaryDto[] items = (hasMore ? rows.GetRange(0, limit) : rows)
-            .Select(r =>
-                new OrderSummaryDto(
-                    r.OrderId,
-                    r.Status,
-                    r.Total,
-                    r.Currency,
-                    r.LineCount,
-                    r.PlacedAt,
-                    JsonSerializer.Deserialize<SummaryProduct[]>(r.Products)!))
-            .ToArray();
+        OrderSummaryDto[] items =
+        [
+            .. (hasMore ? rows.GetRange(0, limit) : rows)
+                .Select(r =>
+                    new OrderSummaryDto(
+                        r.OrderId,
+                        r.Status,
+                        r.Total,
+                        r.Currency,
+                        r.LineCount,
+                        r.PlacedAt,
+                        JsonSerializer.Deserialize<SummaryProduct[]>(r.Products)!))
+        ];
 
         string? next = hasMore && items.Length > 0
             ? Cursor.Encode(items[^1].PlacedAt, items[^1].OrderId)

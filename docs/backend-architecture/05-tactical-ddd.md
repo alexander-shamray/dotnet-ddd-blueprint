@@ -110,9 +110,7 @@ public sealed class Order : AggregateRoot<OrderId>
     /// next.
     /// </summary>
     private IReadOnlyList<OrderLineSnapshot> SnapshotLines() =>
-        _lines
-            .Select(l => new OrderLineSnapshot(l.ProductId, l.Quantity, l.UnitPrice))
-            .ToArray();
+        [.. _lines.Select(l => new OrderLineSnapshot(l.ProductId, l.Quantity, l.UnitPrice))];
 
     private readonly string _currency;
 

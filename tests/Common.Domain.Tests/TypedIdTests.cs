@@ -24,10 +24,12 @@ public class TypedIdTests
     [Fact]
     public void Every_new_identifier_is_distinct()
     {
-        TestId[] ids = Enumerable
-            .Range(0, 1_000)
-            .Select(_ => TestId.New())
-            .ToArray();
+        TestId[] ids =
+        [
+            .. Enumerable
+                .Range(0, 1_000)
+                .Select(_ => TestId.New())
+        ];
 
         ids.Distinct().Count().ShouldBe(ids.Length);
     }

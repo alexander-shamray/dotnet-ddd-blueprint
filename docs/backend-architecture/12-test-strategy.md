@@ -1026,12 +1026,13 @@ public class ContractTests
     // versioned namespace of an interface that is deliberately shared across
     // all of them — and then ask ContractSamples for an instance of it.
     private static readonly Type[] Contracts =
-        typeof(OrderPlaced).Assembly
+    [
+        .. typeof(OrderPlaced).Assembly
             .GetTypes()
             .Where(t => t.IsPublic &&
                 t is { IsInterface: false, IsAbstract: false } &&
                 t.Namespace?.StartsWith("Common.Contracts.") == true)
-            .ToArray();
+    ];
 
     [Fact]
     public void No_contract_names_a_domain_type()

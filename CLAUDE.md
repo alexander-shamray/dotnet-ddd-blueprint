@@ -289,8 +289,7 @@ already written against it.
   ```csharp
   IReadOnlyDictionary<ProductId, Money> priceList =
       await prices.GetAsync(productIds, command.Currency, ct);
-  ProductId[] missing =
-      productIds.Where(id => !priceList.ContainsKey(id)).ToArray();
+  ProductId[] missing = [.. productIds.Where(id => !priceList.ContainsKey(id))];
   ```
 
   A reader of a fenced code block has no hover and no go-to-definition, and this
@@ -316,7 +315,8 @@ already written against it.
   stays on one line, and past it every element gets its own:
 
   ```csharp
-  string[] forbidden = [
+  string[] forbidden =
+  [
       "Microsoft.EntityFrameworkCore",
       "MassTransit",
       "StackExchange.Redis",
@@ -324,9 +324,10 @@ already written against it.
   ];
   ```
 
-  `[` and `{` end the line they open and their closer sits on its own line at
-  the opening construct's column. `(` also ends its line, but `)` trails the
-  last element — `);`, not a line of its own:
+  **`[` and `{` each take a line of their own**, at the column of the construct
+  they open, and their closers do too. **`(` is the single exception**: it ends
+  the line it opens, and `)` trails the last element — `);`, not a line of its
+  own:
 
   ```csharp
   _deliveryLag = meter.CreateHistogram<double>(
@@ -334,6 +335,48 @@ already written against it.
       unit: "s",
       description: "OccurredAt to consumer start.");
   ```
+
+  The exception is not arbitrary, and it is symmetric at both ends. A
+  parenthesised argument list is *part of* the invocation — it belongs to the
+  call syntactically, so it hugs it on the way in and on the way out. A braced
+  or bracketed body is a *container* of elements, and giving the container its
+  own opening and closing line puts its extent in a column the eye can scan
+  without reading anything between.
+
+  ```csharp
+  options.DefaultEntryOptions = new HybridCacheEntryOptions
+  {
+      Expiration           = TimeSpan.FromMinutes(10),  // L2, Redis
+      LocalCacheExpiration = TimeSpan.FromMinutes(1)    // L1, in-process
+  };
+  ```
+
+  **The two halves are enforced very differently, and it is worth knowing
+  which is which.** `{` is not a review rule at all: the C# default for
+  `csharp_new_line_before_open_brace` is `all`, IDE0055 reports a trailing one
+  as a formatting violation, and ADR-019 turns that into a failed build. Write
+  `new Options {` and the compiler stops you. `[` has no such backing —
+  Roslyn has no opinion on bracket placement, `dotnet format` neither
+  introduces nor removes the break, and IDE0055 is silent. That half is
+  carried by review and by this file alone.
+
+  In argument position the two rules compose rather than fight: `(` ends its
+  line, arguments go one per line at + 4, and a collection expression among
+  them opens at its own argument's column.
+
+  ```csharp
+  actual.ShouldBe(
+      [
+          typeof(LoggingBehavior<,>),
+          typeof(ValidationBehavior<,>)
+      ],
+      "queries get logging and validation only — §6.3");
+  ```
+
+  A collection expression that fits stays on one line, `[` included — the
+  budget governs it exactly as it governs any other list, and
+  `IDomainEvent[] events = [.. aggregates.SelectMany(a => a.DomainEvents)];`
+  is one line rather than five.
 
   Continuations indent **four**, never to a bracket column. A list too wide for
   one line was previously wrapped under its opening bracket
@@ -368,17 +411,30 @@ already written against it.
   head and the chain indents four past *it* — eight from the declaration:
 
   ```csharp
-  ValidationFailure[] failures =
-      (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
-          .SelectMany(r => r.Errors)
-          .Where(f => f is not null)
-          .ToArray();
+  IEnumerable<(Type Implementation, Type Service)> implementations =
+      assemblies
+          .SelectMany(a => a.GetTypes())
+          .Where(t => t is { IsAbstract: false, IsInterface: false })
+          // ... the chain continues; §6.2 carries it in full
   ```
 
   Measuring from the declaration instead would put `.SelectMany` level with the
   expression it is chained onto, and the chain would read as a sibling of the
   initialiser rather than as applied to it. A `})` closing a lambda mid-chain is
   a continuation, not a head — the calls after it keep the chain's indent.
+
+  **A spread element is a head the same way.** `..` introduces the expression,
+  so the chain hangs off the `.. x` line at + 4 — which lands eight from the
+  declaration again, the `[` line having taken the first four:
+
+  ```csharp
+  ValidationFailure[] failures =
+  [
+      .. (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
+          .SelectMany(r => r.Errors)
+          .Where(f => f is not null)
+  ];
+  ```
 
   **"Contains no invocation" means no *dotted* call, and a receiver never
   outranks that.** `Types`, `app`, `_lines`, `from` and `Enumerable` all sit
@@ -478,6 +534,28 @@ already written against it.
 - Prefer collection expressions, `is null` over `ReferenceEquals`, null
   propagation, compound assignment, simplified interpolation, primary
   constructors.
+- **Materialise with a spread, not a terminal `.ToArray()` or `.ToList()`.**
+  A sequence being fixed into an array or list target is written
+  `[.. sequence]` — one space after the `..`, as `[.. record.Attributes]` and
+  `[.. assemblies]` already had it. There are no `.ToArray()` or `.ToList()`
+  calls left in the corpus, and a new one is a site this rule missed:
+
+  ```csharp
+  ProductId[] missing = [.. productIds.Where(id => !priceList.ContainsKey(id))];
+  ```
+
+  The reason is that the spread states the target and the terminal call states
+  a conversion, and only one of those is what the line is for. `ProductId[]` on
+  the left already fixes the type; `.ToArray()` on the right repeats it in a
+  second vocabulary, and repeats it *last*, so the shape of the result is the
+  final thing a reader learns rather than the first.
+
+  Two consequences worth stating, because both changed real sites in this
+  sweep. Dropping `.ToArray()` often leaves a **single** call, and a single
+  call is not a broken chain — join it (`[.. e.Lines.Select(…)]`, not `..
+  e.Lines` over two lines). And a spread frequently brings the whole statement
+  back under 120, in which case the one-line rule applies and the `[` does not
+  get its own line after all.
 - **No `#pragma` suppressions** — there are none in the corpus and a sample that
   needs one is a sample whose design is wrong. If a suppression is genuinely
   warranted in source, it belongs in `Directory.Build.props` with a comment
