@@ -94,16 +94,19 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.ToTable("Orders", "ordering");
         builder.HasKey(o => o.Id);
 
-        builder.Property(o => o.Id)
-               .HasConversion(id => id.Value, value => new OrderId(value))
-               .ValueGeneratedNever();
+        builder
+            .Property(o => o.Id)
+            .HasConversion(id => id.Value, value => new OrderId(value))
+            .ValueGeneratedNever();
 
-        builder.Property(o => o.CustomerId)
-               .HasConversion(id => id.Value, value => new CustomerId(value));
+        builder
+            .Property(o => o.CustomerId)
+            .HasConversion(id => id.Value, value => new CustomerId(value));
 
-        builder.Property(o => o.Status)
-               .HasConversion<string>()
-               .HasMaxLength(32);
+        builder
+            .Property(o => o.Status)
+            .HasConversion<string>()
+            .HasMaxLength(32);
 
         // Value object mapped as a complex type — columns on the same table,
         // no identity, exactly matching the domain semantics.
@@ -117,8 +120,8 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         // Backing field, not the public read-only property.
         builder.Metadata
-               .FindNavigation(nameof(Order.Lines))!
-               .SetPropertyAccessMode(PropertyAccessMode.Field);
+            .FindNavigation(nameof(Order.Lines))!
+            .SetPropertyAccessMode(PropertyAccessMode.Field);
 
         builder.OwnsMany<OrderLine>("_lines", line =>
         {
@@ -173,12 +176,10 @@ degrade badly under that load. There, use a targeted pessimistic update:
 
 ```sql
 UPDATE inventory.StockItems
-SET    Available = Available - @Quantity,
-       Reserved  = Reserved  + @Quantity,
-       UpdatedAt = SYSDATETIMEOFFSET()
+SET Available = Available - @Quantity, Reserved = Reserved + @Quantity, UpdatedAt = SYSDATETIMEOFFSET()
 OUTPUT inserted.Available
-WHERE  ProductId = @ProductId
-  AND  Available >= @Quantity;
+WHERE ProductId = @ProductId
+    AND Available >= @Quantity;
 ```
 
 The `WHERE Available >= @Quantity` makes the check and the decrement a single

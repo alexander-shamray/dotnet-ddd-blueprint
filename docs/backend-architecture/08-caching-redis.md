@@ -76,8 +76,7 @@ the [§6.2](06-cqrs.md) scan, so an unregistered cache is a service that will no
 
 ```csharp
 // Ordering.Infrastructure — called by AddOrderingInfrastructure (§4.2).
-public static IServiceCollection AddRedisConnections(
-    this IServiceCollection services, IConfiguration configuration)
+public static IServiceCollection AddRedisConnections(this IServiceCollection services, IConfiguration configuration)
 {
     // §8.1's two keyed IConnectionMultiplexer registrations — cache and
     // coordination, separate because the eviction policies cannot be shared.
@@ -93,9 +92,10 @@ public static IServiceCollection AddRedisConnections(
     // name lives (§15.4), and the two drift silently: §8.1's per-service ACL
     // denies writes to a prefix the service does not own, so the symptom is a
     // cache that never populates rather than an error naming the prefix.
-    services.AddOptions<RedisCacheOptions>()
-            .Configure<IHostEnvironment>((o, env) =>
-                o.InstanceName = $"{env.ApplicationName}:cache:");
+    services
+        .AddOptions<RedisCacheOptions>()
+        .Configure<IHostEnvironment>((o, env) =>
+            o.InstanceName = $"{env.ApplicationName}:cache:");
 
     services.AddHybridCache(options =>
     {
@@ -117,20 +117,17 @@ usually an acceptable trade for eliminating most Redis round trips; adjust with
 the domain in mind.
 
 ```csharp
-public sealed class GetProductDetailHandler(
-    HybridCache cache, IDbConnectionFactory connections)
+public sealed class GetProductDetailHandler(HybridCache cache, IDbConnectionFactory connections)
     : IQueryHandler<GetProductDetailQuery, ProductDetailDto?>
 {
-    public async Task<ProductDetailDto?> HandleAsync(
-        GetProductDetailQuery query, CancellationToken ct)
-        => await cache.GetOrCreateAsync(
+    public async Task<ProductDetailDto?> HandleAsync(GetProductDetailQuery query, CancellationToken ct) =>
+        await cache.GetOrCreateAsync(
             $"product:{query.ProductId}:v2",
             query,
             static async (q, token) =>
             {
                 using IDbConnection connection = connections.Create();
-                return await connection.QuerySingleOrDefaultAsync<ProductDetailDto>(
-                    ProductSql, new { q.ProductId });
+                return await connection.QuerySingleOrDefaultAsync<ProductDetailDto>(ProductSql, new { q.ProductId });
             },
             tags: [$"product:{query.ProductId}", "catalog"],
             cancellationToken: ct);
@@ -223,8 +220,8 @@ namespace Ordering.Infrastructure.Caching;
 public sealed class PriceChangedCacheInvalidator(HybridCache cache)
     : IIntegrationEventHandler<PriceChanged>
 {
-    public Task HandleAsync(PriceChanged e, CancellationToken ct)
-        => cache.RemoveByTagAsync($"product:{e.ProductId}", ct).AsTask();
+    public Task HandleAsync(PriceChanged e, CancellationToken ct) =>
+        cache.RemoveByTagAsync($"product:{e.ProductId}", ct).AsTask();
 }
 ```
 
@@ -269,15 +266,13 @@ public interface IIdempotentCommand
 ```
 
 ```csharp
-public sealed class IdempotencyBehavior<TCommand, TResult>(
-    IIdempotencyStore store)
+public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore store)
     : IPipelineBehavior<TCommand, TResult>
     where TCommand : ICommand<TResult>, IIdempotentCommand
 {
     private static readonly TimeSpan Retention = TimeSpan.FromHours(24);
 
-    public async Task<TResult> HandleAsync(
-        TCommand command, NextDelegate<TResult> next, CancellationToken ct)
+    public async Task<TResult> HandleAsync(TCommand command, NextDelegate<TResult> next, CancellationToken ct)
     {
         // Key shape only — the store owns the service prefix and namespace.
         string key = $"{typeof(TCommand).Name}:{command.CommandId}";
@@ -329,9 +324,8 @@ internal sealed class RedisIdempotencyStore(
     // when it is needed — and a wrong prefix fails the ACL silently.
     private string Key(string suffix) => $"{environment.ApplicationName}:idem:{suffix}";
 
-    public async Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct)
-        => await redis.GetDatabase().StringSetAsync(
-               Key(key), InProgressMarker, retention, When.NotExists);
+    public async Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct) =>
+        await redis.GetDatabase().StringSetAsync(Key(key), InProgressMarker, retention, When.NotExists);
 
     // GetAsync / CompleteAsync / ReleaseAsync follow the same key shaping.
 }
@@ -346,9 +340,11 @@ command rather than trusting the author to have opted in:
 [Fact]
 public void Commands_carrying_a_CommandId_declare_IIdempotentCommand()
 {
-    IEnumerable<string> offenders = typeof(PlaceOrderCommand).Assembly.GetTypes()
-        .Where(t => t.GetInterfaces().Any(i =>
-                        i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>)))
+    IEnumerable<string> offenders = typeof(PlaceOrderCommand).Assembly
+        .GetTypes()
+        .Where(t =>
+            t.GetInterfaces().Any(i =>
+                i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>)))
         .Where(t => t.GetProperty("CommandId") is not null)
         .Where(t => !typeof(IIdempotentCommand).IsAssignableFrom(t))
         .Select(t => t.Name);

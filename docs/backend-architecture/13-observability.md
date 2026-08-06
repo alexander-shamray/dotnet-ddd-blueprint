@@ -36,7 +36,8 @@ public static IHostApplicationBuilder AddCommonWebDefaults(this IHostApplication
     // YARP would accept as the magic string "default" (§10.2). Naming it costs
     // one line and buys a route file that says what it means — that file is
     // read by people deciding whether a path is public.
-    builder.Services.AddAuthorizationBuilder()
+    builder.Services
+        .AddAuthorizationBuilder()
         .AddPolicy("authenticated", p => p.RequireAuthenticatedUser());
 
     builder.Services.AddProblemDetails(o => { /* §10.5 */ });
@@ -72,7 +73,8 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
         logging.AddProcessor(new SensitiveDataRedactor());
     });
 
-    builder.Services.AddOpenTelemetry()
+    builder.Services
+        .AddOpenTelemetry()
         .ConfigureResource(r => r
             .AddService(serviceName, serviceVersion: BuildInfo.Version)
             .AddAttributes([
@@ -150,21 +152,22 @@ public sealed class OrderMetrics
     {
         Meter meter = factory.Create("Ordering.Orders");
 
-        _placed    = meter.CreateCounter<long>("orders.placed",
-                        unit: "{order}", description: "Orders successfully placed.");
-        _cancelled = meter.CreateCounter<long>("orders.cancelled",
-                        unit: "{order}");
-        _value     = meter.CreateHistogram<double>("orders.value",
-                        unit: "EUR");
-        _fulfilmentSeconds = meter.CreateHistogram<double>("orders.fulfilment.duration",
-                        unit: "s", description: "Placed to confirmed.");
+        _placed    = meter.CreateCounter<long>(
+            "orders.placed",
+            unit: "{order}",
+            description: "Orders successfully placed.");
+        _cancelled = meter.CreateCounter<long>("orders.cancelled", unit: "{order}");
+        _value     = meter.CreateHistogram<double>("orders.value", unit: "EUR");
+        _fulfilmentSeconds = meter.CreateHistogram<double>(
+            "orders.fulfilment.duration",
+            unit: "s",
+            description: "Placed to confirmed.");
     }
 
     public void Placed(Money total)
     {
         _placed.Add(1, new KeyValuePair<string, object?>("currency", total.Currency));
-        _value.Record((double)total.Amount,
-            new KeyValuePair<string, object?>("currency", total.Currency));
+        _value.Record((double)total.Amount, new KeyValuePair<string, object?>("currency", total.Currency));
     }
 
     public void Cancelled(string reason) =>
@@ -233,10 +236,13 @@ placed:
 FulfilmentFact? fulfilment =
     await connection.QuerySingleOrDefaultAsync<FulfilmentFact>(
         """
-        UPDATE ordering.OrderSummaries SET FulfilmentCounted = 1
+        UPDATE ordering.OrderSummaries
+        SET FulfilmentCounted = 1
         OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
-        WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL
-               AND ConfirmedAt IS NOT NULL AND FulfilmentCounted = 0;
+        WHERE OrderId = @OrderId
+            AND PlacedAt IS NOT NULL
+            AND ConfirmedAt IS NOT NULL
+            AND FulfilmentCounted = 0;
         """, args);
 
 if (fulfilment is not null)
@@ -316,12 +322,15 @@ public sealed class RequestMetrics
     public RequestMetrics(IMeterFactory factory)
     {
         Meter meter = factory.Create("Commerce.Requests");
-        _duration = meter.CreateHistogram<double>("request.duration",
-                        unit: "s", description: "Dispatcher entry to result.");
+        _duration = meter.CreateHistogram<double>(
+            "request.duration",
+            unit: "s",
+            description: "Dispatcher entry to result.");
     }
 
     public void Recorded(string request, string outcome, TimeSpan elapsed) =>
-        _duration.Record(elapsed.TotalSeconds,
+        _duration.Record(
+            elapsed.TotalSeconds,
             new KeyValuePair<string, object?>("request", request),
             new KeyValuePair<string, object?>("outcome", outcome));
 }
@@ -340,24 +349,28 @@ public sealed class MessagingMetrics
     {
         Meter meter = factory.Create("Commerce.Messaging");
 
-        _deliveryLag   = meter.CreateHistogram<double>("messaging.delivery.lag",
-                             unit: "s", description: "OccurredAt to consumer start.");
-        _projectionLag = meter.CreateHistogram<double>("projection.lag",
-                             unit: "s", description: "Event raised to projection applied.");
-        _rejected      = meter.CreateCounter<long>("command.domain_rejected",
-                             description: "Message-borne commands the domain refused (§9.8).");
+        _deliveryLag   = meter.CreateHistogram<double>(
+            "messaging.delivery.lag",
+            unit: "s",
+            description: "OccurredAt to consumer start.");
+        _projectionLag = meter.CreateHistogram<double>(
+            "projection.lag",
+            unit: "s",
+            description: "Event raised to projection applied.");
+        _rejected      = meter.CreateCounter<long>(
+            "command.domain_rejected",
+            description: "Message-borne commands the domain refused (§9.8).");
     }
 
     public void Delivered(string message, TimeSpan lag) =>
-        _deliveryLag.Record(lag.TotalSeconds,
-            new KeyValuePair<string, object?>("message", message));
+        _deliveryLag.Record(lag.TotalSeconds, new KeyValuePair<string, object?>("message", message));
 
     public void Projected(string message, TimeSpan lag) =>
-        _projectionLag.Record(lag.TotalSeconds,
-            new KeyValuePair<string, object?>("message", message));
+        _projectionLag.Record(lag.TotalSeconds, new KeyValuePair<string, object?>("message", message));
 
     public void Rejected(string message, string error) =>
-        _rejected.Add(1,
+        _rejected.Add(
+            1,
             new KeyValuePair<string, object?>("message", message),
             new KeyValuePair<string, object?>("error", error));
 }
@@ -410,8 +423,7 @@ public sealed class LoggingBehavior<TRequest, TResult>(
     TimeProvider clock)
     : IPipelineBehavior<TRequest, TResult>
 {
-    public async Task<TResult> HandleAsync(
-        TRequest request, NextDelegate<TResult> next, CancellationToken ct)
+    public async Task<TResult> HandleAsync(TRequest request, NextDelegate<TResult> next, CancellationToken ct)
     {
         string name  = typeof(TRequest).Name;
         long   start = clock.GetTimestamp();
@@ -427,8 +439,10 @@ public sealed class LoggingBehavior<TRequest, TResult>(
         {
             TResult result = await next();
 
-            logger.LogInformation("{RequestType} completed in {ElapsedMs} ms",
-                name, clock.GetElapsedTime(start).TotalMilliseconds);
+            logger.LogInformation(
+                "{RequestType} completed in {ElapsedMs} ms",
+                name,
+                clock.GetElapsedTime(start).TotalMilliseconds);
             metrics.Recorded(name, "ok", clock.GetElapsedTime(start));
 
             return result;
@@ -462,7 +476,10 @@ here.
 // Good — structured, queryable, no PII.
 logger.LogInformation(
     "Order {OrderId} placed by customer {CustomerId} for {Amount} {Currency}",
-    order.Id, order.CustomerId, order.Total.Amount, order.Total.Currency);
+    order.Id,
+    order.CustomerId,
+    order.Total.Amount,
+    order.Total.Currency);
 
 // Bad — string interpolation destroys the structure; the fields cannot be
 // queried and every message is a distinct string.
@@ -501,19 +518,20 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
     // Substring match, not equality: the field that leaks is never named
     // exactly "password" — it is "NewPassword", "card_number", "id_token".
     private static readonly string[] Sensitive =
-        ["password", "secret", "token", "authorization", "cardnumber",
-         "card_number", "ssn", "nationalid"];
+        ["password", "secret", "token", "authorization", "cardnumber", "card_number", "ssn", "nationalid"];
 
     public override void OnEnd(LogRecord record)
     {
-        if (record.Attributes is null) return;
+        if (record.Attributes is null)
+            return;
 
         List<KeyValuePair<string, object?>>? scrubbed = null;
 
         for (int i = 0; i < record.Attributes.Count; i++)
         {
             KeyValuePair<string, object?> attribute = record.Attributes[i];
-            if (!IsSensitive(attribute.Key)) continue;
+            if (!IsSensitive(attribute.Key))
+                continue;
 
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
@@ -521,7 +539,8 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             scrubbed[i] = new(attribute.Key, "[redacted]");
         }
 
-        if (scrubbed is not null) record.Attributes = scrubbed;
+        if (scrubbed is not null)
+            record.Attributes = scrubbed;
     }
 
     private static bool IsSensitive(string key) =>
@@ -558,14 +577,14 @@ public void Sensitive_attributes_are_redacted()
 
     // Built exactly as AddObservability builds it (§13.2) — ILoggingBuilder,
     // the same extension, so the test covers the seam the host uses.
-    using ILoggerFactory factory = LoggerFactory.Create(b => b.AddOpenTelemetry(o =>
-    {
-        o.AddProcessor(new SensitiveDataRedactor());
-        o.AddInMemoryExporter(exported);
-    }));
+    using ILoggerFactory factory = LoggerFactory.Create(b =>
+        b.AddOpenTelemetry(o =>
+        {
+            o.AddProcessor(new SensitiveDataRedactor());
+            o.AddInMemoryExporter(exported);
+        }));
 
-    factory.CreateLogger("test").LogInformation(
-        "Login for {User} with {Password}", "ada", "hunter2");
+    factory.CreateLogger("test").LogInformation("Login for {User} with {Password}", "ada", "hunter2");
 
     IReadOnlyList<KeyValuePair<string, object?>> attributes =
         exported.Single().Attributes!;
@@ -592,7 +611,8 @@ need connection strings and the endpoints do not.
 shown in `AddOrderingInfrastructure` (§4.2), which has the configuration:
 
 ```csharp
-services.AddHealthChecks()
+services
+    .AddHealthChecks()
     .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
     .AddRedis(configuration.GetConnectionString("RedisCache")!, name: "redis-cache", tags: ["ready"])
     .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"])
@@ -612,14 +632,17 @@ public static IEndpointRouteBuilder MapCommonHealthEndpoints(this IEndpointRoute
 {
     // AllowAnonymous is required, not cosmetic: the kubelet sends no token,
     // so an authenticated probe fails and the pod is restarted in a loop.
-    app.MapHealthChecks("/health/live",    new() { Predicate = _ => false })
-       .AllowAnonymous();
+    app
+        .MapHealthChecks("/health/live",    new() { Predicate = _ => false })
+        .AllowAnonymous();
 
-    app.MapHealthChecks("/health/ready",   new() { Predicate = c => c.Tags.Contains("ready") })
-       .AllowAnonymous();
+    app
+        .MapHealthChecks("/health/ready",   new() { Predicate = c => c.Tags.Contains("ready") })
+        .AllowAnonymous();
 
-    app.MapHealthChecks("/health/startup", new() { Predicate = c => c.Tags.Contains("ready") })
-       .AllowAnonymous();
+    app
+        .MapHealthChecks("/health/startup", new() { Predicate = c => c.Tags.Contains("ready") })
+        .AllowAnonymous();
 
     return app;
 }
@@ -789,14 +812,15 @@ internal sealed class OutboxStats(IServiceScopeFactory scopes) : IOutboxStats
         {
             e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5);
             using IServiceScope scope = scopes.CreateScope();
-            using IDbConnection connection = scope.ServiceProvider
-                .GetRequiredService<IDbConnectionFactory>().Create();
+            using IDbConnection connection =
+                scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
             return connection.ExecuteScalar<double?>(
                 """
                 SELECT DATEDIFF(second, MIN(OccurredAt), SYSDATETIMEOFFSET())
-                FROM   ordering.OutboxMessages
-                WHERE  ProcessedAt IS NULL AND Lane = @lane;
+                FROM ordering.OutboxMessages
+                WHERE ProcessedAt IS NULL
+                    AND Lane = @lane;
                 """, new { lane = lane.ToString() }) ?? 0;
         });
 
@@ -847,8 +871,10 @@ services.AddHostedService<MetricsInitialiser>();
 // below names the type from another assembly, and one access modifier is a
 // smaller commitment than an InternalsVisibleTo that has to name the consumer.
 public sealed class MetricsInitialiser(
-    OutboxMetrics _, OrderMetrics __,
-    MessagingMetrics ___, RequestMetrics ____) : IHostedService
+    OutboxMetrics _,
+    OrderMetrics __,
+    MessagingMetrics ___,
+    RequestMetrics ____) : IHostedService
 {
     // Resolving the parameters is the entire job: constructing them registers
     // the instruments with their meters.
@@ -908,13 +934,17 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
         .Distinct();
 
     HashSet<Type> forced = typeof(MetricsInitialiser)
-        .GetConstructors().Single()
-        .GetParameters().Select(p => p.ParameterType).ToHashSet();
+        .GetConstructors()
+        .Single()
+        .GetParameters()
+        .Select(p => p.ParameterType)
+        .ToHashSet();
 
     // Both directions. Unforced-and-unexplained is the drift this exists for;
     // forced-but-unregistered is a host that will not start.
-    registered.Where(t => !forced.Contains(t) && !NotForced.ContainsKey(t))
-              .ShouldBeEmpty("add it to MetricsInitialiser, or to NotForced with a reason");
+    registered
+        .Where(t => !forced.Contains(t) && !NotForced.ContainsKey(t))
+        .ShouldBeEmpty("add it to MetricsInitialiser, or to NotForced with a reason");
 
     forced.ShouldBeSubsetOf(registered);
 }

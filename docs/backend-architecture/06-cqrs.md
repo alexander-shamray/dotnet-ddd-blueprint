@@ -51,8 +51,7 @@ public delegate Task<TResult> NextDelegate<TResult>();
 
 public interface IPipelineBehavior<in TRequest, TResult>
 {
-    Task<TResult> HandleAsync(TRequest request, NextDelegate<TResult> next,
-                              CancellationToken ct);
+    Task<TResult> HandleAsync(TRequest request, NextDelegate<TResult> next, CancellationToken ct);
 }
 
 public interface IDispatcher
@@ -70,30 +69,28 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 {
     private static readonly ConcurrentDictionary<Type, object> Invokers = new();
 
-    public Task<TResult> SendAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default)
-        => GetInvoker<TResult>(command.GetType(), typeof(CommandInvoker<,>))
-              .InvokeAsync(services, command, ct);
+    public Task<TResult> SendAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default) =>
+        GetInvoker<TResult>(command.GetType(), typeof(CommandInvoker<,>))
+            .InvokeAsync(services, command, ct);
 
-    public Task<TResult> QueryAsync<TResult>(IQuery<TResult> query, CancellationToken ct = default)
-        => GetInvoker<TResult>(query.GetType(), typeof(QueryInvoker<,>))
-              .InvokeAsync(services, query, ct);
+    public Task<TResult> QueryAsync<TResult>(IQuery<TResult> query, CancellationToken ct = default) =>
+        GetInvoker<TResult>(query.GetType(), typeof(QueryInvoker<,>))
+            .InvokeAsync(services, query, ct);
 
-    private static Invoker<TResult> GetInvoker<TResult>(Type requestType, Type openInvoker)
-        => (Invoker<TResult>)Invokers.GetOrAdd(requestType, _ =>
-               Activator.CreateInstance(
-                   openInvoker.MakeGenericType(requestType, typeof(TResult)))!);
+    private static Invoker<TResult> GetInvoker<TResult>(Type requestType, Type openInvoker) =>
+        (Invoker<TResult>)Invokers.GetOrAdd(
+            requestType,
+            _ => Activator.CreateInstance(openInvoker.MakeGenericType(requestType, typeof(TResult)))!);
 
     private abstract class Invoker<TResult>
     {
-        public abstract Task<TResult> InvokeAsync(
-            IServiceProvider services, object request, CancellationToken ct);
+        public abstract Task<TResult> InvokeAsync(IServiceProvider services, object request, CancellationToken ct);
     }
 
     private sealed class CommandInvoker<TCommand, TResult> : Invoker<TResult>
         where TCommand : ICommand<TResult>
     {
-        public override Task<TResult> InvokeAsync(
-            IServiceProvider services, object request, CancellationToken ct)
+        public override Task<TResult> InvokeAsync(IServiceProvider services, object request, CancellationToken ct)
         {
             TCommand typed = (TCommand)request;
             ICommandHandler<TCommand, TResult> handler =
@@ -103,8 +100,8 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 
             // Reversed so the first-registered behaviour is the outermost.
             foreach (IPipelineBehavior<TCommand, TResult> behavior in services
-                         .GetServices<IPipelineBehavior<TCommand, TResult>>()
-                         .Reverse())
+                .GetServices<IPipelineBehavior<TCommand, TResult>>()
+                .Reverse())
             {
                 NextDelegate<TResult> next = pipeline;
                 pipeline = () => behavior.HandleAsync(typed, next, ct);
@@ -158,14 +155,14 @@ public interface ICommandMessageMapper<in TMessage, out TCommand>
 ```
 
 ```csharp
-public static IServiceCollection AddPluggableFrom(
-    this IServiceCollection services, Assembly assembly)
-    => services.Scan(scan =>
+public static IServiceCollection AddPluggableFrom(this IServiceCollection services, Assembly assembly) =>
+    services.Scan(scan =>
     {
         IImplementationTypeSelector from = scan.FromAssemblies(assembly);
 
         foreach (Type contract in PluggableInterfaces.All)
-            from.AddClasses(c => c.AssignableTo(contract))
+            from
+                .AddClasses(c => c.AssignableTo(contract))
                 .AsImplementedInterfaces()
                 .WithScopedLifetime();
     });
@@ -237,17 +234,20 @@ public void Every_handler_implementation_is_registered()
     // has forced both to load, and deriving the set here means a new layer is
     // covered without editing this test — the same reason the interface list
     // is not duplicated either.
-    IEnumerable<Assembly> assemblies = AppDomain.CurrentDomain.GetAssemblies()
+    IEnumerable<Assembly> assemblies = AppDomain.CurrentDomain
+        .GetAssemblies()
         .Where(a => a.GetName().Name?.StartsWith("Ordering.") == true);
 
     // Same list the scan uses — a new interface is covered the moment it is
     // added to PluggableInterfaces, with no second place to remember.
     IEnumerable<(Type Implementation, Type Service)> implementations =
-        assemblies.SelectMany(a => a.GetTypes())
+        assemblies
+            .SelectMany(a => a.GetTypes())
             .Where(t => t is { IsAbstract: false, IsInterface: false })
-            .SelectMany(t => t.GetInterfaces()
-                .Where(i => i.IsGenericType
-                         && PluggableInterfaces.All.Contains(i.GetGenericTypeDefinition()))
+            .SelectMany(t => t
+                .GetInterfaces()
+                .Where(i => i.IsGenericType &&
+                    PluggableInterfaces.All.Contains(i.GetGenericTypeDefinition()))
                 .Select(i => (Implementation: t, Service: i)));
 
     foreach (var (implementation, service) in implementations)
@@ -343,8 +343,7 @@ public void Queries_run_without_the_transaction_and_idempotency_behaviours()
         // closed IPipelineBehavior<,> asked for with the wrong TResult resolves
         // to an empty sequence, and an empty sequence passes any assertion
         // about what is absent.
-        .GetServices<IPipelineBehavior<GetOrderSummariesQuery,
-                                       CursorPage<OrderSummaryDto>>>()
+        .GetServices<IPipelineBehavior<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>>()
         .Select(b => b.GetType().GetGenericTypeDefinition())
         .ToArray();
 
@@ -360,22 +359,20 @@ public void Queries_run_without_the_transaction_and_idempotency_behaviours()
 Validation:
 
 ```csharp
-public sealed class ValidationBehavior<TRequest, TResult>(
-    IEnumerable<IValidator<TRequest>> validators)
+public sealed class ValidationBehavior<TRequest, TResult>(IEnumerable<IValidator<TRequest>> validators)
     : IPipelineBehavior<TRequest, TResult>
 {
-    public async Task<TResult> HandleAsync(
-        TRequest request, NextDelegate<TResult> next, CancellationToken ct)
+    public async Task<TResult> HandleAsync(TRequest request, NextDelegate<TResult> next, CancellationToken ct)
     {
         if (!validators.Any())
             return await next();
 
         ValidationContext<TRequest> context = new(request);
-        ValidationFailure[] failures = (await Task.WhenAll(
-                validators.Select(v => v.ValidateAsync(context, ct))))
-            .SelectMany(r => r.Errors)
-            .Where(f => f is not null)
-            .ToArray();
+        ValidationFailure[] failures =
+            (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
+                .SelectMany(r => r.Errors)
+                .Where(f => f is not null)
+                .ToArray();
 
         if (failures.Length > 0)
             throw new ValidationException(failures);
@@ -407,8 +404,7 @@ public interface IUnitOfWork
     /// whole unit on transient faults. Persists aggregate changes, domain-event
     /// side effects and outbox rows together, or none of them.
     /// </summary>
-    Task<TResult> ExecuteAsync<TResult>(
-        Func<CancellationToken, Task<TResult>> operation, CancellationToken ct);
+    Task<TResult> ExecuteAsync<TResult>(Func<CancellationToken, Task<TResult>> operation, CancellationToken ct);
 
     Task<int> SaveChangesAsync(CancellationToken ct);
 }
@@ -417,14 +413,11 @@ public interface IUnitOfWork
 The behaviour depends only on that:
 
 ```csharp
-public sealed class TransactionBehavior<TCommand, TResult>(
-    IUnitOfWork unitOfWork,
-    IDomainEventDispatcher domainEvents)
+public sealed class TransactionBehavior<TCommand, TResult>(IUnitOfWork unitOfWork, IDomainEventDispatcher domainEvents)
     : IPipelineBehavior<TCommand, TResult>
     where TCommand : ICommand<TResult>
 {
-    public async Task<TResult> HandleAsync(
-        TCommand command, NextDelegate<TResult> next, CancellationToken ct)
+    public async Task<TResult> HandleAsync(TCommand command, NextDelegate<TResult> next, CancellationToken ct)
     {
         // Already inside a transaction (nested dispatch) — do not open another.
         if (unitOfWork.HasActiveTransaction)
@@ -556,7 +549,8 @@ internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
     public bool HasActiveTransaction => db.Database.CurrentTransaction is not null;
 
     public async Task<TResult> ExecuteAsync<TResult>(
-        Func<CancellationToken, Task<TResult>> operation, CancellationToken ct)
+        Func<CancellationToken, Task<TResult>> operation,
+        CancellationToken ct)
     {
         IExecutionStrategy strategy = db.Database.CreateExecutionStrategy();
 
@@ -592,10 +586,12 @@ internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
     // The transaction's own connection and transaction, explicitly passed —
     // this is what makes a raw write part of the command rather than beside it.
     public Task ExecuteRawAsync(string sql, object parameters, CancellationToken ct) =>
-        db.Database.GetDbConnection().ExecuteAsync(new CommandDefinition(
-            sql, parameters,
-            transaction: db.Database.CurrentTransaction?.GetDbTransaction(),
-            cancellationToken: ct));
+        db.Database.GetDbConnection().ExecuteAsync(
+            new CommandDefinition(
+                sql,
+                parameters,
+                transaction: db.Database.CurrentTransaction?.GetDbTransaction(),
+                cancellationToken: ct));
 }
 ```
 
@@ -649,14 +645,10 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
     }
 }
 
-public sealed class PlaceOrderHandler(
-    IOrderRepository orders,
-    IProductPriceReader prices,
-    TimeProvider clock)
+public sealed class PlaceOrderHandler(IOrderRepository orders, IProductPriceReader prices, TimeProvider clock)
     : ICommandHandler<PlaceOrderCommand, Result<Guid>>
 {
-    public async Task<Result<Guid>> HandleAsync(
-        PlaceOrderCommand command, CancellationToken ct)
+    public async Task<Result<Guid>> HandleAsync(PlaceOrderCommand command, CancellationToken ct)
     {
         ProductId[] productIds =
             command.Items.Select(i => new ProductId(i.ProductId)).ToArray();
@@ -723,14 +715,16 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
     private const string Sql =
         """
         SELECT ProductId, Amount, Currency
-        FROM   ordering.ProductPrices
-        WHERE  ProductId IN @ProductIds
-          AND  Currency = @Currency
-          AND  IsAvailable = 1;
+        FROM ordering.ProductPrices
+        WHERE ProductId IN @ProductIds
+            AND Currency = @Currency
+            AND IsAvailable = 1;
         """;
 
     public async Task<IReadOnlyDictionary<ProductId, Money>> GetAsync(
-        IReadOnlyCollection<ProductId> productIds, string currency, CancellationToken ct)
+        IReadOnlyCollection<ProductId> productIds,
+        string currency,
+        CancellationToken ct)
     {
         using IDbConnection connection = connections.Create();
         IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
@@ -739,8 +733,7 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
                 new { ProductIds = productIds.Select(p => p.Value), Currency = currency },
                 cancellationToken: ct));
 
-        return rows.ToDictionary(r => new ProductId(r.ProductId),
-                                 r => Money.Of(r.Amount, r.Currency));
+        return rows.ToDictionary(r => new ProductId(r.ProductId), r => Money.Of(r.Amount, r.Currency));
     }
 }
 ```
@@ -775,8 +768,12 @@ public sealed record GetOrderSummariesQuery(Guid CustomerId, string? Cursor, int
 // Level 1. §6.6 rewrites this pair in place when the projection arrives —
 // they are one slice at two points in its life, not two slices.
 public sealed record OrderSummaryDto(
-    Guid OrderId, string Status, decimal Total, string Currency,
-    int LineCount, DateTimeOffset PlacedAt);
+    Guid OrderId,
+    string Status,
+    decimal Total,
+    string Currency,
+    int LineCount,
+    DateTimeOffset PlacedAt);
 
 public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
     : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
@@ -784,24 +781,24 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
     private const string Sql =
         """
         SELECT TOP (@Take)
-                o.Id            AS OrderId,
-                o.Status        AS Status,
-                o.TotalAmount   AS Total,
-                o.Currency      AS Currency,
-                COUNT(l.Id)     AS LineCount,
-                o.PlacedAt      AS PlacedAt
-        FROM    ordering.Orders      o
-        JOIN    ordering.OrderLines  l ON l.OrderId = o.Id
-        WHERE   o.CustomerId = @CustomerId
-          AND   (@AfterPlacedAt IS NULL
-                 OR o.PlacedAt < @AfterPlacedAt
-                 OR (o.PlacedAt = @AfterPlacedAt AND o.Id < @AfterId))
+            OrderId   = o.Id,
+            Status    = o.Status,
+            Total     = o.TotalAmount,
+            Currency  = o.Currency,
+            LineCount = COUNT(l.Id),
+            PlacedAt  = o.PlacedAt
+        FROM ordering.Orders o
+        INNER JOIN ordering.OrderLines l
+            ON l.OrderId = o.Id
+        WHERE o.CustomerId = @CustomerId
+            AND (@AfterPlacedAt IS NULL
+                OR o.PlacedAt < @AfterPlacedAt
+                OR (o.PlacedAt = @AfterPlacedAt AND o.Id < @AfterId))
         GROUP BY o.Id, o.Status, o.TotalAmount, o.Currency, o.PlacedAt
         ORDER BY o.PlacedAt DESC, o.Id DESC;
         """;
 
-    public async Task<CursorPage<OrderSummaryDto>> HandleAsync(
-        GetOrderSummariesQuery query, CancellationToken ct)
+    public async Task<CursorPage<OrderSummaryDto>> HandleAsync(GetOrderSummariesQuery query, CancellationToken ct)
     {
         int limit = Math.Clamp(query.Limit, 1, 100);
         (DateTimeOffset PlacedAt, Guid Id)? after = Cursor.Decode(query.Cursor);
@@ -810,13 +807,16 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
         // Fetch one extra row to determine whether a next page exists,
         // without a second COUNT(*) over the whole table.
         List<OrderSummaryDto> rows = (await connection.QueryAsync<OrderSummaryDto>(
-            new CommandDefinition(Sql, new
-            {
-                query.CustomerId,
-                Take          = limit + 1,
-                AfterPlacedAt = after?.PlacedAt,
-                AfterId       = after?.Id
-            }, cancellationToken: ct))).AsList();
+            new CommandDefinition(
+                Sql,
+                new
+                {
+                    query.CustomerId,
+                    Take          = limit + 1,
+                    AfterPlacedAt = after?.PlacedAt,
+                    AfterId       = after?.Id
+                },
+                cancellationToken: ct))).AsList();
 
         bool hasMore = rows.Count > limit;
         List<OrderSummaryDto> items = hasMore ? rows.GetRange(0, limit) : rows;
@@ -981,8 +981,9 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     private const string UpsertSql =
         """
         MERGE ordering.ProductPrices AS target
-        USING (SELECT @ProductId AS ProductId, @Currency AS Currency) AS source
-           ON target.ProductId = source.ProductId AND target.Currency = source.Currency
+        USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
+            ON target.ProductId = source.ProductId
+            AND target.Currency = source.Currency
         WHEN NOT MATCHED THEN
             INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
             VALUES (@ProductId, @Currency, @Amount, 1, @OccurredAt)
@@ -995,8 +996,9 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     private const string DiscontinueSql =
         """
         UPDATE ordering.ProductPrices
-        SET    IsAvailable = 0, UpdatedAt = @OccurredAt
-        WHERE  ProductId = @ProductId AND UpdatedAt < @OccurredAt;
+        SET IsAvailable = 0, UpdatedAt = @OccurredAt
+        WHERE ProductId = @ProductId
+            AND UpdatedAt < @OccurredAt;
         """;
 
     public Task HandleAsync(ProductPublished e, CancellationToken ct) =>
@@ -1045,8 +1047,7 @@ Both must therefore be idempotent:
 ```csharp
 namespace Ordering.Infrastructure.Projections;
 
-public sealed class OrderSummaryProjection(
-    IDbConnectionFactory connections, OrderMetrics metrics)
+public sealed class OrderSummaryProjection(IDbConnectionFactory connections, OrderMetrics metrics)
     // Every lifecycle event, not just the first. A projection that handles
     // only creation shows a status frozen at whatever the aggregate was when
     // it was born — and the SQL still looks correct, because the UPDATE branch
@@ -1064,32 +1065,31 @@ public sealed class OrderSummaryProjection(
         await connection.ExecuteAsync(
             """
             MERGE ordering.OrderSummaries AS target
-            USING (SELECT @OrderId AS OrderId) AS source
-               ON target.OrderId = source.OrderId
+            USING (SELECT OrderId = @OrderId) AS source
+                ON target.OrderId = source.OrderId
             WHEN NOT MATCHED THEN
-                INSERT (OrderId, CustomerId, Status, TotalAmount, Currency,
-                        LineCount, Products, PlacedAt, UpdatedAt)
-                VALUES (@OrderId, @CustomerId, @Status, @Total, @Currency,
-                        @LineCount, @Products, @PlacedAt, @UpdatedAt)
+                INSERT (OrderId, CustomerId, Status, TotalAmount, Currency, LineCount, Products, PlacedAt, UpdatedAt)
+                VALUES (@OrderId, @CustomerId, @Status, @Total, @Currency, @LineCount, @Products, @PlacedAt, @UpdatedAt)
             -- PlacedAt IS NULL, not an UpdatedAt guard: the row exists because
             -- a status event arrived first, and the descriptive columns have
             -- never been written. Matching on that condition fires exactly
             -- once — a redelivery finds PlacedAt set and does nothing, which
             -- is what keeps the counter below honest.
             WHEN MATCHED AND target.PlacedAt IS NULL THEN
-                UPDATE SET CustomerId  = @CustomerId,
-                           TotalAmount = @Total,
-                           Currency    = @Currency,
-                           LineCount   = @LineCount,
-                           Products    = @Products,
-                           PlacedAt    = @PlacedAt,
-                           -- The facts above are immutable and always safe to
-                           -- write. Status is not: something later already set
-                           -- it, and this event is the older one.
-                           Status      = CASE WHEN target.UpdatedAt < @UpdatedAt
-                                              THEN @Status ELSE target.Status END,
-                           UpdatedAt   = CASE WHEN target.UpdatedAt < @UpdatedAt
-                                              THEN @UpdatedAt ELSE target.UpdatedAt END;
+                UPDATE SET
+                    CustomerId  = @CustomerId,
+                    TotalAmount = @Total,
+                    Currency    = @Currency,
+                    LineCount   = @LineCount,
+                    Products    = @Products,
+                    PlacedAt    = @PlacedAt,
+                    -- The facts above are immutable and always safe to write.
+                    -- Status is not: something later already set it, and this
+                    -- event is the older one.
+                    Status      = CASE WHEN target.UpdatedAt < @UpdatedAt
+                                       THEN @Status ELSE target.Status END,
+                    UpdatedAt   = CASE WHEN target.UpdatedAt < @UpdatedAt
+                                       THEN @UpdatedAt ELSE target.UpdatedAt END;
             """,
             new
             {
@@ -1102,8 +1102,7 @@ public sealed class OrderSummaryProjection(
                 // Ids are known now; name and thumbnail arrive with
                 // ProductPublished and are patched in below.
                 Products   = JsonSerializer.Serialize(
-                                 e.Lines.Select(l => new { id = l.ProductId.Value,
-                                                           name = "", thumb = "" })),
+                    e.Lines.Select(l => new { id = l.ProductId.Value, name = "", thumb = "" })),
                 PlacedAt   = e.OccurredAt,
                 UpdatedAt  = e.OccurredAt
             });
@@ -1126,8 +1125,7 @@ public sealed class OrderSummaryProjection(
         SetStatusAsync(e.OrderId, OrderStatus.AwaitingPayment, e.OccurredAt);
 
     public Task HandleAsync(OrderConfirmedDomainEvent e, CancellationToken ct) =>
-        SetStatusAsync(e.OrderId, OrderStatus.Confirmed, e.OccurredAt,
-                       confirmedAt: e.OccurredAt);
+        SetStatusAsync(e.OrderId, OrderStatus.Confirmed, e.OccurredAt, confirmedAt: e.OccurredAt);
 
     public Task HandleAsync(OrderShippedDomainEvent e, CancellationToken ct) =>
         SetStatusAsync(e.OrderId, OrderStatus.Shipped, e.OccurredAt);
@@ -1136,8 +1134,11 @@ public sealed class OrderSummaryProjection(
         // The wire code, not the enum: a metric tag is a string either way, and
         // ToString() on an enum makes its member names the dimension values —
         // renaming a member would silently split the series in two (§13.3).
-        SetStatusAsync(e.OrderId, OrderStatus.Cancelled, e.OccurredAt,
-                       cancelReason: CancellationReasons.ToCode(e.Reason));
+        SetStatusAsync(
+            e.OrderId,
+            OrderStatus.Cancelled,
+            e.OccurredAt,
+            cancelReason: CancellationReasons.ToCode(e.Reason));
 
     // Returns nothing. It used to return rows affected, for callers that
     // decided whether to count a metric from it — and that is precisely the
@@ -1145,16 +1146,19 @@ public sealed class OrderSummaryProjection(
     // `applied` on a status write is an invitation to write `if (applied > 0)`
     // again, which is the bug, not the fix.
     private async Task SetStatusAsync(
-        OrderId orderId, OrderStatus status, DateTimeOffset occurredAt,
-        DateTimeOffset? confirmedAt = null, string? cancelReason = null)
+        OrderId orderId,
+        OrderStatus status,
+        DateTimeOffset occurredAt,
+        DateTimeOffset? confirmedAt = null,
+        string? cancelReason = null)
     {
         using IDbConnection connection = connections.Create();
 
         await connection.ExecuteAsync(
             """
             MERGE ordering.OrderSummaries AS target
-            USING (SELECT @OrderId AS OrderId) AS source
-               ON target.OrderId = source.OrderId
+            USING (SELECT OrderId = @OrderId) AS source
+                ON target.OrderId = source.OrderId
             -- An UPDATE here would be the whole defect: §9.4 claims ordering
             -- is not required, and a Cancelled claimed before its OrderPlaced
             -- would match no row, change nothing, and be marked processed. The
@@ -1165,16 +1169,16 @@ public sealed class OrderSummaryProjection(
             -- The guard that makes this safe under at-least-once delivery:
             -- a redelivered Confirmed must not undo a Shipped that followed.
             WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
-                UPDATE SET Status       = @Status,
-                           UpdatedAt    = @OccurredAt,
-                           -- COALESCE, not assignment: Shipped follows
-                           -- Confirmed and passes NULL, and overwriting would
-                           -- erase the timestamp the duration is measured from.
-                           ConfirmedAt  = COALESCE(@ConfirmedAt,  target.ConfirmedAt),
-                           CancelReason = COALESCE(@CancelReason, target.CancelReason);
+                UPDATE SET
+                    Status       = @Status,
+                    UpdatedAt    = @OccurredAt,
+                    -- COALESCE, not assignment: Shipped follows Confirmed and
+                    -- passes NULL, and overwriting would erase the timestamp
+                    -- the duration is measured from.
+                    ConfirmedAt  = COALESCE(@ConfirmedAt,  target.ConfirmedAt),
+                    CancelReason = COALESCE(@CancelReason, target.CancelReason);
             """,
-            new { OrderId = orderId.Value, Status = status.ToString(),
-                  occurredAt, confirmedAt, cancelReason });
+            new { OrderId = orderId.Value, Status = status.ToString(), occurredAt, confirmedAt, cancelReason });
 
         await RecordPendingFactsAsync(connection, orderId);
     }
@@ -1199,9 +1203,12 @@ public sealed class OrderSummaryProjection(
         // nowhere to put it (Appendix D.5).
         PlacedFact? placed = await connection.QuerySingleOrDefaultAsync<PlacedFact>(
             """
-            UPDATE ordering.OrderSummaries SET PlacedCounted = 1
+            UPDATE ordering.OrderSummaries
+            SET PlacedCounted = 1
             OUTPUT inserted.TotalAmount, inserted.Currency
-            WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL AND PlacedCounted = 0;
+            WHERE OrderId = @OrderId
+                AND PlacedAt IS NOT NULL
+                AND PlacedCounted = 0;
             """, args);
 
         // Money.Of, not new Money: the constructor is private (§5.3) and Of is
@@ -1217,10 +1224,13 @@ public sealed class OrderSummaryProjection(
         // reconciliation that finds it should be finding a real defect.
         string? cancelled = await connection.QuerySingleOrDefaultAsync<string>(
             """
-            UPDATE ordering.OrderSummaries SET CancelledCounted = 1
+            UPDATE ordering.OrderSummaries
+            SET CancelledCounted = 1
             OUTPUT inserted.CancelReason
-            WHERE  OrderId = @OrderId AND PlacedCounted = 1
-                   AND CancelReason IS NOT NULL AND CancelledCounted = 0;
+            WHERE OrderId = @OrderId
+                AND PlacedCounted = 1
+                AND CancelReason IS NOT NULL
+                AND CancelledCounted = 0;
             """, args);
 
         if (cancelled is not null)
@@ -1229,10 +1239,13 @@ public sealed class OrderSummaryProjection(
         FulfilmentFact? fulfilment =
             await connection.QuerySingleOrDefaultAsync<FulfilmentFact>(
                 """
-                UPDATE ordering.OrderSummaries SET FulfilmentCounted = 1
+                UPDATE ordering.OrderSummaries
+                SET FulfilmentCounted = 1
                 OUTPUT inserted.PlacedAt, inserted.ConfirmedAt
-                WHERE  OrderId = @OrderId AND PlacedAt IS NOT NULL
-                       AND ConfirmedAt IS NOT NULL AND FulfilmentCounted = 0;
+                WHERE OrderId = @OrderId
+                    AND PlacedAt IS NOT NULL
+                    AND ConfirmedAt IS NOT NULL
+                    AND FulfilmentCounted = 0;
                 """, args);
 
         if (fulfilment is not null)
@@ -1249,15 +1262,19 @@ public sealed class OrderSummaryProjection(
         await connection.ExecuteAsync(
             """
             UPDATE s
-            SET    s.Products = JSON_MODIFY(
-                                    JSON_MODIFY(s.Products,
-                                        '$[' + CAST(j.[key] AS varchar(10)) + '].name',  @Name),
-                                        '$[' + CAST(j.[key] AS varchar(10)) + '].thumb', @Thumbnail),
-                   s.UpdatedAt = @OccurredAt
-            FROM   ordering.OrderSummaries s
+            SET
+                s.Products  = JSON_MODIFY(
+                    JSON_MODIFY(
+                        s.Products,
+                        '$[' + CAST(j.[key] AS varchar(10)) + '].name',
+                        @Name),
+                    '$[' + CAST(j.[key] AS varchar(10)) + '].thumb',
+                    @Thumbnail),
+                s.UpdatedAt = @OccurredAt
+            FROM ordering.OrderSummaries s
             CROSS APPLY OPENJSON(s.Products) j
-            WHERE  JSON_VALUE(j.value, '$.id') = @ProductId
-              AND  s.UpdatedAt < @OccurredAt;
+            WHERE JSON_VALUE(j.value, '$.id') = @ProductId
+                AND s.UpdatedAt < @OccurredAt;
             """,
             new { ProductId = e.ProductId, Name = e.Name, Thumbnail = e.ThumbnailUrl, e.OccurredAt });
     }
@@ -1351,8 +1368,12 @@ namespace Ordering.Application.Orders.GetOrderSummaries;
 // The fields §6.6 exists for. Level 1 could not return these at any price:
 // the names and images live in Catalog.
 public sealed record OrderSummaryDto(
-    Guid OrderId, string Status, decimal Total, string Currency,
-    int LineCount, DateTimeOffset PlacedAt,
+    Guid OrderId,
+    string Status,
+    decimal Total,
+    string Currency,
+    int LineCount,
+    DateTimeOffset PlacedAt,
     IReadOnlyList<SummaryProduct> Products);
 
 public sealed record SummaryProduct(Guid Id, string Name, string Thumb);
@@ -1365,23 +1386,20 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
     // OrderLines on every read.
     private const string Sql =
         """
-        SELECT TOP (@Take)
-               OrderId, Status, TotalAmount AS Total, Currency,
-               LineCount, PlacedAt, Products
-        FROM   ordering.OrderSummaries
+        SELECT TOP (@Take) OrderId, Status, Total = TotalAmount, Currency, LineCount, PlacedAt, Products
+        FROM ordering.OrderSummaries
         -- Also excludes incomplete rows: a summary created by a status event
         -- that outran its OrderPlaced has a NULL CustomerId and matches no
         -- customer, so a half-built order is never returned. It becomes
         -- visible the moment the MERGE above fills it in.
-        WHERE  CustomerId = @CustomerId
-          AND  (@AfterPlacedAt IS NULL
+        WHERE CustomerId = @CustomerId
+            AND (@AfterPlacedAt IS NULL
                 OR PlacedAt < @AfterPlacedAt
                 OR (PlacedAt = @AfterPlacedAt AND OrderId < @AfterId))
         ORDER BY PlacedAt DESC, OrderId DESC;
         """;
 
-    public async Task<CursorPage<OrderSummaryDto>> HandleAsync(
-        GetOrderSummariesQuery query, CancellationToken ct)
+    public async Task<CursorPage<OrderSummaryDto>> HandleAsync(GetOrderSummariesQuery query, CancellationToken ct)
     {
         int limit = Math.Clamp(query.Limit, 1, 100);
         (DateTimeOffset PlacedAt, Guid Id)? after = Cursor.Decode(query.Cursor);
@@ -1389,15 +1407,21 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
 
         List<SummaryRow> rows = (await connection.QueryAsync<SummaryRow>(
             new CommandDefinition(
-                Sql, new { query.CustomerId, Take = limit + 1,
-                           AfterPlacedAt = after?.PlacedAt, AfterId = after?.Id },
+                Sql,
+                new { query.CustomerId, Take = limit + 1, AfterPlacedAt = after?.PlacedAt, AfterId = after?.Id },
                 cancellationToken: ct))).AsList();
 
         bool hasMore = rows.Count > limit;
         OrderSummaryDto[] items = (hasMore ? rows.GetRange(0, limit) : rows)
-            .Select(r => new OrderSummaryDto(
-                r.OrderId, r.Status, r.Total, r.Currency, r.LineCount, r.PlacedAt,
-                JsonSerializer.Deserialize<SummaryProduct[]>(r.Products)!))
+            .Select(r =>
+                new OrderSummaryDto(
+                    r.OrderId,
+                    r.Status,
+                    r.Total,
+                    r.Currency,
+                    r.LineCount,
+                    r.PlacedAt,
+                    JsonSerializer.Deserialize<SummaryProduct[]>(r.Products)!))
             .ToArray();
 
         string? next = hasMore && items.Length > 0

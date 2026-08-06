@@ -482,10 +482,11 @@ as behaviour rather than as an error:
 // and ClientCredentialsHandler, and the only host that registers any of the
 // three. Unbound, the BFF requests a token with an empty scope and gets 401s
 // it will read as Catalog's fault.
-services.AddOptions<ServiceIdentityOptions>()
-        .BindConfiguration("Identity:Client")
-        .ValidateDataAnnotations()
-        .ValidateOnStart();
+services
+    .AddOptions<ServiceIdentityOptions>()
+    .BindConfiguration("Identity:Client")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 ```
 
 **This is the only options type in the solution, and that is the point.** The
