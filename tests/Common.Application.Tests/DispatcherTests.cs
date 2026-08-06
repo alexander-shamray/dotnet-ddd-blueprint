@@ -86,6 +86,51 @@ public class DispatcherTests
     }
 
     [Fact]
+    public async Task One_request_type_under_two_result_types_reaches_both_handlers()
+    {
+        // The cache key has to carry the result type. Keyed on the request type
+        // alone, the second dispatch reads the first one's invoker and the cast
+        // to Invoker<int> throws — loudly, but from inside the dispatcher,
+        // naming neither the command nor the reason.
+        using ServiceProvider provider = TestContainer.Build();
+        using IServiceScope scope = provider.CreateScope();
+        IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
+
+        var request = new TwoResults();
+
+        string text = await dispatcher.SendAsync(
+            (ICommand<string>)request,
+            TestContext.Current.CancellationToken);
+        int number = await dispatcher.SendAsync(
+            (ICommand<int>)request,
+            TestContext.Current.CancellationToken);
+
+        text.ShouldBe("text");
+        number.ShouldBe(42);
+    }
+
+    [Fact]
+    public async Task A_request_that_is_both_a_command_and_a_query_reaches_the_right_handler_each_way()
+    {
+        // The quieter half of the same defect, and the one worth the test. Both
+        // invokers derive from Invoker<string>, so a shared cache entry casts
+        // cleanly and nothing throws — the query just runs the command handler,
+        // through the command's behaviours. From PR-09 that means a read opens
+        // a transaction, which is exactly what §6.3 constrains against.
+        using ServiceProvider provider = TestContainer.Build();
+        using IServiceScope scope = provider.CreateScope();
+        IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
+
+        var request = new BothWays();
+
+        string asCommand = await dispatcher.SendAsync(request, TestContext.Current.CancellationToken);
+        string asQuery = await dispatcher.QueryAsync(request, TestContext.Current.CancellationToken);
+
+        asCommand.ShouldBe("command");
+        asQuery.ShouldBe("query");
+    }
+
+    [Fact]
     public async Task The_same_request_type_dispatches_the_same_way_twice()
     {
         // The second call reads the cached invoker rather than building one.

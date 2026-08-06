@@ -28,6 +28,45 @@ public sealed class AskHandler : IQueryHandler<Ask, string>
 /// <summary>A command nothing handles — the §6.2 trap, made deliberate.</summary>
 public sealed record Unhandled : ICommand<string>;
 
+/// <summary>
+/// One request type under two result types. `ICommand&lt;T&gt;` is an ordinary
+/// generic interface and nothing stops a record implementing it twice, so the
+/// invoker cache cannot assume a request type determines its result type.
+/// </summary>
+public sealed record TwoResults : ICommand<string>, ICommand<int>;
+
+public sealed class TwoResultsTextHandler : ICommandHandler<TwoResults, string>
+{
+    public Task<string> HandleAsync(TwoResults command, CancellationToken ct) =>
+        Task.FromResult("text");
+}
+
+public sealed class TwoResultsNumberHandler : ICommandHandler<TwoResults, int>
+{
+    public Task<int> HandleAsync(TwoResults command, CancellationToken ct) =>
+        Task.FromResult(42);
+}
+
+/// <summary>
+/// Both a command and a query, under the same result type — the quieter of the
+/// two collisions. The cast a shared cache entry goes through succeeds here,
+/// because both invokers derive from the same <c>Invoker&lt;TResult&gt;</c>, so
+/// nothing throws and the wrong handler simply runs.
+/// </summary>
+public sealed record BothWays : ICommand<string>, IQuery<string>;
+
+public sealed class BothWaysCommandHandler : ICommandHandler<BothWays, string>
+{
+    public Task<string> HandleAsync(BothWays command, CancellationToken ct) =>
+        Task.FromResult("command");
+}
+
+public sealed class BothWaysQueryHandler : IQueryHandler<BothWays, string>
+{
+    public Task<string> HandleAsync(BothWays query, CancellationToken ct) =>
+        Task.FromResult("query");
+}
+
 /// <summary>A command whose handler throws, for the failure arm of §13.3.</summary>
 public sealed record Boom : ICommand<string>;
 

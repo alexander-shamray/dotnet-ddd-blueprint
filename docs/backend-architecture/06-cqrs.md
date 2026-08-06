@@ -61,13 +61,15 @@ public interface IDispatcher
 }
 ```
 
-The implementation caches one invoker instance per concrete request type, so the
-reflection cost is paid once per type rather than per call.
+The implementation caches one invoker instance per concrete request type,
+result type and kind, so the reflection cost is paid once per combination
+rather than per call.
 
 ```csharp
 internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 {
-    private static readonly ConcurrentDictionary<Type, object> Invokers = new();
+    // Keyed on all three parts of what the invoker closes over — see below.
+    private static readonly ConcurrentDictionary<(Type Request, Type Result, Type Kind), object> Invokers = new();
 
     public Task<TResult> SendAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default) =>
         GetInvoker<TResult>(command.GetType(), typeof(CommandInvoker<,>))
@@ -79,8 +81,8 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 
     private static Invoker<TResult> GetInvoker<TResult>(Type requestType, Type openInvoker) =>
         (Invoker<TResult>)Invokers.GetOrAdd(
-            requestType,
-            _ => Activator.CreateInstance(openInvoker.MakeGenericType(requestType, typeof(TResult)))!);
+            (requestType, typeof(TResult), openInvoker),
+            static key => Activator.CreateInstance(key.Kind.MakeGenericType(key.Request, key.Result))!);
 
     private abstract class Invoker<TResult>
     {
@@ -114,6 +116,18 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
     // QueryInvoker<TQuery, TResult> is identical but resolves IQueryHandler<,>.
 }
 ```
+
+> **The request type alone is not a key, and the two collisions it admits fail
+> differently.** `ICommand<T>` is an ordinary generic interface, so one record
+> may implement it twice under different results — and may implement
+> `ICommand<T>` and `IQuery<T>` under the same one. The first case throws an
+> `InvalidCastException` from inside the dispatcher, naming neither the request
+> nor the reason. **The second throws nothing at all**: both invokers derive
+> from `Invoker<TResult>`, so the cast succeeds and the query quietly runs the
+> command's handler through the command's behaviours — a read inside a
+> transaction, which is the defect §6.3 constrains `TransactionBehavior` to
+> avoid. A three-part key costs a tuple hash on a path that was already doing a
+> dictionary lookup.
 
 `Dispatcher` is `internal`, so a service cannot name the type and cannot write
 its own `AddScoped` line. `Common.Application` registers it:

@@ -6,8 +6,8 @@ namespace Common.Application;
 /// <summary>
 /// Resolves the handler for a request, wraps it in the registered behaviours
 /// and runs the result. One invoker instance is cached per concrete request
-/// type, so the reflection cost is paid once per type rather than once per
-/// call (§6.2).
+/// type, result type and kind, so the reflection cost is paid once per
+/// combination rather than once per call (§6.2).
 /// </summary>
 /// <remarks>
 /// Internal: a service registers it through <c>AddDispatcher</c> and depends on
@@ -17,7 +17,16 @@ namespace Common.Application;
 /// </remarks>
 internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 {
-    private static readonly ConcurrentDictionary<Type, object> Invokers = new();
+    // Keyed on all three parts of what the invoker closes over, because a
+    // request type determines neither of the other two. A record may implement
+    // ICommand<T> twice under different results, and it may implement both
+    // ICommand<T> and IQuery<T> under the same one — and those two collisions
+    // fail differently. The first throws an InvalidCastException from inside
+    // this class, naming neither the request nor the reason. The second does
+    // not throw at all: both invokers derive from Invoker<TResult>, so the cast
+    // succeeds and the query quietly runs the command's handler through the
+    // command's behaviours.
+    private static readonly ConcurrentDictionary<(Type Request, Type Result, Type Kind), object> Invokers = new();
 
     public Task<TResult> SendAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default) =>
         GetInvoker<TResult>(command.GetType(), typeof(CommandInvoker<,>))
@@ -29,8 +38,8 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 
     private static Invoker<TResult> GetInvoker<TResult>(Type requestType, Type openInvoker) =>
         (Invoker<TResult>)Invokers.GetOrAdd(
-            requestType,
-            _ => Activator.CreateInstance(openInvoker.MakeGenericType(requestType, typeof(TResult)))!);
+            (requestType, typeof(TResult), openInvoker),
+            static key => Activator.CreateInstance(key.Kind.MakeGenericType(key.Request, key.Result))!);
 
     private abstract class Invoker<TResult>
     {
