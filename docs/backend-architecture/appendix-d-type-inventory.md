@@ -180,7 +180,9 @@ their declaration.
 
 Not listed individually: ASP.NET Core, EF Core, MassTransit, StackExchange.Redis,
 Dapper, Polly, OpenTelemetry, xUnit, Shouldly, NSubstitute, Testcontainers,
-Respawn, Scrutor and FluentValidation types are assumed. Licences in [Appendix B](appendix-b-licences.md).
+Respawn, Scrutor, FluentValidation, NetArchTest and Aspire types are assumed —
+including the ones the samples name outright, such as `TestResult` (§4.2) and
+`IResourceBuilder<ProjectResource>` (§14.2). Licences in [Appendix B](appendix-b-licences.md).
 
 ---
 

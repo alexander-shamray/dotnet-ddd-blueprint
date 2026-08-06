@@ -610,6 +610,10 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Respawn" Version="6.2.1" />
     <PackageVersion Include="WireMock.Net" Version="1.8.11" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.9.0" />
+    <!-- The architecture gates of §4.2, which PR-07 turns from a review
+         comment into a build failure. A major bump can change which rules
+         exist, so it fails loudly rather than quietly stopping to enforce. -->
+    <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
   </ItemGroup>
 </Project>
 ```
@@ -621,6 +625,28 @@ Appendix B says whether a licence is acceptable, this file says which version CI
 will actually resolve. A package in one and not the other is how a licence
 boundary gets crossed by a restore, and it is worth a CI check that the two
 lists match.
+
+Appendix B is the wider list, though, and three kinds of row in it will never
+have a pin here. A check that does not know them reports false positives until
+somebody stops reading its output:
+
+- **Infrastructure products** — SQL Server, Redis, RabbitMQ, Keycloak — are
+  licensable in their own right but are containers, not packages. The
+  `StackExchange.Redis`, `Testcontainers.*` and `AspNetCore.HealthChecks.*` pins
+  above are the *client libraries* that talk to them: a different artefact under
+  a different licence. Match on package identity, never on the product a package
+  is named after.
+- **The Aspire packages** of [§14.2](14-local-development.md) are deliberately
+  unpinned. Aspire is optional, nothing references it until the AppHost is
+  adopted, and its API has moved fast enough that pinning a version this
+  document cannot keep current would be worse than pinning none. Adopting
+  Aspire means adding the pins here in the same change — the licence rows
+  already exist, so the gap this file shows is the reminder.
+- **Either/or rows** — `Shouldly` *or* `AwesomeAssertions` — pin only the chosen
+  library. Clearing a licence for an alternative is not a commitment to restore
+  it. Keep such rows rare and word them as alternatives, because a row that
+  reads as two dependencies when it means one is how this check starts being
+  ignored.
 
 The versions are those current at the review date in the header. A blueprint
 cannot keep them accurate; the SCA step below is what keeps them honest.
