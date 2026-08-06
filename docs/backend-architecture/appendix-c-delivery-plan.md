@@ -4,6 +4,10 @@ An architecture document that does not say what to build first is a description,
 not a plan. This appendix sequences the work into independently reviewable pull
 requests. Every PR leaves `main` building and green.
 
+It says nothing about how long. That lives outside the blueprint, in the
+[delivery roadmap](../roadmap.md) — one estimate per PR below, the calendar
+they imply, and the assumptions holding it up.
+
 ## C.1 Service build order
 
 Two orderings matter and they are different. The **platform** is built in the PR

@@ -1,5 +1,5 @@
 ---
-description: Multi-pass self-consistency audit of the blueprint, and of the code against it
+description: Multi-pass self-consistency audit of the blueprint and its roadmap, and of the code against them
 argument-hint: "[chapter file or topic to focus on — omit for a full sweep]"
 allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
 ---
@@ -7,9 +7,15 @@ allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(w
 Audit `docs/backend-architecture/` for internal contradictions — and, once the
 solution exists, for disagreement between the blueprint and the code.
 
-Scope: $1 — if empty, sweep the whole blueprint; if a filename, audit that
-chapter against every other chapter; if a topic, trace that topic everywhere it
-appears.
+`docs/roadmap.md` is in scope too, despite sitting outside the blueprint
+directory. It prices Appendix C's pull requests and cites chapters to justify
+the prices, so it drifts exactly as an appendix would — and unlike an appendix,
+no link checker or nav footer will notice when it does. Check 10 covers what is
+particular to it; checks 1–8 apply to it unchanged.
+
+Scope: $1 — if empty, sweep the whole blueprint and the roadmap; if a filename,
+audit that chapter against every other chapter; if a topic, trace that topic
+everywhere it appears.
 
 **First, establish the phase.** If `Platform.slnx` (or any `src/`) exists, the
 code is in scope and check 9 below applies. If not, this is a docs-only audit
@@ -70,11 +76,45 @@ not tone, not "this could be clearer". Specifically hunt for:
    system depends on, exactly as for two chapters. If the blueprint is the
    better answer, the finding is against the code — report it and say so rather
    than quietly amending the spec to match what was built.
+10. **Roadmap drift** (`docs/roadmap.md`) — the roadmap is an estimate laid over
+    Appendix C, so its failure modes are coverage and arithmetic more often than
+    contradiction:
+    - **Coverage.** Every PR in Appendix C has exactly one roadmap row, and
+      every roadmap row names a PR that exists. A PR added, removed or
+      renumbered in Appendix C and not carried across is the commonest case.
+    - **Titles and phases.** Titles are Appendix C's verbatim and the phase
+      groupings match its headings. **Appendix C always wins.** The roadmap
+      states no requirement, so it can never be the side that is right about
+      what gets built or in what order.
+    - **Arithmetic.** Cumulative totals are the running sum of the per-PR
+      estimates; the header total, the milestone totals and every week number
+      follow from those and the stated days-per-week ratio. Recompute the
+      column — do not spot-check it. One revised estimate silently invalidates
+      every row beneath it, and that is a defect the prose will not show.
+    - **The critical path.** The chain and its length must be derivable from
+      Appendix C's C.3 edges together with the roadmap's own estimates. An edge
+      added to C.3 can move the chain without changing a single number in
+      either file, so re-derive it rather than trusting it.
+    - **Cited claims.** The roadmap justifies prices by citing chapters — how
+      many runbooks §13.9 requires, which ADR refuses a mediator library, what
+      §14.1 makes the baseline. Those are ordinary check-6 mis-citations.
+    - **Stated-undecided items.** Its risk section names the questions CLAUDE.md
+      records as open: the domain, the `Directory.Build.props` analyzer policy,
+      Aspire. When one is settled, that section is wrong — and the change that
+      settled it should have amended it.
+
+    **An estimate is never a finding.** Six days for PR-14 cannot contradict
+    anything, because no chapter states a duration. Report that the arithmetic
+    resting on a number has gone stale, or that the number's PR no longer
+    exists — never that the number itself is wrong. Revising a day figure is a
+    judgement about schedule, not a reconciliation, and it is not this audit's
+    to make.
 
 ## Method
 
 Work in passes. Each pass picks one axis from the list above and traces it
-across all 20 files — do not read chapter-by-chapter, read claim-by-claim.
+across all 21 files — the 20 under `docs/backend-architecture/` plus
+`docs/roadmap.md`. Do not read chapter-by-chapter; read claim-by-claim.
 
 For each candidate:
 
@@ -105,6 +145,12 @@ wrong (`code` or `blueprint`) before `Resolved:`. Never edit `src/` as part of
 this audit — report the code-side findings and let the fix be its own change
 with its own tests.
 
+A roadmap finding needs no `Verdict:` line — check 10 settles the direction in
+advance. Its `Resolved:` should name which derived figures were recomputed
+(cumulative column, milestone totals, week numbers, critical path), because
+"fixed the roadmap" hides whether the arithmetic beneath the fix was carried
+through.
+
 End with the pass count and a plain statement of whether the last pass was
 clean. If you did not reach a clean pass, say so — do not round up.
 
@@ -116,5 +162,8 @@ clean. If you did not reach a clean pass, say so — do not round up.
   deliberate in both docs and source. Note that `var` is **not** among them:
   explicit types are the rule, with only the four exceptions CLAUDE.md lists.
 - Do not renumber ADRs or chapters.
+- Do not revise an estimate in `docs/roadmap.md`, or its days-per-week ratio,
+  or its one-engineer assumption. Recompute what rests on them; leave the
+  inputs to whoever owns the schedule.
 - Do not edit anything under `src/` or `tests/`.
 - Do not touch `.remember/`.
