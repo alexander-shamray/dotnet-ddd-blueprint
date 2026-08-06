@@ -47,6 +47,15 @@ Every row above names a project **and has an example in this section**. Both
 halves are the rule: a level with no home is a level nobody writes, and a level
 whose home is empty is one nobody notices is missing.
 
+> **A suite that never ran looks exactly like a suite that passed.** `dotnet
+> test` discovers through a VSTest adapter, and `xunit.v3` does not carry one:
+> `xunit.runner.visualstudio` is a separate package ([Appendix B](appendix-b-licences.md)).
+> Leave it off a test project and the build succeeds, the run reports no tests,
+> and the process exits **zero** — green CI over a suite nothing executed. Every
+> project under `tests/` references all three of `xunit.v3`, the adapter and
+> `Microsoft.NET.Test.Sdk`, and the one that goes missing is the one nothing
+> turns red about.
+
 ## 12.2 The TDD cycle applied
 
 Red, green, refactor — with a worked example, because the discipline is easier
