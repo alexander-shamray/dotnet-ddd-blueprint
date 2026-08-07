@@ -68,8 +68,9 @@ Platform.slnx                    the six projects below
 
 deploy/compose/                  §14.1's infrastructure — seven services,
                                  .env.example, the placeholder realm PR-16
-                                 replaces, the collector config; application
-                                 blocks arrive with their services
+                                 replaces, the collector config, a ports
+                                 README; application blocks arrive with
+                                 their services
 
 src/BuildingBlocks/
   Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,

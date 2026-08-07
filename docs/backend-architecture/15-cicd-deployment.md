@@ -76,17 +76,23 @@ make a monorepo practical at this size:
         - 'src/BFF/**'
       # A chart or values change produces no new image and must still reach
       # the cluster. See below — this path needs a tag it did not build.
+      # deploy/compose/** is excluded: it reaches no cluster, and its own
+      # workflow exercises it (see below).
       deploy:
         - 'deploy/**'
+        - '!deploy/compose/**'
 ```
 
 **A filter list is a deployable inventory, and it drifts the way inventories
 do.** Every path under `src/` must be matched by **some** filter — the
 deployables (`Gateway`, `BFF`, and each directory under `Services/`) by their
 own, and `BuildingBlocks` by `shared`, which is the anchor every service
-inherits rather than a filter of its own. Everything under `deploy/` is matched
-by `deploy`: charts are deliberately not attached to a service, because a chart
-change deploys without building and takes the second path through the pipeline.
+inherits rather than a filter of its own. Everything under `deploy/` except
+`deploy/compose/**` is matched by `deploy`: charts are deliberately not
+attached to a service, because a chart change deploys without building and
+takes the second path through the pipeline — and the Compose tree is
+excluded because it reaches no cluster, so a compose-only change must not
+roll one.
 
 The check is one line of CI and worth more than the convention it replaces:
 assert that every immediate child of `src/`, and every immediate child of
@@ -114,8 +120,9 @@ which names its tool, its target and its assertions (§13.7).
 
 One `deploy/**` artefact is exercised by CI directly rather than deployed:
 the Compose file. A separate workflow, path-filtered to
-`deploy/compose/**`, runs `docker compose config -q`, then `up --wait` —
-which fails if any healthcheck never passes or any container exits — then
+`deploy/compose/**` and to itself, runs `docker compose config -q`, then
+`up --wait` — which fails if any healthcheck never passes, or a
+container exits before the wait completes — then
 `down -v` (PR-06 in [Appendix C](appendix-c-delivery-plan.md)). It is not
 the smoke stage ruled out above: it deploys nothing and asserts only what
 [§14.1](14-local-development.md) already defines, and it is what makes

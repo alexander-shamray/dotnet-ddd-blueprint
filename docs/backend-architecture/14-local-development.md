@@ -181,7 +181,7 @@ it. The `docker-compose.infra-only.yml` override below arrives with the
 first containerised service, there being nothing to exclude before it.
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up -d
+docker compose -f deploy/compose/docker-compose.yml up -d --wait
 ```
 
 | Endpoint | URL |
@@ -190,6 +190,9 @@ docker compose -f deploy/compose/docker-compose.yml up -d
 | Keycloak | http://localhost:8080 (admin/admin) |
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
+
+`deploy/compose/README.md` repeats this table with every port and
+credential, beside the file it describes.
 
 The collector's mounted configuration is the smallest correct pipeline —
 OTLP in on both protocols, a batch processor, OTLP out to the LGTM
