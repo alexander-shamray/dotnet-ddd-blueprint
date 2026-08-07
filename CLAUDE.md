@@ -5,11 +5,12 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-05 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-06 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
-CI and the licence gate — and the first C#: `Common.Domain`,
-`Common.Application` and `Common.Web`, each with its test project.
+CI and the licence gate — the first C#: `Common.Domain`, `Common.Application`
+and `Common.Web`, each with its test project — and §14.1's Compose
+infrastructure, with the CI smoke that proves it.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -137,7 +138,8 @@ followed it — amend the chapter instead, which is where the specification
 actually lives.
 
 Planned, per §4.1 — do not invent a different shape for it. The three building
-blocks built so far are shown above; everything below is still ahead:
+blocks built so far are shown above; the tree below is the target shape, and
+its annotations mark what has already landed:
 
 ```
 src/BuildingBlocks/   .Infrastructure, .Contracts (Domain, Application and Web exist)
@@ -150,7 +152,7 @@ src/Services/         Catalog, Ordering, Inventory, Payments — five projects e
 tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                       .TestSupport, plus Platform.IntegrationTests
 deploy/               helm/, k8s/ — compose/ landed with PR-06
-Directory.Build.props, Directory.Packages.props, Platform.slnx
+Directory.Build.props, Directory.Packages.props, Platform.slnx — landed with PR-01
 ```
 
 Two things live outside that tree because §4.1 does not draw them:

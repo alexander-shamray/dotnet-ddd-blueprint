@@ -132,9 +132,10 @@ services:
       # already the client, and trusting X-Forwarded-For would let any caller
       # pick its own rate-limit bucket. In Kubernetes this is true (§15.3).
       Ingress__Enabled: "false"
-      # Browsers hit the gateway directly in dev.
+      # Browsers hit the gateway directly in dev. The SPA's dev origin is
+      # 5173 (Vite's default): 3000 belongs to Grafana in this same file.
       Cors__Enabled: "true"
-      Cors__Origins__0: "http://localhost:3000"
+      Cors__Origins__0: "http://localhost:5173"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     ports: [ "5000:8080" ]
     depends_on:
@@ -191,8 +192,11 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
 
-`deploy/compose/README.md` repeats this table with every port and
-credential, beside the file it describes.
+`deploy/compose/README.md` is the keyboard inventory of what runs today —
+every port and credential of the seven infrastructure services, beside the
+file it describes. The table above is the finished platform's surface: its
+Gateway row arrives with the gateway's image
+([Appendix C](appendix-c-delivery-plan.md)).
 
 The collector's mounted configuration is the smallest correct pipeline —
 OTLP in on both protocols, a batch processor, OTLP out to the LGTM
@@ -370,7 +374,7 @@ WithPlatformIdentity(
         // under the other.
         .WithEnvironment("Ingress__Enabled", "false")
         .WithEnvironment("Cors__Enabled", "true")
-        .WithEnvironment("Cors__Origins__0", "http://localhost:3000")
+        .WithEnvironment("Cors__Origins__0", "http://localhost:5173")
         // /health/ready, like every other resource and like the chart in
         // §15.3 — an empty readiness set is still the right question here,
         // and probing liveness instead would make the gateway the one
