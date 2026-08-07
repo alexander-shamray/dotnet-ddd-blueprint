@@ -800,7 +800,7 @@ actionable — if the response is "acknowledge and ignore", delete it.
 | Error rate | 5xx > 1% over 5 min | Users are seeing failures | `error-rate.md` |
 | Latency | p99 > 1 s over 10 min | Users are waiting | `latency.md` |
 | Error queue depth | > 0 | A business process has stopped | `error-queue.md` |
-| Saga age | any saga unfinalised > 1 h | Orders are stuck | `stuck-saga.md` |
+| Saga age | any saga unfinalised > 1 h, **excluding one awaiting despatch** | Orders are stuck. Every other wait state in §9.6 times out in 5, 10 or 15 minutes, so an hour is a sane margin above all of them — but the despatch wait is **three days** by design, three orders of magnitude further out, and an unqualified hour would page on the healthy path for most of a saga's real lifetime. A despatch that genuinely expires escalates to the row below, not to this one | `stuck-saga.md` |
 | Orders awaiting review | any row in `ordering.OrderReviews` older than 1 h | A saga hit a wait it could not compensate and escalated (§9.6). It has already finalised, so the saga-age alert above will *not* catch this | `order-review.md` |
 | Migration job failed | Helm `pre-upgrade` hook non-zero, or a release stuck pending | The deploy stopped before any pod rolled ([§7.4](07-persistence.md)); the previous version is still serving, which is why nothing else fires | `migration-failure.md` |
 | Cache hit ratio collapse | `rate(cache_hits) / rate(cache_hits + cache_misses)` < 50% over 10 min, from `Microsoft.Extensions.Caching.Hybrid` | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |
