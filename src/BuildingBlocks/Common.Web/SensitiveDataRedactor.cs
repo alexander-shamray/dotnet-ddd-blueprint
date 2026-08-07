@@ -23,7 +23,10 @@ namespace Common.Web;
 /// on it is left exactly as it arrived.
 /// </para>
 /// <para>
-/// Three limits worth stating rather than discovering. Redaction is by key
+/// Four limits worth stating rather than discovering. An exception whose
+/// text repeats a redacted value causes the exception to be dropped, but one
+/// carrying a secret the attributes never named survives — there is nothing
+/// to match it against, which is the interpolation case in another costume. Redaction is by key
 /// alone, which is the argument for naming a placeholder <c>{Token}</c> and
 /// never interpolating: an interpolated secret produces no attribute to match
 /// and lands in the template itself, so the fallback carries it too. It cannot
@@ -57,6 +60,7 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             return;
 
         List<KeyValuePair<string, object?>>? scrubbed = null;
+        List<string>? secrets = null;
         bool hasTemplate = false;
 
         for (int i = 0; i < record.Attributes.Count; i++)
@@ -72,6 +76,12 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
             scrubbed ??= [.. record.Attributes];
+
+            // Keep what was removed. The exception check below needs the
+            // values, not the keys — see the rule it enforces.
+            if (attribute.Value?.ToString() is { Length: > 0 } secret)
+                (secrets ??= []).Add(secret);
+
             scrubbed[i] = new KeyValuePair<string, object?>(attribute.Key, "[redacted]");
         }
 
@@ -103,6 +113,40 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
         record.FormattedMessage = hasTemplate && record.Body is not null
             ? record.Body
             : "[redacted]";
+
+        // The rule this enforces: never export a value the processor has just
+        // decided is sensitive. OTLP serialises Exception separately from both
+        // Attributes and FormattedMessage — as exception.message and
+        // exception.stacktrace — so scrubbing those two and leaving the
+        // exception alone ships the secret through a third channel.
+        //
+        // ToString() rather than Message, because it covers inner exceptions
+        // and the stack trace too. Dropped rather than rewritten: Exception
+        // .Message is read-only, and reconstructing the type is not something
+        // to attempt on a logging path. The record keeps its level, template
+        // and every non-sensitive attribute, so the error is still visible —
+        // what is lost is the trace, on the records that demonstrably carry a
+        // live secret in it.
+        //
+        // Deliberately narrower than "drop the exception whenever anything was
+        // redacted": that would destroy stack traces on every record that
+        // merely has a Password attribute beside an unrelated failure, which
+        // is most of them.
+        if (record.Exception is not null && secrets is not null && Reveals(record.Exception, secrets))
+            record.Exception = null;
+    }
+
+    private static bool Reveals(Exception exception, List<string> secrets)
+    {
+        string text = exception.ToString();
+
+        foreach (string secret in secrets)
+        {
+            if (text.Contains(secret, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the

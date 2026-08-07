@@ -577,6 +577,7 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             return;
 
         List<KeyValuePair<string, object?>>? scrubbed = null;
+        List<string>? secrets = null;
         bool hasTemplate = false;
 
         for (int i = 0; i < record.Attributes.Count; i++)
@@ -592,6 +593,12 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
             scrubbed ??= [.. record.Attributes];
+
+            // Keep what was removed. The exception check below needs the
+            // values, not the keys — see the rule it enforces.
+            if (attribute.Value?.ToString() is { Length: > 0 } secret)
+                (secrets ??= []).Add(secret);
+
             scrubbed[i] = new KeyValuePair<string, object?>(attribute.Key, "[redacted]");
         }
 
@@ -613,6 +620,40 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
         record.FormattedMessage = hasTemplate && record.Body is not null
             ? record.Body
             : "[redacted]";
+
+        // The rule this enforces: never export a value the processor has just
+        // decided is sensitive. OTLP serialises Exception separately from both
+        // Attributes and FormattedMessage — as exception.message and
+        // exception.stacktrace — so scrubbing those two and leaving the
+        // exception alone ships the secret through a third channel.
+        //
+        // ToString() rather than Message, because it covers inner exceptions
+        // and the stack trace too. Dropped rather than rewritten: Exception
+        // .Message is read-only, and reconstructing the type is not something
+        // to attempt on a logging path. The record keeps its level, template
+        // and every non-sensitive attribute, so the error is still visible —
+        // what is lost is the trace, on the records that demonstrably carry a
+        // live secret in it.
+        //
+        // Deliberately narrower than "drop the exception whenever anything was
+        // redacted": that would destroy stack traces on every record that
+        // merely has a Password attribute beside an unrelated failure, which
+        // is most of them.
+        if (record.Exception is not null && secrets is not null && Reveals(record.Exception, secrets))
+            record.Exception = null;
+    }
+
+    private static bool Reveals(Exception exception, List<string> secrets)
+    {
+        string text = exception.ToString();
+
+        foreach (string secret in secrets)
+        {
+            if (text.Contains(secret, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the
@@ -645,7 +686,7 @@ and that is asserted as its own test rather than left implied. Without it a
 processor that rewrote unconditionally would pass every redaction test in the
 suite while quietly emptying every log line on the platform.
 
-Three limits worth stating rather than discovering.
+Four limits worth stating rather than discovering.
 
 Redaction is **by key**, so `logger.LogInformation("Token is {Value}", token)`
 is caught only if the placeholder is named sensitively — the argument for
@@ -665,6 +706,15 @@ two scopes and neither can carry one: `LoggingBehavior`'s `RequestType`
 carrying a secret would leak it silently, and no test here would notice.
 Widening the processor to walk `ScopeProvider` is a design change with its own
 cost, not a fix to fold into this one.
+
+And an **exception can still carry a secret the attributes never named**.
+Where a redacted value reappears in the exception text the exception is
+dropped, under the rule above — never export a value the processor has just
+decided is sensitive. Where the secret was only ever in the exception, there
+is nothing to match it against and it survives. That is the interpolation case again: text an author
+wrote by hand, which no key-based mechanism can inspect. `throw new
+InvalidOperationException($"bad token {token}")` is the same mistake as
+`$"Token is {token}"` and is caught by neither.
 
 **The processor governs one pipeline, which is why §13.2 leaves only one.** A
 `BaseProcessor<LogRecord>` sees records inside OpenTelemetry and nowhere else.

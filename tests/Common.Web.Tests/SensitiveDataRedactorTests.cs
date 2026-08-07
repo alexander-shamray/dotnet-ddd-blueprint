@@ -21,6 +21,12 @@ public class SensitiveDataRedactorTests
             new EventId(1, nameof(Login)),
             "Login for {User} with {Password}");
 
+    private static readonly Action<ILogger, string, Exception?> Failed =
+        LoggerMessage.Define<string>(
+            LogLevel.Error,
+            new EventId(7, nameof(Failed)),
+            "Login failed with {Password}");
+
     private static readonly Action<ILogger, string, Exception?> Plain =
         LoggerMessage.Define<string>(
             LogLevel.Information,
@@ -216,6 +222,35 @@ public class SensitiveDataRedactorTests
 
         record.Attributes!.Single(a => a.Key == "Password").Value.ShouldBe("[redacted]");
         record.FormattedMessage.ShouldBe("[redacted]");
+    }
+
+    [Fact]
+    public void An_exception_repeating_a_redacted_value_is_dropped()
+    {
+        // OTLP serialises Exception separately from Attributes and
+        // FormattedMessage, as exception.message and exception.stacktrace, so
+        // scrubbing those two and leaving the exception alone ships the secret
+        // through a third channel.
+        LogRecord record = EmitRecord(logger =>
+            Failed(logger, "hunter2", new InvalidOperationException("auth rejected token hunter2")));
+
+        record.Attributes!.Single(a => a.Key == "Password").Value.ShouldBe("[redacted]");
+        record.Exception.ShouldBeNull();
+    }
+
+    [Fact]
+    public void An_exception_that_reveals_nothing_is_kept()
+    {
+        // The control, and the reason this is narrower than "drop the
+        // exception whenever anything was redacted": a stack trace is what an
+        // operator needs most on the error path, and a record that merely has
+        // a Password attribute beside an unrelated failure must keep it.
+        InvalidOperationException failure = new("connection reset by peer");
+
+        LogRecord record = EmitRecord(logger => Failed(logger, "hunter2", failure));
+
+        record.Attributes!.Single(a => a.Key == "Password").Value.ShouldBe("[redacted]");
+        record.Exception.ShouldBeSameAs(failure);
     }
 
     [Fact]
