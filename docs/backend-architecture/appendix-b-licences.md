@@ -83,11 +83,12 @@ it runs the other way:
 Discovering a licence obligation at renewal time is considerably more expensive
 than discovering it at build time.
 
-**The table above is beyond its reach, and deliberately so.** SQL Server, Duende
-and Redis are products rather than packages — nothing restores them, so nothing
-reading `Directory.Packages.props` can see them, and the client libraries that
-talk to them sit in the first table under their own licences. That boundary is a
-review obligation and there is no tooling behind it.
+**The table above is beyond its reach, and deliberately so.** SQL Server,
+Duende, Redis and the Grafana OTel-LGTM image are products rather than
+packages — nothing restores them, so nothing reading `Directory.Packages.props`
+can see them, and the client libraries that talk to them sit in the first table
+under their own licences. That boundary is a review obligation and there is no
+tooling behind it.
 
 ---
 
