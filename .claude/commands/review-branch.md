@@ -20,6 +20,7 @@ the default job is to re-verify it, not to ignore it and start a fresh review.
 | `$ARGUMENTS` is `full` or `full --local` | **Full review**, even if `suggestions.md` exists (replace the file from scratch after the new pass) |
 | `$ARGUMENTS` is `--local` only, no `suggestions.md` | **Full review** of the working tree |
 | `$ARGUMENTS` is `--local` and `suggestions.md` exists | **Recheck** first (same as default when the file exists); do not silently switch to a full local sweep unless the user also passed `full` |
+| `$ARGUMENTS` is `recheck` and `suggestions.md` **missing** | Stop: say there is nothing to recheck and offer a full review — do not enter recheck mode against a file that is not there |
 
 `recheck` as an explicit argument is kept for clarity; it is **not** required
 when the file is already there. Prefer the file’s presence over the empty
