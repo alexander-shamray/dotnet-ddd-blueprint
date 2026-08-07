@@ -446,8 +446,20 @@ already written against it.
   fires only when the type *is* apparent, so it polices the first block and has
   nothing to say about the second — turning it off would attack the form this
   rule wants to keep. Like the `[` placement rule, this half is carried by
-  review and by this file alone. Length is not a defence: the `AddAttributes`
-  line above runs past 100 columns spelled out, and stays that way.
+  review and by this file alone.
+
+  **Where naming the type breaks the 120-column budget, name it in a local —
+  do not fall back to `new()`.** Spelling the type inside `AddAttributes`' own
+  argument runs that line to 130 columns, and the two rules resolve in one
+  move rather than trading off: a local declaration carries the type, so the
+  `new` beside it needs none and both lines fit.
+
+  ```csharp
+  KeyValuePair<string, object> environment =
+      new("deployment.environment", builder.Environment.EnvironmentName);
+  // ...
+      .AddAttributes([environment]))
+  ```
 - Binary operators spaced. Where a wrapped one goes is the operator-placement
   rule below, which states it once.
 - **A list is on one line, or one element per line. Never a ragged middle.**

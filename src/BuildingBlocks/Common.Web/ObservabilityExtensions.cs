@@ -36,11 +36,18 @@ public static class ObservabilityExtensions
             logging.AddProcessor(new SensitiveDataRedactor());
         });
 
+        // A named local rather than an inline construction. The type has to be
+        // spelled out where it is built, and spelling it inside AddAttributes'
+        // own argument runs that line to 130 columns — past the 120 budget.
+        // Named here, the declaration carries the type and `new` needs none.
+        KeyValuePair<string, object> environment =
+            new("deployment.environment", builder.Environment.EnvironmentName);
+
         builder.Services
             .AddOpenTelemetry()
             .ConfigureResource(r => r
                 .AddService(serviceName, serviceVersion: BuildInfo.Version)
-                .AddAttributes([new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)]))
+                .AddAttributes([environment]))
             .WithMetrics(m => m
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
