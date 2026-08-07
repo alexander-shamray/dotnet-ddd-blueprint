@@ -133,12 +133,25 @@ internal sealed class Dispatcher(IServiceProvider services) : IDispatcher
 its own `AddScoped` line. `Common.Application` registers it:
 
 ```csharp
-public static IServiceCollection AddDispatcher(this IServiceCollection services)
+public static class DependencyInjection
 {
-    services.AddScoped<IDispatcher, Dispatcher>();
-    return services;
+    extension(IServiceCollection services)
+    {
+        public IServiceCollection AddDispatcher()
+        {
+            services.AddScoped<IDispatcher, Dispatcher>();
+            return services;
+        }
+    }
 }
 ```
+
+A C# 14 **extension block**, not a `this`-parameter extension method. The
+receiver is named once on the block and every member inside it reads
+`services` directly, which is what makes the two registrations below worth
+grouping — they extend the same type for the same reason, and the classic form
+repeats `this IServiceCollection services` on each. Call sites are identical
+either way: `services.AddDispatcher()` binds the same.
 
 Scoped, because handlers are. A singleton dispatcher would capture the root
 provider, and every request would share one handler instance — and one
@@ -186,7 +199,8 @@ public interface ICommandMessageMapper<in TMessage, out TCommand>
 ```
 
 ```csharp
-public static IServiceCollection AddPluggableFrom(this IServiceCollection services, Assembly assembly) =>
+// The second member of the same extension block as AddDispatcher above.
+public IServiceCollection AddPluggableFrom(Assembly assembly) =>
     services.Scan(scan =>
     {
         IImplementationTypeSelector from = scan.FromAssemblies(assembly);

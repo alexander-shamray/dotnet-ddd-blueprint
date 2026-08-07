@@ -21,6 +21,10 @@
          only fail together: a customiser that never runs on what ToHttpResult
          writes is invisible to any test that inspects the IResult alone. -->
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <!-- Reads log records and metrics back out of a real OpenTelemetry
+         pipeline, so the redactor and the meter list are asserted through the
+         path a host actually uses rather than through a stub. -->
+    <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
   </ItemGroup>
 
   <ItemGroup>

@@ -227,8 +227,20 @@ public sealed class PriceChangedCacheInvalidator(HybridCache cache)
 
 ## 8.5 Idempotency keys
 
-Every non-idempotent write endpoint requires an `Idempotency-Key` header. The
-key is claimed atomically before any work happens.
+Every non-idempotent write command carries a client-generated `CommandId`, and
+the key is claimed atomically before any work happens.
+
+**It is a field on the command, not an `Idempotency-Key` header**, and the
+reason is the dependency rule rather than taste. `IdempotencyBehavior` runs in
+`Common.Application`, which knows nothing about HTTP ([§4.2](04-solution-structure.md)) — it cannot read a
+header, so the value has to be on the command by the time the pipeline sees
+it. `PlaceOrderCommand` ([§6.2](06-cqrs.md)) declares it as its first field for
+that reason.
+
+A service that wants the REST convention can still have it: an endpoint may
+bind `Idempotency-Key` into `CommandId` at the boundary, which is the only
+layer permitted to know either name. Nothing in this document does, so no
+endpoint here reads a header — the request body carries the value.
 
 The behaviour lives in `Common.Application`, so — exactly as with
 `IUnitOfWork` in §6.3 — it must not reference `StackExchange.Redis`. [§4.2](04-solution-structure.md) names

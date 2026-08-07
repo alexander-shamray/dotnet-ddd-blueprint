@@ -61,6 +61,10 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
 {
     string serviceName = builder.Environment.ApplicationName;
 
+    // OpenTelemetry becomes the ONLY logging provider, and that is a security
+    // requirement rather than tidiness — see §13.4.
+    builder.Logging.ClearProviders();
+
     builder.Logging.AddOpenTelemetry(logging =>
     {
         logging.IncludeFormattedMessage = true;
@@ -73,11 +77,18 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
         logging.AddProcessor(new SensitiveDataRedactor());
     });
 
+    // A named local rather than an inline construction. The type has to be
+    // spelled out where it is built, and spelling it inside AddAttributes' own
+    // argument runs that line to 130 columns — past the 120 budget. Named here,
+    // the declaration carries the type and `new` needs none.
+    KeyValuePair<string, object> environment =
+        new("deployment.environment", builder.Environment.EnvironmentName);
+
     builder.Services
         .AddOpenTelemetry()
         .ConfigureResource(r => r
             .AddService(serviceName, serviceVersion: BuildInfo.Version)
-            .AddAttributes([new("deployment.environment", builder.Environment.EnvironmentName)]))
+            .AddAttributes([environment]))
         .WithMetrics(m => m
             .AddAspNetCoreInstrumentation()
             .AddHttpClientInstrumentation()
@@ -108,6 +119,15 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
     return builder;
 }
 ```
+
+Three of the lines above arrive later than the rest, and each is named here so
+that a reader comparing this block against `Common.Web` does not read a gap as
+a mistake. `AddEntityFrameworkCoreInstrumentation` and `AddRedisInstrumentation`
+land with the packages they instrument, at **PR-08** and **PR-12** — unlike a
+meter name, which is a string, each costs a package reference, and a reference
+to a library nothing uses is a claim about the dependency graph that is not yet
+true. The authentication block in `AddCommonWebDefaults` lands at **PR-16**,
+with the scheme that makes its policy mean anything.
 
 Filtering health checks out of traces is not cosmetic — at a ten-second probe
 interval across a dozen pods they would otherwise dominate both trace volume and
@@ -542,6 +562,10 @@ rather than by discipline:
 // its consumer.
 public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 {
+    // The key ILogger puts the message template under. Its presence is what
+    // makes Body a template rather than a rendered line — see OnEnd.
+    private const string OriginalFormat = "{OriginalFormat}";
+
     // Substring match, not equality: the field that leaks is never named
     // exactly "password" — it is "NewPassword", "card_number", "id_token".
     private static readonly string[] Sensitive =
@@ -553,42 +577,175 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             return;
 
         List<KeyValuePair<string, object?>>? scrubbed = null;
+        List<string>? secrets = null;
+        bool hasTemplate = false;
 
         for (int i = 0; i < record.Attributes.Count; i++)
         {
             KeyValuePair<string, object?> attribute = record.Attributes[i];
+
+            if (attribute.Key == OriginalFormat)
+                hasTemplate = true;
+
             if (!IsSensitive(attribute.Key))
                 continue;
 
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
             scrubbed ??= [.. record.Attributes];
-            scrubbed[i] = new(attribute.Key, "[redacted]");
+
+            // Keep what was removed. The exception check below needs the
+            // values, not the keys — see the rule it enforces.
+            if (attribute.Value?.ToString() is { Length: > 0 } secret)
+                (secrets ??= []).Add(secret);
+
+            scrubbed[i] = new KeyValuePair<string, object?>(attribute.Key, "[redacted]");
         }
 
-        if (scrubbed is not null)
-            record.Attributes = scrubbed;
+        if (scrubbed is null)
+            return;
+
+        record.Attributes = scrubbed;
+
+        // Attributes alone are not enough. IncludeFormattedMessage is set
+        // above, and with it the exporter sends FormattedMessage as the
+        // record's body — the template with every argument substituted.
+        // Redacting Password while "Login for ada with hunter2" ships beside
+        // it protects nothing and reads in review as though it does.
+        //
+        // Body is only that template when the state carried {OriginalFormat}.
+        // Without it OpenTelemetry fills Body with the formatter's own output
+        // — the rendered line, secret and all — so falling back to Body there
+        // would re-export what the scrub just removed.
+        record.FormattedMessage = hasTemplate && record.Body is not null
+            ? record.Body
+            : "[redacted]";
+
+        // The rule this enforces: never export a value the processor has just
+        // decided is sensitive. OTLP serialises Exception separately from both
+        // Attributes and FormattedMessage — as exception.message and
+        // exception.stacktrace — so scrubbing those two and leaving the
+        // exception alone ships the secret through a third channel.
+        //
+        // ToString() rather than Message, because it covers inner exceptions
+        // and the stack trace too. Dropped rather than rewritten: Exception
+        // .Message is read-only, and reconstructing the type is not something
+        // to attempt on a logging path. The record keeps its level, template
+        // and every non-sensitive attribute, so the error is still visible —
+        // what is lost is the trace, on the records that demonstrably carry a
+        // live secret in it.
+        //
+        // Deliberately narrower than "drop the exception whenever anything was
+        // redacted": that would destroy stack traces on every record that
+        // merely has a Password attribute beside an unrelated failure, which
+        // is most of them.
+        if (record.Exception is not null && secrets is not null && Reveals(record.Exception, secrets))
+            record.Exception = null;
     }
 
-    private static bool IsSensitive(string key) =>
-        Sensitive.Any(s => key.Contains(s, StringComparison.OrdinalIgnoreCase));
+    private static bool Reveals(Exception exception, List<string> secrets)
+    {
+        string text = exception.ToString();
+
+        foreach (string secret in secrets)
+        {
+            if (text.Contains(secret, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the
+    // lambda would capture `key`, so the closure allocates once per attribute
+    // inspected — including on the no-match path the copy above is written to
+    // keep allocation-free. This runs on every attribute of every log record.
+    private static bool IsSensitive(string key)
+    {
+        foreach (string term in Sensitive)
+        {
+            if (key.Contains(term, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
 }
 ```
 
-Two limits worth stating rather than discovering. The processor sees
-**attributes**, not the formatted message, so
-`logger.LogInformation("Token is {Value}", token)` is redacted by its key only
-if that key is named sensitively — which is the argument for naming the
-placeholder `{Token}` and never interpolating. And it cannot help with a whole
-object logged as one attribute; that is what the "never log full request
-bodies" half of the rule is for.
+> **Scrubbing the attributes alone would protect nothing.**
+> `IncludeFormattedMessage` is on (§13.2), and with it the exported body is the
+> *rendered* string — so `Login for ada with hunter2` would sit in the one
+> field a log backend indexes and searches, next to a `Password` attribute
+> reading `[redacted]`. The fallback is `Body`, the un-substituted template:
+> still readable, and the values that were not sensitive are still on the
+> record as attributes.
+
+A record with nothing sensitive on it keeps its formatted message untouched,
+and that is asserted as its own test rather than left implied. Without it a
+processor that rewrote unconditionally would pass every redaction test in the
+suite while quietly emptying every log line on the platform.
+
+Four limits worth stating rather than discovering.
+
+Redaction is **by key**, so `logger.LogInformation("Token is {Value}", token)`
+is caught only if the placeholder is named sensitively — the argument for
+naming it `{Token}` and never interpolating. Interpolation is now doubly
+unsafe: `$"Token is {token}"` produces no attribute to match *and* puts the
+secret in the template, so the fallback carries it too.
+
+It cannot help with a **whole object logged as one attribute**; that is what
+the "never log full request bodies" half of the rule is for.
+
+And it does not read **scopes**. `IncludeScopes` is on, but the processor
+inspects `Attributes` only, so a sensitive key in a `BeginScope` dictionary is
+exported unredacted. Nothing leaks today, because the platform opens exactly
+two scopes and neither can carry one: `LoggingBehavior`'s `RequestType`
+(§13.3), which is a type name, and `UseCorrelationId`'s `CorrelationId`
+([§10.4](10-api-gateway.md)), which is a trace ID or a GUID. A third one
+carrying a secret would leak it silently, and no test here would notice.
+Widening the processor to walk `ScopeProvider` is a design change with its own
+cost, not a fix to fold into this one.
+
+And an **exception can still carry a secret the attributes never named**.
+Where a redacted value reappears in the exception text the exception is
+dropped, under the rule above — never export a value the processor has just
+decided is sensitive. Where the secret was only ever in the exception, there
+is nothing to match it against and it survives. That is the interpolation case again: text an author
+wrote by hand, which no key-based mechanism can inspect. `throw new
+InvalidOperationException($"bad token {token}")` is the same mistake as
+`$"Token is {token}"` and is caught by neither.
+
+**The processor governs one pipeline, which is why §13.2 leaves only one.** A
+`BaseProcessor<LogRecord>` sees records inside OpenTelemetry and nowhere else.
+Any other `ILoggerProvider` on the host formats the original state itself and
+never passes through this code — so `AddObservability` calls
+`ClearProviders()` before adding OpenTelemetry, making it the sole provider.
+
+That is not tidiness. `WebApplication.CreateBuilder` installs Console, Debug and
+EventSource before a host reaches `AddCommonWebDefaults` (§4.2), and container
+stdout is collected in most clusters, so a `{Password}` scrubbed on the OTLP
+path shipped in clear text on the console one. The redaction looked complete and
+covered a single destination — the same shape as the `FormattedMessage` gap
+above, one layer further out.
+
+Two things follow, both worth stating. The guarantee covers providers registered
+**before** `AddObservability`, which is every default and the only case §4.2
+produces; a service that adds a provider afterwards has opted out and owns the
+consequence. And the visible cost is local: `dotnet run` no longer prints to the
+terminal, because nothing is left that writes there. §13.1 routes logs to Loki
+or Seq through OTLP regardless, and [§14.1](14-local-development.md) runs a
+collector, so the loss is the raw terminal stream rather than the logs
+themselves — add a console exporter to the OpenTelemetry pipeline if a
+developer wants it back.
 
 Assert it, because a redactor that silently stops matching is worse than none.
-The test lives in `Ordering.Api.Tests` — a `Common.Web` behaviour tested once
-rather than once per host, in the suite that already owns host-level concerns
-([§12.1](12-test-strategy.md)). Every host calls `AddObservability`, so a second copy in Catalog's
-suite would re-assert the same processor over the same pipeline and only add a
-place to forget.
+The test lives in `Common.Web.Tests` — a `Common.Web` behaviour tested once
+rather than once per host, in the suite that already owns this project's
+behaviour ([§12.1](12-test-strategy.md)). Every host calls `AddObservability`, so a copy in a
+service's own suite would re-assert the same processor over the same pipeline
+and only add a place to forget — and a building block asserted in Ordering's
+suite is one that moves house if Ordering ever does.
 
 Assert it through `ILogger`, not through OpenTelemetry's logger provider
 directly. The Logs Bridge API (`Sdk.CreateLoggerProviderBuilder`) is shipped
@@ -597,29 +754,60 @@ record; a test that used it would be green while the path in production drifted
 away underneath it:
 
 ```csharp
-[Fact]
-public void Sensitive_attributes_are_redacted()
+// CA1848 is enforced repo-wide (ADR-019) and does not exempt test projects, so
+// the template goes through LoggerMessage.Define exactly as production logging
+// does. The point survives intact: the attribute keys still come from a message
+// template, read through ILogger.
+private static readonly Action<ILogger, string, string, Exception?> Login =
+    LoggerMessage.Define<string, string>(
+        LogLevel.Information,
+        new EventId(1, nameof(Login)),
+        "Login for {User} with {Password}");
+
+private static LogRecord EmitRecord(Action<ILogger> write)
 {
     List<LogRecord> exported = [];
 
     // Built exactly as AddObservability builds it (§13.2) — ILoggingBuilder,
-    // the same extension, so the test covers the seam the host uses.
-    using ILoggerFactory factory = LoggerFactory.Create(b =>
+    // the same extension, and IncludeFormattedMessage set the same way, so the
+    // test covers the seam the host uses. A block rather than a using
+    // declaration: the factory has to be disposed before the exported list is
+    // read, and a declaration would defer that to the end of the method.
+    using (ILoggerFactory factory = LoggerFactory.Create(b =>
         b.AddOpenTelemetry(o =>
         {
+            o.IncludeFormattedMessage = true;
             o.AddProcessor(new SensitiveDataRedactor());
             o.AddInMemoryExporter(exported);
-        }));
+        })))
+    {
+        write(factory.CreateLogger("test"));
+    }
 
-    factory.CreateLogger("test").LogInformation("Login for {User} with {Password}", "ada", "hunter2");
+    return exported.Single();
+}
 
+[Fact]
+public void Sensitive_attributes_are_redacted()
+{
     IReadOnlyList<KeyValuePair<string, object?>> attributes =
-        exported.Single().Attributes!;
+        EmitRecord(logger => Login(logger, "ada", "hunter2", null)).Attributes!;
+
     attributes.Single(a => a.Key == "Password").Value.ShouldBe("[redacted]");
 
     // The other half of the assertion, and the one that catches a deny-list
     // grown careless: everything not on it survives intact.
     attributes.Single(a => a.Key == "User").Value.ShouldBe("ada");
+}
+
+[Fact]
+public void A_redacted_record_does_not_export_the_rendered_secret()
+{
+    // The assertion above is cosmetic without this one: the exported body is
+    // the rendered string, and it is what a log backend indexes.
+    LogRecord record = EmitRecord(logger => Login(logger, "ada", "hunter2", null));
+
+    record.FormattedMessage.ShouldBe("Login for {User} with {Password}");
 }
 ```
 
@@ -660,15 +848,15 @@ public static IEndpointRouteBuilder MapCommonHealthEndpoints(this IEndpointRoute
     // AllowAnonymous is required, not cosmetic: the kubelet sends no token,
     // so an authenticated probe fails and the pod is restarted in a loop.
     app
-        .MapHealthChecks("/health/live", new() { Predicate = _ => false })
+        .MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
         .AllowAnonymous();
 
     app
-        .MapHealthChecks("/health/ready", new() { Predicate = c => c.Tags.Contains("ready") })
+        .MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
         .AllowAnonymous();
 
     app
-        .MapHealthChecks("/health/startup", new() { Predicate = c => c.Tags.Contains("ready") })
+        .MapHealthChecks("/health/startup", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
         .AllowAnonymous();
 
     return app;
@@ -717,7 +905,7 @@ actionable — if the response is "acknowledge and ignore", delete it.
 | Error rate | 5xx > 1% over 5 min | Users are seeing failures | `error-rate.md` |
 | Latency | p99 > 1 s over 10 min | Users are waiting | `latency.md` |
 | Error queue depth | > 0 | A business process has stopped | `error-queue.md` |
-| Saga age | any saga unfinalised > 1 h | Orders are stuck | `stuck-saga.md` |
+| Saga age | any saga unfinalised > 1 h, **excluding one awaiting despatch** | Orders are stuck. Every other wait state in §9.6 times out in 5, 10 or 15 minutes, so an hour is a sane margin above all of them — but the despatch wait is **three days** by design, three orders of magnitude further out, and an unqualified hour would page on the healthy path for most of a saga's real lifetime. A despatch that genuinely expires escalates to the row below, not to this one | `stuck-saga.md` |
 | Orders awaiting review | any row in `ordering.OrderReviews` older than 1 h | A saga hit a wait it could not compensate and escalated (§9.6). It has already finalised, so the saga-age alert above will *not* catch this | `order-review.md` |
 | Migration job failed | Helm `pre-upgrade` hook non-zero, or a release stuck pending | The deploy stopped before any pod rolled ([§7.4](07-persistence.md)); the previous version is still serving, which is why nothing else fires | `migration-failure.md` |
 | Cache hit ratio collapse | `rate(cache_hits) / rate(cache_hits + cache_misses)` < 50% over 10 min, from `Microsoft.Extensions.Caching.Hybrid` | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |

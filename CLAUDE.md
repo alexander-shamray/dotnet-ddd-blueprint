@@ -5,11 +5,11 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 and PR-02 have landed**, so the repo is
-the blueprint under `docs/backend-architecture/`, the foundation that blueprint
-specifies — SDK pin, central package management, the solution file, CI and the
-licence gate — and the first C#: `Common.Domain` and `Common.Application`, each
-with its test project.
+built with DDD, CQRS and TDD. **PR-01 through PR-05 have landed**, so the repo
+is the blueprint under `docs/backend-architecture/`, the foundation that
+blueprint specifies — SDK pin, central package management, the solution file,
+CI and the licence gate — and the first C#: `Common.Domain`,
+`Common.Application` and `Common.Web`, each with its test project.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -25,8 +25,15 @@ Keep two different things apart:
 - **Solution shape** — the projects §4.1 lays out: Catalog, Ordering, Inventory,
   Payments, Shipping, Notifications, plus the building blocks, gateway and BFF.
 - **Service build order** — Appendix C.1, which is *not* the §4.1 listing
-  order: **Notifications → Catalog → Ordering → Inventory and Payments →
-  Shipping**. Notifications goes first precisely because it has no domain logic.
+  order: **Catalog → Ordering → Inventory and Payments → Shipping →
+  Notifications**. Notifications goes **last**, and the reason is worth
+  carrying: it publishes nothing and its whole contract is seven events owned
+  by Ordering, Payments and Shipping (§3.2), so before those exist it is a
+  consumer with no producers. C.1 used to say it went first, on the grounds
+  that a service with no domain logic proves the pipeline end to end with
+  nothing else to debug — appealing, and wrong, because end to end needs both
+  ends. C.2 never built it first either: PR-10 is Catalog and PR-18 is the
+  "second service".
 
 One thing is genuinely **undecided**: the READMEs call the e-commerce domain
 "illustrative only", while §4.1 and Appendix C name those six services
@@ -45,6 +52,9 @@ docs/backend-architecture/
   appendix-c-delivery-plan.md    PR sequencing plan
   appendix-d-type-inventory.md   type inventory
 docs/roadmap.md                  estimates and calendar over Appendix C
+docs/superpowers/
+  specs/                         one design spec per PR, frozen at write time
+  plans/                         its implementation plan, frozen the same way
 
 global.json                      SDK pin (§4.4)
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
@@ -61,7 +71,10 @@ src/BuildingBlocks/
                                  dispatcher and its two behaviours, plus
                                  RequestMetrics and PluggableInterfaces
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
-                                 ToHttpResult — the only project referencing
+                                 ToHttpResult, AddObservability,
+                                 MapCommonHealthEndpoints, SensitiveDataRedactor,
+                                 BuildInfo and the AddCommonWebDefaults that
+                                 composes them — the only project referencing
                                  another, and the only one with a
                                  FrameworkReference
 tests/
@@ -72,7 +85,7 @@ tests/
                                  starts the real middleware pipeline in memory
 ```
 
-The second block is PR-01's, the third PR-02's, PR-03's and PR-04's.
+The second block is PR-01's, the third PR-02's through PR-05's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it and PR-09's `TransactionBehavior` will need it, but an unused
 project reference is a claim about the dependency graph that nothing yet
@@ -96,11 +109,29 @@ footer or index row will catch its drift — `/validate-blueprint` check 10 is
 the only thing that does, which is why the roadmap is named in that command's
 scope rather than left to the directory glob.
 
-Planned, per §4.1 — do not invent a different shape for it. The two building
-blocks PR-02 built are shown above; everything below is still ahead:
+`docs/superpowers/` sits outside the blueprint tree for a different reason, and
+it is the stronger one: these files are a **frozen historical record**, not a
+specification. Each pair — a design spec and the implementation plan derived
+from it — records how one PR was thought through *before* it was built, and
+PR-05's is the first. They are written once and left alone. **Where one
+disagrees with the blueprint, the blueprint wins**, and the disagreement is not
+a defect to reconcile: it is the record showing where the design moved during
+implementation, which is the only thing these files are for. PR-05's plan
+still carries a `SourceRevisionId, §4.4` citation that the shipped code
+corrected, and that stale line is left standing deliberately.
+
+So they are **deliberately outside `/validate-blueprint`'s scope**, and unlike
+the roadmap they are not named in it either. A drift check on a document whose
+whole value is being stale would fail on every entry by design, and "fixing" it
+would destroy the record. Do not edit a spec or a plan to match the code that
+followed it — amend the chapter instead, which is where the specification
+actually lives.
+
+Planned, per §4.1 — do not invent a different shape for it. The three building
+blocks built so far are shown above; everything below is still ahead:
 
 ```
-src/BuildingBlocks/   .Infrastructure, .Web, .Contracts (Domain and Application exist)
+src/BuildingBlocks/   .Infrastructure, .Contracts (Domain, Application and Web exist)
 src/Gateway/          Gateway.Api (YARP)
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
@@ -124,20 +155,19 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds six projects and `dotnet test` runs 88 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 122 tests, so the
 build rules and the drift rules below are live and a green run now means
-something. **PR-05 is next** (`feat(common): OpenTelemetry and structured
-logging defaults`), which builds on PR-03 — it composes
-`AddCommonProblemDetails` into `AddCommonWebDefaults` (§13.2) and wires the
-OTLP export that the `request.duration` histogram PR-04 just landed currently
-records into nothing.
+something. **PR-06 is next** (`feat(dev): Docker Compose — SQL Server, Redis,
+RabbitMQ, Keycloak, OTel`), which depends only on PR-01 and gives the OTLP
+export PR-05 just wired somewhere to send to.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
 them is a change that belongs in the PR that creates it (Appendix C), not in a
 project invented early. `Common.Web` now does exist, and the same rule applies
-inside it: it holds §10.4 and §10.5 and nothing else until PR-05 adds
-observability and PR-16 adds JWT validation.
+inside it: it holds §10.4, §10.5, §13.2, §13.4 and §13.5, and nothing else
+until PR-16 adds JWT validation — which is also the one gap inside
+`AddCommonWebDefaults`, three of §13.2's five pieces today.
 
 `Common.Application` is the same story one layer down. The pipeline is two
 behaviours of four: **`IdempotencyBehavior` (§8.5) and `TransactionBehavior`
@@ -197,6 +227,24 @@ and unenforced on purpose — the four `var` carve-outs above are the reason, an
 raising a rule whose exception lives in prose would fail builds that are
 correct. Verified end to end: each of the three fails a build, and a compliant
 file is clean.
+
+`Common.Web.Tests` also carries an `AssemblyInfo.cs` that disables xUnit's
+parallelisation for the project, and the reason belongs beside the analyser
+policy above because it is the same kind of decision: a rule scoped to the
+whole assembly rather than argued file by file. OpenTelemetry's ASP.NET Core
+instrumentation subscribes a **process-wide** `DiagnosticListener` the moment
+any test builds a host through `AddObservability`, and while that listener is
+live, ASP.NET Core's hosting layer starts a server `Activity` for every
+request in the process — including one an unrelated test class sends through
+its own `TestServer`. That is exactly the ambient state §10.4's
+correlation-ID fallback test sets `Activity.Current` to null to rule out, and
+a host still alive from another class handed it one anyway, failing the test
+about half the time. Serialising the assembly makes the ordering
+deterministic, and the parallelism given up is worth very little: the suite
+is 55 tests running in about a second. A shared xUnit collection was rejected
+for failing open: the next class that builds an observability host and
+forgets to join the collection would silently reintroduce the flake, where
+the assembly-wide attribute leaves nothing to forget.
 
 ## The one rule that matters
 
@@ -295,6 +343,25 @@ already written against it.
   consecutive usings. This one binds source only — the samples carry no `using`
   directives at all, because they are excerpts rather than compilable units
   (Appendix D). Do not "complete" a sample by adding them.
+- **No unused `using` directives**, and a file that stops needing one drops it
+  in the change that stopped needing it. A stale using is a claim that the file
+  depends on something it does not, which is the same class of untruth as an
+  unused project reference — and the reader who trusts it looks in the wrong
+  assembly first. Two of the four found in the last sweep were left behind by a
+  refactor that moved the only call.
+
+  **Nothing catches this, and the reason is a trap worth knowing.** IDE0005 is
+  the rule, and it is **not reported by the build at all** unless
+  `GenerateDocumentationFile` is on — so `dotnet build` is silent on an unused
+  using even with `TreatWarningsAsErrors`, and so is
+  `dotnet format style --diagnostics IDE0005`. Both were checked against a
+  deliberately injected `using System.Text;` and neither said a word; a clean
+  run here proves nothing. Turning it on costs a fourth entry in
+  `Directory.Build.props`, because `GenerateDocumentationFile` also enables
+  CS1591 and this repository has **62** public members with no XML comment.
+  That is a decision about the policy, so until someone argues it the rule is
+  carried by review, like the `[` placement rule and the `new()` rule above.
+  The IDE does flag it — the greyed-out using is the only live signal there is.
 - Pascal case for types, properties, methods and events; `I` prefix on
   interfaces; namespace matches folder.
 - **A blank line always follows the namespace declaration.** `namespace X;` is a
@@ -358,6 +425,67 @@ already written against it.
   | Anonymous types | `var args = new { OrderId = orderId.Value };` |
   | Tuple deconstruction | `foreach (var (product, qty, price) in items)` |
   | Fluent resource DSLs | The whole Aspire AppHost block in §14.2 — eleven of its thirteen locals are an `IResourceBuilder<T>` whose name only repeats what the `Add*` call already said. Explicit types are possible there and read worse; keep the block uniform rather than typing part of it |
+- **Target-typed `new()` only where the type is already named beside it.** This
+  is the `var` rule applied to the right-hand side, and it cuts the same way: a
+  reader with no hover must be able to see what is being constructed. Where the
+  declaration names the type, `new()` repeats nothing and is preferred —
+  `.editorconfig` asks for it
+  (`csharp_style_implicit_object_creation_when_type_is_apparent = true`):
+
+  ```csharp
+  ServiceCollection services = new();
+  private static readonly ConcurrentDictionary<Type, Invoker> Cache = new();
+  public static Result Success() => new(null);
+  ```
+
+  Where nothing beside it names the type, spell the type out. The test is
+  whether the type is visible in the declaration the expression belongs to, so
+  the positions that hide it are **an argument**, **a collection expression in
+  argument position**, and **the target of an indexer or property assignment**:
+
+  ```csharp
+  // Wrong — the reader cannot see what is being constructed in any of these.
+  .MapHealthChecks("/health/live", new() { Predicate = _ => false })
+  .AddAttributes([new("deployment.environment", builder.Environment.EnvironmentName)])
+  scrubbed[i] = new(attribute.Key, "[redacted]");
+
+  // Right.
+  .MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
+  .AddAttributes([new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)])
+  scrubbed[i] = new KeyValuePair<string, object?>(attribute.Key, "[redacted]");
+  ```
+
+  A collection expression assigned to a typed declaration is **not** one of
+  them — the element type is right there on the left, so the elements stay
+  bare. Both forms appear in `SensitiveDataRedactorTests`, which is the file to
+  read if the distinction ever looks arbitrary:
+
+  ```csharp
+  KeyValuePair<string, object?>[] state =
+  [
+      new("NewPassword", "a"),      // fine — the array's type is on the left
+      new("card_number", "b")
+  ];
+  ```
+
+  **No analyser reaches the banned half**, and it is worth knowing why. IDE0090
+  fires only when the type *is* apparent, so it polices the first block and has
+  nothing to say about the second — turning it off would attack the form this
+  rule wants to keep. Like the `[` placement rule, this half is carried by
+  review and by this file alone.
+
+  **Where naming the type breaks the 120-column budget, name it in a local —
+  do not fall back to `new()`.** Spelling the type inside `AddAttributes`' own
+  argument runs that line to 130 columns, and the two rules resolve in one
+  move rather than trading off: a local declaration carries the type, so the
+  `new` beside it needs none and both lines fit.
+
+  ```csharp
+  KeyValuePair<string, object> environment =
+      new("deployment.environment", builder.Environment.EnvironmentName);
+  // ...
+      .AddAttributes([environment]))
+  ```
 - Binary operators spaced. Where a wrapped one goes is the operator-placement
   rule below, which states it once.
 - **A list is on one line, or one element per line. Never a ragged middle.**
@@ -671,6 +799,7 @@ already written against it.
 | | |
 |---|---|
 | Namespaces | File-scoped (`namespace X;`), never block-scoped |
+| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: `Common.Web`'s six extension classes still use the classic `this`-parameter form. Four extend a receiver nothing else does — `IApplicationBuilder`, `IServiceCollection`, `IEndpointRouteBuilder`, `Result` — but `ObservabilityExtensions` and `CommonWebDefaultsExtensions` **both** extend `IHostApplicationBuilder` and could therefore be grouped. Whether to group that pair is open and deliberately unsettled: they are separate files because one composes the other, and merging them would put a caller-facing entry point in the same block as a piece it calls. Converting anything here is a decision about the whole corpus, not about the file in front of you |
 | Expression-bodied members | Used for one-line members, not for constructors |
 | Braces | Optional for a single statement, required for two or more |
 | Target framework | .NET 10 (LTS), C# 14 |
@@ -823,6 +952,16 @@ every argument at column 7). If you find one, it is a leftover — convert it.
 - **Commit messages** are semantic and present-tense: `docs:`, `feat(<scope>):`,
   `fix:`, `chore:` — the delivery plan in Appendix C already names each PR in
   this form, so use its title verbatim when you implement one.
+- **Uncommitted work in the tree belongs in the PR being worked on.** When a
+  change appears that nobody in the current task wrote — an edit made directly
+  by the repo owner, most often — it is not stray churn to be reverted or left
+  behind for someone else to notice. Commit it as part of the current PR, in
+  its own commit, with a body that argues it like any other. **Never revert it
+  to clean the tree**: that has happened once, and only a saved diff kept the
+  work. If it genuinely does not belong in this PR, say so and ask — do not
+  decide by deleting. The same reconciliation rule applies to it as to
+  everything else, so a hand edit that contradicts a chapter takes the chapter
+  with it in the same commit.
 - `.remember/` is session state, not content. Never edit it as part of a change.
 
 Once code is present, additionally:
@@ -831,8 +970,9 @@ Once code is present, additionally:
   PR as the code they cover — the convention starts at PR-02 and there is no
   PR in the plan that adds tests afterwards.
 - **Follow the delivery plan's order.** Appendix C sequences 26 PRs with
-  explicit dependencies, and the service order (Notifications → Catalog →
-  Ordering → Inventory and Payments → Shipping) is deliberate. Building out of
+  explicit dependencies, and the service order (Catalog → Ordering →
+  Inventory and Payments → Shipping → Notifications) is deliberate. Building
+  out of
   order is a design decision, not a shortcut — raise it rather than taking it.
 - **The architecture tests are the enforcement mechanism**, not review.
   NetArchTest gates land at PR-07: domain isolation, Application ↛ EF Core,

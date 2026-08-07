@@ -114,7 +114,8 @@ row behind.
 | **14** | `feat(template): transactional outbox and allow-list event mapper` | 6d | 49 | 14 |
 | **15** | `feat(messaging): Contracts, inbox consumers, inbox + outbox retention purge` | 5d | 54 | 16 |
 
-**PR-14 is the single heaviest pull request in the plan**, and the 2d/6d split
+**PR-14 is the heaviest pull request in the plan, tied with PR-21 and PR-24**,
+and the 2d/6d split
 between it and PR-13 is why Appendix C separates them. Getting a bus connection
 working is an afternoon; getting an outbox transactionally correct, with
 `MessageTypeMap` and `OutboxJson` both landing before any row exists in the
@@ -214,7 +215,7 @@ interruption: a day lost on PR-14 is a day on the end date, while a day lost on
 PR-12 — which is not on the chain — is free until it isn't.
 
 The chain also explains the shape of the *Integration and operations* phase.
-Four of its seven pull requests sit on the critical path, which is why a phase
+Three of its seven pull requests sit on the critical path, which is why a phase
 that reads like clean-up is a third of the plan.
 
 ## What moves these numbers
@@ -225,7 +226,7 @@ Six things, ordered by how much of the total they can move.
 READMEs call the e-commerce domain "illustrative only", while
 [§4.1](backend-architecture/04-solution-structure.md) and Appendix C name six
 services concretely. If the real solution substitutes another domain, PR-10,
-PR-18, PR-20 and PR-21 are re-specified rather than re-estimated — 18 of the
+PR-18, PR-20 and PR-21 are re-specified rather than re-estimated — 17 of the
 98 days, and the four that carry the most design argument. Nothing else on this
 list is close. Settle it before M2.
 

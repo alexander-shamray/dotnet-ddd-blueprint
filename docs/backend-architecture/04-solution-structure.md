@@ -560,28 +560,40 @@ shared library used by six services and the BFF is a coordination point.
 
 ## 4.4 Pinning the toolchain and packages
 
-`global.json` pins the SDK, so every developer and every CI agent compiles with
-the same compiler and analysers. Without it, a machine with a newer SDK can
-produce different diagnostics — or different behaviour — from the build that was
-reviewed.
+`global.json` pins the SDK to one exact patch, so every developer and every CI
+agent compiles with the same compiler and analysers. Without it, a machine with
+a newer SDK can produce different diagnostics — or different behaviour — from
+the build that was reviewed. The trap below is why the pin says `disable`
+rather than `latestPatch`: only one of the two makes that first sentence true.
 
 ```json
 {
   "sdk": {
-    "version": "10.0.300",
-    "rollForward": "latestPatch"
+    "version": "10.0.302",
+    "rollForward": "disable"
   }
 }
 ```
 
-> **Trap — `latestPatch` does not roll across feature bands.** The third digit
-> of an SDK version is a feature band, and `latestPatch` stays inside the one it
-> is given: `10.0.100` accepts any `10.0.1xx` and rejects `10.0.302`. That is the
-> strictness the pin is for, but it means the number here has to name the band
-> the team actually installs. Get it wrong and `dotnet` does not fall back — it
-> refuses to run at all, on every machine, with a message about an SDK nobody
-> asked for. Bumping the band is a deliberate change to this file, which is the
-> intended cost.
+> **Trap — `latestPatch` is not a pin, and the sentence above is only true
+> without it.** `latestPatch` accepts any patch inside the feature band, so it
+> resolves to whatever the machine happens to have: a developer on `10.0.305`
+> compiles with those analysers while CI, which `setup-dotnet` gives exactly the
+> version named here, compiles with these. Since ADR-019 makes analyser output a
+> build gate, that divergence does not show up as a warning — it shows up as a
+> build that is green on every machine and red in CI, reproducing nowhere. This
+> repository has had one.
+>
+> `disable` is what closes it: the version named is the version used, or
+> `dotnet` refuses to run at all rather than quietly choosing another. Feature
+> bands were never the exposure — `latestPatch` already declined to cross them
+> (`10.0.100` rejects `10.0.302`) — patches were, and they are the ones that
+> ship analyser changes.
+>
+> The cost is the intended one and it is larger than it was: every machine needs
+> this exact patch, not merely one in the band, so a bump is a deliberate edit
+> here that everyone installs before they can build. That is the same trade as
+> the exact package pins below, applied to the compiler that reads them.
 
 `Directory.Packages.props` pins every package version once for the whole
 repository. This prevents the situation where two services depend on different
@@ -620,13 +632,13 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
   </ItemGroup>
   <ItemGroup Label="Telemetry">
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.13.1" />
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.13.1" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.13.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.13.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.13.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.13.0-beta.1" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.13.0-beta.1" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.17.0-beta.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.17.0-beta.1" />
     <PackageVersion Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
     <PackageVersion Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <PackageVersion Include="AspNetCore.HealthChecks.Rabbitmq" Version="9.0.0" />
@@ -664,6 +676,12 @@ EF Core minor versions and behave differently under identical code.
          comment into a build failure. A major bump can change which rules
          exist, so it fails loudly rather than quietly stopping to enforce. -->
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+    <!-- The in-memory reader the observability tests read back through:
+         §13.4's redaction tests, which that chapter prints one of, and the
+         meter-coverage tests guarding §13.2's meter list, which live in
+         Common.Web.Tests only. Test-only: nothing in src/ exports in
+         memory. -->
+    <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="1.17.0" />
   </ItemGroup>
 </Project>
 ```

@@ -65,9 +65,11 @@ subscriber silently executing your business commands.
 
 Every cell enumerates. "All customer-relevant events" would be shorter and is
 not a contract: it cannot be versioned, reviewed, or checked against what
-publishers actually emit, and Notifications is the service the delivery plan
-says to build first ([Appendix C.1](appendix-c-delivery-plan.md#c1-service-build-order)). A subscription list that grows silently is
-how a consumer ends up bound to a type nobody meant to give it.
+publishers actually emit. Notifications is the clearest case: it publishes
+nothing, so this row is the whole of its contract, and the delivery plan builds
+it last for that reason ([Appendix C.1](appendix-c-delivery-plan.md#c1-service-build-order)) — every name in it belongs to a
+service that has to exist first. A subscription list that grows silently is how
+a consumer ends up bound to a type nobody meant to give it.
 
 **The table closes in both directions, and the second one is easier to lose.**
 Every name in a Consumes cell appears in exactly one Publishes cell — an event
@@ -86,9 +88,11 @@ Ordering itself — the saga coordinates, the aggregate decides (§9.6).
 
 Note the shapes this produces. **Shipping** and **Notifications** expose no
 public write API at all — they are pure event consumers. **Notifications** is
-the simplest possible service and is a good first one to build, because it
-exercises the entire messaging and observability stack while containing almost
-no domain logic.
+the simplest possible service and the last one built, and those two facts are
+not in tension. It contains almost no domain logic, which is what makes it
+cheap; it also publishes nothing and subscribes to seven events owned by other
+services, which is what makes it impossible to exercise before they exist
+([Appendix C.1](appendix-c-delivery-plan.md#c1-service-build-order)). Simple to write is not the same as ready to build.
 
 ## 3.3 Rules for creating a new service
 

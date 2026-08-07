@@ -13,15 +13,27 @@ they imply, and the assumptions holding it up.
 Two orderings matter and they are different. The **platform** is built in the PR
 sequence below. The **services** are built in this order, and not in parallel:
 
-1. **Notifications** — no domain logic, pure event consumer, no public API.
-   Proves messaging, observability and the deployment pipeline end to end while
-   there is nothing else to debug.
-2. **Catalog** — simple domain. Establishes the CQRS structure, caching, and the
-   query patterns.
-3. **Ordering** — the core domain. Rich aggregate, outbox, saga.
-4. **Inventory and Payments** — concurrency and third-party integration, once
+1. **Catalog** — simple domain, and the only service that owes nothing to
+   another. Establishes the CQRS structure, caching and the query patterns, and
+   is the first thing through the deployment pipeline (PR-10).
+2. **Ordering** — the core domain. Rich aggregate, outbox, saga (PR-18).
+3. **Inventory and Payments** — concurrency and third-party integration, once
    the surrounding patterns have settled.
-5. **Shipping** — last, because it depends on everything upstream being stable.
+4. **Shipping** — depends on everything upstream being stable.
+5. **Notifications** — last, and not because it is hard. It has no domain
+   logic, no public API and publishes nothing: its entire subscription list is
+   seven events belonging to Ordering, Payments and Shipping ([§3.2](03-bounded-contexts.md)). Built
+   before them it is a consumer with no producers, which can be deployed but
+   not exercised.
+
+> **A pure consumer cannot be the thing that proves the pipeline.** An earlier
+> version of this list put Notifications first, on the reasoning that a service
+> with no domain logic proves messaging, observability and deployment end to
+> end while there is nothing else to debug. The first half is true and the
+> conclusion does not follow: end to end needs both ends, and every event
+> Notifications reads is emitted by a service that would not exist yet. C.2 was
+> never written that way — PR-10 is Catalog and PR-18 is "second service" —
+> so the sequence below is what the plan always did.
 
 The first service through the pipeline finds every gap in deployment,
 observability and testing. Fixing those once is far cheaper than fixing them

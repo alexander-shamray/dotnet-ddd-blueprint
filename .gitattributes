@@ -1,9 +1,20 @@
-# core.autocrlf is on, which would store the licence gate's Python with CRLF and
-# check it out the same way. On the Linux runner that CI uses, a CRLF shebang
-# makes the kernel look for an interpreter named `python3\r` — "bad
-# interpreter", from a line that looks correct in every editor.
+# .editorconfig sets `end_of_line = crlf`, and ADR-019 makes IDE0055 a build
+# error — so a checkout that produces LF fails the build on every line the
+# formatter inspects. On Windows `core.autocrlf=true` hides this by converting
+# on the way out. On the Linux runner CI uses, nothing does, and the build goes
+# red on a tree that is green on every developer's machine.
 #
-# Narrow on purpose. A blanket `* text=auto` here would renormalise every file
-# in the repository in a commit that is supposed to be about something else;
-# .editorconfig already carries the CRLF rule for everything but this.
+# That is not hypothetical: it is how PR-05 first went red. Nineteen IDE0055
+# errors in one file, reproducible locally only by converting that file to LF,
+# and invisible to `dotnet build` on Windows at any SDK version.
+#
+# `text eol=crlf` normalises to LF in the object store — where the blobs
+# already are, so this renormalises nothing — and checks out CRLF everywhere,
+# which is what .editorconfig has always asked for.
+*.cs text eol=crlf
+
+# The one file type that overrides the rule above, and it is not a preference.
+# A CRLF shebang makes the Linux kernel look for an interpreter named
+# `python3\r` — "bad interpreter", from a line that looks correct in every
+# editor. The licence gate runs on that runner.
 *.py text eol=lf
