@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using Common.Application;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -63,6 +64,48 @@ public class ObservabilityTests
         // exact match would only pass by dropping telemetry the same PR turns
         // on, which is a worse defect than the one this test guards against.
         Required.ShouldBeSubsetOf(exported.Select(m => m.MeterName).Distinct());
+    }
+
+    [Fact]
+    public void The_one_instrument_the_repo_actually_has_is_collected()
+    {
+        // The test above guards seven strings against a list of seven strings.
+        // Both copies are here in the test project; RequestMetrics holds a
+        // third, unshared copy of "Commerce.Requests" over in
+        // Common.Application. Rename that one and the test above stays green
+        // while request.duration — the only real instrument in the repo — is
+        // collected by nothing.
+        //
+        // So this one goes through the production type rather than a probe
+        // counter, and closes the seam by construction: it cannot pass unless
+        // the meter name RequestMetrics really uses is a name AddObservability
+        // really registers.
+        List<Metric> exported = [];
+
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        builder.AddObservability();
+        builder.Services
+            .AddOpenTelemetry()
+            .WithMetrics(m => m.AddInMemoryExporter(exported));
+
+        using IHost host = builder.Build();
+
+        // Before constructing RequestMetrics, for the reason spelled out
+        // above: an instrument created ahead of the provider has no listener
+        // and this test would measure nothing while appearing to pass.
+        MeterProvider provider = host.Services.GetRequiredService<MeterProvider>();
+
+        RequestMetrics metrics = new(host.Services.GetRequiredService<IMeterFactory>());
+        metrics.Recorded("PlaceOrderCommand", "success", TimeSpan.FromMilliseconds(12));
+
+        provider.ForceFlush();
+
+        // Both halves asserted together. The name alone would pass against an
+        // instrument on an unregistered meter, and the meter alone is what the
+        // test above already covers.
+        exported.ShouldContain(
+            m => m.Name == "request.duration" && m.MeterName == "Commerce.Requests",
+            $"exported: {string.Join(", ", exported.Select(m => $"{m.MeterName}/{m.Name}"))}");
     }
 
     [Fact]

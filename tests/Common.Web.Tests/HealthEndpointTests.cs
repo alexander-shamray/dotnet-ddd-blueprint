@@ -96,6 +96,35 @@ public class HealthEndpointTests
     }
 
     [Fact]
+    public async Task Startup_gates_on_the_ready_tagged_checks()
+    {
+        // Asserted by request, because the route string is the contract. The
+        // kubelet's startupProbe holds its own copy of "/health/startup" in a
+        // manifest no compiler reads, so nothing here links the two: change
+        // the route to "/health/startupp" and every other test in this file
+        // stays green while a slow-starting pod 404s and is killed mid-boot.
+        //
+        // Counting endpoints does not close that gap — three endpoints exist
+        // under any spelling. Only a GET does.
+        using (IHost healthy = await StartAsync(checks =>
+            checks.AddCheck("sql", new Always(HealthStatus.Healthy), tags: ["ready"])))
+        {
+            HttpResponseMessage startup = await GetAsync(healthy, "/health/startup");
+
+            startup.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        // The control: 200 above could equally mean the predicate matched
+        // nothing at all, since an empty predicate set is a passing one.
+        using IHost failing = await StartAsync(checks =>
+            checks.AddCheck("sql", new Always(HealthStatus.Unhealthy), tags: ["ready"]));
+
+        HttpResponseMessage unavailable = await GetAsync(failing, "/health/startup");
+
+        unavailable.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+    }
+
+    [Fact]
     public async Task Every_probe_allows_anonymous()
     {
         // Asserted on the metadata rather than by an unauthenticated request:
