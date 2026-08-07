@@ -118,22 +118,21 @@ test rather than a code review convention:
 
 ```csharp
 [Fact]
-public void Domain_has_no_infrastructure_dependencies()
+public void Domain_references_only_common_domain_and_the_framework()
 {
-    string[] forbidden =
-    [
-        "Microsoft.EntityFrameworkCore",
-        "MassTransit",
-        "StackExchange.Redis",
-        "Microsoft.AspNetCore",
-        "System.Text.Json"
-    ];
-
+    // The table's rule is an allow-list — "Common.Domain and nothing else" —
+    // so the gate is one too: a blacklist can only ban the libraries someone
+    // thought to name, and Common.Application, another service's Domain or a
+    // new package all slip past it. System.Text.Json is the one framework
+    // assembly the table bans by name: a domain type must not serialise
+    // itself.
     IEnumerable<string> referenced = typeof(Order).Assembly
         .GetReferencedAssemblies()
         .Select(a => a.Name!);
 
-    referenced.ShouldNotContain(name => forbidden.Any(name.StartsWith));
+    referenced.ShouldAllBe(name =>
+        name == "Common.Domain" ||
+        (name.StartsWith("System.") && !name.StartsWith("System.Text.Json")));
 }
 ```
 
