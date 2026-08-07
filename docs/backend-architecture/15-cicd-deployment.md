@@ -36,6 +36,9 @@ make a monorepo practical at this size:
   id: changes
   uses: dorny/paths-filter@v3
   with:
+    # Without this, negated patterns are silently ignored: the default
+    # quantifier ('some') never evaluates the exclusion below.
+    predicate-quantifier: 'some-with-excludes'
     filters: |
       # Inputs shared by every service, including the three repo-root files.
       # A version bump in Directory.Packages.props changes every binary the
