@@ -93,8 +93,8 @@ src/Services/Catalog/
   Catalog.Domain/                AssemblyMarker only — the typeof anchor the
                                  gates need until PR-10's first aggregate
   Catalog.Application/           AddCatalogApplication: the §6.2 scan, the
-                                 dispatcher, RequestMetrics, the two behaviours
-                                 in pipeline order
+                                 dispatcher, the clock, RequestMetrics, the
+                                 two behaviours in pipeline order
   Catalog.Infrastructure/        AddCatalogInfrastructure: the §6.2 scan only;
                                  no IConfiguration parameter until PR-08 has a
                                  line that reads it
@@ -190,7 +190,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 131 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 132 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-08 is next** (`feat(template): EF Core, repositories,
 IUnitOfWork, migrator host`), which depends on PR-07 and PR-06 and gives

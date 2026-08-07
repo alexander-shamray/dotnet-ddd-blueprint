@@ -15,8 +15,12 @@ public static class DependencyInjection
         services.AddPluggableFrom(typeof(DependencyInjection).Assembly);   // §6.2
         services.AddDispatcher();
 
-        // LoggingBehavior injects it, so a host that omits this line fails
-        // ValidateOnBuild rather than the first dispatched request (§13.3).
+        // The clock (§5.4) and the request histogram (§13.3): LoggingBehavior
+        // injects both, and nothing catches an omission before the first
+        // dispatched request — not ValidateOnBuild, which never constructs an
+        // open generic, and not the host smoke, which never enters the
+        // dispatcher. The registration test is what guards these two lines.
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<RequestMetrics>();
 
         // Ordered, explicit, not scanned — registration order is pipeline

@@ -26,6 +26,24 @@ public class DependencyInjectionTests
     }
 
     [Fact]
+    public void AddCatalogApplication_registers_the_system_clock()
+    {
+        // LoggingBehavior injects TimeProvider, and neither ValidateOnBuild
+        // nor the host smoke can see the hole: an open generic is not
+        // constructed until a closed IPipelineBehavior<,> resolves, which
+        // nothing does before the first dispatched request (§4.2, §5.4).
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        ServiceDescriptor clock = services
+            .Where(d => d.ServiceType == typeof(TimeProvider))
+            .ShouldHaveSingleItem();
+        clock.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+        clock.ImplementationInstance.ShouldBeSameAs(TimeProvider.System);
+    }
+
+    [Fact]
     public void AddCatalogApplication_registers_the_two_behaviours_in_pipeline_order()
     {
         ServiceCollection services = new();
