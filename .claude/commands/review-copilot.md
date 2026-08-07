@@ -100,8 +100,12 @@ the database id joins to the inline comment's numeric `id` from the intake
 step. Then, once the marker is posted:
 
 ```bash
-bash .claude/scripts/pr-thread-resolve.sh <PRRT-thread-id>
+bash .claude/scripts/pr-thread-resolve.sh <n> <PRRT-thread-id>
 ```
+
+The PR number is not decoration: thread node ids are global, so the helper
+refuses to run the mutation until it has seen the id in that PR's own
+thread map.
 
 The mutation inside the helper is idempotent — re-running it on a resolved
 thread returns `true` and changes nothing — so a re-run after a partial pass
