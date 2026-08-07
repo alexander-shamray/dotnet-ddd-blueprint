@@ -41,6 +41,10 @@ namespace Common.Web;
 /// </remarks>
 public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 {
+    // The key ILogger puts the message template under. Its presence is what
+    // makes Body a template rather than a rendered line — see OnEnd.
+    private const string OriginalFormat = "{OriginalFormat}";
+
     // Substring match, not equality: the field that leaks is never named
     // exactly "password" — it is "NewPassword", "card_number", "id_token".
     private static readonly string[] Sensitive =
@@ -53,10 +57,15 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             return;
 
         List<KeyValuePair<string, object?>>? scrubbed = null;
+        bool hasTemplate = false;
 
         for (int i = 0; i < record.Attributes.Count; i++)
         {
             KeyValuePair<string, object?> attribute = record.Attributes[i];
+
+            if (attribute.Key == OriginalFormat)
+                hasTemplate = true;
+
             if (!IsSensitive(attribute.Key))
                 continue;
 
@@ -79,12 +88,21 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
         // while "Login for ada with hunter2" ships beside it protects nothing
         // and reads in review as though it does.
         //
-        // Body is the un-substituted template, so it is both safe and the most
-        // readable thing left: the values that were not sensitive are still on
-        // the record as attributes. Only when there is no template — a state
-        // logged without {OriginalFormat} — is there nothing to fall back to,
-        // and then the message goes entirely rather than partly.
-        record.FormattedMessage = record.Body ?? "[redacted]";
+        // Body is only the un-substituted template when the state actually
+        // carried {OriginalFormat}. Without it OpenTelemetry fills Body with
+        // the formatter's own output — the rendered line, secret and all — so
+        // falling back to Body there would re-export precisely what the
+        // attribute scrub just removed. Measured against 1.17 rather than
+        // assumed: a state of [Password=hunter2] with a formatter returning
+        // "password is hunter2" produces that string in Body.
+        //
+        // With a template, Body is safe and is the most readable thing left:
+        // every non-sensitive value is still on the record as an attribute.
+        // Without one there is nothing to fall back to, so the message goes
+        // entirely rather than partly.
+        record.FormattedMessage = hasTemplate && record.Body is not null
+            ? record.Body
+            : "[redacted]";
     }
 
     // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the

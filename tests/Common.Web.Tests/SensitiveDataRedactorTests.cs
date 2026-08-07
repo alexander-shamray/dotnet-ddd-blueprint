@@ -203,6 +203,22 @@ public class SensitiveDataRedactorTests
     }
 
     [Fact]
+    public void A_state_with_no_template_loses_its_message_rather_than_re_exporting_it()
+    {
+        // Without {OriginalFormat} OpenTelemetry fills Body with the
+        // formatter's own output, not a template — so the rendered secret is
+        // sitting in Body, and falling back to it would re-export exactly what
+        // the attribute scrub removed. Measured against 1.17.
+        KeyValuePair<string, object?>[] state = [new("Password", "hunter2")];
+
+        LogRecord record = EmitRecord(logger =>
+            logger.Log(LogLevel.Information, new EventId(6), state, null, (s, _) => $"password is {s[0].Value}"));
+
+        record.Attributes!.Single(a => a.Key == "Password").Value.ShouldBe("[redacted]");
+        record.FormattedMessage.ShouldBe("[redacted]");
+    }
+
+    [Fact]
     public void No_other_logging_provider_survives_to_see_the_rendered_secret()
     {
         // The redactor only ever sees records inside the OpenTelemetry

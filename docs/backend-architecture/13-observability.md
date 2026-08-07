@@ -562,6 +562,10 @@ rather than by discipline:
 // its consumer.
 public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 {
+    // The key ILogger puts the message template under. Its presence is what
+    // makes Body a template rather than a rendered line — see OnEnd.
+    private const string OriginalFormat = "{OriginalFormat}";
+
     // Substring match, not equality: the field that leaks is never named
     // exactly "password" — it is "NewPassword", "card_number", "id_token".
     private static readonly string[] Sensitive =
@@ -573,10 +577,15 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             return;
 
         List<KeyValuePair<string, object?>>? scrubbed = null;
+        bool hasTemplate = false;
 
         for (int i = 0; i < record.Attributes.Count; i++)
         {
             KeyValuePair<string, object?> attribute = record.Attributes[i];
+
+            if (attribute.Key == OriginalFormat)
+                hasTemplate = true;
+
             if (!IsSensitive(attribute.Key))
                 continue;
 
@@ -596,7 +605,14 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
         // record's body — the template with every argument substituted.
         // Redacting Password while "Login for ada with hunter2" ships beside
         // it protects nothing and reads in review as though it does.
-        record.FormattedMessage = record.Body ?? "[redacted]";
+        //
+        // Body is only that template when the state carried {OriginalFormat}.
+        // Without it OpenTelemetry fills Body with the formatter's own output
+        // — the rendered line, secret and all — so falling back to Body there
+        // would re-export what the scrub just removed.
+        record.FormattedMessage = hasTemplate && record.Body is not null
+            ? record.Body
+            : "[redacted]";
     }
 
     // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the
