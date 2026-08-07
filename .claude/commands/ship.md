@@ -1,7 +1,7 @@
 ---
 description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh api repos/:*), Bash(gh api --method POST repos/:*), Bash(gh api --method DELETE repos/:*), Bash(grok:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(grok:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -162,50 +162,41 @@ anything.
    1. **Request GitHub's Copilot review** on the PR:
 
       ```bash
-      gh api repos/:owner/:repo/pulls/<n>/requested_reviewers -f "reviewers[]=Copilot"
+      bash .claude/scripts/copilot-request.sh <n>
       ```
 
-      Both `Copilot` and `copilot-pull-request-reviewer[bot]` are accepted as
-      the request target; the finished review's *author* reads
-      `copilot-pull-request-reviewer` from GraphQL and gains the `[bot]`
-      suffix in REST. The GraphQL route (`gh pr edit --add-reviewer`) cannot
-      resolve the bot at all — REST is the only door.
+      The helper removes the reviewer, then re-adds it — after a landed
+      review a plain POST enters a stale-reviewer state where the API
+      returns the PR object and registers nothing, observed live four times
+      in a row, while delete-then-post registered immediately. Its endpoint,
+      method and body are fixed and its one parameter is shape-checked,
+      which is why the frontmatter grants the *helper* and not `gh api`: a
+      `Bash` rule matches a command prefix, so any raw-`gh api` grant —
+      however narrow the path looks — still licenses method flags and
+      payloads the deny rules never contemplated. The scripts under
+      `.claude/scripts/` are the whole API surface this loop can touch, and
+      widening one is a permission-model decision made in the script, where
+      review can see it.
 
-      The frontmatter deliberately grants `gh api` only under `repos/`
-      prefixes — the reviewer-request and timeline calls this loop makes —
-      rather than `gh api:*`, which would licence any authenticated mutation
-      the deny rules never contemplated. Prefix rules cannot pin the path
-      *after* `repos/`, so breadth remains; anything beyond these two call
-      shapes still prompts, and widening the grant is a decision about the
-      permission model, not a convenience edit.
+      (For the curious: the request target accepts both `Copilot` and
+      `copilot-pull-request-reviewer[bot]`; the finished review's *author*
+      reads `copilot-pull-request-reviewer` from GraphQL and gains the
+      `[bot]` suffix in REST; and `gh pr edit --add-reviewer` cannot resolve
+      the bot at all — the fixed REST call inside the helper is the only
+      door.)
 
-      **On every round after the first, remove the reviewer before
-      re-requesting.** After a Copilot review lands, a plain POST enters a
-      stale-reviewer state where the API returns the PR object and registers
-      nothing — observed live four times in a row, while a DELETE followed
-      by the same POST registered immediately, five minutes after the review
-      it followed:
+      **A success exit is still not a registered request** — the only proof,
+      on any round, is a new `review_requested` event on the issue timeline:
 
       ```bash
-      gh api --method DELETE repos/:owner/:repo/pulls/<n>/requested_reviewers \
-        -f "reviewers[]=copilot-pull-request-reviewer[bot]"
-      gh api --method POST repos/:owner/:repo/pulls/<n>/requested_reviewers \
-        -f "reviewers[]=copilot-pull-request-reviewer[bot]"
+      bash .claude/scripts/copilot-request-count.sh <n>
       ```
 
-      **A 200 is still not a registered request** — the only proof, on any
-      round, is a new `review_requested` event on the issue timeline:
-
-      ```bash
-      gh api repos/:owner/:repo/issues/<n>/timeline --paginate \
-        --jq '[.[] | select(.event=="review_requested")] | length'
-      ```
-
-      Request, verify the count grew, and on a silent drop retry —
-      delete-then-post — with a minute-plus backoff. A request that will not
-      register after ~10 minutes of that stops the loop and says so: never
-      wait on a review whose request never took, and never call the branch
-      clean because asking failed.
+      Request, verify the count grew, and on a silent drop retry with a
+      minute-plus backoff. A request that will not register after ~10
+      minutes of that stops the loop and says so: never wait on a review
+      whose request never took, and never call the branch clean because
+      asking failed.
 
       **The review's depth is not a request parameter.** Copilot reviews at
       whatever tier the account's code-review settings grant, so keeping the

@@ -1,7 +1,7 @@
 ---
 description: Triage Copilot's review comments on a PR — verify each before acting on it
 argument-hint: "[PR number — omit for the current branch's PR]"
-allowed-tools: Read, Grep, Glob, Edit, Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr diff:*), Bash(gh api repos/:*), Bash(gh api graphql:*), Bash(git log:*), Bash(git diff:*), Bash(git branch:*)
+allowed-tools: Read, Grep, Glob, Edit, Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr diff:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-comment-reply.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/pr-thread-resolve.sh:*), Bash(git log:*), Bash(git diff:*), Bash(git branch:*)
 ---
 
 Work through the Copilot review on PR $1 — if empty, the PR for the current
@@ -16,10 +16,16 @@ appear under the author `Copilot`. Collect:
    `<details><summary>Suppressed comments</summary>` block, which holds findings
    that never surfaced as inline comments. Read the suppressed ones; they are
    not filtered for being wrong.
-2. **Inline comments** — `gh api repos/:owner/:repo/pulls/<n>/comments`. Take
-   `path`, `line`, `body` and `in_reply_to_id`, and skip any thread already
-   answered by the repo owner.
-3. **Issue comments** — `gh api repos/:owner/:repo/issues/<n>/comments`.
+2. **Inline comments** — `bash .claude/scripts/pr-review-comments.sh <n>`.
+   Take `path`, `line`, `body` and `in_reply_to_id`, and skip any thread
+   already answered by the repo owner.
+3. **Issue comments** — `gh pr view <n> --json comments`.
+
+The scripts under `.claude/scripts/` are the whole of this command's API
+surface, and that is the point: a `Bash` permission rule matches a command
+prefix, so a raw `gh api` grant of any spelling licenses methods and payloads
+nobody reviewed. Each helper fixes its endpoint and shape-checks its
+parameters; widening one is an edit a reviewer can see.
 
 A re-review supersedes an earlier one on the same line. Work from the latest.
 
@@ -66,7 +72,7 @@ or bot — re-opens the same argument on the next PR.
 1. **The reasoned reply.** Always for a rejection: a rejection nobody reads is
    a comment that comes back. For an acceptance, only where the commit does not
    already say it — a one-line fix needs no essay. Post with
-   `gh api repos/:owner/:repo/pulls/<n>/comments/<id>/replies -f body='…'`,
+   `bash .claude/scripts/pr-comment-reply.sh <n> <comment-id> '…'`,
    and only after showing the user the text.
 2. **The marker**, as its own reply on the same thread, one word and nothing
    else: **`done`** if the finding was accepted and the fix is committed,
@@ -86,30 +92,20 @@ is no `gh pr` subcommand for it. It is a GraphQL mutation on a *thread* ID
 (`PRRT_…`), which is not the comment's `id`, so the mapping must be fetched:
 
 ```bash
-gh api graphql -f query='
-query($owner:String!,$repo:String!,$pr:Int!){
-  repository(owner:$owner,name:$repo){
-    pullRequest(number:$pr){
-      reviewThreads(first:50){
-        nodes{ id isResolved comments(first:1){ nodes{ databaseId path } } }
-      }
-    }
-  }
-}' -F owner=<owner> -F repo=<repo> -F pr=<n>
+bash .claude/scripts/pr-review-threads.sh <n>
 ```
 
-`comments.nodes[0].databaseId` is the inline comment's numeric id from the REST
-call above; `id` is the thread. Then, once the marker is posted:
+Each output line is `<thread-id> <isResolved> <comment-database-id> <path>`;
+the database id joins to the inline comment's numeric `id` from the intake
+step. Then, once the marker is posted:
 
 ```bash
-gh api graphql -f query='mutation($id:ID!){
-  resolveReviewThread(input:{threadId:$id}){ thread{ isResolved } }
-}' -F id=<PRRT_…>
+bash .claude/scripts/pr-thread-resolve.sh <PRRT-thread-id>
 ```
 
-The mutation is idempotent — re-running it on a resolved thread returns
-`isResolved: true` and changes nothing — so a re-run after a partial pass is
-safe.
+The mutation inside the helper is idempotent — re-running it on a resolved
+thread returns `true` and changes nothing — so a re-run after a partial pass
+is safe.
 
 **One verdict does not get this treatment: `Ask`.** A thread raising a genuine
 design ambiguity is unresolved by definition, and closing it would hide the
