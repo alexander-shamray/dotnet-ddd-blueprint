@@ -1047,7 +1047,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence, resuming where a previous run stopped |
+| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until a pass leaves no `suggestions.md` |
 | `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -1055,18 +1055,28 @@ Delivery:
 | `/review-grok` | Triage an external review into a resolution record |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 
-`/pr` pushes the branch itself, and `/ship` therefore runs all the way to an
-open PR. What `.claude/settings.json` still denies is the narrow set that is a
-decision rather than a step: `--force`, `-f`, `--delete`, and any push to
-`main`. A branch wanting one of those is raising a question, not running a
-command. `gh pr create`'s own offer to push is not used either — it is the
-same action by a route that skips the upstream check `/pr` makes first, so it
-reaches the remote without reporting that it did.
+`/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
+and into the review loop: Grok runs `/review-branch` headlessly
+(`grok -p "/review-branch"` — Grok discovers `.claude/commands/` itself),
+`/review-grok` triages whatever `suggestions.md` it leaves, and the loop
+repeats until a pass leaves no file. The split of ownership matters: Grok's
+half owns the `suggestions.md` lifecycle — writing it, rechecking it,
+removing it when clean — and the triage half never creates or deletes that
+file, only fixes what it names. The loop stops early on a `Needs a decision`
+finding, or after three rounds without convergence — both are the user's,
+not the loop's. What `.claude/settings.json` still denies is the narrow set
+that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
+push to `main`. A branch wanting one of those is raising a question, not
+running a command. `gh pr create`'s own offer to push is not used either — it
+is the same action by a route that skips the upstream check `/pr` makes
+first, so it reaches the remote without reporting that it did.
 
 This replaced a blanket `Bash(git push:*)` deny, under which `/pr` stopped and
 asked the user to push. Worth knowing what that cost: the stop was the last
 moment the work was still cheap to change, and **the checks in `/ship` step 2
-now carry that weight alone.** They are the only thing that halts the chain.
+now carry that weight** — with the review loop behind the PR as the second
+net. A check finding and a `Needs a decision` triage row are what halt the
+chain.
 
 **File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
 covers every file-editing tool, `Write` included; a `Write(path)` rule matches
