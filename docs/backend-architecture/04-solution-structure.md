@@ -125,7 +125,8 @@ public void Domain_has_no_infrastructure_dependencies()
         "Microsoft.EntityFrameworkCore",
         "MassTransit",
         "StackExchange.Redis",
-        "Microsoft.AspNetCore"
+        "Microsoft.AspNetCore",
+        "System.Text.Json"
     ];
 
     IEnumerable<string> referenced = typeof(Order).Assembly
@@ -154,10 +155,19 @@ silently licenses an endpoint to inject a `DbContext`.
 [Fact]
 public void Endpoints_do_not_depend_on_infrastructure()
 {
+    // Not the service's Infrastructure namespace alone: the rule above is
+    // "Application and Domain contracts only", and the concrete types it
+    // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach an
+    // endpoint transitively without any Ordering.Infrastructure dependency
+    // to trip on.
     TestResult result = Types
         .InAssembly(typeof(OrderEndpoints).Assembly)
         .That().ResideInNamespaceContaining(".Endpoints")
-        .ShouldNot().HaveDependencyOn("Ordering.Infrastructure")
+        .ShouldNot().HaveDependencyOnAny(
+            "Ordering.Infrastructure",
+            "Microsoft.EntityFrameworkCore",
+            "MassTransit",
+            "StackExchange.Redis")
         .GetResult();
 
     result.IsSuccessful.ShouldBeTrue(

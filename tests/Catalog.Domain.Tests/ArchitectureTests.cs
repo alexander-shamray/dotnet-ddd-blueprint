@@ -19,7 +19,8 @@ public class ArchitectureTests
             "Microsoft.EntityFrameworkCore",
             "MassTransit",
             "StackExchange.Redis",
-            "Microsoft.AspNetCore"
+            "Microsoft.AspNetCore",
+            "System.Text.Json"
         ];
 
         IEnumerable<string> referenced = typeof(AssemblyMarker).Assembly

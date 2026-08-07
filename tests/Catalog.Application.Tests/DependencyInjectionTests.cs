@@ -44,6 +44,22 @@ public class DependencyInjectionTests
     }
 
     [Fact]
+    public void AddCatalogApplication_registers_the_request_metrics_singleton()
+    {
+        // The clock test's twin, for the same reason: LoggingBehavior injects
+        // RequestMetrics, and neither ValidateOnBuild nor the host smoke can
+        // see the omission before the first dispatched request.
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        ServiceDescriptor metrics = services
+            .Where(d => d.ServiceType == typeof(RequestMetrics))
+            .ShouldHaveSingleItem();
+        metrics.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+    }
+
+    [Fact]
     public void AddCatalogApplication_registers_the_two_behaviours_in_pipeline_order()
     {
         ServiceCollection services = new();

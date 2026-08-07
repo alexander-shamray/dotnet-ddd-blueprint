@@ -190,7 +190,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 132 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 133 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-08 is next** (`feat(template): EF Core, repositories,
 IUnitOfWork, migrator host`), which depends on PR-07 and PR-06 and gives
