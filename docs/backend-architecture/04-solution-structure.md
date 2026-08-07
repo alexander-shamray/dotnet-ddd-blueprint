@@ -121,18 +121,19 @@ test rather than a code review convention:
 public void Domain_references_only_common_domain_and_the_framework()
 {
     // The table's rule is an allow-list — "Common.Domain and nothing else" —
-    // so the gate is one too: a blacklist can only ban the libraries someone
-    // thought to name, and Common.Application, another service's Domain or a
-    // new package all slip past it. System.Text.Json is the one framework
-    // assembly the table bans by name: a domain type must not serialise
-    // itself.
+    // so the gate is one too, and an exact one: a blacklist only bans what
+    // someone thought to name, and a System.* prefix still passes
+    // System.Data.SqlClient or a serialiser. Each BCL assembly Domain starts
+    // using earns its line here on purpose — extending this list is the
+    // decision the gate exists to force, and System.Text.Json is the
+    // extension the table forbids by name.
+    string[] allowed = ["Common.Domain", "System.Runtime"];
+
     IEnumerable<string> referenced = typeof(Order).Assembly
         .GetReferencedAssemblies()
         .Select(a => a.Name!);
 
-    referenced.ShouldAllBe(name =>
-        name == "Common.Domain" ||
-        (name.StartsWith("System.") && !name.StartsWith("System.Text.Json")));
+    referenced.ShouldAllBe(name => allowed.Contains(name));
 }
 ```
 

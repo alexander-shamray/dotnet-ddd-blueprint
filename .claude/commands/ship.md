@@ -223,7 +223,13 @@ anything.
       "generated no new comments" can still carry a `Suppressed comments`
       block, and `/review-copilot` reads those on the same bar as inline
       threads; every real finding against this command's own machinery
-      arrived suppressed. Zero findings anywhere → the loop is done.
+      arrived suppressed. **Zero findings in the review is necessary, not
+      sufficient**: a resumed run can carry an `Ask` thread from an earlier
+      round that a fresh clean review never repeats, so before declaring the
+      loop done, list the PR's unresolved review threads — an unresolved
+      `Ask` stops the loop exactly as a new one would, and any other
+      unresolved thread is triage the loop still owes. Zero findings and
+      zero unresolved threads → the loop is done.
       Otherwise run `/review-copilot` **paused at its marker step**: let it
       triage and fix, then — because its tool grant cannot commit, and a
       `done` marker claims a committed fix — rerun the applicable step 2
