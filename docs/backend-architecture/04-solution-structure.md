@@ -664,10 +664,11 @@ EF Core minor versions and behave differently under identical code.
          comment into a build failure. A major bump can change which rules
          exist, so it fails loudly rather than quietly stopping to enforce. -->
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
-    <!-- The in-memory reader two tests read: §13.4's redaction test, which
-         that chapter prints, and the meter-coverage test guarding §13.2's
-         meter list, which lives in Common.Web.Tests only. Test-only:
-         nothing in src/ exports in memory. -->
+    <!-- The in-memory reader the observability tests read back through:
+         §13.4's redaction tests, which that chapter prints one of, and the
+         meter-coverage tests guarding §13.2's meter list, which live in
+         Common.Web.Tests only. Test-only: nothing in src/ exports in
+         memory. -->
     <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="1.17.0" />
   </ItemGroup>
 </Project>

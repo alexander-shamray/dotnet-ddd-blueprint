@@ -595,8 +595,20 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
         record.FormattedMessage = record.Body ?? "[redacted]";
     }
 
-    private static bool IsSensitive(string key) =>
-        Sensitive.Any(s => key.Contains(s, StringComparison.OrdinalIgnoreCase));
+    // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the
+    // lambda would capture `key`, so the closure allocates once per attribute
+    // inspected — including on the no-match path the copy above is written to
+    // keep allocation-free. This runs on every attribute of every log record.
+    private static bool IsSensitive(string key)
+    {
+        foreach (string term in Sensitive)
+        {
+            if (key.Contains(term, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
 }
 ```
 
