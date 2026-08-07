@@ -1063,12 +1063,17 @@ repeats until a pass leaves no file. The split of ownership matters: Grok's
 half owns the `suggestions.md` lifecycle — writing it, rechecking it,
 removing it when clean — and the triage half never creates or deletes that
 file, only fixes what it names. Then Copilot: a review is requested through
-the REST reviewers endpoint under the login `Copilot` — the bot's *posting*
-name, `copilot-pull-request-reviewer[bot]`, is silently ignored as a request
-target — `/review-copilot` triages what lands, and the loop repeats until a
-requested review posts with no new findings. The review's depth is the
-account's Copilot settings, not a request parameter; the full tier, not a
-lite one, is the one the loop wants. Either loop stops early on the finding
+the REST reviewers endpoint — `Copilot` and
+`copilot-pull-request-reviewer[bot]` both work as the request target — and
+on every round after the first the reviewer is **removed and re-added**,
+because a landed review leaves a stale-reviewer state in which a plain POST
+returns 200 and registers nothing. The timeline's `review_requested` event,
+never the status code, is what proves a request took. `/review-copilot`
+triages what lands — suppressed comments included, which is where every real
+finding against the loop's own machinery has arrived — and the loop repeats
+until a requested review posts with no new findings. The review's depth is
+the account's Copilot settings, not a request parameter; the full tier, not
+a lite one, is the one the loop wants. Either loop stops early on the finding
 class that is the user's — `Needs a decision` from the Grok triage, an open
 `Ask` thread from the Copilot one — or after three rounds without
 convergence. What `.claude/settings.json` still denies is the narrow set
