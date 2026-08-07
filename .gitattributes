@@ -13,8 +13,10 @@
 # which is what .editorconfig has always asked for.
 *.cs text eol=crlf
 
-# The one file type that overrides the rule above, and it is not a preference.
-# A CRLF shebang makes the Linux kernel look for an interpreter named
-# `python3\r` — "bad interpreter", from a line that looks correct in every
-# editor. The licence gate runs on that runner.
+# Two file types override the rule above, and neither is a preference.
+# A CRLF shebang makes the kernel look for an interpreter named `python3\r` —
+# "bad interpreter", from a line that looks correct in every editor. The
+# licence gate runs on that runner, and the .claude/scripts helpers run under
+# Git Bash on Windows, where the same `\r` breaks bash mid-line.
 *.py text eol=lf
+*.sh text eol=lf
