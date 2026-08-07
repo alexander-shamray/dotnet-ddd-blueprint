@@ -776,6 +776,15 @@ already written against it.
   options.Retry.BackoffType = DelayBackoffType.Exponential;
   ```
 
+  The carve-out stops at the end of the line, and PR-07 found the boundary by
+  compiling it. A trailing comment too long for one line cannot wrap into a
+  second `//` line aligned under the first: a line that *starts* with `//` is
+  a whole-line comment, its leading whitespace is indentation, and indentation
+  IDE0055 does govern — the continuation fails the build at the statement's
+  own column ±0. §4.2's `Program.cs` sample carried exactly that form on
+  `UseExceptionHandler` and was amended in the same change; a trailing comment
+  that will not fit is shortened, or moved above the statement whole.
+
   `dotnet format` agrees with both halves — it collapses the code padding and
   leaves the comment column untouched — so a format run neither introduces this
   nor undoes it, and nothing has to be pinned to keep it idempotent. Checked

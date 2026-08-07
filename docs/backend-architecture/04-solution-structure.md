@@ -380,8 +380,7 @@ WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting. Each line below depends on
 // the ones above it, and getting it wrong fails silently rather than loudly.
-app.UseExceptionHandler();        // §10.5 — outermost, so it catches faults in
-                                  //          the middleware below it too
+app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — above everything else that logs
 app.UseAuthentication();          // §11.3 — populates HttpContext.User
 app.UseAuthorization();           // §11.4 — evaluates the permission policies
