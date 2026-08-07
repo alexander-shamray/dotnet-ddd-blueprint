@@ -642,29 +642,60 @@ record; a test that used it would be green while the path in production drifted
 away underneath it:
 
 ```csharp
-[Fact]
-public void Sensitive_attributes_are_redacted()
+// CA1848 is enforced repo-wide (ADR-019) and does not exempt test projects, so
+// the template goes through LoggerMessage.Define exactly as production logging
+// does. The point survives intact: the attribute keys still come from a message
+// template, read through ILogger.
+private static readonly Action<ILogger, string, string, Exception?> Login =
+    LoggerMessage.Define<string, string>(
+        LogLevel.Information,
+        new EventId(1, nameof(Login)),
+        "Login for {User} with {Password}");
+
+private static LogRecord EmitRecord(Action<ILogger> write)
 {
     List<LogRecord> exported = [];
 
     // Built exactly as AddObservability builds it (§13.2) — ILoggingBuilder,
-    // the same extension, so the test covers the seam the host uses.
-    using ILoggerFactory factory = LoggerFactory.Create(b =>
+    // the same extension, and IncludeFormattedMessage set the same way, so the
+    // test covers the seam the host uses. A block rather than a using
+    // declaration: the factory has to be disposed before the exported list is
+    // read, and a declaration would defer that to the end of the method.
+    using (ILoggerFactory factory = LoggerFactory.Create(b =>
         b.AddOpenTelemetry(o =>
         {
+            o.IncludeFormattedMessage = true;
             o.AddProcessor(new SensitiveDataRedactor());
             o.AddInMemoryExporter(exported);
-        }));
+        })))
+    {
+        write(factory.CreateLogger("test"));
+    }
 
-    factory.CreateLogger("test").LogInformation("Login for {User} with {Password}", "ada", "hunter2");
+    return exported.Single();
+}
 
+[Fact]
+public void Sensitive_attributes_are_redacted()
+{
     IReadOnlyList<KeyValuePair<string, object?>> attributes =
-        exported.Single().Attributes!;
+        EmitRecord(logger => Login(logger, "ada", "hunter2", null)).Attributes!;
+
     attributes.Single(a => a.Key == "Password").Value.ShouldBe("[redacted]");
 
     // The other half of the assertion, and the one that catches a deny-list
     // grown careless: everything not on it survives intact.
     attributes.Single(a => a.Key == "User").Value.ShouldBe("ada");
+}
+
+[Fact]
+public void A_redacted_record_does_not_export_the_rendered_secret()
+{
+    // The assertion above is cosmetic without this one: the exported body is
+    // the rendered string, and it is what a log backend indexes.
+    LogRecord record = EmitRecord(logger => Login(logger, "ada", "hunter2", null));
+
+    record.FormattedMessage.ShouldBe("Login for {User} with {Password}");
 }
 ```
 

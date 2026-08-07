@@ -26,7 +26,7 @@ public static class BuildInfo
         if (string.IsNullOrWhiteSpace(informational))
             return "0.0.0";
 
-        // Deterministic builds append "+<sha>" (SourceRevisionId, §4.4). It is
+        // Deterministic builds append "+<sha>" (SourceRevisionId). It is
         // dropped rather than kept: service.version is grouped on, and a value
         // that changes every commit turns one series into thousands.
         int plus = informational.IndexOf('+', StringComparison.Ordinal);

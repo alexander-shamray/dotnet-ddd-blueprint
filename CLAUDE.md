@@ -45,6 +45,9 @@ docs/backend-architecture/
   appendix-c-delivery-plan.md    PR sequencing plan
   appendix-d-type-inventory.md   type inventory
 docs/roadmap.md                  estimates and calendar over Appendix C
+docs/superpowers/
+  specs/                         one design spec per PR, frozen at write time
+  plans/                         its implementation plan, frozen the same way
 
 global.json                      SDK pin (§4.4)
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
@@ -98,6 +101,24 @@ disagree, Appendix C wins**, always. Because it is outside the tree, no nav
 footer or index row will catch its drift — `/validate-blueprint` check 10 is
 the only thing that does, which is why the roadmap is named in that command's
 scope rather than left to the directory glob.
+
+`docs/superpowers/` sits outside the blueprint tree for a different reason, and
+it is the stronger one: these files are a **frozen historical record**, not a
+specification. Each pair — a design spec and the implementation plan derived
+from it — records how one PR was thought through *before* it was built, and
+PR-05's is the first. They are written once and left alone. **Where one
+disagrees with the blueprint, the blueprint wins**, and the disagreement is not
+a defect to reconcile: it is the record showing where the design moved during
+implementation, which is the only thing these files are for. PR-05's plan
+still carries a `SourceRevisionId, §4.4` citation that the shipped code
+corrected, and that stale line is left standing deliberately.
+
+So they are **deliberately outside `/validate-blueprint`'s scope**, and unlike
+the roadmap they are not named in it either. A drift check on a document whose
+whole value is being stale would fail on every entry by design, and "fixing" it
+would destroy the record. Do not edit a spec or a plan to match the code that
+followed it — amend the chapter instead, which is where the specification
+actually lives.
 
 Planned, per §4.1 — do not invent a different shape for it. The two building
 blocks PR-02 built are shown above; everything below is still ahead:
