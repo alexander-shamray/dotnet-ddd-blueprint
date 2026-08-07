@@ -148,7 +148,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds six projects and `dotnet test` runs 112 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 113 tests, so the
 build rules and the drift rules below are live and a green run now means
 something. **PR-06 is next** (`feat(dev): Docker Compose — SQL Server, Redis,
 RabbitMQ, Keycloak, OTel`), which depends only on PR-01 and gives the OTLP
@@ -234,7 +234,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 45 tests running in about a second. A shared xUnit collection was rejected
+is 46 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.

@@ -61,6 +61,10 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
 {
     string serviceName = builder.Environment.ApplicationName;
 
+    // OpenTelemetry becomes the ONLY logging provider, and that is a security
+    // requirement rather than tidiness — see §13.4.
+    builder.Logging.ClearProviders();
+
     builder.Logging.AddOpenTelemetry(logging =>
     {
         logging.IncludeFormattedMessage = true;
@@ -645,6 +649,29 @@ two scopes and neither can carry one: `LoggingBehavior`'s `RequestType`
 carrying a secret would leak it silently, and no test here would notice.
 Widening the processor to walk `ScopeProvider` is a design change with its own
 cost, not a fix to fold into this one.
+
+**The processor governs one pipeline, which is why §13.2 leaves only one.** A
+`BaseProcessor<LogRecord>` sees records inside OpenTelemetry and nowhere else.
+Any other `ILoggerProvider` on the host formats the original state itself and
+never passes through this code — so `AddObservability` calls
+`ClearProviders()` before adding OpenTelemetry, making it the sole provider.
+
+That is not tidiness. `WebApplication.CreateBuilder` installs Console, Debug and
+EventSource before a host reaches `AddCommonWebDefaults` (§4.2), and container
+stdout is collected in most clusters, so a `{Password}` scrubbed on the OTLP
+path shipped in clear text on the console one. The redaction looked complete and
+covered a single destination — the same shape as the `FormattedMessage` gap
+above, one layer further out.
+
+Two things follow, both worth stating. The guarantee covers providers registered
+**before** `AddObservability`, which is every default and the only case §4.2
+produces; a service that adds a provider afterwards has opted out and owns the
+consequence. And the visible cost is local: `dotnet run` no longer prints to the
+terminal, because nothing is left that writes there. §13.1 routes logs to Loki
+or Seq through OTLP regardless, and [§14.1](14-local-development.md) runs a
+collector, so the loss is the raw terminal stream rather than the logs
+themselves — add a console exporter to the OpenTelemetry pipeline if a
+developer wants it back.
 
 Assert it, because a redactor that silently stops matching is worse than none.
 The test lives in `Common.Web.Tests` — a `Common.Web` behaviour tested once

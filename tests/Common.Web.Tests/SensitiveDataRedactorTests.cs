@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Logs;
@@ -197,6 +200,54 @@ public class SensitiveDataRedactorTests
             AttributesEitherSideOf(logger => Login(logger, "ada", "hunter2", null));
 
         after.ShouldNotBeSameAs(before);
+    }
+
+    [Fact]
+    public void No_other_logging_provider_survives_to_see_the_rendered_secret()
+    {
+        // The redactor only ever sees records inside the OpenTelemetry
+        // pipeline, so a second provider would format the original state
+        // itself and ship the secret. AddObservability clears providers for
+        // exactly this reason (§13.4); this stands in for the Console, Debug
+        // and EventSource providers WebApplication.CreateBuilder installs
+        // before a host reaches AddCommonWebDefaults (§4.2).
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        CapturingProvider console = new();
+        builder.Logging.AddProvider(console);
+
+        builder.AddObservability();
+
+        using IHost host = builder.Build();
+        Login(host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("test"), "ada", "hunter2", null);
+
+        console.Messages.ShouldBeEmpty();
+    }
+
+    private sealed class CapturingProvider : ILoggerProvider
+    {
+        internal readonly ConcurrentQueue<string> Messages = new();
+
+        public ILogger CreateLogger(string categoryName) => new Sink(Messages);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Sink(ConcurrentQueue<string> messages) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter) =>
+                messages.Enqueue(formatter(state, exception));
+        }
     }
 
     private sealed class CapturingProcessor(Action<LogRecord> capture) : BaseProcessor<LogRecord>

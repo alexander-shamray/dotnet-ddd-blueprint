@@ -22,6 +22,16 @@ public static class ObservabilityExtensions
     {
         string serviceName = builder.Environment.ApplicationName;
 
+        // OpenTelemetry becomes the ONLY logging provider, and that is a
+        // security requirement rather than tidiness. SensitiveDataRedactor is a
+        // BaseProcessor<LogRecord>: it sees records inside this pipeline and
+        // nowhere else. WebApplication.CreateBuilder installs Console, Debug
+        // and EventSource before a host reaches this line (§4.2), each of which
+        // formats the original state itself — so a {Password} scrubbed on the
+        // OTLP path still shipped in clear text on the console one, and
+        // container stdout is collected in most clusters. Verified by test.
+        builder.Logging.ClearProviders();
+
         builder.Logging.AddOpenTelemetry(logging =>
         {
             logging.IncludeFormattedMessage = true;

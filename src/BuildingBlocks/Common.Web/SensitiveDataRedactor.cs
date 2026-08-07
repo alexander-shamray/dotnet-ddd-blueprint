@@ -10,12 +10,18 @@ namespace Common.Web;
 /// project it would protect that service alone.
 /// </summary>
 /// <remarks>
+/// <b>Scope.</b> This governs the OpenTelemetry pipeline and nothing else, so
+/// <c>AddObservability</c> clears every other logging provider before adding
+/// it (§13.2, §13.4) — a provider outside this pipeline formats the original
+/// state itself and would ship the secret the processor just scrubbed.
+/// <para>
 /// <b>What it does.</b> Matching is by attribute <em>key</em>, and a match
 /// rewrites two things: the attribute's value, and — because <c>§13.2</c> sets
 /// <c>IncludeFormattedMessage</c> and the exporter then ships
 /// <c>FormattedMessage</c> as the record's body — the rendered message, which
 /// falls back to the un-substituted template. A record with nothing sensitive
 /// on it is left exactly as it arrived.
+/// </para>
 /// <para>
 /// Three limits worth stating rather than discovering. Redaction is by key
 /// alone, which is the argument for naming a placeholder <c>{Token}</c> and
