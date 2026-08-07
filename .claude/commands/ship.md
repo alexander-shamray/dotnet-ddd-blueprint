@@ -154,12 +154,33 @@ anything.
 
       The login is `Copilot` — not `copilot-pull-request-reviewer[bot]`, which
       is the account the finished review *posts* as; requesting that name is
-      silently ignored. **The review's depth is not a request parameter.**
-      Copilot reviews at whatever tier the account's code-review settings
-      grant, so keeping the full review — not a lite tier — is a settings
-      decision made once, not something this command can ask for per run. If
-      the settings offer a depth choice, the full one is the one this loop
-      wants; say which tier ran if it is visible in the review.
+      silently ignored. This same POST is also the **re-request** on every
+      round after the first — there is no separate re-request endpoint, and
+      the GraphQL route (`gh pr edit --add-reviewer`) cannot resolve the bot
+      at all.
+
+      **A 200 from this endpoint is not a registered request.** The API
+      returns the PR object whether or not the request took — observed live:
+      three consecutive accepted POSTs registered nothing, apparently a
+      cooldown after a just-landed review. The only proof is a new
+      `review_requested` event on the issue timeline:
+
+      ```bash
+      gh api repos/:owner/:repo/issues/<n>/timeline --paginate \
+        --jq '[.[] | select(.event=="review_requested")] | length'
+      ```
+
+      Post, verify the count grew, and on a silent drop retry with a
+      minute-plus backoff. A request that will not register after ~10 minutes
+      of that stops the loop and says so — never wait on a review whose
+      request never took.
+
+      **The review's depth is not a request parameter.** Copilot reviews at
+      whatever tier the account's code-review settings grant, so keeping the
+      full review — not a lite tier — is a settings decision made once, not
+      something this command can ask for per run. If the settings offer a
+      depth choice, the full one is the one this loop wants; say which tier
+      ran if it is visible in the review.
 
    2. **Wait for the review to land** — a new review by
       `copilot-pull-request-reviewer` newer than the request. It takes
