@@ -188,7 +188,8 @@ public void Application_and_domain_do_not_reference_masstransit()
     // guarantee that exists on the consume pipeline and nowhere else. A handler
     // that copies the saga's style gets a dual write with no outbox behind it,
     // and it works in every test where the broker is up.
-    foreach (Assembly assembly in new[] { typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly })
+    Assembly[] assemblies = [typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly];
+    foreach (Assembly assembly in assemblies)
         Types
             .InAssembly(assembly)
             .ShouldNot().HaveDependencyOn("MassTransit")

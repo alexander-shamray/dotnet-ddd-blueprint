@@ -1,7 +1,7 @@
 ---
 description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh api:*), Bash(grok:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh api repos/:*), Bash(gh api --method POST repos/:*), Bash(gh api --method DELETE repos/:*), Bash(grok:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -122,6 +122,14 @@ anything.
       removes it when everything is resolved. Do not write or delete
       `suggestions.md` from here.
 
+      **Then check the worktree, because the reviewer could write to it.**
+      `acceptEdits` hands Grok a repository-wide edit grant, and the loop
+      must not launder that into a commit: after the invocation,
+      `git status --short` may show `suggestions.md` and nothing else.
+      Any other change — accidental or injected — stops the loop and
+      reports the diff; reviewer edits to the work are findings to read,
+      never edits to keep.
+
    2. **Check for `suggestions.md` at the repo root.** Absent → the loop is
       done; the review came back clean. Present → run `/review-grok`, which
       triages and fixes — **its tool grant deliberately stops short of
@@ -159,6 +167,14 @@ anything.
       `copilot-pull-request-reviewer` from GraphQL and gains the `[bot]`
       suffix in REST. The GraphQL route (`gh pr edit --add-reviewer`) cannot
       resolve the bot at all — REST is the only door.
+
+      The frontmatter deliberately grants `gh api` only under `repos/`
+      prefixes — the reviewer-request and timeline calls this loop makes —
+      rather than `gh api:*`, which would licence any authenticated mutation
+      the deny rules never contemplated. Prefix rules cannot pin the path
+      *after* `repos/`, so breadth remains; anything beyond these two call
+      shapes still prompts, and widening the grant is a decision about the
+      permission model, not a convenience edit.
 
       **On every round after the first, remove the reviewer before
       re-requesting.** After a Copilot review lands, a plain POST enters a

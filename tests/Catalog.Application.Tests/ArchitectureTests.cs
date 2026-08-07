@@ -35,7 +35,8 @@ public class ArchitectureTests
         // guarantee that exists on the consume pipeline and nowhere else. A handler
         // that copies the saga's style gets a dual write with no outbox behind it,
         // and it works in every test where the broker is up.
-        foreach (Assembly assembly in new[] { typeof(DependencyInjection).Assembly, typeof(AssemblyMarker).Assembly })
+        Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(AssemblyMarker).Assembly];
+        foreach (Assembly assembly in assemblies)
             Types
                 .InAssembly(assembly)
                 .ShouldNot().HaveDependencyOn("MassTransit")
