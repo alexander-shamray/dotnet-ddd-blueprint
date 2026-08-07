@@ -773,6 +773,7 @@ already written against it.
 | | |
 |---|---|
 | Namespaces | File-scoped (`namespace X;`), never block-scoped |
+| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: `Common.Web`'s five extension classes still use the classic `this`-parameter form, and each of those extends a different receiver, so nothing there groups. Converting them is a decision about the whole corpus, not about the file in front of you |
 | Expression-bodied members | Used for one-line members, not for constructors |
 | Braces | Optional for a single statement, required for two or more |
 | Target framework | .NET 10 (LTS), C# 14 |
@@ -925,6 +926,16 @@ every argument at column 7). If you find one, it is a leftover — convert it.
 - **Commit messages** are semantic and present-tense: `docs:`, `feat(<scope>):`,
   `fix:`, `chore:` — the delivery plan in Appendix C already names each PR in
   this form, so use its title verbatim when you implement one.
+- **Uncommitted work in the tree belongs in the PR being worked on.** When a
+  change appears that nobody in the current task wrote — an edit made directly
+  by the repo owner, most often — it is not stray churn to be reverted or left
+  behind for someone else to notice. Commit it as part of the current PR, in
+  its own commit, with a body that argues it like any other. **Never revert it
+  to clean the tree**: that has happened once, and only a saved diff kept the
+  work. If it genuinely does not belong in this PR, say so and ask — do not
+  decide by deleting. The same reconciliation rule applies to it as to
+  everything else, so a hand edit that contradicts a chapter takes the chapter
+  with it in the same commit.
 - `.remember/` is session state, not content. Never edit it as part of a change.
 
 Once code is present, additionally:
