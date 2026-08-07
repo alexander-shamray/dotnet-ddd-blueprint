@@ -171,9 +171,14 @@ anything.
       ```
 
       Post, verify the count grew, and on a silent drop retry with a
-      minute-plus backoff. A request that will not register after ~10 minutes
-      of that stops the loop and says so — never wait on a review whose
-      request never took.
+      minute-plus backoff. The observed cooldown ran about twelve minutes
+      from the last landed review — the one early POST that registered came
+      at +12, four between +3 and +11 all dropped, and registration came at
+      +13 — so keep retrying until at least fifteen minutes past that
+      review's `submittedAt` before giving up. A request that will not
+      register even then stops the loop and says so — never wait on a review
+      whose request never took, and never call it clean because asking
+      failed.
 
       **The review's depth is not a request parameter.** Copilot reviews at
       whatever tier the account's code-review settings grant, so keeping the
