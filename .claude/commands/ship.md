@@ -208,8 +208,10 @@ anything.
       whatever tier the account's code-review settings grant, so keeping the
       full review — not a lite tier — is a settings decision made once, not
       something this command can ask for per run. If the settings offer a
-      depth choice, the full one is the one this loop wants; say which tier
-      ran if it is visible in the review.
+      depth choice, the full one is the one this loop wants — and the tier
+      that ran is visible: the timeline's request event names it in its own
+      words ("requested a **balanced** review"), so the report quotes it
+      rather than guessing.
 
    2. **Wait for the review to land** — a new review by
       `copilot-pull-request-reviewer` newer than the request. (That is the

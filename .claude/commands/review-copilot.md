@@ -1,7 +1,7 @@
 ---
 description: Triage Copilot's review comments on a PR — verify each before acting on it
 argument-hint: "[PR number — omit for the current branch's PR]"
-allowed-tools: Read, Grep, Glob, Edit, Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr diff:*), Bash(gh api:*), Bash(git log:*), Bash(git diff:*), Bash(git branch:*)
+allowed-tools: Read, Grep, Glob, Edit, Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr diff:*), Bash(gh api repos/:*), Bash(gh api graphql:*), Bash(git log:*), Bash(git diff:*), Bash(git branch:*)
 ---
 
 Work through the Copilot review on PR $1 — if empty, the PR for the current
