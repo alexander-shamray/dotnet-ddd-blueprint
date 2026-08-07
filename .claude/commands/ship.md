@@ -154,33 +154,39 @@ anything.
       gh api repos/:owner/:repo/pulls/<n>/requested_reviewers -f "reviewers[]=Copilot"
       ```
 
-      The login is `Copilot` — not `copilot-pull-request-reviewer[bot]`, which
-      is the account the finished review *posts* as; requesting that name is
-      silently ignored. This same POST is also the **re-request** on every
-      round after the first — there is no separate re-request endpoint, and
-      the GraphQL route (`gh pr edit --add-reviewer`) cannot resolve the bot
-      at all.
+      Both `Copilot` and `copilot-pull-request-reviewer[bot]` are accepted as
+      the request target; the finished review's *author* reads
+      `copilot-pull-request-reviewer` from GraphQL and gains the `[bot]`
+      suffix in REST. The GraphQL route (`gh pr edit --add-reviewer`) cannot
+      resolve the bot at all — REST is the only door.
 
-      **A 200 from this endpoint is not a registered request.** The API
-      returns the PR object whether or not the request took — observed live:
-      three consecutive accepted POSTs registered nothing, apparently a
-      cooldown after a just-landed review. The only proof is a new
-      `review_requested` event on the issue timeline:
+      **On every round after the first, remove the reviewer before
+      re-requesting.** After a Copilot review lands, a plain POST enters a
+      stale-reviewer state where the API returns the PR object and registers
+      nothing — observed live four times in a row, while a DELETE followed
+      by the same POST registered immediately, five minutes after the review
+      it followed:
+
+      ```bash
+      gh api --method DELETE repos/:owner/:repo/pulls/<n>/requested_reviewers \
+        -f "reviewers[]=copilot-pull-request-reviewer[bot]"
+      gh api --method POST repos/:owner/:repo/pulls/<n>/requested_reviewers \
+        -f "reviewers[]=copilot-pull-request-reviewer[bot]"
+      ```
+
+      **A 200 is still not a registered request** — the only proof, on any
+      round, is a new `review_requested` event on the issue timeline:
 
       ```bash
       gh api repos/:owner/:repo/issues/<n>/timeline --paginate \
         --jq '[.[] | select(.event=="review_requested")] | length'
       ```
 
-      Post, verify the count grew, and on a silent drop retry with a
-      minute-plus backoff. The observed cooldown ran about twelve minutes
-      from the last landed review — the one early POST that registered came
-      at +12, four between +3 and +11 all dropped, and registration came at
-      +13 — so keep retrying until at least fifteen minutes past that
-      review's `submittedAt` before giving up. A request that will not
-      register even then stops the loop and says so — never wait on a review
-      whose request never took, and never call it clean because asking
-      failed.
+      Request, verify the count grew, and on a silent drop retry —
+      delete-then-post — with a minute-plus backoff. A request that will not
+      register after ~10 minutes of that stops the loop and says so: never
+      wait on a review whose request never took, and never call the branch
+      clean because asking failed.
 
       **The review's depth is not a request parameter.** Copilot reviews at
       whatever tier the account's code-review settings grant, so keeping the
