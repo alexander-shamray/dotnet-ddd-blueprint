@@ -77,7 +77,7 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
         .AddOpenTelemetry()
         .ConfigureResource(r => r
             .AddService(serviceName, serviceVersion: BuildInfo.Version)
-            .AddAttributes([new("deployment.environment", builder.Environment.EnvironmentName)]))
+            .AddAttributes([new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)]))
         .WithMetrics(m => m
             .AddAspNetCoreInstrumentation()
             .AddHttpClientInstrumentation()
@@ -572,7 +572,7 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
             scrubbed ??= [.. record.Attributes];
-            scrubbed[i] = new(attribute.Key, "[redacted]");
+            scrubbed[i] = new KeyValuePair<string, object?>(attribute.Key, "[redacted]");
         }
 
         if (scrubbed is null)
@@ -736,15 +736,15 @@ public static IEndpointRouteBuilder MapCommonHealthEndpoints(this IEndpointRoute
     // AllowAnonymous is required, not cosmetic: the kubelet sends no token,
     // so an authenticated probe fails and the pod is restarted in a loop.
     app
-        .MapHealthChecks("/health/live", new() { Predicate = _ => false })
+        .MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
         .AllowAnonymous();
 
     app
-        .MapHealthChecks("/health/ready", new() { Predicate = c => c.Tags.Contains("ready") })
+        .MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
         .AllowAnonymous();
 
     app
-        .MapHealthChecks("/health/startup", new() { Predicate = c => c.Tags.Contains("ready") })
+        .MapHealthChecks("/health/startup", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
         .AllowAnonymous();
 
     return app;

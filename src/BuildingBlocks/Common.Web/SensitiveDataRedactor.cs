@@ -57,7 +57,7 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
             scrubbed ??= [.. record.Attributes];
-            scrubbed[i] = new(attribute.Key, "[redacted]");
+            scrubbed[i] = new KeyValuePair<string, object?>(attribute.Key, "[redacted]");
         }
 
         if (scrubbed is null)

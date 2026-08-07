@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Routing;
 
 namespace Common.Web;
@@ -30,15 +31,15 @@ public static class HealthCheckExtensions
         // AllowAnonymous is required, not cosmetic: the kubelet sends no token,
         // so an authenticated probe fails and the pod is restarted in a loop.
         app
-            .MapHealthChecks("/health/live", new() { Predicate = _ => false })
+            .MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
             .AllowAnonymous();
 
         app
-            .MapHealthChecks("/health/ready", new() { Predicate = c => c.Tags.Contains("ready") })
+            .MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
             .AllowAnonymous();
 
         app
-            .MapHealthChecks("/health/startup", new() { Predicate = c => c.Tags.Contains("ready") })
+            .MapHealthChecks("/health/startup", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
             .AllowAnonymous();
 
         return app;

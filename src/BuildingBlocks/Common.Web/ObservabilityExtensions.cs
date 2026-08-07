@@ -40,7 +40,7 @@ public static class ObservabilityExtensions
             .AddOpenTelemetry()
             .ConfigureResource(r => r
                 .AddService(serviceName, serviceVersion: BuildInfo.Version)
-                .AddAttributes([new("deployment.environment", builder.Environment.EnvironmentName)]))
+                .AddAttributes([new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)]))
             .WithMetrics(m => m
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()

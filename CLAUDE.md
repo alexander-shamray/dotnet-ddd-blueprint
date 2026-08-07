@@ -399,6 +399,55 @@ already written against it.
   | Anonymous types | `var args = new { OrderId = orderId.Value };` |
   | Tuple deconstruction | `foreach (var (product, qty, price) in items)` |
   | Fluent resource DSLs | The whole Aspire AppHost block in §14.2 — eleven of its thirteen locals are an `IResourceBuilder<T>` whose name only repeats what the `Add*` call already said. Explicit types are possible there and read worse; keep the block uniform rather than typing part of it |
+- **Target-typed `new()` only where the type is already named beside it.** This
+  is the `var` rule applied to the right-hand side, and it cuts the same way: a
+  reader with no hover must be able to see what is being constructed. Where the
+  declaration names the type, `new()` repeats nothing and is preferred —
+  `.editorconfig` asks for it
+  (`csharp_style_implicit_object_creation_when_type_is_apparent = true`):
+
+  ```csharp
+  ServiceCollection services = new();
+  private static readonly ConcurrentDictionary<Type, Invoker> Cache = new();
+  public static Result Success() => new(null);
+  ```
+
+  Where nothing beside it names the type, spell the type out. The test is
+  whether the type is visible in the declaration the expression belongs to, so
+  the positions that hide it are **an argument**, **a collection expression in
+  argument position**, and **the target of an indexer or property assignment**:
+
+  ```csharp
+  // Wrong — the reader cannot see what is being constructed in any of these.
+  .MapHealthChecks("/health/live", new() { Predicate = _ => false })
+  .AddAttributes([new("deployment.environment", builder.Environment.EnvironmentName)])
+  scrubbed[i] = new(attribute.Key, "[redacted]");
+
+  // Right.
+  .MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
+  .AddAttributes([new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)])
+  scrubbed[i] = new KeyValuePair<string, object?>(attribute.Key, "[redacted]");
+  ```
+
+  A collection expression assigned to a typed declaration is **not** one of
+  them — the element type is right there on the left, so the elements stay
+  bare. Both forms appear in `SensitiveDataRedactorTests`, which is the file to
+  read if the distinction ever looks arbitrary:
+
+  ```csharp
+  KeyValuePair<string, object?>[] state =
+  [
+      new("NewPassword", "a"),      // fine — the array's type is on the left
+      new("card_number", "b")
+  ];
+  ```
+
+  **No analyser reaches the banned half**, and it is worth knowing why. IDE0090
+  fires only when the type *is* apparent, so it polices the first block and has
+  nothing to say about the second — turning it off would attack the form this
+  rule wants to keep. Like the `[` placement rule, this half is carried by
+  review and by this file alone. Length is not a defence: the `AddAttributes`
+  line above runs past 100 columns spelled out, and stays that way.
 - Binary operators spaced. Where a wrapped one goes is the operator-placement
   rule below, which states it once.
 - **A list is on one line, or one element per line. Never a ragged middle.**
