@@ -1025,7 +1025,15 @@ public class ObservabilityTests
 
         provider.ForceFlush();
 
-        exported.Select(m => m.MeterName).Distinct().Order().ShouldBe(Required.Order());
+        // Asserted as a subset, not exact equality. AddRuntimeInstrumentation
+        // and the OTLP exporter's own (failing, localhost) export attempt add
+        // "System.Runtime", "System.Net.Http" and "System.Net.NameResolution"
+        // to this list too — real .NET diagnostics meters that ARE genuinely
+        // wanted in production. An exact match would only pass by dropping
+        // telemetry the same PR turns on. The guard survives: a MeterProvider
+        // only subscribes to names AddMeter registered, so deleting any one of
+        // the seven still fails this.
+        Required.ShouldBeSubsetOf(exported.Select(m => m.MeterName).Distinct());
     }
 
     [Fact]
