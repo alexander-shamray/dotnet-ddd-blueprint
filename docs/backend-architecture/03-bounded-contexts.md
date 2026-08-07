@@ -88,9 +88,11 @@ Ordering itself — the saga coordinates, the aggregate decides (§9.6).
 
 Note the shapes this produces. **Shipping** and **Notifications** expose no
 public write API at all — they are pure event consumers. **Notifications** is
-the simplest possible service and is a good first one to build, because it
-exercises the entire messaging and observability stack while containing almost
-no domain logic.
+the simplest possible service and the last one built, and those two facts are
+not in tension. It contains almost no domain logic, which is what makes it
+cheap; it also publishes nothing and subscribes to seven events owned by other
+services, which is what makes it impossible to exercise before they exist
+([Appendix C.1](appendix-c-delivery-plan.md#c1-service-build-order)). Simple to write is not the same as ready to build.
 
 ## 3.3 Rules for creating a new service
 

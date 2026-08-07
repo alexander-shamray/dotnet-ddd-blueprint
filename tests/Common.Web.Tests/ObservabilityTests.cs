@@ -109,6 +109,38 @@ public class ObservabilityTests
     }
 
     [Fact]
+    public void The_OTLP_exporter_is_registered()
+    {
+        // OTLP export is the production output path and the deliverable this
+        // whole extension exists for, yet every other test here installs an
+        // in-memory exporter of its own — so deleting UseOtlpExporter() would
+        // leave the meter, resource, trace-filter, redaction and composition
+        // tests all green.
+        //
+        // Asserted through the SDK's own guard rather than by reaching into
+        // provider internals: UseOtlpExporter refuses to run twice on one
+        // IServiceCollection. A second registration therefore fails only if
+        // AddObservability already made the first, and removing that line
+        // makes this test fail.
+        //
+        // The guard fires when the provider is BUILT, not when the second call
+        // is made — so the build has to be inside the assertion. An earlier
+        // version of this test wrapped only the registration call and failed
+        // against correct code.
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        builder.AddObservability();
+        builder.Services.AddOpenTelemetry().UseOtlpExporter();
+
+        NotSupportedException thrown = Should.Throw<NotSupportedException>(() =>
+        {
+            using IHost host = builder.Build();
+            host.Services.GetRequiredService<MeterProvider>();
+        });
+
+        thrown.Message.ShouldContain("UseOtlpExporter");
+    }
+
+    [Fact]
     public void The_resource_names_the_service_its_version_and_its_environment()
     {
         ResourceCapturingExporter exporter = new();
