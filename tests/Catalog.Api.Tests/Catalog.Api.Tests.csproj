@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit v3 test projects are self-executing: the runner is compiled in
+         rather than loaded by a host, so the assembly has to be an Exe. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+    <!-- The endpoints gate (§4.2) — a namespace rule, so it needs type-level
+         dependency analysis rather than GetReferencedAssemblies. -->
+    <PackageReference Include="NetArchTest.Rules" />
+    <!-- WebApplicationFactory over the real Program (§12.4). No containers
+         yet: the host smoke asks only what a host with no connection strings
+         can answer — PR-08 brings the infrastructure worth containerising. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
+  </ItemGroup>
+
+</Project>

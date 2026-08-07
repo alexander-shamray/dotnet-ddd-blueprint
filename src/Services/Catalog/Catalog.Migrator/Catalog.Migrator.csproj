@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    The fifth of §4.1's five projects, present as a compilable shell: every
+    service owns a database and ADR-007 forbids migrating at application
+    startup, so the project exists from the first commit of the service. The
+    §7.4 job host — Database.Migrate() and nothing else — arrives with PR-08,
+    in the same PR as the DbContext it migrates.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+</Project>

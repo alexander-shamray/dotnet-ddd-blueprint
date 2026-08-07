@@ -192,6 +192,11 @@ Respawn, Scrutor, FluentValidation, NetArchTest and Aspire types are assumed —
 including the ones the samples name outright, such as `TestResult` (§4.2) and
 `IResourceBuilder<ProjectResource>` (§14.2). Licences in [Appendix B](appendix-b-licences.md).
 
+One of those names collides: xunit.v3 declares its own `Xunit.TestResult`, so
+a test file holding §4.2's gates aliases the one it means —
+`using TestResult = NetArchTest.Rules.TestResult;` — the `Types` shadowing
+note in D.5, met from the other direction.
+
 ---
 
 [← Appendix C](appendix-c-delivery-plan.md) · [Index](README.md)

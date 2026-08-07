@@ -630,6 +630,15 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
     <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- PR-07's OpenAPI deliverable (Appendix C): the framework's own document
+         generator — AddOpenApi/MapOpenApi, document only, no UI. -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <!-- Transitive, pinned deliberately: every patch of the package above
+         floors this at 2.0.0, which carries GHSA-v5pm-xwqc-g5wc, and NuGet
+         resolves a floor to its lowest. NU1903 turns that into a failed
+         restore, so the pin is what makes the line above buildable at all —
+         CentralPackageTransitivePinningEnabled is why it works. -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.11.0" />
   </ItemGroup>
   <ItemGroup Label="Telemetry">
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
