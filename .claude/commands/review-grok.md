@@ -1,11 +1,19 @@
 ---
 description: Triage an external review of the blueprint into a resolution record
-argument-hint: "[path to the review, or paste it after the command]"
+argument-hint: "[path to the review, or paste it after the command — defaults to suggestions.md]"
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
 ---
 
 Work through the review in $ARGUMENTS — a file path, or the text pasted after
 the command.
+
+**With no argument, read `suggestions.md` at the repository root.** That is
+where an external review lands by default, and it is untracked working state
+rather than repo content — do not commit it, and do not treat its absence as
+an error worth guessing around. If there is no argument and no
+`suggestions.md`, stop and ask for the review rather than reviewing the diff
+from scratch: this command triages someone else's findings, and inventing them
+is a different job with a different bar.
 
 Unlike `/review-copilot`, this review arrives as prose from outside the repo
 with no line anchors, so the first job is to locate what each finding is

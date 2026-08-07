@@ -5,11 +5,11 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 and PR-02 have landed**, so the repo is
-the blueprint under `docs/backend-architecture/`, the foundation that blueprint
-specifies — SDK pin, central package management, the solution file, CI and the
-licence gate — and the first C#: `Common.Domain` and `Common.Application`, each
-with its test project.
+built with DDD, CQRS and TDD. **PR-01 through PR-05 have landed**, so the repo
+is the blueprint under `docs/backend-architecture/`, the foundation that
+blueprint specifies — SDK pin, central package management, the solution file,
+CI and the licence gate — and the first C#: `Common.Domain`,
+`Common.Application` and `Common.Web`, each with its test project.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -78,7 +78,7 @@ tests/
                                  starts the real middleware pipeline in memory
 ```
 
-The second block is PR-01's, the third PR-02's, PR-03's and PR-04's.
+The second block is PR-01's, the third PR-02's through PR-05's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it and PR-09's `TransactionBehavior` will need it, but an unused
 project reference is a claim about the dependency graph that nothing yet
@@ -120,11 +120,11 @@ would destroy the record. Do not edit a spec or a plan to match the code that
 followed it — amend the chapter instead, which is where the specification
 actually lives.
 
-Planned, per §4.1 — do not invent a different shape for it. The two building
-blocks PR-02 built are shown above; everything below is still ahead:
+Planned, per §4.1 — do not invent a different shape for it. The three building
+blocks built so far are shown above; everything below is still ahead:
 
 ```
-src/BuildingBlocks/   .Infrastructure, .Web, .Contracts (Domain and Application exist)
+src/BuildingBlocks/   .Infrastructure, .Contracts (Domain, Application and Web exist)
 src/Gateway/          Gateway.Api (YARP)
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
@@ -148,7 +148,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds six projects and `dotnet test` runs 108 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 112 tests, so the
 build rules and the drift rules below are live and a green run now means
 something. **PR-06 is next** (`feat(dev): Docker Compose — SQL Server, Redis,
 RabbitMQ, Keycloak, OTel`), which depends only on PR-01 and gives the OTLP
@@ -234,7 +234,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 41 tests running in about a second. A shared xUnit collection was rejected
+is 45 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.
@@ -792,7 +792,7 @@ already written against it.
 | | |
 |---|---|
 | Namespaces | File-scoped (`namespace X;`), never block-scoped |
-| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: `Common.Web`'s five extension classes still use the classic `this`-parameter form, and each of those extends a different receiver, so nothing there groups. Converting them is a decision about the whole corpus, not about the file in front of you |
+| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: `Common.Web`'s six extension classes still use the classic `this`-parameter form. Four extend a receiver nothing else does — `IApplicationBuilder`, `IServiceCollection`, `IEndpointRouteBuilder`, `Result` — but `ObservabilityExtensions` and `CommonWebDefaultsExtensions` **both** extend `IHostApplicationBuilder` and could therefore be grouped. Whether to group that pair is open and deliberately unsettled: they are separate files because one composes the other, and merging them would put a caller-facing entry point in the same block as a piece it calls. Converting anything here is a decision about the whole corpus, not about the file in front of you |
 | Expression-bodied members | Used for one-line members, not for constructors |
 | Braces | Optional for a single statement, required for two or more |
 | Target framework | .NET 10 (LTS), C# 14 |
