@@ -109,6 +109,15 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
 }
 ```
 
+Three of the lines above arrive later than the rest, and each is named here so
+that a reader comparing this block against `Common.Web` does not read a gap as
+a mistake. `AddEntityFrameworkCoreInstrumentation` and `AddRedisInstrumentation`
+land with the packages they instrument, at **PR-08** and **PR-12** — unlike a
+meter name, which is a string, each costs a package reference, and a reference
+to a library nothing uses is a claim about the dependency graph that is not yet
+true. The authentication block in `AddCommonWebDefaults` lands at **PR-16**,
+with the scheme that makes its policy mean anything.
+
 Filtering health checks out of traces is not cosmetic — at a ten-second probe
 interval across a dozen pods they would otherwise dominate both trace volume and
 storage cost.
@@ -584,11 +593,12 @@ object logged as one attribute; that is what the "never log full request
 bodies" half of the rule is for.
 
 Assert it, because a redactor that silently stops matching is worse than none.
-The test lives in `Ordering.Api.Tests` — a `Common.Web` behaviour tested once
-rather than once per host, in the suite that already owns host-level concerns
-([§12.1](12-test-strategy.md)). Every host calls `AddObservability`, so a second copy in Catalog's
-suite would re-assert the same processor over the same pipeline and only add a
-place to forget.
+The test lives in `Common.Web.Tests` — a `Common.Web` behaviour tested once
+rather than once per host, in the suite that already owns this project's
+behaviour ([§12.1](12-test-strategy.md)). Every host calls `AddObservability`, so a copy in a
+service's own suite would re-assert the same processor over the same pipeline
+and only add a place to forget — and a building block asserted in Ordering's
+suite is one that moves house if Ordering ever does.
 
 Assert it through `ILogger`, not through OpenTelemetry's logger provider
 directly. The Logs Bridge API (`Sdk.CreateLoggerProviderBuilder`) is shipped

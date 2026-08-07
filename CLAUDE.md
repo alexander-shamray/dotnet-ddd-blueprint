@@ -61,7 +61,10 @@ src/BuildingBlocks/
                                  dispatcher and its two behaviours, plus
                                  RequestMetrics and PluggableInterfaces
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
-                                 ToHttpResult — the only project referencing
+                                 ToHttpResult, AddObservability,
+                                 MapCommonHealthEndpoints, SensitiveDataRedactor,
+                                 BuildInfo and the AddCommonWebDefaults that
+                                 composes them — the only project referencing
                                  another, and the only one with a
                                  FrameworkReference
 tests/
@@ -124,20 +127,19 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds six projects and `dotnet test` runs 88 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 108 tests, so the
 build rules and the drift rules below are live and a green run now means
-something. **PR-05 is next** (`feat(common): OpenTelemetry and structured
-logging defaults`), which builds on PR-03 — it composes
-`AddCommonProblemDetails` into `AddCommonWebDefaults` (§13.2) and wires the
-OTLP export that the `request.duration` histogram PR-04 just landed currently
-records into nothing.
+something. **PR-06 is next** (`feat(dev): Docker Compose — SQL Server, Redis,
+RabbitMQ, Keycloak, OTel`), which depends only on PR-01 and gives the OTLP
+export PR-05 just wired somewhere to send to.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
 them is a change that belongs in the PR that creates it (Appendix C), not in a
 project invented early. `Common.Web` now does exist, and the same rule applies
-inside it: it holds §10.4 and §10.5 and nothing else until PR-05 adds
-observability and PR-16 adds JWT validation.
+inside it: it holds §10.4, §10.5, §13.2, §13.4 and §13.5, and nothing else
+until PR-16 adds JWT validation — which is also the one gap inside
+`AddCommonWebDefaults`, three of §13.2's five pieces today.
 
 `Common.Application` is the same story one layer down. The pipeline is two
 behaviours of four: **`IdempotencyBehavior` (§8.5) and `TransactionBehavior`
@@ -197,6 +199,24 @@ and unenforced on purpose — the four `var` carve-outs above are the reason, an
 raising a rule whose exception lives in prose would fail builds that are
 correct. Verified end to end: each of the three fails a build, and a compliant
 file is clean.
+
+`Common.Web.Tests` also carries an `AssemblyInfo.cs` that disables xUnit's
+parallelisation for the project, and the reason belongs beside the analyser
+policy above because it is the same kind of decision: a rule scoped to the
+whole assembly rather than argued file by file. OpenTelemetry's ASP.NET Core
+instrumentation subscribes a **process-wide** `DiagnosticListener` the moment
+any test builds a host through `AddObservability`, and while that listener is
+live, ASP.NET Core's hosting layer starts a server `Activity` for every
+request in the process — including one an unrelated test class sends through
+its own `TestServer`. That is exactly the ambient state §10.4's
+correlation-ID fallback test sets `Activity.Current` to null to rule out, and
+a host still alive from another class handed it one anyway, failing the test
+about half the time. Serialising the assembly makes the ordering
+deterministic, and the parallelism given up is worth very little: the suite
+is 41 tests running in about a second. A shared xUnit collection was rejected
+for failing open: the next class that builds an observability host and
+forgets to join the collection would silently reintroduce the flake, where
+the assembly-wide attribute leaves nothing to forget.
 
 ## The one rule that matters
 
