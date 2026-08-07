@@ -1047,7 +1047,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until a pass leaves no `suggestions.md` |
+| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until a pass leaves no `suggestions.md`, then loop a requested Copilot review and `/review-copilot` until one lands with no new findings |
 | `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -1056,15 +1056,22 @@ Delivery:
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
-and into the review loop: Grok runs `/review-branch` headlessly
+and into two review loops. First Grok: it runs `/review-branch` headlessly
 (`grok -p "/review-branch"` — Grok discovers `.claude/commands/` itself),
 `/review-grok` triages whatever `suggestions.md` it leaves, and the loop
 repeats until a pass leaves no file. The split of ownership matters: Grok's
 half owns the `suggestions.md` lifecycle — writing it, rechecking it,
 removing it when clean — and the triage half never creates or deletes that
-file, only fixes what it names. The loop stops early on a `Needs a decision`
-finding, or after three rounds without convergence — both are the user's,
-not the loop's. What `.claude/settings.json` still denies is the narrow set
+file, only fixes what it names. Then Copilot: a review is requested through
+the REST reviewers endpoint under the login `Copilot` — the bot's *posting*
+name, `copilot-pull-request-reviewer[bot]`, is silently ignored as a request
+target — `/review-copilot` triages what lands, and the loop repeats until a
+requested review posts with no new findings. The review's depth is the
+account's Copilot settings, not a request parameter; the full tier, not a
+lite one, is the one the loop wants. Either loop stops early on the finding
+class that is the user's — `Needs a decision` from the Grok triage, an open
+`Ask` thread from the Copilot one — or after three rounds without
+convergence. What `.claude/settings.json` still denies is the narrow set
 that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
 push to `main`. A branch wanting one of those is raising a question, not
 running a command. `gh pr create`'s own offer to push is not used either — it
@@ -1074,9 +1081,9 @@ first, so it reaches the remote without reporting that it did.
 This replaced a blanket `Bash(git push:*)` deny, under which `/pr` stopped and
 asked the user to push. Worth knowing what that cost: the stop was the last
 moment the work was still cheap to change, and **the checks in `/ship` step 2
-now carry that weight** — with the review loop behind the PR as the second
-net. A check finding and a `Needs a decision` triage row are what halt the
-chain.
+now carry that weight** — with the two review loops behind the PR as the
+second net. A check finding, a `Needs a decision` triage row and an open
+`Ask` thread are what halt the chain.
 
 **File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
 covers every file-editing tool, `Write` included; a `Write(path)` rule matches

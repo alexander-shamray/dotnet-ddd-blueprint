@@ -1,5 +1,5 @@
 ---
-description: Branch, commit, push and open a PR in one pass, then loop the external review until it comes back clean
+description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
 argument-hint: "[what the change does] — omit and each step derives its own"
 allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(grok:*)
 ---
@@ -21,12 +21,13 @@ the sequence is allowed to stop.
 ## It runs to the end
 
 `/pr` pushes the branch itself, so the chain reaches an open PR without waiting
-for anyone — and the PR is no longer where it stops. Step 5 keeps going: the
-external reviewer reads the branch, `/review-grok` triages what it found, and
-the chain ends only when a review pass leaves nothing behind. **Step 2 and a
-`Needs a decision` finding in step 5 are the only things that stop it** — a
-check that finds something halts the run and hands the finding back, because
-fixing it is the user's call.
+for anyone — and the PR is no longer where it stops. Steps 5 and 6 keep going:
+Grok reads the branch and `/review-grok` triages what it found, then Copilot
+reads the PR and `/review-copilot` triages that, and the chain ends only when
+both reviewers have nothing left to say. **Step 2, a `Needs a decision`
+finding in step 5 and an `Ask` thread in step 6 are the only things that stop
+it** — a check that finds something halts the run and hands the finding back,
+because fixing it is the user's call.
 
 That is a real change in character and worth naming. Under the old blanket
 `Bash(git push:*)` deny this command could not finish: it stopped before the
@@ -46,12 +47,22 @@ skippable because an earlier run already did it:
 | On `main` | All of it — start at step 1 |
 | On a branch, tree dirty | Checks, `/commit`, push, `/pr` |
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
-| On a branch, tree clean and pushed | `/pr`, then the review loop |
-| On a branch with an open PR | The review loop (step 5) — and, if the tree is dirty, checks, `/commit` and a push first, so the reviewer reads what the PR will actually carry |
-| On a branch with an open PR and no `suggestions.md` after a clean pass | Nothing. Say so and stop |
+| On a branch, tree clean and pushed | `/pr`, then the review loops |
+| On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` and a push first, so the reviewers read what the PR will actually carry |
+
+**A loop's clean state cannot be read from the tree**, so a resumed run
+re-enters both loops rather than inferring they ran: `suggestions.md` is
+absent before the first review and after a clean one, and the two states are
+indistinguishable. Re-entering is safe because both loops are idempotent
+against a clean branch — a Grok full review of nothing writes nothing, and a
+requested Copilot review posts with zero comments — and that re-run is the
+proof, where the inference was a guess. The only "nothing owed" state is the
+one this run just produced by watching both loops end clean.
 
 `git status -sb`, `git branch --show-current`, `gh pr list --state open` and
-a look for `suggestions.md` answer all six. Read them before doing anything.
+a look for `suggestions.md` (it decides recheck versus full review inside
+step 5, not whether step 5 runs) answer all five. Read them before doing
+anything.
 
 ## Steps
 
@@ -113,8 +124,10 @@ a look for `suggestions.md` answer all six. Read them before doing anything.
 
    2. **Check for `suggestions.md` at the repo root.** Absent → the loop is
       done; the review came back clean. Present → run `/review-grok`, which
-      triages, fixes, and commits — then push the branch by name so the next
-      Grok pass (and the PR) reads the fixed state, and go back to (1).
+      triages and fixes — **its tool grant deliberately stops short of
+      committing**, so `/commit` follows it — then push the branch by name so
+      the next Grok pass (and the PR) reads the fixed state, and go back
+      to (1).
 
    Two exits short of clean, both reported rather than looped past:
 
@@ -130,16 +143,53 @@ a look for `suggestions.md` answer all six. Read them before doing anything.
    the command not found — is reported as the loop not having run, never
    silently skipped and never substituted with a self-review.
 
+6. **The Copilot loop.** Once the Grok loop ends clean, hand the branch to the
+   second reviewer and alternate the same way:
+
+   1. **Request GitHub's Copilot review** on the PR:
+
+      ```bash
+      gh api repos/:owner/:repo/pulls/<n>/requested_reviewers -f "reviewers[]=Copilot"
+      ```
+
+      The login is `Copilot` — not `copilot-pull-request-reviewer[bot]`, which
+      is the account the finished review *posts* as; requesting that name is
+      silently ignored. **The review's depth is not a request parameter.**
+      Copilot reviews at whatever tier the account's code-review settings
+      grant, so keeping the full review — not a lite tier — is a settings
+      decision made once, not something this command can ask for per run. If
+      the settings offer a depth choice, the full one is the one this loop
+      wants; say which tier ran if it is visible in the review.
+
+   2. **Wait for the review to land** — a new review by
+      `copilot-pull-request-reviewer` newer than the request. It takes
+      minutes, and a clean one still posts (with zero comments), so landing
+      is observable either way.
+
+   3. **Count the new findings.** Zero new comments → the loop is done.
+      Otherwise run `/review-copilot`, which triages, fixes, and closes every
+      thread with its marker-and-resolve discipline — like the Grok triage it
+      cannot commit, so `/commit` follows it — then push the branch by name
+      so the next request reviews the fixed state, and go back to (1). Its
+      `done` markers claim a committed fix, so the commit comes before the
+      markers are posted, exactly as that command orders them.
+
+   The same two early exits as step 5, in this loop's vocabulary: an **`Ask`**
+   thread — left open by `/review-copilot` by design — stops the loop, and
+   **three rounds without convergence** stops it. A request that registers no
+   review inside a reasonable wait is reported as the loop not having
+   finished, never marked clean by timeout.
+
 ## Report
 
 One line per step: done, skipped and why, or stopped and what is needed —
 including the push, which reports which of its three states it found even when
-that state was "nothing to do". The review loop reports one line per round —
+that state was "nothing to do". Each review loop reports one line per round —
 findings raised, findings fixed, and what each round pushed — and how it
-ended: clean, stopped on a decision, or stopped unconverged. End with the PR
-URL.
+ended: clean, stopped on a decision or an open `Ask`, or stopped unconverged.
+End with the PR URL.
 
 A step skipped on an assumption gets its assumption restated here rather than
 left in the middle of the run, and a check that did not run is named. The whole
-value of chaining five commands is that the summary is still honest about each
+value of chaining six commands is that the summary is still honest about each
 one.
