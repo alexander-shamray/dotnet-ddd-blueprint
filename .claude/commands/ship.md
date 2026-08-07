@@ -1,7 +1,7 @@
 ---
 description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(grok:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh api:*), Bash(grok:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -125,9 +125,11 @@ anything.
    2. **Check for `suggestions.md` at the repo root.** Absent → the loop is
       done; the review came back clean. Present → run `/review-grok`, which
       triages and fixes — **its tool grant deliberately stops short of
-      committing**, so `/commit` follows it — then push the branch by name so
-      the next Grok pass (and the PR) reads the fixed state, and go back
-      to (1).
+      committing**. Then rerun the step 2 checks that apply to what it
+      changed: a review fix is still an edit, and committing it unchecked
+      hands the next reviewer a broken branch. Then `/commit`, push the
+      branch by name so the next Grok pass (and the PR) reads the fixed
+      state, and go back to (1).
 
    Two exits short of clean, both reported rather than looped past:
 
@@ -188,17 +190,24 @@ anything.
       ran if it is visible in the review.
 
    2. **Wait for the review to land** — a new review by
-      `copilot-pull-request-reviewer` newer than the request. It takes
-      minutes, and a clean one still posts (with zero comments), so landing
-      is observable either way.
+      `copilot-pull-request-reviewer` newer than the request. (That is the
+      login GraphQL reports and the one `gh pr view --json reviews` filters
+      on; REST spells the same account `copilot-pull-request-reviewer[bot]`.
+      Both are the finished review's author — neither is the request
+      target.) It takes minutes, and a clean one still posts (with zero
+      comments), so landing is observable either way.
 
-   3. **Count the new findings.** Zero new comments → the loop is done.
-      Otherwise run `/review-copilot`, which triages, fixes, and closes every
-      thread with its marker-and-resolve discipline — like the Grok triage it
-      cannot commit, so `/commit` follows it — then push the branch by name
-      so the next request reviews the fixed state, and go back to (1). Its
-      `done` markers claim a committed fix, so the commit comes before the
-      markers are posted, exactly as that command orders them.
+   3. **Count the new findings — suppressed ones included.** A review that
+      "generated no new comments" can still carry a `Suppressed comments`
+      block, and `/review-copilot` reads those on the same bar as inline
+      threads; every real finding against this command's own machinery
+      arrived suppressed. Zero findings anywhere → the loop is done.
+      Otherwise run `/review-copilot` **paused at its marker step**: let it
+      triage and fix, then — because its tool grant cannot commit, and a
+      `done` marker claims a committed fix — rerun the applicable step 2
+      checks, `/commit`, and only then let it post its markers and resolve
+      the threads. Push the branch by name so the next request reviews the
+      fixed state, and go back to (1).
 
    The same two early exits as step 5, in this loop's vocabulary: an **`Ask`**
    thread — left open by `/review-copilot` by design — stops the loop, and
