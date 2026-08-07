@@ -48,7 +48,7 @@ skippable because an earlier run already did it:
 | On a branch, tree dirty | Checks, `/commit`, push, `/pr` |
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
-| On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` and a push first, so the reviewers read what the PR will actually carry |
+| On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
 
 **A loop's clean state cannot be read from the tree**, so a resumed run
 re-enters both loops rather than inferring they ran: `suggestions.md` is
@@ -135,9 +135,12 @@ anything.
       triages and fixes — **its tool grant deliberately stops short of
       committing**. Then rerun the step 2 checks that apply to what it
       changed: a review fix is still an edit, and committing it unchecked
-      hands the next reviewer a broken branch. Then `/commit`, push the
-      branch by name so the next Grok pass (and the PR) reads the fixed
-      state, and go back to (1).
+      hands the next reviewer a broken branch. Then `/commit` **scoped to
+      the paths the triage touched** — `suggestions.md` is still on disk
+      here by design, waiting for the next pass to recheck and remove it,
+      and `/commit`'s unscoped form sweeps untracked files, which would
+      commit the review record itself. Push the branch by name so the next
+      Grok pass (and the PR) reads the fixed state, and go back to (1).
 
    Two exits short of clean, both reported rather than looped past:
 
