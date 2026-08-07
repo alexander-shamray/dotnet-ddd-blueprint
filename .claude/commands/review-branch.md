@@ -1,7 +1,7 @@
 ---
 description: Review branch vs main for contradictions; recheck suggestions.md when it already exists
 argument-hint: "[recheck | full | --local]"
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git *), Bash(python *), Bash(dotnet test:*), Bash(dotnet build:*)
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch:*), Bash(python .github/licence-gate/licence_gate.py), Bash(dotnet test:*), Bash(dotnet build:*), Bash(rm suggestions.md)
 ---
 
 Review uncommitted or branch work for **contradictions and self-consistency
@@ -127,7 +127,12 @@ spread-over-`.ToArray()` when the corpus is already clean).
 
    ## Bugs / Suggestions / Nits
    ### 1. …
-   | Where | Status |
+
+   | | |
+   |---|---|
+   | **Where** | … |
+   | **Status** | open |
+
    **Problem.** …
    **Suggestion.** …
 

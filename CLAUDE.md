@@ -1018,6 +1018,7 @@ Delivery:
 | `/pr` | Open a PR in the house body form |
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
 | `/review-grok` | Triage an external review into a resolution record |
+| `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 
 `/pr` pushes the branch itself, and `/ship` therefore runs all the way to an
 open PR. What `.claude/settings.json` still denies is the narrow set that is a

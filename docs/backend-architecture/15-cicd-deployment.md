@@ -34,7 +34,7 @@ make a monorepo practical at this size:
 ```yaml
 - name: Detect changed services
   id: changes
-  uses: dorny/paths-filter@v3
+  uses: dorny/paths-filter@v4
   with:
     # Without this, negated patterns are silently ignored: the default
     # quantifier ('some') never evaluates the exclusion below.
