@@ -102,7 +102,7 @@ re-litigate them; do not "simplify" the workarounds away.
 | File | Responsibility |
 |---|---|
 | `BuildInfoTests.cs` | Version is produced and carries no `+sha` |
-| `SensitiveDataRedactorTests.cs` | Redaction, substring matching, the null guard, the untouched fast path |
+| `SensitiveDataRedactorTests.cs` | Redaction, substring matching, the null guard, the copy/no-copy pair |
 | `HealthEndpointTests.cs` | Probe status codes and anonymity |
 | `TelemetryHost.cs` | Test host builder with the OTLP timeout pinned down |
 | `ObservabilityTests.cs` | Meter coverage, resource attributes, the trace filter |
@@ -511,29 +511,57 @@ public class SensitiveDataRedactorTests
         exported.Single().Attributes.ShouldBeNull();
     }
 
-    [Fact]
-    public void A_record_with_nothing_sensitive_is_not_copied()
+    // Pins the `scrubbed ??=` fast path, which exists because this runs on
+    // every log record on every request. Nothing else would catch its removal
+    // — the redaction tests above pass whether or not it copies.
+    //
+    // Measured either side of the redactor by two capturing processors, with
+    // NO exporter in the pipeline. AddInMemoryExporter cannot be used for an
+    // identity assertion: its export path calls LogRecord.Copy(), which
+    // unconditionally reallocates the attribute list as the SDK's defence
+    // against record pooling. Verified by decompiling
+    // OpenTelemetry.Exporter.InMemory 1.17.0, after an earlier version of this
+    // test failed against it for that reason and nothing to do with the code
+    // under test.
+    private (object? Before, object? After) AttributesEitherSideOf(Action<ILogger> write)
     {
-        // Pins the `scrubbed ??=` fast path, which exists because this runs on
-        // every log record on every request. Nothing else would catch its
-        // removal — the redaction tests above pass either way.
-        List<LogRecord> exported = [];
-        IReadOnlyList<KeyValuePair<string, object?>>? seen = null;
+        object? before = null;
+        object? after = null;
 
         using (ILoggerFactory factory = LoggerFactory.Create(b =>
             b.AddOpenTelemetry(o =>
             {
-                o.AddProcessor(new CapturingProcessor(r => seen = r.Attributes));
+                o.AddProcessor(new CapturingProcessor(r => before = r.Attributes));
                 o.AddProcessor(new SensitiveDataRedactor());
-                o.AddInMemoryExporter(exported);
+                o.AddProcessor(new CapturingProcessor(r => after = r.Attributes));
             })))
         {
-            Plain(factory.CreateLogger("test"), "ada", null);
+            write(factory.CreateLogger("test"));
         }
 
+        return (before, after);
+    }
+
+    [Fact]
+    public void A_record_with_nothing_sensitive_is_not_copied()
+    {
+        (object? before, object? after) =
+            AttributesEitherSideOf(logger => Plain(logger, "ada", null));
+
         // Same instance, not merely an equal one: the processor returned
-        // without allocating a copy.
-        exported.Single().Attributes.ShouldBeSameAs(seen);
+        // without allocating.
+        after.ShouldBeSameAs(before);
+    }
+
+    [Fact]
+    public void A_record_with_something_sensitive_is_copied()
+    {
+        // The control. Without it the test above passes against a redactor
+        // that never copies anything — including one that never redacts.
+        (object? before, object? after) =
+            AttributesEitherSideOf(logger => Login(logger, "ada", "hunter2", null));
+
+        after.ShouldNotBeSameAs(before);
     }
 
     private sealed class CapturingProcessor(Action<LogRecord> capture) : BaseProcessor<LogRecord>
@@ -612,7 +640,7 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `dotnet test Platform.slnx`
-Expected: PASS, 97 tests.
+Expected: PASS, 98 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -841,7 +869,7 @@ public static class HealthCheckExtensions
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `dotnet test Platform.slnx`
-Expected: PASS, 102 tests.
+Expected: PASS, 103 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1176,7 +1204,7 @@ public static class ObservabilityExtensions
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `dotnet test Platform.slnx`
-Expected: PASS, 105 tests. The three new tests should complete in well under a
+Expected: PASS, 106 tests. The three new tests should complete in well under a
 second each — if any takes eight seconds, `TelemetryHost`'s OTLP timeout is not
 reaching the exporter and the run will get slower with every host added later.
 
@@ -1352,7 +1380,7 @@ public static class CommonWebDefaultsExtensions
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `dotnet test Platform.slnx`
-Expected: PASS, 107 tests.
+Expected: PASS, 108 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1489,7 +1517,7 @@ Second, in *Which phase are you in*, replace the paragraph beginning
 "`Platform.slnx` holds six projects and `dotnet test` runs 88 tests" with:
 
 ```markdown
-`Platform.slnx` holds six projects and `dotnet test` runs 107 tests, so the
+`Platform.slnx` holds six projects and `dotnet test` runs 108 tests, so the
 build rules and the drift rules below are live and a green run now means
 something. **PR-06 is next** (`feat(dev): Docker Compose — SQL Server, Redis,
 RabbitMQ, Keycloak, OTel`), which depends only on PR-01 and gives the OTLP
@@ -1531,7 +1559,7 @@ dotnet test Platform.slnx
 cd .github/licence-gate && python -m unittest && python licence_gate.py
 ```
 
-Expected: build clean with 0 warnings; 107 tests pass; the gate exits 0.
+Expected: build clean with 0 warnings; 108 tests pass; the gate exits 0.
 
 Then run `/validate-blueprint` and `/check-links`, and fix anything either
 reports before committing.
@@ -1562,7 +1590,7 @@ a fourth; D.4's own rule requires it to appear.
 
 CLAUDE.md's test count read 88 against an actual 91 before this PR even
 started — PR-04's last two commits landed after that sentence was written.
-It now reads 107.
+It now reads 108.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 MSG
@@ -1575,7 +1603,7 @@ MSG
 - `dotnet build Platform.slnx` clean, **with no new entry in
   `Directory.Build.props`**. A fourth suppression is a decision about the
   policy; if one seems necessary, stop and raise it.
-- `dotnet test Platform.slnx` green at **107** tests, and the observability
+- `dotnet test Platform.slnx` green at **108** tests, and the observability
   tests each complete in well under a second.
 - The licence gate passes.
 - `/validate-blueprint` and `/check-links` clean.
