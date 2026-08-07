@@ -1,0 +1,51 @@
+name: Compose
+
+# A separate workflow rather than a job in ci.yml because path filtering is
+# per-workflow: the smoke pulls ~2 GB of images and proves a file most PRs
+# never touch, so it runs only when that file (or this one) changes. The
+# filter also contains §14.1's two :latest pins — a broken upstream latest
+# can fail only a compose PR, never the main build.
+on:
+  pull_request:
+    paths:
+      - 'deploy/compose/**'
+      - '.github/workflows/compose.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/compose/**'
+      - '.github/workflows/compose.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Syntax and interpolation first — seconds, no pulls, and a YAML error
+      # should not cost an image download to find.
+      - name: Validate the file
+        run: docker compose -f deploy/compose/docker-compose.yml config -q
+
+      # --wait exits non-zero if a healthcheck never passes, or a container
+      # exits before the wait completes — the four healthchecks are asserted
+      # directly; services without one (Keycloak among them) are only
+      # asserted to start.
+      - name: Start and wait for healthy
+        run: docker compose -f deploy/compose/docker-compose.yml up -d --wait --quiet-pull
+
+      - name: Show state on failure
+        if: failure()
+        run: docker compose -f deploy/compose/docker-compose.yml ps -a && docker compose -f deploy/compose/docker-compose.yml logs --tail 50
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f deploy/compose/docker-compose.yml down -v

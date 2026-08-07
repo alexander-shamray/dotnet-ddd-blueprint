@@ -49,6 +49,7 @@ Adding a dependency means adding its identity here, not just its name.
 | `Aspire.*` client integrations (one per resource a service consumes) | MIT | The service-side half of §14.2. Registered ahead of use: **if** Aspire is adopted each service takes the integrations for its own resources, which is why backing it out costs a line per resource per service rather than deleting one project. Unpinned on the same terms as the row above |
 | Keycloak | Apache 2.0 | Identity provider |
 | RabbitMQ | MPL 2.0 | Message broker |
+| OpenTelemetry Collector (contrib) | Apache 2.0 | Local and CI telemetry pipeline — the `otel-collector` container of [§14.1](14-local-development.md) |
 
 ## Avoided — commercial, with the replacement used here
 
@@ -66,6 +67,7 @@ Adding a dependency means adding its identity here, not just its name.
 | SQL Server | Per-core or CAL licensing; Developer Edition is free for non-production only |
 | Duende IdentityServer | Free below a revenue threshold; commercial above it |
 | Redis | Redis 7.4+ is under RSALv2/SSPLv1. Valkey (BSD) is a drop-in fork if the terms are a problem |
+| Grafana OTel-LGTM (`grafana/otel-lgtm` image) | AGPL 3.0 for Grafana, Loki, Tempo and Mimir (the Prometheus-compatible store inside the image). Development and CI only ([§14.1](14-local-development.md)); never deployed, so no distribution or network-service obligation arises |
 
 PR-01 ships the CI step that enforces the first table. `.github/licence-gate/`
 fails the build on three things, and the third is the one worth naming because
@@ -81,11 +83,12 @@ it runs the other way:
 Discovering a licence obligation at renewal time is considerably more expensive
 than discovering it at build time.
 
-**The table above is beyond its reach, and deliberately so.** SQL Server, Duende
-and Redis are products rather than packages — nothing restores them, so nothing
-reading `Directory.Packages.props` can see them, and the client libraries that
-talk to them sit in the first table under their own licences. That boundary is a
-review obligation and there is no tooling behind it.
+**The table above is beyond its reach, and deliberately so.** SQL Server,
+Duende, Redis and the Grafana OTel-LGTM image are products rather than
+packages — nothing restores them, so nothing reading `Directory.Packages.props`
+can see them, and the client libraries that talk to them sit in the first table
+under their own licences. That boundary is a review obligation and there is no
+tooling behind it.
 
 ---
 

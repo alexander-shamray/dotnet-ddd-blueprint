@@ -5,11 +5,12 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-05 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-06 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
-CI and the licence gate — and the first C#: `Common.Domain`,
-`Common.Application` and `Common.Web`, each with its test project.
+CI and the licence gate — the first C#: `Common.Domain`, `Common.Application`
+and `Common.Web`, each with its test project — and §14.1's Compose
+infrastructure, with the CI smoke that proves it.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -63,6 +64,14 @@ Platform.slnx                    the six projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate, then restore/build/test
 .github/licence-gate/            the gate, its allow-list and its tests
+.github/workflows/compose.yml    path-filtered smoke on deploy/compose/**:
+                                 config -q, up --wait, down -v
+
+deploy/compose/                  §14.1's infrastructure — seven services,
+                                 .env.example, the placeholder realm PR-16
+                                 replaces, the collector config, a ports
+                                 README; application blocks arrive with
+                                 their services
 
 src/BuildingBlocks/
   Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,
@@ -85,7 +94,8 @@ tests/
                                  starts the real middleware pipeline in memory
 ```
 
-The second block is PR-01's, the third PR-02's through PR-05's.
+The second block is PR-01's, the third PR-02's through PR-05's, and the
+compose tree PR-06's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it and PR-09's `TransactionBehavior` will need it, but an unused
 project reference is a claim about the dependency graph that nothing yet
@@ -128,7 +138,8 @@ followed it — amend the chapter instead, which is where the specification
 actually lives.
 
 Planned, per §4.1 — do not invent a different shape for it. The three building
-blocks built so far are shown above; everything below is still ahead:
+blocks built so far are shown above; the tree below is the target shape, and
+its annotations mark what has already landed:
 
 ```
 src/BuildingBlocks/   .Infrastructure, .Contracts (Domain, Application and Web exist)
@@ -140,8 +151,8 @@ src/Services/         Catalog, Ordering, Inventory, Payments — five projects e
                       Notifications — four: no Domain, and a Worker
 tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                       .TestSupport, plus Platform.IntegrationTests
-deploy/               compose/, helm/, k8s/
-Directory.Build.props, Directory.Packages.props, Platform.slnx
+deploy/               helm/, k8s/ — compose/ landed with PR-06
+Directory.Build.props, Directory.Packages.props, Platform.slnx — landed with PR-01
 ```
 
 Two things live outside that tree because §4.1 does not draw them:
@@ -157,9 +168,10 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 `Platform.slnx` holds six projects and `dotnet test` runs 122 tests, so the
 build rules and the drift rules below are live and a green run now means
-something. **PR-06 is next** (`feat(dev): Docker Compose — SQL Server, Redis,
-RabbitMQ, Keycloak, OTel`), which depends only on PR-01 and gives the OTLP
-export PR-05 just wired somewhere to send to.
+something. **PR-07 is next** (`feat(template): service skeleton and
+architecture test gate`), which depends on PR-02 through PR-06 and turns
+§4.2's architecture rules into a build failure. PR-06 landed the Compose
+infrastructure, so PR-05's OTLP export now has somewhere to send to.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
@@ -1006,6 +1018,7 @@ Delivery:
 | `/pr` | Open a PR in the house body form |
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
 | `/review-grok` | Triage an external review into a resolution record |
+| `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 
 `/pr` pushes the branch itself, and `/ship` therefore runs all the way to an
 open PR. What `.claude/settings.json` still denies is the narrow set that is a
