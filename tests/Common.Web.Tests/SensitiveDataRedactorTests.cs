@@ -24,17 +24,23 @@ public class SensitiveDataRedactorTests
             new EventId(2, nameof(Plain)),
             "Customer {Customer} signed in");
 
-    private static IReadOnlyList<KeyValuePair<string, object?>> Emit(Action<ILogger> write)
+    private static LogRecord EmitRecord(Action<ILogger> write)
     {
         List<LogRecord> exported = [];
 
         // Built exactly as AddObservability builds it (§13.2) — ILoggingBuilder,
-        // the same extension — so the test covers the seam the host uses. Not
-        // the Logs Bridge API: that is behind an experimental diagnostic and is
-        // not how any host here produces a record.
+        // the same extension, and IncludeFormattedMessage set the same way — so
+        // the test covers the seam the host uses. Not the Logs Bridge API: that
+        // is behind an experimental diagnostic and is not how any host here
+        // produces a record.
+        //
+        // IncludeFormattedMessage is not decoration. With it set the exporter
+        // sends FormattedMessage as the record's body, so a test that leaves it
+        // off asserts against a pipeline shape no host runs.
         using (ILoggerFactory factory = LoggerFactory.Create(b =>
             b.AddOpenTelemetry(o =>
             {
+                o.IncludeFormattedMessage = true;
                 o.AddProcessor(new SensitiveDataRedactor());
                 o.AddInMemoryExporter(exported);
             })))
@@ -42,8 +48,11 @@ public class SensitiveDataRedactorTests
             write(factory.CreateLogger("test"));
         }
 
-        return exported.Single().Attributes!;
+        return exported.Single();
     }
+
+    private static IReadOnlyList<KeyValuePair<string, object?>> Emit(Action<ILogger> write) =>
+        EmitRecord(write).Attributes!;
 
     [Fact]
     public void Sensitive_attributes_are_redacted()
@@ -56,6 +65,38 @@ public class SensitiveDataRedactorTests
         // The other half, and the one that catches a deny-list grown careless:
         // everything not on it survives intact.
         attributes.Single(a => a.Key == "User").Value.ShouldBe("ada");
+    }
+
+    [Fact]
+    public void A_redacted_record_does_not_export_the_rendered_secret()
+    {
+        // The attribute redaction above is cosmetic without this one.
+        // AddObservability sets IncludeFormattedMessage (§13.2), and the OTLP
+        // exporter then uses FormattedMessage as the exported body — so the
+        // fully substituted "Login for ada with hunter2" travels beside a
+        // Password attribute reading "[redacted]", and it is the rendered
+        // string that gets indexed and searched.
+        LogRecord record = EmitRecord(logger => Login(logger, "ada", "hunter2", null));
+
+        record.FormattedMessage.ShouldNotBeNull();
+        record.FormattedMessage.ShouldNotContain("hunter2");
+
+        // Falling back to the template keeps the record readable. The safe
+        // values are still on the record as attributes, so nothing a reader
+        // needs is lost — only the substitution is.
+        record.FormattedMessage.ShouldBe("Login for {User} with {Password}");
+    }
+
+    [Fact]
+    public void A_record_with_nothing_sensitive_keeps_its_formatted_message()
+    {
+        // The control, and the one that matters most: the fix above rewrites
+        // the message only when something was actually redacted. Without this
+        // assertion a processor that rewrote unconditionally would pass, and
+        // every log line on the platform would silently lose its values.
+        LogRecord record = EmitRecord(logger => Plain(logger, "ada", null));
+
+        record.FormattedMessage.ShouldBe("Customer ada signed in");
     }
 
     [Fact]

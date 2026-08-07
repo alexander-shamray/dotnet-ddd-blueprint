@@ -10,12 +10,28 @@ namespace Common.Web;
 /// project it would protect that service alone.
 /// </summary>
 /// <remarks>
-/// Two limits worth stating rather than discovering. The processor sees
-/// <em>attributes</em>, not the formatted message, so a value is redacted by
-/// its key alone — which is the argument for naming a placeholder
-/// <c>{Token}</c> and never interpolating. And it cannot help with a whole
-/// object logged as one attribute; that is what the "never log full request
-/// bodies" half of the rule is for.
+/// <b>What it does.</b> Matching is by attribute <em>key</em>, and a match
+/// rewrites two things: the attribute's value, and — because <c>§13.2</c> sets
+/// <c>IncludeFormattedMessage</c> and the exporter then ships
+/// <c>FormattedMessage</c> as the record's body — the rendered message, which
+/// falls back to the un-substituted template. A record with nothing sensitive
+/// on it is left exactly as it arrived.
+/// <para>
+/// Three limits worth stating rather than discovering. Redaction is by key
+/// alone, which is the argument for naming a placeholder <c>{Token}</c> and
+/// never interpolating: an interpolated secret produces no attribute to match
+/// and lands in the template itself, so the fallback carries it too. It cannot
+/// help with a whole object logged as one attribute — that is what the "never
+/// log full request bodies" half of the rule is for. And it does not read
+/// scopes: <c>IncludeScopes</c> is on, but the processor inspects
+/// <c>Attributes</c> only, so a sensitive key in a <c>BeginScope</c> dictionary
+/// is exported unredacted. Nothing leaks today, because the platform opens
+/// exactly two scopes and neither can carry a secret — <c>LoggingBehavior</c>'s
+/// <c>RequestType</c> (§13.3) is a type name, and <c>UseCorrelationId</c>'s
+/// <c>CorrelationId</c> (§10.4) is a trace ID or a GUID. A third one carrying a
+/// secret would leak it silently. Widening the processor to walk the scope
+/// provider is a design change, not a fix.
+/// </para>
 /// </remarks>
 public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 {
@@ -44,8 +60,25 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             scrubbed[i] = new(attribute.Key, "[redacted]");
         }
 
-        if (scrubbed is not null)
-            record.Attributes = scrubbed;
+        if (scrubbed is null)
+            return;
+
+        record.Attributes = scrubbed;
+
+        // Attributes alone are not enough, and stopping there is the failure
+        // this rewrite exists to prevent. AddObservability sets
+        // IncludeFormattedMessage (§13.2), and with it the exporter sends
+        // FormattedMessage as the record's body — the template with every
+        // argument already substituted. Redacting Password to "[redacted]"
+        // while "Login for ada with hunter2" ships beside it protects nothing
+        // and reads in review as though it does.
+        //
+        // Body is the un-substituted template, so it is both safe and the most
+        // readable thing left: the values that were not sensitive are still on
+        // the record as attributes. Only when there is no template — a state
+        // logged without {OriginalFormat} — is there nothing to fall back to,
+        // and then the message goes entirely rather than partly.
+        record.FormattedMessage = record.Body ?? "[redacted]";
     }
 
     private static bool IsSensitive(string key) =>

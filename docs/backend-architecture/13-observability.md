@@ -575,8 +575,17 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             scrubbed[i] = new(attribute.Key, "[redacted]");
         }
 
-        if (scrubbed is not null)
-            record.Attributes = scrubbed;
+        if (scrubbed is null)
+            return;
+
+        record.Attributes = scrubbed;
+
+        // Attributes alone are not enough. IncludeFormattedMessage is set
+        // above, and with it the exporter sends FormattedMessage as the
+        // record's body — the template with every argument substituted.
+        // Redacting Password while "Login for ada with hunter2" ships beside
+        // it protects nothing and reads in review as though it does.
+        record.FormattedMessage = record.Body ?? "[redacted]";
     }
 
     private static bool IsSensitive(string key) =>
@@ -584,13 +593,39 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 }
 ```
 
-Two limits worth stating rather than discovering. The processor sees
-**attributes**, not the formatted message, so
-`logger.LogInformation("Token is {Value}", token)` is redacted by its key only
-if that key is named sensitively — which is the argument for naming the
-placeholder `{Token}` and never interpolating. And it cannot help with a whole
-object logged as one attribute; that is what the "never log full request
-bodies" half of the rule is for.
+> **Scrubbing the attributes alone would protect nothing.**
+> `IncludeFormattedMessage` is on (§13.2), and with it the exported body is the
+> *rendered* string — so `Login for ada with hunter2` would sit in the one
+> field a log backend indexes and searches, next to a `Password` attribute
+> reading `[redacted]`. The fallback is `Body`, the un-substituted template:
+> still readable, and the values that were not sensitive are still on the
+> record as attributes.
+
+A record with nothing sensitive on it keeps its formatted message untouched,
+and that is asserted as its own test rather than left implied. Without it a
+processor that rewrote unconditionally would pass every redaction test in the
+suite while quietly emptying every log line on the platform.
+
+Three limits worth stating rather than discovering.
+
+Redaction is **by key**, so `logger.LogInformation("Token is {Value}", token)`
+is caught only if the placeholder is named sensitively — the argument for
+naming it `{Token}` and never interpolating. Interpolation is now doubly
+unsafe: `$"Token is {token}"` produces no attribute to match *and* puts the
+secret in the template, so the fallback carries it too.
+
+It cannot help with a **whole object logged as one attribute**; that is what
+the "never log full request bodies" half of the rule is for.
+
+And it does not read **scopes**. `IncludeScopes` is on, but the processor
+inspects `Attributes` only, so a sensitive key in a `BeginScope` dictionary is
+exported unredacted. Nothing leaks today, because the platform opens exactly
+two scopes and neither can carry one: `LoggingBehavior`'s `RequestType`
+(§13.3), which is a type name, and `UseCorrelationId`'s `CorrelationId`
+([§10.4](10-api-gateway.md)), which is a trace ID or a GUID. A third one
+carrying a secret would leak it silently, and no test here would notice.
+Widening the processor to walk `ScopeProvider` is a design change with its own
+cost, not a fix to fold into this one.
 
 Assert it, because a redactor that silently stops matching is worse than none.
 The test lives in `Common.Web.Tests` — a `Common.Web` behaviour tested once
