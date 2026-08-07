@@ -49,6 +49,8 @@ Adding a dependency means adding its identity here, not just its name.
 | `Aspire.*` client integrations (one per resource a service consumes) | MIT | The service-side half of §14.2. Registered ahead of use: **if** Aspire is adopted each service takes the integrations for its own resources, which is why backing it out costs a line per resource per service rather than deleting one project. Unpinned on the same terms as the row above |
 | Keycloak | Apache 2.0 | Identity provider |
 | RabbitMQ | MPL 2.0 | Message broker |
+| OpenTelemetry Collector (contrib) | Apache 2.0 | Local and CI telemetry pipeline — the `otel-collector` container of [§14.1](14-local-development.md) |
+| Grafana OTel-LGTM | AGPL 3.0 (Grafana, Loki, Tempo, Mimir) / Apache 2.0 components | Local observability stack (`grafana/otel-lgtm` image) — development and CI only, never deployed |
 
 ## Avoided — commercial, with the replacement used here
 

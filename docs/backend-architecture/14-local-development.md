@@ -172,6 +172,14 @@ volumes:
   rabbit-data:
 ```
 
+The file is delivered in [Appendix C](appendix-c-delivery-plan.md)'s order
+rather than at once. PR-06 ships the seven infrastructure services above;
+each application block lands with the PR that builds its image — the
+scaffold of PR-11 copies one per service — and the realm file ships as a
+placeholder, realm name and `enabled` only, until PR-16's import replaces
+it. The `docker-compose.infra-only.yml` override below arrives with the
+first containerised service, there being nothing to exclude before it.
+
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up -d
 ```
@@ -182,6 +190,43 @@ docker compose -f deploy/compose/docker-compose.yml up -d
 | Keycloak | http://localhost:8080 (admin/admin) |
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
+
+The collector's mounted configuration is the smallest correct pipeline —
+OTLP in on both protocols, a batch processor, OTLP out to the LGTM
+container, which ingests OTLP directly:
+
+```yaml
+# deploy/compose/otel/config.yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  otlphttp:
+    endpoint: http://grafana:4318
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp]
+```
 
 An override file runs infrastructure in containers while services run on the
 host with a debugger attached — the usual inner-loop compromise:

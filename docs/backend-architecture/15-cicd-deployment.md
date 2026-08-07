@@ -112,6 +112,15 @@ re-assert what Kubernetes has already enforced, or assert something nobody has
 written down. The first real gate after dev is the k6 SLO run against staging,
 which names its tool, its target and its assertions (§13.7).
 
+One `deploy/**` artefact is exercised by CI directly rather than deployed:
+the Compose file. A separate workflow, path-filtered to
+`deploy/compose/**`, runs `docker compose config -q`, then `up --wait` —
+which fails if any healthcheck never passes or any container exits — then
+`down -v` (PR-06 in [Appendix C](appendix-c-delivery-plan.md)). It is not
+the smoke stage ruled out above: it deploys nothing and asserts only what
+[§14.1](14-local-development.md) already defines, and it is what makes
+[§14.2](14-local-development.md)'s "Compose runs in CI" true.
+
 `BuildingBlocks` appears under every service, so a change there rebuilds
 everything. That is correct, and it is also the reason to keep those projects
 small.
