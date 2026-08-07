@@ -65,9 +65,11 @@ subscriber silently executing your business commands.
 
 Every cell enumerates. "All customer-relevant events" would be shorter and is
 not a contract: it cannot be versioned, reviewed, or checked against what
-publishers actually emit, and Notifications is the service the delivery plan
-says to build first ([Appendix C.1](appendix-c-delivery-plan.md#c1-service-build-order)). A subscription list that grows silently is
-how a consumer ends up bound to a type nobody meant to give it.
+publishers actually emit. Notifications is the clearest case: it publishes
+nothing, so this row is the whole of its contract, and the delivery plan builds
+it last for that reason ([Appendix C.1](appendix-c-delivery-plan.md#c1-service-build-order)) — every name in it belongs to a
+service that has to exist first. A subscription list that grows silently is how
+a consumer ends up bound to a type nobody meant to give it.
 
 **The table closes in both directions, and the second one is easier to lose.**
 Every name in a Consumes cell appears in exactly one Publishes cell — an event

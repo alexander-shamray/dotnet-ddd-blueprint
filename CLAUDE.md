@@ -25,8 +25,15 @@ Keep two different things apart:
 - **Solution shape** — the projects §4.1 lays out: Catalog, Ordering, Inventory,
   Payments, Shipping, Notifications, plus the building blocks, gateway and BFF.
 - **Service build order** — Appendix C.1, which is *not* the §4.1 listing
-  order: **Notifications → Catalog → Ordering → Inventory and Payments →
-  Shipping**. Notifications goes first precisely because it has no domain logic.
+  order: **Catalog → Ordering → Inventory and Payments → Shipping →
+  Notifications**. Notifications goes **last**, and the reason is worth
+  carrying: it publishes nothing and its whole contract is seven events owned
+  by Ordering, Payments and Shipping (§3.2), so before those exist it is a
+  consumer with no producers. C.1 used to say it went first, on the grounds
+  that a service with no domain logic proves the pipeline end to end with
+  nothing else to debug — appealing, and wrong, because end to end needs both
+  ends. C.2 never built it first either: PR-10 is Catalog and PR-18 is the
+  "second service".
 
 One thing is genuinely **undecided**: the READMEs call the e-commerce domain
 "illustrative only", while §4.1 and Appendix C name those six services
@@ -963,8 +970,9 @@ Once code is present, additionally:
   PR as the code they cover — the convention starts at PR-02 and there is no
   PR in the plan that adds tests afterwards.
 - **Follow the delivery plan's order.** Appendix C sequences 26 PRs with
-  explicit dependencies, and the service order (Notifications → Catalog →
-  Ordering → Inventory and Payments → Shipping) is deliberate. Building out of
+  explicit dependencies, and the service order (Catalog → Ordering →
+  Inventory and Payments → Shipping → Notifications) is deliberate. Building
+  out of
   order is a design decision, not a shortcut — raise it rather than taking it.
 - **The architecture tests are the enforcement mechanism**, not review.
   NetArchTest gates land at PR-07: domain isolation, Application ↛ EF Core,
