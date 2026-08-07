@@ -336,6 +336,25 @@ already written against it.
   consecutive usings. This one binds source only — the samples carry no `using`
   directives at all, because they are excerpts rather than compilable units
   (Appendix D). Do not "complete" a sample by adding them.
+- **No unused `using` directives**, and a file that stops needing one drops it
+  in the change that stopped needing it. A stale using is a claim that the file
+  depends on something it does not, which is the same class of untruth as an
+  unused project reference — and the reader who trusts it looks in the wrong
+  assembly first. Two of the four found in the last sweep were left behind by a
+  refactor that moved the only call.
+
+  **Nothing catches this, and the reason is a trap worth knowing.** IDE0005 is
+  the rule, and it is **not reported by the build at all** unless
+  `GenerateDocumentationFile` is on — so `dotnet build` is silent on an unused
+  using even with `TreatWarningsAsErrors`, and so is
+  `dotnet format style --diagnostics IDE0005`. Both were checked against a
+  deliberately injected `using System.Text;` and neither said a word; a clean
+  run here proves nothing. Turning it on costs a fourth entry in
+  `Directory.Build.props`, because `GenerateDocumentationFile` also enables
+  CS1591 and this repository has **62** public members with no XML comment.
+  That is a decision about the policy, so until someone argues it the rule is
+  carried by review, like the `[` placement rule and the `new()` rule above.
+  The IDE does flag it — the greyed-out using is the only live signal there is.
 - Pascal case for types, properties, methods and events; `I` prefix on
   interfaces; namespace matches folder.
 - **A blank line always follows the namespace declaration.** `namespace X;` is a
