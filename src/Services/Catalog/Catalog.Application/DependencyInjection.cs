@@ -15,6 +15,12 @@ public static class DependencyInjection
         services.AddPluggableFrom(typeof(DependencyInjection).Assembly);   // §6.2
         services.AddDispatcher();
 
+        // Explicit rather than scanned, beside the dispatcher it serves —
+        // §4.2's registration sample is the shape. The null object is truthful
+        // only while no aggregate exists to raise an event; PR-14's outbox
+        // dispatcher takes this line over.
+        services.AddScoped<IDomainEventDispatcher, NullDomainEventDispatcher>();
+
         // The clock (§5.4) and the request histogram (§13.3): LoggingBehavior
         // injects both, and nothing catches an omission before the first
         // dispatched request — not ValidateOnBuild, which never constructs an

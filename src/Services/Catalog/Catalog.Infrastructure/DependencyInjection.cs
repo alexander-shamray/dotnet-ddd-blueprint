@@ -38,11 +38,6 @@ public static class DependencyInjection
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3
 
-        // Explicit rather than scanned, like §7.5 registers the real one. The
-        // null object is truthful only while no aggregate exists to raise an
-        // event; PR-14's outbox dispatcher takes this line over.
-        services.AddScoped<IDomainEventDispatcher, NullDomainEventDispatcher>();
-
         // No IDbConnectionFactory: §4.2's sample registers one and §6.5 says
         // what it is for — Dapper against read models — and Catalog has no
         // query until PR-10. A registration nothing injects is an unused

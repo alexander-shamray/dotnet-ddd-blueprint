@@ -99,14 +99,14 @@ src/Services/Catalog/
   Catalog.Domain/                AssemblyMarker only — the typeof anchor the
                                  gates need until PR-10's first aggregate
   Catalog.Application/           AddCatalogApplication: the §6.2 scan, the
-                                 dispatcher, the clock, RequestMetrics, the
-                                 three behaviours in pipeline order
+                                 dispatcher, the NullDomainEventDispatcher
+                                 PR-14 replaces (§4.2 registers the dispatcher
+                                 in Application), the clock, RequestMetrics,
+                                 the three behaviours in pipeline order
   Catalog.Infrastructure/        AddCatalogInfrastructure(IConfiguration): the
                                  §6.2 scan, the sealed CatalogDbContext with
-                                 §7.2's conventions, EfUnitOfWork, the
-                                 NullDomainEventDispatcher PR-14 replaces,
-                                 §13.5's SQL readiness check, and
-                                 Persistence/Migrations —
+                                 §7.2's conventions, EfUnitOfWork, §13.5's SQL
+                                 readiness check, and Persistence/Migrations —
                                  an InitialCreate whose Up is one hand-written
                                  EnsureSchema, no entity types until PR-10
   Catalog.Migrator/              §7.4's job host: MigratorHost builds it,
@@ -221,7 +221,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 152 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 153 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-10 is next** (`feat(catalog): first vertical slice — command,
 query, cursor pagination`), which depends on PR-07 through PR-09 and delivers

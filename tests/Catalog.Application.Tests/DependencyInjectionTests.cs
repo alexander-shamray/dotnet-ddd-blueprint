@@ -60,6 +60,25 @@ public class DependencyInjectionTests
     }
 
     [Fact]
+    public void AddCatalogApplication_registers_the_null_domain_event_dispatcher_scoped()
+    {
+        // §4.2 registers the dispatcher's IDomainEventDispatcher in
+        // Application, beside AddDispatcher — the null object sits where
+        // PR-14's real one will, so that PR replaces a line in place. Without
+        // this registration the first resolved TransactionBehavior throws,
+        // and nothing resolves one before the first dispatched command.
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        ServiceDescriptor dispatcher = services
+            .Where(d => d.ServiceType == typeof(IDomainEventDispatcher))
+            .ShouldHaveSingleItem();
+        dispatcher.Lifetime.ShouldBe(ServiceLifetime.Scoped);
+        dispatcher.ImplementationType!.Name.ShouldBe("NullDomainEventDispatcher");
+    }
+
+    [Fact]
     public void AddCatalogApplication_registers_the_three_behaviours_in_pipeline_order()
     {
         ServiceCollection services = new();
