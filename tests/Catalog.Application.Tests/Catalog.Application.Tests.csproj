@@ -19,10 +19,21 @@
          abstractions package Catalog.Application compiles against has no
          container in it to build. -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <!-- The handler tests seed and assert through the real CatalogDbContext
+         (§12.4's seeding rule — a raw INSERT drifts from the aggregate the
+         first time it gains a column). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Services\Catalog\Catalog.Application\Catalog.Application.csproj" />
+    <!-- §12.1 homes the handler tests here, with real containers — the
+         fixture lives in TestSupport, shared with Catalog.Api.Tests, which
+         this project cannot reference. -->
+    <ProjectReference Include="..\..\tests\Catalog.TestSupport\Catalog.TestSupport.csproj" />
+    <!-- CatalogDbContext by name, for seeding and read-back. The test
+         project may: §4.2's gate binds Catalog.Application, not its tests. -->
+    <ProjectReference Include="..\..\src\Services\Catalog\Catalog.Infrastructure\Catalog.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,5 @@
+using Catalog.Application.Products.GetProducts;
+using Catalog.Application.Products.PublishProduct;
 using Common.Application;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -96,5 +98,35 @@ public class DependencyInjectionTests
                 typeof(TransactionBehavior<,>)
             ],
             "three of four — IdempotencyBehavior joins with its PR, between Validation and Transaction (§6.3)");
+    }
+
+    [Fact]
+    public void AddCatalogApplication_registers_the_command_validator()
+    {
+        // ValidationBehavior takes IEnumerable<IValidator<T>>, so a missing
+        // scan is not a failure — it is a pipeline that validates nothing and
+        // says so to nobody. The registration is the only place to catch it.
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        services.ShouldContain(
+            d => d.ServiceType == typeof(FluentValidation.IValidator<PublishProductCommand>),
+            "AddValidatorsFromAssemblyContaining is §4.2's line, and losing it fails silently");
+    }
+
+    [Fact]
+    public void AddCatalogApplication_registers_the_slice_handlers()
+    {
+        // The §6.2 scan found nothing until this PR; these two are the first
+        // real registrations it produces, so the scan itself is now testable.
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        services.ShouldContain(d =>
+            d.ServiceType == typeof(ICommandHandler<PublishProductCommand, Result<Guid>>));
+        services.ShouldContain(d =>
+            d.ServiceType == typeof(IQueryHandler<GetProductsQuery, CursorPage<ProductSummaryDto>>));
     }
 }

@@ -1,3 +1,4 @@
+using Catalog.Domain.Products;
 using Catalog.Infrastructure.Persistence;
 using Common.Application;
 using Microsoft.EntityFrameworkCore;
@@ -37,11 +38,15 @@ public static class DependencyInjection
         services.AddPluggableFrom(typeof(DependencyInjection).Assembly);
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3
+        services.AddScoped<IProductRepository, ProductRepository>();         // §5.6
 
-        // No IDbConnectionFactory: §4.2's sample registers one and §6.5 says
-        // what it is for — Dapper against read models — and Catalog has no
-        // query until PR-10. A registration nothing injects is an unused
-        // project reference in container form.
+        // §6.5's read side. Singleton, as §4.2's sample has it: the factory
+        // holds a string and constructs per call — the connections it hands
+        // out are the caller's to dispose, so there is no scoped state to
+        // capture. The RUNTIME key, deliberately: a query on the migrator's
+        // identity would be §7.1's boundary failing quietly.
+        services.AddSingleton<IDbConnectionFactory>(
+            new SqlConnectionFactory(configuration.GetConnectionString("Catalog")!));
 
         // Readiness lives here, not in Common.Web, because it needs the
         // connection string the shared host package does not have (§13.5).

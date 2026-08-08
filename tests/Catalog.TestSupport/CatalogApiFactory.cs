@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
-namespace Catalog.Api.Tests;
+namespace Catalog.TestSupport;
 
 /// <summary>
 /// The real Catalog host over a caller-supplied database (§12.4). One type for

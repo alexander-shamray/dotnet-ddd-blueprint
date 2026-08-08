@@ -1,3 +1,4 @@
+using Catalog.Domain.Products;
 using Shouldly;
 using Xunit;
 
@@ -21,9 +22,13 @@ public class ArchitectureTests
         // BCL assembly Domain starts using earns its line here on purpose —
         // extending this list is the decision the gate exists to force, and
         // System.Text.Json is the extension the table forbids by name.
-        string[] allowed = ["Common.Domain", "System.Runtime"];
+        //
+        // System.Collections earned its line with the first domain event: a
+        // record's generated equality goes through EqualityComparer<T>, which
+        // lives there. No collection type appears in any domain signature.
+        string[] allowed = ["Common.Domain", "System.Runtime", "System.Collections"];
 
-        IEnumerable<string> referenced = typeof(AssemblyMarker).Assembly
+        IEnumerable<string> referenced = typeof(Product).Assembly
             .GetReferencedAssemblies()
             .Select(a => a.Name!);
 

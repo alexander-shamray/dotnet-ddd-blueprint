@@ -1,6 +1,7 @@
 using System.Net;
 using Catalog.Infrastructure;
 using Catalog.Infrastructure.Persistence;
+using Catalog.TestSupport;
 using Common.Application;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -23,7 +24,8 @@ namespace Catalog.Api.Tests;
 /// go green on a runner whose daemon had broken, and a category is PR-22's
 /// deliverable rather than something to invent two PRs early.
 /// </remarks>
-public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlServerFixture>
+[Collection(nameof(IntegrationCollection))]
+public class DatabaseSmokeTests(ServiceFixture fixture)
 {
     [Fact]
     public async Task Migrator_exits_zero_and_creates_the_schema()
@@ -34,10 +36,12 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
 
         int schema = await fixture.ScalarAsync<int>(
             "SELECT Value = COUNT(*) FROM sys.schemas WHERE name = 'catalog'");
-        schema.ShouldBe(1, "InitialCreate's hand-written EnsureSchema is the only thing that creates it");
+        schema.ShouldBe(1, "InitialCreate's hand-written EnsureSchema creates it; AddProducts' is a no-op after it");
 
         string[] applied = await fixture.AppliedMigrationsAsync();
-        applied.ShouldHaveSingleItem().ShouldEndWith("_InitialCreate");
+        applied.Length.ShouldBe(2);
+        applied[0].ShouldEndWith("_InitialCreate");
+        applied[1].ShouldEndWith("_AddProducts");
     }
 
     [Fact]
@@ -46,7 +50,7 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
         // §7.4 runs this as a pre-install/pre-upgrade hook, so it reruns on
         // every deploy. Applying nothing is a successful outcome, and a job
         // that failed here would block every deploy after the first.
-        int exitCode = await SqlServerFixture.RunMigratorAsync(fixture.ConnectionString);
+        int exitCode = await ServiceFixture.RunMigratorAsync(fixture.ConnectionString);
 
         exitCode.ShouldBe(0);
     }
@@ -58,7 +62,7 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
         // boundary only while the migrator reads its own key. Handing it the
         // runtime connection under the runtime name must not work — if it did,
         // the two connection strings would be a naming convention.
-        int exitCode = await SqlServerFixture.RunMigratorAsync(
+        int exitCode = await ServiceFixture.RunMigratorAsync(
             migratorConnectionString: null,
             runtimeConnectionString: fixture.ConnectionString);
 

@@ -8,9 +8,9 @@ namespace Catalog.Api.Tests;
 /// <summary>
 /// §4.2's composition-root rule: only <c>Program.cs</c> may reference
 /// Infrastructure, and endpoints hold to Application and Domain contracts.
-/// Vacuously green until PR-10 adds the first endpoint — which is the point:
-/// a rule introduced before the violations exist is a constraint, not a
-/// backlog item.
+/// Vacuously green from PR-07 until PR-10's first endpoint — a rule
+/// introduced before the violations exist is a constraint, not a backlog
+/// item — and judging <c>ProductEndpoints</c> for real since.
 /// </summary>
 public class ArchitectureTests
 {

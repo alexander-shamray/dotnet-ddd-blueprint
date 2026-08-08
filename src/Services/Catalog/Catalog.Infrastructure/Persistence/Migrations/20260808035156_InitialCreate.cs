@@ -4,7 +4,7 @@ namespace Catalog.Infrastructure.Persistence.Migrations;
 
 /// <summary>
 /// Catalog's first migration. EF generated an empty <c>Up</c>, because the
-/// model has no entity types until PR-10 — the schema below is hand-written,
+/// model had no entity types until PR-10 — the schema below is hand-written,
 /// which §7.4 permits and describes: DDL that EF cannot generate "rides along,
 /// in the same transaction, applied by the same job, versioned by the same
 /// migration history".

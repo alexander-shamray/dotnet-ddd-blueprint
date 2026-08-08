@@ -1,3 +1,4 @@
+using Catalog.Api.Endpoints;
 using Catalog.Application;
 using Catalog.Infrastructure;
 using Common.Web;
@@ -23,12 +24,13 @@ builder.Services.AddOpenApi();
 WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting (§4.2). Authentication and
-// authorization join this pipeline at PR-16, endpoints at PR-10.
+// authorization join this pipeline at PR-16.
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — above everything else that logs
 
 app.MapCommonHealthEndpoints();   // §13.5 — anonymous; kubelet carries no token
 app.MapOpenApi();
+app.MapProductEndpoints();        // deliberately unauthenticated until PR-16 (Appendix C)
 
 app.Run();
 

@@ -1,5 +1,5 @@
 using System.Reflection;
-using Catalog.Domain;
+using Catalog.Domain.Products;
 using NetArchTest.Rules;
 using Shouldly;
 using Xunit;
@@ -35,7 +35,7 @@ public class ArchitectureTests
         // guarantee that exists on the consume pipeline and nowhere else. A handler
         // that copies the saga's style gets a dual write with no outbox behind it,
         // and it works in every test where the broker is up.
-        Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(AssemblyMarker).Assembly];
+        Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(Product).Assembly];
         foreach (Assembly assembly in assemblies)
             Types
                 .InAssembly(assembly)
