@@ -230,6 +230,38 @@ which already references Domain. PR-07 landed the Catalog skeleton, so §4.2's a
 rules are a build failure — each gate was observed red against a deliberately
 added forbidden reference before it was trusted.
 
+**PR-09 carries one thing Appendix C does not list, decided on PR #15 and
+scheduled here rather than left in a review thread.** `EfUnitOfWork.ExecuteAsync`
+retries its whole delegate through `CreateExecutionStrategy`, and `db` is the
+same scoped `CatalogDbContext` on every attempt — EF does not reset the change
+tracker when a transaction rolls back. So after a transient fault mid-handler,
+attempt 2's `GetAsync` returns attempt 1's *tracked, already-mutated* instance
+from the identity map rather than the committed row, the domain method runs
+again, and one `SaveChanges` commits the mutation twice. The staged outbox rows
+survive the same way, so the event publishes twice as well. Neither throws, and
+neither is reachable from a test suite: it needs a transient fault under load,
+which is §7.5's "works under test and fails under load" in another costume.
+
+The fix is one line at the top of each attempt — `db.ChangeTracker.Clear()`,
+so every attempt starts from committed state — plus a test that forces a
+transient fault and asserts no double-apply, and a sentence in §6.3 beside its
+existing "may therefore run **more than once**" note, which covers side effects
+*outside* the transaction and not in-memory state surviving inside it. **Not** a
+fresh `DbContext` per attempt: that moves retry out of `IUnitOfWork` and up into
+the dispatcher, and destroys the property that makes §6.3's behaviour reviewable
+— that it depends on nothing but the port.
+
+**What the line does not fix is the commit-acknowledgement race**, and that
+stays open past PR-09 on purpose. If `CommitAsync` succeeds on the server and
+the connection drops before the ack, the strategy retries work that is already
+durable, and no in-process tidying can tell those two states apart. Closing it
+needs an idempotency marker written *inside* the transaction — §8.5's
+`IIdempotentCommand` already carries a usable `CommandId`, but
+`IIdempotencyStore` is Redis-backed and outside the transaction, so a Redis
+claim is not atomic with the SQL commit. That decision belongs with PR-14,
+where the outbox is what makes a double-apply externally visible and where a
+SQL-side marker would live.
+
 PR-08 landed the persistence layer, and three of its decisions bind what comes
 after:
 
