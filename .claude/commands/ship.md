@@ -208,14 +208,22 @@ anything.
       whose request never took, and never call the branch clean because
       asking failed.
 
-      **The review's depth is not a request parameter.** Copilot reviews at
-      whatever tier the account's code-review settings grant, so keeping the
-      full review — not a lite tier — is a settings decision made once, not
-      something this command can ask for per run. If the settings offer a
-      depth choice, the full one is the one this loop wants — and the tier
-      that ran is visible: the timeline's request event names it in its own
-      words ("requested a **balanced** review"), so the report quotes it
-      rather than guessing.
+      **The review's depth is not a request parameter, and the loop checks
+      what it got.** The effort level is a repository admin setting —
+      Settings → Copilot → Code review → **Review effort level**, two tiers,
+      rendered in the timeline as "lite" and "balanced" — and no API field
+      carries it: the REST event and the GraphQL types were introspected
+      live and hold nothing. Left unset, GitHub routes by content, and the
+      routing was observed doing exactly what its changelog implies: a
+      27-file C# PR drew balanced, a six-file docs PR drew lite.
+
+      So each round, read the tier from the PR timeline's own wording
+      ("requested a *lite* review") and put it in the report. **A clean
+      verdict at lite is weaker evidence than a clean verdict at balanced**,
+      and on a branch that wanted scrutiny it is a prompt to pin the repo's
+      effort level, not a pass to celebrate quietly — say which tier
+      reviewed, every round, so the difference is never discovered from a
+      merge regret.
 
    2. **Wait for the review to land** — a new review by
       `copilot-pull-request-reviewer` newer than the request. (That is the
