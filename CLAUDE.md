@@ -1252,10 +1252,20 @@ by acting on that review — and both times it broke startup. A reviewer who has
 not run the harness cannot see this; check a permission claim against the
 harness before acting on it.
 
-`Edit(.claude/scripts/**)` follows the same two-spelling pattern and binds
-the agent's own tooling: the review loops grant those helper scripts by name,
-and a session that could rewrite a helper before invoking it would make the
-fixed endpoints a fiction. Changing a helper is therefore a human's edit,
-made with the deny lifted. Like the push denies, it is defence in depth —
-`Bash` redirection can still write a file — but it removes the quiet path,
-which is the session's own editing tools acting on reviewed grants.
+`Edit(.claude/scripts/**)` **and `Edit(.claude/sandbox/**)`** follow the same
+two-spelling pattern and bind the agent's own tooling: the review loops grant
+those helper scripts by name, and a session that could rewrite a helper before
+invoking it would make the fixed endpoints a fiction. Changing either is
+therefore a human's edit, made with the deny lifted. Like the push denies, it
+is defence in depth — `Bash` redirection can still write a file — but it
+removes the quiet path, which is the session's own editing tools acting on
+reviewed grants.
+
+**`sandbox/` is on that list for a reason worth keeping.** It arrived guarded
+by nothing, and a review caught it: the Dockerfile is a *build input to the
+security boundary*, so a session able to edit it can add an entrypoint that
+reads the credentials the following `docker run` mounts in. Guarding the
+runner and leaving its image editable protects the door and not the wall —
+and the reasoning that put the image in `.claude/` at all was the reasoning
+that should have guarded it, since a helper the loop invokes by name is
+exactly what the Dockerfile had become.

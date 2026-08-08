@@ -34,8 +34,12 @@ branch=$(git branch --show-current)
 status=$(git status --porcelain)
 [ -z "$(grep -v '^?? suggestions.md$' <<<"$status" || true)" ] ||
   { echo "tree has uncommitted changes; commit before the review, or the reviewer reads a state the PR does not carry" >&2; exit 3; }
-command -v docker >/dev/null 2>&1 ||
-  { echo "docker is required: the reviewer runs in a container (.claude/sandbox/Dockerfile)" >&2; exit 7; }
+# The daemon, not just the CLI. `command -v docker` passes on a machine whose
+# Docker Desktop is installed and stopped — which is the common case, not an
+# exotic one — and the build then fails with Docker's own generic status
+# instead of the exit 7 this script documents. Probe what is actually needed.
+docker info >/dev/null 2>&1 ||
+  { echo "docker is required and its daemon must be running: the reviewer runs in a container (.claude/sandbox/Dockerfile)" >&2; exit 7; }
 
 sandbox=$(cd "$(dirname "${BASH_SOURCE[0]}")/../sandbox" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/grok-review-XXXXXX")
@@ -54,6 +58,23 @@ chmod 700 "$auth"
 # origin/* refs, which is all /review-branch reads.
 git clone --quiet --no-hardlinks . "$work/repo"
 git -C "$work/repo" checkout --quiet "$branch"
+# The clone's origin/main is built from this checkout's LOCAL main, not from its
+# origin/main, and those are routinely different: /branch branches from
+# origin/main without ever advancing local main, so local main here is whatever
+# it was when it was last pulled. Left alone, the reviewer diffs the branch
+# against a stale base and reports commits that are already on main as though
+# this branch introduced them. Fetch the real remote-tracking ref, with its
+# objects, so the review's base is the base the PR will merge into.
+#
+# Fetched through the clone's own `origin`, which git already pointed back at
+# this checkout, rather than through a path built here: `$(pwd)` under MSYS is
+# `/c/dev/...`, which a Windows git binary cannot resolve at all — it reports
+# the source as "not a git repository", which reads like a broken checkout
+# rather than a mistranslated path.
+if git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+  git -C "$work/repo" fetch --quiet origin \
+    "+refs/remotes/origin/main:refs/remotes/origin/main"
+fi
 # The recheck contract: an existing suggestions.md is the file the review
 # re-verifies, so it crosses into the copy; nothing else does.
 #
