@@ -27,7 +27,7 @@ Adding a dependency means adding its identity here, not just its name.
 | `System.Security.Cryptography.Xml` | MIT | A transitive of the row above, pinned explicitly because the floor it declares resolves to a version carrying eight advisories and NU1903 fails the restore. Design-time only — it ships in no image — and registered anyway, on the rule that a pinned transitive is still a pin |
 | `Microsoft.Extensions.Configuration.Abstractions` | MIT | `IConfiguration`, named in each `AddXInfrastructure` signature (§4.2). Registered on the abstractions row's terms: it rides in the shared framework, and `*.Infrastructure` is not a web project, so it pays for the contract as a package |
 | `Microsoft.Extensions.Hosting` | MIT | The generic host each `*.Migrator` builds (§7.4). The one project shape in this blueprint that is neither a web host nor a library, so it is the one that pays for hosting as a package |
-| `Dapper` | Apache 2.0 | Read-side data access |
+| `Dapper` | Apache 2.0 | Read-side data access ([§6.5](06-cqrs.md)), and the raw writes `IUnitOfWork.ExecuteRawAsync` makes on the command's own transaction (§6.3). Both halves named, because a register row saying "read-side" reads as an audit of where the package may appear, and the write-side use would then look unregistered |
 | MassTransit **8.x** (`MassTransit.RabbitMQ`) | Apache 2.0 | Messaging |
 | `StackExchange.Redis` | MIT | Redis client |
 | `FluentValidation` | Apache 2.0 | Input validation |

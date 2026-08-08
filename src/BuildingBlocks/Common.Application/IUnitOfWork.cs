@@ -6,8 +6,14 @@ namespace Common.Application;
 /// </summary>
 /// <remarks>
 /// No member names a domain type, which is why this file does not draw the
-/// <c>Common.Application → Common.Domain</c> edge. §6.3's
-/// <c>TransactionBehavior</c> is what needs it, and it arrives with PR-09.
+/// <c>Common.Application → Common.Domain</c> edge — and neither does §6.3's
+/// <c>TransactionBehavior</c>, which reads
+/// <see cref="ModifiedAggregateCount"/> as an <c>int</c> and never sees the
+/// <c>IAggregateRoot</c> the count is derived from. Deriving it behind the port
+/// is what keeps EF's change tracker, and the domain interface it tests for, on
+/// Infrastructure's side of §4.2. The edge waits for the first Application type
+/// that really does name a domain type — §7.5's <c>IDomainEventCollector</c>,
+/// which returns <c>IReadOnlyList&lt;IDomainEvent&gt;</c>.
 /// </remarks>
 public interface IUnitOfWork
 {

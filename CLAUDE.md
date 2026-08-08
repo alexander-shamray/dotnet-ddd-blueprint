@@ -130,11 +130,17 @@ The second block is PR-01's, the third PR-02's through PR-05's, the
 compose tree PR-06's, the Catalog trees PR-07's, and their persistence
 PR-08's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
-permits it and PR-09's `TransactionBehavior` will need it, but an unused
-project reference is a claim about the dependency graph that nothing yet
-makes true. PR-08's `IUnitOfWork` did not change that and could not: no
-member of it names a domain type, which is the whole reason
-`ExecuteRawAsync` takes `string` and `object`.
+permits it, but an unused project reference is a claim about the dependency
+graph that nothing yet makes true. PR-08's `IUnitOfWork` did not change that
+and could not: no member of it names a domain type, which is the whole reason
+`ExecuteRawAsync` takes `string` and `object`. **The edge is not PR-09's**,
+though this file and two comments beside it said so until a review checked the
+claim — §6.3's behaviour reads `ModifiedAggregateCount` as an `int`, and the
+`is IAggregateRoot` test it is derived from lives in `EfUnitOfWork`, on
+Infrastructure's side of §4.2. Counting behind the port is precisely what
+keeps it there. The edge belongs to the first Application type that really
+names a domain type, which on the plan is §7.5's `IDomainEventCollector` and
+its `IReadOnlyList<IDomainEvent>` — so it arrives with the outbox.
 `Common.Web → Common.Application` is the one edge that has been drawn, because
 `ToHttpResult` maps an `Error` and cannot be written without one.
 
@@ -213,10 +219,14 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fourteen projects and `dotnet test` runs 143 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-09 is next** (`feat(common): TransactionBehavior over
-IUnitOfWork`), which depends on PR-04 and PR-08 and is the PR that draws the
-`Common.Application → Common.Domain` edge, registers a third behaviour in
+IUnitOfWork`), which depends on PR-04 and PR-08, registers a third behaviour in
 `AddCatalogApplication`, and proves `SaveChanges` happens once on success and
-never on failure. PR-07 landed the Catalog skeleton, so §4.2's architecture
+never on failure. It does **not** draw the
+`Common.Application → Common.Domain` edge, and this file said it would until a
+review checked: the behaviour reads `ModifiedAggregateCount` as an `int` and
+calls `DispatchAsync(CancellationToken)`, so neither signature names a domain
+type. The `is IAggregateRoot` test is `EfUnitOfWork`'s, in Infrastructure,
+which already references Domain. PR-07 landed the Catalog skeleton, so §4.2's architecture
 rules are a build failure — each gate was observed red against a deliberately
 added forbidden reference before it was trusted.
 
