@@ -115,8 +115,15 @@ sandbox_host=$(host_path "$sandbox")
 # passed by Docker Desktop's VM, which does not need them matched — and a
 # typical macOS primary gid of 20 already exists in Debian as `dialout`, so
 # `groupadd --gid 20` aborts the build over a problem that host did not have.
+#
+# Root is refused rather than passed through. Running the helper as root would
+# send 0:0, which fails the build outright — root already exists in Debian —
+# and would contradict the non-root boundary even if it succeeded. Better to
+# say so than to hand back useradd's error.
 build_args=()
 if [ "$(uname -s)" = "Linux" ]; then
+  [ "$(id -u)" -ne 0 ] ||
+    { echo "refusing to build the reviewer as root: the image runs non-root by design" >&2; exit 11; }
   build_args+=(--build-arg "REVIEWER_UID=$(id -u)" --build-arg "REVIEWER_GID=$(id -g)")
 fi
 
@@ -156,7 +163,7 @@ else
     { echo "no usable XAI_API_KEY and no $HOME/.grok/auth.json: the reviewer cannot authenticate" >&2; exit 8; }
   cp "$HOME/.grok/auth.json" "$auth/auth.json"
   chmod 600 "$auth/auth.json"
-  mounts+=(--volume "$(host_path "$auth/auth.json"):/home/reviewer/.grok/auth.json")
+  mounts+=(--volume "$(host_path "$auth/auth.json"):/home/reviewer/.grok/auth.json:Z")
   # agent_id and config.toml as well, and neither is optional. The session names
   # a team, but a container missing this machine's agent identity and its
   # settled configuration does not use it: grok takes itself to be a first run,
@@ -176,13 +183,13 @@ else
       { echo "$HOME/.grok/$extra is missing; the OAuth session cannot resolve its team without it" >&2; exit 8; }
     cp "$HOME/.grok/$extra" "$auth/$extra"
     chmod 600 "$auth/$extra"
-    mounts+=(--volume "$(host_path "$auth/$extra"):/home/reviewer/.grok/$extra")
+    mounts+=(--volume "$(host_path "$auth/$extra"):/home/reviewer/.grok/$extra:Z")
   done
 fi
 
 set +e
 docker run --rm \
-  --volume "$(host_path "$work/repo"):/review" \
+  --volume "$(host_path "$work/repo"):/review:Z" \
   "${mounts[@]}" \
   --workdir /review \
   "$image" \
