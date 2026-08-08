@@ -15,7 +15,7 @@ builder.Host.UseDefaultServiceProvider(o =>
 
 builder.AddCommonWebDefaults();                 // §13.2
 builder.Services.AddCatalogApplication();       // §6.2
-builder.Services.AddCatalogInfrastructure();    // §4.2
+builder.Services.AddCatalogInfrastructure(builder.Configuration);   // §4.2, §7.1
 
 // PR-07's OpenAPI deliverable (Appendix C): document only, no UI.
 builder.Services.AddOpenApi();

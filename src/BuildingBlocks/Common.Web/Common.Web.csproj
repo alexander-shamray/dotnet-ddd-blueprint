@@ -15,14 +15,15 @@
 
   <ItemGroup>
     <!-- §13.2's AddObservability. Versionless: central package management
-         owns the pins (§4.4). The EF Core and Redis instrumentations are
-         deliberately absent — they arrive with the packages they instrument,
-         at PR-08 and PR-12. -->
+         owns the pins (§4.4). The Redis instrumentation is still deliberately
+         absent — it arrives with the package it instruments, at PR-12. The EF
+         Core one arrived here, with PR-08's DbContext. -->
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" />
   </ItemGroup>
 
   <ItemGroup>

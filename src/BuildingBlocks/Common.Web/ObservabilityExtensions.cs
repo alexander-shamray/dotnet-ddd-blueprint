@@ -83,11 +83,24 @@ public static class ObservabilityExtensions
                 .AddAspNetCoreInstrumentation(o =>
                     o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/health"))
                 .AddHttpClientInstrumentation()
-                // AddEntityFrameworkCoreInstrumentation and
-                // AddRedisInstrumentation land with the packages they
-                // instrument, at PR-08 and PR-12. Unlike a meter name, each
-                // costs a package reference — a claim about the dependency
-                // graph that nothing here would yet make true.
+                // Landed with PR-08, the PR that gave a service a DbContext —
+                // §13.2's rule is that an instrumentation arrives with the
+                // package it instruments, and EF Core is now here.
+                //
+                // No options lambda, and §13.2 was amended to match. The
+                // chapter configured SetDbStatementForText, which this package
+                // line does not have: the command text rides on the
+                // semantic-convention attributes and is emitted by default.
+                // The package's XML also documents a SetDbQueryParameters
+                // switch — raw parameter VALUES on the span, past §13.4's
+                // redactor — but the compiler rejects it on this pin, so
+                // nothing here can turn it on. If a bump ever exposes it, it
+                // stays off.
+                .AddEntityFrameworkCoreInstrumentation()
+                // AddRedisInstrumentation still waits for PR-12, on the same
+                // rule. Unlike a meter name, it costs a package reference — a
+                // claim about the dependency graph that nothing here would yet
+                // make true.
                 .AddSource("MassTransit"))
             .UseOtlpExporter();
 

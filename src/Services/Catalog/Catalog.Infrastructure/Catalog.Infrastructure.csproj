@@ -4,9 +4,18 @@
     Settings come from Directory.Build.props (§4.4).
 
     Domain and Application — §4.2's third row permits any package besides, and
-    this project takes none yet: EF Core, the connection strings and the
-    readiness checks all arrive with PR-08.
+    PR-08 is where that row starts being used: EF Core for the write side
+    (§7.2), Dapper for the raw writes IUnitOfWork exposes (§6.3), the SQL
+    readiness check (§13.5), and IConfiguration, which AddCatalogInfrastructure
+    now names in its signature.
   -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="AspNetCore.HealthChecks.SqlServer" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Catalog.Domain\Catalog.Domain.csproj" />

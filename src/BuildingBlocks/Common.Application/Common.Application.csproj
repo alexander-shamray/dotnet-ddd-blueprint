@@ -3,10 +3,22 @@
   <!--
     Settings come from Directory.Build.props (§4.4).
 
-    No reference to Common.Domain yet. §4.2 permits one, and TransactionBehavior
-    will need it — it counts IAggregateRoot (§6.3) — but that arrives with
-    PR-09. An unused project reference is a claim about the dependency graph
-    that nothing in this PR makes true.
+    No reference to Common.Domain yet. §4.2 permits one; nothing here needs one,
+    because no type in this assembly names a domain type. An unused project
+    reference is a claim about the dependency graph that nothing makes true.
+
+    Not "TransactionBehavior counts IAggregateRoot", which this comment said
+    until a review checked it. §6.3's behaviour reads
+    IUnitOfWork.ModifiedAggregateCount — an int — and calls
+    IDomainEventDispatcher.DispatchAsync(CancellationToken); neither signature
+    names a domain type. The `is IAggregateRoot` test lives in EfUnitOfWork,
+    over EF's change tracker, and Infrastructure already references Domain.
+    That separation is the whole point of counting behind the port.
+
+    The edge is drawn by the first Application type that genuinely names a
+    domain type. On the plan that is §7.5's IDomainEventCollector, whose
+    CollectAndClear returns IReadOnlyList&lt;IDomainEvent&gt; — so it arrives
+    with the outbox, not with PR-09.
   -->
 
   <ItemGroup>

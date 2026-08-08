@@ -11,5 +11,5 @@ using Xunit;
 // still alive when a request runs in another, defeats the null it assigned.
 // The provider unsubscribes the listener on disposal, so serial execution is
 // enough to make the ordering deterministic; the parallelism this gives up is
-// worth very little; the suite is 55 tests running in about a second.
+// worth very little; the suite is 56 tests running in about a second.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]

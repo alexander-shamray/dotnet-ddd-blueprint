@@ -19,14 +19,22 @@
     <!-- The endpoints gate (§4.2) — a namespace rule, so it needs type-level
          dependency analysis rather than GetReferencedAssemblies. -->
     <PackageReference Include="NetArchTest.Rules" />
-    <!-- WebApplicationFactory over the real Program (§12.4). No containers
-         yet: the host smoke asks only what a host with no connection strings
-         can answer — PR-08 brings the infrastructure worth containerising. -->
+    <!-- WebApplicationFactory over the real Program (§12.4). -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- Real SQL Server, per ADR-010: the in-memory provider enforces no
+         foreign keys, implements no rowversion and translates LINQ
+         differently, so a suite green against it still fails in production. -->
+    <PackageReference Include="Testcontainers.MsSql" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
+    <!-- The migrator, because its exit code is a contract with §7.4's
+         `backoffLimit: 2` and the smoke drives the real host rather than a
+         copy of its wiring. §4.1 gives the service three test projects and
+         none of them is a *.Migrator.Tests, so the suite that owns containers
+         owns this too. -->
+    <ProjectReference Include="..\..\src\Services\Catalog\Catalog.Migrator\Catalog.Migrator.csproj" />
   </ItemGroup>
 
 </Project>
