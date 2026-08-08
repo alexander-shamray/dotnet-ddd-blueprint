@@ -80,9 +80,14 @@ services:
       context: ../..
       dockerfile: src/Services/Ordering/Ordering.Migrator/Dockerfile
     environment:
-      # Migrator identity (DDL) — §7.1. Locally these differ only by SQL login;
-      # in production they are separate secrets on separate workloads.
-      ConnectionStrings__OrderingMigrator: "${ORDERING_MIGRATOR_CONNECTION}"
+      # Migrator identity (DDL) — §7.1. Locally both keys resolve to the one
+      # sa login (§14.2's stated simplification); in production they are
+      # separate secrets on separate workloads. The default is inline, nesting
+      # the password's own default, because .env.example promises every
+      # variable a working default — bare ${…} interpolates to an empty
+      # string on a clean checkout, which config -q accepts and the first
+      # query does not.
+      ConnectionStrings__OrderingMigrator: "${ORDERING_MIGRATOR_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
     depends_on:
       sql: { condition: service_healthy }
     restart: "no"
@@ -94,7 +99,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       # Runtime identity (DML only) — never the migrator connection.
-      ConnectionStrings__Ordering: "${ORDERING_CONNECTION}"
+      ConnectionStrings__Ordering: "${ORDERING_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
       ConnectionStrings__RedisCache: "redis-cache:6379"
       ConnectionStrings__RedisCoordination: "redis-coordination:6379"
       ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
@@ -241,6 +246,22 @@ host with a debugger attached — the usual inner-loop compromise:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.infra-only.yml up -d
 dotnet run --project src/Services/Ordering/Ordering.Api
+```
+
+The override's whole content is a profile per application service. An override
+cannot delete a service, but profiles gate activation and nothing activates
+this one, so the default `up` skips every service it names — declaratively,
+with no duplicated configuration to drift:
+
+```yaml
+# deploy/compose/docker-compose.infra-only.yml
+services:
+  ordering-migrator:
+    profiles: [ "excluded" ]
+  ordering-api:
+    profiles: [ "excluded" ]
+  # ... every application block in docker-compose.yml joins this list in the
+  # same PR that adds it; an omitted one silently keeps starting.
 ```
 
 ## 14.2 Aspire — optional accelerator

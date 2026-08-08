@@ -1,0 +1,14 @@
+# §14.1's inner-loop override: infrastructure in containers, the service on
+# the host with a debugger attached. Assigning a profile removes a service
+# from the default `up` — profiles gate activation, and nothing activates
+# this one — which is the declarative way to exclude a service an override
+# file cannot delete. Every application block added to docker-compose.yml
+# joins this list in the same PR.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.infra-only.yml up -d
+#   dotnet run --project src/Services/Catalog/Catalog.Api
+services:
+  catalog-migrator:
+    profiles: [ "excluded" ]
+  catalog-api:
+    profiles: [ "excluded" ]

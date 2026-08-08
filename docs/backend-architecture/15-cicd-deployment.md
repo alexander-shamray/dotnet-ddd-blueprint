@@ -189,7 +189,7 @@ RUN dotnet restore src/Services/Ordering/Ordering.Api/Ordering.Api.csproj
 RUN dotnet publish src/Services/Ordering/Ordering.Api/Ordering.Api.csproj \
     -c $BUILD_CONFIGURATION -o /app/publish --no-restore /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
@@ -203,6 +203,13 @@ Chiselled base images contain no package manager and no shell, which removes
 most of the CVE surface that routine scans would otherwise report. The trade-off
 is that `kubectl exec` into a running container gives you nothing — debugging
 uses ephemeral debug containers instead.
+
+The tag is `-extra`, and the suffix is load-bearing: the plain chiselled image
+runs in globalization-invariant mode, and `Microsoft.Data.SqlClient` refuses to
+open a connection under it — `Globalization Invariant Mode is not supported`,
+at the first query rather than at build. Every service here talks to SQL
+Server, so every image takes the variant. What `-extra` adds is ICU and
+tzdata, nothing else; the shell and the package manager stay gone.
 
 ### Every service builds two images
 
@@ -224,8 +231,9 @@ RUN dotnet restore src/Services/Ordering/Ordering.Migrator/Ordering.Migrator.csp
 RUN dotnet publish src/Services/Ordering/Ordering.Migrator/Ordering.Migrator.csproj \
     -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
-# Runtime, not aspnet — the migrator has no listener.
-FROM mcr.microsoft.com/dotnet/runtime:10.0-noble-chiseled AS final
+# Runtime, not aspnet — the migrator has no listener. -extra for the same
+# reason as the API image: SqlClient needs ICU.
+FROM mcr.microsoft.com/dotnet/runtime:10.0-noble-chiseled-extra AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 USER $APP_UID

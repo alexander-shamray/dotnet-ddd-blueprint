@@ -58,6 +58,42 @@ services:
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
 
+  # §14.1's pair rule: a {service}-migrator one-shot plus the service itself,
+  # gated on `condition: service_completed_successfully` — every service owns
+  # a database and none may migrate at startup (§4.1, ADR-007).
+  catalog-migrator:
+    build:
+      context: ../..
+      dockerfile: src/Services/Catalog/Catalog.Migrator/Dockerfile
+    environment:
+      # Migrator identity (DDL) — §7.1. Locally both keys resolve to the one
+      # sa login (§14.2's stated simplification); the KEY still differs, so
+      # the migrator reads the name it will read in production. The default is
+      # inline because .env.example promises every variable one — §14.1's bare
+      # `${…}` would break `docker compose up` on a clean checkout.
+      ConnectionStrings__CatalogMigrator: "${CATALOG_MIGRATOR_CONNECTION:-Server=sql;Database=Catalog;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
+    depends_on:
+      sql: { condition: service_healthy }
+    restart: "no"
+
+  catalog-api:
+    build:
+      context: ../..
+      dockerfile: src/Services/Catalog/Catalog.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Runtime identity (DML only) — never the migrator connection.
+      ConnectionStrings__Catalog: "${CATALOG_CONNECTION:-Server=sql;Database=Catalog;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      # No Redis, RabbitMQ or Identity__Authority keys: Catalog reads none of
+      # them yet — HybridCache, the outbox and JWT validation arrive with
+      # PR-13, PR-14 and PR-16, and an env var nothing reads is the container
+      # form of an unused registration. Each joins with the PR whose code
+      # reads it.
+    ports: [ "5102:8080" ]
+    depends_on:
+      catalog-migrator: { condition: service_completed_successfully }
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     command: [ "--config=/etc/otel/config.yaml" ]
