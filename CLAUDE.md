@@ -81,9 +81,12 @@ src/BuildingBlocks/
   Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,
                                  IHasDomainEvents, IAggregateRoot — no packages
   Common.Application/            Result, Result<T>, Error, ErrorType; the §6.2
-                                 dispatcher and its two behaviours, plus
-                                 RequestMetrics, PluggableInterfaces and the
-                                 §6.3 IUnitOfWork port
+                                 dispatcher and its three behaviours, plus
+                                 RequestMetrics, PluggableInterfaces,
+                                 InvariantViolationException, and two ports:
+                                 §6.3's IUnitOfWork and §7.5's
+                                 IDomainEventDispatcher — the interface only,
+                                 everything behind it waits for PR-14
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
                                  ToHttpResult, AddObservability,
                                  MapCommonHealthEndpoints, SensitiveDataRedactor,
@@ -96,8 +99,10 @@ src/Services/Catalog/
   Catalog.Domain/                AssemblyMarker only — the typeof anchor the
                                  gates need until PR-10's first aggregate
   Catalog.Application/           AddCatalogApplication: the §6.2 scan, the
-                                 dispatcher, the clock, RequestMetrics, the
-                                 two behaviours in pipeline order
+                                 dispatcher, the NullDomainEventDispatcher
+                                 PR-14 replaces (§4.2 registers the dispatcher
+                                 in Application), the clock, RequestMetrics,
+                                 the three behaviours in pipeline order
   Catalog.Infrastructure/        AddCatalogInfrastructure(IConfiguration): the
                                  §6.2 scan, the sealed CatalogDbContext with
                                  §7.2's conventions, EfUnitOfWork, §13.5's SQL
@@ -127,8 +132,8 @@ tests/
 ```
 
 The second block is PR-01's, the third PR-02's through PR-05's, the
-compose tree PR-06's, the Catalog trees PR-07's, and their persistence
-PR-08's.
+compose tree PR-06's, the Catalog trees PR-07's, their persistence
+PR-08's, and the third behaviour with its two ports PR-09's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it, but an unused project reference is a claim about the dependency
 graph that nothing yet makes true. PR-08's `IUnitOfWork` did not change that
@@ -216,43 +221,51 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 143 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 154 tests, so
 the build rules and the drift rules below are live and a green run now means
-something. **PR-09 is next** (`feat(common): TransactionBehavior over
-IUnitOfWork`), which depends on PR-04 and PR-08, registers a third behaviour in
-`AddCatalogApplication`, and proves `SaveChanges` happens once on success and
-never on failure. It does **not** draw the
-`Common.Application → Common.Domain` edge, and this file said it would until a
-review checked: the behaviour reads `ModifiedAggregateCount` as an `int` and
-calls `DispatchAsync(CancellationToken)`, so neither signature names a domain
-type. The `is IAggregateRoot` test is `EfUnitOfWork`'s, in Infrastructure,
-which already references Domain. PR-07 landed the Catalog skeleton, so §4.2's architecture
-rules are a build failure — each gate was observed red against a deliberately
-added forbidden reference before it was trusted.
+something. **PR-10 is next** (`feat(catalog): first vertical slice — command,
+query, cursor pagination`), which depends on PR-07 through PR-09 and delivers
+the first aggregate, the first command and query, the service's Dockerfile and
+Compose block, and deliberately unauthenticated endpoints that PR-16 closes.
+PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a build
+failure — each gate was observed red against a deliberately added forbidden
+reference before it was trusted.
 
-**PR-09 carries one thing Appendix C does not list, decided on PR #15 and
-scheduled here rather than left in a review thread.** `EfUnitOfWork.ExecuteAsync`
-retries its whole delegate through `CreateExecutionStrategy`, and `db` is the
-same scoped `CatalogDbContext` on every attempt — EF does not reset the change
-tracker when a transaction rolls back. So after a transient fault mid-handler,
-attempt 2's `GetAsync` returns attempt 1's *tracked, already-mutated* instance
-from the identity map rather than the committed row, the domain method runs
-again, and one `SaveChanges` commits the mutation twice. The staged outbox rows
-survive the same way, so the event publishes twice as well. Neither throws, and
-neither is reachable from a test suite: it needs a transient fault under load,
-which is §7.5's "works under test and fails under load" in another costume.
+PR-09 landed §6.3's `TransactionBehavior` and did **not** draw the
+`Common.Application → Common.Domain` edge — the behaviour reads
+`ModifiedAggregateCount` as an `int` and calls `DispatchAsync(CancellationToken)`,
+so neither signature names a domain type, and the edge still waits for §7.5's
+`IDomainEventCollector` (PR-14). It brought `IDomainEventDispatcher` forward as
+an interface only, over Catalog's `NullDomainEventDispatcher`.
 
-The fix is one line at the top of each attempt — `db.ChangeTracker.Clear()`,
-so every attempt starts from committed state — plus a test that forces a
-transient fault and asserts no double-apply, and a sentence in §6.3 beside its
-existing "may therefore run **more than once**" note, which covers side effects
-*outside* the transaction and not in-memory state surviving inside it. **Not** a
-fresh `DbContext` per attempt: that moves retry out of `IUnitOfWork` and up into
-the dispatcher, and destroys the property that makes §6.3's behaviour reviewable
-— that it depends on nothing but the port.
+PR-09 also shipped PR #15's retry fix — `db.ChangeTracker.Clear()` at the top
+of every `EfUnitOfWork.ExecuteAsync` attempt, so a transient fault cannot
+re-run the domain method on attempt 1's tracked, already-mutated aggregates
+and commit the mutation twice. Both halves are tested: a strategy subclass
+retrying a marker exception proves the delegate re-runs and the raw write
+commits once, and the identity-map half — attempt 2 must read committed
+state, not attempt 1's mutation — is asserted through a **test-only
+`IModelCustomizer`** that maps a `TrackedProbe` entity onto the fixture's
+probe table in the retry tests' own `DbContextOptions` and nowhere else. That
+was first deferred to PR-10 as needing an entity type; a Copilot review on
+PR #18 pushed back, and the customizer is the answer that costs neither a
+production model change nor snapshot drift. The technique generalises: a test
+that needs an entity the model does not have swaps the customizer, never
+edits `CatalogDbContext`.
 
-**What the line does not fix is the commit-acknowledgement race**, and that
-stays open past PR-09 on purpose. If `CommitAsync` succeeds on the server and
+**PR-10 inherits two things from PR-09, stated here rather than left in its
+commit bodies:**
+
+- **Raised events are dropped until PR-14.** `NullDomainEventDispatcher` is
+  truthful while no aggregate exists; from PR-10's first aggregate until
+  PR-14's outbox it silently drops whatever is raised, and PR-10 must weigh
+  that against its slice.
+- **`IdempotencyBehavior`'s seat.** The pipeline registers three of four
+  behaviours; the missing one slots in *between* Validation and Transaction,
+  and the registration comment names the seat.
+
+**What PR-09's line does not fix is the commit-acknowledgement race**, and that
+stays open past it on purpose. If `CommitAsync` succeeds on the server and
 the connection drops before the ack, the strategy retries work that is already
 durable, and no in-process tidying can tell those two states apart. Closing it
 needs an idempotency marker written *inside* the transaction — §8.5's
@@ -289,9 +302,10 @@ inside it: it holds §10.4, §10.5, §13.2, §13.4 and §13.5, and nothing else
 until PR-16 adds JWT validation — which is also the one gap inside
 `AddCommonWebDefaults`, three of §13.2's five pieces today.
 
-`Common.Application` is the same story one layer down. The pipeline is two
-behaviours of four: **`IdempotencyBehavior` (§8.5) and `TransactionBehavior`
-(§6.3) do not exist**, and PR-09 is the PR that adds the second one. So is
+`Common.Application` is the same story one layer down. The pipeline is three
+behaviours of four: **`IdempotencyBehavior` (§8.5) does not exist**, and its
+seat is between Validation and Transaction. Built to be appended to in the
+same way is
 `PluggableInterfaces.All`, which lists two of its eventual five — the three
 missing entries name interfaces §7.5 and §9.4 have not defined yet, and the
 list is built to be appended to. Adding an interface there and nowhere else is

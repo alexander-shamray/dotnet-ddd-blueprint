@@ -1,5 +1,10 @@
 using System.Net;
+using Catalog.Infrastructure;
+using Catalog.Infrastructure.Persistence;
 using Common.Application;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -119,6 +124,39 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
     }
 
     [Fact]
+    public async Task The_behaviour_leaves_no_row_when_a_handler_writes_raw_and_then_fails()
+    {
+        // Appendix C's PR-09 test, on the full §6.3 stack: the real behaviour
+        // over the scope's real unit of work and the registered dispatcher,
+        // with a handler that writes through ExecuteRawAsync and then rejects.
+        // PR-08 proved EfUnitOfWork's half from the port; this proves the
+        // behaviour is what opens the unit and declines the commit.
+        Guid id = Guid.CreateVersion7();
+
+        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        IDomainEventDispatcher dispatcher =
+            scope.ServiceProvider.GetRequiredService<IDomainEventDispatcher>();
+
+        TransactionBehavior<ProbeCommand, Result> behaviour = new(unitOfWork, dispatcher);
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        Result result = await behaviour.HandleAsync(
+            new ProbeCommand(),
+            async () =>
+            {
+                await InsertProbeAsync(unitOfWork, id, ct);
+                return Result.Failure(Error.Rule("probe.rejected", "The handler rejected the command."));
+            },
+            ct);
+
+        result.IsFailure.ShouldBeTrue();
+
+        int rows = await fixture.ProbeRowCountAsync(id);
+        rows.ShouldBe(0, "the behaviour must decline the commit, and the rollback must take the raw write");
+    }
+
+    [Fact]
     public async Task ExecuteRawAsync_outside_a_unit_of_work_throws_rather_than_autocommitting()
     {
         // Without the guard this call succeeds: Dapper is handed a null
@@ -137,6 +175,115 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
 
         int rows = await fixture.ProbeRowCountAsync(id);
         rows.ShouldBe(0, "the guard must refuse the write, not merely report it afterwards");
+    }
+
+    [Fact]
+    public async Task A_transient_fault_retries_the_whole_unit_and_commits_it_once()
+    {
+        // PR #15's finding, the unmanaged half: the strategy re-runs the
+        // whole delegate, and attempt 1's work must not survive into the
+        // commit — here the raw write, rolled back with its transaction. The
+        // tracked half is the test below.
+        Guid id = Guid.CreateVersion7();
+        int attempts = 0;
+
+        await using ServiceProvider provider = BuildFaultInjectingProvider();
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+        Result result = await unitOfWork.ExecuteAsync(
+            async token =>
+            {
+                attempts++;
+                await InsertProbeAsync(unitOfWork, id, token);
+                if (attempts == 1)
+                    throw new FakeTransientException();
+                return Result.Success();
+            },
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.ShouldBeTrue();
+        attempts.ShouldBe(2, "the strategy must re-run the delegate, not surface the fault");
+
+        int rows = await fixture.ProbeRowCountAsync(id);
+        rows.ShouldBe(1, "attempt 1's write rolls back; attempt 2's commits exactly once");
+    }
+
+    [Fact]
+    public async Task A_transient_fault_does_not_double_apply_a_tracked_mutation()
+    {
+        // The identity-map half, and the reason EfUnitOfWork clears the
+        // tracker: EF keeps it across a rollback, so without the Clear()
+        // attempt 2 reads attempt 1's already-mutated instance back out of
+        // the identity map and the domain method applies twice into one
+        // commit. Copilot asked for exactly this test on PR #18;
+        // ProbeModelCustomizer is what makes a tracked entity possible before
+        // PR-10's first aggregate. Observed red against a Clear()-less
+        // EfUnitOfWork before it was trusted.
+        Guid id = Guid.CreateVersion7();
+
+        await using ServiceProvider provider = BuildFaultInjectingProvider();
+
+        await using (AsyncServiceScope seedScope = provider.CreateAsyncScope())
+        {
+            CatalogDbContext seed = seedScope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            seed.Add(new TrackedProbe { Id = id, Note = "committed" });
+            await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        int attempts = 0;
+
+        Result result = await unitOfWork.ExecuteAsync(
+            async token =>
+            {
+                attempts++;
+                TrackedProbe probe = await db.Set<TrackedProbe>().SingleAsync(p => p.Id == id, token);
+                probe.Note += "+once";                                   // the domain method
+                if (attempts == 1)
+                    throw new FakeTransientException();
+                await unitOfWork.SaveChangesAsync(token);
+                return Result.Success();
+            },
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.ShouldBeTrue();
+        attempts.ShouldBe(2);
+
+        string note = await fixture.ScalarAsync<string>(
+            "SELECT Value = Note FROM catalog.TransactionProbe WHERE Id = {0}", id);
+        note.ShouldBe(
+            "committed+once",
+            "attempt 2 must read committed state, not attempt 1's mutation out of the identity map");
+    }
+
+    /// <summary>
+    /// AddCatalogInfrastructure over the fixture's database, with two changes
+    /// scoped to these options and nothing else's: the execution strategy also
+    /// retries the marker, and the model carries <see cref="TrackedProbe"/>.
+    /// AddDbContext backs off registrations that exist, so the stock options
+    /// descriptor is removed first.
+    /// </summary>
+    private ServiceProvider BuildFaultInjectingProvider()
+    {
+        ServiceCollection services = new();
+        services.AddCatalogInfrastructure(new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?> { ["ConnectionStrings:Catalog"] = fixture.ConnectionString })
+            .Build());
+
+        ServiceDescriptor options =
+            services.Single(d => d.ServiceType == typeof(DbContextOptions<CatalogDbContext>));
+        services.Remove(options);
+        services.AddDbContext<CatalogDbContext>(o => o
+            .UseSqlServer(
+                fixture.ConnectionString,
+                sql => sql.ExecutionStrategy(deps => new MarkerRetryingStrategy(deps)))
+            .ReplaceService<IModelCustomizer, ProbeModelCustomizer>());
+
+        return services.BuildServiceProvider();
     }
 
     [Fact]
@@ -165,3 +312,6 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
             new { Id = id, Note = "written through IUnitOfWork" },
             ct);
 }
+
+/// <summary>The command shape the behaviour's constraint requires — nothing more.</summary>
+public sealed record ProbeCommand : ICommand<Result>;

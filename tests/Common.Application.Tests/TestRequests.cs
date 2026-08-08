@@ -104,6 +104,18 @@ public sealed class RejectHandler : ICommandHandler<Reject, Result>
         Task.FromResult(Result.Failure(Error.Rule("test.rejected", "The domain said no.")));
 }
 
+/// <summary>
+/// A command the domain accepts, returning the non-generic <c>Result</c> —
+/// the success arm of §6.3's failure guard, <c>Reject</c>'s counterpart.
+/// </summary>
+public sealed record Approve : ICommand<Result>;
+
+public sealed class ApproveHandler : ICommandHandler<Approve, Result>
+{
+    public Task<Result> HandleAsync(Approve command, CancellationToken ct) =>
+        Task.FromResult(Result.Success());
+}
+
 public sealed class PingValidator : AbstractValidator<Ping>
 {
     public PingValidator() => RuleFor(x => x.Message).NotEmpty().WithErrorCode("Empty");

@@ -635,6 +635,13 @@ internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
         return await strategy.ExecuteAsync(
             async token =>
             {
+                // Every attempt starts from committed state. EF does not reset
+                // the change tracker when a transaction rolls back, so without
+                // this line a retry re-runs the domain method on attempt 1's
+                // tracked, already-mutated aggregates out of the identity map,
+                // and one SaveChanges commits the mutation twice.
+                db.ChangeTracker.Clear();
+
                 await using IDbContextTransaction tx =
                     await db.Database.BeginTransactionAsync(token);
                 TResult result = await operation(token);
@@ -696,6 +703,17 @@ unit is wrapped in the strategy. Omitting it produces an exception the first
 time a transient network fault occurs in production. Note that the operation may
 therefore run **more than once** — it must not have side effects outside the
 transaction, which is another reason the outbox exists.
+
+Outside the transaction is only half of it: **in-memory state survives a
+rollback too**, because EF does not reset the change tracker when a transaction
+fails. Without the `ChangeTracker.Clear()` above, attempt 2's load returns
+attempt 1's tracked, already-mutated aggregate from the identity map rather
+than the committed row, the domain method runs again, and one `SaveChanges`
+commits the mutation twice — the staged outbox rows survive and double-publish
+the same way. Clearing at the top of each attempt is the fix that keeps retry
+behind the port; a fresh `DbContext` per attempt would move it into the
+dispatcher and cost the behaviour above the property that it depends on nothing
+but `IUnitOfWork`.
 
 **`DbContext` never leaves Infrastructure.** An `IApplicationDbContext`
 interface exposing `DbSet<T>` is a common shortcut and is explicitly rejected
