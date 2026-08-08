@@ -122,10 +122,11 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     /// <summary>
     /// The migrations EF considers applied. Asked through EF rather than by
-    /// selecting from <c>__EFMigrationsHistory</c>, because
-    /// <c>HasDefaultSchema</c> moves that table out of <c>dbo</c> and an
-    /// unqualified query would be asserting where the table is rather than
-    /// what it holds.
+    /// selecting from <c>__EFMigrationsHistory</c>, so the assertion is about
+    /// what that table holds and not about where it lives — which is EF's to
+    /// decide, is configured by <c>MigrationsHistoryTable</c> rather than by
+    /// this context's <c>HasDefaultSchema</c>, and is no part of what PR-08
+    /// claims.
     /// </summary>
     public async Task<string[]> AppliedMigrationsAsync()
     {

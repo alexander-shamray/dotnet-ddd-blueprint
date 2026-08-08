@@ -89,13 +89,13 @@ public static class ObservabilityExtensions
                 //
                 // No options lambda, and §13.2 was amended to match. The
                 // chapter configured SetDbStatementForText, which this package
-                // line no longer has: the command text now rides on the
+                // line does not have: the command text rides on the
                 // semantic-convention attributes and is emitted by default.
-                // What survives is SetDbQueryParameters, and it stays off —
-                // its own documentation warns it captures raw parameter
-                // values, which is every password and card number the
-                // application has ever bound, written to a span that §13.4's
-                // redactor never sees.
+                // The package's XML also documents a SetDbQueryParameters
+                // switch — raw parameter VALUES on the span, past §13.4's
+                // redactor — but the compiler rejects it on this pin, so
+                // nothing here can turn it on. If a bump ever exposes it, it
+                // stays off.
                 .AddEntityFrameworkCoreInstrumentation()
                 // AddRedisInstrumentation still waits for PR-12, on the same
                 // rule. Unlike a meter name, it costs a package reference — a

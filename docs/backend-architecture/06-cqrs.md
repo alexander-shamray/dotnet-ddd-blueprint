@@ -628,24 +628,30 @@ internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
     {
         IExecutionStrategy strategy = db.Database.CreateExecutionStrategy();
 
-        return await strategy.ExecuteAsync(async () =>
-        {
-            await using IDbContextTransaction tx =
-                await db.Database.BeginTransactionAsync(ct);
-            TResult result = await operation(ct);
+        // The token-aware overload, so cancellation is observed by the strategy
+        // itself. With the parameterless one the token reaches only the calls
+        // inside the delegate, so a cancel during a retry backoff is not seen
+        // until the delay elapses and the next attempt reaches one of them.
+        return await strategy.ExecuteAsync(
+            async token =>
+            {
+                await using IDbContextTransaction tx =
+                    await db.Database.BeginTransactionAsync(token);
+                TResult result = await operation(token);
 
-            // The commit decision belongs with the commit. §6.3's behaviour
-            // declines to SaveChanges on a failed Result, which is enough for
-            // tracked changes — but ExecuteRawAsync writes on this
-            // transaction's connection immediately, and only a rollback undoes
-            // that. Returning without committing disposes the transaction,
-            // which rolls it back.
-            if (result is Result { IsFailure: true })
+                // The commit decision belongs with the commit. §6.3's behaviour
+                // declines to SaveChanges on a failed Result, which is enough
+                // for tracked changes — but ExecuteRawAsync writes on this
+                // transaction's connection immediately, and only a rollback
+                // undoes that. Returning without committing disposes the
+                // transaction, which rolls it back.
+                if (result is Result { IsFailure: true })
+                    return result;
+
+                await tx.CommitAsync(token);
                 return result;
-
-            await tx.CommitAsync(ct);
-            return result;
-        });
+            },
+            ct);
     }
 
     public Task<int> SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);

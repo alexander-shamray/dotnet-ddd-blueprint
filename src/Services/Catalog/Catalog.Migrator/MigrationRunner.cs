@@ -41,7 +41,12 @@ public sealed class MigrationRunner(CatalogDbContext db, ILogger<MigrationRunner
         LoggerMessage.Define(
             LogLevel.Error,
             new EventId(4, nameof(Failed)),
-            "Catalog migration failed. The schema is unchanged and the job exits non-zero.");
+            // Not "the schema is unchanged" — that is not something this
+            // process can promise. A migration may suppress its transaction,
+            // and a later one can fail after an earlier one has committed, so
+            // the honest report to whoever reads this line at 3am is that the
+            // schema may be half applied.
+            "Catalog migration failed; the schema may be partially applied. The job exits non-zero.");
 
     /// <returns>0 when the schema is current, 1 when it is not.</returns>
     public async Task<int> RunAsync(CancellationToken ct)
