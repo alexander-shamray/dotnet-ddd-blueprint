@@ -119,6 +119,39 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
     }
 
     [Fact]
+    public async Task The_behaviour_leaves_no_row_when_a_handler_writes_raw_and_then_fails()
+    {
+        // Appendix C's PR-09 test, on the full §6.3 stack: the real behaviour
+        // over the scope's real unit of work and the registered dispatcher,
+        // with a handler that writes through ExecuteRawAsync and then rejects.
+        // PR-08 proved EfUnitOfWork's half from the port; this proves the
+        // behaviour is what opens the unit and declines the commit.
+        Guid id = Guid.CreateVersion7();
+
+        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        IDomainEventDispatcher dispatcher =
+            scope.ServiceProvider.GetRequiredService<IDomainEventDispatcher>();
+
+        TransactionBehavior<ProbeCommand, Result> behaviour = new(unitOfWork, dispatcher);
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        Result result = await behaviour.HandleAsync(
+            new ProbeCommand(),
+            async () =>
+            {
+                await InsertProbeAsync(unitOfWork, id, ct);
+                return Result.Failure(Error.Rule("probe.rejected", "The handler rejected the command."));
+            },
+            ct);
+
+        result.IsFailure.ShouldBeTrue();
+
+        int rows = await fixture.ProbeRowCountAsync(id);
+        rows.ShouldBe(0, "the behaviour must decline the commit, and the rollback must take the raw write");
+    }
+
+    [Fact]
     public async Task ExecuteRawAsync_outside_a_unit_of_work_throws_rather_than_autocommitting()
     {
         // Without the guard this call succeeds: Dapper is handed a null
@@ -165,3 +198,6 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
             new { Id = id, Note = "written through IUnitOfWork" },
             ct);
 }
+
+/// <summary>The command shape the behaviour's constraint requires — nothing more.</summary>
+public sealed record ProbeCommand : ICommand<Result>;
