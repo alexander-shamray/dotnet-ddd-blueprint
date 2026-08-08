@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Catalog.Api.Tests;
@@ -21,4 +22,40 @@ public sealed class MarkerRetryingStrategy(ExecutionStrategyDependencies depende
 {
     protected override bool ShouldRetryOn(Exception exception) =>
         exception is FakeTransientException || base.ShouldRetryOn(exception);
+}
+
+/// <summary>
+/// A tracked entity over the fixture's probe table, so the identity-map half
+/// of the retry defect is assertable before PR-10's first aggregate exists.
+/// </summary>
+public sealed class TrackedProbe
+{
+    public Guid Id { get; set; }
+
+    public string Note { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Adds <see cref="TrackedProbe"/> to the model of the retry tests' own
+/// <c>DbContextOptions</c> — and nothing else's. The production model and its
+/// migration snapshot never see the entity: a test table mapped in
+/// <c>CatalogDbContext</c> itself would make the next <c>migrations add</c>
+/// generate DDL for a table only the fixture creates, which is the snapshot
+/// drift PR-08 forbids.
+/// </summary>
+public sealed class ProbeModelCustomizer(ModelCustomizerDependencies dependencies)
+    : ModelCustomizer(dependencies)
+{
+    public override void Customize(ModelBuilder modelBuilder, DbContext context)
+    {
+        base.Customize(modelBuilder, context);
+
+        modelBuilder.Entity<TrackedProbe>(probe =>
+        {
+            probe.ToTable("TransactionProbe", "catalog");
+            probe.HasKey(p => p.Id);
+            probe.Property(p => p.Id).ValueGeneratedNever();
+            probe.Property(p => p.Note).HasMaxLength(100);
+        });
+    }
 }

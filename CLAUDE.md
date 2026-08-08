@@ -221,7 +221,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 153 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 154 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-10 is next** (`feat(catalog): first vertical slice — command,
 query, cursor pagination`), which depends on PR-07 through PR-09 and delivers
@@ -238,19 +238,24 @@ so neither signature names a domain type, and the edge still waits for §7.5's
 `IDomainEventCollector` (PR-14). It brought `IDomainEventDispatcher` forward as
 an interface only, over Catalog's `NullDomainEventDispatcher`.
 
-**PR-10 inherits three things from PR-09, stated here rather than left in its
+PR-09 also shipped PR #15's retry fix — `db.ChangeTracker.Clear()` at the top
+of every `EfUnitOfWork.ExecuteAsync` attempt, so a transient fault cannot
+re-run the domain method on attempt 1's tracked, already-mutated aggregates
+and commit the mutation twice. Both halves are tested: a strategy subclass
+retrying a marker exception proves the delegate re-runs and the raw write
+commits once, and the identity-map half — attempt 2 must read committed
+state, not attempt 1's mutation — is asserted through a **test-only
+`IModelCustomizer`** that maps a `TrackedProbe` entity onto the fixture's
+probe table in the retry tests' own `DbContextOptions` and nowhere else. That
+was first deferred to PR-10 as needing an entity type; a Copilot review on
+PR #18 pushed back, and the customizer is the answer that costs neither a
+production model change nor snapshot drift. The technique generalises: a test
+that needs an entity the model does not have swaps the customizer, never
+edits `CatalogDbContext`.
+
+**PR-10 inherits two things from PR-09, stated here rather than left in its
 commit bodies:**
 
-- **The identity-map assertion.** PR-09 shipped PR #15's retry fix —
-  `db.ChangeTracker.Clear()` at the top of every `EfUnitOfWork.ExecuteAsync`
-  attempt, so a transient fault cannot re-run the domain method on attempt 1's
-  tracked, already-mutated aggregates and commit the mutation twice. Its retry
-  test (a strategy subclass retrying a marker exception) proves the delegate
-  re-runs and the raw write commits once, which is every path observable
-  today; the half that needs a *tracked entity* — attempt 2 must read
-  committed state, not attempt 1's mutation out of the identity map — is not
-  assertable while `CatalogDbContext` has no entity types. PR-10's slice adds
-  that test beside its first aggregate.
 - **Raised events are dropped until PR-14.** `NullDomainEventDispatcher` is
   truthful while no aggregate exists; from PR-10's first aggregate until
   PR-14's outbox it silently drops whatever is raised, and PR-10 must weigh

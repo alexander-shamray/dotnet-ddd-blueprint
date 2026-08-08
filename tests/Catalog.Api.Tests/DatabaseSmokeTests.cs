@@ -3,6 +3,7 @@ using Catalog.Infrastructure;
 using Catalog.Infrastructure.Persistence;
 using Common.Application;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -179,34 +180,14 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
     [Fact]
     public async Task A_transient_fault_retries_the_whole_unit_and_commits_it_once()
     {
-        // PR #15's finding, half of it testable today: the strategy re-runs
-        // the whole delegate, and attempt 1's work must not survive into the
+        // PR #15's finding, the unmanaged half: the strategy re-runs the
+        // whole delegate, and attempt 1's work must not survive into the
         // commit — here the raw write, rolled back with its transaction. The
-        // other half, attempt 2 reading attempt 1's tracked mutation from the
-        // identity map, needs an entity type and lands with PR-10's first
-        // aggregate; ChangeTracker.Clear() ships now so the sample never
-        // teaches the defect.
+        // tracked half is the test below.
         Guid id = Guid.CreateVersion7();
         int attempts = 0;
 
-        ServiceCollection services = new();
-        services.AddCatalogInfrastructure(new ConfigurationBuilder()
-            .AddInMemoryCollection(
-                new Dictionary<string, string?> { ["ConnectionStrings:Catalog"] = fixture.ConnectionString })
-            .Build());
-
-        // The same registration with one change: the strategy also retries
-        // the marker. AddDbContext backs off registrations that exist, so the
-        // stock options descriptor is removed first.
-        ServiceDescriptor options =
-            services.Single(d => d.ServiceType == typeof(DbContextOptions<CatalogDbContext>));
-        services.Remove(options);
-        services.AddDbContext<CatalogDbContext>(o =>
-            o.UseSqlServer(
-                fixture.ConnectionString,
-                sql => sql.ExecutionStrategy(deps => new MarkerRetryingStrategy(deps))));
-
-        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using ServiceProvider provider = BuildFaultInjectingProvider();
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
@@ -226,6 +207,83 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
 
         int rows = await fixture.ProbeRowCountAsync(id);
         rows.ShouldBe(1, "attempt 1's write rolls back; attempt 2's commits exactly once");
+    }
+
+    [Fact]
+    public async Task A_transient_fault_does_not_double_apply_a_tracked_mutation()
+    {
+        // The identity-map half, and the reason EfUnitOfWork clears the
+        // tracker: EF keeps it across a rollback, so without the Clear()
+        // attempt 2 reads attempt 1's already-mutated instance back out of
+        // the identity map and the domain method applies twice into one
+        // commit. Copilot asked for exactly this test on PR #18;
+        // ProbeModelCustomizer is what makes a tracked entity possible before
+        // PR-10's first aggregate. Observed red against a Clear()-less
+        // EfUnitOfWork before it was trusted.
+        Guid id = Guid.CreateVersion7();
+
+        await using ServiceProvider provider = BuildFaultInjectingProvider();
+
+        await using (AsyncServiceScope seedScope = provider.CreateAsyncScope())
+        {
+            CatalogDbContext seed = seedScope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+            seed.Add(new TrackedProbe { Id = id, Note = "committed" });
+            await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        int attempts = 0;
+
+        Result result = await unitOfWork.ExecuteAsync(
+            async token =>
+            {
+                attempts++;
+                TrackedProbe probe = await db.Set<TrackedProbe>().SingleAsync(p => p.Id == id, token);
+                probe.Note += "+once";                                   // the domain method
+                if (attempts == 1)
+                    throw new FakeTransientException();
+                await unitOfWork.SaveChangesAsync(token);
+                return Result.Success();
+            },
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.ShouldBeTrue();
+        attempts.ShouldBe(2);
+
+        string note = await fixture.ScalarAsync<string>(
+            "SELECT Value = Note FROM catalog.TransactionProbe WHERE Id = {0}", id);
+        note.ShouldBe(
+            "committed+once",
+            "attempt 2 must read committed state, not attempt 1's mutation out of the identity map");
+    }
+
+    /// <summary>
+    /// AddCatalogInfrastructure over the fixture's database, with two changes
+    /// scoped to these options and nothing else's: the execution strategy also
+    /// retries the marker, and the model carries <see cref="TrackedProbe"/>.
+    /// AddDbContext backs off registrations that exist, so the stock options
+    /// descriptor is removed first.
+    /// </summary>
+    private ServiceProvider BuildFaultInjectingProvider()
+    {
+        ServiceCollection services = new();
+        services.AddCatalogInfrastructure(new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?> { ["ConnectionStrings:Catalog"] = fixture.ConnectionString })
+            .Build());
+
+        ServiceDescriptor options =
+            services.Single(d => d.ServiceType == typeof(DbContextOptions<CatalogDbContext>));
+        services.Remove(options);
+        services.AddDbContext<CatalogDbContext>(o => o
+            .UseSqlServer(
+                fixture.ConnectionString,
+                sql => sql.ExecutionStrategy(deps => new MarkerRetryingStrategy(deps)))
+            .ReplaceService<IModelCustomizer, ProbeModelCustomizer>());
+
+        return services.BuildServiceProvider();
     }
 
     [Fact]
