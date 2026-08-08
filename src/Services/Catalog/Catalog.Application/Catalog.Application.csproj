@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    Domain and Common.Application — the §4.2 dependency table's second row.
+    No Common.Contracts yet: the project does not exist until PR-15, and an
+    unbuildable reference is not a claim this PR can make.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Catalog.Domain\Catalog.Domain.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\Common.Application\Common.Application.csproj" />
+  </ItemGroup>
+
+</Project>

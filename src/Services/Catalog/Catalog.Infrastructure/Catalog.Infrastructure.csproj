@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    Domain and Application — §4.2's third row permits any package besides, and
+    this project takes none yet: EF Core, the connection strings and the
+    readiness checks all arrive with PR-08.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Catalog.Domain\Catalog.Domain.csproj" />
+    <ProjectReference Include="..\Catalog.Application\Catalog.Application.csproj" />
+  </ItemGroup>
+
+</Project>

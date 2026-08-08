@@ -5,12 +5,14 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-06 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-07 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
 CI and the licence gate — the first C#: `Common.Domain`, `Common.Application`
-and `Common.Web`, each with its test project — and §14.1's Compose
-infrastructure, with the CI smoke that proves it.
+and `Common.Web`, each with its test project — §14.1's Compose infrastructure,
+with the CI smoke that proves it — and the first service skeleton: Catalog
+across §4.1's five projects, with §4.2's architecture gates live in its three
+test projects.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -60,7 +62,7 @@ docs/superpowers/
 global.json                      SDK pin (§4.4)
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the six projects below
+Platform.slnx                    the fourteen projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate, then restore/build/test
 .github/licence-gate/            the gate, its allow-list and its tests
@@ -83,19 +85,38 @@ src/BuildingBlocks/
                                  ToHttpResult, AddObservability,
                                  MapCommonHealthEndpoints, SensitiveDataRedactor,
                                  BuildInfo and the AddCommonWebDefaults that
-                                 composes them — the only project referencing
-                                 another, and the only one with a
-                                 FrameworkReference
+                                 composes them — the only building block
+                                 referencing another, and the only one with a
+                                 FrameworkReference (Catalog.Api's rides in
+                                 with Sdk.Web)
+src/Services/Catalog/
+  Catalog.Domain/                AssemblyMarker only — the typeof anchor the
+                                 gates need until PR-10's first aggregate
+  Catalog.Application/           AddCatalogApplication: the §6.2 scan, the
+                                 dispatcher, the clock, RequestMetrics, the
+                                 two behaviours in pipeline order
+  Catalog.Infrastructure/        AddCatalogInfrastructure: the §6.2 scan only;
+                                 no IConfiguration parameter until PR-08 has a
+                                 line that reads it
+  Catalog.Migrator/              compilable shell, exit 0 — §7.4's job host
+                                 arrives with PR-08's DbContext
+  Catalog.Api/                   the composition root of §4.2 minus the PRs
+                                 not yet landed: no auth (PR-16), no endpoints
+                                 (PR-10); health probes and OpenAPI
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on;
                                  TestContainer.cs is the one registration path
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
+  Catalog.Domain.Tests/          §4.2's gates in §12.1's homes: domain isolation;
+  Catalog.Application.Tests/     ↛ EF Core, ↛ MassTransit, + registration
+  Catalog.Api.Tests/             surface; endpoints ↛ Infrastructure, + the
+                                 WebApplicationFactory host smoke
 ```
 
-The second block is PR-01's, the third PR-02's through PR-05's, and the
-compose tree PR-06's.
+The second block is PR-01's, the third PR-02's through PR-05's, the
+compose tree PR-06's, and the Catalog trees PR-07's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it and PR-09's `TransactionBehavior` will need it, but an unused
 project reference is a claim about the dependency graph that nothing yet
@@ -147,10 +168,13 @@ src/Gateway/          Gateway.Api (YARP)
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
                         Domain, Application, Infrastructure, Migrator, Api
+                        (Catalog's five landed with PR-07, as shells)
                       Shipping — the same five, but Worker in place of Api
                       Notifications — four: no Domain, and a Worker
 tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                       .TestSupport, plus Platform.IntegrationTests
+                        (Catalog's first three landed with PR-07; TestSupport
+                        waits for the containers and auth it exists to hold)
 deploy/               helm/, k8s/ — compose/ landed with PR-06
 Directory.Build.props, Directory.Packages.props, Platform.slnx — landed with PR-01
 ```
@@ -166,12 +190,14 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds six projects and `dotnet test` runs 122 tests, so the
-build rules and the drift rules below are live and a green run now means
-something. **PR-07 is next** (`feat(template): service skeleton and
-architecture test gate`), which depends on PR-02 through PR-06 and turns
-§4.2's architecture rules into a build failure. PR-06 landed the Compose
-infrastructure, so PR-05's OTLP export now has somewhere to send to.
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 133 tests, so
+the build rules and the drift rules below are live and a green run now means
+something. **PR-08 is next** (`feat(template): EF Core, repositories,
+IUnitOfWork, migrator host`), which depends on PR-07 and PR-06 and gives
+Catalog its `DbContext`, dual connection strings, readiness checks, the real
+migrator, and the Testcontainers smoke. PR-07 landed the Catalog skeleton, so
+§4.2's architecture rules are now a build failure — each gate was observed
+red against a deliberately added forbidden reference before it was trusted.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
@@ -776,6 +802,15 @@ already written against it.
   options.Retry.BackoffType = DelayBackoffType.Exponential;
   ```
 
+  The carve-out stops at the end of the line, and PR-07 found the boundary by
+  compiling it. A trailing comment too long for one line cannot wrap into a
+  second `//` line aligned under the first: a line that *starts* with `//` is
+  a whole-line comment, its leading whitespace is indentation, and indentation
+  IDE0055 does govern — the continuation fails the build at the statement's
+  own column ±0. §4.2's `Program.cs` sample carried exactly that form on
+  `UseExceptionHandler` and was amended in the same change; a trailing comment
+  that will not fit is shortened, or moved above the statement whole.
+
   `dotnet format` agrees with both halves — it collapses the code padding and
   leaves the comment column untouched — so a format run neither introduces this
   nor undoes it, and nothing has to be pinned to keep it idempotent. Checked
@@ -1012,7 +1047,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence, resuming where a previous run stopped |
+| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until a pass leaves no `suggestions.md`, then loop a requested Copilot review and `/review-copilot` until one lands with no new findings |
 | `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -1020,18 +1055,40 @@ Delivery:
 | `/review-grok` | Triage an external review into a resolution record |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 
-`/pr` pushes the branch itself, and `/ship` therefore runs all the way to an
-open PR. What `.claude/settings.json` still denies is the narrow set that is a
-decision rather than a step: `--force`, `-f`, `--delete`, and any push to
-`main`. A branch wanting one of those is raising a question, not running a
-command. `gh pr create`'s own offer to push is not used either — it is the
-same action by a route that skips the upstream check `/pr` makes first, so it
-reaches the remote without reporting that it did.
+`/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
+and into two review loops. First Grok: it runs `/review-branch` headlessly
+(`grok -p "/review-branch"` — Grok discovers `.claude/commands/` itself),
+`/review-grok` triages whatever `suggestions.md` it leaves, and the loop
+repeats until a pass leaves no file. The split of ownership matters: Grok's
+half owns the `suggestions.md` lifecycle — writing it, rechecking it,
+removing it when clean — and the triage half never creates or deletes that
+file, only fixes what it names. Then Copilot: a review is requested through
+the REST reviewers endpoint — `Copilot` and
+`copilot-pull-request-reviewer[bot]` both work as the request target — and
+on every round after the first the reviewer is **removed and re-added**,
+because a landed review leaves a stale-reviewer state in which a plain POST
+returns 200 and registers nothing. The timeline's `review_requested` event,
+never the status code, is what proves a request took. `/review-copilot`
+triages what lands — suppressed comments included, which is where every real
+finding against the loop's own machinery has arrived — and the loop repeats
+until a requested review posts with no new findings. The review's depth is
+the account's Copilot settings, not a request parameter; the full tier, not
+a lite one, is the one the loop wants. Either loop stops early on the finding
+class that is the user's — `Needs a decision` from the Grok triage, an open
+`Ask` thread from the Copilot one — or after three rounds without
+convergence. What `.claude/settings.json` still denies is the narrow set
+that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
+push to `main`. A branch wanting one of those is raising a question, not
+running a command. `gh pr create`'s own offer to push is not used either — it
+is the same action by a route that skips the upstream check `/pr` makes
+first, so it reaches the remote without reporting that it did.
 
 This replaced a blanket `Bash(git push:*)` deny, under which `/pr` stopped and
 asked the user to push. Worth knowing what that cost: the stop was the last
 moment the work was still cheap to change, and **the checks in `/ship` step 2
-now carry that weight alone.** They are the only thing that halts the chain.
+now carry that weight** — with the two review loops behind the PR as the
+second net. A check finding, a `Needs a decision` triage row and an open
+`Ask` thread are what halt the chain.
 
 **File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
 covers every file-editing tool, `Write` included; a `Write(path)` rule matches

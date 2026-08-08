@@ -5,7 +5,18 @@
     <Project Path="src/BuildingBlocks/Common.Domain/Common.Domain.csproj" />
     <Project Path="src/BuildingBlocks/Common.Web/Common.Web.csproj" />
   </Folder>
+  <Folder Name="/src/Services/" />
+  <Folder Name="/src/Services/Catalog/">
+    <Project Path="src/Services/Catalog/Catalog.Api/Catalog.Api.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Application/Catalog.Application.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Domain/Catalog.Domain.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Migrator/Catalog.Migrator.csproj" />
+  </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj" />
+    <Project Path="tests/Catalog.Application.Tests/Catalog.Application.Tests.csproj" />
+    <Project Path="tests/Catalog.Domain.Tests/Catalog.Domain.Tests.csproj" />
     <Project Path="tests/Common.Application.Tests/Common.Application.Tests.csproj" />
     <Project Path="tests/Common.Domain.Tests/Common.Domain.Tests.csproj" />
     <Project Path="tests/Common.Web.Tests/Common.Web.Tests.csproj" />

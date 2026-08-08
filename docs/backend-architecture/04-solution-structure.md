@@ -118,21 +118,22 @@ test rather than a code review convention:
 
 ```csharp
 [Fact]
-public void Domain_has_no_infrastructure_dependencies()
+public void Domain_references_only_common_domain_and_the_framework()
 {
-    string[] forbidden =
-    [
-        "Microsoft.EntityFrameworkCore",
-        "MassTransit",
-        "StackExchange.Redis",
-        "Microsoft.AspNetCore"
-    ];
+    // The table's rule is an allow-list — "Common.Domain and nothing else" —
+    // so the gate is one too, and an exact one: a blacklist only bans what
+    // someone thought to name, and a System.* prefix still passes
+    // System.Data.SqlClient or a serialiser. Each BCL assembly Domain starts
+    // using earns its line here on purpose — extending this list is the
+    // decision the gate exists to force, and System.Text.Json is the
+    // extension the table forbids by name.
+    string[] allowed = ["Common.Domain", "System.Runtime"];
 
     IEnumerable<string> referenced = typeof(Order).Assembly
         .GetReferencedAssemblies()
         .Select(a => a.Name!);
 
-    referenced.ShouldNotContain(name => forbidden.Any(name.StartsWith));
+    referenced.ShouldAllBe(name => allowed.Contains(name));
 }
 ```
 
@@ -154,10 +155,19 @@ silently licenses an endpoint to inject a `DbContext`.
 [Fact]
 public void Endpoints_do_not_depend_on_infrastructure()
 {
+    // Not the service's Infrastructure namespace alone: the rule above is
+    // "Application and Domain contracts only", and the concrete types it
+    // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach an
+    // endpoint transitively without any Ordering.Infrastructure dependency
+    // to trip on.
     TestResult result = Types
         .InAssembly(typeof(OrderEndpoints).Assembly)
         .That().ResideInNamespaceContaining(".Endpoints")
-        .ShouldNot().HaveDependencyOn("Ordering.Infrastructure")
+        .ShouldNot().HaveDependencyOnAny(
+            "Ordering.Infrastructure",
+            "Microsoft.EntityFrameworkCore",
+            "MassTransit",
+            "StackExchange.Redis")
         .GetResult();
 
     result.IsSuccessful.ShouldBeTrue(
@@ -179,7 +189,8 @@ public void Application_and_domain_do_not_reference_masstransit()
     // guarantee that exists on the consume pipeline and nowhere else. A handler
     // that copies the saga's style gets a dual write with no outbox behind it,
     // and it works in every test where the broker is up.
-    foreach (Assembly assembly in new[] { typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly })
+    Assembly[] assemblies = [typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly];
+    foreach (Assembly assembly in assemblies)
         Types
             .InAssembly(assembly)
             .ShouldNot().HaveDependencyOn("MassTransit")
@@ -380,8 +391,7 @@ WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting. Each line below depends on
 // the ones above it, and getting it wrong fails silently rather than loudly.
-app.UseExceptionHandler();        // §10.5 — outermost, so it catches faults in
-                                  //          the middleware below it too
+app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — above everything else that logs
 app.UseAuthentication();          // §11.3 — populates HttpContext.User
 app.UseAuthorization();           // §11.4 — evaluates the permission policies
@@ -630,6 +640,15 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
     <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- PR-07's OpenAPI deliverable (Appendix C): the framework's own document
+         generator — AddOpenApi/MapOpenApi, document only, no UI. -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <!-- Transitive, pinned deliberately: every patch of the package above
+         floors this at 2.0.0, which carries GHSA-v5pm-xwqc-g5wc, and NuGet
+         resolves a floor to its lowest. NU1903 turns that into a failed
+         restore, so the pin is what makes the line above buildable at all —
+         CentralPackageTransitivePinningEnabled is why it works. -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.11.0" />
   </ItemGroup>
   <ItemGroup Label="Telemetry">
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
