@@ -1,7 +1,7 @@
 ---
 description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(grok:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -113,22 +113,27 @@ anything.
       the point, and a review run by the author's own model is not one:
 
       ```bash
-      grok -p "/review-branch" --permission-mode acceptEdits
+      bash .claude/scripts/grok-review.sh
       ```
 
-      Grok discovers `.claude/commands/review-branch.md` itself, and that
-      command owns the `suggestions.md` lifecycle: a full pass writes the
-      file when findings remain, a recheck re-verifies an existing file and
-      removes it when everything is resolved. Do not write or delete
-      `suggestions.md` from here.
+      The helper runs Grok in a **disposable git worktree**: the reviewer's
+      repository-wide edit grant lands in a copy that is removed afterwards,
+      and the only artefact imported back is `suggestions.md` — isolation by
+      construction, where the earlier post-run `git status` check could be
+      passed by a payload that executed and then reverted itself. It also
+      refuses a dirty tree (everything but `suggestions.md` must be
+      committed), because the worktree holds only commits and a reviewer
+      reading less than the PR carries is a review of something else.
+      Residual, stated in the script: Grok still runs with the host's
+      ambient credentials and network — stripping those needs a container,
+      which stays an open infrastructure decision
+      (`docs/superpowers/specs/2026-08-08-review-loop-hardening-findings.md`).
 
-      **Then check the worktree, because the reviewer could write to it.**
-      `acceptEdits` hands Grok a repository-wide edit grant, and the loop
-      must not launder that into a commit: after the invocation,
-      `git status --short` may show `suggestions.md` and nothing else.
-      Any other change — accidental or injected — stops the loop and
-      reports the diff; reviewer edits to the work are findings to read,
-      never edits to keep.
+      Inside the copy, Grok discovers `.claude/commands/review-branch.md`
+      itself, and that command owns the `suggestions.md` lifecycle: a full
+      pass writes the file when findings remain, a recheck re-verifies an
+      existing file and removes it when everything is resolved. Do not
+      write or delete `suggestions.md` from here.
 
    2. **Check for `suggestions.md` at the repo root.** Absent → the loop is
       done; the review came back clean. Present → run `/review-grok`, which
@@ -175,8 +180,13 @@ anything.
       however narrow the path looks — still licenses method flags and
       payloads the deny rules never contemplated. The scripts under
       `.claude/scripts/` are the whole API surface this loop can touch, and
-      widening one is a permission-model decision made in the script, where
-      review can see it.
+      they are **edit-denied to the session that runs them** —
+      `.claude/settings.json` denies `Edit(.claude/scripts/**)`, so a
+      granted name means the helper as reviewed, and widening one is a
+      human's edit to a reviewed file, made with the deny lifted. (The deny
+      is defence in depth, like the push rules: `Bash` redirection can still
+      write a file, and no prefix list enumerates every spelling of write.
+      What it removes is the quiet path — the session's own editing tools.)
 
       (For the curious: the request target accepts both `Copilot` and
       `copilot-pull-request-reviewer[bot]`; the finished review's *author*

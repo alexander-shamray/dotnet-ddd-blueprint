@@ -1056,13 +1056,15 @@ Delivery:
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
-and into two review loops. First Grok: it runs `/review-branch` headlessly
-(`grok -p "/review-branch"` — Grok discovers `.claude/commands/` itself),
-`/review-grok` triages whatever `suggestions.md` it leaves, and the loop
-repeats until a pass leaves no file. The split of ownership matters: Grok's
-half owns the `suggestions.md` lifecycle — writing it, rechecking it,
-removing it when clean — and the triage half never creates or deletes that
-file, only fixes what it names. Then Copilot: a review is requested through
+and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`
+headlessly **in a disposable git worktree** — the reviewer's edit grant lands
+in a copy that is removed afterwards, and only `suggestions.md` crosses back,
+isolation by construction rather than by a post-run status check.
+`/review-grok` triages whatever file it leaves, and the loop repeats until a
+pass leaves none. The split of ownership matters: Grok's half owns the
+`suggestions.md` lifecycle — writing it, rechecking it, removing it when
+clean — and the triage half never creates or deletes that file, only fixes
+what it names. Then Copilot: a review is requested through
 the REST reviewers endpoint — `Copilot` and
 `copilot-pull-request-reviewer[bot]` both work as the request target — and
 on every round after the first the reviewer is **removed and re-added**,
@@ -1106,3 +1108,11 @@ back — once by an external reviewer reading the deny list as incomplete, once
 by acting on that review — and both times it broke startup. A reviewer who has
 not run the harness cannot see this; check a permission claim against the
 harness before acting on it.
+
+`Edit(.claude/scripts/**)` follows the same two-spelling pattern and binds
+the agent's own tooling: the review loops grant those helper scripts by name,
+and a session that could rewrite a helper before invoking it would make the
+fixed endpoints a fiction. Changing a helper is therefore a human's edit,
+made with the deny lifted. Like the push denies, it is defence in depth —
+`Bash` redirection can still write a file — but it removes the quiet path,
+which is the session's own editing tools acting on reviewed grants.
