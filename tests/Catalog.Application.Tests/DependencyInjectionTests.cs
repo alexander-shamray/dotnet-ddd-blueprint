@@ -60,7 +60,7 @@ public class DependencyInjectionTests
     }
 
     [Fact]
-    public void AddCatalogApplication_registers_the_two_behaviours_in_pipeline_order()
+    public void AddCatalogApplication_registers_the_three_behaviours_in_pipeline_order()
     {
         ServiceCollection services = new();
 
@@ -73,8 +73,9 @@ public class DependencyInjectionTests
         behaviours.ShouldBe(
             [
                 typeof(LoggingBehavior<,>),
-                typeof(ValidationBehavior<,>)
+                typeof(ValidationBehavior<,>),
+                typeof(TransactionBehavior<,>)
             ],
-            "two of four — IdempotencyBehavior and TransactionBehavior join with their PRs (§6.3)");
+            "three of four — IdempotencyBehavior joins with its PR, between Validation and Transaction (§6.3)");
     }
 }

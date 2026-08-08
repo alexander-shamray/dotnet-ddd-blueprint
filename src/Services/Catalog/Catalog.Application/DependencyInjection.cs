@@ -24,10 +24,11 @@ public static class DependencyInjection
         services.AddSingleton<RequestMetrics>();
 
         // Ordered, explicit, not scanned — registration order is pipeline
-        // order (§6.3). Two of four: IdempotencyBehavior and
-        // TransactionBehavior join with the PRs that build them.
+        // order (§6.3). Three of four: IdempotencyBehavior joins with the PR
+        // that builds it, and slots in between Validation and Transaction.
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+        services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
         return services;
     }
 }
