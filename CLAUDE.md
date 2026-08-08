@@ -1169,9 +1169,10 @@ Delivery:
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
 and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`
-headlessly **in a disposable git worktree** — the reviewer's edit grant lands
-in a copy that is removed afterwards, and only `suggestions.md` crosses back,
-isolation by construction rather than by a post-run status check.
+headlessly **in a container, over a throwaway clone** — the reviewer's grant
+lands in a copy that is removed afterwards, and only `suggestions.md` crosses
+back, never through a symlink. Isolation by construction rather than by a
+post-run status check.
 
 **The reviewer runs in a container**, `.claude/sandbox/Dockerfile`, and that is
 the boundary — not the tool grant. The worktree only ever bounded *edits*: the

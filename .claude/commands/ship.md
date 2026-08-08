@@ -116,18 +116,30 @@ anything.
       bash .claude/scripts/grok-review.sh
       ```
 
-      The helper runs Grok in a **disposable git worktree**: the reviewer's
-      repository-wide edit grant lands in a copy that is removed afterwards,
-      and the only artefact imported back is `suggestions.md` — isolation by
-      construction, where the earlier post-run `git status` check could be
-      passed by a payload that executed and then reverted itself. It also
-      refuses a dirty tree (everything but `suggestions.md` must be
-      committed), because the worktree holds only commits and a reviewer
-      reading less than the PR carries is a review of something else.
-      Residual, stated in the script: Grok still runs with the host's
-      ambient credentials and network — stripping those needs a container,
-      which stays an open infrastructure decision
-      (`docs/superpowers/specs/2026-08-08-review-loop-hardening-findings.md`).
+      The helper runs Grok **in a container** (`.claude/sandbox/Dockerfile`)
+      over a **throwaway clone**: the reviewer's repository-wide grant lands
+      in a copy that is removed afterwards, and the only artefact imported
+      back is `suggestions.md` — never through a symlink, in either
+      direction, because that file is the one path across the boundary and
+      therefore the only one worth attacking. Isolation by construction,
+      where the earlier post-run `git status` check could be passed by a
+      payload that executed and then reverted itself. It also refuses a
+      dirty tree (everything but `suggestions.md` must be committed),
+      because the clone holds only commits and a reviewer reading less than
+      the PR carries is a review of something else.
+
+      A clone rather than a worktree because a worktree's `.git` points back
+      into this checkout — the one path the container must not mount. **Docker
+      is required**; without it the helper exits 7 rather than falling back to
+      the host.
+
+      Residual, stated in the script and in `CLAUDE.md`: **egress is not
+      restricted**. The container reaches the network, and confining it to
+      `api.x.ai` needs an allow-list proxy Docker cannot supply alone. The
+      credential half — no `gh` token, no SSH keys, no host filesystem — is
+      closed. The reviewer also has **no .NET SDK**, so `dotnet test` is the
+      host's gate, not the review's; the licence gate is stdlib Python and
+      runs inside.
 
       Inside the copy, Grok discovers `.claude/commands/review-branch.md`
       itself, and that command owns the `suggestions.md` lifecycle: a full

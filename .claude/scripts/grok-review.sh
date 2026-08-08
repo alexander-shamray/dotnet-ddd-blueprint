@@ -56,7 +56,21 @@ git clone --quiet --no-hardlinks . "$work/repo"
 git -C "$work/repo" checkout --quiet "$branch"
 # The recheck contract: an existing suggestions.md is the file the review
 # re-verifies, so it crosses into the copy; nothing else does.
-[ -f suggestions.md ] && cp suggestions.md "$work/repo/suggestions.md"
+#
+# Never through a symlink, in either direction. suggestions.md is untracked and
+# the container can replace it with a link — point it at /proc/self/environ and
+# a following `cp` reads the environment of whichever process dereferences it,
+# carrying this host's credentials into the container on the way in, or host
+# content into the imported file on the way out. `cp` follows links by default,
+# so the guard has to be explicit and it has to be on both crossings: this is
+# the one path through the boundary, which makes it the only one worth
+# attacking.
+if [ -e suggestions.md ] || [ -L suggestions.md ]; then
+  [ -L suggestions.md ] &&
+    { echo "suggestions.md is a symlink; refusing to import it" >&2; exit 9; }
+  [ -f suggestions.md ] &&
+    cp --no-dereference suggestions.md "$work/repo/suggestions.md"
+fi
 
 # Built before the credential check below, which needs the image to run its
 # preflight in.
@@ -65,7 +79,16 @@ git -C "$work/repo" checkout --quiet "$branch"
 # does not exist — which it reports as a missing context rather than as a path
 # it could not translate.
 sandbox_host=$(host_path "$sandbox")
-docker build --quiet --tag grok-reviewer:local \
+# The reviewer's uid must match this host's, or the bind-mounted clone and the
+# credential copies — which keep their host ownership — are unreadable and
+# unwritable inside. Docker Desktop maps ownership and hides the problem, so
+# this matters on Linux and is invisible on Windows. `id -u` is meaningless
+# under MSYS, hence the guard.
+build_args=()
+if ! command -v cygpath >/dev/null 2>&1; then
+  build_args+=(--build-arg "REVIEWER_UID=$(id -u)" --build-arg "REVIEWER_GID=$(id -g)")
+fi
+docker build --quiet --tag grok-reviewer:local "${build_args[@]}" \
   --file "$sandbox_host/Dockerfile" "$sandbox_host" >/dev/null
 
 # Credentials. XAI_API_KEY is the better of the two and needs no file at all:
@@ -79,16 +102,19 @@ docker build --quiet --tag grok-reviewer:local \
 # loop that had been working. The preflight below is a trivial prompt that costs
 # a second; learning the same thing from a failed review costs the review, and
 # reports it as a reviewer that did not run.
+# --env NAME, never --env NAME=VALUE. The second spelling puts the key in
+# docker's argv, where every `ps` on this machine can read it for the life of
+# the container; the first forwards the value this process already holds.
 mounts=()
 if [ -n "${XAI_API_KEY:-}" ] &&
-   docker run --rm --env "XAI_API_KEY=$XAI_API_KEY" grok-reviewer:local \
+   docker run --rm --env XAI_API_KEY grok-reviewer:local \
      grok -p "ok" >/dev/null 2>&1; then
-  mounts+=(--env "XAI_API_KEY=$XAI_API_KEY")
+  mounts+=(--env XAI_API_KEY)
 else
   [ -z "${XAI_API_KEY:-}" ] ||
     echo "XAI_API_KEY is set but did not authenticate — no credits on its team? Using the OAuth session instead." >&2
   [ -f "$HOME/.grok/auth.json" ] ||
-    { echo "no XAI_API_KEY and no $HOME/.grok/auth.json: the reviewer cannot authenticate" >&2; exit 8; }
+    { echo "no usable XAI_API_KEY and no $HOME/.grok/auth.json: the reviewer cannot authenticate" >&2; exit 8; }
   cp "$HOME/.grok/auth.json" "$auth/auth.json"
   chmod 600 "$auth/auth.json"
   mounts+=(--volume "$(host_path "$auth/auth.json"):/home/reviewer/.grok/auth.json")
@@ -102,8 +128,13 @@ else
   #
   # Three files, all copies, all discarded afterwards. None of them is a
   # credential for anything but grok: no gh token, no SSH key, no cloud profile.
+  # Required, not optional, and failing here rather than skipping is the whole
+  # point: a run missing either of these does not degrade, it dies at the model
+  # call with a 403 about a team nobody created on purpose. Saying so now costs
+  # a second; discovering it costs the review.
   for extra in agent_id config.toml; do
-    [ -f "$HOME/.grok/$extra" ] || continue
+    [ -f "$HOME/.grok/$extra" ] ||
+      { echo "$HOME/.grok/$extra is missing; the OAuth session cannot resolve its team without it" >&2; exit 8; }
     cp "$HOME/.grok/$extra" "$auth/$extra"
     chmod 600 "$auth/$extra"
     mounts+=(--volume "$(host_path "$auth/$extra"):/home/reviewer/.grok/$extra")
@@ -136,8 +167,17 @@ fi
 cat "$result"
 # Import the one artefact the review owns. Its absence is the clean verdict —
 # trustworthy only because the checks above have ruled out a cancelled run.
+#
+# The symlink guard again, and this is the crossing that matters most: the file
+# is now reviewer-controlled, so a link planted inside the container would be
+# dereferenced here, in a host process, against host paths. Rejected rather than
+# resolved, and the destination is removed first so a pre-existing link on this
+# side cannot be written through either.
+if [ -L "$work/repo/suggestions.md" ]; then
+  echo "the review left suggestions.md as a symlink; refusing to import it" >&2
+  exit 9
+fi
+rm -f suggestions.md
 if [ -f "$work/repo/suggestions.md" ]; then
-  cp "$work/repo/suggestions.md" suggestions.md
-else
-  rm -f suggestions.md
+  cp --no-dereference "$work/repo/suggestions.md" suggestions.md
 fi
