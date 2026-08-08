@@ -16,7 +16,11 @@ branch=$(git branch --show-current)
 # suggestions.md is the one file allowed to differ — it is the review's own
 # working state. Anything else, tracked or untracked, means the reviewer
 # would read a state the PR does not carry: the worktree holds only commits.
-[ -z "$(git status --porcelain | grep -v '^?? suggestions.md$' || true)" ] ||
+# git status is captured first so a git failure aborts under set -e rather
+# than collapsing to an empty string that reads as a clean tree; only grep's
+# expected no-match exit is suppressed.
+status=$(git status --porcelain)
+[ -z "$(grep -v '^?? suggestions.md$' <<<"$status" || true)" ] ||
   { echo "tree has uncommitted changes; commit before the review, or the reviewer reads a state the PR does not carry" >&2; exit 3; }
 wt=$(mktemp -d "${TMPDIR:-/tmp}/grok-review-XXXXXX")
 cleanup() {
