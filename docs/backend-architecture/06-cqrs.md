@@ -659,13 +659,26 @@ internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
 
     // The transaction's own connection and transaction, explicitly passed —
     // this is what makes a raw write part of the command rather than beside it.
-    public Task ExecuteRawAsync(string sql, object parameters, CancellationToken ct) =>
-        db.Database.GetDbConnection().ExecuteAsync(
+    public Task ExecuteRawAsync(string sql, object parameters, CancellationToken ct)
+    {
+        // Not CurrentTransaction?.GetDbTransaction(). A null-conditional here
+        // hands Dapper transaction: null, and a command with no transaction
+        // autocommits — so the one call this member exists to prevent would
+        // succeed silently, on its own connection, outside the unit the caller
+        // believes it is in. Checked rather than trusted, for the reason the
+        // aggregate count above is.
+        IDbContextTransaction transaction = db.Database.CurrentTransaction ??
+            throw new InvalidOperationException(
+                "ExecuteRawAsync was called outside IUnitOfWork.ExecuteAsync. The write would commit " +
+                "immediately on its own connection, outside the command's transaction (§6.3).");
+
+        return db.Database.GetDbConnection().ExecuteAsync(
             new CommandDefinition(
                 sql,
                 parameters,
-                transaction: db.Database.CurrentTransaction?.GetDbTransaction(),
+                transaction: transaction.GetDbTransaction(),
                 cancellationToken: ct));
+    }
 }
 ```
 

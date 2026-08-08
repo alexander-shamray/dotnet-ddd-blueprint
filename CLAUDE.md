@@ -210,7 +210,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 141 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 142 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-09 is next** (`feat(common): TransactionBehavior over
 IUnitOfWork`), which depends on PR-04 and PR-08 and is the PR that draws the
@@ -273,7 +273,7 @@ the same argument that made `Common.Web.Tests` disable parallelisation
 assembly-wide rather than trust a shared collection — and a category is
 PR-22's named deliverable ("Testcontainers categories"), with PR-25 running
 them as their own CI stage. ADR-010 already made real infrastructure
-non-optional. Without a daemon the seven tests in `DatabaseSmokeTests` fail on
+non-optional. Without a daemon the eight tests in `DatabaseSmokeTests` fail on
 `Failed to connect to Docker endpoint`, which is a true statement about the
 machine and not a defect in the branch.
 

@@ -119,6 +119,27 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
     }
 
     [Fact]
+    public async Task ExecuteRawAsync_outside_a_unit_of_work_throws_rather_than_autocommitting()
+    {
+        // Without the guard this call succeeds: Dapper is handed a null
+        // transaction, SQL Server autocommits, and the row is durable outside
+        // any unit — the dual write ExecuteRawAsync exists to prevent. The
+        // assertion is therefore both halves, the throw and the empty table.
+        Guid id = Guid.CreateVersion7();
+
+        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+        unitOfWork.HasActiveTransaction.ShouldBeFalse();
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => InsertProbeAsync(unitOfWork, id, TestContext.Current.CancellationToken));
+
+        int rows = await fixture.ProbeRowCountAsync(id);
+        rows.ShouldBe(0, "the guard must refuse the write, not merely report it afterwards");
+    }
+
+    [Fact]
     public async Task HasActiveTransaction_is_false_outside_the_unit_and_true_inside_it()
     {
         // The guard PR-09's behaviour reads to avoid opening a second
