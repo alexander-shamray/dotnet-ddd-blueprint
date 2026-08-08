@@ -390,7 +390,7 @@ public async Task Bff_client_credentials_token_is_accepted_by_a_service()
     string token = await Realm.ClientCredentialsAsync("web-bff");
 
     token.Audiences().ShouldContain("commerce-api");
-    (await Catalog.GetAsync("/products/1", token)).StatusCode
+    (await Catalog.GetAsync("/v1/catalog/products/1", token)).StatusCode
         .ShouldBe(HttpStatusCode.OK);
 }
 
@@ -402,7 +402,7 @@ public async Task A_client_without_the_scope_is_rejected()
     // realm happens to hold.
     string token = await Realm.ClientCredentialsAsync("unrelated-client");
 
-    (await Catalog.GetAsync("/products/1", token)).StatusCode
+    (await Catalog.GetAsync("/v1/catalog/products/1", token)).StatusCode
         .ShouldBe(HttpStatusCode.Unauthorized);
 }
 ```

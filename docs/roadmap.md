@@ -225,8 +225,9 @@ Six things, ordered by how much of the total they can move.
 **The domain question is unsettled, and it is the largest single risk.** Both
 READMEs call the e-commerce domain "illustrative only", while
 [§4.1](backend-architecture/04-solution-structure.md) and Appendix C name six
-services concretely. If the real solution substitutes another domain, PR-10,
-PR-18, PR-20 and PR-21 are re-specified rather than re-estimated — 17 of the
+services concretely. PR-10 has since landed on the illustrative domain, so for
+it substitution now means reworking shipped code; PR-18, PR-20 and PR-21 are
+still re-specified rather than re-estimated. Together that is 17 of the
 98 days, and the four that carry the most design argument. Nothing else on this
 list is close. Settle it before M2.
 

@@ -179,7 +179,7 @@ sequenceDiagram
     participant MQ as RabbitMQ
     participant O as Ordering
 
-    A->>C: PUT /products/{id}/price
+    A->>C: PUT /v1/catalog/products/{id}/price
     rect rgb(240, 245, 250)
     Note over C,DB: One transaction — no I/O but the database
     C->>DB: UPDATE Prices
