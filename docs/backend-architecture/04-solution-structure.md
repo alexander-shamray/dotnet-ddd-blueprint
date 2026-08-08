@@ -110,7 +110,18 @@ Api ──────────► Application ──────────
 | `*.Domain` | `Common.Domain` and nothing else | EF Core, ASP.NET, Redis, MassTransit, `System.Text.Json` |
 | `*.Application` | its own Domain, `Common.Application`, `Common.Contracts` | EF Core, ASP.NET, any concrete infrastructure |
 | `*.Infrastructure` | Domain, Application, any package | another service's projects |
+| `*.Migrator` | Infrastructure, for the `DbContext` it migrates | another service's projects; anything it does not need to apply a migration |
 | `*.Api` | Application, Infrastructure (**composition root only**) | another service's projects |
+
+**The migrator's row is the narrowest, and deliberately.** It is not a second
+composition root: it builds a host, resolves the `DbContext` and calls
+`Database.Migrate()` ([§7.4](07-persistence.md)), and it needs no Application,
+no dispatcher and no Redis to do that. The temptation is to reach for
+`AddXInfrastructure(config)` and get the context for free — which also gets
+the readiness checks, the bus registration and the runtime connection string,
+in the one process holding the DDL identity of [§7.1](07-persistence.md). A
+migration job that can open a message broker is a migration job with reasons
+to fail that have nothing to do with migrations.
 
 `*.Domain` having no third-party dependencies is what makes domain tests
 instant and mock-free. It is worth defending. Enforce it with an architecture
