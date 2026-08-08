@@ -25,6 +25,10 @@
          foreign keys, implements no rowversion and translates LINQ
          differently, so a suite green against it still fails in production. -->
     <PackageReference Include="Testcontainers.MsSql" />
+    <!-- SqlServerRetryingExecutionStrategy, for the subclass that lets the
+         retry test inject a fault the strategy treats as transient. Already
+         pinned centrally and in Appendix B via Catalog.Infrastructure. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
   </ItemGroup>
 
   <ItemGroup>

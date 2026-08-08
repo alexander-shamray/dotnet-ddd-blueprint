@@ -1,5 +1,9 @@
 using System.Net;
+using Catalog.Infrastructure;
+using Catalog.Infrastructure.Persistence;
 using Common.Application;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -170,6 +174,58 @@ public class DatabaseSmokeTests(SqlServerFixture fixture) : IClassFixture<SqlSer
 
         int rows = await fixture.ProbeRowCountAsync(id);
         rows.ShouldBe(0, "the guard must refuse the write, not merely report it afterwards");
+    }
+
+    [Fact]
+    public async Task A_transient_fault_retries_the_whole_unit_and_commits_it_once()
+    {
+        // PR #15's finding, half of it testable today: the strategy re-runs
+        // the whole delegate, and attempt 1's work must not survive into the
+        // commit — here the raw write, rolled back with its transaction. The
+        // other half, attempt 2 reading attempt 1's tracked mutation from the
+        // identity map, needs an entity type and lands with PR-10's first
+        // aggregate; ChangeTracker.Clear() ships now so the sample never
+        // teaches the defect.
+        Guid id = Guid.CreateVersion7();
+        int attempts = 0;
+
+        ServiceCollection services = new();
+        services.AddCatalogInfrastructure(new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?> { ["ConnectionStrings:Catalog"] = fixture.ConnectionString })
+            .Build());
+
+        // The same registration with one change: the strategy also retries
+        // the marker. AddDbContext backs off registrations that exist, so the
+        // stock options descriptor is removed first.
+        ServiceDescriptor options =
+            services.Single(d => d.ServiceType == typeof(DbContextOptions<CatalogDbContext>));
+        services.Remove(options);
+        services.AddDbContext<CatalogDbContext>(o =>
+            o.UseSqlServer(
+                fixture.ConnectionString,
+                sql => sql.ExecutionStrategy(deps => new MarkerRetryingStrategy(deps))));
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+        Result result = await unitOfWork.ExecuteAsync(
+            async token =>
+            {
+                attempts++;
+                await InsertProbeAsync(unitOfWork, id, token);
+                if (attempts == 1)
+                    throw new FakeTransientException();
+                return Result.Success();
+            },
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.ShouldBeTrue();
+        attempts.ShouldBe(2, "the strategy must re-run the delegate, not surface the fault");
+
+        int rows = await fixture.ProbeRowCountAsync(id);
+        rows.ShouldBe(1, "attempt 1's write rolls back; attempt 2's commits exactly once");
     }
 
     [Fact]

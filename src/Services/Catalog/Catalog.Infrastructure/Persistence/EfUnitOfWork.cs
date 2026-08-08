@@ -28,6 +28,13 @@ internal sealed class EfUnitOfWork(CatalogDbContext db) : IUnitOfWork
         return await strategy.ExecuteAsync(
             async token =>
             {
+                // Every attempt starts from committed state. EF does not reset
+                // the change tracker when a transaction rolls back, so without
+                // this line a retry re-runs the domain method on attempt 1's
+                // tracked, already-mutated aggregates out of the identity map,
+                // and one SaveChanges commits the mutation twice.
+                db.ChangeTracker.Clear();
+
                 await using IDbContextTransaction tx =
                     await db.Database.BeginTransactionAsync(token);
                 TResult result = await operation(token);
