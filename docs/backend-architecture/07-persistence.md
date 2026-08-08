@@ -152,11 +152,16 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 Global conventions cover what would otherwise be repeated in every file:
 
 ```csharp
-protected override void ConfigureConventions(ModelConfigurationBuilder builder)
+// The parameter name is the base declaration's, not a shorter one. CA1725
+// makes a rename an error under ADR-019's TreatWarningsAsErrors, which is a
+// good rule here and not a formality: a caller reading the framework's own
+// documentation for ConfigureConventions is reading about
+// `configurationBuilder`.
+protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
 {
-    builder.Properties<decimal>().HavePrecision(19, 4);
-    builder.Properties<string>().HaveMaxLength(400);
-    builder.Properties<DateTimeOffset>().HaveColumnType("datetimeoffset(7)");
+    configurationBuilder.Properties<decimal>().HavePrecision(19, 4);
+    configurationBuilder.Properties<string>().HaveMaxLength(400);
+    configurationBuilder.Properties<DateTimeOffset>().HaveColumnType("datetimeoffset(7)");
 }
 ```
 
