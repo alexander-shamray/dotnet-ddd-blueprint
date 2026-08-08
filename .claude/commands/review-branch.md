@@ -106,6 +106,14 @@ spread-over-`.ToArray()` when the corpus is already clean).
 3. **Run cheap gates when the range touches them.**
    - Packages / Appendix B: `python .github/licence-gate/licence_gate.py`
    - Tests / counts CLAUDE asserts: `dotnet test Platform.slnx` when useful
+
+   **In the sandbox the second one is not available**, and that is deliberate
+   rather than an oversight: `dotnet test` has needed a Docker daemon since
+   PR-08's Testcontainers suite, so running it inside a container built to take
+   capability away would mean Docker-in-Docker. The licence gate is stdlib
+   Python and does run there. So a test-count claim is the **host's** to verify
+   — report it as unverified rather than asserting it, and never report
+   `command not found` as a finding about the branch.
 4. **Author findings only when verified.** Quote the conflicting sites.
    Severity: **bug** | **suggestion** | **nit**.
 5. **Write `suggestions.md` at the repo root** when any issue is open. Shape:

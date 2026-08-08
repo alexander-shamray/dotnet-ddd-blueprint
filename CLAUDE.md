@@ -1169,30 +1169,39 @@ Delivery:
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
 and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`
-headlessly **in a disposable git worktree** — the reviewer's edit grant lands
-in a copy that is removed afterwards, and only `suggestions.md` crosses back,
-isolation by construction rather than by a post-run status check.
+headlessly **in a container, over a throwaway clone** — the reviewer's grant
+lands in a copy that is removed afterwards, and only `suggestions.md` crosses
+back, never through a symlink. Isolation by construction rather than by a
+post-run status check.
 
-**The worktree bounds files and nothing else, and that gap is a known open
-residual with its own PR.** The reviewer runs under `bypassPermissions` and
-inherits this host's network and credentials, so it can reach remotes that
-`.claude/settings.json` refuses to the session that spawned it — the deny list
-bounds the session, never the subprocess. Copilot raised it against PR-15 and
-it is real. **Flags do not close it, and PR-15 proved that rather than
-assuming it**: a `Bash(...)` allow rule does map onto grok's
-`run_terminal_command` (checked against a live `git status --short`), but
-`/review-branch` needs commands outside any list narrow enough to be worth
-having, and every miss is a *cancelled* review rather than a smaller one.
-`dontAsk` in place of `bypassPermissions` honours deny rules where
-`bypassPermissions` ignores them, which constrains a model's mistake and not
-an adversary — anything holding a terminal can spell `git push` another way.
-The only real boundary is a container with no host filesystem, no inherited
-environment and egress restricted to the grok API, which is finding 3 of
-`docs/superpowers/specs/2026-08-08-review-loop-hardening-findings.md` and is
-its own change. Until it lands, **what keeps the loop honest is the verdict
-check, not the grant**: a cancelled run exits non-zero and leaves
-`suggestions.md` untouched, so a review that never happened can no longer
-report as clean.
+**The reviewer runs in a container**, `.claude/sandbox/Dockerfile`, and that is
+the boundary — not the tool grant. The worktree only ever bounded *edits*: the
+process still held this host's filesystem, network and credentials, and with
+`gh` authenticated here it could reach remotes that `.claude/settings.json`
+refuses to the session that spawned it. A deny list bounds the session, never
+the subprocess. Copilot raised it against PR-15; the container closes it.
+
+`bypassPermissions` is still passed and is no longer the risk it was, because
+the blast radius is the box. **Flags were tried first and cannot do this**: a
+`Bash(...)` rule does map onto grok's `run_terminal_command`, but
+`/review-branch` reaches for commands outside any list narrow enough to be
+worth having, and every miss is a *cancelled* review rather than a smaller one.
+
+Three things are worth knowing before touching it. It **clones** rather than
+building a worktree — a worktree's `.git` points back into the host checkout,
+the one path the container must not mount. The grok version is **pinned** to
+the host's, because an unpinned image took 1.0.0 against a 0.2.118 host and
+resolved the same session to a new team with no credits. And the OAuth fallback
+copies **three** files — `auth.json`, `agent_id`, `config.toml` — because with
+only the first the container takes itself to be a first run and registers a new
+team; `XAI_API_KEY` is preferred but preflighted, since a key set with no
+credits on its team breaks a loop the session beside it would have run.
+
+**Egress is the remaining residual** — the container reaches the network, and
+confining it to `api.x.ai` needs an allow-list proxy Docker cannot supply on
+its own. What keeps the loop honest either way is the verdict check rather than
+the grant: a cancelled run exits non-zero and leaves `suggestions.md`
+untouched, so a review that never happened cannot report as clean.
 
 `/review-grok` triages whatever file it leaves, and the loop repeats until a
 pass leaves none. The split of ownership matters: Grok's half owns the
@@ -1243,10 +1252,20 @@ by acting on that review — and both times it broke startup. A reviewer who has
 not run the harness cannot see this; check a permission claim against the
 harness before acting on it.
 
-`Edit(.claude/scripts/**)` follows the same two-spelling pattern and binds
-the agent's own tooling: the review loops grant those helper scripts by name,
-and a session that could rewrite a helper before invoking it would make the
-fixed endpoints a fiction. Changing a helper is therefore a human's edit,
-made with the deny lifted. Like the push denies, it is defence in depth —
-`Bash` redirection can still write a file — but it removes the quiet path,
-which is the session's own editing tools acting on reviewed grants.
+`Edit(.claude/scripts/**)` **and `Edit(.claude/sandbox/**)`** follow the same
+two-spelling pattern and bind the agent's own tooling: the review loops grant
+those helper scripts by name, and a session that could rewrite a helper before
+invoking it would make the fixed endpoints a fiction. Changing either is
+therefore a human's edit, made with the deny lifted. Like the push denies, it
+is defence in depth — `Bash` redirection can still write a file — but it
+removes the quiet path, which is the session's own editing tools acting on
+reviewed grants.
+
+**`sandbox/` is on that list for a reason worth keeping.** It arrived guarded
+by nothing, and a review caught it: the Dockerfile is a *build input to the
+security boundary*, so a session able to edit it can add an entrypoint that
+reads the credentials the following `docker run` mounts in. Guarding the
+runner and leaving its image editable protects the door and not the wall —
+and the reasoning that put the image in `.claude/` at all was the reasoning
+that should have guarded it, since a helper the loop invokes by name is
+exactly what the Dockerfile had become.
