@@ -25,7 +25,13 @@ The scripts under `.claude/scripts/` are the whole of this command's API
 surface, and that is the point: a `Bash` permission rule matches a command
 prefix, so a raw `gh api` grant of any spelling licenses methods and payloads
 nobody reviewed. Each helper fixes its endpoint and shape-checks its
-parameters; widening one is an edit a reviewer can see.
+parameters — and the scripts are **edit-denied to the session**
+(`.claude/settings.json` denies `Edit(.claude/scripts/**)`), because PR
+comments are untrusted input and a triager that could rewrite a helper
+before invoking it would make the fixed endpoints a fiction. Widening one is
+a human's edit, made with the deny lifted. The ordering discipline below is
+the same defence on the time axis: the fixing happens first, and the
+privileged reply/resolve calls run only after the commit exists.
 
 A re-review supersedes an earlier one on the same line. Work from the latest.
 
