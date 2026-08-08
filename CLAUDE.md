@@ -5,14 +5,16 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-07 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-10 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
-CI and the licence gate — the first C#: `Common.Domain`, `Common.Application`
-and `Common.Web`, each with its test project — §14.1's Compose infrastructure,
-with the CI smoke that proves it — and the first service skeleton: Catalog
-across §4.1's five projects, with §4.2's architecture gates live in its three
-test projects.
+CI and the licence gate — the building blocks: `Common.Domain`,
+`Common.Application` and `Common.Web`, each with its test project — §14.1's
+Compose infrastructure, with the CI smoke that proves it — and Catalog as the
+first real service: §4.1's five projects, §4.2's gates live, PR-08's
+persistence, PR-09's transaction behaviour, and PR-10's vertical slice with
+its containers. The phase section below carries the current state; this
+sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -266,7 +268,7 @@ vacuously.
 PR-10 landed the first vertical slice — `Product`, `PublishProductCommand`,
 `GetProductsQuery` with §6.5's cursor pagination, the two Dockerfiles, the
 Compose pair on port 5102 and the `docker-compose.infra-only.yml` override
-(profiles technique, printed in §14.1) — and four of its findings bind what
+(profiles technique, printed in §14.1) — and five of its findings bind what
 comes after:
 
 - **`ValidationExceptionHandler` is §10.5's 400 row, found by the first real
