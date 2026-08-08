@@ -1172,6 +1172,28 @@ and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`
 headlessly **in a disposable git worktree** — the reviewer's edit grant lands
 in a copy that is removed afterwards, and only `suggestions.md` crosses back,
 isolation by construction rather than by a post-run status check.
+
+**The worktree bounds files and nothing else, and that gap is a known open
+residual with its own PR.** The reviewer runs under `bypassPermissions` and
+inherits this host's network and credentials, so it can reach remotes that
+`.claude/settings.json` refuses to the session that spawned it — the deny list
+bounds the session, never the subprocess. Copilot raised it against PR-15 and
+it is real. **Flags do not close it, and PR-15 proved that rather than
+assuming it**: a `Bash(...)` allow rule does map onto grok's
+`run_terminal_command` (checked against a live `git status --short`), but
+`/review-branch` needs commands outside any list narrow enough to be worth
+having, and every miss is a *cancelled* review rather than a smaller one.
+`dontAsk` in place of `bypassPermissions` honours deny rules where
+`bypassPermissions` ignores them, which constrains a model's mistake and not
+an adversary — anything holding a terminal can spell `git push` another way.
+The only real boundary is a container with no host filesystem, no inherited
+environment and egress restricted to the grok API, which is finding 3 of
+`docs/superpowers/specs/2026-08-08-review-loop-hardening-findings.md` and is
+its own change. Until it lands, **what keeps the loop honest is the verdict
+check, not the grant**: a cancelled run exits non-zero and leaves
+`suggestions.md` untouched, so a review that never happened can no longer
+report as clean.
+
 `/review-grok` triages whatever file it leaves, and the loop repeats until a
 pass leaves none. The split of ownership matters: Grok's half owns the
 `suggestions.md` lifecycle — writing it, rechecking it, removing it when
