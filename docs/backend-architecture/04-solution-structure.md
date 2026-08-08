@@ -617,6 +617,23 @@ EF Core minor versions and behave differently under identical code.
   </PropertyGroup>
   <ItemGroup Label="Runtime">
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
+    <!-- Design-time only, referenced by each *.Migrator with PrivateAssets.
+         `dotnet ef migrations add` (§7.4) needs it in the startup project and
+         nothing at runtime does — the version is pinned to the line above
+         because the tool and the runtime move together. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
+    <!-- Transitive, pinned deliberately, and the same shape as Microsoft.OpenApi
+         below. The package above reaches it twice — through
+         Microsoft.Build.Tasks.Core and through
+         Microsoft.CodeAnalysis.Workspaces.MSBuild — and both floors resolve to
+         9.0.0, which carries eight advisories. NU1903 turns that into a failed
+         restore, so this pin is what makes the line above restorable at all.
+
+         PrivateAssets on the Design reference means it never ships in an image.
+         The restore fails anyway, and rightly: a design-time supply chain is
+         still a supply chain, and this one runs on a developer's machine with
+         their credentials. -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
     <!-- The container and logging contracts Common.Application compiles
@@ -626,6 +643,15 @@ EF Core minor versions and behave differently under identical code.
          IPipelineBehavior sits on this one. -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <!-- The same argument one row down: AddCatalogInfrastructure names
+         IConfiguration in its signature (§4.2) and *.Infrastructure is not a
+         web project, so it pays for the contract as a package. -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.0" />
+    <!-- The migrator's job host (§7.4). ASP.NET Core's shared framework carries
+         the generic host, and a *.Migrator is a console job with no listener —
+         so it is the one project shape here that pays for hosting as a
+         package. -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageVersion Include="Dapper" Version="2.1.66" />
     <!-- Exact major. v9 is commercially licensed — see ADR-003. -->
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
