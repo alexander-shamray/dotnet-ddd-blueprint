@@ -122,6 +122,7 @@ structurally always null on one path.
 | `IdempotencyBehavior<,>` | §8.5 | `IPipelineBehavior<,>` over `IIdempotencyStore` |
 | `UseCorrelationId`, `MapCommonHealthEndpoints`, `AddObservability`, `AddCommonWebDefaults` | §10.4, §13.5, §13.2 | `Common.Web` host extensions |
 | `AddCommonProblemDetails` | §10.5 | `Common.Web`; the RFC 9457 customisation `AddCommonWebDefaults` composes |
+| `ValidationExceptionHandler` | §10.5 | `Common.Web`; the `IExceptionHandler` executing the table's 400 row — `ValidationBehavior`'s thrown `ValidationException` into field-keyed `errors`, registered by `AddCommonProblemDetails` |
 | `ToHttpResult` | §10.5 | `Common.Web`; extension on `Result` and `Result<T>` — 204 or the value, and `ErrorType` to a status otherwise |
 | `OrderFulfilmentSaga`, `Endpoints` | §9.6 | Saga and its command destinations |
 | `ServiceFixture` | §12.4 | Testcontainers `IAsyncLifetime` fixture; owns the `WebApplicationFactory`. Lives in `Ordering.TestSupport` (§4.1) |

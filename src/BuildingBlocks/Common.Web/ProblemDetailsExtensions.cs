@@ -10,12 +10,18 @@ namespace Common.Web;
 public static class ProblemDetailsExtensions
 {
     /// <summary>
-    /// Registers the shared problem-details customisation. Composed by
+    /// Registers the shared problem-details customisation, and the handler
+    /// for §10.5's 400 row — <c>ValidationBehavior</c>'s thrown
+    /// <c>ValidationException</c>, which is produced beside the handler and
+    /// must be translated beside the other status decisions. Composed by
     /// <c>AddCommonWebDefaults</c> (§13.2) rather than called directly by a
     /// host — it is one of the things every host needs identically.
     /// </summary>
-    public static IServiceCollection AddCommonProblemDetails(this IServiceCollection services) =>
-        services.AddProblemDetails(options =>
+    public static IServiceCollection AddCommonProblemDetails(this IServiceCollection services)
+    {
+        services.AddExceptionHandler<ValidationExceptionHandler>();
+
+        return services.AddProblemDetails(options =>
             options.CustomizeProblemDetails = context =>
             {
                 context.ProblemDetails.Instance =
@@ -30,4 +36,5 @@ public static class ProblemDetailsExtensions
                 context.ProblemDetails.Extensions["traceId"] =
                     Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
             });
+    }
 }

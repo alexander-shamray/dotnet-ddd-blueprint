@@ -24,6 +24,10 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
     <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" />
+    <!-- ValidationException, caught by ValidationExceptionHandler — §10.5's
+         400 row. Common.Application carries the package transitively; the
+         direct reference states the direct use. -->
+    <PackageReference Include="FluentValidation" />
   </ItemGroup>
 
   <ItemGroup>
