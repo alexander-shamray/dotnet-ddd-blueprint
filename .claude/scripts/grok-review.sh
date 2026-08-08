@@ -86,12 +86,17 @@ fi
 # so the guard has to be explicit and it has to be on both crossings: this is
 # the one path through the boundary, which makes it the only one worth
 # attacking.
-if [ -e suggestions.md ] || [ -L suggestions.md ]; then
-  [ -L suggestions.md ] &&
-    { echo "suggestions.md is a symlink; refusing to import it" >&2; exit 9; }
-  [ -f suggestions.md ] &&
-    cp --no-dereference suggestions.md "$work/repo/suggestions.md"
+# A regular file or nothing — a symlink is not the only shape that hurts. A
+# FIFO or a socket named suggestions.md is reported by git as `?? suggestions.md`
+# and so passes the dirty-tree allow-list above, then fails `-f` here and is
+# silently skipped, turning an intended recheck into a full review. Anything
+# that is not a plain file is refused rather than ignored.
+if [ -L suggestions.md ] || { [ -e suggestions.md ] && [ ! -f suggestions.md ]; }; then
+  echo "suggestions.md is a symlink or not a regular file; refusing to import it" >&2
+  exit 9
 fi
+[ -f suggestions.md ] &&
+  cp --no-dereference suggestions.md "$work/repo/suggestions.md"
 
 # Built before the credential check below, which needs the image to run its
 # preflight in.
@@ -194,11 +199,19 @@ cat "$result"
 # dereferenced here, in a host process, against host paths. Rejected rather than
 # resolved, and the destination is removed first so a pre-existing link on this
 # side cannot be written through either.
-if [ -L "$work/repo/suggestions.md" ]; then
-  echo "the review left suggestions.md as a symlink; refusing to import it" >&2
+#
+# Every non-regular shape is refused, not only symlinks, and the check happens
+# BEFORE the host's copy is removed. Ordered the other way this is a fail-open
+# straight across the boundary: a FIFO, socket or directory left behind by the
+# reviewer would delete the findings already on this side, fail `-f`, copy
+# nothing, and let the run report itself clean — which is the precise failure
+# this loop's verdict checks exist to make impossible.
+out="$work/repo/suggestions.md"
+if [ -L "$out" ] || { [ -e "$out" ] && [ ! -f "$out" ]; }; then
+  echo "the review left suggestions.md as a symlink or not a regular file; refusing to import it" >&2
   exit 9
 fi
 rm -f suggestions.md
-if [ -f "$work/repo/suggestions.md" ]; then
-  cp --no-dereference "$work/repo/suggestions.md" suggestions.md
+if [ -f "$out" ]; then
+  cp --no-dereference "$out" suggestions.md
 fi

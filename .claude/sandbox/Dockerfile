@@ -30,7 +30,10 @@ FROM debian:trixie-slim
 #
 # python3 for the one gate the review is asked to run itself: the licence gate
 # is stdlib-only and needs no restore, which is exactly why §15.1 puts it ahead
-# of the build. The .NET SDK is deliberately absent — `dotnet test` has needed a
+# of the build. python-is-python3 beside it, and it is not decoration —
+# review-branch.md invokes `python licence_gate.py`, and Debian's python3
+# package ships no `python`, so without the shim the gate this image exists to
+# provide still would not run. The .NET SDK is deliberately absent — `dotnet test` has needed a
 # Docker daemon since PR-08's Testcontainers suite, so running it here would
 # mean Docker-in-Docker inside a sandbox built to take capability away.
 # review-branch.md says so, and says the host owns that gate.
@@ -40,6 +43,7 @@ RUN apt-get update \
         curl \
         git \
         python3 \
+        python-is-python3 \
     && rm --recursive --force /var/lib/apt/lists/*
 
 # Not root. The container is the boundary, but a reviewer that is root inside it
