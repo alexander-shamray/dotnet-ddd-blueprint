@@ -111,7 +111,7 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
             .AddAspNetCoreInstrumentation(o =>
                 o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/health"))
             .AddHttpClientInstrumentation()
-            .AddEntityFrameworkCoreInstrumentation(o => o.SetDbStatementForText = true)
+            .AddEntityFrameworkCoreInstrumentation()
             .AddRedisInstrumentation()
             .AddSource("MassTransit"))
         .UseOtlpExporter();
@@ -120,14 +120,26 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
 }
 ```
 
-Three of the lines above arrive later than the rest, and each is named here so
-that a reader comparing this block against `Common.Web` does not read a gap as
-a mistake. `AddEntityFrameworkCoreInstrumentation` and `AddRedisInstrumentation`
-land with the packages they instrument, at **PR-08** and **PR-12** — unlike a
-meter name, which is a string, each costs a package reference, and a reference
-to a library nothing uses is a claim about the dependency graph that is not yet
-true. The authentication block in `AddCommonWebDefaults` lands at **PR-16**,
-with the scheme that makes its policy mean anything.
+Two of the lines above still arrive later than the rest, and each is named here
+so that a reader comparing this block against `Common.Web` does not read a gap
+as a mistake. The rule is that an instrumentation lands with the package it
+instruments — unlike a meter name, which is a string, each costs a package
+reference, and a reference to a library nothing uses is a claim about the
+dependency graph that is not yet true. `AddEntityFrameworkCoreInstrumentation`
+therefore landed at **PR-08**, the PR that gave a service a `DbContext`;
+`AddRedisInstrumentation` waits for **PR-12**. The authentication block in
+`AddCommonWebDefaults` lands at **PR-16**, with the scheme that makes its
+policy mean anything.
+
+> **The EF Core call takes no options, and the one it used to take is a trap.**
+> This block configured `SetDbStatementForText = true` until PR-08 compiled it:
+> the property does not exist on the instrumentation package, which now emits
+> the command text through the semantic-convention attributes by default. The
+> option that *does* survive is `SetDbQueryParameters`, and it must stay off —
+> its own documentation warns that it captures raw parameter **values**, which
+> is every password, token and card number the application has ever bound,
+> written onto a span that [§13.4](13-observability.md)'s redactor never
+> inspects.
 
 Filtering health checks out of traces is not cosmetic — at a ten-second probe
 interval across a dozen pods they would otherwise dominate both trace volume and

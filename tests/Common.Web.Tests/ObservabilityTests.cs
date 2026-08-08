@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Common.Application;
 using Microsoft.AspNetCore.Http;
@@ -8,6 +9,7 @@ using OpenTelemetry;
 using OpenTelemetry.Instrumentation.AspNetCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Shouldly;
 using Xunit;
 
@@ -15,6 +17,11 @@ namespace Common.Web.Tests;
 
 public class ObservabilityTests
 {
+    // The instrumentation package's own source name — the string AddSource
+    // subscribes to, spelled out here rather than shared with production code
+    // for the reason the meter list below is.
+    private const string EfCoreActivitySource = "OpenTelemetry.Instrumentation.EntityFrameworkCore";
+
     // The test holds its own copy of §13.2's list on purpose. Sharing a
     // constant with the registration would make this vacuous: deleting a name
     // from one place would delete it from the assertion too, and the whole
@@ -195,6 +202,51 @@ public class ObservabilityTests
         options.Filter(Request("/health/ready")).ShouldBeFalse();
         options.Filter(Request("/health/startup")).ShouldBeFalse();
         options.Filter(Request("/orders")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Ef_core_spans_are_collected()
+    {
+        // §13.2 ships AddEntityFrameworkCoreInstrumentation at PR-08, the PR
+        // that gave a service a DbContext. Driven through a probe activity on
+        // the instrumentation's own source, exactly as the meter tests above
+        // drive a probe counter — an EF span needs a real DbContext and a real
+        // query, and Common.Web has neither.
+        //
+        // Two earlier versions of this test were worthless and are worth
+        // naming. Reading SetDbStatementForText off IOptionsMonitor asserted a
+        // property this package line does not have; scanning IServiceCollection
+        // for an "EntityFrameworkCore" ServiceType found nothing, because with
+        // no options lambda the call registers nothing in DI at all — it adds a
+        // source to the tracer provider. That version failed identically with
+        // the instrumentation present and absent, so its mutation run "passed"
+        // while proving nothing.
+        List<Activity> exported = [];
+
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        builder.AddObservability();
+        builder.Services
+            .AddOpenTelemetry()
+            .WithTracing(t => t.AddInMemoryExporter(exported));
+
+        using IHost host = builder.Build();
+
+        // Before starting the activity, for the reason the meter tests give:
+        // a source with no listener yet returns null from StartActivity and
+        // the test would measure nothing while appearing to set itself up.
+        TracerProvider provider = host.Services.GetRequiredService<TracerProvider>();
+
+        using ActivitySource source = new(EfCoreActivitySource);
+        using Activity? activity = source.StartActivity("probe");
+        activity?.Stop();
+
+        provider.ForceFlush();
+
+        // The null check is the assertion that bites. AddSource is what puts a
+        // listener on this name, so without the instrumentation call
+        // StartActivity returns null and nothing is ever exported.
+        activity.ShouldNotBeNull("nothing is listening to the EF Core activity source");
+        exported.ShouldContain(a => a.Source.Name == EfCoreActivitySource);
     }
 
     private static DefaultHttpContext Request(string path)

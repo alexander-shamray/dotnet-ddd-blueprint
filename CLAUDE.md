@@ -210,7 +210,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 142 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 143 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-09 is next** (`feat(common): TransactionBehavior over
 IUnitOfWork`), which depends on PR-04 and PR-08 and is the PR that draws the
