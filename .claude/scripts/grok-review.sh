@@ -96,7 +96,7 @@ if [ -L suggestions.md ] || { [ -e suggestions.md ] && [ ! -f suggestions.md ]; 
   exit 9
 fi
 [ -f suggestions.md ] &&
-  cp --no-dereference suggestions.md "$work/repo/suggestions.md"
+  cp -P suggestions.md "$work/repo/suggestions.md"
 
 # Built before the credential check below, which needs the image to run its
 # preflight in.
@@ -110,12 +110,25 @@ sandbox_host=$(host_path "$sandbox")
 # unwritable inside. Docker Desktop maps ownership and hides the problem, so
 # this matters on Linux and is invisible on Windows. `id -u` is meaningless
 # under MSYS, hence the guard.
+#
+# Native Linux only, not "anything that is not MSYS". On macOS the ids are
+# passed by Docker Desktop's VM, which does not need them matched — and a
+# typical macOS primary gid of 20 already exists in Debian as `dialout`, so
+# `groupadd --gid 20` aborts the build over a problem that host did not have.
 build_args=()
-if ! command -v cygpath >/dev/null 2>&1; then
+if [ "$(uname -s)" = "Linux" ]; then
   build_args+=(--build-arg "REVIEWER_UID=$(id -u)" --build-arg "REVIEWER_GID=$(id -g)")
 fi
-docker build --quiet --tag grok-reviewer:local "${build_args[@]}" \
-  --file "$sandbox_host/Dockerfile" "$sandbox_host" >/dev/null
+
+# The image is used by ID, never by the tag. `grok-reviewer:local` is global to
+# the daemon and mutable, so a concurrent review — another checkout, other
+# uid/gid arguments — can move it between this build and the runs below, and
+# those runs hand the image credentials. Binding to the digest that this build
+# produced makes what gets built and what gets trusted the same object.
+image=$(docker build --quiet "${build_args[@]}" \
+  --file "$sandbox_host/Dockerfile" "$sandbox_host")
+[ -n "$image" ] ||
+  { echo "docker build produced no image id" >&2; exit 10; }
 
 # Credentials. XAI_API_KEY is the better of the two and needs no file at all:
 # grok falls back to it when no session token is present, and a fresh container
@@ -133,7 +146,7 @@ docker build --quiet --tag grok-reviewer:local "${build_args[@]}" \
 # the container; the first forwards the value this process already holds.
 mounts=()
 if [ -n "${XAI_API_KEY:-}" ] &&
-   docker run --rm --env XAI_API_KEY grok-reviewer:local \
+   docker run --rm --env XAI_API_KEY "$image" \
      grok -p "ok" >/dev/null 2>&1; then
   mounts+=(--env XAI_API_KEY)
 else
@@ -172,7 +185,7 @@ docker run --rm \
   --volume "$(host_path "$work/repo"):/review" \
   "${mounts[@]}" \
   --workdir /review \
-  grok-reviewer:local \
+  "$image" \
   grok -p "/review-branch" --permission-mode bypassPermissions --output-format json >"$result"
 grok_status=$?
 set -e
@@ -213,5 +226,5 @@ if [ -L "$out" ] || { [ -e "$out" ] && [ ! -f "$out" ]; }; then
 fi
 rm -f suggestions.md
 if [ -f "$out" ]; then
-  cp --no-dereference "$out" suggestions.md
+  cp -P "$out" suggestions.md
 fi
