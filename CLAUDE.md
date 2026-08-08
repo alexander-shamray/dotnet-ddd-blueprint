@@ -60,6 +60,8 @@ docs/superpowers/
   plans/                         its implementation plan, frozen the same way
 
 global.json                      SDK pin (§4.4)
+.config/dotnet-tools.json        dotnet-ef, pinned to the EF Core version —
+                                 `dotnet tool restore` is the whole setup
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
 Platform.slnx                    the fourteen projects below
@@ -80,7 +82,8 @@ src/BuildingBlocks/
                                  IHasDomainEvents, IAggregateRoot — no packages
   Common.Application/            Result, Result<T>, Error, ErrorType; the §6.2
                                  dispatcher and its two behaviours, plus
-                                 RequestMetrics and PluggableInterfaces
+                                 RequestMetrics, PluggableInterfaces and the
+                                 §6.3 IUnitOfWork port
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
                                  ToHttpResult, AddObservability,
                                  MapCommonHealthEndpoints, SensitiveDataRedactor,
@@ -95,11 +98,16 @@ src/Services/Catalog/
   Catalog.Application/           AddCatalogApplication: the §6.2 scan, the
                                  dispatcher, the clock, RequestMetrics, the
                                  two behaviours in pipeline order
-  Catalog.Infrastructure/        AddCatalogInfrastructure: the §6.2 scan only;
-                                 no IConfiguration parameter until PR-08 has a
-                                 line that reads it
-  Catalog.Migrator/              compilable shell, exit 0 — §7.4's job host
-                                 arrives with PR-08's DbContext
+  Catalog.Infrastructure/        AddCatalogInfrastructure(IConfiguration): the
+                                 §6.2 scan, the sealed CatalogDbContext with
+                                 §7.2's conventions, EfUnitOfWork, §13.5's SQL
+                                 readiness check, and Persistence/Migrations —
+                                 an InitialCreate whose Up is one hand-written
+                                 EnsureSchema, no entity types until PR-10
+  Catalog.Migrator/              §7.4's job host: MigratorHost builds it,
+                                 MigrationRunner migrates and returns 0 or 1.
+                                 Reads ConnectionStrings:CatalogMigrator and
+                                 never the runtime key (§7.1)
   Catalog.Api/                   the composition root of §4.2 minus the PRs
                                  not yet landed: no auth (PR-16), no endpoints
                                  (PR-10); health probes and OpenAPI
@@ -112,15 +120,21 @@ tests/
   Catalog.Domain.Tests/          §4.2's gates in §12.1's homes: domain isolation;
   Catalog.Application.Tests/     ↛ EF Core, ↛ MassTransit, + registration
   Catalog.Api.Tests/             surface; endpoints ↛ Infrastructure, + the
-                                 WebApplicationFactory host smoke
+                                 WebApplicationFactory host smoke and, from
+                                 PR-08, the Testcontainers suite over the real
+                                 migrator and EfUnitOfWork — the one test
+                                 project that needs Docker
 ```
 
 The second block is PR-01's, the third PR-02's through PR-05's, the
-compose tree PR-06's, and the Catalog trees PR-07's.
+compose tree PR-06's, the Catalog trees PR-07's, and their persistence
+PR-08's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it and PR-09's `TransactionBehavior` will need it, but an unused
 project reference is a claim about the dependency graph that nothing yet
-makes true.
+makes true. PR-08's `IUnitOfWork` did not change that and could not: no
+member of it names a domain type, which is the whole reason
+`ExecuteRawAsync` takes `string` and `object`.
 `Common.Web → Common.Application` is the one edge that has been drawn, because
 `ToHttpResult` maps an `Error` and cannot be written without one.
 
@@ -174,14 +188,20 @@ src/Services/         Catalog, Ordering, Inventory, Payments — five projects e
 tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                       .TestSupport, plus Platform.IntegrationTests
                         (Catalog's first three landed with PR-07; TestSupport
-                        waits for the containers and auth it exists to hold)
+                        waits for a second consumer — §4.1 calls it "referenced
+                        by the two above, which cannot reference each other",
+                        and PR-08's containers gave it only one. PR-16's test
+                        auth is the other candidate)
 deploy/               helm/, k8s/ — compose/ landed with PR-06
 Directory.Build.props, Directory.Packages.props, Platform.slnx — landed with PR-01
 ```
 
-Two things live outside that tree because §4.1 does not draw them:
+Three things live outside that tree because §4.1 does not draw them:
 `global.json`, which PR-01 delivers and whose SDK pin §4.1's prose relies on for
-the `.slnx` floor; and `src/AppHost`, the optional Aspire host of §14.2. Aspire
+the `.slnx` floor; `.config/dotnet-tools.json`, which PR-08 delivers and which
+pins `dotnet-ef` to the EF Core version — the machine that built PR-08 had the
+8.0.11 tool against a 10.0.0 runtime, and the error names neither; and
+`src/AppHost`, the optional Aspire host of §14.2. Aspire
 is **not adopted** — Compose is the baseline (§14.1) and nothing references an
 `Aspire.*` package today, which is why §4.4 pins none of them. If it is adopted,
 `src/AppHost` is the only project taking `Aspire.Hosting.*`, but each service
@@ -190,14 +210,34 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 133 tests, so
+`Platform.slnx` holds fourteen projects and `dotnet test` runs 141 tests, so
 the build rules and the drift rules below are live and a green run now means
-something. **PR-08 is next** (`feat(template): EF Core, repositories,
-IUnitOfWork, migrator host`), which depends on PR-07 and PR-06 and gives
-Catalog its `DbContext`, dual connection strings, readiness checks, the real
-migrator, and the Testcontainers smoke. PR-07 landed the Catalog skeleton, so
-§4.2's architecture rules are now a build failure — each gate was observed
-red against a deliberately added forbidden reference before it was trusted.
+something. **PR-09 is next** (`feat(common): TransactionBehavior over
+IUnitOfWork`), which depends on PR-04 and PR-08 and is the PR that draws the
+`Common.Application → Common.Domain` edge, registers a third behaviour in
+`AddCatalogApplication`, and proves `SaveChanges` happens once on success and
+never on failure. PR-07 landed the Catalog skeleton, so §4.2's architecture
+rules are a build failure — each gate was observed red against a deliberately
+added forbidden reference before it was trusted.
+
+PR-08 landed the persistence layer, and three of its decisions bind what comes
+after:
+
+- **Catalog has a connection string, so it has a readiness check** (§13.5), and
+  a host with no `ConnectionStrings:Catalog` no longer starts —
+  `AddSqlServer` throws on a null one. Every `WebApplicationFactory` over
+  `Catalog.Api` supplies one; `CatalogApiFactory` in `Catalog.Api.Tests` is the
+  single place that does it.
+- **The migration is hand-authored and the snapshot is not.**
+  `20260808035156_InitialCreate.cs` was rewritten into house style, because it
+  is a file people edit — §7.4's hand-written DDL rides in its `Up`, and
+  IDE0161 fails the build on the block-scoped namespace EF generates. The
+  `.Designer.cs` and `CatalogDbContextModelSnapshot.cs` beside it carry an
+  `auto-generated` header that exempts them from the analysers and are left
+  **exactly** as the tool wrote them: the snapshot is the input to the next
+  `migrations add`, and an edited one produces a wrong migration a PR later.
+- **`dotnet test` now needs Docker**, for `Catalog.Api.Tests` alone. See the
+  commands below.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
@@ -219,9 +259,31 @@ route.
 The commands are the ones the target solution uses:
 
 ```bash
+dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
-dotnet test  Platform.slnx
+dotnet test  Platform.slnx         # needs a running Docker daemon
+```
+
+**`dotnet test` requires Docker from PR-08**, and the container tests are
+neither skipped nor categorised when it is absent. Both were considered and
+both fail in a way this repository has rejected before: a skip on a missing
+daemon **fails open**, so CI would go green on a runner whose Docker broke —
+the same argument that made `Common.Web.Tests` disable parallelisation
+assembly-wide rather than trust a shared collection — and a category is
+PR-22's named deliverable ("Testcontainers categories"), with PR-25 running
+them as their own CI stage. ADR-010 already made real infrastructure
+non-optional. Without a daemon the seven tests in `DatabaseSmokeTests` fail on
+`Failed to connect to Docker endpoint`, which is a true statement about the
+machine and not a defect in the branch.
+
+Adding a migration needs the pinned tool and a startup project:
+
+```bash
+dotnet ef migrations add <Name> \
+    --project src/Services/Catalog/Catalog.Infrastructure \
+    --startup-project src/Services/Catalog/Catalog.Migrator \
+    --output-dir Persistence/Migrations
 ```
 
 Central package management means versions live in `Directory.Packages.props`
@@ -256,7 +318,15 @@ The first two were found by PR-02, the third by PR-04. **A fourth is a decision
 about the policy, not about the file in front of you.** Argue it in the comment
 or do not add it — and prefer changing the code: PR-04 met CA1848 by moving
 `LoggingBehavior` onto `LoggerMessage.Define` rather than waiving a rule whose
-whole subject is the hot path that behaviour sits on.
+whole subject is the hot path that behaviour sits on. PR-08 met three more the
+same way and added no fourth suppression: **CA1725** on an override whose
+parameter it had renamed (§7.2's `ConfigureConventions` sample said `builder`
+and the base declares `configurationBuilder` — the chapter was amended, since
+a reader consulting the framework's documentation is reading about the base
+name), **CA1863 and CA1305** on a `string.Format`-built SQL predicate, which
+became an EF `{0}` parameter and stopped being an injection shape at the same
+time, and **NU1903** on a transitive of the EF design-time package, pinned
+forward like `Microsoft.OpenApi` before it.
 
 `EnforceCodeStyleInBuild` only bites on rules set to `warning` or above, and
 exactly three are: **IDE0055** (formatting), **IDE0065** (`using` placement) and
