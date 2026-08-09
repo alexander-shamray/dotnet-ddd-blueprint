@@ -516,6 +516,12 @@ public sealed class AssemblyMarker;
 BENIGN = re.compile(r"[Pp]roduction|ProductVersion")
 STRAGGLERS = re.compile(r"catalog|roduct", re.IGNORECASE)
 
+# Every anchored pattern here is applied with `fullmatch`, never `match`.
+# Python's `$` matches at the end of the string *or just before a trailing
+# newline*, so `NAME.match("Zulu\n")` and `MIGRATION_ID.match("20260809120000\n")`
+# both succeeded — and the newline then went into a directory name, a file
+# name and a C# namespace. `fullmatch` is the whole fix, and it is worth
+# stating because the patterns look exhaustive on their own.
 NAME = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
 # The three casings, matched in one pass. Distinct strings under a
@@ -669,9 +675,9 @@ def classify(repo_root: Path) -> list[str]:
             # the guard below ever seeing it — the one directory where the
             # scaffold's "it will not guess" promise silently did not hold.
             name = PurePosixPath(relative).name
-            if INITIAL_CREATE.match(name):
+            if INITIAL_CREATE.fullmatch(name):
                 copied.append(relative)
-            elif LATER_MIGRATION.match(name) or name == f"{TEMPLATE}DbContextModelSnapshot.cs":
+            elif LATER_MIGRATION.fullmatch(name) or name == f"{TEMPLATE}DbContextModelSnapshot.cs":
                 pass
             else:
                 raise ScaffoldError(
@@ -892,7 +898,7 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
         raise ScaffoldError(f"port {port} is already published in deploy/compose/docker-compose.yml")
 
     lines = text.split("\n")
-    keys = [(i, m.group(1)) for i, line in enumerate(lines) if (m := SERVICE_KEY.match(line))]
+    keys = [(i, m.group(1)) for i, line in enumerate(lines) if (m := SERVICE_KEY.fullmatch(line))]
     order = [name for _, name in keys]
 
     pair = [f"{TEMPLATE.lower()}-migrator", f"{TEMPLATE.lower()}-api"]
@@ -994,7 +1000,7 @@ def update_ports_readme(repo_root: Path, names: Names, port: int) -> str:
 
 def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     """Everything the run would write, validated. Nothing is written here."""
-    if not NAME.match(name):
+    if not NAME.fullmatch(name):
         raise ScaffoldError(f"'{name}' is not a PascalCase service name")
     if name.upper() in WINDOWS_RESERVED:
         raise ScaffoldError(
@@ -1036,7 +1042,7 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
             f"a service whose name differs from {name} only by casing already exists; "
             f"the two would share every lower-cased Compose key and connection variable"
         )
-    if not MIGRATION_ID.match(migration_id):
+    if not MIGRATION_ID.fullmatch(migration_id):
         raise ScaffoldError(
             f"'{migration_id}' is not a 14-digit migration timestamp; it reaches a file path"
         )

@@ -597,7 +597,10 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
 
 class RefusesToRun(unittest.TestCase):
     def test_a_name_that_is_not_pascal_case(self):
-        for name in ("zulu", "Zulu.Api", "order-ing", ""):
+        # The last two needed `fullmatch`: Python's `$` matches before a
+        # trailing newline, so the anchored pattern accepted one and it went
+        # into a directory name, a file name and a C# namespace.
+        for name in ("zulu", "Zulu.Api", "order-ing", "", "Zulu\n", "Zulu\nEvil"):
             with self.assertRaises(ScaffoldError):
                 render(name=name)
 
@@ -689,7 +692,12 @@ class RefusesToRun(unittest.TestCase):
     def test_a_migration_id_that_is_not_a_timestamp(self):
         # It reaches a file path, so `..` in it writes outside the service
         # tree — from the flag whose only purpose is repeatable tests.
-        for migration_id in ("../../../etc/passwd", "InitialCreate", "2026080912000"):
+        for migration_id in (
+            "../../../etc/passwd",
+            "InitialCreate",
+            "2026080912000",
+            "20260809120000\n",   # `$` accepts a trailing newline; `fullmatch` does not
+        ):
             with self.assertRaises(ScaffoldError):
                 plan(REPO_ROOT, "Zulu", PORT, migration_id)
 
