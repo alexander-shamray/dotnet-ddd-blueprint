@@ -165,14 +165,17 @@ anything.
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
    - **Twelve rounds** stops the loop. This bound was three, and three was
-     wrong: PR-11 ran seven Copilot rounds and the findings went 10 → 4 → 3 →
-     1 → 1 → 3 → 1, every one accepted and fixed. Rounds four through seven
-     caught a documented-but-unenforced constraint, an assertion that could
-     not fail in one direction, and a fail-open in the script's own manifest
-     check — three defects a three-round bound would have shipped. The bound
-     exists for a reviewer and a triager *disagreeing*, which converges or
-     never does; it was never meant to stop a loop that is still finding real
-     things and fixing them in minutes. Twelve, and hand over what survives.
+     wrong. By its seventh Copilot round PR-11's findings had gone
+     10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted and fixed, and rounds four
+     through seven caught a documented-but-unenforced constraint, an assertion
+     that could not fail in one direction, and a fail-open in the script's own
+     manifest check — three defects a three-round bound would have shipped.
+     That was the evidence for raising it; the loop then ran on and kept
+     finding things, including a round-eight *clean* pass followed by eight
+     more findings. The bound exists for a reviewer and a triager
+     *disagreeing*, which converges or never does; it was never meant to stop
+     a loop still finding real things and fixing them in minutes. Twelve, and
+     hand over what survives.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never

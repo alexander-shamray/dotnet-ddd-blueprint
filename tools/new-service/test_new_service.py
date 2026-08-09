@@ -626,6 +626,16 @@ class RefusesToRun(unittest.TestCase):
             "src/Services/CATALOGSearch/CATALOGSearch.Domain/AssemblyMarker.cs", rendered.created
         )
 
+    def test_a_name_windows_reserves_as_a_device(self):
+        # These clear PascalCase, the template check and every collision test,
+        # and then `apply()` cannot create `src/Services/Con` or
+        # `Con.Domain.csproj` on Windows — a failure in the middle of the
+        # write, which is the one place this script promises not to fail.
+        for name in ("Con", "Prn", "Aux", "Nul", "Com1", "Lpt9", "CON"):
+            with self.assertRaises(ScaffoldError) as raised:
+                render(name=name)
+            self.assertIn("reserved device name", str(raised.exception), name)
+
     def test_a_name_whose_projects_would_collide_with_the_building_blocks(self):
         # `Common` renders Common.Domain and Common.Application beside the
         # building blocks of exactly those names — two projects, one assembly

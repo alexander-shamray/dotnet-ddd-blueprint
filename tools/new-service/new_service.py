@@ -522,6 +522,17 @@ NAME = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 # case-sensitive match, so alternation order carries no meaning.
 CASINGS = re.compile("|".join((TEMPLATE, TEMPLATE.lower(), TEMPLATE.upper())))
 
+# Windows reserves these as file and directory base names, with or without an
+# extension — so neither `src/Services/Con` nor `Con.Domain.csproj` can be
+# created there. They pass every other check in this file: PascalCase, no
+# template token, no collision. Without this they fail *inside* `apply()`,
+# which is the one place the script promises not to.
+WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{port}" for port in range(1, 10)}
+    | {f"LPT{port}" for port in range(1, 10)}
+)
+
 # A migration id is the timestamp EF generates, and it reaches a path. Anything
 # else is both invalid metadata and, with a `..` in it, a write outside the
 # service tree — from a flag whose whole purpose is to make a test repeatable.
@@ -985,6 +996,12 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     """Everything the run would write, validated. Nothing is written here."""
     if not NAME.match(name):
         raise ScaffoldError(f"'{name}' is not a PascalCase service name")
+    if name.upper() in WINDOWS_RESERVED:
+        raise ScaffoldError(
+            f"'{name}' is a reserved device name on Windows: neither "
+            f"src/Services/{name} nor {name}.Domain.csproj can be created there, and "
+            f"a repository that half-renders on one platform is not portable."
+        )
     # Case-insensitively, because the casings are what the rename keys on:
     # `CATALOG` passes an exact-match check, and its *lower* casing is still
     # `catalog`, so the Compose block it renders keeps the template's own
