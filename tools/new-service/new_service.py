@@ -205,6 +205,14 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     "src/Services/Catalog/Catalog.Infrastructure/DependencyInjection.cs": (
         ("using Catalog.Domain.Products;\n", ""),
         (
+            "/// <c>typeof</c> anchor. The <c>IConfiguration</c> parameter arrives with PR-08\n"
+            "/// because PR-08 is the first thing that reads one — an unused parameter is the\n"
+            "/// same untruth as an unused <c>using</c>.\n",
+            "/// <c>typeof</c> anchor. The <c>IConfiguration</c> parameter is here because\n"
+            "/// this layer reads one — an unused parameter would be the same untruth as an\n"
+            "/// unused <c>using</c>.\n",
+        ),
+        (
             "        services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3\n"
             "        services.AddScoped<IProductRepository, ProductRepository>();         // §5.6\n",
             "        services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3\n"
@@ -351,6 +359,12 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "tests/Catalog.TestSupport/ServiceFixture.cs": (
         (
+            "    /// this context's <c>HasDefaultSchema</c>, and is no part of what PR-08\n"
+            "    /// claims.\n",
+            "    /// this context's <c>HasDefaultSchema</c>, and is no part of what this\n"
+            "    /// fixture claims.\n",
+        ),
+        (
             "/// machine cannot disagree about the engine. §12.4's name and §4.1's home:\n"
             "/// the fixture serves <c>Catalog.Application.Tests</c> and\n"
             "/// <c>Catalog.Api.Tests</c>, which cannot reference each other — each\n"
@@ -386,7 +400,39 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "/// was scaffolded from, not here, where there is nothing yet to judge.\n",
         ),
     ),
+    "tests/Catalog.Api.Tests/HostSmokeTests.cs": (
+        (
+            "/// has a readiness check and a host without one does not; Catalog acquired both\n"
+            "/// in PR-08, and <c>AddSqlServer</c> throws on a null connection string — so a\n",
+            "/// has a readiness check and a host without one does not; this service has\n"
+            "/// both from its first commit, and <c>AddSqlServer</c> throws on a null\n"
+            "/// connection string — so a\n",
+        ),
+    ),
+    "tests/Catalog.Api.Tests/TransientFaultInjection.cs": (
+        (
+            "/// of the retry defect is assertable before PR-10's first aggregate exists.\n",
+            "/// of the retry defect is assertable before this service has an aggregate.\n",
+        ),
+    ),
+    "tests/Catalog.TestSupport/Catalog.TestSupport.csproj": (
+        (
+            "    other\". PR-08 gave the fixture one consumer; PR-10's handler tests are the\n"
+            "    second, which is the condition §4.1 named for this project to exist.\n",
+            "    other\". The API suite is its consumer today; the application suite becomes\n"
+            "    the second with its first handler test, which is the condition §4.1 names\n"
+            "    for this project to exist.\n",
+        ),
+    ),
     "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs": (
+        (
+            "/// PR-08's deliverables against a real engine: the migrator applies the schema\n",
+            "/// The persistence layer against a real engine: the migrator applies the schema\n",
+        ),
+        (
+            "        // PR-10's first aggregate. Observed red against a Clear()-less\n",
+            "        // this service has an aggregate. Observed red against a Clear()-less\n",
+        ),
         (
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema creates it; "
             "AddProducts' is a no-op after it\");\n"
@@ -402,6 +448,27 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
 }
+
+# Keyed on the file's shape rather than on its path, because the path carries
+# Catalog's migration timestamp — and a PATCHES key that stopped matching would
+# fail *open*, silently leaving the file unpatched. `require_once` still binds
+# each anchor.
+INITIAL_CREATE_PATCHES: tuple[tuple[str, str], ...] = (
+    (
+        "/// Catalog's first migration. EF generated an empty <c>Up</c>, because the\n"
+        "/// model had no entity types until PR-10 — the schema below is hand-written,\n",
+        "/// This service's first migration. EF generates an empty <c>Up</c> for a model\n"
+        "/// with no entity types, so the schema below is hand-written,\n",
+    ),
+    (
+        "/// The schema is the one piece of Catalog's shape that exists before its first\n"
+        "/// table, and creating it here means PR-10's first <c>CREATE TABLE</c> lands in\n"
+        "/// a schema that is already there rather than being ordered against it.\n",
+        "/// The schema is the one piece of Catalog's shape that exists before its first\n"
+        "/// table, and creating it here means the first <c>CREATE TABLE</c> lands in a\n"
+        "/// schema that is already there rather than being ordered against it.\n",
+    ),
+)
 
 # The one file with no counterpart in Catalog, and it is written to be deleted.
 ASSEMBLY_MARKER = """namespace Catalog.Domain;
@@ -438,6 +505,11 @@ CASINGS = re.compile("|".join((TEMPLATE, TEMPLATE.lower(), TEMPLATE.upper())))
 # else is both invalid metadata and, with a `..` in it, a write outside the
 # service tree — from a flag whose whole purpose is to make a test repeatable.
 MIGRATION_ID = re.compile(r"^\d{14}$")
+
+# The three shapes EF puts in a migrations directory. Anything else there is
+# somebody's addition, and the scaffold refuses rather than dropping it.
+INITIAL_CREATE = re.compile(r"^\d{14}_InitialCreate(\.Designer)?\.cs$")
+LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The two files that accumulate a block per service, and the markers that bound
 # one block. Both were sliced to the end of the file once, which is the same
@@ -555,11 +627,25 @@ def classify(repo_root: Path) -> list[str]:
     for relative in discovered:
         if relative.startswith(MIGRATIONS + "/"):
             # Migration file names carry a timestamp, so they are classified by
-            # rule rather than by name: a scaffolded service starts at
+            # shape rather than by name: a scaffolded service starts at
             # InitialCreate — the hand-written EnsureSchema of §7.4 — and every
             # later migration, and the snapshot, belongs to Catalog's model.
-            if PurePosixPath(relative).name.split("_", 1)[-1].startswith("InitialCreate"):
+            #
+            # Three shapes and no others. An unconditional `continue` here
+            # treated *anything* in this directory as classified, so a helper
+            # or a README added beside the migrations would be dropped without
+            # the guard below ever seeing it — the one directory where the
+            # scaffold's "it will not guess" promise silently did not hold.
+            name = PurePosixPath(relative).name
+            if INITIAL_CREATE.match(name):
                 copied.append(relative)
+            elif LATER_MIGRATION.match(name) or name == f"{TEMPLATE}DbContextModelSnapshot.cs":
+                pass
+            else:
+                raise ScaffoldError(
+                    f"{relative} is not a migration, a designer file or the model snapshot. "
+                    f"Classify it in new_service.py — the scaffold will not guess."
+                )
             continue
         if relative in COPIED:
             copied.append(relative)
@@ -649,7 +735,10 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
         if relative.endswith(".cs"):
             csharp_newline = newline
 
-        for needle, replacement in PATCHES.get(relative, ()):
+        patches = PATCHES.get(relative, ())
+        if PurePosixPath(relative).name.endswith("_InitialCreate.cs"):
+            patches = (*patches, *INITIAL_CREATE_PATCHES)
+        for needle, replacement in patches:
             require_once(text, needle, relative)
             text = text.replace(needle, replacement)
 
@@ -862,6 +951,23 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     if name.lower() == TEMPLATE.lower():
         raise ScaffoldError(
             f"{name} is the template under another casing; it cannot be its own copy"
+        )
+
+    # And the same test against every service already here, because the
+    # template is only the first entry in that set. After Ordering exists,
+    # `ORDERING` makes a distinct directory on a case-sensitive filesystem and
+    # then renders `ordering-api` and `ordering-migrator` a second time — the
+    # duplicate-key failure again, one service along.
+    services = repo_root / "src" / "Services"
+    taken = (
+        {path.name.lower() for path in services.iterdir() if path.is_dir()}
+        if services.is_dir()
+        else set()
+    )
+    if name.lower() in taken:
+        raise ScaffoldError(
+            f"a service whose name differs from {name} only by casing already exists; "
+            f"the two would share every lower-cased Compose key and connection variable"
         )
     if not MIGRATION_ID.match(migration_id):
         raise ScaffoldError(
