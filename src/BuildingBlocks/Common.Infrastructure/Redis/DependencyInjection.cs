@@ -47,7 +47,8 @@ public static class DependencyInjection
                     // §8.1's key prefix, spelled once, in RedisKeys (§8.3).
                     options.InstanceName = provider.GetRequiredService<RedisKeys>().CacheInstanceName;
                     options.ConnectionMultiplexerFactory = () =>
-                        Task.FromResult(provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Cache));
+                        Task.FromResult(
+                            provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Cache));
                 });
 
             services.AddHybridCache(options =>
@@ -71,8 +72,10 @@ public static class DependencyInjection
                     .AddRedisInstrumentation()
                     .ConfigureRedisInstrumentation((provider, instrumentation) =>
                     {
-                        instrumentation.AddConnection(provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Cache));
-                        instrumentation.AddConnection(provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination));
+                        instrumentation.AddConnection(
+                            provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Cache));
+                        instrumentation.AddConnection(
+                            provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination));
                     }));
 
             return services;

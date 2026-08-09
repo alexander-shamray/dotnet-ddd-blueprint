@@ -51,7 +51,10 @@ public sealed class DistributedLockTests
     {
         _database.StringSetAsync(default, default, null, When.Always).ReturnsForAnyArgs(false);
 
-        IDistributedLock? held = await Factory().TryAcquireAsync("reprice", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        IDistributedLock? held = await Factory().TryAcquireAsync(
+            "reprice",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken);
 
         held.ShouldBeNull();
     }
@@ -61,7 +64,10 @@ public sealed class DistributedLockTests
     {
         _database.StringSetAsync(default, default, null, When.Always).ReturnsForAnyArgs(true);
 
-        IDistributedLock? held = await Factory().TryAcquireAsync("reprice", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        IDistributedLock? held = await Factory().TryAcquireAsync(
+            "reprice",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken);
 
         held.ShouldNotBeNull();
         held.Name.ShouldBe("reprice");
@@ -77,7 +83,10 @@ public sealed class DistributedLockTests
     {
         _database.StringSetAsync(default, default, null, When.Always).ReturnsForAnyArgs(true);
 
-        IDistributedLock held = (await Factory().TryAcquireAsync("reprice", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken))!;
+        IDistributedLock held = (await Factory().TryAcquireAsync(
+            "reprice",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken))!;
         await held.DisposeAsync();
         await held.DisposeAsync();
 

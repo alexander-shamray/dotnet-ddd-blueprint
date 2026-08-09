@@ -17,7 +17,9 @@ namespace Common.Infrastructure.Tests;
 /// </summary>
 public sealed class AddRedisConnectionsTests
 {
-    internal static IConfiguration Configuration(string? cache = "localhost:6379", string? coordination = "localhost:6380")
+    internal static IConfiguration Configuration(
+        string? cache = "localhost:6379",
+        string? coordination = "localhost:6380")
     {
         Dictionary<string, string?> settings = new();
         if (cache is not null)
