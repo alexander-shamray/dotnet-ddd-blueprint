@@ -284,7 +284,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`python -m unittest` in `tools/new-service` runs 38, and CI has a `scaffold`
+`python -m unittest` in `tools/new-service` runs 52, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-12 is next**
 (`feat(common): Redis helpers — HybridCache, key namespaces, distributed
 locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
@@ -469,7 +469,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && python -m unittest      # 38 tests, no Docker, no SDK
+cd tools/new-service && python -m unittest      # 52 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 

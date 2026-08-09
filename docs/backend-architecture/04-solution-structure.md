@@ -881,6 +881,13 @@ be removed, and its own doc comment says so.
 > paid by refusing, never by silently emitting a service that still names
 > Catalog. Its own tests render this repository for the same reason — a fixture
 > tree would test the script against a template that cannot drift.
+>
+> **That guarantee is about validation, not about the write.** A run the
+> scaffold refuses writes nothing; a disk that fills up halfway through the
+> write leaves a partial tree, and no transaction log is kept to undo it. The
+> target is a git checkout — `git status` shows exactly what landed — and a
+> second, untested rollback mechanism for something version control already
+> does is not worth having.
 
 `--port` is required and never derived. A port is an allocation recorded in
 §14.1 and in `deploy/compose/README.md`; a script that guessed one would

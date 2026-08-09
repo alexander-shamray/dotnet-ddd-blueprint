@@ -17,8 +17,21 @@ python tools/new-service/new_service.py Ordering --port 5101
 
 It writes thirty-five files and edits five. The five are `Platform.slnx`,
 `deploy/compose/docker-compose.yml`, `docker-compose.infra-only.yml`,
-`.env.example` and `deploy/compose/README.md`. There is no undo and none is
-needed: `git status` is the preview and `git checkout .` is the undo.
+`.env.example` and `deploy/compose/README.md`.
+
+**Run it on a clean worktree**, and undoing it is then two commands — the
+generated tree is untracked and the five edits are tracked, so neither one
+alone is enough:
+
+```bash
+rm -rf src/Services/<Name> tests/<Name>.*
+git restore Platform.slnx deploy/compose
+```
+
+`git checkout .` is **not** the undo and this file used to say it was: it
+leaves every generated file in place, because they are untracked, and it
+discards any unrelated tracked edit you happened to have. `git status` after a
+run shows exactly the five and the new directories.
 
 ## What you get
 
