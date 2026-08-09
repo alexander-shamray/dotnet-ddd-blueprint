@@ -65,12 +65,19 @@ deleted before the real aggregate can be written.
 2. Add the entity configuration and run `dotnet ef migrations add` — the
    generated snapshot already describes the empty model, so the first
    migration is the first table and nothing else.
-3. Add the first command or query. Three things come back with it, each noted
-   at the line concerned in the generated code: `Dapper` in
-   `{Service}.Application.csproj` for §6.5's read side, the container wiring
-   in `{Service}.Application.Tests.csproj`, and the two registration tests
-   `Catalog.Application.Tests` carries — the validator scan and the §6.2
-   handler scan both fail silently when lost.
+3. Add the first command or query. Three things come back, each with the one
+   that needs it and each noted at the line concerned in the generated code —
+   they are **not** a set to restore together:
+   - **The first handler of either kind** brings the container wiring in
+     `{Service}.Application.Tests.csproj`, and the test that the §6.2 scan
+     produced a registration. That scan fails silently when lost.
+   - **The first validator** brings the registration test for the validator
+     scan, which fails silently in the same way, and re-anchors
+     `AddValidatorsFromAssembly` on a type. A query-only slice has no
+     validator and needs neither.
+   - **The first query** brings `Dapper` to `{Service}.Application.csproj`,
+     for §6.5's read side. A command-only slice must not add it: an unused
+     package reference is a claim the project would not be making.
 4. Map the first endpoint in `Program.cs`. It is unauthenticated until PR-16;
    say so in `deploy/compose/README.md`, as Catalog does (§C.4).
 

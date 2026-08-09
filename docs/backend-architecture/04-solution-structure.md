@@ -827,9 +827,9 @@ needs restoring before the list can be read.
 
 ## 4.5 Adding a service
 
-Six services share the shape §4.1 draws, and writing the fifth one by hand is
-how the fifth one ends up subtly different from the first four. One command
-renders it instead:
+**Four** of §4.1's six services share the shape below — Catalog, Ordering,
+Inventory and Payments — and writing the fourth by hand is how it ends up
+subtly different from the first three. One command renders it instead:
 
 ```bash
 python tools/new-service/new_service.py Ordering --port 5101
@@ -862,10 +862,13 @@ endpoints are excluded by name; what a new service inherits is PR-07's state
 with the later wiring on it, not PR-10's state with the nouns changed.
 Renaming an aggregate would hand the next service a deletion job and a
 vocabulary it did not choose. Three things therefore arrive with the first real
-slice rather than with the scaffold, and each is noted at the line concerned in
-the generated code: `Dapper`, the container wiring in the application test
-project, and the two registration tests that guard a scan which otherwise fails
-silently.
+slice rather than with the scaffold — each with the part of it that needs them,
+not as a set, and each noted at the line concerned in the generated code. The
+first handler of either kind brings the application-test container wiring and
+the test that §6.2's scan produced a registration; the first validator brings
+the test for the validator scan; the first *query* brings `Dapper`, which a
+command-only slice must not add. Both those scans fail silently when lost,
+which is why the tests are named rather than left to be missed.
 
 The `AssemblyMarker` runs the other way, and the distinction is worth keeping
 straight. The scaffold **emits** it, because the §4.2 gates must name a type in
