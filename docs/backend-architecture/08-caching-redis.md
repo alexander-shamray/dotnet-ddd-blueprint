@@ -51,9 +51,20 @@ database on an instance shares it, and a lock in DB 1 is exactly as evictable
 as the cache in DB 0. Isolation means a second instance — which is what
 §14.1's Compose file runs and §14.2's Aspire sample mirrors.
 
-Production topology: a **shared Redis cluster with a per-service ACL user** and
-a mandatory `{service}:` key prefix is the cost-effective default. What must
-*not* be shared is the eviction policy between cache and coordination keys.
+Production topology: **two shared Redis deployments — cache and coordination —
+each with a per-service ACL user** and a mandatory `{service}:` key prefix are
+the cost-effective default. Two, not one, because the paragraph above is as
+true of a cluster as of an instance: `maxmemory-policy` is deployment-wide, so
+a single shared cluster cannot run `allkeys-lru` and `noeviction` at once.
+What the services share is each deployment; what the two deployments never
+share is the eviction policy.
+
+`{service}` throughout this chapter is the host's `ApplicationName`,
+**verbatim**: `RedisKeys` (§8.3) writes it into every key, and the ACL below
+is provisioned from the same value, so the two cannot disagree. The examples
+here show hosts whose `ApplicationName` is the bare lowercase service name —
+a host deployed as `Ordering.Api` takes `~Ordering.Api:*`, and provisioning
+any other spelling is the silent-ACL failure §8.2 describes.
 
 ```
 user ordering-svc on >REDACTED ~ordering:* +@read +@write +@keyspace +@connection +eval -@dangerous +client|setname +client|setinfo

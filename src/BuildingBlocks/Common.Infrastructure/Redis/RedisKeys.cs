@@ -10,7 +10,9 @@ namespace Common.Infrastructure.Redis;
 /// source §8.5's store and §13.2's <c>service.name</c> already use. Two
 /// sources would let the Redis prefix and the telemetry label disagree,
 /// which breaks correlation exactly when it is needed — and a wrong prefix
-/// fails §8.1's ACL silently.
+/// fails §8.1's ACL silently, which is why §8.1 provisions the ACL pattern
+/// from the same value: a host deployed as <c>Ordering.Api</c> takes
+/// <c>~Ordering.Api:*</c>.
 /// </summary>
 /// <remarks>
 /// There is deliberately no <c>Cache(string)</c> method: cache keys get

@@ -95,7 +95,7 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
         // not include, so a token-checked release under the documented grant
         // threw and the lock stood until its TTL. The grant §8.1 now prints
         // is the one this test proves.
-        ConfigurationOptions admin = ConfigurationOptions.Parse(fixture.ConnectionString);
+        ConfigurationOptions admin = ConfigurationOptions.Parse(fixture.CoordinationConnectionString);
         admin.AllowAdmin = true;
         await using ConnectionMultiplexer adminConnection = await ConnectionMultiplexer.ConnectAsync(admin);
         object[] grant =
@@ -117,7 +117,7 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
         ];
         await adminConnection.GetServer(adminConnection.GetEndPoints()[0]).ExecuteAsync("ACL", grant);
 
-        ConfigurationOptions restricted = ConfigurationOptions.Parse(fixture.ConnectionString);
+        ConfigurationOptions restricted = ConfigurationOptions.Parse(fixture.CoordinationConnectionString);
         restricted.User = "acl-svc";
         restricted.Password = "s3cret";
         await using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(restricted);

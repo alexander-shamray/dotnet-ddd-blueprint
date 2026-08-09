@@ -8,19 +8,28 @@ using Xunit;
 namespace Common.Infrastructure.Tests;
 
 /// <summary>
-/// A real Redis (ADR-010, §12.4) — the image §14.1's Compose file runs, so a
-/// test and a developer machine cannot disagree about the engine. One
-/// container serves both §8.1 roles: the *policies* differ per instance in
-/// Compose, but what these tests assert — key shapes, TTLs, NX semantics,
-/// token-checked release — is identical under either policy.
+/// Two real Redis containers (ADR-010) — the image §14.1's Compose file runs
+/// and §8.1's split, for §12.4's stated reason: with one server playing both
+/// roles, a cache stack accidentally wired to the coordination connection
+/// still passes every prefix, TTL and span test while production cache
+/// entries fill the noeviction instance. Two servers make role-routing an
+/// assertable fact.
 /// </summary>
 public sealed class RedisFixture : IAsyncLifetime
 {
-    private readonly RedisContainer _redis = new RedisBuilder()
+    private readonly RedisContainer _cache = new RedisBuilder()
         .WithImage("redis:7-alpine")
+        .WithCommand("--maxmemory-policy", "allkeys-lru")
         .Build();
 
-    public string ConnectionString => _redis.GetConnectionString();
+    private readonly RedisContainer _coordination = new RedisBuilder()
+        .WithImage("redis:7-alpine")
+        .WithCommand("--maxmemory-policy", "noeviction")
+        .Build();
+
+    public string CacheConnectionString => _cache.GetConnectionString();
+
+    public string CoordinationConnectionString => _coordination.GetConnectionString();
 
     /// <summary>
     /// The real composition path — no test re-wires what AddRedisConnections
@@ -32,8 +41,8 @@ public sealed class RedisFixture : IAsyncLifetime
     {
         Dictionary<string, string?> settings = new()
         {
-            ["ConnectionStrings:RedisCache"] = ConnectionString,
-            ["ConnectionStrings:RedisCoordination"] = ConnectionString
+            ["ConnectionStrings:RedisCache"] = CacheConnectionString,
+            ["ConnectionStrings:RedisCoordination"] = CoordinationConnectionString
         };
         IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
@@ -48,8 +57,13 @@ public sealed class RedisFixture : IAsyncLifetime
 
     // ValueTask, not Task: xUnit v3 redefined IAsyncLifetime (§12.4).
     public async ValueTask InitializeAsync() =>
-        await _redis.StartAsync(TestContext.Current.CancellationToken);
+        await Task.WhenAll(
+            _cache.StartAsync(TestContext.Current.CancellationToken),
+            _coordination.StartAsync(TestContext.Current.CancellationToken));
 
-    public async ValueTask DisposeAsync() =>
-        await _redis.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await _cache.DisposeAsync();
+        await _coordination.DisposeAsync();
+    }
 }
