@@ -51,7 +51,10 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 ├── tests/
 │   ├── Common.Domain.Tests/            The building blocks, under the same
 │   ├── Common.Application.Tests/       *.Domain.Tests / *.Application.Tests
-│   ├── Common.Web.Tests/               convention the services use (§12.1).
+│   ├── Common.Infrastructure.Tests/    convention the services use (§12.1).
+│   ├── Common.Web.Tests/               Common.Infrastructure's suite needs
+│   │                                   Docker — its Redis half runs against
+│   │                                   a Testcontainers server (§8, §12.4).
 │   │                                   Common.Web is a library with no entry
 │   │                                   point, so its suite drives a TestServer
 │   │                                   rather than a WebApplicationFactory
