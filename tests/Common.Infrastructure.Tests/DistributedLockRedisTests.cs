@@ -100,9 +100,20 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
         await using ConnectionMultiplexer adminConnection = await ConnectionMultiplexer.ConnectAsync(admin);
         object[] grant =
         [
-            "SETUSER", "acl-svc", "reset", "on", ">s3cret", "~acl:*",
-            "+@read", "+@write", "+@keyspace", "+@connection", "+eval",
-            "-@dangerous", "+client|setname", "+client|setinfo"
+            "SETUSER",
+            "acl-svc",
+            "reset",
+            "on",
+            ">s3cret",
+            "~acl:*",
+            "+@read",
+            "+@write",
+            "+@keyspace",
+            "+@connection",
+            "+eval",
+            "-@dangerous",
+            "+client|setname",
+            "+client|setinfo"
         ];
         await adminConnection.GetServer(adminConnection.GetEndPoints()[0]).ExecuteAsync("ACL", grant);
 

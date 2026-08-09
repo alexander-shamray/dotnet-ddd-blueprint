@@ -775,9 +775,11 @@ EF Core minor versions and behave differently under identical code.
          exist, so it fails loudly rather than quietly stopping to enforce. -->
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
     <!-- The in-memory reader the observability tests read back through:
-         §13.4's redaction tests, which that chapter prints one of, and the
-         meter-coverage tests guarding §13.2's meter list, which live in
-         Common.Web.Tests only. Test-only: nothing in src/ exports in
+         §13.4's redaction tests, which that chapter prints one of, the
+         meter-coverage tests guarding §13.2's meter list in
+         Common.Web.Tests, and the Redis client-span tests in
+         Common.Infrastructure.Tests proving AddRedisConnections instruments
+         its own connections. Test-only: nothing in src/ exports in
          memory. -->
     <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="1.17.0" />
   </ItemGroup>
