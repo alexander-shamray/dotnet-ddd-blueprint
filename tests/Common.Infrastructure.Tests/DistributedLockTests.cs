@@ -79,6 +79,32 @@ public sealed class DistributedLockTests
     }
 
     [Fact]
+    public async Task A_failed_release_puts_the_handle_back_for_retry()
+    {
+        _database.StringSetAsync(default, default, null, When.Always).ReturnsForAnyArgs(true);
+        _database.ScriptEvaluateAsync(Arg.Any<string>(), Arg.Any<RedisKey[]>(), Arg.Any<RedisValue[]>())
+            .Returns(
+                _ => throw new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"),
+                _ => Task.FromResult(RedisResult.Create((RedisValue)1)));
+
+        IDistributedLock held = (await Factory().TryAcquireAsync(
+            "reprice",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken))!;
+
+        // A transient failure propagates — and must not consume the handle:
+        // a "released" state after a throw makes every later attempt a
+        // successful no-op, and the lock stands until its TTL.
+        await Should.ThrowAsync<RedisConnectionException>(async () => await held.DisposeAsync());
+        await held.DisposeAsync();
+
+        await _database.Received(2).ScriptEvaluateAsync(
+            Arg.Any<string>(),
+            Arg.Any<RedisKey[]>(),
+            Arg.Any<RedisValue[]>());
+    }
+
+    [Fact]
     public async Task Dispose_releases_once_and_only_once()
     {
         _database.StringSetAsync(default, default, null, When.Always).ReturnsForAnyArgs(true);

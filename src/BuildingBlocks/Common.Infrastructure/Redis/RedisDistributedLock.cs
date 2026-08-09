@@ -26,6 +26,19 @@ internal sealed class RedisDistributedLock(IConnectionMultiplexer redis, string 
         if (Interlocked.Exchange(ref _released, 1) == 1)
             return;
 
-        await redis.GetDatabase().ScriptEvaluateAsync(ReleaseScript, [(RedisKey)key], [(RedisValue)token]);
+        try
+        {
+            await redis.GetDatabase().ScriptEvaluateAsync(ReleaseScript, [(RedisKey)key], [(RedisValue)token]);
+        }
+        catch
+        {
+            // The release did not happen, or its outcome is unknown. Put the
+            // handle back so the caller may retry: the script is token-checked
+            // and idempotent, so retrying an unknown outcome is safe — where a
+            // handle that stays "released" turns every later attempt into a
+            // successful no-op and holds the lock to its TTL.
+            Interlocked.Exchange(ref _released, 0);
+            throw;
+        }
     }
 }

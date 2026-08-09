@@ -170,10 +170,12 @@ tests/
                                  the registration surface read off the
                                  IServiceCollection — and a Testcontainers
                                  Redis half: lock lifecycle with the
-                                 stale-handle case, prefix + TTL asserted on
-                                 the server, tag invalidation, one span test.
-                                 The third Docker-needing project, its own
-                                 IntegrationCollection
+                                 stale-handle and failed-release cases, the
+                                 §8.1 ACL grant proven live, prefix + TTL
+                                 asserted on the server, tag invalidation,
+                                 and two span tests — one per keyed
+                                 connection. The third Docker-needing
+                                 project, its own IntegrationCollection
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
@@ -304,7 +306,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds seventeen projects and `dotnet test` runs 235 tests, so
+`Platform.slnx` holds seventeen projects and `dotnet test` runs 238 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 71, and CI has a `scaffold`
@@ -346,9 +348,9 @@ one `Redis/` folder — and five of its decisions bind what comes after:
   mechanism was proven by the container suite two PRs before its consumer —
   along with the mandatory TTL on the lock (refused before any I/O), the
   token-checked release (a stale handle must not delete the next holder's
-  key), and the span test, which forces the `TracerProvider` the way a
-  host's startup would because a raw `ServiceProvider` runs no hosted
-  services.
+  key), and the span tests — one per keyed connection — which force the
+  `TracerProvider` the way a host's startup would because a raw
+  `ServiceProvider` runs no hosted services.
 
 PR-11 landed the scaffold of §4.5 — `tools/new-service/new_service.py`, stdlib
 Python, one command per service — and five of its decisions bind what comes
