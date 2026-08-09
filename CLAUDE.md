@@ -153,7 +153,7 @@ tests/
                                  two suites below, which cannot reference
                                  each other
   Catalog.Domain.Tests/          §4.2's gates in §12.1's homes: domain isolation
-  Catalog.Application.Tests/     (allow-list now includes System.Collections —
+  Catalog.Application.Tests/     (allow-list now includes System.Collections and System.Linq —
   Catalog.Api.Tests/             a record's generated equality); ↛ EF Core,
                                  ↛ MassTransit, + registration surface +
                                  validator unit tests + the container-backed
@@ -255,7 +255,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fifteen projects and `dotnet test` runs 203 tests, so
+`Platform.slnx` holds fifteen projects and `dotnet test` runs 206 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-11 is next** (`feat(tooling): new-service scaffold script`),
 which copies and renames the template PR-10 finished: ports, database name,

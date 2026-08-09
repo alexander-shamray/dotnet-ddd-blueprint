@@ -141,7 +141,7 @@ their declaration.
 
 | Name | What it is |
 |---|---|
-| `IDbConnectionFactory`, `SqlConnectionFactory` | Opens a `SqlConnection` for Dapper reads |
+| `IDbConnectionFactory`, `SqlConnectionFactory` | Creates a `SqlConnection` for Dapper reads — closed; Dapper opens it, the caller disposes it |
 | `OrderingDbContext` | The service `DbContext`; configuration in §7.2 |
 | `OutboxPublisher` | `IIntegrationEventPublisher` writing `OutboxMessage` rows; resolves `MessageTypeMap` and hands it to `Stage` |
 | `Result`, `Result<T>` | Non-generic `Result` is the void case — there is no `Unit` — and `Result<T>` derives from it, which is what lets `TransactionBehavior` test any command's outcome with one pattern (§6.3). `IsSuccess`/`IsFailure`, `Error`, and the `Success`/`Failure` factories |

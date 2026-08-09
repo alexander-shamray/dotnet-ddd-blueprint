@@ -69,7 +69,11 @@ public readonly record struct Money
     {
         if (amount < 0)
             throw new DomainException("Money cannot be negative.");
-        if (currency is not { Length: 3 })
+
+        // Letters as well as length: "1$?" is three characters and no
+        // currency, and a guard that admits it makes the exception message a
+        // stricter claim than the type keeps.
+        if (currency is not { Length: 3 } || !currency.All(char.IsAsciiLetter))
             throw new DomainException("Currency must be a 3-letter ISO code.");
 
         return new Money(decimal.Round(amount, 2, MidpointRounding.ToEven), currency.ToUpperInvariant());

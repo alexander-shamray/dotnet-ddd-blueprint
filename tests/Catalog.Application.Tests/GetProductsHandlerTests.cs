@@ -32,8 +32,8 @@ public sealed class GetProductsHandlerTests(ServiceFixture fixture) : IAsyncLife
     /// </summary>
     private async Task<List<Product>> SeedAsync(params (string Name, DateTimeOffset PublishedAt)[] rows)
     {
-        List<Product> products = [.. rows.Select(r =>
-            Product.Publish(r.Name, null, Money.Of(10m, "EUR"), r.PublishedAt))];
+        List<Product> products =
+            [.. rows.Select(r => Product.Publish(r.Name, null, Money.Of(10m, "EUR"), r.PublishedAt))];
 
         await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
         CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();

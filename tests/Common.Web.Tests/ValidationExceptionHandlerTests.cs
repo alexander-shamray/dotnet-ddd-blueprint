@@ -25,12 +25,13 @@ public class ValidationExceptionHandlerTests
     [Fact]
     public async Task A_validation_exception_becomes_a_400_with_field_keyed_errors()
     {
-        using IHost host = await StartThrowingAsync(new ValidationException(
+        ValidationFailure[] failures =
         [
-            new ValidationFailure("Name", "'Name' must not be empty."),
-            new ValidationFailure("Name", "'Name' is too short."),
-            new ValidationFailure("Amount", "'Amount' must not be negative.")
-        ]));
+            new("Name", "'Name' must not be empty."),
+            new("Name", "'Name' is too short."),
+            new("Amount", "'Amount' must not be negative.")
+        ];
+        using IHost host = await StartThrowingAsync(new ValidationException(failures));
         using HttpClient client = host.GetTestClient();
 
         HttpResponseMessage response = await client.GetAsync("/products", TestContext.Current.CancellationToken);

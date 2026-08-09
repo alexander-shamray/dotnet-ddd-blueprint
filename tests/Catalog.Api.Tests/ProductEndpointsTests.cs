@@ -102,7 +102,8 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
         // and the deterministic ordering lives in the handler tests, where
         // the seeding controls the clock.
         List<Guid> published = [];
-        foreach (string name in new[] { "First", "Second", "Third" })
+        string[] names = ["First", "Second", "Third"];
+        foreach (string name in names)
         {
             HttpResponseMessage response = await PublishAsync(name);
             response.EnsureSuccessStatusCode();

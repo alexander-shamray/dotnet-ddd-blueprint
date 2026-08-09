@@ -3,10 +3,10 @@ using System.Data;
 namespace Common.Application;
 
 /// <summary>
-/// Opens a connection for Dapper reads (§6.5). Queries bypass the domain model
-/// and the unit of work entirely — this port is what a query handler injects
-/// instead of a repository, and it must never appear inside §6.3's transaction
-/// (§9's outbox note: it belongs to queries and to projections).
+/// Creates a connection for Dapper reads (§6.5). Queries bypass the domain
+/// model and the unit of work entirely — this port is what a query handler
+/// injects instead of a repository, and it must never appear inside §6.3's
+/// transaction (§9's outbox note: it belongs to queries and to projections).
 /// </summary>
 /// <remarks>
 /// The caller owns the connection it is handed — <c>using</c> at the call

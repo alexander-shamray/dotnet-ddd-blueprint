@@ -13,8 +13,8 @@ namespace Common.Application;
 public static class Cursor
 {
     public static string Encode(DateTimeOffset sortKey, Guid id) =>
-        Base64Url.EncodeToString(Encoding.UTF8.GetBytes(
-            string.Create(CultureInfo.InvariantCulture, $"{sortKey.UtcTicks}:{id:N}")));
+        Base64Url.EncodeToString(
+            Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture, $"{sortKey.UtcTicks}:{id:N}")));
 
     /// <summary>
     /// Null for null, and null for anything unreadable. The cursor is opaque

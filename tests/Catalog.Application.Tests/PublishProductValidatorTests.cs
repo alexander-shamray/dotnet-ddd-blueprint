@@ -45,9 +45,16 @@ public class PublishProductValidatorTests
         // decimal(19,4)'s integer capacity — past it the write fails at
         // SaveChanges as a 500, which is the wrong blame for bad input.
         { nameof(PublishProductCommand.Amount), Valid() with { Amount = 1_000_000_000_000_000m } },
+        // The rounding boundary: Money.Of rounds half-to-even at two places,
+        // so this value becomes exactly 1e15 and overflows despite sitting
+        // under a naive < 1e15 bound.
+        { nameof(PublishProductCommand.Amount), Valid() with { Amount = 999_999_999_999_999.995m } },
         { nameof(PublishProductCommand.Currency), Valid() with { Currency = "EURO" } },
         { nameof(PublishProductCommand.Currency), Valid() with { Currency = "" } },
-        // Length alone skips null — the rule needs NotEmpty for a JSON
+        // Three characters is not three letters — "1$?" must be refused here
+        // as input, not by Money.Of as a bug (§5.7's division).
+        { nameof(PublishProductCommand.Currency), Valid() with { Currency = "1$?" } },
+        // Matches alone skips null — the rule needs NotEmpty for a JSON
         // "currency": null to stay a 400 rather than a DomainException.
         { nameof(PublishProductCommand.Currency), Valid() with { Currency = null! } }
     };

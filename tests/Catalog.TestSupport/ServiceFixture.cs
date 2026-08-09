@@ -54,8 +54,9 @@ public sealed class ServiceFixture : IAsyncLifetime
 
         // The container hands out a connection to master; Catalog owns a
         // database of its own (§7.1), and MigrateAsync is what creates it.
-        // DbConnectionStringBuilder rather than SqlConnectionStringBuilder, so
-        // this project needs no provider package of its own.
+        // DbConnectionStringBuilder out of habit rather than necessity now:
+        // this project does carry the provider package, for the open
+        // SqlConnection Respawn inspects in ResetAsync.
         DbConnectionStringBuilder connection = new() { ConnectionString = _sql.GetConnectionString() };
         connection["Database"] = "Catalog";
         ConnectionString = connection.ConnectionString;

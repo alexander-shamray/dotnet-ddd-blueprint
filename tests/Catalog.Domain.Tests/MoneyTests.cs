@@ -30,8 +30,11 @@ public class MoneyTests
     [InlineData("")]
     [InlineData("EU")]
     [InlineData("EURO")]
+    [InlineData("1$?")]
     public void Of_refuses_anything_but_a_three_letter_code(string currency)
     {
+        // "1$?" is the case length alone admits: three characters, no
+        // currency — the guard checks letters, not just count.
         Should.Throw<DomainException>(() => Money.Of(1m, currency));
     }
 

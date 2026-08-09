@@ -26,7 +26,10 @@ public class ArchitectureTests
         // System.Collections earned its line with the first domain event: a
         // record's generated equality goes through EqualityComparer<T>, which
         // lives there. No collection type appears in any domain signature.
-        string[] allowed = ["Common.Domain", "System.Runtime", "System.Collections"];
+        // System.Linq earned its line with Money's currency guard —
+        // enumerable logic over owned values is domain work, not an I/O
+        // dependency, and §5.4's Order sample already leans on it.
+        string[] allowed = ["Common.Domain", "System.Runtime", "System.Collections", "System.Linq"];
 
         IEnumerable<string> referenced = typeof(Product).Assembly
             .GetReferencedAssemblies()

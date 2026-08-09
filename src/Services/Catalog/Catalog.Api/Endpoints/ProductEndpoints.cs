@@ -7,8 +7,8 @@ namespace Catalog.Api.Endpoints;
 
 /// <summary>
 /// One static class per aggregate (ADR-015), in the namespace the §4.2 gate
-/// selects on. The group is <c>/v1/catalog</c> because the gateway strips
-/// <c>/api</c> from <c>/api/v1/catalog/{**catch-all}</c> (§10.2) — the
+/// selects on. The group is <c>/v1/catalog/products</c> because the gateway
+/// strips <c>/api</c> from <c>/api/v1/catalog/{**catch-all}</c> (§10.2) — the
 /// service sees the version, never the <c>/api</c> prefix, and PR-17's config
 /// test will assert this group against the route's stripped path.
 /// </summary>
