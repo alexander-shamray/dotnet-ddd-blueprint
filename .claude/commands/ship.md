@@ -164,18 +164,25 @@ anything.
    - **A `Needs a decision` row** from `/review-grok` stops the loop — that
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
-   - **Twelve rounds** stops the loop. This bound was three, and three was
-     wrong. By its seventh Copilot round PR-11's findings had gone
-     10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted and fixed, and rounds four
-     through seven caught a documented-but-unenforced constraint, an assertion
-     that could not fail in one direction, and a fail-open in the script's own
-     manifest check — three defects a three-round bound would have shipped.
-     That was the evidence for raising it; the loop then ran on and kept
-     finding things, including a round-eight *clean* pass followed by eight
-     more findings. The bound exists for a reviewer and a triager
-     *disagreeing*, which converges or never does; it was never meant to stop
-     a loop still finding real things and fixing them in minutes. Twelve, and
-     hand over what survives.
+   - **A clean round ends it; twelve rounds is the ceiling; never end on a
+     round that produced a fix.** Those three clauses are the whole condition,
+     and the third is what makes the other two executable rather than
+     contradictory. Clean means a requested review that lands with *nothing* —
+     no inline comments, no suppressed ones, no unresolved threads. Failing
+     that, stop at twelve and hand over what survives. But if the last round's
+     findings were accepted and pushed, request one more to verify them even
+     if that is round thirteen: a fix nobody reviewed is the thing this loop
+     exists to prevent, and stopping on one is worse than not having run.
+
+     The ceiling was three, and three was wrong. By its seventh Copilot round
+     PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
+     and rounds four through seven caught a documented-but-unenforced
+     constraint, an assertion that could not fail in one direction, and a
+     fail-open in the script's own manifest check — three defects three rounds
+     would have shipped. The loop then ran past twelve and kept finding things,
+     including a *clean* round eight followed by eight more findings. A ceiling
+     is for a reviewer and a triager **disagreeing**, which converges or never
+     does; it was never for a loop still finding real things.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
@@ -271,9 +278,11 @@ anything.
       the threads. Push the branch by name so the next request reviews the
       fixed state, and go back to (1).
 
-   The same two early exits as step 5, in this loop's vocabulary: an **`Ask`**
-   thread — left open by `/review-copilot` by design — stops the loop, and
-   **twelve rounds** stops it. A request that registers no review inside a
+   The same stopping condition as step 5, in this loop's vocabulary: an
+   **`Ask`** thread — left open by `/review-copilot` by design — stops the
+   loop; otherwise it runs until a requested review lands with nothing at all,
+   to a ceiling of twelve rounds, and **never ends on a round whose findings
+   were fixed and pushed**. A request that registers no review inside a
    reasonable wait is reported as the loop not having finished, never marked
    clean by timeout.
 

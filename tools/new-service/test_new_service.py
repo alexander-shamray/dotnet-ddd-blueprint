@@ -749,6 +749,27 @@ class RefusesToRun(unittest.TestCase):
                 render(repo_root=root)
             self.assertIn("not classified", str(raised.exception))
 
+    def test_either_half_of_the_infra_only_pair_going_missing(self):
+        # The anchor used to be the API entry alone, so a change to the
+        # migrator's half passed unnoticed while the scaffold went on emitting
+        # the shape it used to have. Both halves, either direction.
+        halves = (
+            '  catalog-migrator:\n    profiles: [ "excluded" ]\n',
+            '  catalog-api:\n    profiles: [ "excluded" ]\n',
+        )
+        for half in halves:
+            with tempfile.TemporaryDirectory() as directory:
+                root = template_copy(Path(directory))
+                override = root / "deploy/compose/docker-compose.infra-only.yml"
+                text = override.read_bytes().decode("utf-8")
+                override.write_bytes(
+                    text.replace(half.replace("\n", "\r\n"), "").replace(half, "").encode("utf-8")
+                )
+
+                with self.assertRaises(ScaffoldError) as raised:
+                    render(repo_root=root)
+                self.assertIn("infra-only override", str(raised.exception))
+
     def test_a_patch_anchor_the_template_no_longer_carries(self):
         # The fragility this design accepts, failing loudly rather than
         # silently producing a service that still names Catalog's slice.

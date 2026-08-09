@@ -284,7 +284,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`py -3.12 -m unittest` in `tools/new-service` runs 65, and CI has a `scaffold`
+`py -3.12 -m unittest` in `tools/new-service` runs 66, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-12 is next**
 (`feat(common): Redis helpers — HybridCache, key namespaces, distributed
 locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
@@ -469,7 +469,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 65 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 66 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
@@ -1402,19 +1402,23 @@ triages what lands — suppressed comments included, which is where every real
 finding against the loop's own machinery has arrived — and the loop repeats
 until a requested review posts with no new findings. The review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
-a lite one, is the one the loop wants. Either loop stops early on the finding
-class that is the user's — `Needs a decision` from the Grok triage, an open
-`Ask` thread from the Copilot one — or after **twelve** rounds. That bound was
-three until PR-11, where the first seven Copilot rounds went
-10 → 4 → 3 → 1 → 1 → 3 → 1 with every finding accepted: rounds four to seven
-caught a documented-but-unenforced constraint, an assertion that could not fail
-in one direction, and a fail-open in a manifest check. Three would have shipped
-all three, which is what raised the bound — and the loop then ran past twelve
-and kept finding things, including a **clean** round followed by eight more
-findings. The bound is for a reviewer and a triager *disagreeing*, not for a
-loop still finding real defects, and Copilot's late rounds surface them in the
-**suppressed** block under a "generated no new comments" heading — so a clean
-inline verdict is not convergence, and one clean round is not two.
+a lite one, is the one the loop wants. **`ship.md` owns the stopping
+condition** and states it in three clauses: a clean round ends it, twelve
+rounds is the ceiling, and it never ends on a round whose findings were fixed
+and pushed — that last is what stops the first two contradicting each other,
+since a fix nobody reviewed is what the loop exists to prevent. Either loop
+also stops early on the finding class that is the user's: `Needs a decision`
+from the Grok triage, an open `Ask` thread from the Copilot one.
+
+The ceiling was three until PR-11, and the numbers are why it moved: the first
+seven Copilot rounds went 10 → 4 → 3 → 1 → 1 → 3 → 1 with every finding
+accepted, and rounds four to seven caught a documented-but-unenforced
+constraint, an assertion that could not fail in one direction, and a fail-open
+in a manifest check. Three would have shipped all three. Copilot's late rounds
+surface findings in the **suppressed** block under a "generated no new
+comments" heading, so a clean inline verdict is not convergence — and one clean
+round is not two: round eight came back clean and eight more findings followed
+it.
 What `.claude/settings.json` still denies is the narrow set
 that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
 push to `main`. A branch wanting one of those is raising a question, not

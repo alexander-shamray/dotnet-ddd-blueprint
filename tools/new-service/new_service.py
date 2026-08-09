@@ -946,14 +946,20 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
 def update_infra_only(repo_root: Path, names: Names) -> str:
     """Both halves of the pair join the excluded profile — §14.1's own rule."""
     text, newline = read(repo_root, "deploy/compose/docker-compose.infra-only.yml")
-    require_once(text, f'  {TEMPLATE.lower()}-api:\n    profiles: [ "excluded" ]\n', "infra-only override")
-    added = names.rename(
+
+    # The anchor is the contiguous pair, and the pair is also what gets
+    # written — one string, so the two cannot drift apart. Anchoring the API
+    # half alone let a change to the migrator's entry through unnoticed while
+    # this went on emitting the shape it used to have, which is the drift the
+    # anchors exist to stop.
+    pair = (
         f'  {TEMPLATE.lower()}-migrator:\n'
         f'    profiles: [ "excluded" ]\n'
         f'  {TEMPLATE.lower()}-api:\n'
         f'    profiles: [ "excluded" ]\n'
     )
-    return restore(text + added, newline)
+    require_once(text, pair, "infra-only override")
+    return restore(text + names.rename(pair), newline)
 
 
 def update_env_example(repo_root: Path, names: Names) -> str:
