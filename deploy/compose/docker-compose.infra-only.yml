@@ -5,7 +5,10 @@
 # file cannot delete. Every application block added to docker-compose.yml
 # joins this list in the same PR.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.infra-only.yml up -d
+# Both commands from the repository root — one working directory, as the
+# compose README's invocations already read:
+#
+#   docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.infra-only.yml up -d
 #   dotnet run --project src/Services/Catalog/Catalog.Api
 services:
   catalog-migrator:

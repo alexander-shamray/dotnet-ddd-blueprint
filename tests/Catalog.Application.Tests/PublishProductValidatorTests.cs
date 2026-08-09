@@ -42,8 +42,14 @@ public class PublishProductValidatorTests
         { nameof(PublishProductCommand.Name), Valid() with { Name = new string('x', 201) } },
         { nameof(PublishProductCommand.ThumbnailUrl), Valid() with { ThumbnailUrl = new string('x', 401) } },
         { nameof(PublishProductCommand.Amount), Valid() with { Amount = -0.01m } },
+        // decimal(19,4)'s integer capacity — past it the write fails at
+        // SaveChanges as a 500, which is the wrong blame for bad input.
+        { nameof(PublishProductCommand.Amount), Valid() with { Amount = 1_000_000_000_000_000m } },
         { nameof(PublishProductCommand.Currency), Valid() with { Currency = "EURO" } },
-        { nameof(PublishProductCommand.Currency), Valid() with { Currency = "" } }
+        { nameof(PublishProductCommand.Currency), Valid() with { Currency = "" } },
+        // Length alone skips null — the rule needs NotEmpty for a JSON
+        // "currency": null to stay a 400 rather than a DomainException.
+        { nameof(PublishProductCommand.Currency), Valid() with { Currency = null! } }
     };
 
     [Theory]

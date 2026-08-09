@@ -746,7 +746,9 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
     public PlaceOrderValidator()
     {
         RuleFor(x => x.CustomerId).NotEmpty();
-        RuleFor(x => x.Currency).Length(3);
+        // NotEmpty first: Length alone skips null, and a JSON "currency":
+        // null would reach the domain as a 500 rather than this 400.
+        RuleFor(x => x.Currency).NotEmpty().Length(3);
         RuleFor(x => x.Items).NotEmpty();
         RuleForEach(x => x.Items).ChildRules(item =>
         {

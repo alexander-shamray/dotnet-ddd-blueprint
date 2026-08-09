@@ -83,8 +83,15 @@ public readonly record struct Money
         return new Money(left.Amount + right.Amount, left.Currency);
     }
 
-    public static Money operator *(Money money, int quantity) =>
-        new(money.Amount * quantity, money.Currency);
+    public static Money operator *(Money money, int quantity)
+    {
+        // Without this guard the operator is a back door past Of: a negative
+        // quantity would construct the negative Money the factory refuses.
+        if (quantity < 0)
+            throw new DomainException("Money cannot be multiplied by a negative quantity.");
+
+        return new Money(money.Amount * quantity, money.Currency);
+    }
 
     private static void EnsureSameCurrency(Money left, Money right)
     {

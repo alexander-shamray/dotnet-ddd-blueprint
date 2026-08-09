@@ -61,6 +61,14 @@ public class MoneyTests
     }
 
     [Fact]
+    public void Multiplication_refuses_a_negative_quantity()
+    {
+        // The operator must not be a back door past Of — a negative quantity
+        // would construct the negative Money the factory refuses.
+        Should.Throw<DomainException>(() => Money.Of(2.50m, "EUR") * -1);
+    }
+
+    [Fact]
     public void Two_instances_with_equal_values_are_interchangeable()
     {
         // §5.1's value-object test, on the record struct's own equality.

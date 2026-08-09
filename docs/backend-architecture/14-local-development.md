@@ -244,7 +244,9 @@ An override file runs infrastructure in containers while services run on the
 host with a debugger attached — the usual inner-loop compromise:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.infra-only.yml up -d
+# Both from the repository root — the two commands share one working
+# directory, or the pair cannot be pasted as written.
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.infra-only.yml up -d
 dotnet run --project src/Services/Ordering/Ordering.Api
 ```
 
