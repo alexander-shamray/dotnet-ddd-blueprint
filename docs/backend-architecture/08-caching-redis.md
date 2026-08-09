@@ -56,8 +56,19 @@ a mandatory `{service}:` key prefix is the cost-effective default. What must
 *not* be shared is the eviction policy between cache and coordination keys.
 
 ```
-user ordering-svc on >REDACTED ~ordering:* +@read +@write +@keyspace -@dangerous
+user ordering-svc on >REDACTED ~ordering:* +@read +@write +@keyspace +@connection +eval -@dangerous +client|setname +client|setinfo
 ```
+
+Three of those grants are easy to leave off, and the line above is the one a
+Testcontainers test proves rather than a first guess. `+eval` because the
+lock's token-checked release is a Lua script and `EVAL` sits in `@scripting`,
+which none of the data categories include — under the shorter grant this line
+used to print, every release threw and the lock stood until its TTL.
+`+@connection` because the client library's handshake needs `PING` and its
+kin before it carries a single command. And the two `+client|` subcommands
+because `StackExchange.Redis` names its connection on connect and
+`-@dangerous` takes `CLIENT` away wholesale — the subcommand grants give back
+the two harmless ones.
 
 Two rules the helper library enforces rather than documents:
 
@@ -117,7 +128,8 @@ public static class DependencyInjection
                     // the prefix.
                     options.InstanceName = provider.GetRequiredService<RedisKeys>().CacheInstanceName;
                     options.ConnectionMultiplexerFactory = () =>
-                        Task.FromResult(provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Cache));
+                        Task.FromResult(
+                            provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Cache));
                 });
 
             services.AddHybridCache(options =>

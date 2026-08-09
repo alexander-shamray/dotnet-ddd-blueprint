@@ -1,6 +1,8 @@
 using Common.Infrastructure.Redis;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Shouldly;
+using StackExchange.Redis;
 using Xunit;
 
 namespace Common.Infrastructure.Tests;
@@ -49,8 +51,10 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
     {
         IDistributedLockFactory factory = Factory();
 
-        IDistributedLock? first =
-            await factory.TryAcquireAsync("expire", TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+        IDistributedLock? first = await factory.TryAcquireAsync(
+            "expire",
+            TimeSpan.FromMilliseconds(200),
+            TestContext.Current.CancellationToken);
         first.ShouldNotBeNull();
 
         IDistributedLock? second = await WaitForAcquireAsync(factory, "expire");
@@ -62,8 +66,10 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
     {
         IDistributedLockFactory factory = Factory();
 
-        IDistributedLock? stale =
-            await factory.TryAcquireAsync("stolen", TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+        IDistributedLock? stale = await factory.TryAcquireAsync(
+            "stolen",
+            TimeSpan.FromMilliseconds(200),
+            TestContext.Current.CancellationToken);
         stale.ShouldNotBeNull();
 
         // The key expires; another holder takes the lock with a new token.
@@ -76,6 +82,55 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
         IDistributedLock? intruder =
             await factory.TryAcquireAsync("stolen", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         intruder.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task The_release_script_runs_under_the_documented_ACL_grant()
+    {
+        // §8.1's per-service user, created live. The categories alone broke
+        // this once: EVAL is @scripting, which +@read +@write +@keyspace do
+        // not include, so a token-checked release under the documented grant
+        // threw and the lock stood until its TTL. The grant §8.1 now prints
+        // is the one this test proves.
+        ConfigurationOptions admin = ConfigurationOptions.Parse(fixture.ConnectionString);
+        admin.AllowAdmin = true;
+        await using ConnectionMultiplexer adminConnection = await ConnectionMultiplexer.ConnectAsync(admin);
+        object[] grant =
+        [
+            "SETUSER", "acl-svc", "reset", "on", ">s3cret", "~acl:*",
+            "+@read", "+@write", "+@keyspace", "+@connection", "+eval",
+            "-@dangerous", "+client|setname", "+client|setinfo"
+        ];
+        await adminConnection.GetServer(adminConnection.GetEndPoints()[0]).ExecuteAsync("ACL", grant);
+
+        ConfigurationOptions restricted = ConfigurationOptions.Parse(fixture.ConnectionString);
+        restricted.User = "acl-svc";
+        restricted.Password = "s3cret";
+        await using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(restricted);
+
+        // The real factory over the restricted connection — the keyed
+        // override pattern DistributedLockTests already uses.
+        ServiceCollection services = new();
+        services.AddSingleton<IHostEnvironment>(new TestEnvironment("acl"));
+        services.AddRedisConnections(AddRedisConnectionsTests.Configuration());
+        services.AddKeyedSingleton<IConnectionMultiplexer>(RedisConnections.Coordination, connection);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        IDistributedLockFactory factory = provider.GetRequiredService<IDistributedLockFactory>();
+
+        IDistributedLock? held = await factory.TryAcquireAsync(
+            "guarded",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken);
+        held.ShouldNotBeNull();
+        await held.DisposeAsync();
+
+        // Re-acquisition is the proof the EVAL actually ran: without the
+        // release, NX would refuse this for the rest of the 30 s TTL.
+        IDistributedLock? reacquired = await factory.TryAcquireAsync(
+            "guarded",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken);
+        reacquired.ShouldNotBeNull();
     }
 
     /// <summary>
