@@ -1038,17 +1038,23 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     # check too — `tests/Common.Domain.Tests` exists, so the directory test
     # below fired — but by accident and with a message about the wrong thing,
     # and a name colliding on identity without colliding on disk sailed through.
-    generated = {f"{names.pascal}.{suffix}" for suffix in PROJECT_SUFFIXES}
+    # Compared case-insensitively, because a .NET assembly simple name is.
+    # `COMMON` clears every check above on a case-sensitive filesystem, and
+    # `COMMON.Domain` does not intersect `Common.Domain` as a string — so the
+    # first version of this check let through exactly the case it was written
+    # to stop.
+    generated = {f"{names.pascal}.{suffix}": suffix for suffix in PROJECT_SUFFIXES}
     existing = {
-        path.stem
+        path.stem.lower()
         for directory in ("src", "tests")
         if (repo_root / directory).is_dir()
         for path in (repo_root / directory).rglob("*.csproj")
     }
-    if (clash := generated & existing):
+    if (clash := sorted(project for project in generated if project.lower() in existing)):
         raise ScaffoldError(
-            "the solution already has " + ", ".join(sorted(clash)) + ". Two projects with "
-            "one assembly identity do not build, whatever directory each sits in."
+            "the solution already has " + ", ".join(clash) + ", give or take casing. Two "
+            "projects with one assembly identity do not build, whatever directory each "
+            "sits in and however each is spelt."
         )
 
     for root in COPY_ROOTS:

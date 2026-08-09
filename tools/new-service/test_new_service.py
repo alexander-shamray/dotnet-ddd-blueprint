@@ -35,7 +35,21 @@ MIGRATION_ID = "20260809120000"
 PORT = 5101
 
 
-def render(name: str = "Ordering", port: int = PORT, repo_root: Path = REPO_ROOT) -> Plan:
+# Zulu and Yankee, and neither will ever be a service. The probes used to be
+# Ordering and Inventory — both on Appendix C's plan — and every
+# repository-backed render would have started refusing the day PR-18 created
+# `src/Services/Ordering`, which is the day this suite matters most. A probe
+# name has to be one the platform can never take.
+#
+# Zulu rather than Alfa because it must also sort *after* `Microsoft`: the
+# using-block test below exists for the case where the service's own namespace
+# moves past EF's in the sort order, and a probe sorting before it would have
+# quietly stopped covering that.
+PROBE = "Zulu"
+SECOND_PROBE = "Yankee"
+
+
+def render(name: str = PROBE, port: int = PORT, repo_root: Path = REPO_ROOT) -> Plan:
     return plan(repo_root, name, port, MIGRATION_ID)
 
 
@@ -69,15 +83,15 @@ class RendersTheTemplate(unittest.TestCase):
 
     def test_it_writes_nine_projects_five_service_three_test_and_test_support(self):
         for project in (
-            "src/Services/Ordering/Ordering.Domain/Ordering.Domain.csproj",
-            "src/Services/Ordering/Ordering.Application/Ordering.Application.csproj",
-            "src/Services/Ordering/Ordering.Infrastructure/Ordering.Infrastructure.csproj",
-            "src/Services/Ordering/Ordering.Migrator/Ordering.Migrator.csproj",
-            "src/Services/Ordering/Ordering.Api/Ordering.Api.csproj",
-            "tests/Ordering.Domain.Tests/Ordering.Domain.Tests.csproj",
-            "tests/Ordering.Application.Tests/Ordering.Application.Tests.csproj",
-            "tests/Ordering.Api.Tests/Ordering.Api.Tests.csproj",
-            "tests/Ordering.TestSupport/Ordering.TestSupport.csproj",
+            "src/Services/Zulu/Zulu.Domain/Zulu.Domain.csproj",
+            "src/Services/Zulu/Zulu.Application/Zulu.Application.csproj",
+            "src/Services/Zulu/Zulu.Infrastructure/Zulu.Infrastructure.csproj",
+            "src/Services/Zulu/Zulu.Migrator/Zulu.Migrator.csproj",
+            "src/Services/Zulu/Zulu.Api/Zulu.Api.csproj",
+            "tests/Zulu.Domain.Tests/Zulu.Domain.Tests.csproj",
+            "tests/Zulu.Application.Tests/Zulu.Application.Tests.csproj",
+            "tests/Zulu.Api.Tests/Zulu.Api.Tests.csproj",
+            "tests/Zulu.TestSupport/Zulu.TestSupport.csproj",
         ):
             self.assertIn(project, self.rendered.created)
 
@@ -85,15 +99,15 @@ class RendersTheTemplate(unittest.TestCase):
         # §15.2 builds two images per service, and PR-10 found that both need
         # the -extra tag: SqlClient refuses to open a connection under the
         # globalization-invariant mode plain chiselled runs in.
-        for image in ("Ordering.Api", "Ordering.Migrator"):
-            path = f"src/Services/Ordering/{image}/Dockerfile"
+        for image in ("Zulu.Api", "Zulu.Migrator"):
+            path = f"src/Services/Zulu/{image}/Dockerfile"
             self.assertIn(path, self.rendered.created)
             self.assertIn("-chiseled-extra", self.rendered.created[path])
 
     def test_it_writes_the_assembly_marker_the_gates_anchor_on(self):
-        marker = "src/Services/Ordering/Ordering.Domain/AssemblyMarker.cs"
+        marker = "src/Services/Zulu/Zulu.Domain/AssemblyMarker.cs"
         self.assertIn(marker, self.rendered.created)
-        self.assertIn("namespace Ordering.Domain;", self.rendered.created[marker])
+        self.assertIn("namespace Zulu.Domain;", self.rendered.created[marker])
 
     def test_no_generated_path_or_line_still_names_the_template(self):
         # The single best check a rename script can carry, and the one that
@@ -107,20 +121,20 @@ class RendersTheTemplate(unittest.TestCase):
 
     def test_it_renames_the_schema_the_keys_and_the_environment_variables(self):
         context = self.rendered.created[
-            "src/Services/Ordering/Ordering.Infrastructure/Persistence/OrderingDbContext.cs"
+            "src/Services/Zulu/Zulu.Infrastructure/Persistence/ZuluDbContext.cs"
         ]
-        self.assertIn('modelBuilder.HasDefaultSchema("ordering");', context)
+        self.assertIn('modelBuilder.HasDefaultSchema("zulu");', context)
 
         infrastructure = self.rendered.created[
-            "src/Services/Ordering/Ordering.Infrastructure/DependencyInjection.cs"
+            "src/Services/Zulu/Zulu.Infrastructure/DependencyInjection.cs"
         ]
-        self.assertIn('configuration.GetConnectionString("Ordering")', infrastructure)
+        self.assertIn('configuration.GetConnectionString("Zulu")', infrastructure)
 
-        migrator = self.rendered.created["src/Services/Ordering/Ordering.Migrator/MigratorHost.cs"]
-        self.assertIn('GetConnectionString("OrderingMigrator")', migrator)
+        migrator = self.rendered.created["src/Services/Zulu/Zulu.Migrator/MigratorHost.cs"]
+        self.assertIn('GetConnectionString("ZuluMigrator")', migrator)
 
         self.assertIn(
-            "ORDERING_MIGRATOR_CONNECTION", self.rendered.updated["deploy/compose/.env.example"]
+            "ZULU_MIGRATOR_CONNECTION", self.rendered.updated["deploy/compose/.env.example"]
         )
 
 
@@ -133,10 +147,10 @@ class OmitsTheSlice(unittest.TestCase):
         # PR-07's state with the later wiring on it, not PR-10's state with
         # the nouns changed.
         for omitted in OMITTED:
-            self.assertNotIn(omitted.replace("Catalog", "Ordering"), self.rendered.created)
+            self.assertNotIn(omitted.replace("Catalog", "Zulu"), self.rendered.created)
 
     def test_the_host_maps_no_endpoint_and_says_where_the_first_one_goes(self):
-        program = self.rendered.created["src/Services/Ordering/Ordering.Api/Program.cs"]
+        program = self.rendered.created["src/Services/Zulu/Zulu.Api/Program.cs"]
         self.assertNotIn("MapProductEndpoints", program)
         self.assertIn("app.MapCommonHealthEndpoints();", program)
         self.assertIn("This service maps no endpoint of its own yet.", program)
@@ -146,7 +160,7 @@ class OmitsTheSlice(unittest.TestCase):
         # inside it, there being no validator yet and DependencyInjection
         # being static — CS0718, found by compiling the scaffolded service.
         application = self.rendered.created[
-            "src/Services/Ordering/Ordering.Application/DependencyInjection.cs"
+            "src/Services/Zulu/Zulu.Application/DependencyInjection.cs"
         ]
         self.assertIn(
             "services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);", application
@@ -154,36 +168,36 @@ class OmitsTheSlice(unittest.TestCase):
 
     def test_the_repository_registration_is_gone_and_the_unit_of_work_is_not(self):
         infrastructure = self.rendered.created[
-            "src/Services/Ordering/Ordering.Infrastructure/DependencyInjection.cs"
+            "src/Services/Zulu/Zulu.Infrastructure/DependencyInjection.cs"
         ]
         self.assertIn("services.AddScoped<IUnitOfWork, EfUnitOfWork>();", infrastructure)
         self.assertNotIn("IRepository", infrastructure)
 
     def test_both_architecture_gates_anchor_on_the_marker(self):
-        domain = self.rendered.created["tests/Ordering.Domain.Tests/ArchitectureTests.cs"]
+        domain = self.rendered.created["tests/Zulu.Domain.Tests/ArchitectureTests.cs"]
         self.assertIn("typeof(AssemblyMarker).Assembly", domain)
         self.assertIn('string[] allowed = ["Common.Domain", "System.Runtime"];', domain)
 
-        application = self.rendered.created["tests/Ordering.Application.Tests/ArchitectureTests.cs"]
+        application = self.rendered.created["tests/Zulu.Application.Tests/ArchitectureTests.cs"]
         self.assertIn("typeof(AssemblyMarker).Assembly", application)
-        self.assertIn("using Ordering.Domain;", application)
+        self.assertIn("using Zulu.Domain;", application)
 
     def test_the_application_test_project_carries_no_container_wiring(self):
         # With no handler test there is no collection member and no fixture
         # consumer, so the references and the provider package go with them.
         csproj = self.rendered.created[
-            "tests/Ordering.Application.Tests/Ordering.Application.Tests.csproj"
+            "tests/Zulu.Application.Tests/Zulu.Application.Tests.csproj"
         ]
-        self.assertNotIn("Ordering.TestSupport.csproj", csproj)
-        self.assertNotIn("Ordering.Infrastructure.csproj", csproj)
+        self.assertNotIn("Zulu.TestSupport.csproj", csproj)
+        self.assertNotIn("Zulu.Infrastructure.csproj", csproj)
         self.assertNotIn("Microsoft.EntityFrameworkCore.SqlServer", csproj)
         self.assertNotIn(
-            "tests/Ordering.Application.Tests/IntegrationCollection.cs", self.rendered.created
+            "tests/Zulu.Application.Tests/IntegrationCollection.cs", self.rendered.created
         )
 
     def test_the_application_project_carries_no_dapper_until_its_first_query(self):
         csproj = self.rendered.created[
-            "src/Services/Ordering/Ordering.Application/Ordering.Application.csproj"
+            "src/Services/Zulu/Zulu.Application/Zulu.Application.csproj"
         ]
         self.assertNotIn('PackageReference Include="Dapper"', csproj)
         self.assertIn('PackageReference Include="FluentValidation"', csproj)
@@ -193,15 +207,15 @@ class OmitsTheSlice(unittest.TestCase):
         # miscounted — the null-dispatcher test is copied too — and could not
         # fail if that test were dropped, which is the one registration whose
         # absence makes the first resolved TransactionBehavior throw.
-        tests = self.rendered.created["tests/Ordering.Application.Tests/DependencyInjectionTests.cs"]
+        tests = self.rendered.created["tests/Zulu.Application.Tests/DependencyInjectionTests.cs"]
 
         self.assertEqual(
             [
-                "AddOrderingApplication_registers_the_dispatcher_scoped",
-                "AddOrderingApplication_registers_the_system_clock",
-                "AddOrderingApplication_registers_the_request_metrics_singleton",
-                "AddOrderingApplication_registers_the_null_domain_event_dispatcher_scoped",
-                "AddOrderingApplication_registers_the_three_behaviours_in_pipeline_order",
+                "AddZuluApplication_registers_the_dispatcher_scoped",
+                "AddZuluApplication_registers_the_system_clock",
+                "AddZuluApplication_registers_the_request_metrics_singleton",
+                "AddZuluApplication_registers_the_null_domain_event_dispatcher_scoped",
+                "AddZuluApplication_registers_the_three_behaviours_in_pipeline_order",
             ],
             re.findall(r"public void (\w+)\(\)", tests),
         )
@@ -219,13 +233,14 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
     two more were beside them in copied files.
 
     The straggler check cannot catch this class, because the rename *is* the
-    defect. These assertions are the guard, and a service name that is not
-    Ordering is used deliberately — the false sentences read plausibly with a
-    name the template's own prose might have used.
+    defect. These assertions are the guard, and they render under the second
+    probe rather than the first: a sentence that is false of *any* service is
+    false under either name, so using the same one everywhere would have let a
+    default-name assumption hide inside an assertion about names.
     """
 
     def setUp(self):
-        self.rendered = render(name="Inventory", port=5103)
+        self.rendered = render(name=SECOND_PROBE, port=5103)
 
     def claim(self, path: str) -> str:
         # Normalised, because these assertions are about wording and a
@@ -234,33 +249,33 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
         return self.rendered.created[path].replace("\r\n", "\n")
 
     def test_the_host_does_not_cite_itself_as_the_precedent(self):
-        program = self.claim("src/Services/Inventory/Inventory.Api/Program.cs")
-        self.assertNotIn("as Inventory does", program)
+        program = self.claim("src/Services/Yankee/Yankee.Api/Program.cs")
+        self.assertNotIn("as Yankee does", program)
         self.assertIn("deploy/compose/README.md when it lands (§C.4)", program)
 
     def test_the_registration_suite_does_not_send_the_reader_to_itself(self):
-        tests = self.claim("tests/Inventory.Application.Tests/DependencyInjectionTests.cs")
-        self.assertNotIn("Inventory.Application.Tests carries both", tests)
+        tests = self.claim("tests/Yankee.Application.Tests/DependencyInjectionTests.cs")
+        self.assertNotIn("Yankee.Application.Tests carries both", tests)
         self.assertIn("The service this one was scaffolded from carries both", tests)
 
     def test_the_validator_note_does_not_cite_a_suite_without_the_test(self):
-        di = self.claim("src/Services/Inventory/Inventory.Application/DependencyInjection.cs")
-        self.assertNotIn("Inventory.Application.Tests carries", di)
+        di = self.claim("src/Services/Yankee/Yankee.Application/DependencyInjection.cs")
+        self.assertNotIn("Yankee.Application.Tests carries", di)
 
     def test_the_domain_gate_does_not_claim_a_history_the_service_lacks(self):
-        gate = self.claim("tests/Inventory.Domain.Tests/ArchitectureTests.cs")
-        self.assertNotIn("the ones Inventory added", gate)
+        gate = self.claim("tests/Yankee.Domain.Tests/ArchitectureTests.cs")
+        self.assertNotIn("the ones Yankee added", gate)
 
     def test_the_endpoints_gate_says_where_it_was_observed_red(self):
-        gate = self.claim("tests/Inventory.Api.Tests/ArchitectureTests.cs")
-        self.assertNotIn("forbidden reference in Inventory before being trusted", gate)
+        gate = self.claim("tests/Yankee.Api.Tests/ArchitectureTests.cs")
+        self.assertNotIn("forbidden reference in Yankee before being trusted", gate)
         self.assertIn("the service this one\n/// was scaffolded from", gate)
 
     def test_no_generated_file_claims_this_service_did_something_in_a_past_pr(self):
         """A PR number may cite the plan; it may not narrate this service's past.
 
         `until PR-14`, `PR-22's deliverable`, `does not exist until PR-15` are
-        all true of any service — they cite Appendix C. `Inventory acquired
+        all true of any service — they cite Appendix C. `Yankee acquired
         both in PR-08` and `the model had no entity types until PR-10` are not:
         the service was created today and did none of it.
 
@@ -294,7 +309,7 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
             body = text.replace("\r\n", "\n")
             for match in re.finditer(r"PR-\d+", body):
                 window = body[max(0, match.start() - 170) : match.end() + 170]
-                if "Inventory" not in window:
+                if "Yankee" not in window:
                     continue
                 self.assertTrue(
                     any(phrase in window for phrase in allowed),
@@ -307,25 +322,25 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
         # The scaffold drops the application suite's TestSupport reference —
         # there is no handler test to need it — so a fixture claiming to serve
         # both suites is describing the template, not this service.
-        fixture = self.claim("tests/Inventory.TestSupport/ServiceFixture.cs")
-        self.assertNotIn("serves <c>Inventory.Application.Tests</c> and", fixture)
+        fixture = self.claim("tests/Yankee.TestSupport/ServiceFixture.cs")
+        self.assertNotIn("serves <c>Yankee.Application.Tests</c> and", fixture)
 
-        csproj = self.claim("tests/Inventory.Api.Tests/Inventory.Api.Tests.csproj")
-        self.assertNotIn("shared with\n         Inventory.Application.Tests", csproj)
+        csproj = self.claim("tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj")
+        self.assertNotIn("shared with\n         Yankee.Application.Tests", csproj)
 
 
 class TheMigrationAndItsSnapshot(unittest.TestCase):
     def setUp(self):
         self.rendered = render()
-        self.prefix = "src/Services/Ordering/Ordering.Infrastructure/Persistence/Migrations"
+        self.prefix = "src/Services/Zulu/Zulu.Infrastructure/Persistence/Migrations"
 
     def test_it_copies_initial_create_under_a_fresh_id(self):
         migration = f"{self.prefix}/{MIGRATION_ID}_InitialCreate.cs"
         self.assertIn(migration, self.rendered.created)
-        self.assertIn('migrationBuilder.EnsureSchema("ordering")', self.rendered.created[migration])
+        self.assertIn('migrationBuilder.EnsureSchema("zulu")', self.rendered.created[migration])
 
     def test_the_file_name_and_the_migration_attribute_agree(self):
-        # EF resolves the id from the attribute and the ordering from the file
+        # EF resolves the id from the attribute and the zulu from the file
         # name; a pair that disagreed would apply under one identity and be
         # recorded under another.
         designer = self.rendered.created[f"{self.prefix}/{MIGRATION_ID}_InitialCreate.Designer.cs"]
@@ -340,10 +355,10 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         # next `migrations add` here would generate a drop for a table that
         # never existed. This one is EF's own description of an empty model,
         # lifted from the designer file beside it.
-        snapshot = self.rendered.created[f"{self.prefix}/OrderingDbContextModelSnapshot.cs"]
-        self.assertIn("partial class OrderingDbContextModelSnapshot : ModelSnapshot", snapshot)
+        snapshot = self.rendered.created[f"{self.prefix}/ZuluDbContextModelSnapshot.cs"]
+        self.assertIn("partial class ZuluDbContextModelSnapshot : ModelSnapshot", snapshot)
         self.assertIn("protected override void BuildModel(ModelBuilder modelBuilder)", snapshot)
-        self.assertIn('.HasDefaultSchema("ordering")', snapshot)
+        self.assertIn('.HasDefaultSchema("zulu")', snapshot)
         self.assertNotIn("[Migration(", snapshot)
         self.assertNotIn("modelBuilder.Entity(", snapshot)
 
@@ -366,12 +381,12 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
                 *efcore,
                 "using Microsoft.EntityFrameworkCore.Migrations;",
                 *tail,
-                "using Ordering.Infrastructure.Persistence;",
+                "using Zulu.Infrastructure.Persistence;",
             ],
-            f"{self.prefix}/OrderingDbContextModelSnapshot.cs": [
+            f"{self.prefix}/ZuluDbContextModelSnapshot.cs": [
                 *efcore,
                 *tail,
-                "using Ordering.Infrastructure.Persistence;",
+                "using Zulu.Infrastructure.Persistence;",
             ],
         }
         for machine_owned, usings in expected.items():
@@ -383,9 +398,10 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
     def test_the_machine_owned_files_keep_their_byte_order_mark(self):
         for machine_owned in (
             f"{self.prefix}/{MIGRATION_ID}_InitialCreate.Designer.cs",
-            f"{self.prefix}/OrderingDbContextModelSnapshot.cs",
+            f"{self.prefix}/ZuluDbContextModelSnapshot.cs",
         ):
-            self.assertTrue(self.rendered.created[machine_owned].startswith("\ufeff"), machine_owned)
+            text = self.rendered.created[machine_owned]
+            self.assertTrue(text.startswith("\ufeff"), machine_owned)
 
 
 class EditsTheSharedFiles(unittest.TestCase):
@@ -394,16 +410,16 @@ class EditsTheSharedFiles(unittest.TestCase):
 
     def test_the_solution_gains_a_folder_of_five_and_four_test_entries(self):
         solution = self.rendered.updated["Platform.slnx"]
-        self.assertIn('<Folder Name="/src/Services/Ordering/">', solution)
+        self.assertIn('<Folder Name="/src/Services/Zulu/">', solution)
         for layer in ("Api", "Application", "Domain", "Infrastructure", "Migrator"):
             self.assertIn(
-                f'<Project Path="src/Services/Ordering/Ordering.{layer}'
-                f'/Ordering.{layer}.csproj" />',
+                f'<Project Path="src/Services/Zulu/Zulu.{layer}'
+                f'/Zulu.{layer}.csproj" />',
                 solution,
             )
         for suite in ("Api.Tests", "Application.Tests", "Domain.Tests", "TestSupport"):
             self.assertIn(
-                f'<Project Path="tests/Ordering.{suite}/Ordering.{suite}.csproj" />', solution
+                f'<Project Path="tests/Zulu.{suite}/Zulu.{suite}.csproj" />', solution
             )
 
     def test_the_solution_stays_sorted(self):
@@ -415,15 +431,15 @@ class EditsTheSharedFiles(unittest.TestCase):
 
     def test_the_compose_pair_lands_before_the_collector_on_the_requested_port(self):
         compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
-        self.assertLess(compose.index("  ordering-migrator:"), compose.index("  otel-collector:"))
-        self.assertLess(compose.index("  ordering-api:"), compose.index("  otel-collector:"))
+        self.assertLess(compose.index("  zulu-migrator:"), compose.index("  otel-collector:"))
+        self.assertLess(compose.index("  zulu-api:"), compose.index("  otel-collector:"))
         self.assertIn(f'ports: [ "{PORT}:8080" ]', compose)
         self.assertIn('ports: [ "5102:8080" ]', compose, "Catalog keeps its own port")
 
     def test_the_compose_pair_keeps_the_two_key_split_of_section_7_1(self):
         compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
-        self.assertIn("ConnectionStrings__OrderingMigrator:", compose)
-        self.assertIn("ConnectionStrings__Ordering:", compose)
+        self.assertIn("ConnectionStrings__ZuluMigrator:", compose)
+        self.assertIn("ConnectionStrings__Zulu:", compose)
         self.assertIn("condition: service_completed_successfully", compose)
 
     def test_both_halves_of_the_pair_join_the_excluded_profile(self):
@@ -432,12 +448,12 @@ class EditsTheSharedFiles(unittest.TestCase):
         # service the developer is running on the host.
         override = self.rendered.updated["deploy/compose/docker-compose.infra-only.yml"]
         lines = override.replace("\r\n", "\n")
-        self.assertIn('  ordering-migrator:\n    profiles: [ "excluded" ]', lines)
-        self.assertIn('  ordering-api:\n    profiles: [ "excluded" ]', lines)
+        self.assertIn('  zulu-migrator:\n    profiles: [ "excluded" ]', lines)
+        self.assertIn('  zulu-api:\n    profiles: [ "excluded" ]', lines)
 
     def test_the_ports_readme_gains_one_row(self):
         readme = self.rendered.updated["deploy/compose/README.md"]
-        self.assertIn(f"| Ordering API | http://localhost:{PORT} |", readme)
+        self.assertIn(f"| Zulu API | http://localhost:{PORT} |", readme)
 
     def test_every_shared_file_keeps_the_line_endings_it_had(self):
         # Not "keeps CRLF": `.gitattributes` forces that on `*.cs` only, so
@@ -480,13 +496,13 @@ class RendersOnEitherCheckout(unittest.TestCase):
             self.rewrite(root, "\n")
             self.rewrite(root, "\r\n", only=".cs")
 
-            rendered = plan(root, "Ordering", PORT, MIGRATION_ID)
+            rendered = plan(root, "Zulu", PORT, MIGRATION_ID)
 
             csproj = rendered.created[
-                "src/Services/Ordering/Ordering.Application/Ordering.Application.csproj"
+                "src/Services/Zulu/Zulu.Application/Zulu.Application.csproj"
             ]
             self.assertNotIn("\r", csproj, "an LF template must render LF")
-            program = rendered.created["src/Services/Ordering/Ordering.Api/Program.cs"]
+            program = rendered.created["src/Services/Zulu/Zulu.Api/Program.cs"]
             self.assertNotIn("\n", program.replace("\r\n", ""), "C# is CRLF by attribute")
             self.assertNotIn("\r", rendered.updated["Platform.slnx"])
 
@@ -497,7 +513,7 @@ class RendersOnEitherCheckout(unittest.TestCase):
             root = template_copy(Path(directory))
             self.rewrite(root, "\r\n")
 
-            rendered = plan(root, "Ordering", PORT, MIGRATION_ID)
+            rendered = plan(root, "Zulu", PORT, MIGRATION_ID)
 
             for path, text in {**rendered.created, **rendered.updated}.items():
                 self.assertNotIn("\n", text.replace("\r\n", ""), path)
@@ -509,9 +525,9 @@ class RendersOnEitherCheckout(unittest.TestCase):
             root = template_copy(Path(directory))
             self.rewrite(root, "\n")
 
-            rendered = plan(root, "Ordering", PORT, MIGRATION_ID)
+            rendered = plan(root, "Zulu", PORT, MIGRATION_ID)
 
-            marker = rendered.created["src/Services/Ordering/Ordering.Domain/AssemblyMarker.cs"]
+            marker = rendered.created["src/Services/Zulu/Zulu.Domain/AssemblyMarker.cs"]
             self.assertNotIn("\r", marker)
 
 
@@ -530,9 +546,9 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         root = template_copy(Path(self.directory.name))
-        apply(root, plan(root, "Ordering", 5101, MIGRATION_ID))
+        apply(root, plan(root, PROBE, 5101, MIGRATION_ID))
         self.root = root
-        self.second = plan(root, "Inventory", 5103, "20260810120000")
+        self.second = plan(root, SECOND_PROBE, 5103, "20260810120000")
 
     def tearDown(self):
         self.directory.cleanup()
@@ -541,47 +557,47 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
         compose = self.second.updated["deploy/compose/docker-compose.yml"]
         keys = re.findall(r"^  ([a-z0-9][a-z0-9-]*):$", compose.replace("\r\n", "\n"), re.M)
         self.assertEqual(sorted(set(keys)), sorted(keys), keys)
-        for expected in ("catalog-api", "ordering-api", "inventory-api"):
+        for expected in ("catalog-api", "zulu-api", "yankee-api"):
             self.assertIn(expected, keys)
 
     def test_each_service_declares_its_connection_variables_once(self):
         env = self.second.updated["deploy/compose/.env.example"].replace("\r\n", "\n")
-        for service in ("CATALOG", "ORDERING", "INVENTORY"):
+        for service in ("CATALOG", "ZULU", "YANKEE"):
             self.assertEqual(1, env.count(f"# {service}_CONNECTION="), service)
             self.assertEqual(1, env.count(f"# {service}_MIGRATOR_CONNECTION="), service)
 
     def test_the_new_pair_lands_after_the_services_already_there(self):
         compose = self.second.updated["deploy/compose/docker-compose.yml"]
-        self.assertLess(compose.index("  ordering-api:"), compose.index("  inventory-migrator:"))
-        self.assertLess(compose.index("  inventory-api:"), compose.index("  otel-collector:"))
+        self.assertLess(compose.index("  zulu-api:"), compose.index("  yankee-migrator:"))
+        self.assertLess(compose.index("  yankee-api:"), compose.index("  otel-collector:"))
 
     def test_the_ports_table_and_the_override_gain_one_entry_each(self):
         readme = self.second.updated["deploy/compose/README.md"]
-        self.assertEqual(1, readme.count("| Ordering API |"))
-        self.assertEqual(1, readme.count("| Inventory API |"))
+        self.assertEqual(1, readme.count("| Zulu API |"))
+        self.assertEqual(1, readme.count("| Yankee API |"))
 
         override = self.second.updated["deploy/compose/docker-compose.infra-only.yml"]
-        self.assertEqual(1, override.count("  inventory-api:"))
-        self.assertEqual(1, override.count("  ordering-api:"))
+        self.assertEqual(1, override.count("  yankee-api:"))
+        self.assertEqual(1, override.count("  zulu-api:"))
 
     def test_the_second_service_cannot_be_the_first_under_another_casing(self):
         # Rejecting `CATALOG` closed the template alias and not the general
-        # case: after Ordering exists, `ORDERING` is a distinct directory on a
+        # case: after Zulu exists, `ZULU` is a distinct directory on a
         # case-sensitive filesystem and renders the same lower-cased Compose
         # keys and connection variables.
-        for alias in ("ORDERING", "ordering", "OrDeRiNg"):
+        for alias in ("ZULU", "zulu", "ZuLu"):
             with self.assertRaises(ScaffoldError):
                 plan(self.root, alias, 5105, "20260810120000")
 
     def test_the_solution_still_sorts_with_two_services_in_it(self):
         solution = self.second.updated["Platform.slnx"]
         services = re.findall(r'<Folder Name="/src/Services/([^/]+)/">', solution)
-        self.assertEqual(["Catalog", "Inventory", "Ordering"], services)
+        self.assertEqual(["Catalog", "Yankee", "Zulu"], services)
 
 
 class RefusesToRun(unittest.TestCase):
     def test_a_name_that_is_not_pascal_case(self):
-        for name in ("ordering", "Ordering.Api", "order-ing", ""):
+        for name in ("zulu", "Zulu.Api", "order-ing", ""):
             with self.assertRaises(ScaffoldError):
                 render(name=name)
 
@@ -645,7 +661,7 @@ class RefusesToRun(unittest.TestCase):
     def test_a_service_that_already_exists(self):
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))
-            (root / "src/Services/Ordering").mkdir(parents=True)
+            (root / "src/Services/Zulu").mkdir(parents=True)
             with self.assertRaises(ScaffoldError):
                 render(repo_root=root)
 
@@ -665,7 +681,7 @@ class RefusesToRun(unittest.TestCase):
         # tree — from the flag whose only purpose is repeatable tests.
         for migration_id in ("../../../etc/passwd", "InitialCreate", "2026080912000"):
             with self.assertRaises(ScaffoldError):
-                plan(REPO_ROOT, "Ordering", PORT, migration_id)
+                plan(REPO_ROOT, "Zulu", PORT, migration_id)
 
     def test_a_directory_that_is_not_the_repository(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -693,7 +709,8 @@ class RefusesToRun(unittest.TestCase):
         # succeeded with a service missing a piece.
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))
-            (root / "src/Services/Catalog/Catalog.Application/NullDomainEventDispatcher.cs").unlink()
+            dispatcher = "src/Services/Catalog/Catalog.Application/NullDomainEventDispatcher.cs"
+            (root / dispatcher).unlink()
 
             with self.assertRaises(ScaffoldError) as raised:
                 render(repo_root=root)
@@ -736,7 +753,7 @@ class RefusesToRun(unittest.TestCase):
             before = sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
 
             with self.assertRaises(ScaffoldError):
-                plan(root, "Ordering", 5102, MIGRATION_ID)
+                plan(root, "Zulu", 5102, MIGRATION_ID)
 
             after = sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
             self.assertEqual(before, after)
@@ -746,7 +763,7 @@ class Applies(unittest.TestCase):
     def test_it_writes_every_planned_file_and_nothing_else(self):
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))
-            rendered = plan(root, "Ordering", PORT, MIGRATION_ID)
+            rendered = plan(root, "Zulu", PORT, MIGRATION_ID)
 
             apply(root, rendered)
 
@@ -759,7 +776,7 @@ class Applies(unittest.TestCase):
                 # and a reader that swallowed it could not tell the machine-
                 # owned migration files from the hand-written ones.
                 self.assertEqual(text, (root / relative).read_bytes().decode("utf-8"))
-            self.assertFalse((root / "src/Services/Ordering/Ordering.Domain/Products").exists())
+            self.assertFalse((root / "src/Services/Zulu/Zulu.Domain/Products").exists())
 
 
 class TheCommandLine(unittest.TestCase):
@@ -782,7 +799,7 @@ class TheCommandLine(unittest.TestCase):
             root = template_copy(Path(directory))
 
             code, out, err = self.run_main(
-                "Ordering", "--port", str(PORT), "--repo-root", str(root),
+                "Zulu", "--port", str(PORT), "--repo-root", str(root),
                 "--migration-id", MIGRATION_ID,
             )
 
@@ -790,7 +807,7 @@ class TheCommandLine(unittest.TestCase):
             self.assertEqual("", err)
             self.assertIn("35 files created, 5 updated", out)
             self.assertIn(f"port {PORT}", out)
-            self.assertTrue((root / "src/Services/Ordering/Ordering.Api/Program.cs").exists())
+            self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 
     def test_a_refused_run_exits_one_with_the_reason_on_stderr(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -809,7 +826,7 @@ class TheCommandLine(unittest.TestCase):
         # not this script's — asserted so a later `default=` cannot slip in.
         with self.assertRaises(SystemExit) as exit_code:
             with contextlib.redirect_stderr(io.StringIO()):
-                main(["Ordering"])
+                main(["Zulu"])
         self.assertEqual(2, exit_code.exception.code)
 
     def test_the_migration_id_defaults_to_a_utc_timestamp(self):
@@ -817,10 +834,10 @@ class TheCommandLine(unittest.TestCase):
             root = template_copy(Path(directory))
 
             self.assertEqual(0, self.run_main(
-                "Ordering", "--port", str(PORT), "--repo-root", str(root)
+                "Zulu", "--port", str(PORT), "--repo-root", str(root)
             )[0])
 
-            migrations = root / "src/Services/Ordering/Ordering.Infrastructure/Persistence/Migrations"
+            migrations = root / "src/Services/Zulu/Zulu.Infrastructure/Persistence/Migrations"
             generated = [p.name for p in migrations.glob("*_InitialCreate.cs")]
             self.assertEqual(1, len(generated), generated)
             self.assertRegex(generated[0], r"^\d{14}_InitialCreate\.cs$")
