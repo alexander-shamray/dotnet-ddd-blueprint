@@ -1404,8 +1404,16 @@ until a requested review posts with no new findings. The review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. Either loop stops early on the finding
 class that is the user's — `Needs a decision` from the Grok triage, an open
-`Ask` thread from the Copilot one — or after three rounds without
-convergence. What `.claude/settings.json` still denies is the narrow set
+`Ask` thread from the Copilot one — or after **twelve** rounds. That bound was
+three until PR-11, where seven Copilot rounds went 10 → 4 → 3 → 1 → 1 → 3 → 1
+with every finding accepted: rounds four to seven caught a
+documented-but-unenforced constraint, an assertion that could not fail in one
+direction, and a fail-open in a manifest check. Three would have shipped all
+three. The bound is for a reviewer and a triager *disagreeing*, not for a loop
+still finding real defects, and Copilot's late rounds surface them in the
+**suppressed** block under a "generated no new comments" heading — so a clean
+inline verdict is not convergence.
+What `.claude/settings.json` still denies is the narrow set
 that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
 push to `main`. A branch wanting one of those is raising a question, not
 running a command. `gh pr create`'s own offer to push is not used either — it

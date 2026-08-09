@@ -164,10 +164,15 @@ anything.
    - **A `Needs a decision` row** from `/review-grok` stops the loop — that
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
-   - **Three rounds without convergence** stops the loop. A reviewer and a
-     triager still disagreeing after three exchanges are not going to settle
-     it between themselves; hand over the surviving findings instead of
-     grinding tokens against them.
+   - **Twelve rounds** stops the loop. This bound was three, and three was
+     wrong: PR-11 ran seven Copilot rounds and the findings went 10 → 4 → 3 →
+     1 → 1 → 3 → 1, every one accepted and fixed. Rounds four through seven
+     caught a documented-but-unenforced constraint, an assertion that could
+     not fail in one direction, and a fail-open in the script's own manifest
+     check — three defects a three-round bound would have shipped. The bound
+     exists for a reviewer and a triager *disagreeing*, which converges or
+     never does; it was never meant to stop a loop that is still finding real
+     things and fixing them in minutes. Twelve, and hand over what survives.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
@@ -265,9 +270,17 @@ anything.
 
    The same two early exits as step 5, in this loop's vocabulary: an **`Ask`**
    thread — left open by `/review-copilot` by design — stops the loop, and
-   **three rounds without convergence** stops it. A request that registers no
-   review inside a reasonable wait is reported as the loop not having
-   finished, never marked clean by timeout.
+   **twelve rounds** stops it. A request that registers no review inside a
+   reasonable wait is reported as the loop not having finished, never marked
+   clean by timeout.
+
+   **This is the loop the twelve is for.** Copilot's findings arrive in the
+   suppressed block long after the inline ones dry up, and they do not taper
+   the way a disagreement does: on PR-11 rounds four, five and six each posted
+   "generated no new comments" above a suppressed finding that was worth
+   fixing. Do not read a clean *inline* verdict as convergence, and do not
+   stop early because the counts look small — a round costs minutes and the
+   things it finds at that depth are the ones nobody else will.
 
 ## Report
 
