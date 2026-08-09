@@ -600,6 +600,16 @@ class RefusesToRun(unittest.TestCase):
             "src/Services/CATALOGSearch/CATALOGSearch.Domain/AssemblyMarker.cs", rendered.created
         )
 
+    def test_a_service_section_4_1_gives_a_worker(self):
+        # Shipping and Notifications take a Worker in place of an Api, and
+        # Notifications has no Domain project. Documenting "no Worker template"
+        # did not stop the script producing an Api for either — a note is not
+        # a guard, and the output would have contradicted the chapter.
+        for name in ("Shipping", "Notifications", "SHIPPING"):
+            with self.assertRaises(ScaffoldError) as raised:
+                render(name=name)
+            self.assertIn("Worker", str(raised.exception))
+
     def test_a_name_that_contains_a_template_token_is_still_a_name(self):
         # The straggler check searches for `catalog` and `roduct`, and a
         # service legitimately called CatalogSearch or ProductReviews puts

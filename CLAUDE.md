@@ -284,7 +284,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`python -m unittest` in `tools/new-service` runs 57, and CI has a `scaffold`
+`python -m unittest` in `tools/new-service` runs 58, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-12 is next**
 (`feat(common): Redis helpers — HybridCache, key namespaces, distributed
 locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
@@ -469,7 +469,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && python -m unittest      # 57 tests, no Docker, no SDK
+cd tools/new-service && python -m unittest      # 58 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
@@ -477,8 +477,19 @@ python tools/new-service/new_service.py <Name> --port <51xx>
 to.** A newer interpreter on this machine is the hazard, not an older one: it
 accepts APIs 3.12 does not, so the local suite goes green on code the runner
 cannot execute. `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly
-that way. There is no local 3.12 here to check against, so this is carried by
-review — like the `[` placement rule, and for the same reason.
+that way.
+
+**3.12 is installed here, so run both suites against it rather than trusting
+the default `python`** — which is 3.14 and is the interpreter that let the
+mistake through:
+
+```bash
+py -3.12 -m unittest        # from tools/new-service and .github/licence-gate
+```
+
+This used to be carried by review, for want of a 3.12 to check against. It no
+longer is, and that is the better answer: the rule the reviewer was asked to
+hold is now a command that either passes or does not.
 
 **`dotnet test` requires Docker from PR-08**, and the container tests are
 neither skipped nor categorised when it is absent. Both were considered and

@@ -52,6 +52,13 @@ COPY_ROOTS = (
 
 MIGRATIONS = "src/Services/Catalog/Catalog.Infrastructure/Persistence/Migrations"
 
+# §4.1 gives these two a Worker in place of an Api, and Notifications no Domain
+# project at all. This script renders the Api shape, so it refuses them by name
+# rather than producing a service that contradicts the chapter — which is the
+# quiet failure the documentation's "no Worker template" note did not prevent,
+# because a note is not a guard. The names go when the mode arrives.
+WORKER_SERVICES = frozenset({"Shipping", "Notifications"})
+
 # Every file under COPY_ROOTS is classified here or the run fails. That is
 # deliberate friction, and it is the same argument the domain allow-list gate
 # makes in Catalog.Domain.Tests: extending the list is the decision the check
@@ -951,6 +958,13 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     if name.lower() == TEMPLATE.lower():
         raise ScaffoldError(
             f"{name} is the template under another casing; it cannot be its own copy"
+        )
+
+    if name.lower() in {service.lower() for service in WORKER_SERVICES}:
+        raise ScaffoldError(
+            f"§4.1 gives {name} a Worker in place of an Api, and this script renders the "
+            f"Api shape. Worker mode joins with the PR that builds the first worker host; "
+            f"until then a {name} scaffolded here would contradict the chapter."
         )
 
     # And the same test against every service already here, because the

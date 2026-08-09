@@ -901,6 +901,12 @@ configuration, not the service's tree — the Helm chart
 Shipping and Notifications take (§4.1) and which joins the script with the
 first one built.
 
+**The scaffold refuses `Shipping` and `Notifications` by name until it can.**
+Documenting the gap left the script willing to render either as an API service,
+which would have contradicted §4.1 quietly — Notifications has no Domain
+project at all. A note is not a guard, and the two names come off that list
+with the PR that adds the mode.
+
 ---
 
 [← §3 Bounded contexts](03-bounded-contexts.md) · [Index](README.md) · [§5 Tactical DDD →](05-tactical-ddd.md)

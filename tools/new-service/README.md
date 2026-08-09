@@ -78,6 +78,11 @@ Not in scope, and not silently missing: the gateway route (PR-17 builds the
 gateway), the Helm chart (PR-23), and a Worker host in place of an API — §4.1
 gives Shipping and Notifications one, and no such host exists yet to copy.
 
+**`Shipping` and `Notifications` are refused by name** for that reason: the
+script renders the API shape, §4.1 gives those two a Worker, and Notifications
+no Domain project either. Both names are accepted again by the change that adds
+the mode.
+
 ## The tests
 
 ```bash
@@ -87,7 +92,15 @@ cd tools/new-service && python -m unittest
 Stdlib `unittest`, no dependencies, **Python 3.12** — the version both CI jobs
 pin, and the floor this tool is written to. A newer interpreter locally is the
 hazard rather than an older one: it accepts APIs 3.12 does not, and the suite
-goes green on code CI cannot run.
+goes green on code CI cannot run. `Path.read_text(newline=…)` is 3.13 and cost
+a CI round exactly that way.
+
+So run it against the floor, not against whatever `python` resolves to:
+
+```bash
+py -3.12 -m unittest        # Windows
+python3.12 -m unittest      # elsewhere
+```
 
 They run against the **real repository**: `plan()` renders from the checkout
 and returns a value, and `apply()` is the only thing that touches disk — which
