@@ -59,6 +59,20 @@ MIGRATIONS = "src/Services/Catalog/Catalog.Infrastructure/Persistence/Migrations
 # because a note is not a guard. The names go when the mode arrives.
 WORKER_SERVICES = frozenset({"Shipping", "Notifications"})
 
+# The nine projects a render creates, by suffix. Named once because the
+# solution writer and the identity check below must agree about them.
+PROJECT_SUFFIXES = (
+    "Domain",
+    "Application",
+    "Infrastructure",
+    "Migrator",
+    "Api",
+    "Domain.Tests",
+    "Application.Tests",
+    "Api.Tests",
+    "TestSupport",
+)
+
 # Every file under COPY_ROOTS is classified here or the run fails. That is
 # deliberate friction, and it is the same argument the domain allow-list gate
 # makes in Catalog.Domain.Tests: extending the list is the decision the check
@@ -1015,6 +1029,28 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
         raise ScaffoldError(f"{repo_root} does not look like the repository: no {COPY_ROOTS[0]}")
 
     names = Names(name)
+
+    # Assembly identity first, because it is the more fundamental refusal:
+    # "this name can never work here", ahead of "this service already exists".
+    # `Common` renders Common.Domain and Common.Application beside the
+    # building blocks of exactly those names, and a solution holding two
+    # projects with one identity does not build. It was refused before this
+    # check too — `tests/Common.Domain.Tests` exists, so the directory test
+    # below fired — but by accident and with a message about the wrong thing,
+    # and a name colliding on identity without colliding on disk sailed through.
+    generated = {f"{names.pascal}.{suffix}" for suffix in PROJECT_SUFFIXES}
+    existing = {
+        path.stem
+        for directory in ("src", "tests")
+        if (repo_root / directory).is_dir()
+        for path in (repo_root / directory).rglob("*.csproj")
+    }
+    if (clash := generated & existing):
+        raise ScaffoldError(
+            "the solution already has " + ", ".join(sorted(clash)) + ". Two projects with "
+            "one assembly identity do not build, whatever directory each sits in."
+        )
+
     for root in COPY_ROOTS:
         target = repo_root / names.rename(root)
         if target.exists():

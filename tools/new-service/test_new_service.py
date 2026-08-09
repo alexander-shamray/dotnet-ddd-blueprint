@@ -610,6 +610,16 @@ class RefusesToRun(unittest.TestCase):
             "src/Services/CATALOGSearch/CATALOGSearch.Domain/AssemblyMarker.cs", rendered.created
         )
 
+    def test_a_name_whose_projects_would_collide_with_the_building_blocks(self):
+        # `Common` renders Common.Domain and Common.Application beside the
+        # building blocks of exactly those names — two projects, one assembly
+        # identity, a solution that does not build. It was refused before this
+        # check too, but only because tests/Common.Domain.Tests happens to
+        # exist: an accident, with a message about the wrong thing.
+        with self.assertRaises(ScaffoldError) as raised:
+            render(name="Common")
+        self.assertIn("assembly identity", str(raised.exception))
+
     def test_a_service_section_4_1_gives_a_worker(self):
         # Shipping and Notifications take a Worker in place of an Api, and
         # Notifications has no Domain project. Documenting "no Worker template"
