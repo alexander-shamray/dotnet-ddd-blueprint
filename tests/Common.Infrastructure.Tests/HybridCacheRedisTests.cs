@@ -67,6 +67,12 @@ public sealed class HybridCacheRedisTests(RedisFixture fixture)
     [Fact]
     public async Task Removing_a_tag_invalidates_the_entry()
     {
+        // Same-instance semantics on purpose: §8.4's mechanism proven at
+        // this pin. Cross-replica freshness is deliberately NOT asserted —
+        // §8.2 names the L1 expiry as the bound on how long another
+        // instance may serve an already-invalidated entry, and a test
+        // demanding immediate cross-instance invalidation would assert a
+        // promise the design explicitly trades away.
         await using ServiceProvider provider = fixture.BuildProvider("tags");
         HybridCache cache = provider.GetRequiredService<HybridCache>();
         int executions = 0;
