@@ -88,7 +88,11 @@ Two rules the helper library enforces rather than documents:
   entirely. Enforced twice: `IDistributedLockFactory` refuses a non-positive
   duration before any I/O — there is no overload without one — and
   `AddRedisConnections`' HybridCache defaults (§8.2) give every entry an
-  expiry.
+  expiry. The enforcement sits at the sanctioned seams, not around every
+  conceivable write: a handler that injects `IDistributedCache` directly, or
+  issues a raw `SET` on a keyed multiplexer, has stepped off the §8.2 path —
+  the same move as raw SQL around the unit of work (§6.3), and review's to
+  catch on the same terms.
 - **No cross-service keys.** The ACL makes this impossible rather than
   discouraged, which is the right level of enforcement for something that
   otherwise gets violated once and never noticed. `RedisKeys` (§8.3) makes it
