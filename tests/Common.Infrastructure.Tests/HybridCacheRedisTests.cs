@@ -125,4 +125,35 @@ public sealed class HybridCacheRedisTests(RedisFixture fixture)
         exported.ShouldNotBeEmpty("AddRedisConnections registers the Redis instrumentation " +
             "and hands it both keyed connections — §13.2");
     }
+
+    [Fact]
+    public async Task A_lock_operation_produces_a_span_from_the_coordination_connection()
+    {
+        List<Activity> exported = [];
+
+        await using ServiceProvider provider = fixture.BuildProvider(
+            "traced-lock",
+            services => services
+                .AddOpenTelemetry()
+                .WithTracing(tracing => tracing.AddInMemoryExporter(exported)));
+
+        provider.GetRequiredService<TracerProvider>();
+
+        // No cache operation happens here, so any span that arrives can only
+        // have come from the coordination multiplexer — the half of the
+        // registration's claim the test above cannot prove: dropping its
+        // AddConnection call would leave a cache-only suite green.
+        IDistributedLockFactory factory = provider.GetRequiredService<IDistributedLockFactory>();
+        IDistributedLock? held = await factory.TryAcquireAsync(
+            "traced",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken);
+        await held!.DisposeAsync();
+
+        for (int attempt = 0; attempt < 150 && exported.Count == 0; attempt++)
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+
+        exported.ShouldNotBeEmpty("the instrumentation is handed BOTH keyed connections — " +
+            "the coordination one is what a cache-only test cannot see (§13.2)");
+    }
 }
