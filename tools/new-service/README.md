@@ -93,21 +93,17 @@ the mode.
 ## The tests
 
 ```bash
-cd tools/new-service && python -m unittest
+cd tools/new-service && py -3.12 -m unittest        # Windows
+cd tools/new-service && python3.12 -m unittest      # elsewhere
 ```
 
-Stdlib `unittest`, no dependencies, **Python 3.12** — the version both CI jobs
-pin, and the floor this tool is written to. A newer interpreter locally is the
-hazard rather than an older one: it accepts APIs 3.12 does not, and the suite
-goes green on code CI cannot run. `Path.read_text(newline=…)` is 3.13 and cost
-a CI round exactly that way.
-
-So run it against the floor, not against whatever `python` resolves to:
-
-```bash
-py -3.12 -m unittest        # Windows
-python3.12 -m unittest      # elsewhere
-```
+Stdlib `unittest`, no dependencies, and **3.12 by name rather than whatever
+`python` resolves to** — that is the version both CI jobs pin and the floor
+this tool is written to. A newer interpreter locally is the hazard rather than
+an older one: it accepts APIs 3.12 does not, so the suite goes green on code CI
+cannot run. `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly
+that way, which is why the floor is spelt into the command instead of being
+mentioned underneath it.
 
 They run against the **real repository**: `plan()` renders from the checkout
 and returns a value, and `apply()` is the only thing that touches disk — which

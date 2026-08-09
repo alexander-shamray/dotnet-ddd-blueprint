@@ -76,7 +76,7 @@ tools/new-service/               §4.5's scaffold, its tests and its README.
                                  Stdlib Python, no restore. Renders a service
                                  from src/Services/Catalog at RUN TIME — there
                                  is no template directory, so a Catalog change
-                                 that breaks it fails `python -m unittest`
+                                 that breaks it fails `py -3.12 -m unittest`
                                  here rather than six months later
 .github/workflows/compose.yml    path-filtered smoke on deploy/compose/**:
                                  config -q, up --wait, down -v — and, since
@@ -239,7 +239,7 @@ script names exact text inside `src/Services/Catalog` and `tests/Catalog.*`,
 and every anchor must match exactly once. It also classifies **every** file
 under those roots as template or slice and refuses to run on one it has never
 seen — so a new file in Catalog is a decision the scaffold forces, the same way
-the domain allow-list gate forces one. If `python -m unittest` in
+the domain allow-list gate forces one. If `py -3.12 -m unittest` in
 `tools/new-service` goes red after a Catalog change, reconcile the script in
 the same change; that is the price of having one copy of the wiring instead of
 two.
@@ -284,7 +284,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`python -m unittest` in `tools/new-service` runs 64, and CI has a `scaffold`
+`py -3.12 -m unittest` in `tools/new-service` runs 64, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-12 is next**
 (`feat(common): Redis helpers — HybridCache, key namespaces, distributed
 locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
@@ -469,19 +469,19 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && python -m unittest      # 64 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 64 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
-**Both CI jobs pin Python 3.12, and that is the floor both scripts are written
-to.** A newer interpreter on this machine is the hazard, not an older one: it
-accepts APIs 3.12 does not, so the local suite goes green on code the runner
-cannot execute. `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly
-that way.
+**`py -3.12`, not `python`, and the block above is written that way on
+purpose.** Both CI jobs pin Python 3.12; the default interpreter here is 3.14.
+A newer one is the hazard, not an older one — it accepts APIs 3.12 does not, so
+the local suite goes green on code the runner cannot execute.
+`Path.read_text(newline=…)` is 3.13 and cost a CI round exactly that way. The
+scaffold *script* is a different matter: running it is not a test of the floor,
+so plain `python` is fine there.
 
-**3.12 is installed here, so run both suites against it rather than trusting
-the default `python`** — which is 3.14 and is the interpreter that let the
-mistake through:
+3.12 is installed here, so both suites can be run against it:
 
 ```bash
 py -3.12 -m unittest        # from tools/new-service and .github/licence-gate
