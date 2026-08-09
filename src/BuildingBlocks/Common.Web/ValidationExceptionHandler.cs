@@ -41,7 +41,12 @@ internal sealed class ValidationExceptionHandler(IProblemDetailsService problemD
 
         httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
 
-        return await problemDetails.TryWriteAsync(new ProblemDetailsContext
+        // Handled the moment it matched, whatever the writer negotiates: a
+        // client whose Accept header refuses problem+json still sent
+        // malformed input, and the status alone must answer it — reporting
+        // "unhandled" here would fall through to the 500 fallback and blame
+        // the service.
+        await problemDetails.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
             ProblemDetails = new ValidationProblemDetails(errors)
@@ -49,5 +54,7 @@ internal sealed class ValidationExceptionHandler(IProblemDetailsService problemD
                 Status = StatusCodes.Status400BadRequest
             }
         });
+
+        return true;
     }
 }

@@ -52,6 +52,23 @@ public class ValidationExceptionHandlerTests
     }
 
     [Fact]
+    public async Task A_client_that_cannot_accept_problem_json_still_gets_the_400()
+    {
+        // TryWriteAsync declines when content negotiation fails, and a
+        // handler that echoed that false would report the exception
+        // unhandled — falling through to the 500 fallback over a header.
+        // The status alone is the answer; the body may be empty.
+        ValidationFailure[] failures = [new("Name", "'Name' must not be empty.")];
+        using IHost host = await StartThrowingAsync(new ValidationException(failures));
+        using HttpClient client = host.GetTestClient();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/xml");
+
+        HttpResponseMessage response = await client.GetAsync("/products", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task Any_other_exception_still_falls_through_to_the_500()
     {
         // The handler must decline what is not its case: a 400 for a genuine
