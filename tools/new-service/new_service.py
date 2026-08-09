@@ -37,10 +37,11 @@ from pathlib import Path, PurePosixPath
 
 TEMPLATE = "Catalog"
 
-# The five service projects and the four test projects §4.1 gives a service.
-# Catalog.TestSupport is not a test project and is copied all the same — the
-# fixture is the template's, and its second consumer arrives with the new
-# service's first handler test, exactly as it did for Catalog in PR-10.
+# The five service projects §4.1 gives a service, its three test projects, and
+# Catalog.TestSupport — which §4.1 is explicit is NOT a test project, and which
+# is copied all the same: the fixture is the template's, and its second consumer
+# arrives with the new service's first handler test, exactly as it did for
+# Catalog in PR-10. Nine projects, not "five and four".
 COPY_ROOTS = (
     "src/Services/Catalog",
     "tests/Catalog.Domain.Tests",
@@ -133,6 +134,16 @@ OMITTED = frozenset(
 # asserted to occur exactly once. Removing the slice leaves these files making
 # claims that are no longer true; every one of them is a claim a reader would
 # otherwise trust.
+#
+# **A replacement may name the template only where it means the new service's
+# own project.** `Catalog.Domain` in a replacement is fine — it renames to
+# `Inventory.Domain` and the sentence stays true. `Catalog.Application.Tests
+# carries both` is not: it renames to `Inventory.Application.Tests carries
+# both`, which is a sentence about the exemplar wearing the new service's name,
+# and it is false in the one file where those tests are missing. The straggler
+# check cannot see this — the rename is exactly what makes the claim wrong — so
+# it is carried by review and by GeneratedGuidanceIsTrue in the tests, which
+# pins the sites a Grok review found this way.
 PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     "src/Services/Catalog/Catalog.Application/DependencyInjection.cs": (
         ("using Catalog.Application.Products.PublishProduct;\n", ""),
@@ -152,10 +163,10 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // it, because there is no validator yet to name — and this class,\n"
             "        // the obvious anchor, is static and cannot be a type argument.\n"
             "        // Move to AddValidatorsFromAssemblyContaining<TFirstValidator>()\n"
-            "        // with the first one, and restore the registration test\n"
-            "        // Catalog.Application.Tests carries: ValidationBehavior takes\n"
-            "        // IEnumerable<IValidator<T>>, so a lost scan is a pipeline that\n"
-            "        // validates nothing and says so to nobody.\n"
+            "        // with the first one, and add the registration test that guards\n"
+            "        // it: ValidationBehavior takes IEnumerable<IValidator<T>>, so a\n"
+            "        // lost scan is a pipeline that validates nothing and says so to\n"
+            "        // nobody.\n"
             "        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);\n",
         ),
     ),
@@ -224,7 +235,7 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "\n"
             "// This service maps no endpoint of its own yet. The first one goes here,\n"
             "// and it is unauthenticated until PR-16 — say so in\n"
-            "// deploy/compose/README.md when it lands, as Catalog does (§C.4).\n",
+            "// deploy/compose/README.md when it lands (§C.4).\n",
         ),
     ),
     "tests/Catalog.Domain.Tests/ArchitectureTests.cs": (
@@ -240,11 +251,11 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "\n"
             "        IEnumerable<string> referenced = typeof(Product).Assembly\n",
             "        // Two entries, because two is what an empty domain references. The\n"
-            "        // ones that follow are the ones Catalog added and why:\n"
-            "        // System.Collections with the first domain event, whose generated\n"
-            "        // record equality goes through EqualityComparer<T>, and System.Linq\n"
-            "        // with the first value object doing enumerable logic over owned\n"
-            "        // values — domain work, not an I/O dependency.\n"
+            "        // two that usually follow, and what earns each: System.Collections\n"
+            "        // with the first domain event, whose generated record equality goes\n"
+            "        // through EqualityComparer<T>, and System.Linq with the first value\n"
+            "        // object doing enumerable logic over owned values — domain work,\n"
+            "        // not an I/O dependency.\n"
             "        string[] allowed = [\"Common.Domain\", \"System.Runtime\"];\n"
             "\n"
             "        IEnumerable<string> referenced = typeof(AssemblyMarker).Assembly\n",
@@ -332,9 +343,34 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "    // Two tests are missing here until this service has a slice, and both\n"
             "    // guard a scan that fails silently: that the validator scan finds a\n"
             "    // validator, and that the §6.2 handler scan produces a registration.\n"
-            "    // Catalog.Application.Tests carries both — copy them across with the\n"
-            "    // first command and query.\n"
+            "    // The service this one was scaffolded from carries both — write them\n"
+            "    // with the first command and query.\n"
             "}\n",
+        ),
+    ),
+    "tests/Catalog.TestSupport/ServiceFixture.cs": (
+        (
+            "/// machine cannot disagree about the engine. §12.4's name and §4.1's home:\n"
+            "/// the fixture serves <c>Catalog.Application.Tests</c> and\n"
+            "/// <c>Catalog.Api.Tests</c>, which cannot reference each other — each\n"
+            "/// declares its own <c>IntegrationCollection</c> over this one type. SQL\n",
+            "/// machine cannot disagree about the engine. §12.4's name and §4.1's home:\n"
+            "/// the fixture serves <c>Catalog.Api.Tests</c> today, and the application\n"
+            "/// suite the moment that suite gains a handler test — the two cannot\n"
+            "/// reference each other, so each declares its own\n"
+            "/// <c>IntegrationCollection</c> over this one type. SQL\n",
+        ),
+    ),
+    "tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj": (
+        (
+            "    <!-- ServiceFixture and CatalogApiFactory (§12.4, §4.1) — the containers,\n"
+            "         the migrator runs and the reset live there, shared with\n"
+            "         Catalog.Application.Tests, which this project cannot reference. -->\n",
+            "    <!-- ServiceFixture and CatalogApiFactory (§12.4, §4.1) — the containers,\n"
+            "         the migrator runs and the reset live there. The application suite\n"
+            "         becomes the second consumer with its first handler test, and the\n"
+            "         two cannot reference each other — which is why the fixture has a\n"
+            "         project of its own. -->\n",
         ),
     ),
     "tests/Catalog.Api.Tests/ArchitectureTests.cs": (
@@ -344,8 +380,9 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "/// item — and judging <c>ProductEndpoints</c> for real since.\n",
             "/// Vacuously green until this service maps its first endpoint: a rule\n"
             "/// introduced before the violations exist is a constraint, not a backlog\n"
-            "/// item. It has been observed failing against a deliberately added\n"
-            "/// forbidden reference in Catalog before being trusted here.\n",
+            "/// item. The rule was observed failing against a deliberately added\n"
+            "/// forbidden reference before it was trusted — in the service this one\n"
+            "/// was scaffolded from, not here, where there is nothing yet to judge.\n",
         ),
     ),
     "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs": (

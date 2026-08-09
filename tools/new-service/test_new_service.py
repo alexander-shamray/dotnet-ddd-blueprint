@@ -195,6 +195,66 @@ class OmitsTheSlice(unittest.TestCase):
         self.assertNotIn("registers_the_slice_handlers", tests)
 
 
+class GeneratedGuidanceIsTrue(unittest.TestCase):
+    """A generated comment must be true of the service it lands in.
+
+    The rename is what makes this a real hazard rather than a theoretical one:
+    a patch that names the template as an *example* — "as Catalog does",
+    "Catalog.Application.Tests carries both" — comes out naming the new
+    service, and the sentence is then about the wrong one. Every case below
+    told a developer to copy tests from a suite that does not have them, or
+    claimed a history the new service has not got. A Grok review found five;
+    two more were beside them in copied files.
+
+    The straggler check cannot catch this class, because the rename *is* the
+    defect. These assertions are the guard, and a service name that is not
+    Ordering is used deliberately — the false sentences read plausibly with a
+    name the template's own prose might have used.
+    """
+
+    def setUp(self):
+        self.rendered = render(name="Inventory", port=5103)
+
+    def claim(self, path: str) -> str:
+        # Normalised, because these assertions are about wording and a
+        # multi-line phrase spelt with LF would otherwise pass on the runner
+        # and fail here — the same trap the anchors themselves fell into.
+        return self.rendered.created[path].replace("\r\n", "\n")
+
+    def test_the_host_does_not_cite_itself_as_the_precedent(self):
+        program = self.claim("src/Services/Inventory/Inventory.Api/Program.cs")
+        self.assertNotIn("as Inventory does", program)
+        self.assertIn("deploy/compose/README.md when it lands (§C.4)", program)
+
+    def test_the_registration_suite_does_not_send_the_reader_to_itself(self):
+        tests = self.claim("tests/Inventory.Application.Tests/DependencyInjectionTests.cs")
+        self.assertNotIn("Inventory.Application.Tests carries both", tests)
+        self.assertIn("The service this one was scaffolded from carries both", tests)
+
+    def test_the_validator_note_does_not_cite_a_suite_without_the_test(self):
+        di = self.claim("src/Services/Inventory/Inventory.Application/DependencyInjection.cs")
+        self.assertNotIn("Inventory.Application.Tests carries", di)
+
+    def test_the_domain_gate_does_not_claim_a_history_the_service_lacks(self):
+        gate = self.claim("tests/Inventory.Domain.Tests/ArchitectureTests.cs")
+        self.assertNotIn("the ones Inventory added", gate)
+
+    def test_the_endpoints_gate_says_where_it_was_observed_red(self):
+        gate = self.claim("tests/Inventory.Api.Tests/ArchitectureTests.cs")
+        self.assertNotIn("forbidden reference in Inventory before being trusted", gate)
+        self.assertIn("the service this one\n/// was scaffolded from", gate)
+
+    def test_the_fixture_does_not_claim_a_consumer_that_does_not_reference_it(self):
+        # The scaffold drops the application suite's TestSupport reference —
+        # there is no handler test to need it — so a fixture claiming to serve
+        # both suites is describing the template, not this service.
+        fixture = self.claim("tests/Inventory.TestSupport/ServiceFixture.cs")
+        self.assertNotIn("serves <c>Inventory.Application.Tests</c> and", fixture)
+
+        csproj = self.claim("tests/Inventory.Api.Tests/Inventory.Api.Tests.csproj")
+        self.assertNotIn("shared with\n         Inventory.Application.Tests", csproj)
+
+
 class TheMigrationAndItsSnapshot(unittest.TestCase):
     def setUp(self):
         self.rendered = render()
