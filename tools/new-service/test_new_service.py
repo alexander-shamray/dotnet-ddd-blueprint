@@ -673,6 +673,21 @@ class RefusesToRun(unittest.TestCase):
                 plan(root, "Product", 5199, MIGRATION_ID)
             self.assertIn("the slice survived", str(raised.exception))
 
+    def test_a_slice_leftover_in_any_casing(self):
+        # The template guard has always been case-insensitive; the slice
+        # guard was not, so `PRODUCT_ENDPOINT` cleared a check that rejects
+        # `ProductEndpoint`. Two halves of one invariant held to one standard.
+        for leftover in ("ProductEndpoints", "PRODUCT_ENDPOINT", "product_id"):
+            with tempfile.TemporaryDirectory() as directory:
+                root = template_copy(Path(directory))
+                program = root / "src/Services/Catalog/Catalog.Api/Program.cs"
+                text = program.read_bytes().decode("utf-8")
+                program.write_bytes((text + f"// leftover: {leftover}\n").encode("utf-8"))
+
+                with self.assertRaises(ScaffoldError) as raised:
+                    render(repo_root=root)
+                self.assertIn("the slice survived", str(raised.exception), leftover)
+
     def test_a_name_windows_reserves_as_a_device(self):
         # These clear PascalCase, the template check and every collision test,
         # and then `apply()` cannot create `src/Services/Con` or

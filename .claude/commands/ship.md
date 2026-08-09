@@ -147,8 +147,12 @@ anything.
       existing file and removes it when everything is resolved. Do not
       write or delete `suggestions.md` from here.
 
-   2. **Check for `suggestions.md` at the repo root.** Absent → the loop is
-      done; the review came back clean. Present → run `/review-grok`, which
+   2. **Check for `suggestions.md` at the repo root.** Absent → that is **one**
+      clean pass, not the end: if the pass before it was also clean the loop is
+      done, and otherwise go back to (1) and run one more. Keep the count in
+      the report, because "clean twice" and "clean once" are what separate
+      convergence from a lull, and a Grok recheck of nothing costs a few
+      minutes. Present → run `/review-grok`, which
       triages and fixes — **its tool grant deliberately stops short of
       committing**. Then rerun the step 2 checks that apply to what it
       changed: a review fix is still an edit, and committing it unchecked
@@ -275,7 +279,11 @@ anything.
       loop done, list the PR's unresolved review threads — an unresolved
       `Ask` stops the loop exactly as a new one would, and any other
       unresolved thread is triage the loop still owes. Zero findings and
-      zero unresolved threads → the loop is done.
+      zero unresolved threads → that is **one** clean round. The loop is done
+      only if the round before it was also clean; otherwise request another
+      and go back to (1). Count the streak explicitly rather than reading
+      "no new comments" as an ending — PR-11's round eight was clean and
+      every round after it found more.
       Otherwise run `/review-copilot` **paused at its marker step**: let it
       triage and fix, then — because its tool grant cannot commit, and a
       `done` marker claims a committed fix — rerun the applicable step 2

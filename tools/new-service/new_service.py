@@ -523,9 +523,12 @@ public sealed class AssemblyMarker;
 # along with its own name and the render would call itself domain-neutral.
 # Before the rename a `Product` is unambiguous, since the rename maps the
 # template's casings and never the slice's.
-BENIGN = re.compile(r"[Pp]roduction|ProductVersion")
+# Both case-insensitive, because the two halves have to hold to the same
+# standard: `SLICE_TOKEN` was not, so `PRODUCT_ENDPOINT` in a copied file
+# passed a guard that rejects `ProductEndpoint`.
+BENIGN = re.compile(r"production|productversion", re.IGNORECASE)
 TEMPLATE_TOKEN = re.compile(re.escape(TEMPLATE), re.IGNORECASE)
-SLICE_TOKEN = re.compile(r"roduct")
+SLICE_TOKEN = re.compile(r"roduct", re.IGNORECASE)
 
 # Every anchored pattern here is applied with `fullmatch`, never `match`.
 # Python's `$` matches at the end of the string *or just before a trailing
