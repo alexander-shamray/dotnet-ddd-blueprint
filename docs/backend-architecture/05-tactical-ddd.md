@@ -74,7 +74,7 @@ public readonly record struct Money
         // currency, and a guard that admits it makes the exception message a
         // stricter claim than the type keeps.
         if (currency is not { Length: 3 } || !currency.All(char.IsAsciiLetter))
-            throw new DomainException("Currency must be a 3-letter ISO code.");
+            throw new DomainException("Currency must be a 3-letter currency code.");
 
         return new Money(decimal.Round(amount, 2, MidpointRounding.ToEven), currency.ToUpperInvariant());
     }
