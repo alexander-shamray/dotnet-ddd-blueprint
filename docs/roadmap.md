@@ -105,6 +105,16 @@ Its three tests are not, particularly the one asserting that a handler which
 writes through `ExecuteRawAsync` and then returns `Result.Failure` leaves no
 row behind.
 
+PR-11 has since landed, and it changes what PR-18 is an estimate *of* rather
+than what it costs. The scaffold renders the wiring and none of the domain
+([§4.5](backend-architecture/04-solution-structure.md)): a new service arrives
+with its five projects, its migrator, its schema migration, both images, its
+Compose pair and twenty-four passing tests, and with no aggregate, no command,
+no query and no endpoint. So PR-18's three days are now three days of Ordering's
+*domain* — which is the shape the estimate always assumed, and is the first
+thing on this page that can be checked against a delivered pull request rather
+than argued about.
+
 ### Data, cache, messaging
 
 | PR | Title | Est. | Cum. | Week |
@@ -133,7 +143,11 @@ of that again.
 
 PR-18 is the cheapest service in the plan and that is the whole point of it —
 it is priced at three days *because* PR-11 exists, and if it turns out to cost
-more, the finding is about the scaffold rather than about Ordering.
+more, the finding is about the scaffold rather than about Ordering. With PR-11
+landed, that test is now sharp: the scaffold's output is a service that builds
+and passes its tests with no domain in it, so the three days buy Ordering's
+aggregate, its first command and its endpoint, and nothing else. A day spent
+on project wiring in PR-18 is a defect report against the scaffold.
 
 ### Integration and operations
 
@@ -185,6 +199,12 @@ the second service cost three days instead of thirty. That is the correct
 trade, and it is also the trade that gets abandoned around week 8 by anyone who
 has not agreed to it in advance.
 
+**M2 is complete.** PR-11 is its last pull request, and the milestone reads
+the way it was written to: Catalog serves a request end to end, and the
+machinery behind it now renders the second service in one command. Whether the
+calendar held is not something this file can answer — it prices ideal
+engineer-days and the *Basis* section says why that is deliberately not a date.
+
 **M3 and M5 are the two that can slip quietly.** Both are dominated by a single
 large pull request whose difficulty is invisible from outside — the outbox and
 the saga — and both are places where "nearly done" can last a week.
@@ -229,7 +249,21 @@ services concretely. PR-10 has since landed on the illustrative domain, so for
 it substitution now means reworking shipped code; PR-18, PR-20 and PR-21 are
 still re-specified rather than re-estimated. Together that is 17 of the
 98 days, and the four that carry the most design argument. Nothing else on this
-list is close. Settle it before M2.
+list is close.
+
+**This item said "settle it before M2", and M2 has now been reached with it
+still open.** That advice is spent, and what replaces it is worse rather than
+milder: PR-10 has landed, so substitution is a rework of shipped code and not
+a re-specification, and every service PR after this one adds to what would
+have to be reworked. The deadline that remains is PR-18 — the second service
+is where a domain nobody has agreed to stops being one service's problem.
+
+PR-11 is the one delivered pull request that does **not** move if the domain
+changes, and it was built that way deliberately: the scaffold copies the
+service template and excludes Catalog's slice, so it names no aggregate, no
+command and no endpoint (§4.5). That is three of the 98 days taken off this
+risk rather than added to it — small, and worth stating, because it is the
+only place where a landed PR has narrowed the largest item on this page.
 
 **Testcontainers and Docker on the build agent.** Priced into PR-08 as one day
 of first-time cost, which assumes the agent can run containers at all. If it
