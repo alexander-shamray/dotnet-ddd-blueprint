@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Common.Infrastructure.Redis;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;

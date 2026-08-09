@@ -17,28 +17,42 @@ internal sealed class RedisDistributedLock(IConnectionMultiplexer redis, string 
         return 0
         """;
 
-    private int _released;
+    private readonly Lock _gate = new();
+    private Task? _release;
 
     public string Name { get; } = name;
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _released, 1) == 1)
-            return;
+        // Every disposer awaits the SAME in-flight release: a flag would let
+        // a second caller report success while the delete is still on the
+        // wire — or after it failed. The task is the state, and it is only
+        // put back to null after a failure, so a caller may retry: the
+        // script is token-checked and idempotent, where a handle stuck on
+        // "released" holds the lock to its TTL.
+        Task release;
+        lock (_gate)
+        {
+            _release ??= ReleaseAsync();
+            release = _release;
+        }
 
         try
         {
-            await redis.GetDatabase().ScriptEvaluateAsync(ReleaseScript, [(RedisKey)key], [(RedisValue)token]);
+            await release;
         }
         catch
         {
-            // The release did not happen, or its outcome is unknown. Put the
-            // handle back so the caller may retry: the script is token-checked
-            // and idempotent, so retrying an unknown outcome is safe — where a
-            // handle that stays "released" turns every later attempt into a
-            // successful no-op and holds the lock to its TTL.
-            Interlocked.Exchange(ref _released, 0);
+            lock (_gate)
+            {
+                if (ReferenceEquals(_release, release))
+                    _release = null;
+            }
+
             throw;
         }
     }
+
+    private async Task ReleaseAsync() =>
+        await redis.GetDatabase().ScriptEvaluateAsync(ReleaseScript, [(RedisKey)key], [(RedisValue)token]);
 }

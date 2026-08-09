@@ -105,6 +105,36 @@ public sealed class DistributedLockTests
     }
 
     [Fact]
+    public async Task Concurrent_disposals_share_one_in_flight_release()
+    {
+        _database.StringSetAsync(default, default, null, When.Always).ReturnsForAnyArgs(true);
+        TaskCompletionSource<RedisResult> inFlight = new();
+        _database.ScriptEvaluateAsync(Arg.Any<string>(), Arg.Any<RedisKey[]>(), Arg.Any<RedisValue[]>())
+            .Returns(inFlight.Task);
+
+        IDistributedLock held = (await Factory().TryAcquireAsync(
+            "reprice",
+            TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken))!;
+
+        ValueTask first = held.DisposeAsync();
+        ValueTask second = held.DisposeAsync();
+
+        // Neither caller may report success while the delete is on the wire.
+        first.IsCompleted.ShouldBeFalse();
+        second.IsCompleted.ShouldBeFalse();
+
+        inFlight.SetResult(RedisResult.Create((RedisValue)1));
+        await first;
+        await second;
+
+        await _database.Received(1).ScriptEvaluateAsync(
+            Arg.Any<string>(),
+            Arg.Any<RedisKey[]>(),
+            Arg.Any<RedisValue[]>());
+    }
+
+    [Fact]
     public async Task Dispose_releases_once_and_only_once()
     {
         _database.StringSetAsync(default, default, null, When.Always).ReturnsForAnyArgs(true);
