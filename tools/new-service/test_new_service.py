@@ -312,16 +312,86 @@ class EditsTheSharedFiles(unittest.TestCase):
         # joins this list in the same change, or `up` on the override starts a
         # service the developer is running on the host.
         override = self.rendered.updated["deploy/compose/docker-compose.infra-only.yml"]
-        self.assertIn('  ordering-migrator:\r\n    profiles: [ "excluded" ]', override)
-        self.assertIn('  ordering-api:\r\n    profiles: [ "excluded" ]', override)
+        lines = override.replace("\r\n", "\n")
+        self.assertIn('  ordering-migrator:\n    profiles: [ "excluded" ]', lines)
+        self.assertIn('  ordering-api:\n    profiles: [ "excluded" ]', lines)
 
     def test_the_ports_readme_gains_one_row(self):
         readme = self.rendered.updated["deploy/compose/README.md"]
         self.assertIn(f"| Ordering API | http://localhost:{PORT} |", readme)
 
-    def test_every_shared_file_keeps_its_line_endings(self):
+    def test_every_shared_file_keeps_the_line_endings_it_had(self):
+        # Not "keeps CRLF": `.gitattributes` forces that on `*.cs` only, so
+        # every file edited here is CRLF on Windows and LF on the runner. The
+        # rendered text has to follow the checkout, not the author's platform.
         for path, text in self.rendered.updated.items():
-            self.assertNotIn("\n", text.replace("\r\n", ""), path)
+            source = (REPO_ROOT / path).read_text(encoding="utf-8", newline="")
+            expected = "\r\n" if "\r\n" in source else "\n"
+            stripped = text.replace(expected, "")
+            self.assertNotIn("\n", stripped, path)
+            self.assertNotIn("\r", stripped, path)
+
+
+class RendersOnEitherCheckout(unittest.TestCase):
+    """The template's line endings depend on the platform, and the script must not.
+
+    `.gitattributes` forces `*.cs text eol=crlf`, so C# is CRLF on every
+    machine. Nothing else here carries an attribute, so `.csproj`, `.slnx`, the
+    Compose YAML, the Markdown and the Dockerfiles are CRLF on a Windows
+    checkout and LF on the Ubuntu runner. The first version of this script
+    spelt its anchors with CRLF, passed on the machine that wrote it, and
+    matched nothing in CI — which the anchor check caught, loudly, as it was
+    built to. These tests render both checkouts from one.
+    """
+
+    @staticmethod
+    def rewrite(root: Path, newline: str, only: str | None = None) -> None:
+        for path in root.rglob("*"):
+            if not path.is_file() or (only and path.suffix != only):
+                continue
+            raw = path.read_bytes()
+            path.write_bytes(raw.replace(b"\r\n", b"\n").replace(b"\n", newline.encode()))
+
+    def test_a_checkout_whose_shared_files_are_lf(self):
+        # The Ubuntu runner: C# CRLF by attribute, everything else LF.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+            self.rewrite(root, "\n")
+            self.rewrite(root, "\r\n", only=".cs")
+
+            rendered = plan(root, "Ordering", PORT, MIGRATION_ID)
+
+            csproj = rendered.created[
+                "src/Services/Ordering/Ordering.Application/Ordering.Application.csproj"
+            ]
+            self.assertNotIn("\r", csproj, "an LF template must render LF")
+            program = rendered.created["src/Services/Ordering/Ordering.Api/Program.cs"]
+            self.assertNotIn("\n", program.replace("\r\n", ""), "C# is CRLF by attribute")
+            self.assertNotIn("\r", rendered.updated["Platform.slnx"])
+
+    def test_a_checkout_whose_files_are_all_crlf(self):
+        # The Windows developer machine, where core.autocrlf converts on the
+        # way out and every file arrives CRLF.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+            self.rewrite(root, "\r\n")
+
+            rendered = plan(root, "Ordering", PORT, MIGRATION_ID)
+
+            for path, text in {**rendered.created, **rendered.updated}.items():
+                self.assertNotIn("\n", text.replace("\r\n", ""), path)
+
+    def test_the_marker_follows_the_template_s_own_c_sharp(self):
+        # The one generated file with no template beside it to take endings
+        # from. It takes C#'s, observed rather than assumed.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+            self.rewrite(root, "\n")
+
+            rendered = plan(root, "Ordering", PORT, MIGRATION_ID)
+
+            marker = rendered.created["src/Services/Ordering/Ordering.Domain/AssemblyMarker.cs"]
+            self.assertNotIn("\r", marker)
 
 
 class RefusesToRun(unittest.TestCase):

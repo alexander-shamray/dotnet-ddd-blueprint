@@ -190,6 +190,18 @@ would be filing it by its least important property. It goes in
 `tools/new-service/`, and §4.1's tree gains a `tools/` entry — the honest fix
 for "the blueprint draws no such tree" is to draw it.
 
+**Cross-platform means the anchors cannot name a line ending.** The template
+does not have one: `.gitattributes` forces `*.cs text eol=crlf`, so C# is CRLF
+everywhere, while `.csproj`, `.slnx`, the Compose YAML, the Markdown and the
+Dockerfiles carry no attribute and so arrive CRLF on Windows and LF on the
+Ubuntu runner. Every anchor here is therefore spelt with LF and matched against
+text normalised to LF, and each file's own endings are put back on the way out —
+so a generated `.csproj` follows the checkout it was rendered from rather than
+the platform its author used. The `AssemblyMarker` is the one file with no
+template beside it to take endings from; it takes the ones the template's own
+C# has, read rather than assumed, so a change to `.gitattributes` carries into
+generated code without a second edit.
+
 ## 8. Tests
 
 `tools/new-service/test_new_service.py`, stdlib `unittest`, run against the

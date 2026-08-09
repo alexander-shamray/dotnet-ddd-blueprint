@@ -130,232 +130,232 @@ OMITTED = frozenset(
 # otherwise trust.
 PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     "src/Services/Catalog/Catalog.Application/DependencyInjection.cs": (
-        ("using Catalog.Application.Products.PublishProduct;\r\n", ""),
+        ("using Catalog.Application.Products.PublishProduct;\n", ""),
         (
-            "        // Explicit rather than scanned, beside the dispatcher it serves —\r\n"
-            "        // §4.2's registration sample is the shape. Since PR-10 the null\r\n"
-            "        // object drops real ProductPublished events, stated in CLAUDE.md's\r\n"
-            "        // phase note; PR-14's outbox dispatcher takes this line over.\r\n",
-            "        // Explicit rather than scanned, beside the dispatcher it serves —\r\n"
-            "        // §4.2's registration sample is the shape. The null object drops\r\n"
-            "        // whatever the first aggregate raises until PR-14's outbox\r\n"
-            "        // dispatcher takes this line over.\r\n",
+            "        // Explicit rather than scanned, beside the dispatcher it serves —\n"
+            "        // §4.2's registration sample is the shape. Since PR-10 the null\n"
+            "        // object drops real ProductPublished events, stated in CLAUDE.md's\n"
+            "        // phase note; PR-14's outbox dispatcher takes this line over.\n",
+            "        // Explicit rather than scanned, beside the dispatcher it serves —\n"
+            "        // §4.2's registration sample is the shape. The null object drops\n"
+            "        // whatever the first aggregate raises until PR-14's outbox\n"
+            "        // dispatcher takes this line over.\n",
         ),
         (
-            "        services.AddValidatorsFromAssemblyContaining<PublishProductValidator>();\r\n",
-            "        // §4.2's line spelt over the assembly rather than over a type in\r\n"
-            "        // it, because there is no validator yet to name — and this class,\r\n"
-            "        // the obvious anchor, is static and cannot be a type argument.\r\n"
-            "        // Move to AddValidatorsFromAssemblyContaining<TFirstValidator>()\r\n"
-            "        // with the first one, and restore the registration test\r\n"
-            "        // Catalog.Application.Tests carries: ValidationBehavior takes\r\n"
-            "        // IEnumerable<IValidator<T>>, so a lost scan is a pipeline that\r\n"
-            "        // validates nothing and says so to nobody.\r\n"
-            "        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);\r\n",
+            "        services.AddValidatorsFromAssemblyContaining<PublishProductValidator>();\n",
+            "        // §4.2's line spelt over the assembly rather than over a type in\n"
+            "        // it, because there is no validator yet to name — and this class,\n"
+            "        // the obvious anchor, is static and cannot be a type argument.\n"
+            "        // Move to AddValidatorsFromAssemblyContaining<TFirstValidator>()\n"
+            "        // with the first one, and restore the registration test\n"
+            "        // Catalog.Application.Tests carries: ValidationBehavior takes\n"
+            "        // IEnumerable<IValidator<T>>, so a lost scan is a pipeline that\n"
+            "        // validates nothing and says so to nobody.\n"
+            "        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);\n",
         ),
     ),
     "src/Services/Catalog/Catalog.Application/NullDomainEventDispatcher.cs": (
         (
-            "/// Drops what it is handed, and since PR-10 it is handed something real:\r\n"
-            "/// every <c>Product.Publish</c> raises a <c>ProductPublishedDomainEvent</c>\r\n"
-            "/// that ends here, because there is no outbox to stage into until PR-14 —\r\n"
-            "/// whose real dispatcher replaces this class. The drop is stated in\r\n"
-            "/// CLAUDE.md's phase note rather than hidden; the aggregate raises anyway,\r\n"
-            "/// so PR-14 picks the events up without touching the domain (§5.5). In\r\n"
-            "/// Application because §4.2's registration sample puts the real one there,\r\n"
-            "/// beside the dispatcher it serves.\r\n",
-            "/// Drops what it is handed, which is nothing until this service has an\r\n"
-            "/// aggregate — and everything it raises after that, because there is no\r\n"
-            "/// outbox to stage into until PR-14, whose real dispatcher replaces this\r\n"
-            "/// class. The aggregate must raise anyway: the domain cannot be allowed to\r\n"
-            "/// teach the defect of not raising, and PR-14 then picks the events up\r\n"
-            "/// without touching it (§5.5). In Application because §4.2's registration\r\n"
-            "/// sample puts the real one there, beside the dispatcher it serves.\r\n",
+            "/// Drops what it is handed, and since PR-10 it is handed something real:\n"
+            "/// every <c>Product.Publish</c> raises a <c>ProductPublishedDomainEvent</c>\n"
+            "/// that ends here, because there is no outbox to stage into until PR-14 —\n"
+            "/// whose real dispatcher replaces this class. The drop is stated in\n"
+            "/// CLAUDE.md's phase note rather than hidden; the aggregate raises anyway,\n"
+            "/// so PR-14 picks the events up without touching the domain (§5.5). In\n"
+            "/// Application because §4.2's registration sample puts the real one there,\n"
+            "/// beside the dispatcher it serves.\n",
+            "/// Drops what it is handed, which is nothing until this service has an\n"
+            "/// aggregate — and everything it raises after that, because there is no\n"
+            "/// outbox to stage into until PR-14, whose real dispatcher replaces this\n"
+            "/// class. The aggregate must raise anyway: the domain cannot be allowed to\n"
+            "/// teach the defect of not raising, and PR-14 then picks the events up\n"
+            "/// without touching it (§5.5). In Application because §4.2's registration\n"
+            "/// sample puts the real one there, beside the dispatcher it serves.\n",
         ),
     ),
     "src/Services/Catalog/Catalog.Application/Catalog.Application.csproj": (
         (
-            "  <ItemGroup>\r\n"
-            "    <!-- The read side of §6.5: query handlers use Dapper directly, never EF —\r\n"
-            "         the architecture gate in Catalog.Application.Tests holds that line. -->\r\n"
-            "    <PackageReference Include=\"Dapper\" />\r\n",
-            "  <ItemGroup>\r\n"
-            "    <!-- Dapper is not here yet: §6.5's read side uses it directly, and this\r\n"
-            "         project has no query handler to use it. It joins with the first\r\n"
-            "         one — an unused package reference is a claim this project would\r\n"
-            "         not be making. -->\r\n",
+            "  <ItemGroup>\n"
+            "    <!-- The read side of §6.5: query handlers use Dapper directly, never EF —\n"
+            "         the architecture gate in Catalog.Application.Tests holds that line. -->\n"
+            "    <PackageReference Include=\"Dapper\" />\n",
+            "  <ItemGroup>\n"
+            "    <!-- Dapper is not here yet: §6.5's read side uses it directly, and this\n"
+            "         project has no query handler to use it. It joins with the first\n"
+            "         one — an unused package reference is a claim this project would\n"
+            "         not be making. -->\n",
         ),
     ),
     "src/Services/Catalog/Catalog.Infrastructure/DependencyInjection.cs": (
-        ("using Catalog.Domain.Products;\r\n", ""),
+        ("using Catalog.Domain.Products;\n", ""),
         (
-            "        services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3\r\n"
-            "        services.AddScoped<IProductRepository, ProductRepository>();         // §5.6\r\n",
-            "        services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3\r\n"
-            "\r\n"
-            "        // §5.6's repository registrations join with the first aggregate.\r\n",
+            "        services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3\n"
+            "        services.AddScoped<IProductRepository, ProductRepository>();         // §5.6\n",
+            "        services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3\n"
+            "\n"
+            "        // §5.6's repository registrations join with the first aggregate.\n",
         ),
     ),
     "src/Services/Catalog/Catalog.Infrastructure/Persistence/CatalogDbContext.cs": (
         (
-            "        // Landed before its first find (PR-08) so that PR-10 added an\r\n"
-            "        // IEntityTypeConfiguration<T> and not also the line that discovers\r\n"
-            "        // it; ProductConfiguration is what it finds today. §7.2 puts mapping\r\n"
-            "        // in these classes and never in attributes on domain types, which\r\n"
-            "        // would put EF Core in Catalog.Domain.\r\n",
-            "        // Here before its first find, so that the first entity adds an\r\n"
-            "        // IEntityTypeConfiguration<T> and not also the line that discovers\r\n"
-            "        // it. §7.2 puts mapping in these classes and never in attributes on\r\n"
-            "        // domain types, which would put EF Core in Catalog.Domain.\r\n",
+            "        // Landed before its first find (PR-08) so that PR-10 added an\n"
+            "        // IEntityTypeConfiguration<T> and not also the line that discovers\n"
+            "        // it; ProductConfiguration is what it finds today. §7.2 puts mapping\n"
+            "        // in these classes and never in attributes on domain types, which\n"
+            "        // would put EF Core in Catalog.Domain.\n",
+            "        // Here before its first find, so that the first entity adds an\n"
+            "        // IEntityTypeConfiguration<T> and not also the line that discovers\n"
+            "        // it. §7.2 puts mapping in these classes and never in attributes on\n"
+            "        // domain types, which would put EF Core in Catalog.Domain.\n",
         ),
     ),
     "src/Services/Catalog/Catalog.Api/Program.cs": (
-        ("using Catalog.Api.Endpoints;\r\n", ""),
+        ("using Catalog.Api.Endpoints;\n", ""),
         (
-            "app.MapOpenApi();\r\n"
+            "app.MapOpenApi();\n"
             "app.MapProductEndpoints();        "
-            "// deliberately unauthenticated until PR-16 (Appendix C)\r\n",
-            "app.MapOpenApi();\r\n"
-            "\r\n"
-            "// This service maps no endpoint of its own yet. The first one goes here,\r\n"
-            "// and it is unauthenticated until PR-16 — say so in\r\n"
-            "// deploy/compose/README.md when it lands, as Catalog does (§C.4).\r\n",
+            "// deliberately unauthenticated until PR-16 (Appendix C)\n",
+            "app.MapOpenApi();\n"
+            "\n"
+            "// This service maps no endpoint of its own yet. The first one goes here,\n"
+            "// and it is unauthenticated until PR-16 — say so in\n"
+            "// deploy/compose/README.md when it lands, as Catalog does (§C.4).\n",
         ),
     ),
     "tests/Catalog.Domain.Tests/ArchitectureTests.cs": (
-        ("using Catalog.Domain.Products;\r\n", ""),
+        ("using Catalog.Domain.Products;\n", ""),
         (
-            "        // System.Collections earned its line with the first domain event: a\r\n"
-            "        // record's generated equality goes through EqualityComparer<T>, which\r\n"
-            "        // lives there. No collection type appears in any domain signature.\r\n"
-            "        // System.Linq earned its line with Money's currency guard —\r\n"
-            "        // enumerable logic over owned values is domain work, not an I/O\r\n"
-            "        // dependency, and §5.4's Order sample already leans on it.\r\n"
-            "        string[] allowed = [\"Common.Domain\", \"System.Runtime\", \"System.Collections\", \"System.Linq\"];\r\n"
-            "\r\n"
-            "        IEnumerable<string> referenced = typeof(Product).Assembly\r\n",
-            "        // Two entries, because two is what an empty domain references. The\r\n"
-            "        // ones that follow are the ones Catalog added and why:\r\n"
-            "        // System.Collections with the first domain event, whose generated\r\n"
-            "        // record equality goes through EqualityComparer<T>, and System.Linq\r\n"
-            "        // with the first value object doing enumerable logic over owned\r\n"
-            "        // values — domain work, not an I/O dependency.\r\n"
-            "        string[] allowed = [\"Common.Domain\", \"System.Runtime\"];\r\n"
-            "\r\n"
-            "        IEnumerable<string> referenced = typeof(AssemblyMarker).Assembly\r\n",
+            "        // System.Collections earned its line with the first domain event: a\n"
+            "        // record's generated equality goes through EqualityComparer<T>, which\n"
+            "        // lives there. No collection type appears in any domain signature.\n"
+            "        // System.Linq earned its line with Money's currency guard —\n"
+            "        // enumerable logic over owned values is domain work, not an I/O\n"
+            "        // dependency, and §5.4's Order sample already leans on it.\n"
+            "        string[] allowed = [\"Common.Domain\", \"System.Runtime\", \"System.Collections\", \"System.Linq\"];\n"
+            "\n"
+            "        IEnumerable<string> referenced = typeof(Product).Assembly\n",
+            "        // Two entries, because two is what an empty domain references. The\n"
+            "        // ones that follow are the ones Catalog added and why:\n"
+            "        // System.Collections with the first domain event, whose generated\n"
+            "        // record equality goes through EqualityComparer<T>, and System.Linq\n"
+            "        // with the first value object doing enumerable logic over owned\n"
+            "        // values — domain work, not an I/O dependency.\n"
+            "        string[] allowed = [\"Common.Domain\", \"System.Runtime\"];\n"
+            "\n"
+            "        IEnumerable<string> referenced = typeof(AssemblyMarker).Assembly\n",
         ),
     ),
     "tests/Catalog.Application.Tests/ArchitectureTests.cs": (
-        ("using Catalog.Domain.Products;\r\n", "using Catalog.Domain;\r\n"),
+        ("using Catalog.Domain.Products;\n", "using Catalog.Domain;\n"),
         (
-            "        Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(Product).Assembly];\r\n",
-            "        Assembly[] assemblies =\r\n"
-            "            [typeof(DependencyInjection).Assembly, typeof(AssemblyMarker).Assembly];\r\n",
+            "        Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(Product).Assembly];\n",
+            "        Assembly[] assemblies =\n"
+            "            [typeof(DependencyInjection).Assembly, typeof(AssemblyMarker).Assembly];\n",
         ),
     ),
     "tests/Catalog.Application.Tests/Catalog.Application.Tests.csproj": (
         (
-            "    <!-- ServiceCollection itself, for the registration tests: the\r\n"
-            "         abstractions package Catalog.Application compiles against has no\r\n"
-            "         container in it to build. -->\r\n"
-            "    <PackageReference Include=\"Microsoft.Extensions.DependencyInjection\" />\r\n"
-            "    <!-- The handler tests seed and assert through the real CatalogDbContext\r\n"
-            "         (§12.4's seeding rule — a raw INSERT drifts from the aggregate the\r\n"
-            "         first time it gains a column). -->\r\n"
-            "    <PackageReference Include=\"Microsoft.EntityFrameworkCore.SqlServer\" />\r\n",
-            "    <!-- ServiceCollection itself, for the registration tests: the\r\n"
-            "         abstractions package Catalog.Application compiles against has no\r\n"
-            "         container in it to build. -->\r\n"
-            "    <PackageReference Include=\"Microsoft.Extensions.DependencyInjection\" />\r\n",
+            "    <!-- ServiceCollection itself, for the registration tests: the\n"
+            "         abstractions package Catalog.Application compiles against has no\n"
+            "         container in it to build. -->\n"
+            "    <PackageReference Include=\"Microsoft.Extensions.DependencyInjection\" />\n"
+            "    <!-- The handler tests seed and assert through the real CatalogDbContext\n"
+            "         (§12.4's seeding rule — a raw INSERT drifts from the aggregate the\n"
+            "         first time it gains a column). -->\n"
+            "    <PackageReference Include=\"Microsoft.EntityFrameworkCore.SqlServer\" />\n",
+            "    <!-- ServiceCollection itself, for the registration tests: the\n"
+            "         abstractions package Catalog.Application compiles against has no\n"
+            "         container in it to build. -->\n"
+            "    <PackageReference Include=\"Microsoft.Extensions.DependencyInjection\" />\n",
         ),
         (
-            "    <ProjectReference Include=\"..\\..\\src\\Services\\Catalog\\Catalog.Application\\Catalog.Application.csproj\" />\r\n"
-            "    <!-- §12.1 homes the handler tests here, with real containers — the\r\n"
-            "         fixture lives in TestSupport, shared with Catalog.Api.Tests, which\r\n"
-            "         this project cannot reference. -->\r\n"
-            "    <ProjectReference Include=\"..\\..\\tests\\Catalog.TestSupport\\Catalog.TestSupport.csproj\" />\r\n"
-            "    <!-- CatalogDbContext by name, for seeding and read-back. The test\r\n"
-            "         project may: §4.2's gate binds Catalog.Application, not its tests. -->\r\n"
-            "    <ProjectReference Include=\"..\\..\\src\\Services\\Catalog\\Catalog.Infrastructure\\Catalog.Infrastructure.csproj\" />\r\n",
-            "    <ProjectReference Include=\"..\\..\\src\\Services\\Catalog\\Catalog.Application\\Catalog.Application.csproj\" />\r\n"
-            "    <!-- No Catalog.TestSupport and no Catalog.Infrastructure yet, and no\r\n"
-            "         Docker with them: §12.1 homes the handler tests here against real\r\n"
-            "         containers, and this project has no handler to test. The fixture\r\n"
-            "         reference, the DbContext reference and the provider package all\r\n"
-            "         return with the first one. -->\r\n",
+            "    <ProjectReference Include=\"..\\..\\src\\Services\\Catalog\\Catalog.Application\\Catalog.Application.csproj\" />\n"
+            "    <!-- §12.1 homes the handler tests here, with real containers — the\n"
+            "         fixture lives in TestSupport, shared with Catalog.Api.Tests, which\n"
+            "         this project cannot reference. -->\n"
+            "    <ProjectReference Include=\"..\\..\\tests\\Catalog.TestSupport\\Catalog.TestSupport.csproj\" />\n"
+            "    <!-- CatalogDbContext by name, for seeding and read-back. The test\n"
+            "         project may: §4.2's gate binds Catalog.Application, not its tests. -->\n"
+            "    <ProjectReference Include=\"..\\..\\src\\Services\\Catalog\\Catalog.Infrastructure\\Catalog.Infrastructure.csproj\" />\n",
+            "    <ProjectReference Include=\"..\\..\\src\\Services\\Catalog\\Catalog.Application\\Catalog.Application.csproj\" />\n"
+            "    <!-- No Catalog.TestSupport and no Catalog.Infrastructure yet, and no\n"
+            "         Docker with them: §12.1 homes the handler tests here against real\n"
+            "         containers, and this project has no handler to test. The fixture\n"
+            "         reference, the DbContext reference and the provider package all\n"
+            "         return with the first one. -->\n",
         ),
     ),
     "tests/Catalog.Application.Tests/DependencyInjectionTests.cs": (
         (
-            "using Catalog.Application.Products.GetProducts;\r\n"
-            "using Catalog.Application.Products.PublishProduct;\r\n",
+            "using Catalog.Application.Products.GetProducts;\n"
+            "using Catalog.Application.Products.PublishProduct;\n",
             "",
         ),
         (
-            "\r\n"
-            "    [Fact]\r\n"
-            "    public void AddCatalogApplication_registers_the_command_validator()\r\n"
-            "    {\r\n"
-            "        // ValidationBehavior takes IEnumerable<IValidator<T>>, so a missing\r\n"
-            "        // scan is not a failure — it is a pipeline that validates nothing and\r\n"
-            "        // says so to nobody. The registration is the only place to catch it.\r\n"
-            "        ServiceCollection services = new();\r\n"
-            "\r\n"
-            "        services.AddCatalogApplication();\r\n"
-            "\r\n"
-            "        services.ShouldContain(\r\n"
-            "            d => d.ServiceType == typeof(FluentValidation.IValidator<PublishProductCommand>),\r\n"
-            "            \"AddValidatorsFromAssemblyContaining is §4.2's line, and losing it fails silently\");\r\n"
-            "    }\r\n"
-            "\r\n"
-            "    [Fact]\r\n"
-            "    public void AddCatalogApplication_registers_the_slice_handlers()\r\n"
-            "    {\r\n"
-            "        // The §6.2 scan found nothing until this PR; these two are the first\r\n"
-            "        // real registrations it produces, so the scan itself is now testable.\r\n"
-            "        ServiceCollection services = new();\r\n"
-            "\r\n"
-            "        services.AddCatalogApplication();\r\n"
-            "\r\n"
-            "        services.ShouldContain(d =>\r\n"
-            "            d.ServiceType == typeof(ICommandHandler<PublishProductCommand, Result<Guid>>));\r\n"
-            "        services.ShouldContain(d =>\r\n"
-            "            d.ServiceType == typeof(IQueryHandler<GetProductsQuery, CursorPage<ProductSummaryDto>>));\r\n"
-            "    }\r\n"
-            "}\r\n",
-            "\r\n"
-            "    // Two tests are missing here until this service has a slice, and both\r\n"
-            "    // guard a scan that fails silently: that the validator scan finds a\r\n"
-            "    // validator, and that the §6.2 handler scan produces a registration.\r\n"
-            "    // Catalog.Application.Tests carries both — copy them across with the\r\n"
-            "    // first command and query.\r\n"
-            "}\r\n",
+            "\n"
+            "    [Fact]\n"
+            "    public void AddCatalogApplication_registers_the_command_validator()\n"
+            "    {\n"
+            "        // ValidationBehavior takes IEnumerable<IValidator<T>>, so a missing\n"
+            "        // scan is not a failure — it is a pipeline that validates nothing and\n"
+            "        // says so to nobody. The registration is the only place to catch it.\n"
+            "        ServiceCollection services = new();\n"
+            "\n"
+            "        services.AddCatalogApplication();\n"
+            "\n"
+            "        services.ShouldContain(\n"
+            "            d => d.ServiceType == typeof(FluentValidation.IValidator<PublishProductCommand>),\n"
+            "            \"AddValidatorsFromAssemblyContaining is §4.2's line, and losing it fails silently\");\n"
+            "    }\n"
+            "\n"
+            "    [Fact]\n"
+            "    public void AddCatalogApplication_registers_the_slice_handlers()\n"
+            "    {\n"
+            "        // The §6.2 scan found nothing until this PR; these two are the first\n"
+            "        // real registrations it produces, so the scan itself is now testable.\n"
+            "        ServiceCollection services = new();\n"
+            "\n"
+            "        services.AddCatalogApplication();\n"
+            "\n"
+            "        services.ShouldContain(d =>\n"
+            "            d.ServiceType == typeof(ICommandHandler<PublishProductCommand, Result<Guid>>));\n"
+            "        services.ShouldContain(d =>\n"
+            "            d.ServiceType == typeof(IQueryHandler<GetProductsQuery, CursorPage<ProductSummaryDto>>));\n"
+            "    }\n"
+            "}\n",
+            "\n"
+            "    // Two tests are missing here until this service has a slice, and both\n"
+            "    // guard a scan that fails silently: that the validator scan finds a\n"
+            "    // validator, and that the §6.2 handler scan produces a registration.\n"
+            "    // Catalog.Application.Tests carries both — copy them across with the\n"
+            "    // first command and query.\n"
+            "}\n",
         ),
     ),
     "tests/Catalog.Api.Tests/ArchitectureTests.cs": (
         (
-            "/// Vacuously green from PR-07 until PR-10's first endpoint — a rule\r\n"
-            "/// introduced before the violations exist is a constraint, not a backlog\r\n"
-            "/// item — and judging <c>ProductEndpoints</c> for real since.\r\n",
-            "/// Vacuously green until this service maps its first endpoint: a rule\r\n"
-            "/// introduced before the violations exist is a constraint, not a backlog\r\n"
-            "/// item. It has been observed failing against a deliberately added\r\n"
-            "/// forbidden reference in Catalog before being trusted here.\r\n",
+            "/// Vacuously green from PR-07 until PR-10's first endpoint — a rule\n"
+            "/// introduced before the violations exist is a constraint, not a backlog\n"
+            "/// item — and judging <c>ProductEndpoints</c> for real since.\n",
+            "/// Vacuously green until this service maps its first endpoint: a rule\n"
+            "/// introduced before the violations exist is a constraint, not a backlog\n"
+            "/// item. It has been observed failing against a deliberately added\n"
+            "/// forbidden reference in Catalog before being trusted here.\n",
         ),
     ),
     "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs": (
         (
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema creates it; "
-            "AddProducts' is a no-op after it\");\r\n"
-            "\r\n"
-            "        string[] applied = await fixture.AppliedMigrationsAsync();\r\n"
-            "        applied.Length.ShouldBe(2);\r\n"
-            "        applied[0].ShouldEndWith(\"_InitialCreate\");\r\n"
-            "        applied[1].ShouldEndWith(\"_AddProducts\");\r\n",
-            "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\r\n"
-            "\r\n"
-            "        string[] applied = await fixture.AppliedMigrationsAsync();\r\n"
-            "        applied.ShouldHaveSingleItem().ShouldEndWith(\"_InitialCreate\");\r\n",
+            "AddProducts' is a no-op after it\");\n"
+            "\n"
+            "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
+            "        applied.Length.ShouldBe(2);\n"
+            "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
+            "        applied[1].ShouldEndWith(\"_AddProducts\");\n",
+            "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
+            "\n"
+            "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
+            "        applied.ShouldHaveSingleItem().ShouldEndWith(\"_InitialCreate\");\n",
         ),
     ),
 }
@@ -422,16 +422,34 @@ class Plan:
     updated: dict[str, str] = field(default_factory=dict)
 
 
-def read(repo_root: Path, relative: str) -> str:
-    """Read preserving line endings and the BOM — the repository is CRLF, and
-    EF Core writes its machine-owned files with a byte-order mark that has to
-    survive the copy."""
+def read(repo_root: Path, relative: str) -> tuple[str, str]:
+    """The file with LF endings, and the endings it actually had.
+
+    **The template does not have one line ending, and which files have which
+    depends on the platform.** `.gitattributes` forces `*.cs text eol=crlf`, so
+    C# is CRLF everywhere; every other file here — `.csproj`, `.slnx`, the
+    Compose YAML, the Markdown, the Dockerfiles — carries no attribute, so it
+    checks out CRLF on Windows and LF on the Ubuntu runner. Anchors written
+    with CRLF therefore match on a developer machine and match nothing in CI,
+    which is exactly how this was found. Every anchor in this file is spelt
+    with LF and matched against normalised text; the file's own endings go back
+    on by `restore` on the way out.
+    """
     raw = (repo_root / relative).read_bytes()
     text = raw.decode("utf-8-sig")
     # Escaped, never the character itself: a U+FEFF sitting invisibly inside a
     # string literal is one "strip the BOM" editor command away from silently
     # changing what this script writes.
-    return "\ufeff" + text if raw.startswith(b"\xef\xbb\xbf") else text
+    if raw.startswith(b"\xef\xbb\xbf"):
+        text = "\ufeff" + text
+
+    newline = "\r\n" if "\r\n" in text else "\n"
+    return text.replace("\r\n", "\n"), newline
+
+
+def restore(text: str, newline: str) -> str:
+    """Put a file's own line endings back on rendered text."""
+    return text if newline == "\n" else text.replace("\n", newline)
 
 
 def require_once(text: str, needle: str, where: str) -> None:
@@ -500,16 +518,16 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
     """
     text = designer
     for needle, replacement in (
-        ("using Microsoft.EntityFrameworkCore.Migrations;\r\n", ""),
-        (f'    [Migration("{migration_id}_InitialCreate")]\r\n', ""),
+        ("using Microsoft.EntityFrameworkCore.Migrations;\n", ""),
+        (f'    [Migration("{migration_id}_InitialCreate")]\n', ""),
         (
-            "    partial class InitialCreate\r\n",
-            "    partial class CatalogDbContextModelSnapshot : ModelSnapshot\r\n",
+            "    partial class InitialCreate\n",
+            "    partial class CatalogDbContextModelSnapshot : ModelSnapshot\n",
         ),
-        ("        /// <inheritdoc />\r\n", ""),
+        ("        /// <inheritdoc />\n", ""),
         (
-            "        protected override void BuildTargetModel(ModelBuilder modelBuilder)\r\n",
-            "        protected override void BuildModel(ModelBuilder modelBuilder)\r\n",
+            "        protected override void BuildTargetModel(ModelBuilder modelBuilder)\n",
+            "        protected override void BuildModel(ModelBuilder modelBuilder)\n",
         ),
     ):
         require_once(text, needle, "InitialCreate.Designer.cs")
@@ -550,9 +568,13 @@ def sort_usings(text: str) -> str:
 def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[str, str]:
     """The nine projects, the marker, the migration and its snapshot."""
     created: dict[str, str] = {}
+    csharp_newline = ""
 
     for relative in classify(repo_root):
-        text = read(repo_root, relative)
+        text, newline = read(repo_root, relative)
+        if relative.endswith(".cs"):
+            csharp_newline = newline
+
         for needle, replacement in PATCHES.get(relative, ()):
             require_once(text, needle, relative)
             text = text.replace(needle, replacement)
@@ -569,29 +591,37 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
                 rendered = sort_usings(rendered)
                 snapshot = names.rename(snapshot_from_designer(text, migration_id))
                 created[names.rename(f"{MIGRATIONS}/{TEMPLATE}DbContextModelSnapshot.cs")] = (
-                    sort_usings(snapshot)
+                    restore(sort_usings(snapshot), newline)
                 )
 
-        created[names.rename(target)] = rendered
+        created[names.rename(target)] = restore(rendered, newline)
+
+    # The marker is the only file with no template beside it to take endings
+    # from, so it takes the ones the template's own C# has. Observed rather
+    # than assumed: `.gitattributes` decides this, and reading it here means a
+    # change to that rule carries into generated code without a second edit.
+    if not csharp_newline:
+        raise ScaffoldError("no C# file in the template to take line endings from")
 
     created[names.rename(f"src/Services/{TEMPLATE}/{TEMPLATE}.Domain/AssemblyMarker.cs")] = (
-        names.rename(ASSEMBLY_MARKER.replace("\n", "\r\n"))
+        restore(names.rename(ASSEMBLY_MARKER), csharp_newline)
     )
     return created
 
 
 def update_solution(repo_root: Path, names: Names) -> str:
     """Five projects in their own solution folder, four test entries, alphabetical."""
-    lines = read(repo_root, "Platform.slnx").splitlines(keepends=True)
+    text, newline = read(repo_root, "Platform.slnx")
+    lines = text.splitlines(keepends=True)
 
     folder = [
-        f'  <Folder Name="/src/Services/{names.pascal}/">\r\n',
+        f'  <Folder Name="/src/Services/{names.pascal}/">\n',
         *(
             f'    <Project Path="src/Services/{names.pascal}/{names.pascal}.{layer}'
-            f'/{names.pascal}.{layer}.csproj" />\r\n'
+            f'/{names.pascal}.{layer}.csproj" />\n'
             for layer in ("Api", "Application", "Domain", "Infrastructure", "Migrator")
         ),
-        "  </Folder>\r\n",
+        "  </Folder>\n",
     ]
 
     service_folder = re.compile(r'^  <Folder Name="/src/Services/([^/]+)/">')
@@ -606,11 +636,11 @@ def update_solution(repo_root: Path, names: Names) -> str:
             break
     else:
         last, _ = existing[-1]
-        at = lines.index("  </Folder>\r\n", last) + 1
+        at = lines.index("  </Folder>\n", last) + 1
     lines[at:at] = folder
 
     tests = [
-        f'    <Project Path="tests/{names.pascal}.{suite}/{names.pascal}.{suite}.csproj" />\r\n'
+        f'    <Project Path="tests/{names.pascal}.{suite}/{names.pascal}.{suite}.csproj" />\n'
         for suite in ("Api.Tests", "Application.Tests", "Domain.Tests", "TestSupport")
     ]
     entry = re.compile(r'^    <Project Path="tests/([^"]+)" />')
@@ -624,7 +654,7 @@ def update_solution(repo_root: Path, names: Names) -> str:
         lines.insert(at, line)
         positions = [(i, m.group(1)) for i, l in enumerate(lines) if (m := entry.match(l))]
 
-    return "".join(lines)
+    return restore("".join(lines), newline)
 
 
 def update_compose(repo_root: Path, names: Names, port: int) -> str:
@@ -633,7 +663,7 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
     An extraction rather than a template: the block's comments argue the
     inline-default rule and §7.1's two keys, and they travel with the copy.
     """
-    text = read(repo_root, "deploy/compose/docker-compose.yml")
+    text, newline = read(repo_root, "deploy/compose/docker-compose.yml")
     if re.search(rf'"{port}:\d+"', text):
         raise ScaffoldError(f"port {port} is already published in deploy/compose/docker-compose.yml")
 
@@ -646,42 +676,43 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
         raise ScaffoldError("the template's api block publishes no port to substitute")
     block = block.replace(published.group(0), f'ports: [ "{port}:8080" ]')
 
-    return text[:end] + block + text[end:]
+    return restore(text[:end] + block + text[end:], newline)
 
 
 def update_infra_only(repo_root: Path, names: Names) -> str:
     """Both halves of the pair join the excluded profile — §14.1's own rule."""
-    text = read(repo_root, "deploy/compose/docker-compose.infra-only.yml")
-    require_once(text, f'  {TEMPLATE.lower()}-api:\r\n    profiles: [ "excluded" ]\r\n', "infra-only override")
-    return text + names.rename(
-        f'  {TEMPLATE.lower()}-migrator:\r\n'
-        f'    profiles: [ "excluded" ]\r\n'
-        f'  {TEMPLATE.lower()}-api:\r\n'
-        f'    profiles: [ "excluded" ]\r\n'
+    text, newline = read(repo_root, "deploy/compose/docker-compose.infra-only.yml")
+    require_once(text, f'  {TEMPLATE.lower()}-api:\n    profiles: [ "excluded" ]\n', "infra-only override")
+    added = names.rename(
+        f'  {TEMPLATE.lower()}-migrator:\n'
+        f'    profiles: [ "excluded" ]\n'
+        f'  {TEMPLATE.lower()}-api:\n'
+        f'    profiles: [ "excluded" ]\n'
     )
+    return restore(text + added, newline)
 
 
 def update_env_example(repo_root: Path, names: Names) -> str:
     """Catalog's commented pair, extracted so its argument comes with it."""
-    text = read(repo_root, "deploy/compose/.env.example")
+    text, newline = read(repo_root, "deploy/compose/.env.example")
     marker = f"# {TEMPLATE}'s two §7.1 keys"
     require_once(text, marker, ".env.example")
-    return text + "\r\n" + names.rename(text[text.index(marker):])
+    return restore(text + "\n" + names.rename(text[text.index(marker):]), newline)
 
 
 def update_ports_readme(repo_root: Path, names: Names, port: int) -> str:
     """One row in the application-services table — the keyboard inventory (§14.1)."""
-    text = read(repo_root, "deploy/compose/README.md")
-    header = "| Service | Host port(s) | Notes |\r\n"
+    text, newline = read(repo_root, "deploy/compose/README.md")
+    header = "| Service | Host port(s) | Notes |\n"
     require_once(text, header, "deploy/compose/README.md")
 
     start = text.index(header)
-    end = text.index("\r\n\r\n", start) + 2
+    end = text.index("\n\n", start) + 1
     row = (
         f"| {names.pascal} API | http://localhost:{port} | "
-        f"`/health/live`, `/health/ready`, `/openapi/v1.json` |\r\n"
+        f"`/health/live`, `/health/ready`, `/openapi/v1.json` |\n"
     )
-    return text[:end] + row + text[end:]
+    return restore(text[:end] + row + text[end:], newline)
 
 
 def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:

@@ -284,7 +284,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`python -m unittest` in `tools/new-service` runs 35, and CI has a `scaffold`
+`python -m unittest` in `tools/new-service` runs 38, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-12 is next**
 (`feat(common): Redis helpers — HybridCache, key namespaces, distributed
 locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
@@ -314,6 +314,15 @@ after:
   nothing for the two §4.2 gates to name, so the scaffold emits one whose doc
   comment says to delete it. Seeing one in a service that *has* an aggregate is
   a defect, not a convention.
+- **The template has no single line ending, and a tool that reads it must not
+  assume one.** `.gitattributes` forces `*.cs text eol=crlf`, so C# is CRLF on
+  every machine — but `.csproj`, `.slnx`, the Compose YAML, the Markdown and
+  the Dockerfiles carry no attribute and arrive CRLF on Windows and **LF on the
+  Ubuntu runner**. The scaffold's first version spelt its anchors with CRLF,
+  passed on the machine that wrote it and matched nothing in CI. Anchors are LF
+  now, matched against normalised text, with each file's own endings restored
+  on the way out. Anything else in this repository that reads a file as text
+  and looks for a literal line has the same trap waiting.
 - **The generated model snapshot is EF's own output, not a hand-written copy.**
   It is derived from `InitialCreate.Designer.cs`, which already holds the
   tool's description of an empty model with a default schema. Verified rather
@@ -457,7 +466,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && python -m unittest      # 35 tests, no Docker, no SDK
+cd tools/new-service && python -m unittest      # 38 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
