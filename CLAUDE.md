@@ -255,7 +255,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fifteen projects and `dotnet test` runs 209 tests, so
+`Platform.slnx` holds fifteen projects and `dotnet test` runs 210 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. **PR-11 is next** (`feat(tooling): new-service scaffold script`),
 which copies and renames the template PR-10 finished: ports, database name,

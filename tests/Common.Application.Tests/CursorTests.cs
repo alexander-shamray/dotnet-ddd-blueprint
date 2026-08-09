@@ -1,3 +1,6 @@
+using System.Buffers.Text;
+using System.Globalization;
+using System.Text;
 using Shouldly;
 using Xunit;
 
@@ -51,12 +54,26 @@ public class CursorTests
     [InlineData("")]
     [InlineData("not base64url !!!")]
     [InlineData("bm90LWEtY3Vyc29y")]                  // valid Base64Url, wrong payload
-    [InlineData("OTk5OTk5OTk5OTk5OTk5OTk5OTk6YWJj")]  // ticks past DateTime.MaxValue
+    [InlineData("OTk5OTk5OTk5OTk5OTk5OTk5OTk6YWJj")]  // ticks that overflow long entirely
     public void Decode_returns_null_for_anything_unreadable(string tampered)
     {
         // The cursor is opaque (ADR-016). A client that edits one gets the
         // first page, not an error oracle over the token's insides and not a
         // 500 that makes garbage input this service's fault.
         Cursor.Decode(tampered).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Decode_returns_null_for_ticks_past_the_calendar()
+    {
+        // Distinct from the overflow row above, which long.TryParse already
+        // refuses: these ticks parse and the id is valid, so only the range
+        // guard itself stands between them and a DateTimeOffset constructor
+        // throw — delete the guard and this is the test that goes red.
+        string payload = string.Create(
+            CultureInfo.InvariantCulture, $"{DateTime.MaxValue.Ticks + 1}:{Guid.Empty:N}");
+        string cursor = Base64Url.EncodeToString(Encoding.UTF8.GetBytes(payload));
+
+        Cursor.Decode(cursor).ShouldBeNull();
     }
 }
