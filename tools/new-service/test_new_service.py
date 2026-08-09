@@ -647,6 +647,32 @@ class RefusesToRun(unittest.TestCase):
             render(name="A" + "b" * 128)
         self.assertIn("128", str(raised.exception))
 
+    def test_a_name_sql_server_reserves_for_itself(self):
+        # The name becomes `Database=<name>`, so `Master` points the migrator
+        # at a system database rather than an isolated one, and `Sys` collides
+        # with the reserved schema. Both pass every other check and fail — if
+        # at all — against a live server.
+        for name in ("Master", "Model", "Msdb", "Tempdb", "Sys", "MASTER"):
+            with self.assertRaises(ScaffoldError) as raised:
+                render(name=name)
+            self.assertIn("system name", str(raised.exception), name)
+
+    def test_a_service_named_product_cannot_mask_the_slice_check(self):
+        # The mask that lets `CatalogSearch` through would, for a service
+        # called `Product`, strip every genuine slice leftover along with the
+        # service's own name — and the render would report itself
+        # domain-neutral. The slice half therefore runs before the rename,
+        # where a `Product` means only itself.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+            program = root / "src/Services/Catalog/Catalog.Api/Program.cs"
+            text = program.read_bytes().decode("utf-8")
+            program.write_bytes((text + "// leftover: ProductEndpoints\n").encode("utf-8"))
+
+            with self.assertRaises(ScaffoldError) as raised:
+                plan(root, "Product", 5199, MIGRATION_ID)
+            self.assertIn("the slice survived", str(raised.exception))
+
     def test_a_name_windows_reserves_as_a_device(self):
         # These clear PascalCase, the template check and every collision test,
         # and then `apply()` cannot create `src/Services/Con` or
@@ -803,8 +829,10 @@ class RefusesToRun(unittest.TestCase):
             self.assertIn("Program.cs", str(raised.exception))
 
     def test_nothing_is_written_when_the_run_refuses(self):
-        # The whole render is a value until `apply` is called, which is what
-        # makes "no half-scaffolded state" a property rather than a promise.
+        # A *refused* run writes nothing, because the whole render is a value
+        # until `apply` is called. That is the guarantee, and it is narrower
+        # than "no half-scaffolded state": `apply` writes in a loop and an I/O
+        # failure partway does leave a partial tree — see its docstring.
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))
             before = sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))

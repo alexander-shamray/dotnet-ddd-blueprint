@@ -164,15 +164,19 @@ anything.
    - **A `Needs a decision` row** from `/review-grok` stops the loop — that
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
-   - **A clean round ends it; twelve rounds is the ceiling; never end on a
-     round that produced a fix.** Those three clauses are the whole condition,
-     and the third is what makes the other two executable rather than
-     contradictory. Clean means a requested review that lands with *nothing* —
-     no inline comments, no suppressed ones, no unresolved threads. Failing
-     that, stop at twelve and hand over what survives. But if the last round's
-     findings were accepted and pushed, request one more to verify them even
-     if that is round thirteen: a fix nobody reviewed is the thing this loop
-     exists to prevent, and stopping on one is worse than not having run.
+   - **Two consecutive clean rounds end it; twelve rounds is the ceiling.**
+     Two clauses, and the first is deliberately *two*. Clean means a requested
+     review that lands with nothing at all — no inline comments, no suppressed
+     ones, no unresolved threads. One clean round is not convergence: PR-11's
+     round eight was clean and every round after it found more, so a rule
+     ending on the first clean pass would have stopped at exactly the round
+     that proves it should not. Requiring two also subsumes "never end on a
+     round that produced a fix", since a round with findings is not clean and
+     resets the count.
+
+     Failing that, stop at twelve and hand over what survives — saying plainly
+     that the loop ended on its ceiling rather than on convergence, because
+     those are different states and only one of them is evidence.
 
      The ceiling was three, and three was wrong. By its seventh Copilot round
      PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
@@ -281,11 +285,10 @@ anything.
 
    The same stopping condition as step 5, in this loop's vocabulary: an
    **`Ask`** thread — left open by `/review-copilot` by design — stops the
-   loop; otherwise it runs until a requested review lands with nothing at all,
-   to a ceiling of twelve rounds, and **never ends on a round whose findings
-   were fixed and pushed**. A request that registers no review inside a
-   reasonable wait is reported as the loop not having finished, never marked
-   clean by timeout.
+   loop; otherwise it runs until **two consecutive** requested reviews land
+   with nothing at all, to a ceiling of twelve rounds. A request that
+   registers no review inside a reasonable wait is reported as the loop not
+   having finished, never marked clean by timeout.
 
    **This is the loop the twelve is for.** Copilot's findings arrive in the
    suppressed block long after the inline ones dry up, and they do not taper

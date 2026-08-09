@@ -514,8 +514,18 @@ public sealed class AssemblyMarker;
 # Anything left in the rendered tree fails the run. `production` and EF's own
 # `ProductVersion` annotation are the two benign substrings, and they are
 # removed before the search rather than excused after it.
+#
+# **Two searches, at two different moments, and the split is load-bearing.**
+# The template token is looked for *after* the rename, with the requested name
+# masked out, because a service may legitimately contain it — `CatalogSearch`.
+# The slice token is looked for *before* the rename, because masking cannot
+# help there: a service called `Product` would mask away every real leftover
+# along with its own name and the render would call itself domain-neutral.
+# Before the rename a `Product` is unambiguous, since the rename maps the
+# template's casings and never the slice's.
 BENIGN = re.compile(r"[Pp]roduction|ProductVersion")
-STRAGGLERS = re.compile(r"catalog|roduct", re.IGNORECASE)
+TEMPLATE_TOKEN = re.compile(re.escape(TEMPLATE), re.IGNORECASE)
+SLICE_TOKEN = re.compile(r"roduct")
 
 # Every anchored pattern here is applied with `fullmatch`, never `match`.
 # Python's `$` matches at the end of the string *or just before a trailing
@@ -539,6 +549,12 @@ CASINGS = re.compile("|".join((TEMPLATE, TEMPLATE.lower(), TEMPLATE.upper())))
 # first migration is the thing that fails — late, on a machine with a database
 # attached, which is the worst place for this script to be wrong.
 SQL_IDENTIFIER_LIMIT = 128
+
+# SQL Server's own. `Database=Master` points the migrator at a system database
+# instead of an isolated one, and `Sys` collides with the reserved schema —
+# both from a name that passes every other check and fails, if it fails at all,
+# against a live server.
+SQL_RESERVED = frozenset({"MASTER", "MODEL", "MSDB", "TEMPDB", "SYS"})
 
 WINDOWS_RESERVED = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
@@ -809,6 +825,19 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
             require_once(text, needle, relative)
             text = text.replace(needle, replacement)
 
+        # Before the rename, where a slice token means only itself. Doing this
+        # after it — with the requested name masked, as the template check
+        # must be — would let a service called `Product` mask away the very
+        # leftovers this looks for.
+        if (slice_token := SLICE_TOKEN.search(BENIGN.sub("", text))) is not None:
+            line = BENIGN.sub("", text)[: slice_token.start()].count("\n") + 1
+            raise ScaffoldError(
+                f"{relative}:{line}: the slice survived. This file names "
+                f"Product somewhere the patches do not reach."
+            )
+        if SLICE_TOKEN.search(relative) is not None:
+            raise ScaffoldError(f"{relative}: the path itself names the slice")
+
         target = relative
         rendered = names.rename(text)
         if relative.startswith(MIGRATIONS + "/"):
@@ -1021,6 +1050,11 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
             f"database and schema, and sysname stops at {SQL_IDENTIFIER_LIMIT}. The "
             f"projects would render and the first migration would not run."
         )
+    if name.upper() in SQL_RESERVED:
+        raise ScaffoldError(
+            f"'{name}' is a SQL Server system name: the service's database and schema "
+            f"take this name, so the migrator would target the server's own."
+        )
     if name.upper() in WINDOWS_RESERVED:
         raise ScaffoldError(
             f"'{name}' is a reserved device name on Windows: neither "
@@ -1109,17 +1143,24 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     # rejected for the tokens it was asked for. What is left after masking is a
     # mention the rename did not reach, which is the only thing this check is
     # about.
+    #
+    # The mask is why the SLICE half of this check does not run here. Masking a
+    # service called `Product` would strip every genuine `Product` leftover
+    # along with its own name, and the render would report itself
+    # domain-neutral while the slice survived in it. `render_projects` runs
+    # that half before the rename instead, where a `Product` is unambiguous —
+    # the rename maps the template's casings and never touches the slice's.
     mask = re.compile("|".join(re.escape(n) for n in (names.pascal, names.lower, names.upper)))
     created = render_projects(repo_root, names, migration_id)
     for relative, text in created.items():
         stripped = BENIGN.sub("", mask.sub("", text))
-        if (left := STRAGGLERS.search(stripped)) is not None:
+        if (left := TEMPLATE_TOKEN.search(stripped)) is not None:
             line = stripped[: left.start()].count("\n") + 1
             raise ScaffoldError(
                 f"{relative}:{line}: '{left.group(0)}' survived the rename. "
-                f"The file names Catalog or its slice somewhere this script does not patch."
+                f"The file names Catalog somewhere this script does not patch."
             )
-        if STRAGGLERS.search(mask.sub("", relative)) is not None:
+        if TEMPLATE_TOKEN.search(mask.sub("", relative)) is not None:
             raise ScaffoldError(f"{relative}: the path itself still names the template")
 
     return Plan(

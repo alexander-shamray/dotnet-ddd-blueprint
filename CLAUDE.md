@@ -284,7 +284,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`py -3.12 -m unittest` in `tools/new-service` runs 68, and CI has a `scaffold`
+`py -3.12 -m unittest` in `tools/new-service` runs 70, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-12 is next**
 (`feat(common): Redis helpers — HybridCache, key namespaces, distributed
 locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
@@ -469,7 +469,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 68 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 70 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
@@ -1403,10 +1403,10 @@ finding against the loop's own machinery has arrived — and the loop repeats
 until a requested review posts with no new findings. The review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. **`ship.md` owns the stopping
-condition** and states it in three clauses: a clean round ends it, twelve
-rounds is the ceiling, and it never ends on a round whose findings were fixed
-and pushed — that last is what stops the first two contradicting each other,
-since a fix nobody reviewed is what the loop exists to prevent. Either loop
+condition** and states it in two clauses: **two consecutive clean rounds** end
+it, and twelve rounds is the ceiling. Two rather than one because one clean
+round is not convergence — see below — and because requiring two also means
+the loop can never end on a round whose findings were just fixed. Either loop
 also stops early on the finding class that is the user's: `Needs a decision`
 from the Grok triage, an open `Ask` thread from the Copilot one.
 
