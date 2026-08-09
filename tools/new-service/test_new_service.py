@@ -185,16 +185,23 @@ class OmitsTheSlice(unittest.TestCase):
         self.assertNotIn('PackageReference Include="Dapper"', csproj)
         self.assertIn('PackageReference Include="FluentValidation"', csproj)
 
-    def test_the_registration_suite_keeps_the_four_tests_about_the_template(self):
+    def test_the_registration_suite_keeps_the_five_tests_about_the_template(self):
+        # The exact set, not a subset. Written as four `assertIn`s it both
+        # miscounted — the null-dispatcher test is copied too — and could not
+        # fail if that test were dropped, which is the one registration whose
+        # absence makes the first resolved TransactionBehavior throw.
         tests = self.rendered.created["tests/Ordering.Application.Tests/DependencyInjectionTests.cs"]
-        for kept in (
-            "AddOrderingApplication_registers_the_dispatcher_scoped",
-            "AddOrderingApplication_registers_the_system_clock",
-            "AddOrderingApplication_registers_the_request_metrics_singleton",
-            "AddOrderingApplication_registers_the_three_behaviours_in_pipeline_order",
-        ):
-            self.assertIn(kept, tests)
-        self.assertNotIn("registers_the_slice_handlers", tests)
+
+        self.assertEqual(
+            [
+                "AddOrderingApplication_registers_the_dispatcher_scoped",
+                "AddOrderingApplication_registers_the_system_clock",
+                "AddOrderingApplication_registers_the_request_metrics_singleton",
+                "AddOrderingApplication_registers_the_null_domain_event_dispatcher_scoped",
+                "AddOrderingApplication_registers_the_three_behaviours_in_pipeline_order",
+            ],
+            re.findall(r"public void (\w+)\(\)", tests),
+        )
 
 
 class GeneratedGuidanceIsTrue(unittest.TestCase):
