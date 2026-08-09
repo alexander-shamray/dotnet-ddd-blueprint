@@ -293,7 +293,7 @@ forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
 
 PR-11 landed the scaffold of §4.5 — `tools/new-service/new_service.py`, stdlib
-Python, one command per service — and four of its decisions bind what comes
+Python, one command per service — and five of its decisions bind what comes
 after:
 
 - **Catalog is the template, read at run time.** There is no template
@@ -304,16 +304,19 @@ after:
   same change.
 - **The scaffold copies no domain.** The slice is excluded by name, so a new
   service is PR-07's state with PR-08's, PR-09's and PR-10's wiring on it — five
-  projects, four test suites, both images, the Compose pair, the `InitialCreate`
-  migration and twenty-four passing tests, and no aggregate. `Dapper`, the
-  application-test container wiring, the two silent-scan registration tests and
-  the `AssemblyMarker` the gates anchor on all arrive with the first real
-  slice, each noted at the line concerned in the generated code.
-- **`AssemblyMarker` is back for scaffolded services only.** PR-10 deleted
-  Catalog's when `Product` replaced it; a service with no domain type has
-  nothing for the two §4.2 gates to name, so the scaffold emits one whose doc
-  comment says to delete it. Seeing one in a service that *has* an aggregate is
-  a defect, not a convention.
+  service projects, three test projects and a `TestSupport` library (§4.1 calls
+  that last one *not* a test project, and counting it as one is a drift a
+  review has already caught here), both images, the Compose pair, the
+  `InitialCreate` migration and twenty-four passing tests, and no aggregate.
+  Three things arrive with the first real slice, each noted at the line
+  concerned in the generated code: `Dapper`, the application-test container
+  wiring and the two silent-scan registration tests.
+- **`AssemblyMarker` runs the other way, and it is easy to state backwards.**
+  The scaffold **emits** it — a service with no domain type has nothing for the
+  two §4.2 gates to name — and the first aggregate is when it is **deleted**
+  and the gates re-anchor, which is what PR-10 did to Catalog's when `Product`
+  arrived. It does not "arrive with the first slice"; it leaves then. Seeing
+  one in a service that *has* an aggregate is a defect, not a convention.
 - **The template has no single line ending, and a tool that reads it must not
   assume one.** `.gitattributes` forces `*.cs text eol=crlf`, so C# is CRLF on
   every machine — but `.csproj`, `.slnx`, the Compose YAML, the Markdown and

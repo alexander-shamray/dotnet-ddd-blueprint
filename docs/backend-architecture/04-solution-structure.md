@@ -835,8 +835,10 @@ renders it instead:
 python tools/new-service/new_service.py Ordering --port 5101
 ```
 
-It writes §4.1's five projects and four test projects with everything the
-service template has accumulated — the `DbContext` and its conventions
+It writes §4.1's five service projects, its three test projects and its
+`TestSupport` library — nine in all, and §4.1 is explicit that the last is not
+a test project — with everything the service template has accumulated: the
+`DbContext` and its conventions
 ([§7.2](07-persistence.md)), `EfUnitOfWork` ([§6.3](06-cqrs.md)), the
 connection factory ([§6.5](06-cqrs.md)), the readiness check
 ([§13.5](13-observability.md)), the migration job host
@@ -859,12 +861,17 @@ Dockerfile that nothing builds and nothing reconciles.
 endpoints are excluded by name; what a new service inherits is PR-07's state
 with the later wiring on it, not PR-10's state with the nouns changed.
 Renaming an aggregate would hand the next service a deletion job and a
-vocabulary it did not choose. Four things therefore arrive with the first real
+vocabulary it did not choose. Three things therefore arrive with the first real
 slice rather than with the scaffold, and each is noted at the line concerned in
 the generated code: `Dapper`, the container wiring in the application test
-project, the two registration tests that guard a scan which otherwise fails
-silently, and the `AssemblyMarker` the §4.2 gates anchor on until an aggregate
-exists to anchor them on.
+project, and the two registration tests that guard a scan which otherwise fails
+silently.
+
+The `AssemblyMarker` runs the other way, and the distinction is worth keeping
+straight. The scaffold **emits** it, because the §4.2 gates must name a type in
+an assembly that has none; the first aggregate is when it is **deleted** and
+the gates re-anchor on that aggregate. It is the one generated file written to
+be removed, and its own doc comment says so.
 
 > **The scaffold fails loudly or not at all.** Every piece of Catalog text it
 > names must match exactly once, the whole render is built in memory and

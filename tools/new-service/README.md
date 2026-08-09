@@ -23,8 +23,10 @@ needed: `git status` is the preview and `git checkout .` is the undo.
 ## What you get
 
 [§4.1](../../docs/backend-architecture/04-solution-structure.md)'s five
-projects and four test projects, with everything PR-07 through PR-10 built
-into the template — `DbContext` and conventions, `EfUnitOfWork`, the
+service projects, three test projects and the `TestSupport` library — nine in
+all, and §4.1 is explicit that the last is not a test project — with
+everything PR-07 through PR-10 built
+into the template: `DbContext` and conventions, `EfUnitOfWork`, the
 connection factory, the readiness check, the §7.4 migrator host, the
 `InitialCreate` migration that creates the schema, both Dockerfiles, the
 Compose pair, and the architecture gates of
@@ -71,8 +73,9 @@ pin, and the floor this tool is written to. A newer interpreter locally is the
 hazard rather than an older one: it accepts APIs 3.12 does not, and the suite
 goes green on code CI cannot run.
 
-They run against the **real repository**: `plan()` renders from the checkout and returns a value, and
-`apply()` is the only thing that touches disk. That is deliberate. The design
+They run against the **real repository**: `plan()` renders from the checkout
+and returns a value, and `apply()` is the only thing that touches disk — which
+is why they can. That is deliberate. The design
 has no template directory — the template is Catalog itself, so there is one
 copy of the wiring rather than two that drift — and the risk it accepts is
 that Catalog moves under the script's anchors. Only rendering the tree that
