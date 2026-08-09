@@ -669,6 +669,28 @@ def classify(repo_root: Path) -> list[str]:
             f"expected InitialCreate.cs and InitialCreate.Designer.cs under "
             f"{MIGRATIONS}, found {len(initial)}"
         )
+
+    # The mirror of the check above, and the half that was missing. A file
+    # *added* to Catalog stops the run; a file *deleted* from it did not — the
+    # loop simply never saw it, so its patches never ran and `plan` succeeded
+    # with a service missing a piece. That is the fail-open shape this whole
+    # script is built to avoid, on the manifest itself.
+    if (deleted := COPIED - set(discovered)):
+        raise ScaffoldError(
+            "the template no longer has: "
+            + ", ".join(sorted(deleted))
+            + ". Remove them from COPIED — with their PATCHES entries — or restore them."
+        )
+
+    # And no patch may be inert. A PATCHES key for a file that is not copied
+    # never reaches `require_once`, so the anchor it guards would be unbound
+    # while every other anchor still looked enforced.
+    if (inert := set(PATCHES) - set(copied)):
+        raise ScaffoldError(
+            "PATCHES names files the scaffold does not copy: "
+            + ", ".join(sorted(inert))
+            + ". A patch that never runs is an anchor that guards nothing."
+        )
     return copied
 
 

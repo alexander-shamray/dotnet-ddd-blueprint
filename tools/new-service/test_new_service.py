@@ -676,6 +676,20 @@ class RefusesToRun(unittest.TestCase):
                 render(repo_root=root)
             self.assertIn("will not guess", str(raised.exception))
 
+    def test_a_copied_template_file_that_no_longer_exists(self):
+        # The mirror of the check below, and the half that was missing. A file
+        # added to Catalog stopped the run; a file deleted from it did not —
+        # the loop never saw it, its patches never ran, and the scaffold
+        # succeeded with a service missing a piece.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+            (root / "src/Services/Catalog/Catalog.Application/NullDomainEventDispatcher.cs").unlink()
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("no longer has", str(raised.exception))
+            self.assertIn("NullDomainEventDispatcher.cs", str(raised.exception))
+
     def test_a_template_file_nobody_classified(self):
         # The hole the straggler check cannot see: a new Catalog folder carries
         # none of the tokens it searches for, so the classification is what
