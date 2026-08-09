@@ -261,12 +261,14 @@ a re-specification, and every service PR after this one adds to what would
 have to be reworked. The deadline that remains is PR-18 — the second service
 is where a domain nobody has agreed to stops being one service's problem.
 
-PR-11 is the one delivered pull request that does **not** move if the domain
-changes, and it was built that way deliberately: the scaffold copies the
-service template and excludes Catalog's slice, so it names no aggregate, no
-command and no endpoint (§4.5). That is three of the 98 days taken off this
-risk rather than added to it — small, and worth stating, because it is the
-only place where a landed PR has narrowed the largest item on this page.
+PR-11 and PR-12 are the delivered pull requests that do **not** move if the
+domain changes, and both were built that way deliberately: the scaffold
+copies the service template and excludes Catalog's slice, so it names no
+aggregate, no command and no endpoint (§4.5) — and the Redis helpers are
+shared mechanism in `Common.Infrastructure`, wired to no service at all
+(§8). That is seven of the 98 days taken off this risk rather than added to
+it — small, and worth stating, because these are the only places where a
+landed PR has narrowed the largest item on this page.
 
 **Testcontainers and Docker on the build agent.** Priced into PR-08 as one day
 of first-time cost, which assumes the agent can run containers at all. If it

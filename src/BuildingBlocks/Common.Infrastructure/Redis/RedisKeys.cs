@@ -39,7 +39,7 @@ public sealed class RedisKeys(IHostEnvironment environment)
         return $"{_service}:idem:{suffix}";
     }
 
-    /// <summary>"{service}:denylist:{suffix}" — the noeviction keyspace (§8.1, §11.3).</summary>
+    /// <summary>"{service}:denylist:{suffix}" — the noeviction keyspace (§8.1).</summary>
     public string Denylist(string suffix)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(suffix);

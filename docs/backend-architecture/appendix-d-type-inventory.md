@@ -166,6 +166,7 @@ their declaration.
 | `TestTypeMap` | A `MessageTypeMap` over the contract and test assemblies, built once as a static in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture |
 | `DomainEventSamples` | One sample per stageable domain event, so a new event without one fails §12.4's round-trip rather than being skipped — `ContractSamples`' counterpart for the Local lane |
 | `ConcurrentRequestException` | Thrown when an idempotency key is claimed but unfinished (§8.5) |
+| `InProgressMarker` | The sentinel `TryClaimAsync` writes while a command is in flight; `GetAsync` reads it back as `InProgress` (§8.5) |
 | `InvariantViolationException` | Thrown when a command modifies more than one aggregate root (§6.3, principle 3) |
 | `StockReservationExpired`, `PaymentAuthorisationExpired`, `DespatchExpired`, `StockReleaseExpired` | Saga schedule messages — one per wait, and §9.6 has four (§9.6) |
 | `FlagOrderForReviewHandler` | Writes the `OrderReviews` row; loads no aggregate (§9.6) |
