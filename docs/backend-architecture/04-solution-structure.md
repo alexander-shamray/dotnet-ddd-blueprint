@@ -75,6 +75,11 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── backend-architecture/           This document, one file
 │                                       per chapter; ADRs in Appendix A
 │
+├── tools/
+│   └── new-service/                    The scaffold of §4.5 and its tests.
+│                                       Stdlib Python, no restore — it renders
+│                                       a service from Catalog at run time
+│
 ├── Directory.Build.props               Shared MSBuild settings
 ├── Directory.Packages.props            Central package version management
 └── Platform.slnx
@@ -819,6 +824,91 @@ needs restoring before the list can be read.
 > The gate closes that itself by comparing them — but the failure it reports is
 > against this chapter, not the props file, because the file is what CI
 > restores and the chapter is what a reader believes.
+
+## 4.5 Adding a service
+
+**Four** of §4.1's six services share the shape below — Catalog, Ordering,
+Inventory and Payments — and writing the fourth by hand is how it ends up
+subtly different from the first three. One command renders it instead:
+
+```bash
+python tools/new-service/new_service.py Ordering --port 5101
+```
+
+It writes §4.1's five service projects, its three test projects and its
+`TestSupport` library — nine in all, and §4.1 is explicit that the last is not
+a test project — with everything the service template has accumulated: the
+`DbContext` and its conventions
+([§7.2](07-persistence.md)), `EfUnitOfWork` ([§6.3](06-cqrs.md)), the
+connection factory ([§6.5](06-cqrs.md)), the readiness check
+([§13.5](13-observability.md)), the migration job host
+([§7.4](07-persistence.md)), the `InitialCreate` migration that creates the
+schema, both images ([§15.2](15-cicd-deployment.md)) and §4.2's architecture
+gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
+its `infra-only` exclusion, `.env.example`, and the ports table in
+`deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
+builds and its tests pass before a line of it is written, eleven of them
+against a real SQL Server.
+
+**There is no template directory, and that is the design.** The script reads
+`src/Services/Catalog` at run time, so there is exactly one copy of the
+wiring — the copy CI builds and `dotnet test` exercises — and an improvement to
+the template reaches the next service the next time it runs. A tokenised copy
+beside it would be a second `DbContext`, a second migrator host and a second
+Dockerfile that nothing builds and nothing reconciles.
+
+**It copies no domain.** Catalog's `Product`, its command, its query and its
+endpoints are excluded by name; what a new service inherits is PR-07's state
+with the later wiring on it, not PR-10's state with the nouns changed.
+Renaming an aggregate would hand the next service a deletion job and a
+vocabulary it did not choose. Three things therefore arrive with the first real
+slice rather than with the scaffold — each with the part of it that needs them,
+not as a set, and each noted at the line concerned in the generated code. The
+first handler of either kind brings the application-test container wiring and
+the test that §6.2's scan produced a registration; the first validator brings
+the test for the validator scan; the first *query* brings `Dapper`, which a
+command-only slice must not add. Both those scans fail silently when lost,
+which is why the tests are named rather than left to be missed.
+
+The `AssemblyMarker` runs the other way, and the distinction is worth keeping
+straight. The scaffold **emits** it, because the §4.2 gates must name a type in
+an assembly that has none; the first aggregate is when it is **deleted** and
+the gates re-anchor on that aggregate. It is the one generated file written to
+be removed, and its own doc comment says so.
+
+> **The scaffold fails loudly or not at all.** Every piece of Catalog text it
+> names must match exactly once, the whole render is built in memory and
+> validated before a single file is created, and any file under
+> `src/Services/Catalog` it cannot classify as template or slice stops the run.
+> The price of having no second copy is that the first one moves; the price is
+> paid by refusing, never by silently emitting a service that still names
+> Catalog. Its own tests render this repository for the same reason — a fixture
+> tree would test the script against a template that cannot drift.
+>
+> **That guarantee is about validation, not about the write.** A run the
+> scaffold refuses writes nothing; a disk that fills up halfway through the
+> write leaves a partial tree, and no transaction log is kept to undo it. The
+> target is a git checkout — `git status` shows exactly what landed — and a
+> second, untested rollback mechanism for something version control already
+> does is not worth having.
+
+`--port` is required and never derived. A port is an allocation recorded in
+§14.1 and in `deploy/compose/README.md`; a script that guessed one would
+quietly disagree with a printed chapter. The run refuses a port another service
+already publishes.
+
+Three things are outside it, and none is silently missing: the gateway route
+([§10.2](10-api-gateway.md)) — the route belongs to the gateway's
+configuration, not the service's tree — the Helm chart
+([§15.3](15-cicd-deployment.md)), and a Worker host in place of an API, which
+Shipping and Notifications take (§4.1) and which joins the script with the
+first one built.
+
+**The scaffold refuses `Shipping` and `Notifications` by name until it can.**
+Documenting the gap left the script willing to render either as an API service,
+which would have contradicted §4.1 quietly — Notifications has no Domain
+project at all. A note is not a guard, and the two names come off that list
+with the PR that adds the mode.
 
 ---
 

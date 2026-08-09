@@ -147,8 +147,12 @@ anything.
       existing file and removes it when everything is resolved. Do not
       write or delete `suggestions.md` from here.
 
-   2. **Check for `suggestions.md` at the repo root.** Absent → the loop is
-      done; the review came back clean. Present → run `/review-grok`, which
+   2. **Check for `suggestions.md` at the repo root.** Absent → that is **one**
+      clean pass, not the end: if the pass before it was also clean the loop is
+      done, and otherwise go back to (1) and run one more. Keep the count in
+      the report, because "clean twice" and "clean once" are what separate
+      convergence from a lull, and a Grok recheck of nothing costs a few
+      minutes. Present → run `/review-grok`, which
       triages and fixes — **its tool grant deliberately stops short of
       committing**. Then rerun the step 2 checks that apply to what it
       changed: a review fix is still an edit, and committing it unchecked
@@ -164,10 +168,30 @@ anything.
    - **A `Needs a decision` row** from `/review-grok` stops the loop — that
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
-   - **Three rounds without convergence** stops the loop. A reviewer and a
-     triager still disagreeing after three exchanges are not going to settle
-     it between themselves; hand over the surviving findings instead of
-     grinding tokens against them.
+   - **Two consecutive clean rounds end it; twelve rounds is the ceiling.**
+     Two clauses, and the first is deliberately *two*. Clean means a requested
+     review that lands with nothing at all — no inline comments, no suppressed
+     ones, no unresolved threads. One clean round is not convergence: PR-11's
+     round eight was clean and every round after it found more, so a rule
+     ending on the first clean pass would have stopped at exactly the round
+     that proves it should not. Requiring two also subsumes "never end on a
+     round that produced a fix", since a round with findings is not clean and
+     resets the count.
+
+     Failing that, stop at twelve and hand over what survives — saying plainly
+     that the loop ended on its ceiling rather than on convergence, because
+     those are different states and only one of them is evidence.
+
+     The ceiling was three, and three was wrong. By its seventh Copilot round
+     PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
+     and rounds four through seven caught a documented-but-unenforced
+     constraint, an assertion that could not fail in one direction, and a
+     fail-open in the script's own manifest check — three defects three rounds
+     would have shipped. The loop then ran past twelve and kept finding things,
+     including a *clean* round eight after which every further round found
+     more. A ceiling
+     is for a reviewer and a triager **disagreeing**, which converges or never
+     does; it was never for a loop still finding real things.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
@@ -255,7 +279,11 @@ anything.
       loop done, list the PR's unresolved review threads — an unresolved
       `Ask` stops the loop exactly as a new one would, and any other
       unresolved thread is triage the loop still owes. Zero findings and
-      zero unresolved threads → the loop is done.
+      zero unresolved threads → that is **one** clean round. The loop is done
+      only if the round before it was also clean; otherwise request another
+      and go back to (1). Count the streak explicitly rather than reading
+      "no new comments" as an ending — PR-11's round eight was clean and
+      every round after it found more.
       Otherwise run `/review-copilot` **paused at its marker step**: let it
       triage and fix, then — because its tool grant cannot commit, and a
       `done` marker claims a committed fix — rerun the applicable step 2
@@ -263,11 +291,20 @@ anything.
       the threads. Push the branch by name so the next request reviews the
       fixed state, and go back to (1).
 
-   The same two early exits as step 5, in this loop's vocabulary: an **`Ask`**
-   thread — left open by `/review-copilot` by design — stops the loop, and
-   **three rounds without convergence** stops it. A request that registers no
-   review inside a reasonable wait is reported as the loop not having
-   finished, never marked clean by timeout.
+   The same stopping condition as step 5, in this loop's vocabulary: an
+   **`Ask`** thread — left open by `/review-copilot` by design — stops the
+   loop; otherwise it runs until **two consecutive** requested reviews land
+   with nothing at all, to a ceiling of twelve rounds. A request that
+   registers no review inside a reasonable wait is reported as the loop not
+   having finished, never marked clean by timeout.
+
+   **This is the loop the twelve is for.** Copilot's findings arrive in the
+   suppressed block long after the inline ones dry up, and they do not taper
+   the way a disagreement does: on PR-11 rounds four, five and six each posted
+   "generated no new comments" above a suppressed finding that was worth
+   fixing. Do not read a clean *inline* verdict as convergence, and do not
+   stop early because the counts look small — a round costs minutes and the
+   things it finds at that depth are the ones nobody else will.
 
 ## Report
 

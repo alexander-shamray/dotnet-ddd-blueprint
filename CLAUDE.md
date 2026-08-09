@@ -68,8 +68,16 @@ Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
 Platform.slnx                    the fifteen projects below
 .editorconfig                    house style; a build input, not a hint
-.github/workflows/ci.yml         licence gate, then restore/build/test
+.github/workflows/ci.yml         licence gate and scaffold tests, then
+                                 restore/build/test
 .github/licence-gate/            the gate, its allow-list and its tests
+
+tools/new-service/               §4.5's scaffold, its tests and its README.
+                                 Stdlib Python, no restore. Renders a service
+                                 from src/Services/Catalog at RUN TIME — there
+                                 is no template directory, so a Catalog change
+                                 that breaks it fails `py -3.12 -m unittest`
+                                 here rather than six months later
 .github/workflows/compose.yml    path-filtered smoke on deploy/compose/**:
                                  config -q, up --wait, down -v — and, since
                                  PR-10's build: stanzas, an image build
@@ -218,6 +226,24 @@ would destroy the record. Do not edit a spec or a plan to match the code that
 followed it — amend the chapter instead, which is where the specification
 actually lives.
 
+`tools/new-service/` took the opposite decision to the licence gate's, and the
+difference is what each thing is. The gate is CI-only, so it lives under the CI
+provider's directory and §4.1 stays silent about it. The scaffold is a
+developer tool that happens to be tested in CI, so filing it under `.github/`
+would have filed it by its least important property — **§4.1's tree gained a
+`tools/` entry and §4.5 documents the script instead**, the honest fix for "the
+blueprint draws no such tree" being to draw it.
+
+**Changing Catalog can break the scaffold, and the failure is loud.** The
+script names exact text inside `src/Services/Catalog` and `tests/Catalog.*`,
+and every anchor must match exactly once. It also classifies **every** file
+under those roots as template or slice and refuses to run on one it has never
+seen — so a new file in Catalog is a decision the scaffold forces, the same way
+the domain allow-list gate forces one. If `py -3.12 -m unittest` in
+`tools/new-service` goes red after a Catalog change, reconcile the script in
+the same change; that is the price of having one copy of the wiring instead of
+two.
+
 Planned, per §4.1 — do not invent a different shape for it. The three building
 blocks built so far are shown above; the tree below is the target shape, and
 its annotations mark what has already landed:
@@ -257,13 +283,57 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
-something. **PR-11 is next** (`feat(tooling): new-service scaffold script`),
-which copies and renames the template PR-10 finished: ports, database name,
-solution entries, Compose block. PR-07 landed the Catalog skeleton, so §4.2's
-architecture rules are a build failure — each gate was observed red against a
-deliberately added forbidden reference before it was trusted, and since PR-10
-the endpoints gate judges a real type (`ProductEndpoints`) rather than passing
-vacuously.
+something. Since PR-11 there is a second suite with a second runner:
+`py -3.12 -m unittest` in `tools/new-service` runs 71, and CI has a `scaffold`
+job for them beside `licence-gate`. **PR-12 is next**
+(`feat(common): Redis helpers — HybridCache, key namespaces, distributed
+locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
+build failure — each gate was observed red against a deliberately added
+forbidden reference before it was trusted, and since PR-10 the endpoints gate
+judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-11 landed the scaffold of §4.5 — `tools/new-service/new_service.py`, stdlib
+Python, one command per service — and five of its decisions bind what comes
+after:
+
+- **Catalog is the template, read at run time.** There is no template
+  directory, so there is one copy of the wiring rather than two that drift, and
+  the scaffold's tests render *this* repository. The consequence is stated
+  above and worth repeating here: a Catalog change can turn
+  `tools/new-service`'s suite red, and reconciling the script belongs in the
+  same change.
+- **The scaffold copies no domain.** The slice is excluded by name, so a new
+  service is PR-07's state with PR-08's, PR-09's and PR-10's wiring on it — five
+  service projects, three test projects and a `TestSupport` library (§4.1 calls
+  that last one *not* a test project, and counting it as one is a drift a
+  review has already caught here), both images, the Compose pair, the
+  `InitialCreate` migration and twenty-four passing tests, and no aggregate.
+  Three things arrive with the first real slice, each noted at the line
+  concerned in the generated code: `Dapper`, the application-test container
+  wiring and the two silent-scan registration tests.
+- **`AssemblyMarker` runs the other way, and it is easy to state backwards.**
+  The scaffold **emits** it — a service with no domain type has nothing for the
+  two §4.2 gates to name — and the first aggregate is when it is **deleted**
+  and the gates re-anchor, which is what PR-10 did to Catalog's when `Product`
+  arrived. It does not "arrive with the first slice"; it leaves then. Seeing
+  one in a service that *has* an aggregate is a defect, not a convention.
+- **The template has no single line ending, and a tool that reads it must not
+  assume one.** `.gitattributes` forces `*.cs text eol=crlf`, so C# is CRLF on
+  every machine — but `.csproj`, `.slnx`, the Compose YAML, the Markdown and
+  the Dockerfiles carry no attribute and arrive CRLF on Windows and **LF on the
+  Ubuntu runner**. The scaffold's first version spelt its anchors with CRLF,
+  passed on the machine that wrote it and matched nothing in CI. Anchors are LF
+  now, matched against normalised text, with each file's own endings restored
+  on the way out. Anything else in this repository that reads a file as text
+  and looks for a literal line has the same trap waiting.
+- **The generated model snapshot is EF's own output, not a hand-written copy.**
+  It is derived from `InitialCreate.Designer.cs`, which already holds the
+  tool's description of an empty model with a default schema. Verified rather
+  than argued: a scaffolded service was built, `dotnet ef migrations add` was
+  run against it, the generated `Up` was empty and EF's rewritten snapshot was
+  byte-identical to the emitted one. Two details were found only by that diff —
+  EF sorts its `using` block by namespace (so `;` must not participate in the
+  sort), and the sort order changes when the service name passes `Microsoft`.
 
 PR-10 landed the first vertical slice — `Product`, `PublishProductCommand`,
 `GetProductsQuery` with §6.5's cursor pagination, the two Dockerfiles, the
@@ -394,6 +464,32 @@ dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
 ```
+
+Two suites, two runners. The scaffold's tests are Python and are **not** in
+`Platform.slnx`, so `dotnet test` says nothing about them:
+
+```bash
+cd tools/new-service && py -3.12 -m unittest    # 71 tests, no Docker, no SDK
+python tools/new-service/new_service.py <Name> --port <51xx>
+```
+
+**`py -3.12`, not `python`, and the block above is written that way on
+purpose.** Both CI jobs pin Python 3.12; the default interpreter here is 3.14.
+A newer one is the hazard, not an older one — it accepts APIs 3.12 does not, so
+the local suite goes green on code the runner cannot execute.
+`Path.read_text(newline=…)` is 3.13 and cost a CI round exactly that way. The
+scaffold *script* is a different matter: running it is not a test of the floor,
+so plain `python` is fine there.
+
+3.12 is installed here, so both suites can be run against it:
+
+```bash
+py -3.12 -m unittest        # from tools/new-service and .github/licence-gate
+```
+
+This used to be carried by review, for want of a 3.12 to check against. It no
+longer is, and that is the better answer: the rule the reviewer was asked to
+hold is now a command that either passes or does not.
 
 **`dotnet test` requires Docker from PR-08**, and the container tests are
 neither skipped nor categorised when it is absent. Both were considered and
@@ -1306,10 +1402,24 @@ triages what lands — suppressed comments included, which is where every real
 finding against the loop's own machinery has arrived — and the loop repeats
 until a requested review posts with no new findings. The review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
-a lite one, is the one the loop wants. Either loop stops early on the finding
-class that is the user's — `Needs a decision` from the Grok triage, an open
-`Ask` thread from the Copilot one — or after three rounds without
-convergence. What `.claude/settings.json` still denies is the narrow set
+a lite one, is the one the loop wants. **`ship.md` owns the stopping
+condition** and states it in two clauses: **two consecutive clean rounds** end
+it, and twelve rounds is the ceiling. Two rather than one because one clean
+round is not convergence — see below — and because requiring two also means
+the loop can never end on a round whose findings were just fixed. Either loop
+also stops early on the finding class that is the user's: `Needs a decision`
+from the Grok triage, an open `Ask` thread from the Copilot one.
+
+The ceiling was three until PR-11, and the numbers are why it moved: the first
+seven Copilot rounds went 10 → 4 → 3 → 1 → 1 → 3 → 1 with every finding
+accepted, and rounds four to seven caught a documented-but-unenforced
+constraint, an assertion that could not fail in one direction, and a fail-open
+in a manifest check. Three would have shipped all three. Copilot's late rounds
+surface findings in the **suppressed** block under a "generated no new
+comments" heading, so a clean inline verdict is not convergence — and one clean
+round is not two: round eight came back clean, and every round after it found
+more.
+What `.claude/settings.json` still denies is the narrow set
 that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
 push to `main`. A branch wanting one of those is raising a question, not
 running a command. `gh pr create`'s own offer to push is not used either — it
