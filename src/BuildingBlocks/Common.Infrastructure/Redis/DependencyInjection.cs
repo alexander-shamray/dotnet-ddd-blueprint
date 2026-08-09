@@ -82,10 +82,18 @@ public static class DependencyInjection
         }
     }
 
-    private static string RequiredConnectionString(IConfiguration configuration, string name) =>
-        configuration.GetConnectionString(name)
-            ?? throw new InvalidOperationException(
-                $"ConnectionStrings:{name} is not configured — §8.1 needs both Redis connections.");
+    private static string RequiredConnectionString(IConfiguration configuration, string name)
+    {
+        // IsNullOrWhiteSpace, not a null check: an empty environment variable
+        // configures an empty string, and letting it through defers the
+        // failure to the first keyed resolve — the fail-fast this method
+        // exists to guarantee.
+        string? connectionString = configuration.GetConnectionString(name);
+        return string.IsNullOrWhiteSpace(connectionString)
+            ? throw new InvalidOperationException(
+                $"ConnectionStrings:{name} is not configured — §8.1 needs both Redis connections.")
+            : connectionString;
+    }
 
     private static ConnectionMultiplexer Connect(string connectionString)
     {

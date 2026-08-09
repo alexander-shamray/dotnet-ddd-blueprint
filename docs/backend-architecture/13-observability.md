@@ -119,7 +119,8 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
 }
 ```
 
-Two instrumentations are not in this block, and neither absence is a mistake.
+Two pieces of §13.2's telemetry are not in this block, and neither absence is
+a mistake.
 The rule is that an instrumentation lands with the package it instruments —
 unlike a meter name, which is a string, each costs a package reference, and a
 reference to a library nothing uses is a claim about the dependency graph that

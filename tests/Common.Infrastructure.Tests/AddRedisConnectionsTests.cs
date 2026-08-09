@@ -65,7 +65,9 @@ public sealed class AddRedisConnectionsTests
 
     [Theory]
     [InlineData(null, "localhost:6380", "ConnectionStrings:RedisCache")]
+    [InlineData("", "localhost:6380", "ConnectionStrings:RedisCache")]
     [InlineData("localhost:6379", null, "ConnectionStrings:RedisCoordination")]
+    [InlineData("localhost:6379", "   ", "ConnectionStrings:RedisCoordination")]
     public void A_missing_connection_string_fails_at_registration_naming_the_key(
         string? cache, string? coordination, string expected)
     {

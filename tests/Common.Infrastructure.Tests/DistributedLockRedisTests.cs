@@ -15,13 +15,13 @@ namespace Common.Infrastructure.Tests;
 [Collection(nameof(IntegrationCollection))]
 public sealed class DistributedLockRedisTests(RedisFixture fixture)
 {
-    private IDistributedLockFactory Factory() =>
-        fixture.BuildProvider("locks").GetRequiredService<IDistributedLockFactory>();
-
     [Fact]
     public async Task A_held_lock_cannot_be_acquired_again()
     {
-        IDistributedLockFactory factory = Factory();
+        // Each test owns and disposes its provider — it holds the connected
+        // multiplexers, and a discarded one keeps them alive to process exit.
+        await using ServiceProvider provider = fixture.BuildProvider("locks");
+        IDistributedLockFactory factory = provider.GetRequiredService<IDistributedLockFactory>();
 
         await using IDistributedLock? first =
             await factory.TryAcquireAsync("contend", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
@@ -35,7 +35,8 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
     [Fact]
     public async Task Release_frees_the_lock_for_the_next_holder()
     {
-        IDistributedLockFactory factory = Factory();
+        await using ServiceProvider provider = fixture.BuildProvider("locks");
+        IDistributedLockFactory factory = provider.GetRequiredService<IDistributedLockFactory>();
 
         IDistributedLock? first =
             await factory.TryAcquireAsync("handover", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
@@ -49,7 +50,8 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
     [Fact]
     public async Task Expiry_frees_the_lock_without_a_release()
     {
-        IDistributedLockFactory factory = Factory();
+        await using ServiceProvider provider = fixture.BuildProvider("locks");
+        IDistributedLockFactory factory = provider.GetRequiredService<IDistributedLockFactory>();
 
         IDistributedLock? first = await factory.TryAcquireAsync(
             "expire",
@@ -64,7 +66,8 @@ public sealed class DistributedLockRedisTests(RedisFixture fixture)
     [Fact]
     public async Task A_stale_handle_must_not_release_the_next_holders_lock()
     {
-        IDistributedLockFactory factory = Factory();
+        await using ServiceProvider provider = fixture.BuildProvider("locks");
+        IDistributedLockFactory factory = provider.GetRequiredService<IDistributedLockFactory>();
 
         IDistributedLock? stale = await factory.TryAcquireAsync(
             "stolen",
