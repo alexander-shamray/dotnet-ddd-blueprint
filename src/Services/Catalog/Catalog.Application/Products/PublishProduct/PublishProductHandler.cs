@@ -16,10 +16,13 @@ public sealed class PublishProductHandler(IProductRepository products, TimeProvi
 {
     public Task<Result<Guid>> HandleAsync(PublishProductCommand command, CancellationToken ct)
     {
+        // The null-forgiveness is the validator's NotNull, enforced before
+        // any handler runs (§6.3) — the nullable exists so an omitted JSON
+        // amount is a 400, not a bound zero.
         var product = Product.Publish(
             command.Name,
             command.ThumbnailUrl,
-            Money.Of(command.Amount, command.Currency),
+            Money.Of(command.Amount!.Value, command.Currency),
             clock.GetUtcNow());
 
         products.Add(product);

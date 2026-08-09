@@ -59,6 +59,27 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
     }
 
     [Fact]
+    public async Task Publishing_without_an_amount_is_a_400_not_a_free_product()
+    {
+        // A bare decimal cannot say "absent": an omitted amount would bind as
+        // 0 and publish a free product indistinguishable from a deliberate
+        // one. The command's nullable Amount plus the validator's NotNull
+        // turn the omission into the field-keyed 400 every other bad field
+        // gets — and only this boundary can see the omission at all.
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            "/v1/catalog/products",
+            new { Name = "Walnut desk", Currency = "EUR" },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain("Amount");
+
+        int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");
+        rows.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Publishing_an_invalid_product_returns_400_with_field_keyed_errors()
     {
         // The ValidationBehavior path over the wire (§6.3 → §10.5): thrown

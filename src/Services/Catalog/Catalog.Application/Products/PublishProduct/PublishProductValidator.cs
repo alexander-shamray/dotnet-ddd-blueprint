@@ -20,13 +20,14 @@ public sealed class PublishProductValidator : AbstractValidator<PublishProductCo
         // fault a too-large price is. The bound excludes .995 exactly:
         // Money.Of rounds half-to-even at two places, so 999….995 becomes
         // the sixteen-digit 1e15 and overflows despite passing a bare < 1e15.
-        RuleFor(x => x.Amount).GreaterThanOrEqualTo(0).LessThan(999_999_999_999_999.995m);
+        RuleFor(x => x.Amount).NotNull().GreaterThanOrEqualTo(0).LessThan(999_999_999_999_999.995m);
 
         // NotEmpty first: Matches alone skips null, and a JSON "currency":
         // null would then reach Money.Of and turn malformed input into a 500.
         // Letters, not just length — "1$?" is three characters and no
         // currency, and Money.Of refuses it as a bug where this refuses it
-        // as input (§5.7's division).
-        RuleFor(x => x.Currency).NotEmpty().Matches("^[A-Za-z]{3}$");
+        // as input (§5.7's division). \z, not $: .NET's $ matches before a
+        // trailing newline, and "EUR\n" must fail here, not in the domain.
+        RuleFor(x => x.Currency).NotEmpty().Matches(@"^[A-Za-z]{3}\z");
     }
 }

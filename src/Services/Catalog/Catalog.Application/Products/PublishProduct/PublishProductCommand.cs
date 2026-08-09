@@ -16,5 +16,11 @@ namespace Catalog.Application.Products.PublishProduct;
 public sealed record PublishProductCommand(
     string Name,
     string? ThumbnailUrl,
-    decimal Amount,
+    // Nullable because a bare decimal cannot say "absent": an omitted amount
+    // would bind as 0 and publish a free product indistinguishable from a
+    // deliberate one. The validator's NotNull turns the omission into the
+    // same field-keyed 400 every other bad field gets — a JsonRequired
+    // attribute was tried first and surfaces as a 500 through the binder.
+    // The reference members need no such dance: omission binds them null.
+    decimal? Amount,
     string Currency) : ICommand<Result<Guid>>;

@@ -61,7 +61,8 @@ ALTER ROLE db_datawriter ADD MEMBER [ordering-migrator];   -- for data backfills
 ```
 
 > **Do not let local convenience collapse the two keys.** Locally there is one
-> `sa` account — [§14.2](14-local-development.md) states the simplification and [§12.4](12-test-strategy.md)'s fixture applies
+> `sa` account — [§14.2](14-local-development.md) states the simplification
+> and [§12.4](12-test-strategy.md)'s fixture applies
 > it — so the *permission* boundary is a cloud-side control, exercised where
 > the seeding script above runs. What every local environment exercises is the
 > *name* boundary: the migrator reads `ConnectionStrings__OrderingMigrator`

@@ -10,6 +10,12 @@ namespace Catalog.Domain.Common;
 /// is private and <see cref="Of"/> is the only way in, so no code downstream
 /// checks for an invalid instance.
 /// </summary>
+/// <remarks>
+/// One hole the language keeps open: a struct always has a default, so
+/// <c>default(Money)</c> exists with a null <see cref="Currency"/> despite
+/// the private constructor. Aggregates guard their own boundary against it —
+/// <c>Product.Publish</c> refuses a default price — because a struct cannot.
+/// </remarks>
 public readonly record struct Money
 {
     public decimal Amount { get; }

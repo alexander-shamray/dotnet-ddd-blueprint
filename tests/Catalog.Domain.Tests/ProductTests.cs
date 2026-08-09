@@ -67,6 +67,16 @@ public class ProductTests
     }
 
     [Fact]
+    public void Publish_refuses_a_default_price()
+    {
+        // The language keeps default(Money) constructible however private the
+        // constructor is; the aggregate is where the null currency inside it
+        // must stop, not the non-null column three layers later.
+        Should.Throw<DomainException>(() =>
+            Product.Publish("Walnut desk", null, default, Now));
+    }
+
+    [Fact]
     public void Each_publish_mints_its_own_identity()
     {
         var first = Product.Publish("Walnut desk", null, Money.Of(19.99m, "EUR"), Now);

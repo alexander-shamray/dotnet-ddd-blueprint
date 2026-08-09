@@ -749,8 +749,9 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         // NotEmpty first: Matches alone skips null, and a JSON "currency":
         // null would reach the domain as a 500 rather than this 400. Letters,
         // not just length — Money.Of refuses "1$?" as a bug; this refuses it
-        // as input (§5.7's division).
-        RuleFor(x => x.Currency).NotEmpty().Matches("^[A-Za-z]{3}$");
+        // as input (§5.7's division). \z, not $: .NET's $ matches before a
+        // trailing newline, and "EUR\n" must fail here, not in the domain.
+        RuleFor(x => x.Currency).NotEmpty().Matches(@"^[A-Za-z]{3}\z");
         RuleFor(x => x.Items).NotEmpty();
         RuleForEach(x => x.Items).ChildRules(item =>
         {

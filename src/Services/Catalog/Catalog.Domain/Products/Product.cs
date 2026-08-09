@@ -42,11 +42,16 @@ public sealed class Product : AggregateRoot<ProductId>
 
     public static Product Publish(string name, string? thumbnailUrl, Money price, DateTimeOffset now)
     {
-        // A bug guard, not input validation — the validator rejects a blank
-        // name before any handler runs, so reaching this throw means a caller
-        // bypassed the always-valid boundary (§5.7).
+        // Bug guards, not input validation — the validator rejects both
+        // before any handler runs, so reaching a throw here means a caller
+        // bypassed the always-valid boundary (§5.7). The price check exists
+        // because C# hands every struct a default: Money's constructor is
+        // private, but default(Money) is not, and its null Currency would
+        // otherwise travel to the non-null column before failing.
         if (string.IsNullOrWhiteSpace(name))
             throw new DomainException("A product must have a name.");
+        if (price == default)
+            throw new DomainException("A product must have a price.");
 
         var product = new Product(ProductId.New(), name, thumbnailUrl, price, now);
 

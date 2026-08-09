@@ -54,6 +54,9 @@ public class PublishProductValidatorTests
         // Three characters is not three letters — "1$?" must be refused here
         // as input, not by Money.Of as a bug (§5.7's division).
         { nameof(PublishProductCommand.Currency), Valid() with { Currency = "1$?" } },
+        // .NET's $ anchor matches before a trailing newline; only \z makes
+        // "EUR\n" fail here rather than on Money.Of's length guard.
+        { nameof(PublishProductCommand.Currency), Valid() with { Currency = "EUR\n" } },
         // Matches alone skips null — the rule needs NotEmpty for a JSON
         // "currency": null to stay a 400 rather than a DomainException.
         { nameof(PublishProductCommand.Currency), Valid() with { Currency = null! } }
