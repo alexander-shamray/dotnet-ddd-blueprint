@@ -41,6 +41,28 @@ jobs:
         working-directory: .github/licence-gate
         run: python licence_gate.py
 
+  # The scaffold has no template directory: it renders a new service from
+  # src/Services/Catalog at run time, so there is one copy of the wiring rather
+  # than two that drift. The risk that buys is that Catalog moves under the
+  # script's anchors, and these tests render the real checkout — so a Catalog
+  # change that breaks the scaffold fails here rather than in six months.
+  #
+  # It gates nothing. A broken scaffold does not make the solution wrong, and
+  # holding the build behind it would say otherwise; a red job is the whole
+  # signal that is wanted.
+  scaffold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the scaffold against this repository
+        working-directory: tools/new-service
+        run: python -m unittest
+
   build:
     needs: licence-gate
     runs-on: ubuntu-latest
