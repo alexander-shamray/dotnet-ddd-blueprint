@@ -10,6 +10,8 @@ thing that touches disk.
     cd tools/new-service && python -m unittest
 """
 
+import contextlib
+import io
 import re
 import shutil
 import tempfile
@@ -24,6 +26,7 @@ from new_service import (
     Plan,
     ScaffoldError,
     apply,
+    main,
     plan,
 )
 
@@ -723,12 +726,80 @@ class Applies(unittest.TestCase):
 
             apply(root, rendered)
 
-            for relative, text in rendered.created.items():
+            # Both maps, not just `created`. Read back only the new files, this
+            # asserted the half of `apply()` that is least likely to break: a
+            # regression that omitted or corrupted every shared-file update
+            # would have passed a test whose name says "every planned file".
+            for relative, text in {**rendered.created, **rendered.updated}.items():
                 # utf-8, not utf-8-sig: the byte-order mark is content here,
                 # and a reader that swallowed it could not tell the machine-
                 # owned migration files from the hand-written ones.
                 self.assertEqual(text, (root / relative).read_bytes().decode("utf-8"))
             self.assertFalse((root / "src/Services/Ordering/Ordering.Domain/Products").exists())
+
+
+class TheCommandLine(unittest.TestCase):
+    """`main` itself, which every test above went around.
+
+    `plan` and `apply` were covered from the first commit and the entry point
+    a developer actually types was not — so argument parsing, the default
+    migration id, the exit codes and what reaches stdout and stderr were all
+    uncovered. The licence gate tests its own `main`; this is the same bar.
+    """
+
+    def run_main(self, *argv: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_successful_run_reports_what_it_wrote_and_exits_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+
+            code, out, err = self.run_main(
+                "Ordering", "--port", str(PORT), "--repo-root", str(root),
+                "--migration-id", MIGRATION_ID,
+            )
+
+            self.assertEqual(0, code)
+            self.assertEqual("", err)
+            self.assertIn("35 files created, 5 updated", out)
+            self.assertIn(f"port {PORT}", out)
+            self.assertTrue((root / "src/Services/Ordering/Ordering.Api/Program.cs").exists())
+
+    def test_a_refused_run_exits_one_with_the_reason_on_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+
+            code, out, err = self.run_main(
+                "Shipping", "--port", str(PORT), "--repo-root", str(root)
+            )
+
+            self.assertEqual(1, code)
+            self.assertEqual("", out, "a refused run must not report success")
+            self.assertIn("Worker", err)
+
+    def test_the_port_is_required(self):
+        # argparse exits 2 rather than returning, which is its contract and
+        # not this script's — asserted so a later `default=` cannot slip in.
+        with self.assertRaises(SystemExit) as exit_code:
+            with contextlib.redirect_stderr(io.StringIO()):
+                main(["Ordering"])
+        self.assertEqual(2, exit_code.exception.code)
+
+    def test_the_migration_id_defaults_to_a_utc_timestamp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+
+            self.assertEqual(0, self.run_main(
+                "Ordering", "--port", str(PORT), "--repo-root", str(root)
+            )[0])
+
+            migrations = root / "src/Services/Ordering/Ordering.Infrastructure/Persistence/Migrations"
+            generated = [p.name for p in migrations.glob("*_InitialCreate.cs")]
+            self.assertEqual(1, len(generated), generated)
+            self.assertRegex(generated[0], r"^\d{14}_InitialCreate\.cs$")
 
 
 if __name__ == "__main__":
