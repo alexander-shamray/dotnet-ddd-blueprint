@@ -479,7 +479,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 56 tests running in about a second. A shared xUnit collection was rejected
+is 58 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.

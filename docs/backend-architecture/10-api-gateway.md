@@ -389,8 +389,15 @@ composes ([§13.2](13-observability.md)) rather than each host calling it:
 ```csharp
 namespace Common.Web;
 
-public static IServiceCollection AddCommonProblemDetails(this IServiceCollection services) =>
-    services.AddProblemDetails(options =>
+public static IServiceCollection AddCommonProblemDetails(this IServiceCollection services)
+{
+    // The table's 400 row needs an executor, not just a producer — the
+    // handler that turns ValidationBehavior's thrown ValidationException
+    // into the field-keyed problem response. Registered here so no host can
+    // take the customisation without it (see below).
+    services.AddExceptionHandler<ValidationExceptionHandler>();
+
+    return services.AddProblemDetails(options =>
         options.CustomizeProblemDetails = context =>
         {
             context.ProblemDetails.Instance =
@@ -405,6 +412,7 @@ public static IServiceCollection AddCommonProblemDetails(this IServiceCollection
             context.ProblemDetails.Extensions["traceId"] =
                 Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
         });
+}
 ```
 
 | Situation | Status | Notes |
