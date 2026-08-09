@@ -166,16 +166,17 @@ tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on;
                                  TestContainer.cs is the one registration path
-  Common.Infrastructure.Tests/   a unit half — RedisKeys shapes, lock guards,
-                                 the registration surface read off the
+  Common.Infrastructure.Tests/   a unit half — RedisKeys shapes, lock guards
+                                 with the failed-release retry, the
+                                 registration surface read off the
                                  IServiceCollection — and a Testcontainers
                                  Redis half: lock lifecycle with the
-                                 stale-handle and failed-release cases, the
-                                 §8.1 ACL grant proven live, prefix + TTL
-                                 asserted on the server, tag invalidation,
-                                 and two span tests — one per keyed
-                                 connection. The third Docker-needing
-                                 project, its own IntegrationCollection
+                                 stale-handle case, the §8.1 ACL grant
+                                 proven live, prefix + TTL asserted on the
+                                 server, tag invalidation, and two span
+                                 tests — one per keyed connection. The third
+                                 Docker-needing project, its own
+                                 IntegrationCollection
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —

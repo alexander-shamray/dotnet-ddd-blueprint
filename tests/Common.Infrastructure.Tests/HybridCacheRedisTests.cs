@@ -93,7 +93,7 @@ public sealed class HybridCacheRedisTests(RedisFixture fixture)
     [Fact]
     public async Task A_cache_operation_produces_a_Redis_client_span()
     {
-        List<Activity> exported = [];
+        ExportedActivities exported = new();
 
         // The fixture's composition plus an in-memory exporter — the
         // instrumentation itself is registered by AddRedisConnections, which
@@ -129,7 +129,7 @@ public sealed class HybridCacheRedisTests(RedisFixture fixture)
     [Fact]
     public async Task A_lock_operation_produces_a_span_from_the_coordination_connection()
     {
-        List<Activity> exported = [];
+        ExportedActivities exported = new();
 
         await using ServiceProvider provider = fixture.BuildProvider(
             "traced-lock",

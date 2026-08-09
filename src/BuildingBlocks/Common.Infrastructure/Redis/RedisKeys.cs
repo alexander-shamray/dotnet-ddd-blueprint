@@ -3,8 +3,9 @@ using Microsoft.Extensions.Hosting;
 namespace Common.Infrastructure.Redis;
 
 /// <summary>
-/// §8.3's rule that a call site writes only half the key, applied to every
-/// namespace in §8.1's table. The prefix is
+/// §8.3's rule that a call site writes only half the key, applied to the
+/// cache and coordination namespaces of §8.1's table — the ratelimit
+/// keyspace stays a reservation there, so no member spells it. The prefix is
 /// <see cref="IHostEnvironment.ApplicationName"/> verbatim — the single
 /// source §8.5's store and §13.2's <c>service.name</c> already use. Two
 /// sources would let the Redis prefix and the telemetry label disagree,
