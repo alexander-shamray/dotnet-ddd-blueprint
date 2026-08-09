@@ -5,6 +5,14 @@ name: Compose
 # never touch, so it runs only when that file (or this one) changes. The
 # filter also contains §14.1's two :latest pins — a broken upstream latest
 # can fail only a compose PR, never the main build.
+#
+# Since PR-10 the file carries application blocks with build: stanzas, so
+# `up` also BUILDS those images — the smoke now compiles the solution inside
+# Docker, which is what the timeout below is sized for. Note what the filter
+# implies: a change under src/ alone does not re-run this workflow, so a
+# Dockerfile broken by a source change surfaces on the next compose PR, not
+# the offending one. Per-service image builds in CI proper are PR-25's
+# deliverable (§15.1), not this smoke's.
 on:
   pull_request:
     paths:
@@ -26,7 +34,9 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 covered pulls alone; the two Catalog image builds (restore + publish
+    # each, no layer cache on a fresh runner) ride on top.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +48,11 @@ jobs:
       # --wait exits non-zero if a healthcheck never passes, or a container
       # exits before the wait completes — the four healthchecks are asserted
       # directly; services without one (Keycloak among them) are only
-      # asserted to start.
+      # asserted to start. One-shots are the carve-out, verified empirically
+      # on PR-10: a service another gates on with
+      # `service_completed_successfully` satisfies --wait by exiting 0, and
+      # fails it by exiting non-zero — so the migrator's exit code is part of
+      # what this smoke asserts.
       - name: Start and wait for healthy
         run: docker compose -f deploy/compose/docker-compose.yml up -d --wait --quiet-pull
 

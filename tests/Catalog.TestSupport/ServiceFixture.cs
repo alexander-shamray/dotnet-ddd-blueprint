@@ -1,18 +1,25 @@
 using System.Data.Common;
 using Catalog.Infrastructure.Persistence;
 using Catalog.Migrator;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Respawn;
 using Testcontainers.MsSql;
 using Xunit;
 
-namespace Catalog.Api.Tests;
+namespace Catalog.TestSupport;
 
 /// <summary>
 /// A real SQL Server, migrated by the real migrator (ADR-010, §12.4). The
 /// image is the one §14.1's Compose file runs, so a test and a developer
-/// machine cannot disagree about the engine.
+/// machine cannot disagree about the engine. §12.4's name and §4.1's home:
+/// the fixture serves <c>Catalog.Application.Tests</c> and
+/// <c>Catalog.Api.Tests</c>, which cannot reference each other — each
+/// declares its own <c>IntegrationCollection</c> over this one type. SQL
+/// only, today: the Redis and RabbitMQ containers of §12.4's full shape join
+/// with the PRs whose code touches them.
 /// </summary>
 /// <remarks>
 /// Tests deliberately collapse the two database identities of §7.1 — the
@@ -21,11 +28,13 @@ namespace Catalog.Api.Tests;
 /// reading the wrong one. Production keeps both separate, and migrations run as
 /// a job, never from a host (ADR-007).
 /// </remarks>
-public sealed class SqlServerFixture : IAsyncLifetime
+public sealed class ServiceFixture : IAsyncLifetime
 {
     private readonly MsSqlContainer _sql = new MsSqlBuilder()
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
         .Build();
+
+    private Respawner? _respawner;
 
     /// <summary>
     /// The connection each §7.1 identity would hold, pointed at Catalog's own
@@ -45,8 +54,9 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         // The container hands out a connection to master; Catalog owns a
         // database of its own (§7.1), and MigrateAsync is what creates it.
-        // DbConnectionStringBuilder rather than SqlConnectionStringBuilder, so
-        // this project needs no provider package of its own.
+        // DbConnectionStringBuilder out of habit rather than necessity now:
+        // this project does carry the provider package, for the open
+        // SqlConnection Respawn inspects in ResetAsync.
         DbConnectionStringBuilder connection = new() { ConnectionString = _sql.GetConnectionString() };
         connection["Database"] = "Catalog";
         ConnectionString = connection.ConnectionString;
@@ -67,6 +77,28 @@ public sealed class SqlServerFixture : IAsyncLifetime
                 Note nvarchar(100)    NOT NULL
             );
             """);
+    }
+
+    /// <summary>
+    /// §12.4's reset: truncation over the <c>catalog</c> schema, far faster
+    /// than recreating it and honest where a rolled-back transaction would
+    /// hide transaction-related bugs. Tests that share the collection call
+    /// this from <c>InitializeAsync</c>; suites asserting the migrator or the
+    /// probe table arrange per-test identities instead and never need it.
+    /// </summary>
+    public async Task ResetAsync()
+    {
+        await using SqlConnection connection = new(ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        // dbo is excluded, so EF's migration history survives the truncation.
+        _respawner ??= await Respawner.CreateAsync(connection, new RespawnerOptions
+        {
+            DbAdapter = DbAdapter.SqlServer,
+            SchemasToInclude = ["catalog"]
+        });
+
+        await _respawner.ResetAsync(connection);
     }
 
     /// <summary>

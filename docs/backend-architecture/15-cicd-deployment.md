@@ -176,20 +176,33 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
-# Restore in its own layer so it caches across source-only changes.
-# global.json first among equals: sdk:10.0-noble is a floating tag, so without
-# it this build — the only one whose output ships — compiles under whatever SDK
-# the base image carries that week, while developers and CI are pinned (§4.4).
-# Copied in, a mismatch is a restore error rather than different analysers.
+# Project files first, so the restore layer really does survive source-only
+# changes — a COPY of the whole trees before restore re-keys its layer on
+# every .cs edit and the cache claim becomes fiction. global.json first among
+# equals: sdk:10.0-noble is a floating tag, so without it this build — the
+# only one whose output ships — compiles under whatever SDK the base image
+# carries that week, while developers and CI are pinned (§4.4). Copied in, a
+# mismatch is a restore error rather than different analysers.
 COPY global.json Directory.Build.props Directory.Packages.props ./
-COPY src/BuildingBlocks/ src/BuildingBlocks/
-COPY src/Services/Ordering/ src/Services/Ordering/
+COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
+COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/
+COPY src/BuildingBlocks/Common.Web/Common.Web.csproj src/BuildingBlocks/Common.Web/
+COPY src/Services/Ordering/Ordering.Domain/Ordering.Domain.csproj src/Services/Ordering/Ordering.Domain/
+COPY src/Services/Ordering/Ordering.Application/Ordering.Application.csproj src/Services/Ordering/Ordering.Application/
+COPY src/Services/Ordering/Ordering.Infrastructure/Ordering.Infrastructure.csproj src/Services/Ordering/Ordering.Infrastructure/
+COPY src/Services/Ordering/Ordering.Api/Ordering.Api.csproj src/Services/Ordering/Ordering.Api/
 RUN dotnet restore src/Services/Ordering/Ordering.Api/Ordering.Api.csproj
 
+# .editorconfig rides with the source, not the restore inputs: it is a build
+# input under ADR-019 (EnforceCodeStyleInBuild reads it), and without it this
+# publish would enforce a weaker style policy than every other build.
+COPY .editorconfig ./
+COPY src/BuildingBlocks/ src/BuildingBlocks/
+COPY src/Services/Ordering/ src/Services/Ordering/
 RUN dotnet publish src/Services/Ordering/Ordering.Api/Ordering.Api.csproj \
     -c $BUILD_CONFIGURATION -o /app/publish --no-restore /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
@@ -204,6 +217,13 @@ most of the CVE surface that routine scans would otherwise report. The trade-off
 is that `kubectl exec` into a running container gives you nothing — debugging
 uses ephemeral debug containers instead.
 
+The tag is `-extra`, and the suffix is load-bearing: the plain chiselled image
+runs in globalization-invariant mode, and `Microsoft.Data.SqlClient` refuses to
+open a connection under it — `Globalization Invariant Mode is not supported`,
+at the first query rather than at build. Every service here talks to SQL
+Server, so every image takes the variant. What `-extra` adds is ICU and
+tzdata, nothing else; the shell and the package manager stay gone.
+
 ### Every service builds two images
 
 The migration job (§7.4) is a Helm `pre-upgrade` hook, so its image must exist
@@ -214,18 +234,29 @@ fails at the first step of every release, pulling a tag CI never pushed.
 # src/Services/Ordering/Ordering.Migrator/Dockerfile
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 WORKDIR /src
+# Project files first, same as the API image and for the same reason: restore
+# in a layer that survives source-only changes, which is most changes. No
+# Common.Web — the migrator's reference chain stops at Infrastructure.
 COPY global.json Directory.Build.props Directory.Packages.props ./
-COPY src/BuildingBlocks/ src/BuildingBlocks/
-COPY src/Services/Ordering/ src/Services/Ordering/
-# Restore as its own layer, same as the API image — it caches across
-# source-only changes, which is most changes.
+COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
+COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/
+COPY src/Services/Ordering/Ordering.Domain/Ordering.Domain.csproj src/Services/Ordering/Ordering.Domain/
+COPY src/Services/Ordering/Ordering.Application/Ordering.Application.csproj src/Services/Ordering/Ordering.Application/
+COPY src/Services/Ordering/Ordering.Infrastructure/Ordering.Infrastructure.csproj src/Services/Ordering/Ordering.Infrastructure/
+COPY src/Services/Ordering/Ordering.Migrator/Ordering.Migrator.csproj src/Services/Ordering/Ordering.Migrator/
 RUN dotnet restore src/Services/Ordering/Ordering.Migrator/Ordering.Migrator.csproj
 
+# .editorconfig is a build input under ADR-019 — without it this publish
+# enforces a weaker style policy than every other build.
+COPY .editorconfig ./
+COPY src/BuildingBlocks/ src/BuildingBlocks/
+COPY src/Services/Ordering/ src/Services/Ordering/
 RUN dotnet publish src/Services/Ordering/Ordering.Migrator/Ordering.Migrator.csproj \
     -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
-# Runtime, not aspnet — the migrator has no listener.
-FROM mcr.microsoft.com/dotnet/runtime:10.0-noble-chiseled AS final
+# Runtime, not aspnet — the migrator has no listener. -extra for the same
+# reason as the API image: SqlClient needs ICU.
+FROM mcr.microsoft.com/dotnet/runtime:10.0-noble-chiseled-extra AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 USER $APP_UID

@@ -41,10 +41,20 @@
          package. -->
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageVersion Include="Dapper" Version="2.1.66" />
+    <!-- SqlConnection itself, for §6.5's IDbConnectionFactory. EF's SqlServer
+         provider already carries it transitively at exactly this version;
+         the explicit pin exists because *.Infrastructure constructs the type
+         by name, and referencing what is actually used keeps the register
+         honest. -->
+    <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.1" />
     <!-- Exact major. v9 is commercially licensed — see ADR-003. -->
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
     <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
     <PackageVersion Include="FluentValidation" Version="12.0.0" />
+    <!-- AddValidatorsFromAssemblyContaining (§4.2's registration sample) lives
+         in this separate package, not in FluentValidation itself. Same
+         version, same licence, same publisher — pinned together. -->
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.0.0" />
     <PackageVersion Include="Scrutor" Version="6.1.0" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <!-- The BFF's one synchronous hop (§9.7). Grpc.* majors move on their own
@@ -81,6 +91,11 @@
          xUnit v2 → v3 changed IAsyncLifetime from Task to ValueTask (§12.4):
          a major that drifts in silently breaks every fixture in the repo. -->
     <PackageVersion Include="xunit.v3" Version="3.1.0" />
+    <!-- The fixture contract (IAsyncLifetime, TestContext) for
+         Catalog.TestSupport, which is a Library — xunit.v3 itself refuses
+         non-Exe output and names this package as the alternative. Pinned to
+         the runner's version because they ship as one release. -->
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="3.1.0" />
     <!-- The VSTest adapter, and the reason `dotnet test` discovers anything.
          Microsoft.NET.Test.Sdk is the host; it finds tests through an adapter,
          and xunit.v3 does not carry one. Without this line the build succeeds,

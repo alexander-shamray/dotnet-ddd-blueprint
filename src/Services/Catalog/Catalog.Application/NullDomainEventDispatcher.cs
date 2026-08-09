@@ -3,13 +3,14 @@ using Common.Application;
 namespace Catalog.Application;
 
 /// <summary>
-/// The truthful <see cref="IDomainEventDispatcher"/> while Catalog can raise
-/// no domain event: the domain has no aggregate until PR-10, and there is no
-/// outbox to stage into until PR-14. PR-14's real dispatcher replaces this
-/// class — from PR-10 until then, any event an aggregate raises is dropped
-/// here, which that PR's slice must weigh. In Application because §4.2's
-/// registration sample puts the real one there, beside the dispatcher it
-/// serves.
+/// Drops what it is handed, and since PR-10 it is handed something real:
+/// every <c>Product.Publish</c> raises a <c>ProductPublishedDomainEvent</c>
+/// that ends here, because there is no outbox to stage into until PR-14 —
+/// whose real dispatcher replaces this class. The drop is stated in
+/// CLAUDE.md's phase note rather than hidden; the aggregate raises anyway,
+/// so PR-14 picks the events up without touching the domain (§5.5). In
+/// Application because §4.2's registration sample puts the real one there,
+/// beside the dispatcher it serves.
 /// </summary>
 internal sealed class NullDomainEventDispatcher : IDomainEventDispatcher
 {

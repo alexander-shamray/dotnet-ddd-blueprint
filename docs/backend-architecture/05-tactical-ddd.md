@@ -69,8 +69,12 @@ public readonly record struct Money
     {
         if (amount < 0)
             throw new DomainException("Money cannot be negative.");
-        if (currency is not { Length: 3 })
-            throw new DomainException("Currency must be a 3-letter ISO code.");
+
+        // Letters as well as length: "1$?" is three characters and no
+        // currency, and a guard that admits it makes the exception message a
+        // stricter claim than the type keeps.
+        if (currency is not { Length: 3 } || !currency.All(char.IsAsciiLetter))
+            throw new DomainException("Currency must be a 3-letter currency code.");
 
         return new Money(decimal.Round(amount, 2, MidpointRounding.ToEven), currency.ToUpperInvariant());
     }
@@ -83,8 +87,15 @@ public readonly record struct Money
         return new Money(left.Amount + right.Amount, left.Currency);
     }
 
-    public static Money operator *(Money money, int quantity) =>
-        new(money.Amount * quantity, money.Currency);
+    public static Money operator *(Money money, int quantity)
+    {
+        // Without this guard the operator is a back door past Of: a negative
+        // quantity would construct the negative Money the factory refuses.
+        if (quantity < 0)
+            throw new DomainException("Money cannot be multiplied by a negative quantity.");
+
+        return new Money(money.Amount * quantity, money.Currency);
+    }
 
     private static void EnsureSameCurrency(Money left, Money right)
     {

@@ -389,8 +389,15 @@ composes ([§13.2](13-observability.md)) rather than each host calling it:
 ```csharp
 namespace Common.Web;
 
-public static IServiceCollection AddCommonProblemDetails(this IServiceCollection services) =>
-    services.AddProblemDetails(options =>
+public static IServiceCollection AddCommonProblemDetails(this IServiceCollection services)
+{
+    // The table's 400 row needs an executor, not just a producer — the
+    // handler that turns ValidationBehavior's thrown ValidationException
+    // into the field-keyed problem response. Registered here so no host can
+    // take the customisation without it (see below).
+    services.AddExceptionHandler<ValidationExceptionHandler>();
+
+    return services.AddProblemDetails(options =>
         options.CustomizeProblemDetails = context =>
         {
             context.ProblemDetails.Instance =
@@ -405,6 +412,7 @@ public static IServiceCollection AddCommonProblemDetails(this IServiceCollection
             context.ProblemDetails.Extensions["traceId"] =
                 Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
         });
+}
 ```
 
 | Situation | Status | Notes |
@@ -563,6 +571,17 @@ Each belongs to a mechanism that runs before or beside a handler, and giving
 
 That asymmetry is why `Rule` maps to 422 rather than 409: 409 is already spoken
 for by the concurrency case, and a domain refusal is not a race.
+
+The 400 row still needs an executor: an exception the behaviour throws is not a
+response until something translates it, and `UseExceptionHandler`'s fallback
+answers 500 — the wrong statement about whose fault a malformed request is.
+`ValidationExceptionHandler` in `Common.Web` is that translation, an
+`IExceptionHandler` registered by `AddCommonProblemDetails` beside the
+customisation above. It groups the failures by field into the `errors`
+dictionary, writes through `IProblemDetailsService` so the 400 carries the same
+`instance`, `correlationId` and `traceId` members as every other problem
+response, and declines everything that is not a `ValidationException` — a 400
+for a genuine fault would blame the client for the service's bug.
 
 ---
 

@@ -13,6 +13,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
     <PackageReference Include="Dapper" />
+    <!-- SqlConnection, constructed by name in SqlConnectionFactory (§6.5).
+         The EF provider above carries it transitively; the direct reference
+         states the direct use. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" />
     <PackageReference Include="AspNetCore.HealthChecks.SqlServer" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
   </ItemGroup>

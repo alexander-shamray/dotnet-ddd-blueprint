@@ -1,0 +1,18 @@
+# The build context is the repo root (§14.1's `context: ../..`), and the COPY
+# lines take whole directories — without this file they take the host's bin/
+# and obj/ debris with them, and a Windows-restored obj/ inside a Linux build
+# is a restore failure pointing at nothing. .git is excluded for size alone.
+.git
+**/bin
+**/obj
+TestResults
+
+# .gitignore's "local configuration and secrets" section, mirrored: git
+# ignoring a file does not keep it out of a build context, and a COPY of a
+# whole source tree would carry a local appsettings into the published image.
+**/appsettings.*.local.json
+.env
+.env.*
+!.env.example
+**/*.pfx
+**/*.p12

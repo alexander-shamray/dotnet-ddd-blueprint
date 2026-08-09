@@ -60,13 +60,17 @@ ALTER ROLE db_ddladmin   ADD MEMBER [ordering-migrator];
 ALTER ROLE db_datawriter ADD MEMBER [ordering-migrator];   -- for data backfills
 ```
 
-> **Do not let local convenience set the production shape.** The temptation is
-> to run everything as `sa` locally because it is one line, and the cost lands
-> months later when nobody can say whether the runtime identity has ever been
-> tested without DDL. Compose seeds both logins from the same script the cloud
-> path uses below the divide, so the restriction is exercised on every developer
-> machine, where a `CREATE TABLE` in application code fails immediately and for
-> the same reason it would in production.
+> **Do not let local convenience collapse the two keys.** Locally there is one
+> `sa` account — [§14.2](14-local-development.md) states the simplification
+> and [§12.4](12-test-strategy.md)'s fixture applies
+> it — so the *permission* boundary is a cloud-side control, exercised where
+> the seeding script above runs. What every local environment exercises is the
+> *name* boundary: the migrator reads `ConnectionStrings__OrderingMigrator`
+> and the host reads `ConnectionStrings__Ordering`, exactly as in production,
+> and the integration suite proves a migrator handed only the runtime key
+> refuses to run. Collapsing the keys locally "because they point at the same
+> login anyway" is the mistake this callout exists for: the first environment
+> where the logins differ then discovers every host reading the wrong name.
 
 This means **two connection strings per service**, held in different secrets and
 mounted into different workloads. The migrator's secret is never present in an

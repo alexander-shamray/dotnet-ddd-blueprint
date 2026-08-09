@@ -5,14 +5,16 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-07 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-10 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
-CI and the licence gate — the first C#: `Common.Domain`, `Common.Application`
-and `Common.Web`, each with its test project — §14.1's Compose infrastructure,
-with the CI smoke that proves it — and the first service skeleton: Catalog
-across §4.1's five projects, with §4.2's architecture gates live in its three
-test projects.
+CI and the licence gate — the building blocks: `Common.Domain`,
+`Common.Application` and `Common.Web`, each with its test project — §14.1's
+Compose infrastructure, with the CI smoke that proves it — and Catalog as the
+first real service: §4.1's five projects, §4.2's gates live, PR-08's
+persistence, PR-09's transaction behaviour, and PR-10's vertical slice with
+its containers. The phase section below carries the current state; this
+sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -64,31 +66,40 @@ global.json                      SDK pin (§4.4)
                                  `dotnet tool restore` is the whole setup
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the fourteen projects below
+Platform.slnx                    the fifteen projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate, then restore/build/test
 .github/licence-gate/            the gate, its allow-list and its tests
 .github/workflows/compose.yml    path-filtered smoke on deploy/compose/**:
-                                 config -q, up --wait, down -v
+                                 config -q, up --wait, down -v — and, since
+                                 PR-10's build: stanzas, an image build
 
 deploy/compose/                  §14.1's infrastructure — seven services,
                                  .env.example, the placeholder realm PR-16
                                  replaces, the collector config, a ports
-                                 README; application blocks arrive with
-                                 their services
+                                 README; PR-10 added the first application
+                                 pair (catalog-migrator + catalog-api, port
+                                 5102) and the infra-only override — later
+                                 blocks arrive with their services
 
 src/BuildingBlocks/
   Common.Domain/                 Entity<TId>, AggregateRoot<TId>, IDomainEvent,
-                                 IHasDomainEvents, IAggregateRoot — no packages
+                                 IHasDomainEvents, IAggregateRoot,
+                                 DomainException — no packages
   Common.Application/            Result, Result<T>, Error, ErrorType; the §6.2
                                  dispatcher and its three behaviours, plus
                                  RequestMetrics, PluggableInterfaces,
-                                 InvariantViolationException, and two ports:
-                                 §6.3's IUnitOfWork and §7.5's
-                                 IDomainEventDispatcher — the interface only,
-                                 everything behind it waits for PR-14
-  Common.Web/                    UseCorrelationId, AddCommonProblemDetails,
-                                 ToHttpResult, AddObservability,
+                                 InvariantViolationException, §6.5's
+                                 CursorPage<T> and Cursor codec, and three
+                                 ports: §6.3's IUnitOfWork, §6.5's
+                                 IDbConnectionFactory and §7.5's
+                                 IDomainEventDispatcher — the last an
+                                 interface only, everything behind it waits
+                                 for PR-14
+  Common.Web/                    UseCorrelationId, AddCommonProblemDetails
+                                 (which also registers §10.5's
+                                 ValidationExceptionHandler — the 400 row's
+                                 executor), ToHttpResult, AddObservability,
                                  MapCommonHealthEndpoints, SensitiveDataRedactor,
                                  BuildInfo and the AddCommonWebDefaults that
                                  composes them — the only building block
@@ -96,44 +107,68 @@ src/BuildingBlocks/
                                  FrameworkReference (Catalog.Api's rides in
                                  with Sdk.Web)
 src/Services/Catalog/
-  Catalog.Domain/                AssemblyMarker only — the typeof anchor the
-                                 gates need until PR-10's first aggregate
+  Catalog.Domain/                the first aggregate: Product (Publish factory,
+                                 ProductPublishedDomainEvent), ProductId,
+                                 Catalog's own Money, IProductRepository —
+                                 Add only, argued in the file. Product is the
+                                 gates' typeof anchor; AssemblyMarker is gone
   Catalog.Application/           AddCatalogApplication: the §6.2 scan, the
                                  dispatcher, the NullDomainEventDispatcher
                                  PR-14 replaces (§4.2 registers the dispatcher
                                  in Application), the clock, RequestMetrics,
-                                 the three behaviours in pipeline order
+                                 the three behaviours in pipeline order, the
+                                 §4.2 validator scan; two slices —
+                                 Products/PublishProduct (command, validator,
+                                 handler) and Products/GetProducts (§6.5's
+                                 Dapper keyset query over (PublishedAt, Id))
   Catalog.Infrastructure/        AddCatalogInfrastructure(IConfiguration): the
                                  §6.2 scan, the sealed CatalogDbContext with
-                                 §7.2's conventions, EfUnitOfWork, §13.5's SQL
-                                 readiness check, and Persistence/Migrations —
-                                 an InitialCreate whose Up is one hand-written
-                                 EnsureSchema, no entity types until PR-10
+                                 §7.2's conventions, EfUnitOfWork,
+                                 ProductConfiguration, ProductRepository,
+                                 SqlConnectionFactory over the runtime key,
+                                 §13.5's SQL readiness check, and two
+                                 migrations — InitialCreate (hand-written
+                                 EnsureSchema) and AddProducts (generated DDL,
+                                 hand-dressed only)
   Catalog.Migrator/              §7.4's job host: MigratorHost builds it,
                                  MigrationRunner migrates and returns 0 or 1.
                                  Reads ConnectionStrings:CatalogMigrator and
-                                 never the runtime key (§7.1)
-  Catalog.Api/                   the composition root of §4.2 minus the PRs
-                                 not yet landed: no auth (PR-16), no endpoints
-                                 (PR-10); health probes and OpenAPI
+                                 never the runtime key (§7.1). Has a
+                                 Dockerfile since PR-10, as does Catalog.Api
+  Catalog.Api/                   the composition root of §4.2 minus PR-16:
+                                 health probes, OpenAPI, and
+                                 Endpoints/ProductEndpoints — POST and GET
+                                 /v1/catalog/products, deliberately
+                                 unauthenticated, stated in
+                                 deploy/compose/README.md
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on;
                                  TestContainer.cs is the one registration path
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
-  Catalog.Domain.Tests/          §4.2's gates in §12.1's homes: domain isolation;
-  Catalog.Application.Tests/     ↛ EF Core, ↛ MassTransit, + registration
-  Catalog.Api.Tests/             surface; endpoints ↛ Infrastructure, + the
-                                 WebApplicationFactory host smoke and, from
-                                 PR-08, the Testcontainers suite over the real
-                                 migrator and EfUnitOfWork — the one test
-                                 project that needs Docker
+  Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
+                                 SQL container, real migrator run, Respawn
+                                 reset — and CatalogApiFactory, shared by the
+                                 two suites below, which cannot reference
+                                 each other
+  Catalog.Domain.Tests/          §4.2's gates in §12.1's homes: domain isolation
+  Catalog.Application.Tests/     (allow-list now includes System.Collections and System.Linq —
+  Catalog.Api.Tests/             a record's generated equality); ↛ EF Core,
+                                 ↛ MassTransit, + registration surface +
+                                 validator unit tests + the container-backed
+                                 handler and pagination suites; endpoints ↛
+                                 Infrastructure, + the host smoke, the
+                                 endpoint contract tests and the
+                                 Testcontainers suite over the real migrator
+                                 and EfUnitOfWork — two projects now need
+                                 Docker, one collection each
 ```
 
 The second block is PR-01's, the third PR-02's through PR-05's, the
 compose tree PR-06's, the Catalog trees PR-07's, their persistence
-PR-08's, and the third behaviour with its two ports PR-09's.
+PR-08's, the third behaviour with its two ports PR-09's, and the slices,
+endpoints, TestSupport and container half PR-10's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it, but an unused project reference is a claim about the dependency
 graph that nothing yet makes true. PR-08's `IUnitOfWork` did not change that
@@ -199,10 +234,9 @@ src/Services/         Catalog, Ordering, Inventory, Payments — five projects e
 tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                       .TestSupport, plus Platform.IntegrationTests
                         (Catalog's first three landed with PR-07; TestSupport
-                        waits for a second consumer — §4.1 calls it "referenced
-                        by the two above, which cannot reference each other",
-                        and PR-08's containers gave it only one. PR-16's test
-                        auth is the other candidate)
+                        with PR-10, when the container-backed handler tests
+                        became §4.1's second consumer — "referenced by the two
+                        above, which cannot reference each other")
 deploy/               helm/, k8s/ — compose/ landed with PR-06
 Directory.Build.props, Directory.Packages.props, Platform.slnx — landed with PR-01
 ```
@@ -221,15 +255,50 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fourteen projects and `dotnet test` runs 154 tests, so
+`Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
-something. **PR-10 is next** (`feat(catalog): first vertical slice — command,
-query, cursor pagination`), which depends on PR-07 through PR-09 and delivers
-the first aggregate, the first command and query, the service's Dockerfile and
-Compose block, and deliberately unauthenticated endpoints that PR-16 closes.
-PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a build
-failure — each gate was observed red against a deliberately added forbidden
-reference before it was trusted.
+something. **PR-11 is next** (`feat(tooling): new-service scaffold script`),
+which copies and renames the template PR-10 finished: ports, database name,
+solution entries, Compose block. PR-07 landed the Catalog skeleton, so §4.2's
+architecture rules are a build failure — each gate was observed red against a
+deliberately added forbidden reference before it was trusted, and since PR-10
+the endpoints gate judges a real type (`ProductEndpoints`) rather than passing
+vacuously.
+
+PR-10 landed the first vertical slice — `Product`, `PublishProductCommand`,
+`GetProductsQuery` with §6.5's cursor pagination, the two Dockerfiles, the
+Compose pair on port 5102 and the `docker-compose.infra-only.yml` override
+(profiles technique, printed in §14.1) — and five of its findings bind what
+comes after:
+
+- **`ValidationExceptionHandler` is §10.5's 400 row, found by the first real
+  endpoint.** Until PR-10 nothing translated `ValidationBehavior`'s thrown
+  `ValidationException`, and the wire answered 500 for a malformed request.
+  The handler lives in `Common.Web`, registered by `AddCommonProblemDetails`,
+  and §10.5 now names it — the chapter previously implied the translation
+  without showing it.
+- **Locally there is one `sa` login and two configuration keys.** §7.1's
+  callout used to claim Compose seeds both logins; §14.2, §12.4's fixture and
+  the shipped Compose file all collapse the logins and keep the keys apart,
+  and §7.1 was amended to match. The identity split is a cloud-side control;
+  the key split is what every local environment exercises.
+- **`Catalog.TestSupport` exists**, because PR-10 was the second consumer §4.1
+  was waiting for (not PR-16, as this file once guessed): the handler tests
+  live in `Catalog.Application.Tests` per §12.1 and share `ServiceFixture`
+  with `Catalog.Api.Tests`. It is a Library, so it references
+  `xunit.v3.extensibility.core` — `xunit.v3` itself refuses non-Exe output.
+- **The compose smoke now builds images.** The application blocks carry
+  `build:` stanzas, so the path-filtered workflow compiles the solution inside
+  Docker; its timeout rose to 25 minutes and its header says why. A change
+  under `src/` alone does not re-run it — per-service CI builds are PR-25's.
+- **Chiselled images take the `-extra` tag, and the suffix is load-bearing.**
+  Plain chiselled runs globalization-invariant and `Microsoft.Data.SqlClient`
+  refuses to open a connection under it — found when the containerised
+  migrator first ran, fixed in both Dockerfiles and §15.2's samples. Every
+  later service image inherits this: `-extra` is ICU and tzdata, nothing
+  else. Verified live: `up --wait` treats a `service_completed_successfully`
+  one-shot as satisfied on exit 0 and failed on exit non-zero, so the smoke
+  asserts the migrator's exit code for free.
 
 PR-09 landed §6.3's `TransactionBehavior` and did **not** draw the
 `Common.Application → Common.Domain` edge — the behaviour reads
@@ -253,16 +322,19 @@ production model change nor snapshot drift. The technique generalises: a test
 that needs an entity the model does not have swaps the customizer, never
 edits `CatalogDbContext`.
 
-**PR-10 inherits two things from PR-09, stated here rather than left in its
-commit bodies:**
+**Two standing facts, restated here rather than left in commit bodies:**
 
-- **Raised events are dropped until PR-14.** `NullDomainEventDispatcher` is
-  truthful while no aggregate exists; from PR-10's first aggregate until
-  PR-14's outbox it silently drops whatever is raised, and PR-10 must weigh
-  that against its slice.
+- **Raised events are dropped until PR-14, and since PR-10 that is live, not
+  hypothetical.** Every `Product.Publish` raises a
+  `ProductPublishedDomainEvent` that `NullDomainEventDispatcher` swallows.
+  The aggregate raises anyway — the domain must not teach the defect of not
+  raising, the unit test pins the payload, and PR-14's outbox picks it up
+  without touching `Product`.
 - **`IdempotencyBehavior`'s seat.** The pipeline registers three of four
   behaviours; the missing one slots in *between* Validation and Transaction,
-  and the registration comment names the seat.
+  and the registration comment names the seat. `PublishProductCommand`
+  carries no `CommandId` for the same reason — §6.4 warns the field without
+  the interface is unprotected, so both join with §8.5's PR.
 
 **What PR-09's line does not fix is the commit-acknowledgement race**, and that
 stays open past it on purpose. If `CommitAsync` succeeds on the server and
@@ -281,8 +353,8 @@ after:
 - **Catalog has a connection string, so it has a readiness check** (§13.5), and
   a host with no `ConnectionStrings:Catalog` no longer starts —
   `AddSqlServer` throws on a null one. Every `WebApplicationFactory` over
-  `Catalog.Api` supplies one; `CatalogApiFactory` in `Catalog.Api.Tests` is the
-  single place that does it.
+  `Catalog.Api` supplies one; `CatalogApiFactory` — in `Catalog.TestSupport`
+  since PR-10 — is the single place that does it.
 - **The migration is hand-authored and the snapshot is not.**
   `20260808035156_InitialCreate.cs` was rewritten into house style, because it
   is a file people edit — §7.4's hand-written DDL rides in its `Up`, and
@@ -291,8 +363,10 @@ after:
   `auto-generated` header that exempts them from the analysers and are left
   **exactly** as the tool wrote them: the snapshot is the input to the next
   `migrations add`, and an edited one produces a wrong migration a PR later.
-- **`dotnet test` now needs Docker**, for `Catalog.Api.Tests` alone. See the
-  commands below.
+- **`dotnet test` needs Docker** — since PR-10 for two projects,
+  `Catalog.Api.Tests` and `Catalog.Application.Tests`, each with its own
+  `IntegrationCollection` and therefore its own container set (§12.4's stated
+  price). See the commands below.
 
 The building blocks are three of five. `Common.Infrastructure` and
 `Common.Contracts` do not exist, so a change that "obviously belongs" in one of
@@ -405,7 +479,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 56 tests running in about a second. A shared xUnit collection was rejected
+is 59 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.

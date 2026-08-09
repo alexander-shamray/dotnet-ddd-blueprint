@@ -1,4 +1,6 @@
+using Catalog.Application.Products.PublishProduct;
 using Common.Application;
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Catalog.Application;
@@ -16,9 +18,9 @@ public static class DependencyInjection
         services.AddDispatcher();
 
         // Explicit rather than scanned, beside the dispatcher it serves —
-        // §4.2's registration sample is the shape. The null object is truthful
-        // only while no aggregate exists to raise an event; PR-14's outbox
-        // dispatcher takes this line over.
+        // §4.2's registration sample is the shape. Since PR-10 the null
+        // object drops real ProductPublished events, stated in CLAUDE.md's
+        // phase note; PR-14's outbox dispatcher takes this line over.
         services.AddScoped<IDomainEventDispatcher, NullDomainEventDispatcher>();
 
         // The clock (§5.4) and the request histogram (§13.3): LoggingBehavior
@@ -35,6 +37,12 @@ public static class DependencyInjection
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
+
+        // §4.2's sample line. IValidator<T> is not in PluggableInterfaces.All
+        // because it is FluentValidation's contract, not one of ours — its own
+        // scanner knows its own conventions (Include* filters, internal
+        // validators) and a second scan would drift from it.
+        services.AddValidatorsFromAssemblyContaining<PublishProductValidator>();
         return services;
     }
 }
