@@ -256,7 +256,16 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
     def test_the_registration_suite_does_not_send_the_reader_to_itself(self):
         tests = self.claim("tests/Yankee.Application.Tests/DependencyInjectionTests.cs")
         self.assertNotIn("Yankee.Application.Tests carries both", tests)
-        self.assertIn("The service this one was scaffolded from carries both", tests)
+
+    def test_the_two_missing_tests_are_conditioned_separately(self):
+        # "write them with the first command and query" conflated two
+        # independent triggers: a query-only slice was told to wait for a
+        # command and to add a validator test with no validator to scan for.
+        tests = self.claim("tests/Yankee.Application.Tests/DependencyInjectionTests.cs")
+        self.assertIn("come back separately rather", tests)
+        self.assertIn("first handler of either kind", tests)
+        self.assertIn("first validator", tests)
+        self.assertNotIn("with the first command and query", tests)
 
     def test_the_validator_note_does_not_cite_a_suite_without_the_test(self):
         di = self.claim("src/Services/Yankee/Yankee.Application/DependencyInjection.cs")
@@ -628,6 +637,15 @@ class RefusesToRun(unittest.TestCase):
         self.assertIn(
             "src/Services/CATALOGSearch/CATALOGSearch.Domain/AssemblyMarker.cs", rendered.created
         )
+
+    def test_a_name_longer_than_a_sql_server_identifier(self):
+        # The name is the database and the schema, and `sysname` is
+        # nvarchar(128). Past that everything renders and the first migration
+        # is what fails — late, against a real database.
+        self.assertIsNotNone(render(name="A" + "b" * 127))
+        with self.assertRaises(ScaffoldError) as raised:
+            render(name="A" + "b" * 128)
+        self.assertIn("128", str(raised.exception))
 
     def test_a_name_windows_reserves_as_a_device(self):
         # These clear PascalCase, the template check and every collision test,

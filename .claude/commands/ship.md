@@ -180,7 +180,8 @@ anything.
      constraint, an assertion that could not fail in one direction, and a
      fail-open in the script's own manifest check — three defects three rounds
      would have shipped. The loop then ran past twelve and kept finding things,
-     including a *clean* round eight followed by eight more findings. A ceiling
+     including a *clean* round eight after which every further round found
+     more. A ceiling
      is for a reviewer and a triager **disagreeing**, which converges or never
      does; it was never for a loop still finding real things.
 

@@ -284,7 +284,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`py -3.12 -m unittest` in `tools/new-service` runs 66, and CI has a `scaffold`
+`py -3.12 -m unittest` in `tools/new-service` runs 68, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-12 is next**
 (`feat(common): Redis helpers — HybridCache, key namespaces, distributed
 locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
@@ -469,7 +469,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 66 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 68 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
@@ -1417,8 +1417,8 @@ constraint, an assertion that could not fail in one direction, and a fail-open
 in a manifest check. Three would have shipped all three. Copilot's late rounds
 surface findings in the **suppressed** block under a "generated no new
 comments" heading, so a clean inline verdict is not convergence — and one clean
-round is not two: round eight came back clean and eight more findings followed
-it.
+round is not two: round eight came back clean, and every round after it found
+more.
 What `.claude/settings.json` still denies is the narrow set
 that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
 push to `main`. A branch wanting one of those is raising a question, not

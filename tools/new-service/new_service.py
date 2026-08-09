@@ -370,11 +370,12 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "    }\n"
             "}\n",
             "\n"
-            "    // Two tests are missing here until this service has a slice, and both\n"
-            "    // guard a scan that fails silently: that the validator scan finds a\n"
-            "    // validator, and that the §6.2 handler scan produces a registration.\n"
-            "    // The service this one was scaffolded from carries both — write them\n"
-            "    // with the first command and query.\n"
+            "    // Two tests are missing here, and they come back separately rather\n"
+            "    // than together. The first handler of either kind earns the one that\n"
+            "    // asserts the §6.2 scan produced a registration; the first validator\n"
+            "    // earns the one that asserts the validator scan found it. Both scans\n"
+            "    // fail silently when lost, which is why neither is left implicit —\n"
+            "    // and a query-only slice needs the first and not the second.\n"
             "}\n",
         ),
     ),
@@ -533,6 +534,12 @@ CASINGS = re.compile("|".join((TEMPLATE, TEMPLATE.lower(), TEMPLATE.upper())))
 # created there. They pass every other check in this file: PascalCase, no
 # template token, no collision. Without this they fail *inside* `apply()`,
 # which is the one place the script promises not to.
+# The service name becomes a database name and a schema name, and SQL Server's
+# `sysname` is nvarchar(128). Past that the projects render happily and the
+# first migration is the thing that fails — late, on a machine with a database
+# attached, which is the worst place for this script to be wrong.
+SQL_IDENTIFIER_LIMIT = 128
+
 WINDOWS_RESERVED = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{port}" for port in range(1, 10)}
@@ -1008,6 +1015,12 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     """Everything the run would write, validated. Nothing is written here."""
     if not NAME.fullmatch(name):
         raise ScaffoldError(f"'{name}' is not a PascalCase service name")
+    if len(name) > SQL_IDENTIFIER_LIMIT:
+        raise ScaffoldError(
+            f"'{name[:20]}…' is {len(name)} characters; the name becomes a SQL Server "
+            f"database and schema, and sysname stops at {SQL_IDENTIFIER_LIMIT}. The "
+            f"projects would render and the first migration would not run."
+        )
     if name.upper() in WINDOWS_RESERVED:
         raise ScaffoldError(
             f"'{name}' is a reserved device name on Windows: neither "
