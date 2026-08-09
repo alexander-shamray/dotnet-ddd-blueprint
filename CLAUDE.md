@@ -470,6 +470,13 @@ cd tools/new-service && python -m unittest      # 38 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
+**Both CI jobs pin Python 3.12, and that is the floor both scripts are written
+to.** A newer interpreter on this machine is the hazard, not an older one: it
+accepts APIs 3.12 does not, so the local suite goes green on code the runner
+cannot execute. `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly
+that way. There is no local 3.12 here to check against, so this is carried by
+review — like the `[` placement rule, and for the same reason.
+
 **`dotnet test` requires Docker from PR-08**, and the container tests are
 neither skipped nor categorised when it is absent. Both were considered and
 both fail in a way this repository has rejected before: a skip on a missing

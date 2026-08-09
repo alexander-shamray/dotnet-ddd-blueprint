@@ -66,8 +66,12 @@ gives Shipping and Notifications one, and no such host exists yet to copy.
 cd tools/new-service && python -m unittest
 ```
 
-Stdlib `unittest`, no dependencies, and they run against the **real
-repository**: `plan()` renders from the checkout and returns a value, and
+Stdlib `unittest`, no dependencies, **Python 3.12** — the version both CI jobs
+pin, and the floor this tool is written to. A newer interpreter locally is the
+hazard rather than an older one: it accepts APIs 3.12 does not, and the suite
+goes green on code CI cannot run.
+
+They run against the **real repository**: `plan()` renders from the checkout and returns a value, and
 `apply()` is the only thing that touches disk. That is deliberate. The design
 has no template directory — the template is Catalog itself, so there is one
 copy of the wiring rather than two that drift — and the risk it accepts is

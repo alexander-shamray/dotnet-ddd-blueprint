@@ -19,6 +19,11 @@ precondition reports success for work it did not do.
 
 Stdlib only, like the licence gate, and for the same reasons: no restore, no
 SDK, and it runs on Windows and on the Ubuntu runner without either noticing.
+
+**Python 3.12 is the floor**, because that is what both CI jobs pin. A newer
+interpreter on a developer machine is the hazard, not an older one: it accepts
+APIs the floor does not, and the local suite goes green on code CI cannot run.
+`Path.read_text(newline=…)` is 3.13 and was exactly that mistake once.
 """
 
 from __future__ import annotations

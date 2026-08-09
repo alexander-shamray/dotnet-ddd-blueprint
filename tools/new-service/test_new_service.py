@@ -325,7 +325,9 @@ class EditsTheSharedFiles(unittest.TestCase):
         # every file edited here is CRLF on Windows and LF on the runner. The
         # rendered text has to follow the checkout, not the author's platform.
         for path, text in self.rendered.updated.items():
-            source = (REPO_ROOT / path).read_text(encoding="utf-8", newline="")
+            # Bytes, not read_text(newline=…): that keyword is Python 3.13 and
+            # CI pins 3.12, which is the floor this tool is written to.
+            source = (REPO_ROOT / path).read_bytes().decode("utf-8")
             expected = "\r\n" if "\r\n" in source else "\n"
             stripped = text.replace(expected, "")
             self.assertNotIn("\n", stripped, path)
@@ -428,7 +430,7 @@ class RefusesToRun(unittest.TestCase):
             root = template_copy(Path(directory))
             unclassified = root / "src/Services/Catalog/Catalog.Domain/Categories/Category.cs"
             unclassified.parent.mkdir(parents=True)
-            unclassified.write_text("namespace Catalog.Domain.Categories;\r\n", newline="")
+            unclassified.write_bytes(b"namespace Catalog.Domain.Categories;\r\n")
 
             with self.assertRaises(ScaffoldError) as raised:
                 render(repo_root=root)
@@ -440,12 +442,8 @@ class RefusesToRun(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))
             program = root / "src/Services/Catalog/Catalog.Api/Program.cs"
-            program.write_text(
-                program.read_text(encoding="utf-8", newline="").replace(
-                    "using Catalog.Api.Endpoints;\r\n", ""
-                ),
-                encoding="utf-8",
-                newline="",
+            program.write_bytes(
+                program.read_bytes().replace(b"using Catalog.Api.Endpoints;", b"")
             )
 
             with self.assertRaises(ScaffoldError) as raised:
@@ -478,7 +476,7 @@ class Applies(unittest.TestCase):
                 # utf-8, not utf-8-sig: the byte-order mark is content here,
                 # and a reader that swallowed it could not tell the machine-
                 # owned migration files from the hand-written ones.
-                self.assertEqual(text, (root / relative).read_text(encoding="utf-8", newline=""))
+                self.assertEqual(text, (root / relative).read_bytes().decode("utf-8"))
             self.assertFalse((root / "src/Services/Ordering/Ordering.Domain/Products").exists())
 
 
