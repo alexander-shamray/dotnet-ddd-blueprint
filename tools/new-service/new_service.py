@@ -265,8 +265,9 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ("using Catalog.Domain.Products;\n", "using Catalog.Domain;\n"),
         (
             "        Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(Product).Assembly];\n",
-            "        Assembly[] assemblies =\n"
-            "            [typeof(DependencyInjection).Assembly, typeof(AssemblyMarker).Assembly];\n",
+            # 104 columns, inside CLAUDE.md's 120 budget, so the list stays on
+            # one line — the wrapped form was a ragged middle the rule forbids.
+            "        Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(AssemblyMarker).Assembly];\n",
         ),
     ),
     "tests/Catalog.Application.Tests/Catalog.Application.Tests.csproj": (
@@ -429,6 +430,10 @@ STRAGGLERS = re.compile(r"catalog|roduct", re.IGNORECASE)
 
 NAME = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
+# The three casings, matched in one pass. Distinct strings under a
+# case-sensitive match, so alternation order carries no meaning.
+CASINGS = re.compile("|".join((TEMPLATE, TEMPLATE.lower(), TEMPLATE.upper())))
+
 # A migration id is the timestamp EF generates, and it reaches a path. Anything
 # else is both invalid metadata and, with a `..` in it, a write outside the
 # service tree — from a flag whose whole purpose is to make a test repeatable.
@@ -465,10 +470,21 @@ class Names:
         return self.pascal.upper()
 
     def rename(self, text: str) -> str:
-        return (
-            text.replace(TEMPLATE, self.pascal)
-            .replace(TEMPLATE.lower(), self.lower)
-            .replace(TEMPLATE.upper(), self.upper)
+        """One pass over the three casings, never three passes.
+
+        Chained `str.replace` calls feed each replacement to the next, and a
+        name that contains a later casing of the template token is rewritten
+        twice: `CATALOGSearch` turned a source `Catalog` into
+        `CATALOGSEARCHSearch`, because pass one produced text that pass three
+        then matched. A single alternation cannot re-enter its own output.
+        """
+        return CASINGS.sub(
+            lambda match: {
+                TEMPLATE: self.pascal,
+                TEMPLATE.lower(): self.lower,
+                TEMPLATE.upper(): self.upper,
+            }[match.group(0)],
+            text,
         )
 
 
@@ -837,8 +853,16 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     """Everything the run would write, validated. Nothing is written here."""
     if not NAME.match(name):
         raise ScaffoldError(f"'{name}' is not a PascalCase service name")
-    if name == TEMPLATE:
-        raise ScaffoldError(f"{TEMPLATE} is the template; it cannot be its own copy")
+    # Case-insensitively, because the casings are what the rename keys on:
+    # `CATALOG` passes an exact-match check, and its *lower* casing is still
+    # `catalog`, so the Compose block it renders keeps the template's own
+    # service keys and the file gains a duplicate pair. A case-sensitive
+    # filesystem is where that lands — the collision check below hides it on
+    # Windows and would not on the runner.
+    if name.lower() == TEMPLATE.lower():
+        raise ScaffoldError(
+            f"{name} is the template under another casing; it cannot be its own copy"
+        )
     if not MIGRATION_ID.match(migration_id):
         raise ScaffoldError(
             f"'{migration_id}' is not a 14-digit migration timestamp; it reaches a file path"

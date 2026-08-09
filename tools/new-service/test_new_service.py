@@ -19,6 +19,7 @@ from pathlib import Path
 from new_service import (
     COPY_ROOTS,
     OMITTED,
+    Names,
     Plan,
     ScaffoldError,
     apply,
@@ -520,6 +521,27 @@ class RefusesToRun(unittest.TestCase):
     def test_the_template_cannot_be_its_own_copy(self):
         with self.assertRaises(ScaffoldError):
             render(name="Catalog")
+
+    def test_the_template_under_another_casing_is_still_the_template(self):
+        # `CATALOG` passes an exact-match check and its lower casing is still
+        # `catalog`, so the Compose block it renders keeps the template's own
+        # service keys — a duplicate pair, on a case-sensitive checkout where
+        # the directory collision does not catch it first.
+        for alias in ("CATALOG", "catalog", "CaTaLoG"):
+            with self.assertRaises(ScaffoldError):
+                render(name=alias)
+
+    def test_a_rename_never_re_enters_its_own_output(self):
+        # Chained replaces fed each pass to the next: `CATALOGSearch` turned a
+        # source `Catalog` into `CATALOGSEARCHSearch`, because the pascal pass
+        # produced text the upper pass then matched.
+        self.assertEqual("CATALOGSearch.Domain", Names("CATALOGSearch").rename("Catalog.Domain"))
+        self.assertEqual("catalogsearch-api", Names("CATALOGSearch").rename("catalog-api"))
+
+        rendered = render(name="CATALOGSearch")
+        self.assertIn(
+            "src/Services/CATALOGSearch/CATALOGSearch.Domain/AssemblyMarker.cs", rendered.created
+        )
 
     def test_a_name_that_contains_a_template_token_is_still_a_name(self):
         # The straggler check searches for `catalog` and `roduct`, and a

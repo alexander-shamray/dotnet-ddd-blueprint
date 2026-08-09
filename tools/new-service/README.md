@@ -24,9 +24,12 @@ generated tree is untracked and the five edits are tracked, so neither one
 alone is enough:
 
 ```bash
-rm -rf src/Services/<Name> tests/<Name>.*
+rm -rf src/Services/Ordering tests/Ordering.*
 git restore Platform.slnx deploy/compose
 ```
+
+(`Ordering` rather than a `<Name>` placeholder because this is a `bash` fence
+and the shell reads `<Name>` as a redirection, not as something to fill in.)
 
 `git checkout .` is **not** the undo and this file used to say it was: it
 leaves every generated file in place, because they are untracked, and it
