@@ -62,7 +62,7 @@ class RendersTheTemplate(unittest.TestCase):
     def setUp(self):
         self.rendered = render()
 
-    def test_it_writes_the_five_projects_and_the_four_test_projects(self):
+    def test_it_writes_nine_projects_five_service_three_test_and_test_support(self):
         for project in (
             "src/Services/Ordering/Ordering.Domain/Ordering.Domain.csproj",
             "src/Services/Ordering/Ordering.Application/Ordering.Application.csproj",
@@ -456,6 +456,61 @@ class RendersOnEitherCheckout(unittest.TestCase):
             self.assertNotIn("\r", marker)
 
 
+class RendersASecondServiceBesideTheFirst(unittest.TestCase):
+    """Two scaffolds into one checkout, which is the whole point of the tool.
+
+    Every test above renders once, and once is the case where "to the end of
+    the file" and "to the next service" are the same span. They are not the
+    same span afterwards: the second run's extraction swallowed the first
+    service's Compose pair and its `.env.example` variables and wrote them
+    again — duplicate keys, an invalid Compose file, and no check anywhere
+    that noticed. A Copilot review asked what a second run does; this is the
+    coverage that was missing when it did.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        root = template_copy(Path(self.directory.name))
+        apply(root, plan(root, "Ordering", 5101, MIGRATION_ID))
+        self.root = root
+        self.second = plan(root, "Inventory", 5103, "20260810120000")
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_every_compose_service_key_is_unique(self):
+        compose = self.second.updated["deploy/compose/docker-compose.yml"]
+        keys = re.findall(r"^  ([a-z0-9][a-z0-9-]*):$", compose.replace("\r\n", "\n"), re.M)
+        self.assertEqual(sorted(set(keys)), sorted(keys), keys)
+        for expected in ("catalog-api", "ordering-api", "inventory-api"):
+            self.assertIn(expected, keys)
+
+    def test_each_service_declares_its_connection_variables_once(self):
+        env = self.second.updated["deploy/compose/.env.example"].replace("\r\n", "\n")
+        for service in ("CATALOG", "ORDERING", "INVENTORY"):
+            self.assertEqual(1, env.count(f"# {service}_CONNECTION="), service)
+            self.assertEqual(1, env.count(f"# {service}_MIGRATOR_CONNECTION="), service)
+
+    def test_the_new_pair_lands_after_the_services_already_there(self):
+        compose = self.second.updated["deploy/compose/docker-compose.yml"]
+        self.assertLess(compose.index("  ordering-api:"), compose.index("  inventory-migrator:"))
+        self.assertLess(compose.index("  inventory-api:"), compose.index("  otel-collector:"))
+
+    def test_the_ports_table_and_the_override_gain_one_entry_each(self):
+        readme = self.second.updated["deploy/compose/README.md"]
+        self.assertEqual(1, readme.count("| Ordering API |"))
+        self.assertEqual(1, readme.count("| Inventory API |"))
+
+        override = self.second.updated["deploy/compose/docker-compose.infra-only.yml"]
+        self.assertEqual(1, override.count("  inventory-api:"))
+        self.assertEqual(1, override.count("  ordering-api:"))
+
+    def test_the_solution_still_sorts_with_two_services_in_it(self):
+        solution = self.second.updated["Platform.slnx"]
+        services = re.findall(r'<Folder Name="/src/Services/([^/]+)/">', solution)
+        self.assertEqual(["Catalog", "Inventory", "Ordering"], services)
+
+
 class RefusesToRun(unittest.TestCase):
     def test_a_name_that_is_not_pascal_case(self):
         for name in ("ordering", "Ordering.Api", "order-ing", ""):
@@ -465,6 +520,18 @@ class RefusesToRun(unittest.TestCase):
     def test_the_template_cannot_be_its_own_copy(self):
         with self.assertRaises(ScaffoldError):
             render(name="Catalog")
+
+    def test_a_name_that_contains_a_template_token_is_still_a_name(self):
+        # The straggler check searches for `catalog` and `roduct`, and a
+        # service legitimately called CatalogSearch or ProductReviews puts
+        # those in every path it generates. Masking the requested name first
+        # is what separates "the rename did not reach this" from "the caller
+        # asked for it".
+        for name in ("CatalogSearch", "ProductReviews"):
+            rendered = render(name=name)
+            self.assertIn(
+                f"src/Services/{name}/{name}.Domain/AssemblyMarker.cs", rendered.created, name
+            )
 
     def test_a_service_that_already_exists(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -476,6 +543,20 @@ class RefusesToRun(unittest.TestCase):
     def test_a_port_another_service_already_publishes(self):
         with self.assertRaises(ScaffoldError):
             render(port=5102)
+
+    def test_a_port_docker_cannot_publish(self):
+        # Collision was the only check once, so -1 and 70000 planned happily
+        # and were written into Compose.
+        for port in (-1, 0, 70000):
+            with self.assertRaises(ScaffoldError):
+                render(port=port)
+
+    def test_a_migration_id_that_is_not_a_timestamp(self):
+        # It reaches a file path, so `..` in it writes outside the service
+        # tree — from the flag whose only purpose is repeatable tests.
+        for migration_id in ("../../../etc/passwd", "InitialCreate", "2026080912000"):
+            with self.assertRaises(ScaffoldError):
+                plan(REPO_ROOT, "Ordering", PORT, migration_id)
 
     def test_a_directory_that_is_not_the_repository(self):
         with tempfile.TemporaryDirectory() as directory:

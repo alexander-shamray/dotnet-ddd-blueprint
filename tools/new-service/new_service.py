@@ -429,6 +429,22 @@ STRAGGLERS = re.compile(r"catalog|roduct", re.IGNORECASE)
 
 NAME = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
+# A migration id is the timestamp EF generates, and it reaches a path. Anything
+# else is both invalid metadata and, with a `..` in it, a write outside the
+# service tree — from a flag whose whole purpose is to make a test repeatable.
+MIGRATION_ID = re.compile(r"^\d{14}$")
+
+# The two files that accumulate a block per service, and the markers that bound
+# one block. Both were sliced to the end of the file once, which is the same
+# span only until a second service exists.
+SERVICE_KEY = re.compile(r"^  ([A-Za-z0-9][A-Za-z0-9_-]*):$")
+ENV_MARKER = re.compile(r"^# ([A-Za-z0-9]+)'s two §7\.1 keys")
+
+# Docker publishes 1–65535 and nothing else. §14.1 allocates 51xx by
+# convention, which is a decision rather than a rule, so the guard is the
+# protocol's limit and the convention stays in the documentation.
+PORTS = range(1, 65536)
+
 
 class ScaffoldError(Exception):
     """A precondition the script will not write over."""
@@ -704,21 +720,62 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
 
     An extraction rather than a template: the block's comments argue the
     inline-default rule and §7.1's two keys, and they travel with the copy.
+
+    **Bounded by the key that follows the pair, never by the collector.** The
+    first version sliced from `catalog-migrator` to `otel-collector`, which is
+    the same span only until a service has been scaffolded — after that the
+    slice swallows the previous service's pair and appends it a second time,
+    and duplicate keys make the Compose file invalid. Found by a Copilot review
+    asking what a *second* run does; every test until then scaffolded once.
     """
     text, newline = read(repo_root, "deploy/compose/docker-compose.yml")
     if re.search(rf'"{port}:\d+"', text):
         raise ScaffoldError(f"port {port} is already published in deploy/compose/docker-compose.yml")
 
-    start = text.index(f"  {TEMPLATE.lower()}-migrator:")
-    end = text.index("  otel-collector:")
-    block = names.rename(text[start:end])
+    lines = text.split("\n")
+    keys = [(i, m.group(1)) for i, line in enumerate(lines) if (m := SERVICE_KEY.match(line))]
+    order = [name for _, name in keys]
 
+    pair = [f"{TEMPLATE.lower()}-migrator", f"{TEMPLATE.lower()}-api"]
+    at = order.index(pair[0]) if pair[0] in order else -1
+    if at < 0 or order[at + 1 : at + 2] != pair[1:]:
+        raise ScaffoldError(
+            f"docker-compose.yml has no {pair[0]} / {pair[1]} pair to copy (§14.1's pair rule)"
+        )
+    if at + 2 >= len(keys):
+        raise ScaffoldError("nothing follows the template's pair to bound the copy")
+
+    start, stop = keys[at][0], keys[at + 2][0]
+    # Comments immediately above a service belong to it, not to the pair above.
+    while stop > start and lines[stop - 1].lstrip().startswith("#"):
+        stop -= 1
+
+    block = names.rename("\n".join(lines[start:stop]))
     published = re.search(r'ports: \[ "(\d+):8080" \]', block)
     if published is None:
         raise ScaffoldError("the template's api block publishes no port to substitute")
     block = block.replace(published.group(0), f'ports: [ "{port}:8080" ]')
 
-    return restore(text[:end] + block + text[end:], newline)
+    # After the last application block, so services accumulate in the order
+    # they were created. `build:` is what marks one — a structural test rather
+    # than a hard-coded `otel-collector`, which was only ever the service that
+    # happened to come next.
+    application = [
+        index
+        for index, (line_no, _) in enumerate(keys)
+        if any(
+            body.lstrip().startswith("build:")
+            for body in lines[line_no : keys[index + 1][0] if index + 1 < len(keys) else len(lines)]
+        )
+    ]
+    if not application:
+        raise ScaffoldError("docker-compose.yml has no application block to insert beside")
+
+    after = keys[application[-1] + 1][0]
+    while after > 0 and lines[after - 1].lstrip().startswith("#"):
+        after -= 1
+
+    return restore("\n".join([*lines[:after], block, *lines[after:]]), newline)
 
 
 def update_infra_only(repo_root: Path, names: Names) -> str:
@@ -735,11 +792,30 @@ def update_infra_only(repo_root: Path, names: Names) -> str:
 
 
 def update_env_example(repo_root: Path, names: Names) -> str:
-    """Catalog's commented pair, extracted so its argument comes with it."""
+    """Catalog's commented pair, extracted so its argument comes with it.
+
+    Bounded by the next service's own marker rather than by the end of the
+    file — the same defect as `update_compose`, and found the same way: to EOF
+    is the template's block only until one service has been added, after which
+    it drags that service's variables along and writes them twice.
+    """
     text, newline = read(repo_root, "deploy/compose/.env.example")
-    marker = f"# {TEMPLATE}'s two §7.1 keys"
-    require_once(text, marker, ".env.example")
-    return restore(text + "\n" + names.rename(text[text.index(marker):]), newline)
+    lines = text.split("\n")
+
+    marks = [(i, m.group(1)) for i, line in enumerate(lines) if (m := ENV_MARKER.match(line))]
+    template = [i for i, service in marks if service == TEMPLATE]
+    if len(template) != 1:
+        raise ScaffoldError(
+            f".env.example: expected exactly one \"# {TEMPLATE}'s two §7.1 keys\" block, "
+            f"found {len(template)}"
+        )
+
+    start = template[0]
+    following = [i for i, _ in marks if i > start]
+    stop = following[0] if following else len(lines)
+
+    block = names.rename("\n".join(lines[start:stop]).rstrip("\n"))
+    return restore(text.rstrip("\n") + "\n\n" + block + "\n", newline)
 
 
 def update_ports_readme(repo_root: Path, names: Names, port: int) -> str:
@@ -763,6 +839,12 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
         raise ScaffoldError(f"'{name}' is not a PascalCase service name")
     if name == TEMPLATE:
         raise ScaffoldError(f"{TEMPLATE} is the template; it cannot be its own copy")
+    if not MIGRATION_ID.match(migration_id):
+        raise ScaffoldError(
+            f"'{migration_id}' is not a 14-digit migration timestamp; it reaches a file path"
+        )
+    if port not in PORTS:
+        raise ScaffoldError(f"port {port} is outside 1–65535 and Docker cannot publish it")
     if not (repo_root / COPY_ROOTS[0]).is_dir():
         raise ScaffoldError(f"{repo_root} does not look like the repository: no {COPY_ROOTS[0]}")
 
@@ -772,16 +854,22 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
         if target.exists():
             raise ScaffoldError(f"{names.rename(root)} already exists; this script creates, never merges")
 
+    # The new service's own name is masked before the search, or a legitimate
+    # one that contains a template token — CatalogSearch, ProductReviews — is
+    # rejected for the tokens it was asked for. What is left after masking is a
+    # mention the rename did not reach, which is the only thing this check is
+    # about.
+    mask = re.compile("|".join(re.escape(n) for n in (names.pascal, names.lower, names.upper)))
     created = render_projects(repo_root, names, migration_id)
     for relative, text in created.items():
-        stripped = BENIGN.sub("", text)
+        stripped = BENIGN.sub("", mask.sub("", text))
         if (left := STRAGGLERS.search(stripped)) is not None:
             line = stripped[: left.start()].count("\n") + 1
             raise ScaffoldError(
                 f"{relative}:{line}: '{left.group(0)}' survived the rename. "
                 f"The file names Catalog or its slice somewhere this script does not patch."
             )
-        if STRAGGLERS.search(relative) is not None:
+        if STRAGGLERS.search(mask.sub("", relative)) is not None:
             raise ScaffoldError(f"{relative}: the path itself still names the template")
 
     return Plan(
@@ -797,6 +885,22 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
 
 
 def apply(repo_root: Path, rendered: Plan) -> None:
+    """Write the plan.
+
+    **This is not atomic, and the guarantee above is about validation only.**
+    Every anchor, every classification and every straggler check runs before
+    the first file is created, so a run this script *refuses* writes nothing —
+    that much is a property. An I/O failure partway through this loop is not
+    covered: some targets will exist and some shared files will be updated.
+
+    Staging and rolling back was considered and declined. The target is a git
+    checkout, the run is a developer typing one command, and `git status`
+    already shows exactly what landed with `git restore` and one `rm -rf` to
+    undo it — a bespoke transaction log would be a second, untested mechanism
+    for something version control does better. Narrowing the claim is the
+    honest half of that decision, and a Copilot review is what caught the
+    claim being wider than the code.
+    """
     for relative, text in {**rendered.created, **rendered.updated}.items():
         target = repo_root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
