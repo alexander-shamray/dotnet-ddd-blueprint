@@ -181,7 +181,9 @@ volumes:
 The file is delivered in [Appendix C](appendix-c-delivery-plan.md)'s order
 rather than at once. PR-06 ships the seven infrastructure services above;
 each application block lands with the PR that builds its image — the
-scaffold of PR-11 copies one per service — and the realm file ships as a
+scaffold of [§4.5](04-solution-structure.md) writes one per service, along
+with its `infra-only` exclusion below, its `.env.example` variables and its
+row in `deploy/compose/README.md` — and the realm file ships as a
 placeholder, realm name and `enabled` only, until PR-16's import replaces
 it. The `docker-compose.infra-only.yml` override below arrives with the
 first containerised service, there being nothing to exclude before it.
@@ -263,7 +265,9 @@ services:
   ordering-api:
     profiles: [ "excluded" ]
   # ... every application block in docker-compose.yml joins this list in the
-  # same PR that adds it; an omitted one silently keeps starting.
+  # same PR that adds it; an omitted one silently keeps starting. The §4.5
+  # scaffold writes both halves, which is the reliable way to keep a rule
+  # whose only symptom is a container nobody asked for.
 ```
 
 ## 14.2 Aspire — optional accelerator

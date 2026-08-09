@@ -75,6 +75,11 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── backend-architecture/           This document, one file
 │                                       per chapter; ADRs in Appendix A
 │
+├── tools/
+│   └── new-service/                    The scaffold of §4.5 and its tests.
+│                                       Stdlib Python, no restore — it renders
+│                                       a service from Catalog at run time
+│
 ├── Directory.Build.props               Shared MSBuild settings
 ├── Directory.Packages.props            Central package version management
 └── Platform.slnx
@@ -819,6 +824,68 @@ needs restoring before the list can be read.
 > The gate closes that itself by comparing them — but the failure it reports is
 > against this chapter, not the props file, because the file is what CI
 > restores and the chapter is what a reader believes.
+
+## 4.5 Adding a service
+
+Six services share the shape §4.1 draws, and writing the fifth one by hand is
+how the fifth one ends up subtly different from the first four. One command
+renders it instead:
+
+```bash
+python tools/new-service/new_service.py Ordering --port 5101
+```
+
+It writes §4.1's five projects and four test projects with everything the
+service template has accumulated — the `DbContext` and its conventions
+([§7.2](07-persistence.md)), `EfUnitOfWork` ([§6.3](06-cqrs.md)), the
+connection factory ([§6.5](06-cqrs.md)), the readiness check
+([§13.5](13-observability.md)), the migration job host
+([§7.4](07-persistence.md)), the `InitialCreate` migration that creates the
+schema, both images ([§15.2](15-cicd-deployment.md)) and §4.2's architecture
+gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
+its `infra-only` exclusion, `.env.example`, and the ports table in
+`deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
+builds and its tests pass before a line of it is written, eleven of them
+against a real SQL Server.
+
+**There is no template directory, and that is the design.** The script reads
+`src/Services/Catalog` at run time, so there is exactly one copy of the
+wiring — the copy CI builds and `dotnet test` exercises — and an improvement to
+the template reaches the next service the next time it runs. A tokenised copy
+beside it would be a second `DbContext`, a second migrator host and a second
+Dockerfile that nothing builds and nothing reconciles.
+
+**It copies no domain.** Catalog's `Product`, its command, its query and its
+endpoints are excluded by name; what a new service inherits is PR-07's state
+with the later wiring on it, not PR-10's state with the nouns changed.
+Renaming an aggregate would hand the next service a deletion job and a
+vocabulary it did not choose. Four things therefore arrive with the first real
+slice rather than with the scaffold, and each is noted at the line concerned in
+the generated code: `Dapper`, the container wiring in the application test
+project, the two registration tests that guard a scan which otherwise fails
+silently, and the `AssemblyMarker` the §4.2 gates anchor on until an aggregate
+exists to anchor them on.
+
+> **The scaffold fails loudly or not at all.** Every piece of Catalog text it
+> names must match exactly once, the whole render is built in memory and
+> validated before a single file is created, and any file under
+> `src/Services/Catalog` it cannot classify as template or slice stops the run.
+> The price of having no second copy is that the first one moves; the price is
+> paid by refusing, never by silently emitting a service that still names
+> Catalog. Its own tests render this repository for the same reason — a fixture
+> tree would test the script against a template that cannot drift.
+
+`--port` is required and never derived. A port is an allocation recorded in
+§14.1 and in `deploy/compose/README.md`; a script that guessed one would
+quietly disagree with a printed chapter. The run refuses a port another service
+already publishes.
+
+Three things are outside it, and none is silently missing: the gateway route
+([§10.2](10-api-gateway.md)) — the route belongs to the gateway's
+configuration, not the service's tree — the Helm chart
+([§15.3](15-cicd-deployment.md)), and a Worker host in place of an API, which
+Shipping and Notifications take (§4.1) and which joins the script with the
+first one built.
 
 ---
 
