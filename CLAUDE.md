@@ -68,8 +68,16 @@ Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
 Platform.slnx                    the fifteen projects below
 .editorconfig                    house style; a build input, not a hint
-.github/workflows/ci.yml         licence gate, then restore/build/test
+.github/workflows/ci.yml         licence gate and scaffold tests, then
+                                 restore/build/test
 .github/licence-gate/            the gate, its allow-list and its tests
+
+tools/new-service/               §4.5's scaffold, its tests and its README.
+                                 Stdlib Python, no restore. Renders a service
+                                 from src/Services/Catalog at RUN TIME — there
+                                 is no template directory, so a Catalog change
+                                 that breaks it fails `python -m unittest`
+                                 here rather than six months later
 .github/workflows/compose.yml    path-filtered smoke on deploy/compose/**:
                                  config -q, up --wait, down -v — and, since
                                  PR-10's build: stanzas, an image build
@@ -218,6 +226,24 @@ would destroy the record. Do not edit a spec or a plan to match the code that
 followed it — amend the chapter instead, which is where the specification
 actually lives.
 
+`tools/new-service/` took the opposite decision to the licence gate's, and the
+difference is what each thing is. The gate is CI-only, so it lives under the CI
+provider's directory and §4.1 stays silent about it. The scaffold is a
+developer tool that happens to be tested in CI, so filing it under `.github/`
+would have filed it by its least important property — **§4.1's tree gained a
+`tools/` entry and §4.5 documents the script instead**, the honest fix for "the
+blueprint draws no such tree" being to draw it.
+
+**Changing Catalog can break the scaffold, and the failure is loud.** The
+script names exact text inside `src/Services/Catalog` and `tests/Catalog.*`,
+and every anchor must match exactly once. It also classifies **every** file
+under those roots as template or slice and refuses to run on one it has never
+seen — so a new file in Catalog is a decision the scaffold forces, the same way
+the domain allow-list gate forces one. If `python -m unittest` in
+`tools/new-service` goes red after a Catalog change, reconcile the script in
+the same change; that is the price of having one copy of the wiring instead of
+two.
+
 Planned, per §4.1 — do not invent a different shape for it. The three building
 blocks built so far are shown above; the tree below is the target shape, and
 its annotations mark what has already landed:
@@ -257,13 +283,45 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 `Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
 the build rules and the drift rules below are live and a green run now means
-something. **PR-11 is next** (`feat(tooling): new-service scaffold script`),
-which copies and renames the template PR-10 finished: ports, database name,
-solution entries, Compose block. PR-07 landed the Catalog skeleton, so §4.2's
-architecture rules are a build failure — each gate was observed red against a
-deliberately added forbidden reference before it was trusted, and since PR-10
-the endpoints gate judges a real type (`ProductEndpoints`) rather than passing
-vacuously.
+something. Since PR-11 there is a second suite with a second runner:
+`python -m unittest` in `tools/new-service` runs 35, and CI has a `scaffold`
+job for them beside `licence-gate`. **PR-12 is next**
+(`feat(common): Redis helpers — HybridCache, key namespaces, distributed
+locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
+build failure — each gate was observed red against a deliberately added
+forbidden reference before it was trusted, and since PR-10 the endpoints gate
+judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-11 landed the scaffold of §4.5 — `tools/new-service/new_service.py`, stdlib
+Python, one command per service — and four of its decisions bind what comes
+after:
+
+- **Catalog is the template, read at run time.** There is no template
+  directory, so there is one copy of the wiring rather than two that drift, and
+  the scaffold's tests render *this* repository. The consequence is stated
+  above and worth repeating here: a Catalog change can turn
+  `tools/new-service`'s suite red, and reconciling the script belongs in the
+  same change.
+- **The scaffold copies no domain.** The slice is excluded by name, so a new
+  service is PR-07's state with PR-08's, PR-09's and PR-10's wiring on it — five
+  projects, four test suites, both images, the Compose pair, the `InitialCreate`
+  migration and twenty-four passing tests, and no aggregate. `Dapper`, the
+  application-test container wiring, the two silent-scan registration tests and
+  the `AssemblyMarker` the gates anchor on all arrive with the first real
+  slice, each noted at the line concerned in the generated code.
+- **`AssemblyMarker` is back for scaffolded services only.** PR-10 deleted
+  Catalog's when `Product` replaced it; a service with no domain type has
+  nothing for the two §4.2 gates to name, so the scaffold emits one whose doc
+  comment says to delete it. Seeing one in a service that *has* an aggregate is
+  a defect, not a convention.
+- **The generated model snapshot is EF's own output, not a hand-written copy.**
+  It is derived from `InitialCreate.Designer.cs`, which already holds the
+  tool's description of an empty model with a default schema. Verified rather
+  than argued: a scaffolded service was built, `dotnet ef migrations add` was
+  run against it, the generated `Up` was empty and EF's rewritten snapshot was
+  byte-identical to the emitted one. Two details were found only by that diff —
+  EF sorts its `using` block by namespace (so `;` must not participate in the
+  sort), and the sort order changes when the service name passes `Microsoft`.
 
 PR-10 landed the first vertical slice — `Product`, `PublishProductCommand`,
 `GetProductsQuery` with §6.5's cursor pagination, the two Dockerfiles, the
@@ -393,6 +451,14 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
+```
+
+Two suites, two runners. The scaffold's tests are Python and are **not** in
+`Platform.slnx`, so `dotnet test` says nothing about them:
+
+```bash
+cd tools/new-service && python -m unittest      # 35 tests, no Docker, no SDK
+python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
 **`dotnet test` requires Docker from PR-08**, and the container tests are
