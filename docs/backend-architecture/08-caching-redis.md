@@ -40,10 +40,16 @@ pressure that makes it hardest to reproduce.
 | Keyspace | Eviction policy | Placement |
 |---|---|---|
 | `{service}:cache:` | `allkeys-lru` — eviction is the point | Shared cache instance |
-| `{service}:lock:` | **`noeviction`** | Separate instance, or a separate Redis DB index with its own policy |
+| `{service}:lock:` | **`noeviction`** | Separate instance |
 | `{service}:idem:` | **`noeviction`** | With the locks |
 | `{service}:denylist:` | **`noeviction`** | With the locks |
 | `{service}:ratelimit:` | `volatile-ttl` acceptable | Either |
+
+A separate DB index on the shared instance is **not** an isolation option,
+though it looks like one: `maxmemory-policy` is a server-level setting, every
+database on an instance shares it, and a lock in DB 1 is exactly as evictable
+as the cache in DB 0. Isolation means a second instance — which is what
+§14.1's Compose file runs and §14.2's Aspire sample mirrors.
 
 Production topology: a **shared Redis cluster with a per-service ACL user** and
 a mandatory `{service}:` key prefix is the cost-effective default. What must
@@ -57,10 +63,15 @@ Two rules the helper library enforces rather than documents:
 
 - **Every cache and lock key has a TTL.** A key without one is a memory leak
   with a slow fuse, and on a `noeviction` instance it eventually stops writes
-  entirely.
+  entirely. Enforced twice: `IDistributedLockFactory` refuses a non-positive
+  duration before any I/O — there is no overload without one — and
+  `AddRedisConnections`' HybridCache defaults (§8.2) give every entry an
+  expiry.
 - **No cross-service keys.** The ACL makes this impossible rather than
   discouraged, which is the right level of enforcement for something that
-  otherwise gets violated once and never noticed.
+  otherwise gets violated once and never noticed. `RedisKeys` (§8.3) makes it
+  unwritable as well: the prefix half of every key comes from
+  `ApplicationName`, never from the call site.
 
 ## 8.2 HybridCache
 
@@ -75,39 +86,59 @@ connections of §8.1 — rather than as a separate call somebody has to remember
 the [§6.2](06-cqrs.md) scan, so an unregistered cache is a service that will not start:
 
 ```csharp
-// Ordering.Infrastructure — called by AddOrderingInfrastructure (§4.2).
-public static IServiceCollection AddRedisConnections(this IServiceCollection services, IConfiguration configuration)
+// Common.Infrastructure — called by each AddXInfrastructure (§4.2).
+public static class DependencyInjection
 {
-    // §8.1's two keyed IConnectionMultiplexer registrations — cache and
-    // coordination, separate because the eviction policies cannot be shared.
-
-    services.AddStackExchangeRedisCache(options =>
+    extension(IServiceCollection services)
     {
-        // The CACHE connection (allkeys-lru). Coordination keys use the other.
-        options.Configuration = configuration.GetConnectionString("RedisCache");
-    });
-
-    // The §8.1 key prefix, from ApplicationName — the same single source §8.5
-    // uses for idempotency keys. A literal here is a second place the service
-    // name lives (§15.4), and the two drift silently: §8.1's per-service ACL
-    // denies writes to a prefix the service does not own, so the symptom is a
-    // cache that never populates rather than an error naming the prefix.
-    services
-        .AddOptions<RedisCacheOptions>()
-        .Configure<IHostEnvironment>((o, env) =>
-            o.InstanceName = $"{env.ApplicationName}:cache:");
-
-    services.AddHybridCache(options =>
-    {
-        options.DefaultEntryOptions = new HybridCacheEntryOptions
+        public IServiceCollection AddRedisConnections(IConfiguration configuration)
         {
-            Expiration = TimeSpan.FromMinutes(10),            // L2, Redis
-            LocalCacheExpiration = TimeSpan.FromMinutes(1)    // L1, in-process
-        };
-        options.MaximumPayloadBytes = 1024 * 1024;
-    });
+            // §8.1's two keyed IConnectionMultiplexer registrations — cache
+            // and coordination, separate because the eviction policies cannot
+            // be shared. Both connection strings are read eagerly, so a host
+            // missing one fails at startup rather than at the first miss.
 
-    return services;
+            // The CACHE connection (allkeys-lru); coordination keys use the
+            // other. The factory hands the cache its keyed multiplexer — one
+            // connection per instance, and the traced connection is then the
+            // one the cache actually uses, not a private third.
+            services.AddStackExchangeRedisCache(_ => { });
+            services
+                .AddOptions<RedisCacheOptions>()
+                .Configure<IServiceProvider>((options, provider) =>
+                {
+                    // The §8.1 key prefix, spelled once, in RedisKeys (§8.3) —
+                    // whose source is ApplicationName, the same single source
+                    // §8.5 uses for idempotency keys. A literal here is a
+                    // second place the service name lives (§15.4), and the two
+                    // drift silently: §8.1's per-service ACL denies writes to
+                    // a prefix the service does not own, so the symptom is a
+                    // cache that never populates rather than an error naming
+                    // the prefix.
+                    options.InstanceName = provider.GetRequiredService<RedisKeys>().CacheInstanceName;
+                    options.ConnectionMultiplexerFactory = () =>
+                        Task.FromResult(provider.GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Cache));
+                });
+
+            services.AddHybridCache(options =>
+            {
+                options.DefaultEntryOptions = new HybridCacheEntryOptions
+                {
+                    Expiration = TimeSpan.FromMinutes(10),            // L2, Redis
+                    LocalCacheExpiration = TimeSpan.FromMinutes(1)    // L1, in-process
+                };
+                options.MaximumPayloadBytes = 1024 * 1024;
+            });
+
+            // §13.2's Redis tracing lands here too, with both keyed
+            // connections handed to it — the parameterless overload discovers
+            // only an unkeyed multiplexer, which is why the call cannot live
+            // in Common.Web. RedisKeys and the lock factory of §8.1 register
+            // beside it; the full wiring is in the source.
+
+            return services;
+        }
+    }
 }
 ```
 
@@ -160,6 +191,15 @@ So §8.2's handler passes `product:{id}:v2` and the key in Redis is
 prefix at a call site produces `catalog:catalog:cache:...` or, worse, a key that
 skips the prefix entirely and is denied by the §8.1 ACL — which fails as a cache
 that never populates rather than as an error naming the key.
+
+The coordination namespaces get the same rule from `RedisKeys`, registered by
+§8.2's helper: `Lock(name)`, `Idempotency(suffix)` and `Denylist(suffix)` each
+return the full key with the `ApplicationName` prefix, so a call site cannot
+write the wrong half because it never writes that half at all. The type has
+deliberately **no `Cache(string)` method**: cache keys are prefixed by
+`InstanceName` above, and a full-key builder would double-prefix the moment
+somebody passed its result to `HybridCache` — it exposes the instance-name
+string instead, so `:cache:` is spelled in exactly one place.
 
 The trailing schema version is the important part of the half you do write: when
 a DTO's shape changes, bump the version and old entries become unreachable and
@@ -316,28 +356,25 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 ```
 
 The Redis implementation lives in Infrastructure and is where the two §8.1
-constraints are satisfied — the `{service}:idem:` prefix required by the ACL,
-and the **coordination** connection rather than the cache connection, because
-idempotency keys must never be evicted:
+constraints are satisfied — §8.3's `RedisKeys` supplies the `{service}:idem:`
+prefix the ACL requires, and the **coordination** connection rather than the
+cache connection, because idempotency keys must never be evicted:
 
 ```csharp
 namespace Ordering.Infrastructure.Idempotency;
 
 internal sealed class RedisIdempotencyStore(
     [FromKeyedServices(RedisConnections.Coordination)] IConnectionMultiplexer redis,
-    IHostEnvironment environment)
+    RedisKeys keys)
     : IIdempotencyStore
 {
-    // {service}:idem:... — matches the ACL pattern ~ordering:* from §8.1.
-    //
-    // ApplicationName, not a configured value: the service name is also what
-    // §13.2 stamps on every trace and metric. Two sources would let the Redis
-    // prefix and the telemetry label disagree, which breaks correlation exactly
-    // when it is needed — and a wrong prefix fails the ACL silently.
-    private string Key(string suffix) => $"{environment.ApplicationName}:idem:{suffix}";
-
+    // keys.Idempotency(...) is {service}:idem:... — the ACL pattern
+    // ~ordering:* from §8.1, prefixed from ApplicationName. Why that source
+    // and no other is argued at RedisKeys (§8.3): it is also what §13.2
+    // stamps on every trace, and a second source would let the Redis prefix
+    // and the telemetry label disagree.
     public async Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct) =>
-        await redis.GetDatabase().StringSetAsync(Key(key), InProgressMarker, retention, When.NotExists);
+        await redis.GetDatabase().StringSetAsync(keys.Idempotency(key), InProgressMarker, retention, When.NotExists);
 
     // GetAsync / CompleteAsync / ReleaseAsync follow the same key shaping.
 }
@@ -369,10 +406,10 @@ public void Commands_carrying_a_CommandId_declare_IIdempotentCommand()
 
 > **Two connections, not one.** The cache multiplexer points at the instance
 > running `allkeys-lru`; the coordination multiplexer points at the
-> `noeviction` instance or DB index holding locks, idempotency keys and the
-> denylist. Registering them as keyed services makes picking the wrong one a
-> visible choice rather than an invisible default. This is the §8.1 rule
-> expressed in wiring instead of prose.
+> `noeviction` instance holding locks, idempotency keys and the denylist.
+> Registering them as keyed services makes picking the wrong one a visible
+> choice rather than an invisible default. This is the §8.1 rule expressed in
+> wiring instead of prose.
 
 ## 8.6 Rules and traps
 

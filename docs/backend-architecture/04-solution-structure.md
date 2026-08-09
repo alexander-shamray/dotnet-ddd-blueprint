@@ -651,6 +651,11 @@ EF Core minor versions and behave differently under identical code.
          their credentials. -->
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.0.0" />
+    <!-- HybridCache's L2 (§8.2): AddStackExchangeRedisCache and
+         RedisCacheOptions. The IDistributedCache implementation over
+         StackExchange.Redis — a separate package from both, and the one that
+         actually stores an entry in Redis. -->
+    <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
     <!-- The container and logging contracts Common.Application compiles
          against (§6.2, §13.3). ASP.NET Core's shared framework carries both,
@@ -659,6 +664,10 @@ EF Core minor versions and behave differently under identical code.
          IPipelineBehavior sits on this one. -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <!-- AddOptions<RedisCacheOptions>().Configure (§8.2) — options
+         configuration called directly by Common.Infrastructure, so the
+         assembly is referenced directly, on the register's honesty rule. -->
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
     <!-- The same argument one row down: AddCatalogInfrastructure names
          IConfiguration in its signature (§4.2) and *.Infrastructure is not a
          web project, so it pays for the contract as a package. -->
@@ -668,6 +677,11 @@ EF Core minor versions and behave differently under identical code.
          so it is the one project shape here that pays for hosting as a
          package. -->
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <!-- IHostEnvironment, for RedisKeys' key prefix (§8.3). Rides in the
+         shared framework and in the Hosting meta-package above, but
+         Common.Infrastructure is a library that takes neither — it pays for
+         the contract as a package, like the abstractions rows above. -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Dapper" Version="2.1.66" />
     <!-- SqlConnection itself, for §6.5's IDbConnectionFactory. EF's SqlServer
          provider already carries it transitively at exactly this version;
@@ -748,6 +762,11 @@ EF Core minor versions and behave differently under identical code.
          test resolve from a real container, and the abstractions package the
          source references has none to build — it is contracts only. -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <!-- ConfigurationBuilder and AddInMemoryCollection. AddRedisConnections
+         takes IConfiguration (§8.2), and its tests build a real one rather
+         than substitute the contract — the same argument as the container
+         row above, one abstraction over. -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.0" />
     <!-- The architecture gates of §4.2, which PR-07 turns from a review
          comment into a build failure. A major bump can change which rules
          exist, so it fails loudly rather than quietly stopping to enforce. -->

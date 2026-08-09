@@ -97,10 +97,12 @@ public static class ObservabilityExtensions
                 // nothing here can turn it on. If a bump ever exposes it, it
                 // stays off.
                 .AddEntityFrameworkCoreInstrumentation()
-                // AddRedisInstrumentation still waits for PR-12, on the same
-                // rule. Unlike a meter name, it costs a package reference — a
-                // claim about the dependency graph that nothing here would yet
-                // make true.
+                // AddRedisInstrumentation landed at PR-12 inside
+                // AddRedisConnections (§8.2), not here, and permanently so:
+                // §8.1's connections are keyed services, the parameterless
+                // overload discovers only an unkeyed IConnectionMultiplexer —
+                // in this block it would silently instrument nothing, and it
+                // would hand StackExchange.Redis to hosts that have no Redis.
                 .AddSource("MassTransit"))
             .UseOtlpExporter();
 
