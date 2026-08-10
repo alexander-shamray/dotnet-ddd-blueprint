@@ -83,13 +83,11 @@ unresolved-thread list before declaring that loop owed or exhausted. The
 count read goes through the same helper —
 `bash .claude/scripts/grok-ledger.sh <n> count` — because PR comments are
 unauthenticated state: on a public PR anyone can post a line that imitates
-the ledger, so only the helper's exact shapes count as state, and only from authors whose repository permission
-the helper verifies as write or better — PR-local, not account-local, so a
-resume under another authorised login reads the same count. The last event
-per N wins.
-Step 6 needs no ledger at all: the timeline's `review_requested` events are
-the count, the same events `copilot-request-count.sh` already proves each
-request by. A ledger read or write that fails stops the chain rather than
+the ledger, so only the helper's exact shapes count as state, and only from
+authors whose repository permission the helper verifies as write or better —
+PR-local, not account-local, so a resume under another authorised login
+reads the same count. The last event per N wins.
+A ledger read or write that fails stops the chain rather than
 guessing — a cap that resets when its state goes missing is no cap, the
 same argument as never calling a branch clean because asking failed.
 
