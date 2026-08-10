@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    No project references, deliberately: nothing in the Redis helpers names a
+    domain or an application type, and an unused project reference is a claim
+    about the dependency graph that nothing makes true — the same argument
+    that keeps Common.Application ↛ Common.Domain today. PR-14's outbox is
+    what draws edges here.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Hybrid" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <!-- §13.2's rule: an instrumentation lands with the package it
+         instruments. The Redis one lands here, not in Common.Web — the
+         connections are keyed services, invisible to the parameterless
+         overload, and a host with no Redis must not carry the client. -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" />
+  </ItemGroup>
+
+</Project>

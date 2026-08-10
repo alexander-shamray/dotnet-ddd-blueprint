@@ -5,16 +5,17 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-10 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-12 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
 CI and the licence gate — the building blocks: `Common.Domain`,
-`Common.Application` and `Common.Web`, each with its test project — §14.1's
-Compose infrastructure, with the CI smoke that proves it — and Catalog as the
-first real service: §4.1's five projects, §4.2's gates live, PR-08's
-persistence, PR-09's transaction behaviour, and PR-10's vertical slice with
-its containers. The phase section below carries the current state; this
-sentence only names the shape.
+`Common.Application`, `Common.Infrastructure` and `Common.Web`, each with its
+test project — §14.1's Compose infrastructure, with the CI smoke that proves
+it — Catalog as the first real service: §4.1's five projects, §4.2's gates
+live, PR-08's persistence, PR-09's transaction behaviour, and PR-10's
+vertical slice with its containers — PR-11's scaffold under
+`tools/new-service/` — and PR-12's Redis helpers, §8 as code. The phase
+section below carries the current state; this sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -66,7 +67,7 @@ global.json                      SDK pin (§4.4)
                                  `dotnet tool restore` is the whole setup
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the fifteen projects below
+Platform.slnx                    the seventeen projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate and scaffold tests, then
                                  restore/build/test
@@ -104,6 +105,18 @@ src/BuildingBlocks/
                                  IDomainEventDispatcher — the last an
                                  interface only, everything behind it waits
                                  for PR-14
+  Common.Infrastructure/         §8 as code, one Redis/ folder:
+                                 RedisConnections (keyed names, spelled like
+                                 the configuration keys), AddRedisConnections
+                                 (two keyed multiplexers read eagerly,
+                                 HybridCache over the cache one via
+                                 ConnectionMultiplexerFactory, InstanceName
+                                 from RedisKeys, the Redis tracing
+                                 instrumentation with both connections),
+                                 RedisKeys, and IDistributedLockFactory —
+                                 SET NX PX, mandatory TTL, token-checked
+                                 release. NO project references, deliberately:
+                                 PR-14's outbox is what draws edges here
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails
                                  (which also registers §10.5's
                                  ValidationExceptionHandler — the 400 row's
@@ -153,6 +166,17 @@ tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on;
                                  TestContainer.cs is the one registration path
+  Common.Infrastructure.Tests/   a unit half — RedisKeys shapes, lock guards
+                                 with the failed-release retry, the
+                                 registration surface read off the
+                                 IServiceCollection — and a Testcontainers
+                                 Redis half: lock lifecycle with the
+                                 stale-handle case, the §8.1 ACL grant
+                                 proven live, prefix + TTL asserted on the
+                                 server, tag invalidation, and two span
+                                 tests — one per keyed connection. The third
+                                 Docker-needing project, its own
+                                 IntegrationCollection
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
@@ -169,14 +193,16 @@ tests/
                                  Infrastructure, + the host smoke, the
                                  endpoint contract tests and the
                                  Testcontainers suite over the real migrator
-                                 and EfUnitOfWork — two projects now need
-                                 Docker, one collection each
+                                 and EfUnitOfWork — with Common.Infrastructure
+                                 .Tests above, three projects now need Docker,
+                                 one collection each
 ```
 
 The second block is PR-01's, the third PR-02's through PR-05's, the
 compose tree PR-06's, the Catalog trees PR-07's, their persistence
-PR-08's, the third behaviour with its two ports PR-09's, and the slices,
-endpoints, TestSupport and container half PR-10's.
+PR-08's, the third behaviour with its two ports PR-09's, the slices,
+endpoints, TestSupport and container half PR-10's, and
+`Common.Infrastructure` with its tests PR-12's.
 `Common.Application` does **not** reference `Common.Domain` yet — §4.2
 permits it, but an unused project reference is a claim about the dependency
 graph that nothing yet makes true. PR-08's `IUnitOfWork` did not change that
@@ -249,7 +275,7 @@ blocks built so far are shown above; the tree below is the target shape, and
 its annotations mark what has already landed:
 
 ```
-src/BuildingBlocks/   .Infrastructure, .Contracts (Domain, Application and Web exist)
+src/BuildingBlocks/   .Contracts (the other four exist)
 src/Gateway/          Gateway.Api (YARP)
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
@@ -281,16 +307,51 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds fifteen projects and `dotnet test` runs 211 tests, so
+`Platform.slnx` holds seventeen projects and `dotnet test` runs 241 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 71, and CI has a `scaffold`
-job for them beside `licence-gate`. **PR-12 is next**
-(`feat(common): Redis helpers — HybridCache, key namespaces, distributed
-locks`). PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
+job for them beside `licence-gate`. **PR-13 is next**
+(`feat(template): MassTransit RabbitMQ registration and harness smoke`).
+PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-12 landed §8 as code — `Common.Infrastructure`, the fourth building block,
+one `Redis/` folder — and five of its decisions bind what comes after:
+
+- **`Common.Infrastructure` has no project references, and that is a claim to
+  preserve.** Nothing in the Redis helpers names a domain or application
+  type, so no edge is drawn — the `Common.Application ↛ Common.Domain`
+  argument, one project over. PR-14's outbox is what draws edges here;
+  drawing one earlier is inventing a dependency the code does not have.
+- **The Redis tracing instrumentation lives in `AddRedisConnections`, and can
+  never move to `Common.Web`.** The connections are keyed services; the
+  parameterless `AddRedisInstrumentation()` discovers only an unkeyed
+  `IConnectionMultiplexer`, so in `AddObservability` it would silently
+  instrument nothing — and the package reference would hand
+  `StackExchange.Redis` to hosts with no Redis. §13.2 says this; the sample
+  there deliberately does not show the call.
+- **No service is wired.** Catalog gained no Redis env vars, no readiness
+  checks and no cached query — caching a read before ADR-018's invalidation
+  machinery exists (PR-14) would teach the defect §8.4 exists to prevent.
+  The helpers are proven by their own Testcontainers suite, the same shape
+  as PR-04's dispatcher landing three PRs before its first service. The
+  Redis keys join the Compose file with the PR whose code first reads them.
+- **The key prefix is `ApplicationName` verbatim — no normalisation.** One
+  source shared with §13.2's `service.name`, nothing to drift. §8.3's
+  lowercase examples show a service whose ApplicationName is `catalog`, not
+  a lowering rule. `RedisKeys` has deliberately no `Cache(string)` method:
+  cache keys are prefixed by `InstanceName`, and a full-key builder would
+  double-prefix the moment its result reached `HybridCache`.
+- **`RemoveByTagAsync` works at this pin, verified.** §8.4's invalidation
+  mechanism was proven by the container suite two PRs before its consumer —
+  along with the mandatory TTL on the lock (refused before any I/O), the
+  token-checked release (a stale handle must not delete the next holder's
+  key), and the span tests — one per keyed connection — which force the
+  `TracerProvider` the way a host's startup would because a raw
+  `ServiceProvider` runs no hosted services.
 
 PR-11 landed the scaffold of §4.5 — `tools/new-service/new_service.py`, stdlib
 Python, one command per service — and five of its decisions bind what comes
@@ -433,18 +494,20 @@ after:
   `auto-generated` header that exempts them from the analysers and are left
   **exactly** as the tool wrote them: the snapshot is the input to the next
   `migrations add`, and an edited one produces a wrong migration a PR later.
-- **`dotnet test` needs Docker** — since PR-10 for two projects,
-  `Catalog.Api.Tests` and `Catalog.Application.Tests`, each with its own
-  `IntegrationCollection` and therefore its own container set (§12.4's stated
-  price). See the commands below.
+- **`dotnet test` needs Docker** — since PR-12 for three projects,
+  `Catalog.Api.Tests`, `Catalog.Application.Tests` and
+  `Common.Infrastructure.Tests`, each with its own `IntegrationCollection`
+  and therefore its own container set (§12.4's stated price). See the
+  commands below.
 
-The building blocks are three of five. `Common.Infrastructure` and
-`Common.Contracts` do not exist, so a change that "obviously belongs" in one of
-them is a change that belongs in the PR that creates it (Appendix C), not in a
-project invented early. `Common.Web` now does exist, and the same rule applies
-inside it: it holds §10.4, §10.5, §13.2, §13.4 and §13.5, and nothing else
-until PR-16 adds JWT validation — which is also the one gap inside
-`AddCommonWebDefaults`, three of §13.2's five pieces today.
+The building blocks are four of five. `Common.Contracts` does not exist, so a
+change that "obviously belongs" in it is a change that belongs in the PR that
+creates it (Appendix C, PR-15), not in a project invented early. The same rule
+applies inside the ones that do exist: `Common.Infrastructure` holds §8's
+Redis helpers and nothing else until PR-14's outbox joins it, and `Common.Web`
+holds §10.4, §10.5, §13.2, §13.4 and §13.5, and nothing else until PR-16 adds
+JWT validation — which is also the one gap inside `AddCommonWebDefaults`,
+three of §13.2's five pieces today.
 
 `Common.Application` is the same story one layer down. The pipeline is three
 behaviours of four: **`IdempotencyBehavior` (§8.5) does not exist**, and its

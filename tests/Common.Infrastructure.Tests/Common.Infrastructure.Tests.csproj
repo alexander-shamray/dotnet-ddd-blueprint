@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit v3 test projects are self-executing: the runner is compiled in
+         rather than loaded by a host, so the assembly has to be an Exe. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+    <!-- The lock's guards and call shapes need no server; the container
+         suite below is what needs one. -->
+    <PackageReference Include="NSubstitute" />
+    <!-- The real container: the registration tests resolve through the same
+         AddRedisConnections a service calls, not a second copy of it. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <!-- A real IConfiguration for AddRedisConnections' signature, built
+         in-memory rather than substituted. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Testcontainers.Redis" />
+    <!-- Reads the Redis client spans back out of a real tracer — the §13.2
+         claim that AddRedisConnections instruments its own connections. -->
+    <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BuildingBlocks\Common.Infrastructure\Common.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

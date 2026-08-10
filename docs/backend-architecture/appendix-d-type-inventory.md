@@ -146,8 +146,10 @@ their declaration.
 | `OutboxPublisher` | `IIntegrationEventPublisher` writing `OutboxMessage` rows; resolves `MessageTypeMap` and hands it to `Stage` |
 | `Result`, `Result<T>` | Non-generic `Result` is the void case — there is no `Unit` — and `Result<T>` derives from it, which is what lets `TransactionBehavior` test any command's outcome with one pattern (§6.3). `IsSuccess`/`IsFailure`, `Error`, and the `Success`/`Failure` factories |
 | `CursorPage<T>`, `Cursor` | The pagination envelope and the opaque cursor codec (§6.5) |
-| `AddRedisConnections`, `AddMassTransitMessaging` | Infrastructure registration helpers |
-| `RedisConnections` | Keyed-service names for the cache and coordination connections (§8.1) |
+| `AddRedisConnections`, `AddMassTransitMessaging` | Infrastructure registration helpers. The first is `Common.Infrastructure`'s one entry point, shown abbreviated in §8.2 — connections, cache stack, `RedisKeys`, the lock factory and the Redis tracing instrumentation in one call |
+| `RedisConnections` | Keyed-service names for the cache and coordination connections (§8.1), spelled like the configuration keys they resolve from |
+| `RedisKeys` | §8.3's naming authority: `Lock`, `Idempotency` and `Denylist` return the full `ApplicationName`-prefixed key, and `CacheInstanceName` is the cache half's prefix. Deliberately no `Cache(string)` — the double-prefix hazard §8.3 names |
+| `IDistributedLockFactory`, `IDistributedLock` | §8.1's lock and its held handle: `TryAcquireAsync(name, duration, ct)` returns null under contention, the TTL is mandatory, and disposal is the token-checked release |
 | `BuildInfo` | Assembly version stamped onto OTel resource attributes (§13.2) |
 | `OrderBuilder`, `AddressBuilder`, `CommandBuilder`, `SeedData` | Test data builders (§12.3) |
 | `Poison`, `Healthy`, `LocalRowFor<T>`, `TestClock` | Outbox test builders (§12.4) |
@@ -164,6 +166,7 @@ their declaration.
 | `TestTypeMap` | A `MessageTypeMap` over the contract and test assemblies, built once as a static in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture |
 | `DomainEventSamples` | One sample per stageable domain event, so a new event without one fails §12.4's round-trip rather than being skipped — `ContractSamples`' counterpart for the Local lane |
 | `ConcurrentRequestException` | Thrown when an idempotency key is claimed but unfinished (§8.5) |
+| `InProgressMarker` | The sentinel `TryClaimAsync` writes while a command is in flight; `GetAsync` reads it back as `InProgress` (§8.5) |
 | `InvariantViolationException` | Thrown when a command modifies more than one aggregate root (§6.3, principle 3) |
 | `StockReservationExpired`, `PaymentAuthorisationExpired`, `DespatchExpired`, `StockReleaseExpired` | Saga schedule messages — one per wait, and §9.6 has four (§9.6) |
 | `FlagOrderForReviewHandler` | Writes the `OrderReviews` row; loads no aggregate (§9.6) |

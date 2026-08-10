@@ -7,9 +7,11 @@ namespace Catalog.Infrastructure;
 /// <summary>
 /// The implementation behind §6.5's port, over the RUNTIME identity of §7.1 —
 /// a query has no business on the migrator's connection. Service-local rather
-/// than a building block: <c>Common.Infrastructure</c> does not exist, and
-/// inventing it early is the move CLAUDE.md forbids; when its PR arrives,
-/// moving these lines is that PR's business.
+/// than a building block, still: <c>Common.Infrastructure</c> exists since
+/// PR-12 but takes no project references, and a factory that names
+/// <c>IDbConnectionFactory</c> would draw the <c>Common.Application</c> edge
+/// the Redis helpers deliberately do not have. It moves, if ever, with the
+/// PR whose types need it there.
 /// </summary>
 /// <remarks>
 /// <c>Create</c> only constructs — Dapper opens a closed connection itself,

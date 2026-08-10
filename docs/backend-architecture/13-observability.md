@@ -112,7 +112,6 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
                 o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/health"))
             .AddHttpClientInstrumentation()
             .AddEntityFrameworkCoreInstrumentation()
-            .AddRedisInstrumentation()
             .AddSource("MassTransit"))
         .UseOtlpExporter();
 
@@ -120,16 +119,22 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
 }
 ```
 
-One line above still arrives later than the rest, and it is named here so that
-a reader comparing this block against `Common.Web` does not read a gap as a
-mistake. The rule is that an instrumentation lands with the package it
-instruments — unlike a meter name, which is a string, each costs a package
-reference, and a reference to a library nothing uses is a claim about the
-dependency graph that is not yet true. `AddEntityFrameworkCoreInstrumentation`
-therefore landed at **PR-08**, the PR that gave a service a `DbContext`, and is
-live; `AddRedisInstrumentation` waits for **PR-12**. The authentication block —
-which is in `AddCommonWebDefaults` rather than in the block above — lands at
-**PR-16**, with the scheme that makes its policy mean anything.
+Two pieces of §13.2's telemetry are not in this block, and neither absence is
+a mistake.
+The rule is that an instrumentation lands with the package it instruments —
+unlike a meter name, which is a string, each costs a package reference, and a
+reference to a library nothing uses is a claim about the dependency graph that
+is not yet true. `AddEntityFrameworkCoreInstrumentation` therefore landed at
+**PR-08**, the PR that gave a service a `DbContext`, and is live.
+`AddRedisInstrumentation` landed at **PR-12** — but inside
+`AddRedisConnections` ([§8.2](08-caching-redis.md)), not here, and permanently
+so: §8.1's connections are keyed services, the parameterless overload
+discovers only an unkeyed `IConnectionMultiplexer`, so registered in this
+block it would silently instrument nothing — and it would hand
+`StackExchange.Redis` transitively to every host, including the ones with no
+Redis. The authentication block — which is in `AddCommonWebDefaults` rather
+than in the block above — lands at **PR-16**, with the scheme that makes its
+policy mean anything.
 
 > **The EF Core call takes no options, and the option this block used to pass
 > is gone.** It configured `SetDbStatementForText = true` until PR-08 tried to
