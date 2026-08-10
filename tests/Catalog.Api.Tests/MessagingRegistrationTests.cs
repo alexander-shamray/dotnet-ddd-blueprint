@@ -10,13 +10,17 @@ using Xunit;
 namespace Catalog.Api.Tests;
 
 /// <summary>
-/// The harness smoke of Appendix C's messaging row: publish/consume proven
-/// through the production registration with the transport swapped for
-/// in-memory. <c>AddMassTransitTestHarness</c> replaces an existing
+/// The harness smoke of Appendix C's messaging row, and the row's own split
+/// says which half lives here: "publish/consume proven with the in-memory
+/// harness" is this file, "bus connects" is the container suite's readiness
+/// poll. <c>AddMassTransitTestHarness</c> replaces an existing
 /// <c>AddMassTransit</c> bus with the in-memory transport — verified against
-/// the 8.5.3 source, and the reason these tests can drive
-/// <c>AddMassTransitMessaging</c> itself rather than a parallel registration
-/// that would prove nothing about it.
+/// the 8.5.3 source — which means these tests prove the production helper
+/// COMPOSES (its eager key read runs, its options land, nothing conflicts
+/// with the consumer bindings) and that MassTransit's pipeline delivers.
+/// What the swap deliberately removes is the <c>UsingRabbitMq</c> transport
+/// configuration itself, so that half is asserted where it can be true: in
+/// <c>DatabaseSmokeTests</c>, against a real broker.
 /// </summary>
 /// <remarks>
 /// The message and consumer are test-local on purpose.
@@ -48,7 +52,7 @@ public class MessagingRegistrationTests
     }
 
     [Fact]
-    public async Task Publish_reaches_a_consumer_through_the_production_registration()
+    public async Task Publish_reaches_a_consumer_with_the_transport_swapped_for_in_memory()
     {
         ServiceCollection services = new();
         services.AddMassTransitMessaging(Configuration());
@@ -67,7 +71,8 @@ public class MessagingRegistrationTests
         (await harness.Consumed.Any<ProbeMessage>(m => m.Context.Message.Id == id,
             TestContext.Current.CancellationToken)).ShouldBeTrue(
             "the harness replaced the RabbitMQ transport, so a message that publishes but is never " +
-            "consumed means the production registration did not compose with the consumer bindings");
+            "consumed means the helper's registrations did not compose with the consumer bindings — " +
+            "the transport configuration itself is DatabaseSmokeTests' claim, not this one's");
     }
 
     [Fact]

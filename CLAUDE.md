@@ -350,13 +350,15 @@ consumer on it yet — and five of its decisions bind what comes after:
 - **Usage telemetry is off.** MassTransit 8.5 reports anonymous usage data to
   a vendor endpoint by default; `DisableUsageTelemetry()` is called with the
   argument in the registration — §13.2 owns this platform's telemetry.
-- **The harness smoke drives the production registration.**
-  `AddMassTransitTestHarness` replaces an existing `AddMassTransit` bus with
-  the in-memory transport (verified at the pin), so
-  `MessagingRegistrationTests` proves publish/consume through
-  `AddMassTransitMessaging` itself with a test-local record — no contract
-  invented before `Common.Contracts` (PR-15), no retry policy before the
-  receive endpoints it attaches to (§9.8).
+- **The harness smoke proves composition; the readiness poll proves the
+  transport.** `AddMassTransitTestHarness` replaces an existing
+  `AddMassTransit` bus with the in-memory transport (verified at the pin), so
+  `MessagingRegistrationTests` proves the helper composes and the pipeline
+  delivers — and deliberately not the `UsingRabbitMq` half, which the swap
+  removes and `DatabaseSmokeTests` asserts against a real broker. A
+  test-local record carries the smoke: no contract invented before
+  `Common.Contracts` (PR-15), no retry policy before the receive endpoints
+  it attaches to (§9.8).
 
 PR-12 landed §8 as code — `Common.Infrastructure`, the fourth building block,
 one `Redis/` folder — and five of its decisions bind what comes after:

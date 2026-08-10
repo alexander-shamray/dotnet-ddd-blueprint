@@ -877,9 +877,9 @@ a test project — with everything the service template has accumulated: the
 ([§7.2](07-persistence.md)), `EfUnitOfWork` ([§6.3](06-cqrs.md)), the
 connection factory ([§6.5](06-cqrs.md)), the readiness checks
 ([§13.5](13-observability.md)) — SQL registered by the service, the bus's
-`masstransit-bus` by MassTransit itself — the bus registration of [§9](09-messaging.md),
-whose eager read means a scaffolded host refuses to start without
-`ConnectionStrings:RabbitMq`, the migration job host
+`masstransit-bus` by MassTransit itself — the bus registration of
+[§9](09-messaging.md), whose eager read means a scaffolded host refuses to
+start without `ConnectionStrings:RabbitMq`, the migration job host
 ([§7.4](07-persistence.md)), the `InitialCreate` migration that creates the
 schema, both images ([§15.2](15-cicd-deployment.md)) and §4.2's architecture
 gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
