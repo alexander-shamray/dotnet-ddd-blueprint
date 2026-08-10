@@ -34,8 +34,10 @@ cheaper elsewhere. **Saga coordination** — did the right command go out, in th
 right order, after the right event — is exercised by the in-memory harness in
 §12.5, in milliseconds. The exception is an assertion that something did *not*
 happen, which cannot resolve until the harness gives up waiting and so costs
-the whole inactivity timeout; §12.5's trap prices that, and it is the reason
-these tests are "a few" rather than hundreds. **Contract compatibility** —
+the whole inactivity timeout — once per test, however many negatives it
+asserts. §12.5's traps price that and name the correctness hazard that comes
+with it, and between them they are the reason these tests are "a few" rather
+than hundreds. **Contract compatibility** —
 does the message one service publishes still mean what its consumers expect —
 is a reflection test over the contract assembly, and it is the one thing
 genuinely between services, which is why `Platform.IntegrationTests` exists
@@ -978,8 +980,13 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<ReleaseStock>(m => m.Context.Message.OrderId == orderId))
         .ShouldBeTrue();
 
-    // CancelOrder must not be sent until stock is confirmed released.
-    (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId))
+    // CancelOrder must not be sent until stock is confirmed released. The
+    // caller token is load-bearing and not an optimisation: an unbounded
+    // negative spends the harness's one shared inactivity token, and the
+    // ShouldBeTrue below could then only see what had already arrived. See
+    // the second trap.
+    using CancellationTokenSource notYet = new(TimeSpan.FromMilliseconds(500));
+    (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId, notYet.Token))
         .ShouldBeFalse();
 
     await harness.Bus.Publish(new StockReleased { OrderId = orderId });
@@ -1001,9 +1008,10 @@ public async Task Commands_are_sent_and_events_are_published()
     // would deliver it to every subscriber, and nothing else in the suite
     // would notice.
     //
-    // The shared helper registers the saga and states the inactivity timeout.
-    // The last assertion here is a negative, so it is the one that pays that
-    // timeout in full — see the trap below.
+    // The shared helper registers the saga and states both harness bounds.
+    // The last assertion here is a negative, so it is the one that pays the
+    // inactivity timeout in full — and being last, it spends the shared token
+    // with nothing left to wait after it. See the traps below.
     ITestHarness harness = await StartHarnessAsync();
     var orderId = Guid.CreateVersion7();
 
@@ -1037,20 +1045,28 @@ public async Task Commands_are_sent_and_events_are_published()
 > so which one reported a failure is never a detail of how long the publish
 > took.
 
-> **A matching assertion returns at once; a non-matching one always bills the
-> timeout in full.** That is what makes the number a judgement rather than a
-> constant to copy, because it is the `ShouldBeFalse` assertions that pay for
-> it, once each: the first sample carries one, so its floor is the whole
-> inactivity timeout, and a suite of "a few" saga tests pays that again for
-> every negative it asserts. The synchronous `Select` overload is no escape —
-> it waits on the same token, timed at the pin rather than assumed — but a
-> caller `CancellationToken` is: `Any(filter, ct)` links it, so a
-> `CancelAfter` shortens one assertion, and it returns `false` rather than
-> throwing. Reach for that only where a negative is genuinely cheap to
-> observe; it buys wall-clock by shrinking the window the claim rests on. The
-> registration is the better lever, so the value wants to be the smallest that
-> still absorbs scheduling latency — which is why 10 s here where a
-> composition smoke asserting only positives can afford 30 s.
+> **A matching assertion returns at once; an unmatched one bills the timeout —
+> but only the first one does.** MassTransit shares a single inactivity token
+> across every list on a harness and cancels it for good once inactivity is
+> reached, so a test pays the full wait once however many negatives it
+> asserts, and every later unmatched assertion returns `false` immediately.
+> Measured at the pin: a second negative on a fresh message type came back in
+> 0.0 s where the first took the whole 3 s. That is what prices the value — a
+> saga test with any negative at all has a floor of one inactivity timeout —
+> and why 10 s here, where a composition smoke asserting only positives never
+> pays it and can afford 30 s.
+
+> **The spent token is a correctness trap, not merely a timing one.** Once it
+> is cancelled an assertion can only inspect what has already been recorded:
+> the same probe returned `True` after 0.4 s with no prior negative, and
+> `False` immediately with one. A mid-test `ShouldBeFalse` therefore poisons
+> every assertion after it that has to wait for something to arrive. The first
+> sample bounds its negative with a caller token for exactly that reason —
+> `Any(filter, ct)` links it, `CancelAfter` ends that one assertion, and the
+> shared token survives for the `ShouldBeTrue` after `StockReleased`. A
+> negative that is its test's last assertion, as in the second sample, needs
+> none of this. The synchronous `Select` overload is no escape either way: it
+> waits on the same token.
 
 > **Where the numbers live is the other half, and both samples above assert a
 > negative, so both pay it.** The first states them in the registration it
