@@ -183,8 +183,23 @@ public sealed class ServiceFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        Factory?.Dispose();
-        await _sql.DisposeAsync();
-        await _rabbit.DisposeAsync();
+        // Each teardown runs even when an earlier one throws: a failed
+        // factory or SQL disposal must not leave the broker container
+        // running for the rest of the CI job.
+        try
+        {
+            Factory?.Dispose();
+        }
+        finally
+        {
+            try
+            {
+                await _sql.DisposeAsync();
+            }
+            finally
+            {
+                await _rabbit.DisposeAsync();
+            }
+        }
     }
 }
