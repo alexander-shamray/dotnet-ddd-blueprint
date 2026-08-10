@@ -1,7 +1,7 @@
 ---
 description: Start a correctly named working branch — in its own sibling worktree from a clean main, in place when the tree is dirty or the parent is not writable
 argument-hint: "[what the change does] — omit to derive it from the uncommitted work"
-allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(ls:*)
+allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*)
 ---
 
 Create a branch for: $ARGUMENTS — if empty, derive it from the uncommitted
@@ -147,8 +147,9 @@ not content.
      second `/branch` run that lands somewhere else.
    - **Detached — `git branch --show-current` prints nothing.** There is no
      branch to continue and no `main` to move off, so make one here from
-     `HEAD` with `git checkout -b <name>`, carrying any changes, and say that
-     the workspace is this directory. A `/security-sweep` worktree has exactly
+     `HEAD` with `git-branch-create.sh <name> HEAD`, carrying any changes, and
+     say that the workspace is this directory. A `/security-sweep` worktree has
+     exactly
      this shape, and so does a checkout parked on a tag or a commit; leaving
      the case unnamed would drop it through every other branch of this step.
    - **Already on a branch** — stop and say so. Report the branch, its
@@ -249,9 +250,9 @@ not content.
    | Step 1 said | This step does |
    |---|---|
    | On `main`, clean, in the main checkout with a writable parent | Both halves — fork the worktree, enter it |
-   | On `main` clean, but **already in a linked worktree** (step 0) | `git checkout -b <name> --no-track origin/main` here. The workspace exists; forking a second is what step 0 refused |
-   | On `main` clean, parent not writable | `git checkout -b <name> --no-track origin/main` where you are |
-   | On `main` dirty, or **detached** | `git checkout -b <name>` from `HEAD` — the point is to carry what is in this tree |
+   | On `main` clean, but **already in a linked worktree** (step 0) | `git-branch-create.sh <name> origin/main` here. The workspace exists; forking a second is what step 0 refused |
+   | On `main` clean, parent not writable | `git-branch-create.sh <name> origin/main` where you are |
+   | On `main` dirty, or **detached** | `git-branch-create.sh <name> HEAD` — the point is to carry what is in this tree |
    | Already on a branch | Nothing — step 1 stopped |
 
    **A skipped fork is never a skipped branch.** Every row above except the
@@ -277,11 +278,20 @@ not content.
    command:
 
    ```bash
-   git worktree add --no-track ../<checkout-name>-<slug> -b <name> origin/main
+   bash .claude/scripts/git-worktree-fork.sh ../<checkout-name>-<slug> <name>
    ```
 
-   **`--no-track` is load-bearing, not tidiness.** The start point is a
-   remote-tracking ref, so without it git sets the new branch's upstream to
+   **The helper is the whole command, and it takes two arguments because
+   everything else about it is fixed.** It runs
+   `git worktree add --no-track -b <branch> <path> origin/main` and nothing
+   else — a `Bash(git worktree add:*)` grant would also buy `-B`, which does
+   not create a branch but **resets** an existing one, the operation
+   `.claude/settings.json` denies as `git branch --force` and `-M`. It refuses
+   a branch that already exists, which is what makes the missing `-B` harmless
+   rather than merely unavailable.
+
+   **`--no-track` inside it is load-bearing, not tidiness.** The start point is
+   a remote-tracking ref, so without it git sets the new branch's upstream to
    `origin/main` — "branch '<name>' set up to track 'origin/main'", checked
    rather than assumed. `/pr` then reads `git status -sb`, finds an upstream,
    classifies the branch as *tracking, ahead*, and pushes without `-u`, leaving
@@ -332,17 +342,18 @@ not content.
    running it against an unwritable parent, which printed
    `branch '<name>' set up to track …` and then `fatal: could not create
    leading directories`, leaving the branch in `git branch --list`. A blind
-   `git checkout -b <name>` there fails with *branch already exists*, which
-   would turn a handled fallback into a stop. Both post-failure states are
-   ordinary and each has one command:
+   create there fails with *branch already exists* — `git-branch-create.sh`
+   refuses it on purpose — which would turn a handled fallback into a stop.
+   Both post-failure states are ordinary and each has one command:
 
    | After the failed fork | Take |
    |---|---|
    | `git branch --list <name>` prints it | `bash .claude/scripts/git-switch-existing.sh <name>` — it is already cut from `origin/main` and untracked, which is what the fork asked for |
-   | It prints nothing | `git checkout -b <name> --no-track origin/main` |
+   | It prints nothing | `git-branch-create.sh <name> origin/main` |
 
-   **The switch goes through a helper, and the reason is the one this
-   repository keeps rediscovering.** A `Bash(git switch:*)` grant buys the one
+   **All three git operations in this command go through helpers, and the
+   reason is the one this repository keeps rediscovering.** A
+   `Bash(git switch:*)` grant buys the one
    operation above and also licenses `--discard-changes` and `-C` — discarding
    work and force-moving a branch, both of which `.claude/settings.json` denies
    in their other spellings. Deny rules cannot claw that back, because the
@@ -351,6 +362,17 @@ not content.
    none of it. That is the refspec argument `/pr` already makes about pushes,
    one command over. The helper takes one shape-checked argument, requires the
    branch to exist, and passes no flags to git at all.
+
+   The other two are the same finding in different clothes, and each was
+   confirmed by running it rather than reasoning about it:
+   `git worktree add -B` resets an existing branch, and
+   `git checkout -b <name> -f origin/main` is accepted with the flag *after*
+   the name, discarding tracked modifications on the one path whose whole
+   purpose is carrying them. So `git-worktree-fork.sh` and
+   `git-branch-create.sh` fix their commands the same way — every flag
+   decided in the file, both arguments shape-checked, and creation only, so a
+   name that already exists is refused rather than reset. `git worktree list`
+   stays a raw grant because it reads and nothing else.
 
    The second row spells the base out for the reason the table above gives:
    this path starts from a clean `main`, so it takes the fetched
@@ -372,7 +394,7 @@ not content.
    nothing and it holds the branch.
 
    On the dirty-`main` path of step 1 there is no worktree, and the branch is
-   made in place with `git checkout -b <name>`.
+   made in place with `git-branch-create.sh <name> <base>`.
 
    No upstream is set either way — `/pr` does that on the first push.
 

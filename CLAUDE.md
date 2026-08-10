@@ -1646,17 +1646,25 @@ removes the quiet path, which is the session's own editing tools acting on
 reviewed grants.
 
 **A helper is also the answer when a git grant is wider than the operation it
-buys**, and `git-switch-existing.sh` is the worked example. `/branch` needs to
-switch onto one existing branch after a failed `git worktree add`; a
-`Bash(git switch:*)` grant buys that and also `--discard-changes` and `-C`,
-which are discarding work and force-moving a branch — the two things
-`git reset --hard`, `git clean` and `git branch -D/-M` are denied for. **Deny
-rules cannot claw it back, because the flags combine**: `git switch -fC <name>
-<start>` was run against a throwaway clone and switched, so
-`Bash(git switch -C:*)` matches none of it. That is the refspec argument the
-push rules already make, and the same conclusion follows — the helper takes
-one shape-checked argument, requires the branch to exist, and passes no flags
-to git. Copilot raised it against PR #27.
+buys**, and `/branch` now has three of them: `git-switch-existing.sh`,
+`git-worktree-fork.sh` and `git-branch-create.sh`. Each replaced a raw grant
+that reached past the deny list, and each was confirmed by running the
+offending form rather than reasoning about it:
+
+| Raw grant | What it also bought |
+|---|---|
+| `Bash(git switch:*)` | `--discard-changes` and `-C` — and the flags **combine**, so `git switch -fC <name> <start>` defeats any `Bash(git switch -C:*)` deny |
+| `Bash(git worktree add:*)` | `-B`, which resets an existing branch rather than creating one |
+| `Bash(git checkout -b:*)` | the trailing flag — `git checkout -b <name> -f origin/main` is accepted, discarding tracked modifications |
+
+All three are the operations `git reset --hard`, `git clean` and
+`git branch -D/-M` are denied for, reachable by another spelling. **A prefix
+rule cannot exclude a flag** — the refspec argument the push rules already
+make — so the helpers fix the whole command, shape-check every argument, and
+**create only**, refusing a name that already exists so a reset is not
+reachable by passing one. Copilot raised the first two against PR #27; the
+third was found by grepping for the same shape, which is the rule that says
+one site is never the only site.
 
 **`sandbox/` is on that list for a reason worth keeping.** It arrived guarded
 by nothing, and a review caught it: the Dockerfile is a *build input to the
