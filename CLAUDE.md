@@ -1406,7 +1406,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until a pass leaves no `suggestions.md`, then loop a requested Copilot review and `/review-copilot` until one lands with no new findings |
+| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until a pass leaves no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one lands with no new findings |
 | `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -1451,7 +1451,10 @@ the grant: a cancelled run exits non-zero and leaves `suggestions.md`
 untouched, so a review that never happened cannot report as clean.
 
 `/review-grok` triages whatever file it leaves, and the loop repeats until a
-pass leaves none. The split of ownership matters: Grok's half owns the
+pass leaves none. One exit skips rather than stops: the helper's usage-limit
+preflight (exit 12) hands over to Copilot without a clean Grok pass — reported
+as skipped-on-limits, never as a verdict, and owing Grok a re-entry on a later
+`/ship`. The split of ownership matters: Grok's half owns the
 `suggestions.md` lifecycle — writing it, rechecking it, removing it when
 clean — and the triage half never creates or deletes that file, only fixes
 what it names. Then Copilot: a review is requested through

@@ -144,6 +144,16 @@ anything.
       it. Note in the report that the Grok half was skipped on limits so a later
       `/ship` re-enters it.
 
+      A skip can land mid-cycle: when a recheck is owed after a triage,
+      `suggestions.md` is still on disk, and exit 12 there skips the recheck,
+      not just a fresh pass. Proceed to step 6 all the same — the findings the
+      file records are already triaged and fixed by then, and stalling the
+      chain on the verification the limits refuse is the failure this exit
+      exists to avoid — but the file stays where it is as the record of the
+      unfinished half, the report says a recheck is owed rather than merely
+      skipped, and every commit while it sits there stays scoped, exactly as
+      the resume table requires.
+
       Residual, stated in the script and in `CLAUDE.md`: **egress is not
       restricted**. The container reaches the network, and confining it to
       `api.x.ai` needs an allow-list proxy Docker cannot supply alone. The
@@ -180,10 +190,11 @@ anything.
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
    - **Two consecutive clean rounds end it; twelve rounds is the ceiling.**
-     Two clauses, and the first is deliberately *two*. Clean means a requested
-     review that lands with nothing at all — no inline comments, no suppressed
-     ones, no unresolved threads. One clean round is not convergence: PR-11's
-     round eight was clean and every round after it found more, so a rule
+     Two clauses, and the first is deliberately *two*. Clean here means a pass
+     that leaves no `suggestions.md` — a full review with nothing to write, or
+     a recheck that removes the file; step 6 states its own clean in its own
+     vocabulary. One clean round is not convergence: PR-11's Copilot round
+     eight was clean and every round after it found more, so a rule
      ending on the first clean pass would have stopped at exactly the round
      that proves it should not. Requiring two also subsumes "never end on a
      round that produced a fix", since a round with findings is not clean and
