@@ -1,7 +1,7 @@
 ---
 description: Start a correctly named working branch — in its own sibling worktree from a clean main, in place when the tree is dirty or the parent is not writable
 argument-hint: "[what the change does] — omit to derive it from the uncommitted work"
-allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*)
+allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*)
 ---
 
 Create a branch for: $ARGUMENTS — if empty, derive it from the uncommitted
@@ -94,18 +94,18 @@ not content.
    directories and one branch's work split across them. Report its path and
    its branch.
 
-   **What this step switches off is the `git worktree add`, and nothing
-   else — the branch may still have to be created.** A linked worktree sitting
-   on `main`, or a detached one, needs a branch exactly as the main checkout
-   would; it just needs it *here*, with `git checkout -b`, rather than in a new
-   directory. Step 5 says which half it is skipping for that reason.
+   **What this step switches off is the `git worktree add`, and nothing else.**
    Carry on into step 1 and let it read the branch and the tree as usual: a
    linked worktree says where the session is, never that the branch under it is
    the one this change wants. Entering `/branch` from a previous PR's worktree
    is the case that matters, and stopping here would silently adopt that
    branch — where step 1's **already on a branch** case stops and asks, which
-   is exactly the guard wanted. A detached worktree reaches the same question
-   with no branch to name.
+   is exactly the guard wanted.
+
+   The branch may also still have to be *created*: a linked worktree sitting on
+   `main`, or a detached one, needs one exactly as the main checkout would, and
+   simply needs it here rather than in a new directory. Step 5's table says
+   which half each case skips.
 1. **Read the current state.** `git branch --show-current` and
    `git status --short`. Four cases, and the first question is whether that
    first command printed anything at all:
@@ -203,11 +203,17 @@ not content.
 4. **Check the name and the directory are both free** — `git branch --list`,
    `git branch -a` and `git worktree list`. A name that already exists locally
    or on the remote means the work may already be underway; say so rather than
-   picking a variant. The same goes for the sibling directory: an existing
-   `../<checkout-name>-<slug>` is either a worktree this repo already knows
-   about — in which case it is the workspace and step 0's answer applies — or
-   something else entirely, which is a question for the user and not a name to
-   dodge.
+   picking a variant. **An existing `../<checkout-name>-<slug>` stops this
+   command, whatever it is** — a registered worktree of this repository, or
+   something unrelated that happens to sit there. Report what it is and ask.
+
+   It is tempting to read a registered worktree as "then that is the
+   workspace", and that is wrong: step 0 answers for the directory the session
+   is **inside**, and this is a different directory. The slug is one or two
+   words, so a previous branch can easily own it, and adopting it would either
+   take an unrelated branch as this change's or hand step 5 an occupied path.
+   Two directories with a claim to the same slug is a question, not a
+   collision to resolve by guessing.
 5. **Create the workspace, then move into it.** This step has two halves, and
    three of step 1's four cases skip the first of them:
 
@@ -228,8 +234,17 @@ not content.
    command:
 
    ```bash
-   git worktree add ../<checkout-name>-<slug> -b <name> origin/main
+   git worktree add --no-track ../<checkout-name>-<slug> -b <name> origin/main
    ```
+
+   **`--no-track` is load-bearing, not tidiness.** The start point is a
+   remote-tracking ref, so without it git sets the new branch's upstream to
+   `origin/main` — "branch '<name>' set up to track 'origin/main'", checked
+   rather than assumed. `/pr` then reads `git status -sb`, finds an upstream,
+   classifies the branch as *tracking, ahead*, and pushes without `-u`, leaving
+   the PR branch pointed at `origin/main` for every later status and resume
+   read. With `--no-track` there is no upstream, `/pr` takes its **no upstream**
+   row, and `git push -u origin <branch>` sets the right one.
 
    `origin/main` is the base rather than `HEAD`, for the reason step 1 fetched:
    local `main` here is whatever it was when it was last pulled, and
@@ -249,9 +264,26 @@ not content.
    layout has no `..` to write into — the case `/security-sweep` names — and
    a workspace somewhere unrelated to the checkout would be worse than none: it
    is a directory the user has to be told about and return to, where the
-   in-place branch is where they already are. So report the failure, say the
-   sibling could not be created, and fall through to `git checkout -b <name>`
-   exactly as the dirty-`main` path does. Both no-worktree states then look the
+   in-place branch is where they already are. So report the failure and say the
+   sibling could not be created.
+
+   **Then check whether the branch survived, because it usually does.**
+   `git worktree add -b` creates the branch *before* it creates the directory,
+   so a failure at the directory leaves the branch behind — verified by
+   running it against an unwritable parent, which printed
+   `branch '<name>' set up to track …` and then `fatal: could not create
+   leading directories`, leaving the branch in `git branch --list`. A blind
+   `git checkout -b <name>` there fails with *branch already exists*, which
+   would turn a handled fallback into a stop. Both post-failure states are
+   ordinary and each has one command:
+
+   | After the failed fork | Take |
+   |---|---|
+   | `git branch --list <name>` prints it | `git switch <name>` |
+   | It prints nothing | `git checkout -b <name>` |
+
+   Either way the run continues on the branch, in place, exactly as the
+   dirty-`main` path does. Both no-worktree states then look the
    same to everything downstream, and there is only one of them to describe —
    **including step 1's consequence, which is this path's too**: the branch
    forgoes the worktree for good, and the manual attachment stated there is the
