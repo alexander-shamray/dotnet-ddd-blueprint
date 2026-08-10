@@ -24,11 +24,11 @@
 #
 # `reserve` is an election, not just a write. Two resumed runs can read the
 # same count and claim the same slot; posting is not atomic, so the claim is
-# settled after the fact: the earliest reservation comment for the slot wins,
-# and a later claimant exits 4 without running anything — it re-reads the
-# count and reserves the next slot. The losing comment stays on the PR;
-# `count` folds duplicates for a slot into one spend, so the noise costs
-# nothing.
+# settled after the fact: the first reservation posted after the slot's most
+# recent release wins — first-ever would refuse a released slot forever —
+# and a later claimant exits 4 without running anything, re-reads the count
+# and reserves the next slot. The losing comment stays on the PR; `count`
+# folds duplicates for a slot into one spend, so the noise costs nothing.
 set -euo pipefail
 
 usage() {
@@ -109,13 +109,21 @@ mine="${url##*issuecomment-}"
   { echo "posted, but could not read the comment id back from: $url" >&2; exit 3; }
 
 if [ "$op" = "reserve" ]; then
-  # The election. Earliest reservation for this slot wins, either mode; ids
-  # are assigned in posting order, so the smallest id is the earliest claim.
-  earliest=$(ledger_rows |
-    awk -F'\t' -v slot="Grok check $n/12 — reserved " '
-      index($2, slot) == 1 { print $1; exit }')
-  if [ "$earliest" != "$mine" ]; then
-    echo "slot $n was reserved first by comment $earliest — this claim lost; re-read the count and reserve the next slot" >&2
+  # The election. A slot's winner is the first reservation posted after its
+  # most recent release — not the first ever: a released slot is legitimately
+  # re-spent, and an election that kept honouring the dead claim would refuse
+  # the slot forever while count kept naming it as next. Rows arrive in
+  # posting order, so a release resets the candidate and the first
+  # reservation after it takes the slot; later claims lose.
+  winner=$(ledger_rows |
+    awk -F'\t' \
+      -v r="Grok check $n/12 — reserved " \
+      -v x="Grok check $n/12 — released" '
+      index($2, x) == 1 { cand = "" }
+      index($2, r) == 1 && cand == "" { cand = $1 }
+      END { print cand }')
+  if [ "$winner" != "$mine" ]; then
+    echo "slot $n was claimed first by comment $winner — this claim lost; re-read the count and reserve the next slot" >&2
     exit 4
   fi
 fi

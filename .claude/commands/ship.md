@@ -242,8 +242,9 @@ same argument as never calling a branch clean because asking failed.
      so the helper settles it after posting — the earliest comment for the
      slot wins, and a losing claim exits 4 having spent nothing, which means
      re-read the count and reserve the next slot. The two orders fail in
-     opposite directions and only one is safe — written after, an interrupted run has
-     spent the check and left no record, and the resumed run spends a
+     opposite directions and only one is safe — written after, an
+     interrupted run has spent the check and left no record, and the
+     resumed run spends a
      thirteenth; written before, the worst case is a reservation for a check
      that never ran, which wastes one of the twelve and never exceeds it.
      Exit 12 is the one outcome that posts a second line —
@@ -252,9 +253,8 @@ same argument as never calling a branch clean because asking failed.
      reads the count with `grok-ledger.sh <n> count`, which accepts only the
      ledger's own line shapes from the ledger's own login and counts an
      unreleased reservation as spent. The ledger goes through its own fixed
-     helper for
-     the same reason the Copilot request does: a `Bash(gh pr comment:*)`
-     grant would also license `--edit-last`, `--delete-last` and `--repo` —
+     helper for the same reason the Copilot request does: a
+     `Bash(gh pr comment:*)` grant would also license `--edit-last`, `--delete-last` and `--repo` —
      editing history and writing across repositories — where the helper can
      post exactly the two lines above to a PR of this repository, and is
      edit-denied to the session that invokes it. Keep the running count in
