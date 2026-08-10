@@ -258,8 +258,9 @@ grants now go through fixed helpers — `git-worktree-detach.sh` and
 `git worktree add -B` resets an existing branch, and `git worktree remove -f`
 defeats the refusal this command's own teardown relies on as its guard. The
 helpers validate the path, and no caller-controlled flag reaches git. What each
-refuses differs and is worth naming rather than averaging: `git-worktree-drop.sh`
-passes no flags at all and refuses the main worktree and any path this
-repository has not registered, while `git-worktree-detach.sh` embeds `--detach`
+refuses differs and is worth naming rather than averaging:
+`git-worktree-drop.sh` passes no flags at all and refuses the main worktree and
+any path this repository has not registered, while
+`git-worktree-detach.sh` embeds `--detach`
 by design and requires an empty directory and a resolved 40-character sha.
 `git worktree list` stays a raw grant; it reads.
