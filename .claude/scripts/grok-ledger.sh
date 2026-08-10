@@ -17,10 +17,15 @@
 # to jam the cap shut, or a released line to hold it open, so a reader that
 # greps arbitrary comments is counting an attacker's arithmetic. `count`
 # accepts only whole bodies matching the two exact shapes this file writes,
-# only from the account gh is authenticated as — writer and reader are the
-# same login by construction — and takes the last event per N, so a released
-# slot can be legitimately re-spent and a stale release cannot hide a later
-# one.
+# and only from authors whose repository permission is verified as write or
+# better — not "the current login", which made the ledger account-local: a
+# resumed run under another authorised account would have read zero and
+# re-armed the cap. Verification goes through the collaborators API once per
+# author; a 404 is an untrusted author and their rows are not state, while
+# any other verification failure stops the helper, because a cap whose trust
+# check silently drops rows is a cap that re-arms on a network error. The
+# fold takes the last event per N, so a released slot can be legitimately
+# re-spent and a stale release cannot hide a later one.
 #
 # `reserve` is an election, not just a write. Two resumed runs can read the
 # same count and claim the same slot; posting is not atomic, so the claim is
@@ -47,8 +52,8 @@ mode="${4:-}"
 # ledger's whole vocabulary: twelve checks, so 1..12 and nothing else.
 [[ "$pr" =~ ^[0-9]+$ ]] || usage
 
-# One fixed read, shared by count and the election: whole comment bodies by
-# the authenticated login that match a ledger shape, oldest first (the REST
+# One fixed read, shared by count and the election: whole comment bodies that
+# match a ledger shape, by write-verified authors, oldest first (the REST
 # endpoint returns issue comments in posting order). Shape filtering happens
 # on the whole body in jq — anchored test(), no multiline flag — so a
 # ledger-looking line buried inside a longer comment is not state, and every
@@ -56,13 +61,32 @@ mode="${4:-}"
 # jq string spends one level on its own escaping: \\( reaches the regex
 # engine as \(, where a bare \( would be jq's interpolation syntax.
 ledger_rows() {
-  local me
-  me=$(gh api user --jq .login)
-  [ -n "$me" ] || { echo "cannot resolve the authenticated gh login" >&2; exit 3; }
+  local id login body verdict perm out
+  declare -A seen=()
   gh api "repos/{owner}/{repo}/issues/$pr/comments" --paginate \
-    --jq '.[] | select(.user.login == "'"$me"'")
+    --jq '.[]
       | select(.body | test("^Grok check ([1-9]|1[0-2])/12 — (reserved \\((full|recheck)\\)|released: skipped on limits)$"))
-      | "\(.id)\t\(.body)"'
+      | "\(.id)\t\(.user.login)\t\(.body)"' |
+  while IFS=$'\t' read -r id login body; do
+    verdict="${seen[$login]:-}"
+    if [ -z "$verdict" ]; then
+      if out=$(gh api "repos/{owner}/{repo}/collaborators/$login/permission" \
+                 --jq .permission 2>&1); then
+        case "$out" in
+          admin|maintain|write) verdict=trusted ;;
+          *) verdict=untrusted ;;
+        esac
+      elif grep -q "HTTP 404" <<<"$out"; then
+        verdict=untrusted
+      else
+        echo "cannot verify $login's repository permission: $out" >&2
+        exit 3
+      fi
+      seen[$login]=$verdict
+    fi
+    [ "$verdict" = trusted ] || continue
+    printf '%s\t%s\n' "$id" "$body"
+  done
 }
 
 if [ "$op" = "count" ]; then

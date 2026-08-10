@@ -160,14 +160,21 @@ if [ -n "${XAI_API_KEY:-}" ] &&
   mounts+=(--env XAI_API_KEY)
 else
   # A key that answers with a limit signal is authenticated but out of window,
-  # and the two need different exits. With OAuth files present, fall through:
-  # the session may sit on a team whose window is open, and the preflight
-  # below judges whatever auth was actually selected. With no fallback,
+  # and the two need different exits. With a usable OAuth fallback, fall
+  # through: the session may sit on a team whose window is open, and the
+  # preflight below judges whatever auth was actually selected. Usable means
+  # all three session files — auth.json alone with agent_id or config.toml
+  # missing exits 8 below before the preflight ever runs, so a partial
+  # session must not swallow the limit signal. With no usable fallback,
   # exit 8's "cannot authenticate" is the wrong class — authenticating is not
   # the problem — so this is the preflight's skip, issued one step earlier.
-  if [ -n "${XAI_API_KEY:-}" ] && [ ! -f "$HOME/.grok/auth.json" ] &&
+  oauth_ready=1
+  for f in auth.json agent_id config.toml; do
+    [ -f "$HOME/.grok/$f" ] || oauth_ready=0
+  done
+  if [ -n "${XAI_API_KEY:-}" ] && [ "$oauth_ready" = 0 ] &&
      grep -qiE "$limit_re" <<<"$key_probe"; then
-    echo "grok is out of usage limits (API key, no OAuth fallback) — skipping this review, not failing it:" >&2
+    echo "grok is out of usage limits (API key, no usable OAuth fallback) — skipping this review, not failing it:" >&2
     grep -ioE "$limit_re" <<<"$key_probe" | head -1 >&2
     exit 12
   fi

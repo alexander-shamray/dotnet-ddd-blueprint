@@ -254,7 +254,8 @@ same argument as never calling a branch clean because asking failed.
      ledger's own line shapes from the ledger's own login and counts an
      unreleased reservation as spent. The ledger goes through its own fixed
      helper for the same reason the Copilot request does: a
-     `Bash(gh pr comment:*)` grant would also license `--edit-last`, `--delete-last` and `--repo` —
+     `Bash(gh pr comment:*)` grant would also license `--edit-last`,
+     `--delete-last` and `--repo` —
      editing history and writing across repositories — where the helper can
      post exactly the two lines above to a PR of this repository, and is
      edit-denied to the session that invokes it. Keep the running count in
