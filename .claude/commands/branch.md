@@ -147,7 +147,8 @@ not content.
      second `/branch` run that lands somewhere else.
    - **Detached — `git branch --show-current` prints nothing.** There is no
      branch to continue and no `main` to move off, so make one here from
-     `HEAD` with `git-branch-create.sh <name> HEAD`, carrying any changes, and
+     `HEAD` with `bash .claude/scripts/git-branch-create.sh <name> HEAD`,
+     carrying any changes, and
      say that the workspace is this directory. A `/security-sweep` worktree has
      exactly
      this shape, and so does a checkout parked on a tag or a commit; leaving
@@ -250,9 +251,9 @@ not content.
    | Step 1 said | This step does |
    |---|---|
    | On `main`, clean, in the main checkout with a writable parent | Both halves — fork the worktree, enter it |
-   | On `main` clean, but **already in a linked worktree** (step 0) | `git-branch-create.sh <name> origin/main` here. The workspace exists; forking a second is what step 0 refused |
-   | On `main` clean, parent not writable | `git-branch-create.sh <name> origin/main` where you are |
-   | On `main` dirty, or **detached** | `git-branch-create.sh <name> HEAD` — the point is to carry what is in this tree |
+   | On `main` clean, but **already in a linked worktree** (step 0) | `bash .claude/scripts/git-branch-create.sh <name> origin/main` here. The workspace exists; forking a second is what step 0 refused |
+   | On `main` clean, parent not writable | `bash .claude/scripts/git-branch-create.sh <name> origin/main` where you are |
+   | On `main` dirty, or **detached** | `bash .claude/scripts/git-branch-create.sh <name> HEAD` — the point is to carry what is in this tree |
    | Already on a branch | Nothing — step 1 stopped |
 
    **A skipped fork is never a skipped branch.** Every row above except the
@@ -349,7 +350,7 @@ not content.
    | After the failed fork | Take |
    |---|---|
    | `git branch --list <name>` prints it | `bash .claude/scripts/git-switch-existing.sh <name>` — it is already cut from `origin/main` and untracked, which is what the fork asked for |
-   | It prints nothing | `git-branch-create.sh <name> origin/main` |
+   | It prints nothing | `bash .claude/scripts/git-branch-create.sh <name> origin/main` |
 
    **All three git operations in this command go through helpers, and the
    reason is the one this repository keeps rediscovering.** A
@@ -394,7 +395,8 @@ not content.
    nothing and it holds the branch.
 
    On the dirty-`main` path of step 1 there is no worktree, and the branch is
-   made in place with `git-branch-create.sh <name> <base>`.
+   made in place with
+   `bash .claude/scripts/git-branch-create.sh <name> <base>`.
 
    No upstream is set either way — `/pr` does that on the first push.
 

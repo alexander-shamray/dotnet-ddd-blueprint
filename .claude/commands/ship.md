@@ -126,15 +126,31 @@ step that only wants to look. An unresolved thread from an earlier round is
 exactly the state a fresh clean review never repeats, and it is the one the
 oid cannot see.
 
-**The two reads are scoped differently, and getting that backwards makes
-all-resolved unreachable.** `pr-review-comments.sh` returns *every* inline
-comment the PR has ever carried, replies included — so on any PR whose earlier
-rounds found something, its output is non-empty forever and a resume reading it
-whole would never see a clean review again. Join it to the candidate: each
-comment carries `pull_request_review_id`, and the only ones that count are
-those matching the review being judged. **Threads are the opposite and stay
-global** — an unresolved thread from round three is still owed at round nine,
-which is the entire reason that signal exists.
+**The two reads are scoped differently, and getting that backwards fails in
+both directions.** `pr-review-comments.sh` returns *every* inline comment the
+PR has ever carried, replies included — so on any PR whose earlier rounds found
+something, its output is non-empty forever and a resume reading it whole would
+never see a clean review again. It has to be joined to the candidate review.
+**Threads are the opposite and stay global**: an unresolved thread from round
+three is still owed at round nine, which is the entire reason that signal
+exists.
+
+**Join on the timestamp, not on a review id — the two sides do not share
+one.** `gh pr view --json reviews` reports a GraphQL node id
+(`PRR_kwDOTuTjXM8AAAABI_IalQ`) and the REST helper reports a numeric
+`pull_request_review_id` (`4898036373`). Comparing them matches **nothing**,
+which does not merely fail — it drops every comment and reports a review full
+of findings as clean. That is the one direction this check may never fail in,
+and it is the same GraphQL-versus-REST split the reviewer's own login already
+has two paragraphs above.
+
+What both sides do carry is the time, and they agree to the second: a review's
+`submittedAt` and its comments' `created_at` are the same instant, because the
+comments are created by the submission. So the candidate's findings are the
+comments authored by `Copilot`, with **no** `in_reply_to_id` — a reply is a
+triage answer, not a finding — and `created_at` no earlier than the candidate's
+`submittedAt`. Nothing later than the last review exists, so that set is
+exactly its own.
 
 **Each loop's check count lives on the PR itself, where any resumed run can
 read it.** Step 5's checks are ledgered as PR comments — a reservation
