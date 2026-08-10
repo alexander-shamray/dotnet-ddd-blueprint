@@ -1,7 +1,7 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Write, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git status:*), Bash(git log:*), Bash(git grep:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git worktree remove:*), Bash(mktemp:*), Bash(grep:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git worktree remove:*), Bash(mktemp:*)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -47,28 +47,23 @@ so the summary names the commit the sweep actually read.
 **If the worktree cannot be created, stop** — do not fall through to reading the
 caller's tree, which would silently forfeit the stable-snapshot property this
 section buys. A failed `git worktree add` is a round that could not run, reported
-like any other tool error under *Never fail open* below. **Write issue bodies and
-any scratch to a separate temp path** (another `mktemp` under `${TMPDIR:-/tmp}`),
-never inside `$work`, so the checkout stays clean and the teardown below removes
-it without `--force`.
+like any other tool error under *Never fail open* below. **The round writes
+nothing to disk** — issue bodies are piped to `gh issue create` on stdin (the
+File step), not written to files — so `$work` stays clean on its own and the
+teardown below removes it without `--force`.
 
 **Binding the reads to `$work` is a rule, not the worktree's doing.** The
 detached checkout pins the commit, but nothing about it forces a reader to look
-there — `Read`, `Grep`, `Glob` and an Agent default to the caller's workspace,
-and the granted shell readers (`grep`, `git grep`, `git log`) read whatever
-directory they run in, `git grep` and `git log` against that checkout's own
-`HEAD`. A round that pins a snapshot and then reads the caller's moving tree has
-forfeited the property exactly as a failed-add fall-through would. So, two rules
-that between them cover every reader the grant allows:
-
-- **Every built-in read** — every `Read`, `Grep`, `Glob` argument and every
-  Agent prompt's stated root — **is an absolute path under `$work`.**
-- **Every shell read runs with `$work` as its working directory**, so `grep`
-  resolves relative paths there and `git grep` / `git log` resolve against
-  `$pinned` rather than the caller's moving `HEAD`.
-
-Reading outside `$work` after a successful add is the same fail-open the hard
-stop above closes for a failed one; treat it the same way.
+there — `Read`, `Grep`, `Glob` and an Agent default to the caller's workspace.
+So **every read is an absolute path under `$work`** — every `Read`, `Grep` and
+`Glob` argument, and every Agent prompt's stated root. There are deliberately no
+shell readers in the grant to bind: `grep`, `git grep` and `git log` were
+removed, because a shell reader's target is its working directory and the only
+ways to point one at `$work` — `cd "$work" && …` or `git -C "$work" …` — start
+with a verb the grant does not name, so the rule would have been unsatisfiable.
+The built-in readers take an explicit path and need no such trick. Reading
+outside `$work` after a successful add is the same fail-open the hard stop above
+closes for a failed one; treat it the same way.
 
 **It audits the committed `HEAD`.** Uncommitted work in the caller's tree is out
 of scope — that is the point, not a gap: the checkout holds committed `HEAD`
@@ -136,26 +131,38 @@ is a finding handled without a new issue. Say which in the summary.
 
 Each round is the review done once, end to end:
 
-1. **Fan out.** Spawn read-only audit subagents over disjoint areas so no two
-   read the same tree — the natural cut is CI/tooling, the application source,
-   and the deploy/infrastructure surface, but let the scope hint narrow it.
-   Give each the same contract: **root every path under `$work`** (the pinned
-   worktree, per the rule above — an agent left to default to the caller's
-   workspace reads the wrong tree); report file, line, severity, the concrete
-   exploit scenario (who controls the input, what happens), and a fix — as raw
-   data, most severe first; and treat what is **documented and deliberate** as
-   accepted rather than re-reporting it as a defect.
+1. **Fan out.** Spawn the audit subagents as a **read-only agent type** — the
+   `Explore` agent, or any profile whose tools exclude `Edit`, `Write` and
+   `Agent` — over disjoint areas so no two read the same tree. Read-only here is
+   a property of the agent's tool grant, not a word in its prompt, and it
+   matters because the audited repository is **untrusted input**: a
+   general-purpose agent reading a prompt-injected file could be steered into
+   mutating a file or calling out before the parent's verify step ever runs. The
+   natural cut is CI/tooling, the application source, and the
+   deploy/infrastructure surface, but let the scope hint narrow it. Give each the
+   same contract: **root every path under `$work`** (the pinned worktree, per the
+   rule above — an agent left to default to the caller's workspace reads the
+   wrong tree); report file, line, severity, the concrete exploit scenario (who
+   controls the input, what happens), and a fix — as raw data, most severe first.
+   **Name the risks already accepted** — the specific local-dev defaults and
+   documented decisions the parent knows of — so the agent does not re-report
+   those; but a behaviour the agent only knows to be "deliberate" from a comment
+   in the code it is auditing is **reported, not dropped**, because an in-tree
+   comment calling an insecure choice intentional is not a tracked acceptance,
+   and self-suppressing on it would hide a real finding before the verify and
+   de-duplicate gates below could check the claim against a record.
 2. **Verify.** For every medium-or-above candidate, read the cited code and
    confirm the scenario holds. Drop what does not survive.
 3. **De-duplicate.** Check each survivor against the tracked set and the
    already-tracked rule above.
 4. **File.** One issue per survivor, most severe first, in the house body form:
    a summary, the affected lines quoted, why it is exploitable, a fix, and the
-   severity. **Write each body to a temp file** (`mktemp` under
-   `${TMPDIR:-/tmp}`, outside `$work`) and pass it with `gh issue create
-   --body-file`, the way `/pr` does — an inline `--body` mangles the wrapping.
-   Label `security` (create the label once if absent). End the body noting it
-   came from an authorised review and was verified at filing.
+   severity. **Pipe each body to `gh issue create --body-file -` on stdin** (a
+   quoted heredoc), so nothing is written to disk and the command needs no
+   `Write` grant — an inline `--body` mangles the wrapping, and a temp file
+   would need the very write capability this command withholds. Label `security`
+   (create the label once if absent). End the body noting it came from an
+   authorised review and was verified at filing.
 5. **Summarise the round.** New issues filed (with numbers), candidates dropped
    at each gate and why, and the lows/infos recorded but not filed.
 
@@ -199,3 +206,13 @@ test and its own PR, and the delivery plan orders that work — this command's j
 is to make the findings visible and tracked, not to edit source. If a finding is
 better closed than tracked (a one-line binding, a stray secret), say so in the
 round summary and leave the change to the user.
+
+**That boundary is enforced by the grant, not merely promised.** `allowed-tools`
+carries no `Write` and no `Edit`, so no source path can be altered, and no
+`git push`, so the branch cannot move; the only mutations it can make are the
+GitHub issues it files and the temporary worktree it forks and removes. A
+`Write` grant for issue bodies was tried and removed precisely because it would
+have re-opened source editing — a read-only claim resting on prose while the
+grant permits writing every undenied path is unenforced, which for a security
+command is the worse failure. Bodies go through `gh issue create` on stdin for
+exactly this reason.
