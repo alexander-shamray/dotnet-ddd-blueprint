@@ -140,7 +140,7 @@ anything.
       reporting the round as skipped rather than clean or failed — a review the
       limits will not allow did not run, and neither a clean verdict nor a stop
       may be minted from it. It is the one non-zero exit that does not halt the
-      chain; every other (2, 3, 4, 5, 6, 7) is the loop not having run and stops
+      chain; every other non-zero exit is the loop not having run and stops
       it. Note in the report that the Grok half was skipped on limits so a later
       `/ship` re-enters it.
 
@@ -193,16 +193,18 @@ anything.
      that the loop ended on its ceiling rather than on convergence, because
      those are different states and only one of them is evidence.
 
-     **The twelve is a count of Grok checks per PR, not per session.** Every
+     **Step 5's twelve is a count of Grok checks per PR, not per session** —
+     this loop and step 6 each carry a twelve of their own. Every
      `grok-review.sh` invocation is one check — a full review and a recheck
-     count the same — and the ceiling is **no more than twelve of them against
-     one PR**, carried across resumed `/ship` runs rather than reset each time
-     the chain re-enters. A skip on limits (exit 12) is not a check and does
-     not count; a review that ran and reported does. Track the running count in
-     the report so a resumed run knows how many remain, and when the twelfth is
-     spent, stop and say the PR reached its Grok ceiling.
+     count the same — and this loop's ceiling is **no more than twelve of them
+     against one PR**, carried across resumed `/ship` runs rather than reset
+     each time the chain re-enters. A skip on limits (exit 12) is not a check
+     and does not count; a review that ran and reported does. Track the running
+     count in the report so a resumed run knows how many remain, and when the
+     twelfth is spent, stop and say the PR reached its Grok ceiling.
 
-     The ceiling was three, and three was wrong. By its seventh Copilot round
+     The ceiling — then one number shared by both loops, as its size still
+     is — was three, and three was wrong. By its seventh Copilot round
      PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
      and rounds four through seven caught a documented-but-unenforced
      constraint, an assertion that could not fail in one direction, and a
@@ -217,11 +219,13 @@ anything.
    the command not found — is reported as the loop not having run, never
    silently skipped and never substituted with a self-review. The exit-12
    limits skip above is the one deliberate exception, and it is not silent: it
-   is reported as skipped-on-limits and moves to step 6, where "fails outright"
-   mints nothing and stops the chain.
+   is reported as skipped-on-limits and proceeds to step 6. Every other
+   outright failure mints nothing and stops the chain.
 
-6. **The Copilot loop.** Once the Grok loop ends clean, hand the branch to the
-   second reviewer and alternate the same way:
+6. **The Copilot loop.** Once the Grok loop ends clean — or was reported
+   skipped-on-limits this run, which hands over without being evidence of
+   Grok convergence — hand the branch to the second reviewer and alternate
+   the same way:
 
    1. **Request GitHub's Copilot review** on the PR:
 
@@ -317,13 +321,16 @@ anything.
    The same stopping condition as step 5, in this loop's vocabulary: an
    **`Ask`** thread — left open by `/review-copilot` by design — stops the
    loop; otherwise it runs until **two consecutive** requested reviews land
-   with nothing at all, to a ceiling of twelve rounds. A request that
+   with nothing at all, to this loop's own ceiling of twelve requested-review
+   rounds per PR, counted across resumed runs the way step 5 counts its
+   checks. A request that
    registers no review inside a reasonable wait is reported as the loop not
    having finished, never marked clean by timeout.
 
-   **This is the loop the twelve is for.** Copilot's findings arrive in the
-   suppressed block long after the inline ones dry up, and they do not taper
-   the way a disagreement does: on PR-11 rounds four, five and six each posted
+   **This is the loop that earns a ceiling that size.** Copilot's findings
+   arrive in the suppressed block long after the inline ones dry up, and they
+   do not taper the way a disagreement does: on PR-11 rounds four, five and
+   six each posted
    "generated no new comments" above a suppressed finding that was worth
    fixing. Do not read a clean *inline* verdict as convergence, and do not
    stop early because the counts look small — a round costs minutes and the

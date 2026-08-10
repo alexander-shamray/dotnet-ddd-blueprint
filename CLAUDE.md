@@ -1467,7 +1467,8 @@ until a requested review posts with no new findings. The review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. **`ship.md` owns the stopping
 condition** and states it in two clauses: **two consecutive clean rounds** end
-it, and twelve rounds is the ceiling. Two rather than one because one clean
+it, and each loop carries its own ceiling of twelve rounds per PR. Two rather
+than one because one clean
 round is not convergence — see below — and because requiring two also means
 the loop can never end on a round whose findings were just fixed. Either loop
 also stops early on the finding class that is the user's: `Needs a decision`
