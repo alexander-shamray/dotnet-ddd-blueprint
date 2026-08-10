@@ -1413,6 +1413,7 @@ Delivery:
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
 | `/review-grok` | Triage an external review into a resolution record |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
+| `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
 and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`

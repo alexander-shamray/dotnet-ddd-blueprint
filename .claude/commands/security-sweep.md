@@ -1,12 +1,63 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git status:*), Bash(git log:*), Bash(git grep:*), Bash(grep:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git status:*), Bash(git log:*), Bash(git grep:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git worktree remove:*), Bash(grep:*)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
 issues, and repeat until a round finds nothing new — a ceiling of **seven
 rounds**. Scope: $ARGUMENTS — if empty, the whole repo.
+
+## Run in a throwaway worktree
+
+**Fork a dedicated worktree before the first round and run the whole sweep
+inside it**, so the audit reads one stable snapshot and never contends with the
+tree the caller is standing in. This repo is worked by more than one client at
+once, and the shared working tree accumulates another session's uncommitted
+edits mid-task — an audit that reads that tree reviews a moving target and files
+findings against lines that change under it. A worktree pinned to a commit is
+immune to both.
+
+It carries no commits, so it needs no branch — take a **detached** worktree at
+the current `HEAD`, which locks nothing and lets the caller's branch stay
+checked out where it is:
+
+```bash
+git rev-parse --short HEAD                        # the commit the sweep pins to
+git worktree add --detach ../<repo>-secsweep HEAD
+```
+
+Run every round from there. **Write issue bodies and any scratch to a temp
+directory outside the worktree**, never into it, so the checkout stays clean and
+the teardown below needs no `--force`.
+
+**It audits the committed `HEAD`.** Uncommitted work in the caller's tree is out
+of scope by construction — that is the point, not a gap, but it is a real
+boundary: to sweep work in progress, commit it first so a `HEAD` exists to fork.
+Say in the opening summary which commit the sweep pinned to.
+
+## Teardown
+
+**Always return to the original directory at the end — including when a round
+errors or the loop stops on a decision.** Returning is unconditional; removing
+the worktree is not.
+
+**Remove the worktree only when it has no unchecked files** — nothing modified,
+nothing untracked. Check first and let the result decide:
+
+```bash
+git -C ../<repo>-secsweep status --porcelain      # must be empty to remove
+git worktree remove ../<repo>-secsweep            # from the original directory
+```
+
+A detached, read-only sweep that wrote its scratch elsewhere leaves the checkout
+clean, and a clean worktree removes without complaint. **If anything is in it,
+do not remove it and do not `--force`** — leave the worktree standing and report
+what it holds. Something unchecked in a tree the sweep was not supposed to write
+to is either a rule broken (scratch written inside) or another session's work
+that landed there, and both are the caller's to look at, not this command's to
+delete. Preserving it is the same instinct as the repo's rule against reverting
+uncommitted work to tidy a tree.
 
 ## What counts as an issue
 
@@ -21,10 +72,13 @@ or above.** Three gates, and each drops candidates the round must not file:
   for the user to weigh, not filed. The threshold is the user's to move, not
   this command's.
 - **Not already tracked.** Before filing, `gh issue list --state all` and read
-  the open set — a finding that matches an existing issue, or a documented
-  time-boxed decision in the code (a `closed by PR-NN` remark, an accepted risk
-  named in a README), is **already tracked**. Re-filing it is the drift this
-  repo exists to close, one issue tracker over.
+  the tracked set — **open and closed** — a finding that matches an existing
+  issue, or a documented time-boxed decision in the code (a `closed by PR-NN`
+  remark, an accepted risk named in a README), is **already tracked**. Closed
+  counts: a `wontfix` or already-remediated issue should still block a re-file.
+  Re-filing is the drift this repo exists to close, one issue tracker over. (The
+  prior-round caveat under *Where it stops* is a different set — issues still
+  **open** are a live-risk signal, not the de-duplication test.)
 
 A candidate that fails any gate is not a clean round's absence of findings — it
 is a finding handled without a new issue. Say which in the summary.
