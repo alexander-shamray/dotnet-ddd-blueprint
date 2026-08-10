@@ -72,7 +72,12 @@ read it.** Step 5's checks are ledgered as PR comments — a reservation
 posted before each `grok-review.sh` invocation, released only by an exit-12
 skip (step 5 has both forms) — and a resumed run recovers the count as the
 highest N reserved and not released; an unreleased reservation counts as
-spent, and no ledger comment means a fresh PR with nothing spent.
+spent, and no ledger comment means a fresh PR with nothing spent. The read
+goes through the same helper — `bash .claude/scripts/grok-ledger.sh <n>
+count` — because PR comments are unauthenticated state: on a public PR
+anyone can post a line that imitates the ledger, so only the two exact
+shapes, written by the ledger's own login, count as state, and the last
+event per N wins.
 Step 6 needs no ledger at all: the timeline's `review_requested` events are
 the count, the same events `copilot-request-count.sh` already proves each
 request by. A ledger read or write that fails stops the chain rather than
@@ -240,8 +245,10 @@ same argument as never calling a branch clean because asking failed.
      Exit 12 is the one outcome that posts a second line —
      `grok-ledger.sh <n> release <N>` — because a skip is not a check; every
      other outcome lets the reservation stand as the record. A resumed run
-     reads the highest N reserved and not released, counting an unreleased
-     reservation as spent. The ledger goes through its own fixed helper for
+     reads the count with `grok-ledger.sh <n> count`, which accepts only the
+     ledger's own line shapes from the ledger's own login and counts an
+     unreleased reservation as spent. The ledger goes through its own fixed
+     helper for
      the same reason the Copilot request does: a `Bash(gh pr comment:*)`
      grant would also license `--edit-last`, `--delete-last` and `--repo` —
      editing history and writing across repositories — where the helper can
