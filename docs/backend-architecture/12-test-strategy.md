@@ -956,7 +956,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
 {
     await using ServiceProvider provider = new ServiceCollection()
         .AddMassTransitTestHarness(cfg => cfg
-            .SetTestTimeouts(testInactivityTimeout: TimeSpan.FromSeconds(10))
+            .SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(30), testInactivityTimeout: TimeSpan.FromSeconds(10))
             .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
             .InMemoryRepository())
         .BuildServiceProvider(true);
@@ -1016,37 +1016,49 @@ public async Task Commands_are_sent_and_events_are_published()
 }
 ```
 
-> **Trap — the harness gives up after 1.2 seconds, and `TestTimeout` is not
-> what says so.** Every `Any(…)` above waits on `TestInactivityTimeout`, whose
-> default is 1.2 s. `TestTimeout`'s 30 s governs none of them, so
-> `SetTestTimeouts(testTimeout: …)` is a fix that changes nothing — measured
-> at the 8.5.3 pin, where an unmatched assertion gave up after 1.2 s with
-> `testTimeout` left alone, after 1.2 s again with `testTimeout` lowered to 3 s,
-> and after 5 s only when `testInactivityTimeout` itself was raised. Inherit
-> that default and a saturated runner fails the suite wearing the assertion's
-> own message — a saga that did not send, rather than a runner that did not
-> schedule. That costume is the danger, and it is not hypothetical: the same
-> mechanism failed CI on an in-memory harness test asserting a consume, which
-> then passed on a re-run of the same commit with no changes. No saga suite
-> exists yet to have flaked — this is the wait one will inherit.
+> **Trap — the harness gives up after 1.2 seconds, and the timeout named
+> `TestTimeout` is not the one that says so.** An `Any(…)` ends at the
+> **earliest** of four things: a match, `TestInactivityTimeout` (default 1.2 s,
+> measured from the last bus activity), `TestTimeout` (default 30 s, measured
+> from the call), and the caller's `CancellationToken`. With the defaults the
+> inactivity bound always wins, which is why raising `testTimeout` alone looks
+> like a fix and changes nothing — and why the two must be read as a pair
+> rather than one being dismissed. All four were measured at the 8.5.3 pin, the
+> decisive case being `testTimeout: 2 s` against `testInactivityTimeout: 10 s`,
+> which gave up after 2 s.
+
+> **Inherit either and a saturated runner fails the suite wearing the
+> assertion's own message** — a saga that did not send, rather than a runner
+> that did not schedule. That costume is the danger, and it is not
+> hypothetical: the same mechanism failed CI on an in-memory harness test
+> asserting a consume, which then passed on a re-run of the same commit with no
+> changes. No saga suite exists yet to have flaked — this is the wait one will
+> inherit. State both, and keep the ceiling clear of the bound meant to fire,
+> so which one reported a failure is never a detail of how long the publish
+> took.
 
 > **A matching assertion returns at once; a non-matching one always bills the
 > timeout in full.** That is what makes the number a judgement rather than a
 > constant to copy, because it is the `ShouldBeFalse` assertions that pay for
 > it, once each: the first sample carries one, so its floor is the whole
 > inactivity timeout, and a suite of "a few" saga tests pays that again for
-> every negative it asserts. There is no per-assertion escape — the
-> synchronous `Select` overload waits on the same token, timed at the pin
-> rather than assumed. So the value wants to be the smallest that still
-> absorbs scheduling latency, which is why 10 s here where a composition
-> smoke asserting only positives can afford 30 s.
+> every negative it asserts. The synchronous `Select` overload is no escape —
+> it waits on the same token, timed at the pin rather than assumed — but a
+> caller `CancellationToken` is: `Any(filter, ct)` links it, so a
+> `CancelAfter` shortens one assertion, and it returns `false` rather than
+> throwing. Reach for that only where a negative is genuinely cheap to
+> observe; it buys wall-clock by shrinking the window the claim rests on. The
+> registration is the better lever, so the value wants to be the smallest that
+> still absorbs scheduling latency — which is why 10 s here where a
+> composition smoke asserting only positives can afford 30 s.
 
-> **Where the number lives is the other half, and both samples above assert a
-> negative, so both pay it.** The first states the value in the registration it
-> shows; the second gets it from `StartHarnessAsync`, the shared helper these
-> excerpts call rather than define. Either way it is stated once per harness —
-> copied per test, it lets one test quietly run on a different wait from its
-> neighbour, and left out it is the trap above rather than a saving.
+> **Where the numbers live is the other half, and both samples above assert a
+> negative, so both pay it.** The first states them in the registration it
+> shows; the second gets them from `StartHarnessAsync`, the shared helper
+> these excerpts call rather than define. Either way they are stated once per
+> harness: copy them per test and one test can quietly run on a different wait
+> from its neighbour, leave them out and it is the trap above rather than a
+> saving.
 
 ## 12.6 Contract tests
 
