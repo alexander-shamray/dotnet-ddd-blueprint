@@ -372,7 +372,8 @@ public static IServiceCollection AddOrderingInfrastructure(
         .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
         .AddRedis(configuration.GetConnectionString("RedisCache")!, name: "redis-cache", tags: ["ready"])
         .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"])
-        .AddRabbitMQ(name: "rabbitmq", tags: ["ready"])
+        // No RabbitMQ line, deliberately: AddMassTransit above registers the
+        // bus health check itself — "masstransit-bus", tagged ready (§13.5).
         .AddCheck<OutboxBacklogHealthCheck>("outbox", tags: ["observe"]);
 
     return services;
@@ -692,7 +693,13 @@ EF Core minor versions and behave differently under identical code.
          by name, and referencing what is actually used keeps the register
          honest. -->
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.1" />
-    <!-- Exact major. v9 is commercially licensed — see ADR-003. -->
+    <!-- Exact major. v9 is commercially licensed — see ADR-003. The core
+         package is a transitive of the transport one, pinned separately
+         because the harness smoke references it directly — the in-memory
+         harness is core API, not transport, and a test project that uses no
+         transport must not claim one. Same version: they ship as one
+         release. -->
+    <PackageVersion Include="MassTransit" Version="8.5.3" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
     <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
     <PackageVersion Include="FluentValidation" Version="12.0.0" />
@@ -727,9 +734,13 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.17.0-beta.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.17.0-beta.1" />
+    <!-- No AspNetCore.HealthChecks.Rabbitmq beside these two, and the absence
+         is a decision (PR-13): its parameterless AddRabbitMQ resolves an
+         IConnection nothing registers — MassTransit does not expose one — and
+         the bus health check AddMassTransit registers itself answers the
+         question better, endpoints included. -->
     <PackageVersion Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
     <PackageVersion Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
-    <PackageVersion Include="AspNetCore.HealthChecks.Rabbitmq" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup Label="Test">
     <!-- Test packages are pinned for exactly the same reason as runtime ones.

@@ -7,19 +7,20 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Respawn;
 using Testcontainers.MsSql;
+using Testcontainers.RabbitMq;
 using Xunit;
 
 namespace Catalog.TestSupport;
 
 /// <summary>
-/// A real SQL Server, migrated by the real migrator (ADR-010, §12.4). The
-/// image is the one §14.1's Compose file runs, so a test and a developer
-/// machine cannot disagree about the engine. §12.4's name and §4.1's home:
-/// the fixture serves <c>Catalog.Application.Tests</c> and
-/// <c>Catalog.Api.Tests</c>, which cannot reference each other — each
-/// declares its own <c>IntegrationCollection</c> over this one type. SQL
-/// only, today: the Redis and RabbitMQ containers of §12.4's full shape join
-/// with the PRs whose code touches them.
+/// A real SQL Server, migrated by the real migrator (ADR-010, §12.4), and a
+/// real RabbitMQ for the bus to connect to. Each image is the one §14.1's
+/// Compose file runs, so a test and a developer machine cannot disagree about
+/// the engine. §12.4's name and §4.1's home: the fixture serves
+/// <c>Catalog.Application.Tests</c> and <c>Catalog.Api.Tests</c>, which
+/// cannot reference each other — each declares its own
+/// <c>IntegrationCollection</c> over this one type. The Redis containers of
+/// §12.4's full shape still wait for the PR whose code reads those keys.
 /// </summary>
 /// <remarks>
 /// Tests deliberately collapse the two database identities of §7.1 — the
@@ -32,6 +33,10 @@ public sealed class ServiceFixture : IAsyncLifetime
 {
     private readonly MsSqlContainer _sql = new MsSqlBuilder()
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+        .Build();
+
+    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
+        .WithImage("rabbitmq:4-management-alpine")
         .Build();
 
     private Respawner? _respawner;
@@ -50,7 +55,11 @@ public sealed class ServiceFixture : IAsyncLifetime
     // ValueTask, not Task: xUnit v3 redefined IAsyncLifetime (§12.4).
     public async ValueTask InitializeAsync()
     {
-        await _sql.StartAsync(TestContext.Current.CancellationToken);
+        // Together, §12.4's printed shape — the broker's start hides inside
+        // SQL Server's, which is the slower of the two by some margin.
+        await Task.WhenAll(
+            _sql.StartAsync(TestContext.Current.CancellationToken),
+            _rabbit.StartAsync(TestContext.Current.CancellationToken));
 
         // The container hands out a connection to master; Catalog owns a
         // database of its own (§7.1), and MigrateAsync is what creates it.
@@ -63,7 +72,7 @@ public sealed class ServiceFixture : IAsyncLifetime
 
         FirstRunExitCode = await RunMigratorAsync(ConnectionString);
 
-        Factory = new CatalogApiFactory(ConnectionString);
+        Factory = new CatalogApiFactory(ConnectionString, _rabbit.GetConnectionString());
 
         // A table for the transaction tests, created here and not in a
         // migration. It is a fixture of the test rather than a table of the
@@ -176,5 +185,6 @@ public sealed class ServiceFixture : IAsyncLifetime
     {
         Factory?.Dispose();
         await _sql.DisposeAsync();
+        await _rabbit.DisposeAsync();
     }
 }

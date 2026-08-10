@@ -851,10 +851,23 @@ services
     .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
     .AddRedis(configuration.GetConnectionString("RedisCache")!, name: "redis-cache", tags: ["ready"])
     .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"])
-    .AddRabbitMQ(name: "rabbitmq", tags: ["ready"])
+    // No RabbitMQ line, deliberately: AddMassTransit registers the bus health
+    // check itself — "masstransit-bus", tagged ready — see below.
     // Observed, not gating — see the note below.
     .AddCheck<OutboxBacklogHealthCheck>("outbox", tags: ["observe"]);
 ```
+
+**The broker's readiness check rides in with the bus registration, not with
+this block.** `AddMassTransit` contributes a check named `masstransit-bus`,
+tagged `ready` and `masstransit`, that reports the actual bus — connection and
+receive endpoints both — so the predicate above picks it up with no line here.
+A transport-level check from the `AspNetCore.HealthChecks.Rabbitmq` package
+was considered and rejected: its parameterless `AddRabbitMQ()` resolves an
+`IConnection` from the container, and nothing registers one — MassTransit does
+not expose its connection as that type — so the check as written would throw
+on every probe and the pod would never become ready. Making it work means
+holding a **second** AMQP connection whose only job is answering a weaker
+question than the bus's own check already answers.
 
 **The endpoints** are mapped once in `Common.Web`, since the tag predicates are
 identical for every service and need no configuration. `Program.cs` calls this
