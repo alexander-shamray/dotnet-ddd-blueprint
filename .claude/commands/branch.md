@@ -9,13 +9,15 @@ work.
 
 `main` is not a working branch. If work has already started on it, this command
 is how it gets moved off — and uncommitted changes follow a `checkout -b`, so
-nothing is lost and nothing needs stashing. That carry is also the one case
-that keeps the branch in this checkout; everything else gets a worktree of its
-own, which is the next section.
+nothing is lost and nothing needs stashing. That carry is also one of the two
+cases that keep the branch in this checkout; otherwise the branch gets a
+worktree of its own, which is the next section.
 
 ## A branch is a workspace, not a HEAD
 
-**Every new branch gets its own worktree, and the session moves into it.** One
+**A new branch gets its own worktree by default, and the session moves into
+it** — the exceptions are named in step 1 and step 5, and both branch in
+place. One
 checkout switching between branches is one directory whose contents mean
 something different depending on state nobody can see from the files — and this
 repo's chain leans on the working tree hard enough for that to matter:
@@ -105,9 +107,22 @@ not content.
      the cost.
 
      A clean `main` is the normal state at the start of a PR, so this is the
-     edge and not the rule. If the user would rather have the worktree than
-     the carry, the move is theirs to make: commit the work off `main` first,
-     then re-enter `/branch` on a clean tree.
+     edge and not the rule. **This branch then forgoes the worktree for good,
+     and re-entering `/branch` will not get one** — step 1 stops on an existing
+     branch, step 4 refuses a name already taken, and step 5 cuts from
+     `origin/main`, which would not carry the commits anyway. Attaching one
+     afterwards is three commands the user runs, not a mode this command has,
+     and the middle one is the reason it cannot be automated from here — a
+     branch cannot be checked out in two worktrees at once, so the main
+     checkout has to let go of it first:
+
+     ```bash
+     git switch main
+     git worktree add ../<checkout-name>-<slug> <branch>
+     ```
+
+     then `EnterWorktree` on the new path. Say that, rather than promising a
+     second `/branch` run that lands somewhere else.
    - **Already on a branch** — stop and say so. Report the branch, its
      upstream, its worktree if it has one and whether the tree is dirty, then
      ask whether this is a second change wanting its own branch or a

@@ -1449,7 +1449,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads |
+| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads |
 | `/branch` | Start a correctly named branch — **in a sibling worktree** the session moves into, from a clean `main`; in place when the tree is dirty (carrying the work off `main`) or the parent is not writable |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -1458,10 +1458,13 @@ Delivery:
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 | `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
 
-**Every PR gets its own worktree, and `/branch` is where it comes from.** A new
-branch is cut into a sibling directory — `../ashamray-<slug>`, the shape
-`ashamray-groklimit` is already on disk in — and the session moves into it, so
-the whole of `/ship` runs there and this checkout stays on `main`. Outside the
+**A PR gets its own worktree by default, and `/branch` is where it comes
+from.** From a clean `main` with a writable parent — the ordinary case — the
+new branch is cut into a sibling directory (`../ashamray-<slug>`, the shape
+`ashamray-groklimit` is already on disk in) and the session moves into it, so
+the whole of `/ship` runs there and this checkout stays on `main`. The two
+paragraphs below name the cases where it cannot, and in both of them the branch
+is made in place and the command says so. Outside the
 repository tree is the load-bearing half rather than the naming: a worktree
 under `.claude/worktrees/` would be untracked content inside the checkout,
 which puts it in front of every `git status` the chain reads and inside
@@ -1494,8 +1497,15 @@ first is refused here because it hides work the user can see, the second
 because it is lossy about untracked files and about line endings in a
 repository that pins `*.cs` to CRLF and leaves everything else to the platform.
 The command says which of the two happened rather than deciding quietly.
-Committing the carried work first and re-entering `/branch` is the move if the
-worktree is wanted, and it is the user's to make.
+
+**A branch that took that path does not get a worktree later from `/branch`**,
+and the file says so rather than offering a re-entry that lands elsewhere: the
+command stops on an existing branch, refuses a name already taken, and cuts
+from `origin/main`, which would not carry the commits. Attaching one afterwards
+is manual — `git switch main` in this checkout, then `git worktree add
+../ashamray-<slug> <branch>`, then `EnterWorktree` — and the first of those is
+why it is manual, since a branch cannot be checked out in two worktrees at
+once.
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
 and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`

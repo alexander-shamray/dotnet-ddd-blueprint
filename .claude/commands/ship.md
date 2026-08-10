@@ -1,5 +1,5 @@
 ---
-description: Fork a worktree, branch, commit, push and open a PR in one pass, then loop the external reviews — Grok until two consecutive clean passes, Copilot until one — or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
+description: Fork a worktree where one can be forked, branch, commit, push and open a PR in one pass, then loop the external reviews — Grok until two consecutive clean passes, Copilot until one — or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
 argument-hint: "[what the change does] — omit and each step derives its own"
 allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
