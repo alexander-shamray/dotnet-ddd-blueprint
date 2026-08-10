@@ -1,7 +1,7 @@
 ---
 description: Start a correctly named working branch — in its own sibling worktree from a clean main, in place when the tree is dirty or the parent is not writable
 argument-hint: "[what the change does] — omit to derive it from the uncommitted work"
-allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(ls:*)
+allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(ls:*)
 ---
 
 Create a branch for: $ARGUMENTS — if empty, derive it from the uncommitted
@@ -338,8 +338,19 @@ not content.
 
    | After the failed fork | Take |
    |---|---|
-   | `git branch --list <name>` prints it | `git switch <name>` — it is already cut from `origin/main` and untracked, which is what the fork asked for |
+   | `git branch --list <name>` prints it | `bash .claude/scripts/git-switch-existing.sh <name>` — it is already cut from `origin/main` and untracked, which is what the fork asked for |
    | It prints nothing | `git checkout -b <name> --no-track origin/main` |
+
+   **The switch goes through a helper, and the reason is the one this
+   repository keeps rediscovering.** A `Bash(git switch:*)` grant buys the one
+   operation above and also licenses `--discard-changes` and `-C` — discarding
+   work and force-moving a branch, both of which `.claude/settings.json` denies
+   in their other spellings. Deny rules cannot claw that back, because the
+   flags **combine**: `git switch -fC <name> <start>` was run against a
+   throwaway clone and switched, so a `Bash(git switch -C:*)` rule matches
+   none of it. That is the refspec argument `/pr` already makes about pushes,
+   one command over. The helper takes one shape-checked argument, requires the
+   branch to exist, and passes no flags to git at all.
 
    The second row spells the base out for the reason the table above gives:
    this path starts from a clean `main`, so it takes the fetched

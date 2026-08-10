@@ -1645,6 +1645,19 @@ is defence in depth — `Bash` redirection can still write a file — but it
 removes the quiet path, which is the session's own editing tools acting on
 reviewed grants.
 
+**A helper is also the answer when a git grant is wider than the operation it
+buys**, and `git-switch-existing.sh` is the worked example. `/branch` needs to
+switch onto one existing branch after a failed `git worktree add`; a
+`Bash(git switch:*)` grant buys that and also `--discard-changes` and `-C`,
+which are discarding work and force-moving a branch — the two things
+`git reset --hard`, `git clean` and `git branch -D/-M` are denied for. **Deny
+rules cannot claw it back, because the flags combine**: `git switch -fC <name>
+<start>` was run against a throwaway clone and switched, so
+`Bash(git switch -C:*)` matches none of it. That is the refspec argument the
+push rules already make, and the same conclusion follows — the helper takes
+one shape-checked argument, requires the branch to exist, and passes no flags
+to git. Copilot raised it against PR #27.
+
 **`sandbox/` is on that list for a reason worth keeping.** It arrived guarded
 by nothing, and a review caught it: the Dockerfile is a *build input to the
 security boundary*, so a session able to edit it can add an entrypoint that
