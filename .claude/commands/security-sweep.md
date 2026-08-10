@@ -1,7 +1,7 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git status:*), Bash(git log:*), Bash(git grep:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git worktree remove:*), Bash(grep:*)
+allowed-tools: Read, Grep, Glob, Agent, Write, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git status:*), Bash(git log:*), Bash(git grep:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git worktree remove:*), Bash(mktemp:*), Bash(grep:*)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -20,16 +20,25 @@ immune to both.
 
 It carries no commits, so it needs no branch — take a **detached** worktree at
 the current `HEAD`, which locks nothing and lets the caller's branch stay
-checked out where it is:
+checked out where it is. **Put it under a writable temp path, never a sibling of
+the repo** — a repo whose parent is not writable (a root-level or container
+layout, both of which this repo runs under) cannot create `../<repo>-secsweep`,
+and `mktemp -d` is the same choice `grok-review.sh` already makes for this
+reason:
 
 ```bash
-git rev-parse --short HEAD                        # the commit the sweep pins to
-git worktree add --detach ../<repo>-secsweep HEAD
+work=$(mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX")   # writable, never a repo sibling
+git rev-parse --short HEAD                            # the commit the sweep pins to
+git worktree add --detach "$work" HEAD
 ```
 
-Run every round from there. **Write issue bodies and any scratch to a temp
-directory outside the worktree**, never into it, so the checkout stays clean and
-the teardown below needs no `--force`.
+Run every round from `$work`. **If the worktree cannot be created, stop** — do
+not fall through to reading the caller's tree, which would silently forfeit the
+stable-snapshot property this section buys. A failed `git worktree add` is a
+round that could not run, reported like any other tool error under *Never fail
+open* below. **Write issue bodies and any scratch to a separate temp path**
+(another `mktemp` under `${TMPDIR:-/tmp}`), never inside `$work`, so the
+checkout stays clean and the teardown below removes it without `--force`.
 
 **It audits the committed `HEAD`.** Uncommitted work in the caller's tree is out
 of scope by construction — that is the point, not a gap, but it is a real
@@ -43,21 +52,23 @@ errors or the loop stops on a decision.** Returning is unconditional; removing
 the worktree is not.
 
 **Remove the worktree only when it has no unchecked files** — nothing modified,
-nothing untracked. Check first and let the result decide:
+nothing untracked. Do not check-then-remove and do not `--force`: a plain
+`git worktree remove` already refuses a checkout holding anything modified or
+untracked, which is exactly the condition wanted, so let its own refusal be the
+guard:
 
 ```bash
-git -C ../<repo>-secsweep status --porcelain      # must be empty to remove
-git worktree remove ../<repo>-secsweep            # from the original directory
+git worktree remove "$work"                       # from the original directory
 ```
 
-A detached, read-only sweep that wrote its scratch elsewhere leaves the checkout
-clean, and a clean worktree removes without complaint. **If anything is in it,
-do not remove it and do not `--force`** — leave the worktree standing and report
-what it holds. Something unchecked in a tree the sweep was not supposed to write
-to is either a rule broken (scratch written inside) or another session's work
-that landed there, and both are the caller's to look at, not this command's to
-delete. Preserving it is the same instinct as the repo's rule against reverting
-uncommitted work to tidy a tree.
+A detached, read-only sweep that wrote its scratch to a separate temp path
+leaves `$work` clean, and a clean worktree removes without complaint. **If
+`git worktree remove` refuses, leave the worktree standing and report what it
+holds** — do not force it. Something unchecked in a tree the sweep was not
+supposed to write to is either a rule broken (scratch written inside) or another
+session's work that landed there, and both are the caller's to look at, not this
+command's to delete. Preserving it is the same instinct as the repo's rule
+against reverting uncommitted work to tidy a tree.
 
 ## What counts as an issue
 
@@ -100,8 +111,11 @@ Each round is the review done once, end to end:
    already-tracked rule above.
 4. **File.** One issue per survivor, most severe first, in the house body form:
    a summary, the affected lines quoted, why it is exploitable, a fix, and the
-   severity. Label `security` (create the label once if absent). End the body
-   noting it came from an authorised review and was verified at filing.
+   severity. **Write each body to a temp file** (`mktemp` under
+   `${TMPDIR:-/tmp}`, outside `$work`) and pass it with `gh issue create
+   --body-file`, the way `/pr` does — an inline `--body` mangles the wrapping.
+   Label `security` (create the label once if absent). End the body noting it
+   came from an authorised review and was verified at filing.
 5. **Summarise the round.** New issues filed (with numbers), candidates dropped
    at each gate and why, and the lows/infos recorded but not filed.
 
