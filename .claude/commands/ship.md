@@ -1,7 +1,7 @@
 ---
 description: Fork a worktree where one can be forked, branch, commit, push and open a PR in one pass, then loop the external reviews — Grok until two consecutive clean passes, Copilot until one — or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -104,10 +104,27 @@ having finished rather than clean — so the comparison fails closed, which is
 the direction it must fail in.
 
 `git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
-`gh pr list --state open`, `gh pr view <n> --json reviews` and a look for
-`suggestions.md` (it decides recheck versus full review inside step 5, not
-whether step 5 runs) answer all five rows and both loops. Read them before
-doing anything.
+`gh pr list --state open` and a look for `suggestions.md` (it decides recheck
+versus full review inside step 5, not whether step 5 runs) answer all five rows
+and the Grok half. Read them before doing anything.
+
+**All-resolved needs three reads, not one**, because no single call carries the
+three signals it is defined over. `gh pr view <n> --json reviews` gives the
+review bodies, their suppressed blocks and the `commit` oid — and nothing else:
+**it does not return inline review comments, and it does not return thread
+resolution state.** Deciding step 6 is not owed from that call alone would skip
+two of the three clean signals while reporting that all three were checked. So
+the resume runs the same read-only intake `/review-copilot` does:
+
+```bash
+bash .claude/scripts/pr-review-comments.sh <n>     # inline comments
+bash .claude/scripts/pr-review-threads.sh <n>      # <thread-id> <isResolved> …
+```
+
+Both are read-only with fixed endpoints, which is why they can be granted to a
+step that only wants to look. An unresolved thread from an earlier round is
+exactly the state a fresh clean review never repeats, and it is the one the
+oid cannot see.
 
 **Each loop's check count lives on the PR itself, where any resumed run can
 read it.** Step 5's checks are ledgered as PR comments — a reservation
@@ -452,7 +469,8 @@ same argument as never calling a branch clean because asking failed.
       arrived suppressed. **Zero findings in the review is necessary, not
       sufficient**: a resumed run can carry an `Ask` thread from an earlier
       round that a fresh clean review never repeats, so before declaring the
-      loop done, list the PR's unresolved review threads — an unresolved
+      loop done, list the PR's unresolved review threads with
+      `bash .claude/scripts/pr-review-threads.sh <n>` — an unresolved
       `Ask` stops the loop exactly as a new one would, and any other
       unresolved thread is triage the loop still owes.
 

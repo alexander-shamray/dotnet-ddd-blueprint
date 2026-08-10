@@ -89,11 +89,16 @@ not content.
 
    The first two differing — with no superproject, which would make it a
    submodule instead — means this session is already in a linked worktree.
-   **That worktree is this change's workspace, and step 5 is off** — forking a
-   second one from inside the first is how a chain ends up with two directories
-   and one branch's work split across them. Report its path and its branch.
+   **That worktree is this change's workspace, so step 5 forks nothing** —
+   a second worktree from inside the first is how a chain ends up with two
+   directories and one branch's work split across them. Report its path and
+   its branch.
 
-   **What this step switches off is worktree *creation*, and nothing else.**
+   **What this step switches off is the `git worktree add`, and nothing
+   else — the branch may still have to be created.** A linked worktree sitting
+   on `main`, or a detached one, needs a branch exactly as the main checkout
+   would; it just needs it *here*, with `git checkout -b`, rather than in a new
+   directory. Step 5 says which half it is skipping for that reason.
    Carry on into step 1 and let it read the branch and the tree as usual: a
    linked worktree says where the session is, never that the branch under it is
    the one this change wants. Entering `/branch` from a previous PR's worktree
@@ -102,7 +107,8 @@ not content.
    is exactly the guard wanted. A detached worktree reaches the same question
    with no branch to name.
 1. **Read the current state.** `git branch --show-current` and
-   `git status --short`. Three cases:
+   `git status --short`. Four cases, and the first question is whether that
+   first command printed anything at all:
    - **On `main`, clean** — fetch, then cut the worktree from `origin/main`.
      This is the path the next four steps are written for.
    - **On `main`, dirty** — **branch in place, with no worktree**, from `HEAD`,
@@ -137,6 +143,12 @@ not content.
 
      then `EnterWorktree` on the new path. Say that, rather than promising a
      second `/branch` run that lands somewhere else.
+   - **Detached — `git branch --show-current` prints nothing.** There is no
+     branch to continue and no `main` to move off, so make one here from
+     `HEAD` with `git checkout -b <name>`, carrying any changes, and say that
+     the workspace is this directory. A `/security-sweep` worktree has exactly
+     this shape, and so does a checkout parked on a tag or a commit; leaving
+     the case unnamed would drop it through every other branch of this step.
    - **Already on a branch** — stop and say so. Report the branch, its
      upstream, its worktree if it has one and whether the tree is dirty, then
      ask whether this is a second change wanting its own branch or a
@@ -196,10 +208,24 @@ not content.
    about — in which case it is the workspace and step 0's answer applies — or
    something else entirely, which is a question for the user and not a name to
    dodge.
-5. **Create the workspace, then move into it.** **Skipped entirely when step 0
-   found the session already inside a linked worktree** — the workspace exists
-   and the branch question was settled by step 1. Otherwise, from a clean
-   `main`, both halves happen in one command:
+5. **Create the workspace, then move into it.** This step has two halves, and
+   three of step 1's four cases skip the first of them:
+
+   | Step 1 said | This step does |
+   |---|---|
+   | On `main`, clean, in the main checkout with a writable parent | Both halves — fork the worktree, enter it |
+   | On `main` clean, but **already in a linked worktree** (step 0) | `git checkout -b <name>` here. The workspace exists; forking a second is what step 0 refused |
+   | On `main` dirty, or **detached**, or the parent is not writable | `git checkout -b <name>` where you are |
+   | Already on a branch | Nothing — step 1 stopped |
+
+   **A skipped fork is never a skipped branch.** Every row above except the
+   last ends with a branch that exists; only the first ends with a new
+   directory. Reading step 0 as "step 5 is off" would leave a session in a
+   linked worktree on `main` with nowhere for the change to go, which is a
+   state this command must not produce.
+
+   From a clean `main` in the main checkout, both halves happen in one
+   command:
 
    ```bash
    git worktree add ../<checkout-name>-<slug> -b <name> origin/main
