@@ -4,6 +4,7 @@ using MassTransit.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
@@ -89,6 +90,23 @@ public class MessagingRegistrationTests
         services.ShouldContain(
             d => d.ServiceType == typeof(IHostedService),
             "MassTransit starts the bus from a hosted service; without it the registration is inert");
+    }
+
+    [Fact]
+    public void Usage_telemetry_is_disabled_by_the_production_registration_alone()
+    {
+        // Deliberately no harness: AddMassTransitTestHarness disables usage
+        // telemetry itself (verified in the 8.5.3 source), so a harness-backed
+        // assertion would stay green with the production line deleted — and
+        // every real host would quietly resume reporting to the vendor.
+        ServiceCollection services = new();
+        services.AddMassTransitMessaging(Configuration());
+
+        using ServiceProvider provider = services.BuildServiceProvider(validateScopes: true);
+
+        provider
+            .GetRequiredService<IOptions<UsageTelemetryOptions>>()
+            .Value.Enabled.ShouldBeFalse("§13.2 owns this platform's telemetry, and none of it leaves silently");
     }
 
     [Fact]

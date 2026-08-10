@@ -80,6 +80,7 @@ public class HostSmokeTests(HostSmokeTests.UnreachableInfrastructureFactory fact
         // cluster's readiness.
         HealthCheckRegistration bus = options.Registrations.Single(r => r.Name == "masstransit-bus");
         bus.Tags.ShouldContain("ready", "a bus check outside the ready predicate reports to nobody");
+        bus.Tags.ShouldContain("masstransit", "both tags are the documented contract (§13.5), so both are pinned");
     }
 
     [Fact]
