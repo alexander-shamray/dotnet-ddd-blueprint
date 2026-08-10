@@ -86,10 +86,22 @@ is how a resume ships past a review it never read. A run interrupted between
 requesting a round and its landing leaves the PR in a state where the
 *previous* clean review still satisfies every other condition — same head, no
 threads, nothing suppressed — so a resume would call it all-resolved while a
-review it has not seen is in flight. The timeline `copilot-request-count.sh`
-already reads is the check: compare the newest `review_requested` timestamp
-against the candidate review's `submittedAt`, and if a request is outstanding,
-wait for its review rather than inheriting the verdict of the one before it.
+review it has not seen is in flight.
+
+**Count the two sides; do not compare timestamps.** The check has to be one
+this command can actually run, and a timestamp is not:
+`copilot-request-count.sh` returns an integer and nothing else, and there is
+deliberately no raw `gh api` grant here to fetch anything richer. It needs
+none. The helper counts
+`review_requested` events for Copilot, this loop makes exactly one per round,
+and each lands exactly one review — so **a request is outstanding when that
+count exceeds the number of landed Copilot reviews**, and both numbers are
+readable with what is already granted (`gh pr view <n> --json reviews` supplies
+the second). When one is outstanding, wait for its review rather than
+inheriting the verdict of the one before it. A request that never produces a
+review is the timeout case this step already covers, reported as the loop not
+having finished rather than clean — so the comparison fails closed, which is
+the direction it must fail in.
 
 `git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
 `gh pr list --state open`, `gh pr view <n> --json reviews` and a look for
