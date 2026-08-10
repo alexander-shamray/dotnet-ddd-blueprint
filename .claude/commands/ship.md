@@ -79,7 +79,10 @@ that converged on its last allowed check from one the ceiling cut off. The
 and never excuses re-entry: the rule above stands, a resumed run re-enters
 both loops, and the marker is not pinned to a commit, so commits landing
 after it still get their re-review from the re-entry, budget allowing. Any
-later reservation supersedes the marker. Step 6 needs no marker for the same
+later reservation supersedes the marker, and it is read with
+`bash .claude/scripts/grok-ledger.sh <n> status` — the same author
+verification as the count, because a raw-comment read would take the
+marker from anyone. Step 6 needs no marker for the same
 question — its outcomes are already on the PR, so a resumed run reads the
 last landed reviews (comments and suppressed blocks alike) and the
 unresolved-thread list before declaring that loop owed or exhausted. The

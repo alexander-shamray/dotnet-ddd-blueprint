@@ -43,6 +43,7 @@ usage() {
   echo "       grok-ledger.sh <pr-number> release <n>" >&2
   echo "       grok-ledger.sh <pr-number> converge <n>" >&2
   echo "       grok-ledger.sh <pr-number> count" >&2
+  echo "       grok-ledger.sh <pr-number> status" >&2
   exit 2
 }
 
@@ -111,6 +112,20 @@ if [ "$op" = "count" ]; then
           max = i + 0
       print max
     }'
+  exit 0
+fi
+
+if [ "$op" = "status" ]; then
+  [ -z "$n" ] || usage
+  # count folds spend and deliberately ignores converged rows, so the marker
+  # needs its own verified read — raw comments would bypass the author
+  # check that makes the ledger state at all. A converged marker stands
+  # until a later reservation supersedes it; releases change nothing, since
+  # a skip neither spends nor converges.
+  ledger_rows | awk -F'\t' '
+    $2 ~ /converged/ { conv = 1 }
+    $2 ~ /reserved/  { conv = 0 }
+    END { print conv ? "converged" : "unconverged" }'
   exit 0
 fi
 
