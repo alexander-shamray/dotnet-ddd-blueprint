@@ -1449,7 +1449,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until a pass leaves no `suggestions.md`, then loop a requested Copilot review and `/review-copilot` until one lands with no new findings |
+| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until two consecutive reviews land with no new findings |
 | `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -1494,8 +1494,12 @@ its own. What keeps the loop honest either way is the verdict check rather than
 the grant: a cancelled run exits non-zero and leaves `suggestions.md`
 untouched, so a review that never happened cannot report as clean.
 
-`/review-grok` triages whatever file it leaves, and the loop repeats until a
-pass leaves none. The split of ownership matters: Grok's half owns the
+`/review-grok` triages whatever file it leaves, and the loop repeats until
+two consecutive passes leave none. One exit skips rather than stops: the
+helper's usage-limit preflight (exit 12) hands over to Copilot without a
+clean Grok pass — reported
+as skipped-on-limits, never as a verdict, and owing Grok a re-entry on a later
+`/ship`. The split of ownership matters: Grok's half owns the
 `suggestions.md` lifecycle — writing it, rechecking it, removing it when
 clean — and the triage half never creates or deletes that file, only fixes
 what it names. Then Copilot: a review is requested through
@@ -1507,11 +1511,13 @@ returns 200 and registers nothing. The timeline's `review_requested` event,
 never the status code, is what proves a request took. `/review-copilot`
 triages what lands — suppressed comments included, which is where every real
 finding against the loop's own machinery has arrived — and the loop repeats
-until a requested review posts with no new findings. The review's depth is
+until two consecutive requested reviews post with no new findings. The
+review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. **`ship.md` owns the stopping
 condition** and states it in two clauses: **two consecutive clean rounds** end
-it, and twelve rounds is the ceiling. Two rather than one because one clean
+it, and each loop carries its own ceiling of twelve rounds per PR. Two rather
+than one because one clean
 round is not convergence — see below — and because requiring two also means
 the loop can never end on a round whose findings were just fixed. Either loop
 also stops early on the finding class that is the user's: `Needs a decision`

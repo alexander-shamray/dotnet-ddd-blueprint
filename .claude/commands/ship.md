@@ -1,7 +1,7 @@
 ---
-description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
+description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean, or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -23,11 +23,14 @@ the sequence is allowed to stop.
 `/pr` pushes the branch itself, so the chain reaches an open PR without waiting
 for anyone — and the PR is no longer where it stops. Steps 5 and 6 keep going:
 Grok reads the branch and `/review-grok` triages what it found, then Copilot
-reads the PR and `/review-copilot` triages that, and the chain ends only when
-both reviewers have nothing left to say. **Step 2, a `Needs a decision`
-finding in step 5 and an `Ask` thread in step 6 are the only things that stop
-it** — a check that finds something halts the run and hands the finding back,
-because fixing it is the user's call.
+reads the PR and `/review-copilot` triages that, and the chain ends when both
+reviewers have nothing left to say — or, if Grok was skipped on usage limits
+(step 5's exit 12), when Copilot has finished, with the Grok re-entry owed to
+a later run. **Step 2, a `Needs a decision` finding in step 5 and an `Ask`
+thread in step 6 are the stops that hand a decision back to the user** — a
+check that finds something halts the run and hands the finding back, because
+fixing it is the user's call. Helper failures and either loop's ceiling stop
+the chain too, reported as what they are rather than looped past.
 
 That is a real change in character and worth naming. Under the old blanket
 `Bash(git push:*)` deny this command could not finish: it stopped before the
@@ -63,6 +66,36 @@ one this run just produced by watching both loops end clean.
 a look for `suggestions.md` (it decides recheck versus full review inside
 step 5, not whether step 5 runs) answer all five. Read them before doing
 anything.
+
+**Each loop's check count lives on the PR itself, where any resumed run can
+read it.** Step 5's checks are ledgered as PR comments — a reservation
+posted before each `grok-review.sh` invocation, released only by an exit-12
+skip (step 5 has both forms) — and a resumed run recovers the count as the
+highest N reserved and not released; an unreleased reservation counts as
+spent, and no ledger comment means a fresh PR with nothing spent. The ledger
+carries convergence as well as spend, because spend alone cannot tell a loop
+that converged on its last allowed check from one the ceiling cut off. The
+`converged` marker settles only that question — the report at the ceiling —
+and never excuses re-entry: the rule above stands, a resumed run re-enters
+both loops, and the marker is not pinned to a commit, so commits landing
+after it still get their re-review from the re-entry, budget allowing. Any
+later reservation supersedes the marker, and it is read with
+`bash .claude/scripts/grok-ledger.sh <n> status` — the same author
+verification as the count, because a raw-comment read would take the
+marker from anyone. Step 6 needs no marker for the same
+question — its outcomes are already on the PR, so a resumed run reads the
+last landed reviews (comments and suppressed blocks alike) and the
+unresolved-thread list before declaring that loop owed or exhausted. The
+count read goes through the same helper —
+`bash .claude/scripts/grok-ledger.sh <n> count` — because PR comments are
+unauthenticated state: on a public PR anyone can post a line that imitates
+the ledger, so only the helper's exact shapes count as state, and only from
+authors whose repository permission the helper verifies as write or better —
+PR-local, not account-local, so a resume under another authorised login
+reads the same count. The last event per N wins.
+A ledger read or write that fails stops the chain rather than
+guessing — a cap that resets when its state goes missing is no cap, the
+same argument as never calling a branch clean because asking failed.
 
 ## Steps
 
@@ -133,6 +166,27 @@ anything.
       is required**; without it the helper exits 7 rather than falling back to
       the host.
 
+      **Exit 12 is out of usage limits, and it means skip — not fail.** The
+      helper preflights the selected auth against Grok's limits before the
+      review, and a rate-limited or quota-exhausted team is not a defect in the
+      branch: on exit 12 **skip the Grok loop for now and move to step 6**,
+      reporting the round as skipped rather than clean or failed — a review the
+      limits will not allow did not run, and neither a clean verdict nor a stop
+      may be minted from it. It is the one non-zero exit that does not halt the
+      chain; every other non-zero exit is the loop not having run and stops
+      it. Note in the report that the Grok half was skipped on limits so a later
+      `/ship` re-enters it.
+
+      A skip can land mid-cycle: when a recheck is owed after a triage,
+      `suggestions.md` is still on disk, and exit 12 there skips the recheck,
+      not just a fresh pass. Proceed to step 6 all the same — the findings the
+      file records are already triaged and fixed by then, and stalling the
+      chain on the verification the limits refuse is the failure this exit
+      exists to avoid — but the file stays where it is as the record of the
+      unfinished half, the report says a recheck is owed rather than merely
+      skipped, and every commit while it sits there stays scoped, exactly as
+      the resume table requires.
+
       Residual, stated in the script and in `CLAUDE.md`: **egress is not
       restricted**. The container reaches the network, and confining it to
       `api.x.ai` needs an allow-list proxy Docker cannot supply alone. The
@@ -169,10 +223,11 @@ anything.
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
    - **Two consecutive clean rounds end it; twelve rounds is the ceiling.**
-     Two clauses, and the first is deliberately *two*. Clean means a requested
-     review that lands with nothing at all — no inline comments, no suppressed
-     ones, no unresolved threads. One clean round is not convergence: PR-11's
-     round eight was clean and every round after it found more, so a rule
+     Two clauses, and the first is deliberately *two*. Clean here means a pass
+     that leaves no `suggestions.md` — a full review with nothing to write, or
+     a recheck that removes the file; step 6 states its own clean in its own
+     vocabulary. One clean round is not convergence: PR-11's Copilot round
+     eight was clean and every round after it found more, so a rule
      ending on the first clean pass would have stopped at exactly the round
      that proves it should not. Requiring two also subsumes "never end on a
      round that produced a fix", since a round with findings is not clean and
@@ -182,7 +237,55 @@ anything.
      that the loop ended on its ceiling rather than on convergence, because
      those are different states and only one of them is evidence.
 
-     The ceiling was three, and three was wrong. By its seventh Copilot round
+     **Step 5's twelve is a count of Grok checks per PR, not per session** —
+     this loop and step 6 each carry a twelve of their own. Every
+     `grok-review.sh` invocation is one check — a full review and a recheck
+     count the same — and this loop's ceiling is **no more than twelve of them
+     against one PR**, carried across resumed `/ship` runs rather than reset
+     each time the chain re-enters. A skip on limits (exit 12) is not a check
+     and does not count; a review that ran and reported does. The ledger
+     writes **before** the model call, not after:
+
+     ```bash
+     bash .claude/scripts/grok-ledger.sh <n> reserve <N> <full|recheck>
+     ```
+
+     then invoke the review helper. A reservation is an election, not just a
+     write: two resumed runs can read the same count and claim the same slot,
+     so the helper settles it after posting — the earliest comment for the
+     slot wins, and a losing claim exits 4 having spent nothing. Losing
+     means a concurrent `/ship` is mid-check on this PR, so stop the loop
+     and say so — never reserve the next slot instead: two Grok runs share
+     one root `suggestions.md`, and the later finisher would overwrite the
+     earlier's findings or pass off its rival's clean pass as its own
+     convergence. The two orders fail in
+     opposite directions and only one is safe — written after, an
+     interrupted run has spent the check and left no record, and the
+     resumed run spends a
+     thirteenth; written before, the worst case is a reservation for a check
+     that never ran, which wastes one of the twelve and never exceeds it.
+     Exit 12 is the one outcome that posts a second line —
+     `grok-ledger.sh <n> release <N>` — because a skip is not a check; every
+     other outcome lets the reservation stand as the record. A resumed run
+     reads the count with `grok-ledger.sh <n> count`, which accepts only the
+     ledger's line shapes from write-verified authors and counts an
+     unreleased reservation as spent. The ledger goes through its own fixed
+     helper for the same reason the Copilot request does: a
+     `Bash(gh pr comment:*)` grant would also license `--edit-last`,
+     `--delete-last` and `--repo` —
+     editing history and writing across repositories — where the helper can
+     post exactly the two lines above to a PR of this repository, and is
+     edit-denied to the session that invokes it. Keep the running count in
+     the report as well — the report line is for the reader, the ledger is
+     for the machine — and when the twelfth is spent, stop and say the PR
+     reached its Grok ceiling. When the loop ends clean instead, say so on
+     the ledger — `grok-ledger.sh <n> converge <N>` — because a resumed run
+     reading bare spend at the ceiling cannot tell convergence from
+     exhaustion, and the difference is whether it reports the Grok half
+     finished or blocked.
+
+     The ceiling — then one number shared by both loops, as its size still
+     is — was three, and three was wrong. By its seventh Copilot round
      PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
      and rounds four through seven caught a documented-but-unenforced
      constraint, an assertion that could not fail in one direction, and a
@@ -195,10 +298,15 @@ anything.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
-   silently skipped and never substituted with a self-review.
+   silently skipped and never substituted with a self-review. The exit-12
+   limits skip above is the one deliberate exception, and it is not silent: it
+   is reported as skipped-on-limits and proceeds to step 6. Every other
+   outright failure mints nothing and stops the chain.
 
-6. **The Copilot loop.** Once the Grok loop ends clean, hand the branch to the
-   second reviewer and alternate the same way:
+6. **The Copilot loop.** Once the Grok loop ends clean — or was reported
+   skipped-on-limits this run, which hands over without being evidence of
+   Grok convergence — hand the branch to the second reviewer and alternate
+   the same way:
 
    1. **Request GitHub's Copilot review** on the PR:
 
@@ -287,20 +395,33 @@ anything.
       Otherwise run `/review-copilot` **paused at its marker step**: let it
       triage and fix, then — because its tool grant cannot commit, and a
       `done` marker claims a committed fix — rerun the applicable step 2
-      checks, `/commit`, and only then let it post its markers and resolve
-      the threads. Push the branch by name so the next request reviews the
-      fixed state, and go back to (1).
+      checks, `/commit` **scoped to the paths the triage touched**, and only
+      then let it post its markers and resolve the threads. The scope is
+      load-bearing, not habit: after a mid-cycle limits skip,
+      `suggestions.md` is still on disk through this loop, and the unscoped
+      form sweeps untracked files — committing the review record is exactly
+      what the resume table forbids. Push the branch by name so the next
+      request reviews the fixed state, and go back to (1).
 
    The same stopping condition as step 5, in this loop's vocabulary: an
    **`Ask`** thread — left open by `/review-copilot` by design — stops the
    loop; otherwise it runs until **two consecutive** requested reviews land
-   with nothing at all, to a ceiling of twelve rounds. A request that
+   with nothing at all, to this loop's own ceiling of twelve requested-review
+   rounds per PR — counted from the timeline's `review_requested` events, the
+   ones `copilot-request-count.sh` already proves each request by, so a
+   resumed run recovers this count with no ledger at all. The outcomes are
+   recoverable the same way: the landed reviews carry their comments and
+   suppressed blocks and the thread list its unresolved threads, so a run
+   that finds itself at the ceiling reads the last two landed reviews before
+   declaring the loop unconverged — the count alone cannot say which it
+   was. A request that
    registers no review inside a reasonable wait is reported as the loop not
    having finished, never marked clean by timeout.
 
-   **This is the loop the twelve is for.** Copilot's findings arrive in the
-   suppressed block long after the inline ones dry up, and they do not taper
-   the way a disagreement does: on PR-11 rounds four, five and six each posted
+   **This is the loop that earns a ceiling that size.** Copilot's findings
+   arrive in the suppressed block long after the inline ones dry up, and they
+   do not taper the way a disagreement does: on PR-11 rounds four, five and
+   six each posted
    "generated no new comments" above a suppressed finding that was worth
    fixing. Do not read a clean *inline* verdict as convergence, and do not
    stop early because the counts look small — a round costs minutes and the
@@ -311,8 +432,11 @@ anything.
 One line per step: done, skipped and why, or stopped and what is needed —
 including the push, which reports which of its three states it found even when
 that state was "nothing to do". Each review loop reports one line per round —
-findings raised, findings fixed, and what each round pushed — and how it
-ended: clean, stopped on a decision or an open `Ask`, or stopped unconverged.
+findings raised, findings fixed, and what each round pushed — its running
+check count against its twelve (the PR carries the durable copy: step 5's
+ledger comments, step 6's timeline events; the report line is the
+human-readable echo), and how it ended: clean, stopped on a decision or
+an open `Ask`, skipped on limits with re-entry owed, or stopped unconverged.
 End with the PR URL.
 
 A step skipped on an assumption gets its assumption restated here rather than

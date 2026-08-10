@@ -152,11 +152,32 @@ image=$(docker build --quiet "${build_args[@]}" \
 # docker's argv, where every `ps` on this machine can read it for the life of
 # the container; the first forwards the value this process already holds.
 mounts=()
+limit_re='rate.?limit|429|quota|usage limit|too many requests|(no|any) credits'
+key_probe=""
 if [ -n "${XAI_API_KEY:-}" ] &&
-   docker run --rm --env XAI_API_KEY "$image" \
-     grok -p "ok" >/dev/null 2>&1; then
+   key_probe=$(docker run --rm --env XAI_API_KEY "$image" \
+     grok -p "ok" 2>&1); then
   mounts+=(--env XAI_API_KEY)
 else
+  # A key that answers with a limit signal is authenticated but out of window,
+  # and the two need different exits. With a usable OAuth fallback, fall
+  # through: the session may sit on a team whose window is open, and the
+  # preflight below judges whatever auth was actually selected. Usable means
+  # all three session files — auth.json alone with agent_id or config.toml
+  # missing exits 8 below before the preflight ever runs, so a partial
+  # session must not swallow the limit signal. With no usable fallback,
+  # exit 8's "cannot authenticate" is the wrong class — authenticating is not
+  # the problem — so this is the preflight's skip, issued one step earlier.
+  oauth_ready=1
+  for f in auth.json agent_id config.toml; do
+    [ -f "$HOME/.grok/$f" ] || oauth_ready=0
+  done
+  if [ -n "${XAI_API_KEY:-}" ] && [ "$oauth_ready" = 0 ] &&
+     grep -qiE "$limit_re" <<<"$key_probe"; then
+    echo "grok is out of usage limits (API key, no usable OAuth fallback) — skipping this review, not failing it:" >&2
+    grep -ioE "$limit_re" <<<"$key_probe" | head -1 >&2
+    exit 12
+  fi
   [ -z "${XAI_API_KEY:-}" ] ||
     echo "XAI_API_KEY is set but did not authenticate — no credits on its team? Using the OAuth session instead." >&2
   [ -f "$HOME/.grok/auth.json" ] ||
@@ -185,6 +206,35 @@ else
     chmod 600 "$auth/$extra"
     mounts+=(--volume "$(host_path "$auth/$extra"):/home/reviewer/.grok/$extra:Z")
   done
+fi
+
+# Usage-limit preflight — SKIP, never fail. Authentication being good is not the
+# same as the team being inside its window: a rate limit or an exhausted quota
+# answers the model call, not the handshake, so the credential probe above
+# passes and the review then dies mid-run and reports as "did not run" (exit 4).
+# A review the limits will not currently allow is not a defect in the branch and
+# must not halt the loop as one — the caller skips this round and moves on. The
+# exit is distinct (12) precisely so ship.md can tell a skip from a failure: a
+# failure stops the loop, a skip does not. One extra probe against the auth that
+# was actually selected, so the OAuth path (which the block above never probes)
+# is covered too.
+probe_rc=0
+limit_probe=$(docker run --rm "${mounts[@]}" "$image" grok -p "ok" 2>&1) || probe_rc=$?
+if grep -qiE "$limit_re" <<<"$limit_probe"; then
+  echo "grok is out of usage limits — skipping this review, not failing it:" >&2
+  grep -ioE "$limit_re" <<<"$limit_probe" | head -1 >&2
+  exit 12
+fi
+# A dead fallback must not bury the key's limit signal. File presence made
+# OAuth the selected auth, but an expired, revoked or corrupt session fails
+# this probe with an auth-shaped answer, not a limit-shaped one — and
+# proceeding would burn a full review run to reach exit 4 and learn what
+# both probes already said. The key's limit is the operative fact; skip.
+if [ "$probe_rc" -ne 0 ] && [ -n "${XAI_API_KEY:-}" ] &&
+   grep -qiE "$limit_re" <<<"$key_probe"; then
+  echo "grok is out of usage limits (API key) and the selected OAuth fallback failed its probe — skipping this review, not failing it:" >&2
+  grep -ioE "$limit_re" <<<"$key_probe" | head -1 >&2
+  exit 12
 fi
 
 set +e
