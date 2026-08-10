@@ -160,7 +160,7 @@ their declaration.
 | `ConfirmOrderCommand`, `MarkOrderShippedCommand`, `FlagOrderForReviewCommand` | The other three message-borne slices, same shape as `CancelOrderCommand` (§9.4, §9.6) |
 | `OrderRepository` | `IOrderRepository` over EF; also the Infrastructure assembly marker for the §6.2 scan |
 | `ContractMappingException` | Thrown by an `ICommandMessageMapper` on a value it cannot map; ignored by the retry policy so it reaches the error queue immediately (§9.4, §11.4) |
-| `StartHarnessAsync` | Test helper returning a started MassTransit harness (§12.5) |
+| `StartHarnessAsync` | Test helper returning a started MassTransit harness, and where a saga suite states the inactivity timeout its negative assertions wait on (§12.5) |
 | `Realm`, `Catalog`, `Audiences()` | Fixture handles on the Keycloak and Catalog containers, and a `aud`-claim reader over the decoded token — the realm-configuration assertions in §11.5 |
 | `MessageTypes` | Fixture handle on the real `MessageTypeMap` (§12.4). **Not `Types`**: that name belongs to `NetArchTest.Rules.Types`, which §4.2's architecture tests call as `Types.InAssembly(...)`, and a fixture member would shadow it in any file holding both — the `ServiceCollection` collision again, two rows above |
 | `TestTypeMap` | A `MessageTypeMap` over the contract and test assemblies, built once as a static in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture |

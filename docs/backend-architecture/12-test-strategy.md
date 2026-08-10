@@ -1000,6 +1000,10 @@ public async Task Commands_are_sent_and_events_are_published()
     // The distinction §9.6 rests on, asserted directly: publishing a command
     // would deliver it to every subscriber, and nothing else in the suite
     // would notice.
+    //
+    // The shared helper registers the saga and states the inactivity timeout.
+    // The last assertion here is a negative, so it is the one that pays that
+    // timeout in full — see the trap below.
     ITestHarness harness = await StartHarnessAsync();
     var orderId = Guid.CreateVersion7();
 
@@ -1035,12 +1039,12 @@ public async Task Commands_are_sent_and_events_are_published()
 > absorbs scheduling latency, which is why 10 s here where a composition
 > smoke asserting only positives can afford 30 s.
 
-> **Where the number lives is the other half.** The first sample states it in
-> its own registration, which is the honest place while the suite has one
-> harness; a suite that grows a second wants the call hoisted into the shared
-> `StartHarnessAsync` rather than copied per test, so that a test cannot
-> quietly run on a different wait from its neighbour. What it must never be
-> is unstated.
+> **Where the number lives is the other half, and both samples above assert a
+> negative, so both pay it.** The first states the value in the registration it
+> shows; the second gets it from `StartHarnessAsync`, the shared helper these
+> excerpts call rather than define. Either way it is stated once per harness —
+> copied per test, it lets one test quietly run on a different wait from its
+> neighbour, and left out it is the trap above rather than a saving.
 
 ## 12.6 Contract tests
 
