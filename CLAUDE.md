@@ -1660,11 +1660,24 @@ offending form rather than reasoning about it:
 All three are the operations `git reset --hard`, `git clean` and
 `git branch -D/-M` are denied for, reachable by another spelling. **A prefix
 rule cannot exclude a flag** — the refspec argument the push rules already
-make — so the helpers fix the whole command, shape-check every argument, and
-**create only**, refusing a name that already exists so a reset is not
-reachable by passing one. Copilot raised the first two against PR #27; the
-third was found by grepping for the same shape, which is the rule that says
-one site is never the only site.
+make — so each helper fixes the whole command, shape-checks every argument and
+passes no flags to git.
+
+**What each one refuses differs, and reading "create only" across all three
+breaks the recovery path.** `git-worktree-fork.sh` and `git-branch-create.sh`
+create only: a name that already exists is refused, so a reset is not reachable
+by passing one. `git-switch-existing.sh` is the mirror image — it **requires**
+the branch to exist and only switches — which is exactly what the failed-fork
+recovery needs, since `git worktree add -b` leaves the branch behind when the
+directory fails. An agent that took the summary for all three would refuse that
+recovery, or retry the create helper and hit *branch already exists*.
+
+Copilot raised the first two against PR #27; the third was found by grepping
+for the same shape, which is the rule that says one site is never the only
+site. `/security-sweep`'s two — `git-worktree-detach.sh` and
+`git-worktree-drop.sh` — followed for the same reason: `-B` resets a branch,
+and `-f` on a removal defeats the refusal that command's teardown uses as its
+guard.
 
 **The same review then found the holes in the grants that were left raw**, and
 they were in the command frontmatter rather than in `.claude/settings.json` —
