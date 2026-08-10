@@ -5,7 +5,7 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-12 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-13 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
 CI and the licence gate — the building blocks: `Common.Domain`,
@@ -572,7 +572,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 71 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 73 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
