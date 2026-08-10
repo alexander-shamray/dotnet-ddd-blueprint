@@ -43,16 +43,20 @@ added to `.gitignore` for a sibling, because there is nothing to ignore.
 
 **`/security-sweep` takes the opposite path deliberately, and the difference is
 the worktree's job.** That command forks a *detached* worktree under `mktemp -d`
-and removes it at the end; it carries no branch, nothing returns to it, and it
-must run where the repository's parent is not writable. This one holds a branch
-that a PR, two review loops and a person all come back to, so it wants a stable
-named directory beside the checkout rather than a temp path. Neither is the
-other's precedent — do not reconcile them by making one match.
+and removes it at the end; it carries no branch and nothing returns to it, and
+it refuses a sibling *by name* — partly because a root-level or container
+layout has no writable parent to put one in, which is a layout it has to keep
+working under rather than one it requires. This one holds a branch that a PR,
+two review loops and a person all come back to, so it wants a stable named
+directory beside the checkout rather than a temp path. Neither is the other's
+precedent — do not reconcile them by making one match.
 
-**That makes a writable parent this command's precondition**, and it is the one
-`/security-sweep` warns about: a root-level or container layout cannot create
-`../<checkout-name>-<slug>` at all. So the failure is named rather than left to
-surface as a raw `git` error mid-`/ship` — see step 5.
+**A writable parent is the precondition for the sibling worktree, not for this
+command**, and it is the constraint `/security-sweep` warns about: a root-level
+or container layout cannot create `../<checkout-name>-<slug>` at all. `/branch`
+still succeeds there — it branches in place and says so, exactly as it does on
+a dirty `main`. Naming the case is what keeps it from surfacing as a raw `git`
+error mid-`/ship`; step 5 has the handling.
 
 The slug is the branch's kebab summary cut to the first word or two that name
 the change — it is a directory name, not a branch name, so the `<type>/` prefix
@@ -107,10 +111,12 @@ not content.
      the cost.
 
      A clean `main` is the normal state at the start of a PR, so this is the
-     edge and not the rule. **This branch then forgoes the worktree for good,
-     and re-entering `/branch` will not get one** — step 1 stops on an existing
-     branch, step 4 refuses a name already taken, and step 5 cuts from
-     `origin/main`, which would not carry the commits anyway. Attaching one
+     edge and not the rule. **An in-place branch forgoes the worktree for good
+     — this one and step 5's alike — and re-entering `/branch` will not get one
+     back:** step 1 stops on an existing branch, step 4 refuses a name already
+     taken, and step 5 cuts from `origin/main`, which would not carry the
+     commits anyway. The two paths differ in their reason and not in this
+     consequence, which is why it is stated once, here. Attaching a worktree
      afterwards is three commands the user runs, not a mode this command has,
      and the middle one is the reason it cannot be automated from here — a
      branch cannot be checked out in two worktrees at once, so the main
@@ -210,7 +216,10 @@ not content.
    in-place branch is where they already are. So report the failure, say the
    sibling could not be created, and fall through to `git checkout -b <name>`
    exactly as the dirty-`main` path does. Both no-worktree states then look the
-   same to everything downstream, and there is only one of them to describe.
+   same to everything downstream, and there is only one of them to describe —
+   **including step 1's consequence, which is this path's too**: the branch
+   forgoes the worktree for good, and the manual attachment stated there is the
+   only route to one afterwards.
 
    **If the session cannot enter a worktree that was created, stop and report
    the path** — this is the other half and it fails the other way. Do

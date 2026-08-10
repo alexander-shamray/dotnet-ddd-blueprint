@@ -1498,8 +1498,9 @@ because it is lossy about untracked files and about line endings in a
 repository that pins `*.cs` to CRLF and leaves everything else to the platform.
 The command says which of the two happened rather than deciding quietly.
 
-**A branch that took that path does not get a worktree later from `/branch`**,
-and the file says so rather than offering a re-entry that lands elsewhere: the
+**A branch that took either in-place path does not get a worktree later from
+`/branch`** — the two differ in their reason and not in this consequence — and
+the file says so rather than offering a re-entry that lands elsewhere: the
 command stops on an existing branch, refuses a name already taken, and cuts
 from `origin/main`, which would not carry the commits. Attaching one afterwards
 is manual — `git switch main` in this checkout, then `git worktree add
