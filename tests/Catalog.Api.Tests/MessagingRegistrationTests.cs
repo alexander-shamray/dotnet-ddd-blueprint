@@ -60,10 +60,12 @@ public class MessagingRegistrationTests
     /// a saturated runner may take to schedule a consumer: CI runs seven test
     /// assemblies concurrently, three of them starting Testcontainers, on two
     /// cores — and this test failed there and passed on a re-run of the same
-    /// commit with no changes. 30 s is MassTransit's own <c>TestTimeout</c>
-    /// default, so the wait now ends where the harness's outer bound would
-    /// rather than 25× earlier, and a genuine composition failure still fails
-    /// in one bounded wait instead of hanging.
+    /// commit with no changes. 30 s is a generous scheduling budget for a
+    /// smoke that asserts only positives and so never waits it out, while
+    /// still failing a genuine composition defect in one bounded wait rather
+    /// than hanging. It is also the number MassTransit already uses for
+    /// <c>TestTimeout</c> — but that is a mnemonic, not a bound: as the
+    /// summary says, <c>TestTimeout</c> governs none of the assertions here.
     /// </remarks>
     private static readonly TimeSpan HarnessInactivityTimeout = TimeSpan.FromSeconds(30);
 

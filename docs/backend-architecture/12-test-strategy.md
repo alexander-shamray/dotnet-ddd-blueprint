@@ -1025,8 +1025,10 @@ public async Task Commands_are_sent_and_events_are_published()
 > and after 5 s only when `testInactivityTimeout` itself was raised. Inherit
 > that default and a saturated runner fails the suite wearing the assertion's
 > own message — a saga that did not send, rather than a runner that did not
-> schedule. This is not hypothetical: it failed CI once and passed on a re-run
-> of the same commit with no changes.
+> schedule. That costume is the danger, and it is not hypothetical: the same
+> mechanism failed CI on an in-memory harness test asserting a consume, which
+> then passed on a re-run of the same commit with no changes. No saga suite
+> exists yet to have flaked — this is the wait one will inherit.
 
 > **A matching assertion returns at once; a non-matching one always bills the
 > timeout in full.** That is what makes the number a judgement rather than a
