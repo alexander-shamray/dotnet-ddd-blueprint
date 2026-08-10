@@ -980,13 +980,20 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<ReleaseStock>(m => m.Context.Message.OrderId == orderId))
         .ShouldBeTrue();
 
-    // CancelOrder must not be sent until stock is confirmed released. The
-    // caller token is load-bearing and not an optimisation: an unbounded
-    // negative spends the harness's one shared inactivity token, and the
-    // ShouldBeTrue below could then only see what had already arrived. See
-    // the second trap.
-    using CancellationTokenSource notYet = new(TimeSpan.FromMilliseconds(500));
-    (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId, notYet.Token))
+    // CancelOrder must not be sent until stock is confirmed released — and
+    // "not yet" needs a point in time to be false *at*. The saga finishing
+    // with PaymentDeclined is that point.
+    (await harness.Consumed.Any<PaymentDeclined>(m => m.Context.Message.OrderId == orderId))
+        .ShouldBeTrue();
+
+    // An already-cancelled token then reads the record as of that point: no
+    // wait, no deadline for a late saga to hide inside, and the harness's one
+    // shared inactivity token left unspent for the assertion after
+    // StockReleased. The traps below explain why each of those matters.
+    using CancellationTokenSource asRecorded = new();
+    asRecorded.Cancel();
+
+    (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId, asRecorded.Token))
         .ShouldBeFalse();
 
     await harness.Bus.Publish(new StockReleased { OrderId = orderId });
@@ -1051,30 +1058,37 @@ public async Task Commands_are_sent_and_events_are_published()
 > reached, so a test pays the full wait once however many negatives it
 > asserts, and every later unmatched assertion returns `false` immediately.
 > Measured at the pin: a second negative on a fresh message type came back in
-> 0.0 s where the first took the whole 3 s. That is what prices the value — a
-> saga test with any negative at all has a floor of one inactivity timeout —
-> and why 10 s here, where a composition smoke asserting only positives never
+> 0.0 s where the first took the whole 3 s. That prices the value — a test
+> that lets any negative wait has a floor of one inactivity timeout — and it
+> is why 10 s here, where a composition smoke asserting only positives never
 > pays it and can afford 30 s.
 
 > **The spent token is a correctness trap, not merely a timing one.** Once it
 > is cancelled an assertion can only inspect what has already been recorded:
 > the same probe returned `True` after 0.4 s with no prior negative, and
-> `False` immediately with one. A mid-test `ShouldBeFalse` therefore poisons
-> every assertion after it that has to wait for something to arrive. The first
-> sample bounds its negative with a caller token for exactly that reason —
-> `Any(filter, ct)` links it, `CancelAfter` ends that one assertion, and the
-> shared token survives for the `ShouldBeTrue` after `StockReleased`. A
-> negative that is its test's last assertion, as in the second sample, needs
-> none of this. The synchronous `Select` overload is no escape either way: it
-> waits on the same token.
+> `False` immediately with one. A mid-test `ShouldBeFalse` that waits therefore
+> poisons every assertion after it that needs something to arrive. The
+> synchronous `Select` overload is no escape: it waits on the same token.
 
-> **Where the numbers live is the other half, and both samples above assert a
-> negative, so both pay it.** The first states them in the registration it
-> shows; the second gets them from `StartHarnessAsync`, the shared helper
-> these excerpts call rather than define. Either way they are stated once per
-> harness: copy them per test and one test can quietly run on a different wait
-> from its neighbour, leave them out and it is the trap above rather than a
-> saving.
+> **So a mid-test negative should not wait at all.** Give "not yet" a point in
+> time to be false at — a positive assertion that the triggering message has
+> been consumed — then read the record as of that point with an
+> already-cancelled token. Measured at the pin, it returns `false` for what is
+> absent and `true` for what is present, both immediately, and leaves the
+> shared token unspent for the assertion that follows. A *deadline* is the
+> wrong tool and fails open: a window is something a late-sending saga fits
+> inside, and the later positive would then accept the very command the
+> negative was there to forbid. A negative that is its test's last assertion,
+> as in the second sample, needs none of this and can simply wait.
+
+> **Where the numbers live is the other half.** The first sample states them in
+> the registration it shows; the second gets them from `StartHarnessAsync`, the
+> shared helper these excerpts call rather than define. Either way they are
+> stated once per harness: copy them per test and one test can quietly run on a
+> different wait from its neighbour, leave them out and it is the first trap
+> rather than a saving. Only the second sample actually spends the inactivity
+> timeout — the first reads the record instead of waiting, which is the whole
+> point of the technique.
 
 ## 12.6 Contract tests
 
