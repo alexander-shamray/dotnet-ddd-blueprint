@@ -39,6 +39,7 @@ set -euo pipefail
 usage() {
   echo "usage: grok-ledger.sh <pr-number> reserve <n> <full|recheck>" >&2
   echo "       grok-ledger.sh <pr-number> release <n>" >&2
+  echo "       grok-ledger.sh <pr-number> converge <n>" >&2
   echo "       grok-ledger.sh <pr-number> count" >&2
   exit 2
 }
@@ -65,7 +66,7 @@ ledger_rows() {
   declare -A seen=()
   gh api "repos/{owner}/{repo}/issues/$pr/comments" --paginate \
     --jq '.[]
-      | select(.body | test("^Grok check ([1-9]|1[0-2])/12 — (reserved \\((full|recheck)\\)|released: skipped on limits)$"))
+      | select(.body | test("^Grok check ([1-9]|1[0-2])/12 — (reserved \\((full|recheck)\\)|released: skipped on limits|converged: loop clean)$"))
       | "\(.id)\t\(.user.login)\t\(.body)"' |
   while IFS=$'\t' read -r id login body; do
     verdict="${seen[$login]:-}"
@@ -95,6 +96,7 @@ if [ "$op" = "count" ]; then
   # END and print 0: a fresh PR's ledger is legitimately empty, and pipefail
   # turning that into a failure was this helper's first field defect.
   ledger_rows | awk -F'\t' '
+    $2 ~ /converged/ { next }
     {
       split($2, a, "/")
       sub(/^Grok check /, "", a[1])
@@ -123,6 +125,13 @@ case "$op" in
   release)
     [ -z "$mode" ] || usage
     body="Grok check $n/12 — released: skipped on limits"
+    ;;
+  converge)
+    # Spend alone cannot distinguish a loop that converged on its last
+    # allowed check from one the ceiling cut off — both read as N spent.
+    # The marker says which; any later reservation supersedes it.
+    [ -z "$mode" ] || usage
+    body="Grok check $n/12 — converged: loop clean"
     ;;
   *) usage ;;
 esac

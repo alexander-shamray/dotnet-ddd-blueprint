@@ -218,10 +218,22 @@ fi
 # failure stops the loop, a skip does not. One extra probe against the auth that
 # was actually selected, so the OAuth path (which the block above never probes)
 # is covered too.
-limit_probe=$(docker run --rm "${mounts[@]}" "$image" grok -p "ok" 2>&1) || true
+probe_rc=0
+limit_probe=$(docker run --rm "${mounts[@]}" "$image" grok -p "ok" 2>&1) || probe_rc=$?
 if grep -qiE "$limit_re" <<<"$limit_probe"; then
   echo "grok is out of usage limits — skipping this review, not failing it:" >&2
   grep -ioE "$limit_re" <<<"$limit_probe" | head -1 >&2
+  exit 12
+fi
+# A dead fallback must not bury the key's limit signal. File presence made
+# OAuth the selected auth, but an expired, revoked or corrupt session fails
+# this probe with an auth-shaped answer, not a limit-shaped one — and
+# proceeding would burn a full review run to reach exit 4 and learn what
+# both probes already said. The key's limit is the operative fact; skip.
+if [ "$probe_rc" -ne 0 ] && [ -n "${XAI_API_KEY:-}" ] &&
+   grep -qiE "$limit_re" <<<"$key_probe"; then
+  echo "grok is out of usage limits (API key) and the selected OAuth fallback failed its probe — skipping this review, not failing it:" >&2
+  grep -ioE "$limit_re" <<<"$key_probe" | head -1 >&2
   exit 12
 fi
 

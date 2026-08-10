@@ -72,11 +72,18 @@ read it.** Step 5's checks are ledgered as PR comments — a reservation
 posted before each `grok-review.sh` invocation, released only by an exit-12
 skip (step 5 has both forms) — and a resumed run recovers the count as the
 highest N reserved and not released; an unreleased reservation counts as
-spent, and no ledger comment means a fresh PR with nothing spent. The read
-goes through the same helper — `bash .claude/scripts/grok-ledger.sh <n>
-count` — because PR comments are unauthenticated state: on a public PR
-anyone can post a line that imitates the ledger, so only the two exact
-shapes count as state, and only from authors whose repository permission
+spent, and no ledger comment means a fresh PR with nothing spent. The ledger
+carries convergence as well as spend, because spend alone cannot tell a loop
+that converged on its last allowed check from one the ceiling cut off: a
+`converged` marker as the last Grok row means step 5 owes nothing, and any
+later reservation supersedes it. Step 6 needs no marker for the same
+question — its outcomes are already on the PR, so a resumed run reads the
+last landed reviews (comments and suppressed blocks alike) and the
+unresolved-thread list before declaring that loop owed or exhausted. The
+count read goes through the same helper —
+`bash .claude/scripts/grok-ledger.sh <n> count` — because PR comments are
+unauthenticated state: on a public PR anyone can post a line that imitates
+the ledger, so only the helper's exact shapes count as state, and only from authors whose repository permission
 the helper verifies as write or better — PR-local, not account-local, so a
 resume under another authorised login reads the same count. The last event
 per N wins.
@@ -263,7 +270,11 @@ same argument as never calling a branch clean because asking failed.
      edit-denied to the session that invokes it. Keep the running count in
      the report as well — the report line is for the reader, the ledger is
      for the machine — and when the twelfth is spent, stop and say the PR
-     reached its Grok ceiling.
+     reached its Grok ceiling. When the loop ends clean instead, say so on
+     the ledger — `grok-ledger.sh <n> converge <N>` — because a resumed run
+     reading bare spend at the ceiling cannot tell convergence from
+     exhaustion, and the difference is whether it reports the Grok half
+     finished or blocked.
 
      The ceiling — then one number shared by both loops, as its size still
      is — was three, and three was wrong. By its seventh Copilot round
@@ -390,7 +401,12 @@ same argument as never calling a branch clean because asking failed.
    with nothing at all, to this loop's own ceiling of twelve requested-review
    rounds per PR — counted from the timeline's `review_requested` events, the
    ones `copilot-request-count.sh` already proves each request by, so a
-   resumed run recovers this count with no ledger at all. A request that
+   resumed run recovers this count with no ledger at all. The outcomes are
+   recoverable the same way: the landed reviews carry their comments and
+   suppressed blocks and the thread list its unresolved threads, so a run
+   that finds itself at the ceiling reads the last two landed reviews before
+   declaring the loop unconverged — the count alone cannot say which it
+   was. A request that
    registers no review inside a reasonable wait is reported as the loop not
    having finished, never marked clean by timeout.
 
