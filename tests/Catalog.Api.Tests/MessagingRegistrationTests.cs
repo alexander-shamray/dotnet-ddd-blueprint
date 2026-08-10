@@ -45,6 +45,28 @@ public class MessagingRegistrationTests
                 : [new KeyValuePair<string, string?>("ConnectionStrings:RabbitMq", rabbitConnectionString)])
             .Build();
 
+    /// <summary>
+    /// Stated rather than inherited, because MassTransit's default is 1.2
+    /// seconds and that default is the bound the consume assertion below
+    /// actually waits on. Verified against the 8.5.3 pin rather than
+    /// remembered: a message with no consumer gave up after 1.2 s with
+    /// <c>testTimeout</c> left alone, after 1.2 s again with
+    /// <c>testTimeout</c> lowered to 3 s, and after 5 s when this value alone
+    /// was raised to 5 s. So <c>SetTestTimeouts(testTimeout: …)</c> is not the
+    /// fix it looks like — it moves a number nothing here reads.
+    /// </summary>
+    /// <remarks>
+    /// 1.2 s is a developer machine's budget, not a statement about how long
+    /// a saturated runner may take to schedule a consumer: CI runs seven test
+    /// assemblies concurrently, three of them starting Testcontainers, on two
+    /// cores — and this test failed there and passed on a re-run of the same
+    /// commit with no changes. 30 s is MassTransit's own <c>TestTimeout</c>
+    /// default, so the wait now ends where the harness's outer bound would
+    /// rather than 25× earlier, and a genuine composition failure still fails
+    /// in one bounded wait instead of hanging.
+    /// </remarks>
+    private static readonly TimeSpan HarnessInactivityTimeout = TimeSpan.FromSeconds(30);
+
     public sealed record ProbeMessage(Guid Id);
 
     public sealed class ProbeConsumer : IConsumer<ProbeMessage>
@@ -52,14 +74,52 @@ public class MessagingRegistrationTests
         public Task Consume(ConsumeContext<ProbeMessage> context) => Task.CompletedTask;
     }
 
-    [Fact]
-    public async Task Publish_reaches_a_consumer_with_the_transport_swapped_for_in_memory()
+    /// <summary>
+    /// One registration, shared by the smoke and by the guard that asserts its
+    /// timeout — and shared deliberately. A guard building its own harness
+    /// would keep passing with <c>SetTestTimeouts</c> deleted from the smoke,
+    /// which is precisely the deletion it exists to catch.
+    /// </summary>
+    /// <remarks>
+    /// <c>SetTestTimeouts</c> comes first because it is the only call in the
+    /// chain returning <c>IBusRegistrationConfigurator</c>;
+    /// <c>AddConsumer&lt;T&gt;</c> returns a consumer configurator, so the
+    /// other order does not compile.
+    /// </remarks>
+    private static ServiceProvider BuildHarnessProvider()
     {
         ServiceCollection services = new();
         services.AddMassTransitMessaging(Configuration());
-        services.AddMassTransitTestHarness(x => x.AddConsumer<ProbeConsumer>());
+        services.AddMassTransitTestHarness(x => x
+            .SetTestTimeouts(testInactivityTimeout: HarnessInactivityTimeout)
+            .AddConsumer<ProbeConsumer>());
 
-        await using ServiceProvider provider = services.BuildServiceProvider(validateScopes: true);
+        return services.BuildServiceProvider(validateScopes: true);
+    }
+
+    [Fact]
+    public async Task The_harness_waits_for_the_stated_timeout_rather_than_MassTransits_default()
+    {
+        // The defect this replaced was invisible from the smoke below: with
+        // SetTestTimeouts deleted that test still passes on an idle machine
+        // and fails only on a loaded runner, so a deletion would come back as
+        // a flake rather than as a red test. Asserted here it fails at once —
+        // as does a MassTransit bump that stops honouring the call.
+        await using ServiceProvider provider = BuildHarnessProvider();
+
+        provider
+            .GetRequiredService<ITestHarness>()
+            .TestInactivityTimeout.ShouldBe(
+                HarnessInactivityTimeout,
+                "Consumed.Any waits on the inactivity timeout and never on TestTimeout, so this is the " +
+                "one of the two that has to be stated — 1.2s is MassTransit's default and a developer " +
+                "machine's budget, not a saturated two-core runner's");
+    }
+
+    [Fact]
+    public async Task Publish_reaches_a_consumer_with_the_transport_swapped_for_in_memory()
+    {
+        await using ServiceProvider provider = BuildHarnessProvider();
 
         ITestHarness harness = provider.GetRequiredService<ITestHarness>();
         await harness.Start();
@@ -75,7 +135,8 @@ public class MessagingRegistrationTests
             TestContext.Current.CancellationToken)).ShouldBeTrue(
             "the harness replaced the RabbitMQ transport, so a message that publishes but is never " +
             "consumed means the helper's registrations did not compose with the consumer bindings — " +
-            "the transport configuration itself is DatabaseSmokeTests' claim, not this one's");
+            "the transport configuration itself is DatabaseSmokeTests' claim, not this one's, and the " +
+            "wait is HarnessInactivityTimeout rather than a default, so a busy runner is not the answer");
     }
 
     [Fact]
