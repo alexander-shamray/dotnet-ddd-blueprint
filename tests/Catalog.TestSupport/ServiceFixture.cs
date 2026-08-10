@@ -1,6 +1,7 @@
 using System.Data.Common;
 using Catalog.Infrastructure.Persistence;
 using Catalog.Migrator;
+using Common.Infrastructure.Outbox;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -137,13 +138,19 @@ public sealed class ServiceFixture : IAsyncLifetime
             value is null ? [] : [$"--{key}={value}"];
     }
 
-    /// <summary>Runs a statement outside any unit of work, for arranging.</summary>
-    public async Task ExecuteAsync(string sql)
+    /// <summary>
+    /// Runs a statement outside any unit of work, for arranging. Placeholders
+    /// are <c>{0}</c>-style and EF turns each into a real SQL parameter — the
+    /// same rule <see cref="ScalarAsync{T}"/> states, and for the same two
+    /// reasons: a formatted string here would be both an injection shape and
+    /// a CA1305.
+    /// </summary>
+    public async Task ExecuteAsync(string sql, params object[] parameters)
     {
         await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
         CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
 
-        await db.Database.ExecuteSqlRawAsync(sql, TestContext.Current.CancellationToken);
+        await db.Database.ExecuteSqlRawAsync(sql, parameters, TestContext.Current.CancellationToken);
     }
 
     /// <summary>
@@ -176,6 +183,67 @@ public sealed class ServiceFixture : IAsyncLifetime
 
         return [.. await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)];
     }
+
+    /// <summary>
+    /// The host's own map (§9.4), with this assembly's events in it — the
+    /// builders in <see cref="Outbox.OutboxRows"/> stage through it, so a row
+    /// a test writes is a row the running dispatcher can resolve.
+    /// </summary>
+    public MessageTypeMap MessageTypes =>
+        Factory.Services.GetRequiredService<MessageTypeMap>();
+
+    /// <summary>
+    /// The host's payload format, converters included — so a row a test
+    /// stages is written the way the dispatcher will read it.
+    /// </summary>
+    public OutboxJson OutboxJson =>
+        Factory.Services.GetRequiredService<OutboxJson>();
+
+    /// <summary>Runs exactly one claim-and-deliver pass. No timers, no waiting.</summary>
+    public Task<int> ProcessOutboxBatchAsync() =>
+        Factory.Services
+            .GetRequiredService<OutboxDispatcher>()
+            .ProcessBatchAsync(TestContext.Current.CancellationToken);
+
+    /// <summary>Every outbox row, untracked, for asserting over.</summary>
+    public async Task<IReadOnlyList<OutboxMessage>> OutboxAsync()
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+
+        return await db.OutboxMessages
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>Writes rows directly, for tests about the dispatcher rather than the staging.</summary>
+    public async Task StageOutboxAsync(params OutboxMessage[] rows)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+
+        db.OutboxMessages.AddRange(rows);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Seeds a prior attempt count through the same column the dispatcher
+    /// writes. Explicit rather than hidden in a builder, so no state carries
+    /// between tests (§12.8).
+    /// </summary>
+    public Task SetOutboxAttemptsAsync(Guid messageId, int attempts) =>
+        ExecuteAsync(
+            "UPDATE catalog.OutboxMessages SET Attempts = {0} WHERE MessageId = {1};",
+            attempts,
+            messageId);
+
+    /// <summary>
+    /// Clears retry backoff leases so the next pass is gated only by the
+    /// attempt cap. Lets a test distinguish "backed off" from "abandoned"
+    /// without sleeping.
+    /// </summary>
+    public Task ExpireOutboxLeasesAsync() =>
+        ExecuteAsync("UPDATE catalog.OutboxMessages SET LockedUntil = NULL WHERE ProcessedAt IS NULL;");
 
     /// <summary>Rows the transaction probe holds for one id.</summary>
     public Task<int> ProbeRowCountAsync(Guid id) =>

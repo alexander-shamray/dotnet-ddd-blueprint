@@ -3,11 +3,16 @@
   <!--
     Settings come from Directory.Build.props (§4.4).
 
-    No project references, deliberately: nothing in the Redis helpers names a
-    domain or an application type, and an unused project reference is a claim
-    about the dependency graph that nothing makes true — the same argument
-    that keeps Common.Application ↛ Common.Domain today. PR-14's outbox is
-    what draws edges here.
+    PR-14's outbox drew the edges this comment used to say it would. The Redis
+    helpers still name no domain or application type; the Outbox folder names
+    all three — IDbConnectionFactory and OutboxLane from Common.Application,
+    IDomainEvent from Common.Domain, IIntegrationEvent from Common.Contracts,
+    the last two because MessageTypeMap selects on exactly that pair.
+
+    MassTransit arrives with them, and it is the first common code to name one
+    of its types: IPublishEndpoint, on the Broker half of DeliverAsync. Until
+    PR-13 the argument for keeping it per-service was that no shared code
+    needed it; this is the PR that made that stop being true.
   -->
 
   <ItemGroup>
@@ -24,6 +29,27 @@
          overload, and a host with no Redis must not carry the client. -->
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" />
+    <!-- The outbox (§9.4). MassTransit core, not the transport: the
+         dispatcher publishes through IPublishEndpoint and configures no
+         broker — the transport package stays in each service's
+         Infrastructure, where UsingRabbitMq lives. -->
+    <PackageReference Include="MassTransit" />
+    <!-- The claim, complete and fail statements. Raw SQL on a connection the
+         port hands out, never EF: the dispatcher runs outside the command's
+         transaction by design. -->
+    <PackageReference Include="Dapper" />
+    <!-- LoggerMessage.Define in OutboxDispatcher, and ILogger<T> behind it. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Common.Application\Common.Application.csproj" />
+    <ProjectReference Include="..\Common.Contracts\Common.Contracts.csproj" />
+    <!-- Common.Domain arrives transitively through Common.Application since
+         PR-14. Named anyway: MessageTypeMap and ProjectionInvoker use
+         IDomainEvent directly, and a compile against another project's
+         reference is a claim this one never states. -->
+    <ProjectReference Include="..\Common.Domain\Common.Domain.csproj" />
   </ItemGroup>
 
 </Project>

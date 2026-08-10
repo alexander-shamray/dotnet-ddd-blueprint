@@ -15,14 +15,16 @@ public static class PluggableInterfaces
     public static readonly IReadOnlyList<Type> All =
     [
         typeof(ICommandHandler<,>),          // §6.2 — HTTP and message-borne
-        typeof(IQueryHandler<,>)             // §6.5
+        typeof(IQueryHandler<,>),            // §6.5
+        typeof(IProjectionHandler<>)         // §7.5 — the local outbox lane
 
-        // Three more join this list in the PRs that define them:
-        // IProjectionHandler<> (§7.5, the local outbox lane), and
+        // Two more join this list in the PR that defines them:
         // IIntegrationEventHandler<> and ICommandMessageMapper<,> (§9.4, the
         // broker lane and the wire contract → command mapper). Listing an
         // interface before it exists would not compile; listing one that
-        // exists and is never scanned is the trap this class was built for.
+        // exists and is never scanned is the trap this class was built for —
+        // and the scan is the *only* registration a projection handler gets,
+        // so a missing entry here is a Local row that reaches §9.4's throw.
         //
         // IPipelineBehavior<,> is deliberately absent, and stays absent.
         // Registration order is pipeline order (§6.3), and a scan gives no

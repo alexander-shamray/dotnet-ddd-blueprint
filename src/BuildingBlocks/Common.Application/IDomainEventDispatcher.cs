@@ -9,11 +9,12 @@ public interface IDomainEventDispatcher
     /// the transaction, before SaveChanges.
     /// </summary>
     /// <remarks>
-    /// The port arrives with PR-09 because §6.3's behaviour cannot compile
+    /// The port arrived with PR-09 because §6.3's behaviour could not compile
     /// without it; everything §7.5 builds behind it — the collector, the
-    /// registry, the real dispatcher — arrives with the outbox. No member
-    /// names a domain type, which is why this file draws no edge to
-    /// <c>Common.Domain</c> (see <see cref="IUnitOfWork"/> for the argument).
+    /// registry, the real dispatcher — arrived with the outbox. No member of
+    /// <em>this</em> interface names a domain type, which is why it drew no
+    /// edge to <c>Common.Domain</c> on its own; the edge is
+    /// <see cref="IDomainEventCollector"/>'s.
     /// </remarks>
     Task DispatchAsync(CancellationToken ct);
 }

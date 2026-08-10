@@ -1,3 +1,4 @@
+using Common.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
 
 namespace Catalog.Infrastructure.Persistence;
@@ -19,6 +20,14 @@ namespace Catalog.Infrastructure.Persistence;
 /// </remarks>
 public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
 {
+    /// <summary>
+    /// §9.4's outbox. The one <c>DbSet</c> here that is not an aggregate root,
+    /// and deliberately so: the row has to be written by the same context as
+    /// the aggregate to enlist in the same transaction, which is the entire
+    /// mechanism. §12.4's tests read it through this property.
+    /// </summary>
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("catalog");

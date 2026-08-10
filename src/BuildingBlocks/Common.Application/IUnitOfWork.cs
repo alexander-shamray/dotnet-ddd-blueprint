@@ -11,9 +11,12 @@ namespace Common.Application;
 /// <see cref="ModifiedAggregateCount"/> as an <c>int</c> and never sees the
 /// <c>IAggregateRoot</c> the count is derived from. Deriving it behind the port
 /// is what keeps EF's change tracker, and the domain interface it tests for, on
-/// Infrastructure's side of §4.2. The edge waits for the first Application type
-/// that really does name a domain type — §7.5's <c>IDomainEventCollector</c>,
-/// which returns <c>IReadOnlyList&lt;IDomainEvent&gt;</c>.
+/// Infrastructure's side of §4.2. That is still the argument, and the edge is
+/// now drawn — by §7.5's <see cref="IDomainEventCollector"/>, which returns
+/// <c>IReadOnlyList&lt;IDomainEvent&gt;</c> and is the first member of this
+/// assembly that genuinely names a domain type. A reference existing does not
+/// license this file to use it: the count stays an <c>int</c> for the reason
+/// above, not for want of a dependency.
 /// </remarks>
 public interface IUnitOfWork
 {
