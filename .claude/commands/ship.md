@@ -76,8 +76,10 @@ spent, and no ledger comment means a fresh PR with nothing spent. The read
 goes through the same helper — `bash .claude/scripts/grok-ledger.sh <n>
 count` — because PR comments are unauthenticated state: on a public PR
 anyone can post a line that imitates the ledger, so only the two exact
-shapes, written by the ledger's own login, count as state, and the last
-event per N wins.
+shapes count as state, and only from authors whose repository permission
+the helper verifies as write or better — PR-local, not account-local, so a
+resume under another authorised login reads the same count. The last event
+per N wins.
 Step 6 needs no ledger at all: the timeline's `review_requested` events are
 the count, the same events `copilot-request-count.sh` already proves each
 request by. A ledger read or write that fails stops the chain rather than
@@ -251,7 +253,7 @@ same argument as never calling a branch clean because asking failed.
      `grok-ledger.sh <n> release <N>` — because a skip is not a check; every
      other outcome lets the reservation stand as the record. A resumed run
      reads the count with `grok-ledger.sh <n> count`, which accepts only the
-     ledger's own line shapes from the ledger's own login and counts an
+     ledger's line shapes from write-verified authors and counts an
      unreleased reservation as spent. The ledger goes through its own fixed
      helper for the same reason the Copilot request does: a
      `Bash(gh pr comment:*)` grant would also license `--edit-last`,
