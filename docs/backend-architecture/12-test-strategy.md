@@ -19,7 +19,7 @@
 | Application | One handler end to end | Real DB and Redis (containers), fakes for other services | < 500 ms | Tens | `*.Application.Tests` |
 | API contract | HTTP in, HTTP out | `WebApplicationFactory` + containers | < 1 s | Tens | `*.Api.Tests` |
 | Host building block | One middleware or host extension | `TestServer` — no containers, no entry point | < 50 ms | Tens | `Common.Web.Tests` |
-| Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms | A few | `*.Application.Tests` |
+| Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
 | Contract | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
 **Neither is there an "all services in containers" level, nor an E2E one.** Both
@@ -32,10 +32,16 @@ can attribute.
 What they would actually catch splits cleanly in two, and both halves are
 cheaper elsewhere. **Saga coordination** — did the right command go out, in the
 right order, after the right event — is exercised by the in-memory harness in
-§12.5, in milliseconds. **Contract compatibility** — does the message one
-service publishes still mean what its consumers expect — is a reflection test
-over the contract assembly, and it is the one thing genuinely between services,
-which is why `Platform.IntegrationTests` exists and holds nothing else.
+§12.5, in milliseconds. The exception is an assertion that something did *not*
+happen, which cannot resolve until the harness gives up waiting and so costs
+the whole inactivity timeout — once per test, however many negatives it
+asserts. §12.5's traps price that and name the correctness hazard that comes
+with it, and between them they are the reason these tests are "a few" rather
+than hundreds. **Contract compatibility** —
+does the message one service publishes still mean what its consumers expect —
+is a reflection test over the contract assembly, and it is the one thing
+genuinely between services, which is why `Platform.IntegrationTests` exists
+and holds nothing else.
 
 What no level above covers is whether the *deployed* system responds under load
 and against real infrastructure. That is a **k6 or NBomber run against
@@ -952,6 +958,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
 {
     await using ServiceProvider provider = new ServiceCollection()
         .AddMassTransitTestHarness(cfg => cfg
+            .SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(30), testInactivityTimeout: TimeSpan.FromSeconds(10))
             .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
             .InMemoryRepository())
         .BuildServiceProvider(true);
@@ -973,8 +980,20 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<ReleaseStock>(m => m.Context.Message.OrderId == orderId))
         .ShouldBeTrue();
 
-    // CancelOrder must not be sent until stock is confirmed released.
-    (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId))
+    // CancelOrder must not be sent until stock is confirmed released — and
+    // "not yet" needs a point in time to be false *at*. The saga finishing
+    // with PaymentDeclined is that point.
+    (await harness.Consumed.Any<PaymentDeclined>(m => m.Context.Message.OrderId == orderId))
+        .ShouldBeTrue();
+
+    // An already-cancelled token then reads the record as of that point: no
+    // wait, no deadline for a late saga to hide inside, and the harness's one
+    // shared inactivity token left unspent for the assertion after
+    // StockReleased. The traps below explain why each of those matters.
+    using CancellationTokenSource asRecorded = new();
+    asRecorded.Cancel();
+
+    (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId, asRecorded.Token))
         .ShouldBeFalse();
 
     await harness.Bus.Publish(new StockReleased { OrderId = orderId });
@@ -995,6 +1014,11 @@ public async Task Commands_are_sent_and_events_are_published()
     // The distinction §9.6 rests on, asserted directly: publishing a command
     // would deliver it to every subscriber, and nothing else in the suite
     // would notice.
+    //
+    // The shared helper registers the saga and states both harness bounds.
+    // The last assertion here is a negative, so it is the one that pays the
+    // inactivity timeout in full — and being last, it spends the shared token
+    // with nothing left to wait after it. See the traps below.
     ITestHarness harness = await StartHarnessAsync();
     var orderId = Guid.CreateVersion7();
 
@@ -1006,6 +1030,65 @@ public async Task Commands_are_sent_and_events_are_published()
     (await harness.Published.Any<ReserveStock>()).ShouldBeFalse();
 }
 ```
+
+> **Trap — the harness gives up after 1.2 seconds, and the timeout named
+> `TestTimeout` is not the one that says so.** An `Any(…)` ends at the
+> **earliest** of four things: a match, `TestInactivityTimeout` (default 1.2 s,
+> measured from the last bus activity), `TestTimeout` (default 30 s, measured
+> from the call), and the caller's `CancellationToken`. With the defaults the
+> inactivity bound always wins, which is why raising `testTimeout` alone looks
+> like a fix and changes nothing — and why the two must be read as a pair
+> rather than one being dismissed. All four were measured at the 8.5.3 pin, the
+> decisive case being `testTimeout: 2 s` against `testInactivityTimeout: 10 s`,
+> which gave up after 2 s.
+
+> **Inherit either and a saturated runner fails the suite wearing the
+> assertion's own message** — a saga that did not send, rather than a runner
+> that did not schedule. That costume is the danger, and it is not
+> hypothetical: the same mechanism failed CI on an in-memory harness test
+> asserting a consume, which then passed on a re-run of the same commit with no
+> changes. No saga suite exists yet to have flaked — this is the wait one will
+> inherit. State both, and keep the ceiling clear of the bound meant to fire,
+> so which one reported a failure is never a detail of how long the publish
+> took.
+
+> **A matching assertion returns at once; an unmatched one bills the timeout —
+> but only the first one does.** MassTransit shares a single inactivity token
+> across every list on a harness and cancels it for good once inactivity is
+> reached, so a test pays the full wait once however many negatives it
+> asserts, and every later unmatched assertion returns `false` immediately.
+> Measured at the pin: a second negative on a fresh message type came back in
+> 0.0 s where the first took the whole 3 s. That prices the value — a test
+> that lets any negative wait has a floor of one inactivity timeout — and it
+> is why 10 s here, where a composition smoke asserting only positives never
+> pays it and can afford 30 s.
+
+> **The spent token is a correctness trap, not merely a timing one.** Once it
+> is cancelled an assertion can only inspect what has already been recorded:
+> the same probe returned `True` after 0.4 s with no prior negative, and
+> `False` immediately with one. A mid-test `ShouldBeFalse` that waits therefore
+> poisons every assertion after it that needs something to arrive. The
+> synchronous `Select` overload is no escape: it waits on the same token.
+
+> **So a mid-test negative should not wait at all.** Give "not yet" a point in
+> time to be false at — a positive assertion that the triggering message has
+> been consumed — then read the record as of that point with an
+> already-cancelled token. Measured at the pin, it returns `false` for what is
+> absent and `true` for what is present, both immediately, and leaves the
+> shared token unspent for the assertion that follows. A *deadline* is the
+> wrong tool and fails open: a window is something a late-sending saga fits
+> inside, and the later positive would then accept the very command the
+> negative was there to forbid. A negative that is its test's last assertion,
+> as in the second sample, needs none of this and can simply wait.
+
+> **Where the numbers live is the other half.** The first sample states them in
+> the registration it shows; the second gets them from `StartHarnessAsync`, the
+> shared helper these excerpts call rather than define. Either way they are
+> stated once per harness: copy them per test and one test can quietly run on a
+> different wait from its neighbour, leave them out and it is the first trap
+> rather than a saving. Only the second sample actually spends the inactivity
+> timeout — the first reads the record instead of waiting, which is the whole
+> point of the technique.
 
 ## 12.6 Contract tests
 
