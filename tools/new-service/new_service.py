@@ -119,9 +119,9 @@ COPIED = frozenset(
 )
 
 # PR-10's slice, and nothing else. A scaffolded service is PR-07's state with
-# PR-08, PR-09 and PR-10's wiring on it — not PR-10's state with the nouns
-# changed. Renaming Product to Order would hand the next service a deletion
-# job and a vocabulary it did not choose.
+# the wiring accumulated through PR-13 on it — not PR-10's state with the
+# nouns changed. Renaming Product to Order would hand the next service a
+# deletion job and a vocabulary it did not choose.
 OMITTED = frozenset(
     {
         "src/Services/Catalog/Catalog.Api/Endpoints/ProductEndpoints.cs",

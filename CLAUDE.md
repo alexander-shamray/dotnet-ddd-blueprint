@@ -404,11 +404,12 @@ after:
   `tools/new-service`'s suite red, and reconciling the script belongs in the
   same change.
 - **The scaffold copies no domain.** The slice is excluded by name, so a new
-  service is PR-07's state with PR-08's, PR-09's and PR-10's wiring on it — five
-  service projects, three test projects and a `TestSupport` library (§4.1 calls
-  that last one *not* a test project, and counting it as one is a drift a
-  review has already caught here), both images, the Compose pair, the
-  `InitialCreate` migration and twenty-four passing tests, and no aggregate.
+  service is PR-07's state with the wiring accumulated through PR-13 on it —
+  five service projects, three test projects and a `TestSupport` library
+  (§4.1 calls that last one *not* a test project, and counting it as one is a
+  drift a review has already caught here), both images, the Compose pair, the
+  `InitialCreate` migration, the bus registration with its harness smoke, and
+  twenty-seven passing tests, and no aggregate.
   Three things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
   wiring and the two silent-scan registration tests.

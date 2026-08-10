@@ -363,7 +363,7 @@ public static IServiceCollection AddOrderingInfrastructure(
     // No service name passed: the key prefix comes from ApplicationName, the
     // single source §8.5 already uses for idempotency keys.
     services.AddRedisConnections(configuration);
-    services.AddMassTransitMessaging(configuration);                     // §9.4
+    services.AddMassTransitMessaging(configuration);                     // §9
 
     // Readiness checks live here, not in Common.Web — they need connection
     // strings, which the shared host package does not have (§13.5).
@@ -875,15 +875,18 @@ It writes §4.1's five service projects, its three test projects and its
 a test project — with everything the service template has accumulated: the
 `DbContext` and its conventions
 ([§7.2](07-persistence.md)), `EfUnitOfWork` ([§6.3](06-cqrs.md)), the
-connection factory ([§6.5](06-cqrs.md)), the readiness check
-([§13.5](13-observability.md)), the migration job host
+connection factory ([§6.5](06-cqrs.md)), the readiness checks
+([§13.5](13-observability.md)) — SQL registered by the service, the bus's
+`masstransit-bus` by MassTransit itself — the bus registration of [§9](09-messaging.md),
+whose eager read means a scaffolded host refuses to start without
+`ConnectionStrings:RabbitMq`, the migration job host
 ([§7.4](07-persistence.md)), the `InitialCreate` migration that creates the
 schema, both images ([§15.2](15-cicd-deployment.md)) and §4.2's architecture
 gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, and the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
 builds and its tests pass before a line of it is written, eleven of them
-against a real SQL Server.
+against real SQL Server and RabbitMQ containers.
 
 **There is no template directory, and that is the design.** The script reads
 `src/Services/Catalog` at run time, so there is exactly one copy of the
