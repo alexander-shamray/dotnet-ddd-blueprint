@@ -1,7 +1,7 @@
 ---
 description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr comment:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -67,14 +67,16 @@ a look for `suggestions.md` (it decides recheck versus full review inside
 step 5, not whether step 5 runs) answer all five. Read them before doing
 anything.
 
-**One piece of state lives in no command's output: each loop's check count
-against its twelve.** The tree cannot carry it, so the previous run's report
-does — the Report section makes the running count a required line — and a
-resumed run recovers it from that report, in the conversation or its summary.
-Where it is genuinely unrecoverable, say so in the report and count from what
-this run can prove: the cap then binds what can be seen rather than resetting
-to zero silently — degraded honestly, like the clean streak above, never
-invented.
+**Each loop's check count lives on the PR itself, where any resumed run can
+read it.** Step 5's checks are ledgered as PR comments — each
+`grok-review.sh` invocation posts a `Grok check N/12` comment (step 5 has
+the form) — and a resumed run recovers the count as the highest N the
+ledger states; no ledger comment means a fresh PR with nothing spent.
+Step 6 needs no ledger at all: the timeline's `review_requested` events are
+the count, the same events `copilot-request-count.sh` already proves each
+request by. A ledger read or write that fails stops the chain rather than
+guessing — a cap that resets when its state goes missing is no cap, the
+same argument as never calling a branch clean because asking failed.
 
 ## Steps
 
@@ -222,10 +224,14 @@ invented.
      count the same — and this loop's ceiling is **no more than twelve of them
      against one PR**, carried across resumed `/ship` runs rather than reset
      each time the chain re-enters. A skip on limits (exit 12) is not a check
-     and does not count; a review that ran and reported does. Track the running
-     count in the report — a required line there, and the one place a resumed
-     run can recover it from — and when the twelfth is spent, stop and say the
-     PR reached its Grok ceiling.
+     and does not count; a review that ran and reported does. Every check is
+     ledgered on the PR the moment it returns —
+     `gh pr comment <n> --body "Grok check N/12 — <full|recheck>, <outcome>"`
+     — so the count survives any resume: a later run reads the highest N the
+     ledger states, and a fresh PR has no ledger and nothing spent. Keep the
+     running count in the report as well — the report line is for the reader,
+     the ledger is for the machine — and when the twelfth is spent, stop and
+     say the PR reached its Grok ceiling.
 
      The ceiling — then one number shared by both loops, as its size still
      is — was three, and three was wrong. By its seventh Copilot round
@@ -350,8 +356,9 @@ invented.
    **`Ask`** thread — left open by `/review-copilot` by design — stops the
    loop; otherwise it runs until **two consecutive** requested reviews land
    with nothing at all, to this loop's own ceiling of twelve requested-review
-   rounds per PR, counted across resumed runs the way step 5 counts its
-   checks. A request that
+   rounds per PR — counted from the timeline's `review_requested` events, the
+   ones `copilot-request-count.sh` already proves each request by, so a
+   resumed run recovers this count with no ledger at all. A request that
    registers no review inside a reasonable wait is reported as the loop not
    having finished, never marked clean by timeout.
 
@@ -370,8 +377,9 @@ One line per step: done, skipped and why, or stopped and what is needed —
 including the push, which reports which of its three states it found even when
 that state was "nothing to do". Each review loop reports one line per round —
 findings raised, findings fixed, and what each round pushed — its running
-check count against its twelve (required: this line is what a resumed run
-recovers the count from), and how it ended: clean, stopped on a decision or
+check count against its twelve (the PR carries the durable copy: step 5's
+ledger comments, step 6's timeline events; the report line is the
+human-readable echo), and how it ended: clean, stopped on a decision or
 an open `Ask`, skipped on limits with re-entry owed, or stopped unconverged.
 End with the PR URL.
 
