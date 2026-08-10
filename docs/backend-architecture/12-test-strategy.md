@@ -19,7 +19,7 @@
 | Application | One handler end to end | Real DB and Redis (containers), fakes for other services | < 500 ms | Tens | `*.Application.Tests` |
 | API contract | HTTP in, HTTP out | `WebApplicationFactory` + containers | < 1 s | Tens | `*.Api.Tests` |
 | Host building block | One middleware or host extension | `TestServer` — no containers, no entry point | < 50 ms | Tens | `Common.Web.Tests` |
-| Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms | A few | `*.Application.Tests` |
+| Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
 | Contract | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
 **Neither is there an "all services in containers" level, nor an E2E one.** Both
@@ -32,10 +32,14 @@ can attribute.
 What they would actually catch splits cleanly in two, and both halves are
 cheaper elsewhere. **Saga coordination** — did the right command go out, in the
 right order, after the right event — is exercised by the in-memory harness in
-§12.5, in milliseconds. **Contract compatibility** — does the message one
-service publishes still mean what its consumers expect — is a reflection test
-over the contract assembly, and it is the one thing genuinely between services,
-which is why `Platform.IntegrationTests` exists and holds nothing else.
+§12.5, in milliseconds. The exception is an assertion that something did *not*
+happen, which cannot resolve until the harness gives up waiting and so costs
+the whole inactivity timeout; §12.5's trap prices that, and it is the reason
+these tests are "a few" rather than hundreds. **Contract compatibility** —
+does the message one service publishes still mean what its consumers expect —
+is a reflection test over the contract assembly, and it is the one thing
+genuinely between services, which is why `Platform.IntegrationTests` exists
+and holds nothing else.
 
 What no level above covers is whether the *deployed* system responds under load
 and against real infrastructure. That is a **k6 or NBomber run against
@@ -952,6 +956,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
 {
     await using ServiceProvider provider = new ServiceCollection()
         .AddMassTransitTestHarness(cfg => cfg
+            .SetTestTimeouts(testInactivityTimeout: TimeSpan.FromSeconds(10))
             .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
             .InMemoryRepository())
         .BuildServiceProvider(true);
@@ -1006,6 +1011,28 @@ public async Task Commands_are_sent_and_events_are_published()
     (await harness.Published.Any<ReserveStock>()).ShouldBeFalse();
 }
 ```
+
+> **Trap — the harness gives up after 1.2 seconds, and `TestTimeout` is not
+> what says so.** Every `Any(…)` above waits on `TestInactivityTimeout`, whose
+> default is 1.2 s. `TestTimeout`'s 30 s governs none of them, so
+> `SetTestTimeouts(testTimeout: …)` is a fix that changes nothing — measured
+> at the 8.5.3 pin, where an unmatched assertion gave up after 1.2 s with
+> `testTimeout` left alone, after 1.2 s again with `testTimeout` lowered to 3 s,
+> and after 5 s only when `testInactivityTimeout` itself was raised. Inherit
+> that default and a saturated runner fails the suite wearing the assertion's
+> own message — a saga that did not send, rather than a runner that did not
+> schedule. This is not hypothetical: it failed CI once and passed on a re-run
+> of the same commit with no changes.
+
+> **A matching assertion returns at once; a non-matching one always bills the
+> timeout in full.** That is what makes the number a judgement rather than a
+> constant to copy, because it is the `ShouldBeFalse` assertions that pay for
+> it: the sample above asserts two negatives, so its floor is twice whatever
+> is chosen, and its 10 s is that trade-off taken rather than a number to
+> carry into a suite of a different shape. There is no per-assertion escape —
+> the synchronous `Select` overload waits on the same token, timed at the pin
+> rather than assumed. `StartHarnessAsync` in the second test is where a suite
+> states this once, and the one thing it must not do is leave it unstated.
 
 ## 12.6 Contract tests
 
