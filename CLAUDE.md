@@ -1666,6 +1666,20 @@ reachable by passing one. Copilot raised the first two against PR #27; the
 third was found by grepping for the same shape, which is the rule that says
 one site is never the only site.
 
+**The same review then found the holes in the grants that were left raw**, and
+they were in the command frontmatter rather than in `.claude/settings.json` —
+worth knowing, because the global file had it right all along. Six commands
+carried `Bash(git branch:*)`, which admits `git branch -fd <name>`: force and
+delete behind a spelling the `-d`/`-D`/`--delete` denies do not match, verified
+by deleting a branch with it. Two carried `Bash(git reset HEAD:*)`, which
+admits `git reset HEAD --hard` — the `--hard` deny matches the *other* word
+order, and the reset was verified to discard a tracked modification. Both are
+narrowed to the forms actually used: `git branch --list:*`, `--show-current`
+and `-a` (`--list` was checked against a trailing `-D` and refuses it), and
+`git reset HEAD --:*`, where the `--` makes any later flag a pathspec.
+**A command's frontmatter is a grant like any other, and it is the one nobody
+reads twice.**
+
 **`sandbox/` is on that list for a reason worth keeping.** It arrived guarded
 by nothing, and a review caught it: the Dockerfile is a *build input to the
 security boundary*, so a session able to edit it can add an entrypoint that
