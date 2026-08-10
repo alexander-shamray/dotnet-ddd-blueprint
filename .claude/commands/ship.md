@@ -23,11 +23,14 @@ the sequence is allowed to stop.
 `/pr` pushes the branch itself, so the chain reaches an open PR without waiting
 for anyone — and the PR is no longer where it stops. Steps 5 and 6 keep going:
 Grok reads the branch and `/review-grok` triages what it found, then Copilot
-reads the PR and `/review-copilot` triages that, and the chain ends only when
-both reviewers have nothing left to say. **Step 2, a `Needs a decision`
-finding in step 5 and an `Ask` thread in step 6 are the only things that stop
-it** — a check that finds something halts the run and hands the finding back,
-because fixing it is the user's call.
+reads the PR and `/review-copilot` triages that, and the chain ends when both
+reviewers have nothing left to say — or, if Grok was skipped on usage limits
+(step 5's exit 12), when Copilot has finished, with the Grok re-entry owed to
+a later run. **Step 2, a `Needs a decision` finding in step 5 and an `Ask`
+thread in step 6 are the stops that hand a decision back to the user** — a
+check that finds something halts the run and hands the finding back, because
+fixing it is the user's call. Helper failures and either loop's ceiling stop
+the chain too, reported as what they are rather than looped past.
 
 That is a real change in character and worth naming. Under the old blanket
 `Bash(git push:*)` deny this command could not finish: it stopped before the
@@ -63,6 +66,15 @@ one this run just produced by watching both loops end clean.
 a look for `suggestions.md` (it decides recheck versus full review inside
 step 5, not whether step 5 runs) answer all five. Read them before doing
 anything.
+
+**One piece of state lives in no command's output: each loop's check count
+against its twelve.** The tree cannot carry it, so the previous run's report
+does — the Report section makes the running count a required line — and a
+resumed run recovers it from that report, in the conversation or its summary.
+Where it is genuinely unrecoverable, say so in the report and count from what
+this run can prove: the cap then binds what can be seen rather than resetting
+to zero silently — degraded honestly, like the clean streak above, never
+invented.
 
 ## Steps
 
@@ -211,8 +223,9 @@ anything.
      against one PR**, carried across resumed `/ship` runs rather than reset
      each time the chain re-enters. A skip on limits (exit 12) is not a check
      and does not count; a review that ran and reported does. Track the running
-     count in the report so a resumed run knows how many remain, and when the
-     twelfth is spent, stop and say the PR reached its Grok ceiling.
+     count in the report — a required line there, and the one place a resumed
+     run can recover it from — and when the twelfth is spent, stop and say the
+     PR reached its Grok ceiling.
 
      The ceiling — then one number shared by both loops, as its size still
      is — was three, and three was wrong. By its seventh Copilot round
@@ -356,8 +369,10 @@ anything.
 One line per step: done, skipped and why, or stopped and what is needed —
 including the push, which reports which of its three states it found even when
 that state was "nothing to do". Each review loop reports one line per round —
-findings raised, findings fixed, and what each round pushed — and how it
-ended: clean, stopped on a decision or an open `Ask`, or stopped unconverged.
+findings raised, findings fixed, and what each round pushed — its running
+check count against its twelve (required: this line is what a resumed run
+recovers the count from), and how it ended: clean, stopped on a decision or
+an open `Ask`, skipped on limits with re-entry owed, or stopped unconverged.
 End with the PR URL.
 
 A step skipped on an assumption gets its assumption restated here rather than
