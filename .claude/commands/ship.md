@@ -68,10 +68,11 @@ step 5, not whether step 5 runs) answer all five. Read them before doing
 anything.
 
 **Each loop's check count lives on the PR itself, where any resumed run can
-read it.** Step 5's checks are ledgered as PR comments — each
-`grok-review.sh` invocation posts a `Grok check N/12` comment (step 5 has
-the form) — and a resumed run recovers the count as the highest N the
-ledger states; no ledger comment means a fresh PR with nothing spent.
+read it.** Step 5's checks are ledgered as PR comments — a reservation
+posted before each `grok-review.sh` invocation, released only by an exit-12
+skip (step 5 has both forms) — and a resumed run recovers the count as the
+highest N reserved and not released; an unreleased reservation counts as
+spent, and no ledger comment means a fresh PR with nothing spent.
 Step 6 needs no ledger at all: the timeline's `review_requested` events are
 the count, the same events `copilot-request-count.sh` already proves each
 request by. A ledger read or write that fails stops the chain rather than
@@ -224,14 +225,22 @@ same argument as never calling a branch clean because asking failed.
      count the same — and this loop's ceiling is **no more than twelve of them
      against one PR**, carried across resumed `/ship` runs rather than reset
      each time the chain re-enters. A skip on limits (exit 12) is not a check
-     and does not count; a review that ran and reported does. Every check is
-     ledgered on the PR the moment it returns —
-     `gh pr comment <n> --body "Grok check N/12 — <full|recheck>, <outcome>"`
-     — so the count survives any resume: a later run reads the highest N the
-     ledger states, and a fresh PR has no ledger and nothing spent. Keep the
-     running count in the report as well — the report line is for the reader,
-     the ledger is for the machine — and when the twelfth is spent, stop and
-     say the PR reached its Grok ceiling.
+     and does not count; a review that ran and reported does. The ledger
+     writes **before** the model call, not after: post
+     `gh pr comment <n> --body "Grok check N/12 — reserved (<full|recheck>)"`,
+     then invoke the helper. The two orders fail in opposite directions and
+     only one is safe — written after, an interrupted run has spent the check
+     and left no record, and the resumed run spends a thirteenth; written
+     before, the worst case is a reservation for a check that never ran,
+     which wastes one of the twelve and never exceeds it. Exit 12 is the one
+     outcome that posts a second line —
+     `"Grok check N/12 — released: skipped on limits"` — because a skip is
+     not a check; every other outcome lets the reservation stand as the
+     record. A resumed run reads the highest N reserved and not released,
+     counting an unreleased reservation as spent. Keep the running count in
+     the report as well — the report line is for the reader, the ledger is
+     for the machine — and when the twelfth is spent, stop and say the PR
+     reached its Grok ceiling.
 
      The ceiling — then one number shared by both loops, as its size still
      is — was three, and three was wrong. By its seventh Copilot round
