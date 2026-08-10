@@ -1660,8 +1660,15 @@ offending form rather than reasoning about it:
 All three are the operations `git reset --hard`, `git clean` and
 `git branch -D/-M` are denied for, reachable by another spelling. **A prefix
 rule cannot exclude a flag** — the refspec argument the push rules already
-make — so each helper fixes the whole command, shape-checks every argument and
-passes no flags to git.
+make — so each helper fixes the whole command and shape-checks every argument.
+**No caller-controlled flag can reach git**, which is not the same as passing
+none: `git-switch-existing.sh` and `git-worktree-drop.sh` really do pass none,
+while `git-worktree-fork.sh`, `git-branch-create.sh` and
+`git-worktree-detach.sh` embed the flags the operation requires —
+`--no-track`, `-b`, `--detach` — decided in the file rather than by whoever
+calls it. That distinction is the point of the pattern and worth keeping in the
+summary, because the two are easy to collapse into a claim that is false of
+most of them.
 
 **What each one refuses differs, and reading "create only" across all three
 breaks the recovery path.** `git-worktree-fork.sh` and `git-branch-create.sh`
@@ -1686,12 +1693,25 @@ carried `Bash(git branch:*)`, which admits `git branch -fd <name>`: force and
 delete behind a spelling the `-d`/`-D`/`--delete` denies do not match, verified
 by deleting a branch with it. Two carried `Bash(git reset HEAD:*)`, which
 admits `git reset HEAD --hard` — the `--hard` deny matches the *other* word
-order, and the reset was verified to discard a tracked modification. Both are
-narrowed to the forms actually used: `git branch --list:*`, `--show-current`
-and `-a` (`--list` was checked against a trailing `-D` and refuses it), and
-`git reset HEAD --:*`, where the `--` makes any later flag a pathspec.
+order, and the reset was verified to discard a tracked modification.
 **A command's frontmatter is a grant like any other, and it is the one nobody
 reads twice.**
+
+The branch grant narrows cleanly to the read-only forms — `git branch
+--list:*`, `--show-current` and `-a`, with `--list` checked against a trailing
+`-D` and refusing it. **The reset grant does not narrow, and the attempt is
+the sharpest lesson here.** It was first "fixed" to `Bash(git reset HEAD --:*)`
+on the reasoning that `--` turns a later flag into a pathspec. That is true of
+*git* and irrelevant to the *rule*: a permission rule is a prefix match, and
+`git reset HEAD --hard` starts with `git reset HEAD --`, so the narrowed grant
+admitted the exact command it was written to exclude — while the commit message
+and this file both said the hole was closed. The git behaviour was verified and
+the matching was not.
+
+**A prefix rule cannot say "and then a space", so anything whose safety depends
+on what follows a token needs a helper**, not a cleverer pattern.
+`git-unstage.sh` writes the separator itself and refuses any argument beginning
+with `-`.
 
 **`sandbox/` is on that list for a reason worth keeping.** It arrived guarded
 by nothing, and a review caught it: the Dockerfile is a *build input to the
