@@ -197,8 +197,10 @@ not content.
 
    Then switch the session into it with **`EnterWorktree`**, passing the new
    directory as `path` — the worktree exists and `git worktree list` reports
-   it, which is what that form of the tool requires. Everything after this
-   command — `/commit`, `/pr`, both review loops, `dotnet test` — runs there.
+   it, which is what that form of the tool requires. When both steps succeed,
+   everything after this command — `/commit`, `/pr`, both review loops,
+   `dotnet test` — runs there. The two paragraphs below are what happens when
+   either does not.
 
    **If the parent directory is not writable, `git worktree add` fails and the
    answer is the in-place branch, not a temp path.** A root-level or container

@@ -123,16 +123,19 @@ same argument as never calling a branch clean because asking failed.
 
 1. **`/branch`**, passing $ARGUMENTS. Skip if already off `main`.
 
-   **This step is also where the workspace comes from.** `/branch` forks a
-   sibling worktree for the new branch and moves the session into it, so
-   **every step below runs in the PR's own directory** and the main checkout
-   stays on `main`. That command owns the naming, the placement and the two
-   exceptions that branch in place instead — a dirty `main`, because
-   uncommitted work cannot follow a fresh checkout without a stash or a patch
-   and both are refused here, and a checkout whose parent is not writable,
-   where there is nowhere beside it to put one. Do not restate the rules; do
-   report which case happened, because it decides where the rest of this run
-   lives.
+   **This step is also where the workspace comes from, and it has two
+   outcomes.** From a clean `main` with a writable parent, `/branch` forks a
+   sibling worktree and moves the session into it: **every step below then runs
+   in the PR's own directory** and this checkout stays on `main`. On either
+   exception — a dirty `main`, because uncommitted work cannot follow a fresh
+   checkout without a stash or a patch and both are refused here, or a parent
+   that is not writable, where there is nowhere beside the checkout to put
+   one — it branches in place, and the rest of the run happens in the main
+   checkout on the new branch.
+
+   `/branch` owns the naming, the placement and both exceptions, so do not
+   restate the rules; do report which outcome happened, because it is what
+   decides where every path in this run is rooted.
 
    `/branch` stops when it is already on a branch and asks whether this is a
    second change or a continuation. In a chain that stop is wrong — being on a
