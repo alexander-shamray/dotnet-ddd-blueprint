@@ -1,29 +1,106 @@
 ---
-description: Start a correctly named working branch, carrying any uncommitted work with it
+description: Start a correctly named working branch in its own worktree, carrying any uncommitted work with it
 argument-hint: "[what the change does] — omit to derive it from the uncommitted work"
-allowed-tools: Read, Grep, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*)
+allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*)
 ---
 
 Create a branch for: $ARGUMENTS — if empty, derive it from the uncommitted
 work.
 
 `main` is not a working branch. If work has already started on it, this command
-is how it gets moved off — uncommitted changes follow a `checkout -b`, so
-nothing is lost and nothing needs stashing.
+is how it gets moved off — and uncommitted changes follow a `checkout -b`, so
+nothing is lost and nothing needs stashing. That carry is also the one case
+that keeps the branch in this checkout; everything else gets a worktree of its
+own, which is the next section.
+
+## A branch is a workspace, not a HEAD
+
+**Every new branch gets its own worktree, and the session moves into it.** One
+checkout switching between branches is one directory whose contents mean
+something different depending on state nobody can see from the files — and this
+repo's chain leans on the working tree hard enough for that to matter:
+`grok-review.sh` refuses a dirty tree, `suggestions.md` sits untracked at the
+root as a review's working state, and `/commit`'s unscoped form sweeps
+untracked files. Each of those is a rule about *the* tree, and each of them
+gets safer when a PR owns one.
+
+Worktrees are siblings of this checkout, never children of it:
+
+```
+C:/dev/ashamray                     main — stays clean, stays put
+C:/dev/ashamray-groklimit           feat/grok-usage-limit-guard
+C:/dev/ashamray-masstransit         feat(template)/masstransit-registration
+```
+
+`../<checkout-name>-<slug>` is the shape, and it matches what is already on
+disk (`ashamray-groklimit`) and what `/security-sweep` forks
+(`ashamray-sweep`). **Outside the repository tree is the load-bearing half**,
+not the naming: a worktree under `.claude/worktrees/` would sit inside the
+checkout, show up as untracked in every `git status` the chain reads, and put
+`grok-review.sh`'s clean-tree refusal in its blast radius. Nothing has to be
+added to `.gitignore` for a sibling, because there is nothing to ignore.
+
+The slug is the branch's kebab summary cut to the first word or two that name
+the change — it is a directory name, not a branch name, so the `<type>/` prefix
+and any parenthesised scope are dropped rather than spelled.
+`feat(template)/masstransit-registration` gives `ashamray-masstransit` above
+because one word is already unambiguous; take the second where it is not.
+`ashamray-masstransit-registration` is fine, and `ashamray-feat(template)` is
+not a path.
+
+**A worktree carries committed files and nothing else.** Anything untracked
+that a build needs would have to be copied across — today nothing is, and a
+fresh worktree restores, builds and tests as it stands. Say so if that ever
+stops being true rather than copying quietly.
+
+`.claude/` is tracked, so it comes with it: the commands, the helper scripts
+the review loops invoke by name, and `settings.json` with its allow and deny
+rules all arrive in the new directory, and the relative paths in every
+`Bash(bash .claude/scripts/…)` grant mean the same thing there as here.
+`.remember/` is ignored and does not, which is correct — it is session state,
+not content.
 
 ## Steps
 
+0. **Ask whether this is already an isolated workspace**, before creating
+   anything:
+
+   ```bash
+   git rev-parse --git-dir --git-common-dir --show-superproject-working-tree
+   ```
+
+   The first two differing — with no superproject, which would make it a
+   submodule instead — means this session is already in a linked worktree.
+   **That worktree is this change's workspace**; report its path and its
+   branch and go no further, because forking a second one from inside the
+   first is how a chain ends up with two directories and one branch's work
+   split across them.
 1. **Read the current state.** `git branch --show-current` and
    `git status --short`. Three cases:
-   - **On `main`, clean** — fetch, then branch from `origin/main`.
-   - **On `main`, dirty** — branch from `HEAD` and carry the changes across.
-     Say that you did. Do **not** stash, reset or clean: `git reset --hard` and
-     `git clean` are denied in `.claude/settings.json` and stashing hides work
-     the user can see right now.
+   - **On `main`, clean** — fetch, then cut the worktree from `origin/main`.
+     This is the path the next four steps are written for.
+   - **On `main`, dirty** — **branch in place, with no worktree**, from `HEAD`,
+     carrying the changes across. Say that you did, and say that this branch
+     lives in the main checkout rather than in one of its own.
+
+     The exception is not a shortcut, and it is worth knowing why it exists: a
+     worktree is a fresh checkout of committed state, so uncommitted work does
+     not follow it. Moving the work across would take a stash or a patch, and
+     both are refused here — stashing hides work the user can see right now,
+     and a patch is lossy about untracked files and line endings in a
+     repository that forces `*.cs text eol=crlf` and leaves everything else to
+     the platform. The honest answer is to keep the work where it is and name
+     the cost.
+
+     A clean `main` is the normal state at the start of a PR, so this is the
+     edge and not the rule. If the user would rather have the worktree than
+     the carry, the move is theirs to make: commit the work off `main` first,
+     then re-enter `/branch` on a clean tree.
    - **Already on a branch** — stop and say so. Report the branch, its
-     upstream and whether the tree is dirty, then ask whether this is a second
-     change wanting its own branch or a continuation of the current one. Do not
-     branch off a feature branch on your own initiative.
+     upstream, its worktree if it has one and whether the tree is dirty, then
+     ask whether this is a second change wanting its own branch or a
+     continuation of the current one. Do not branch off a feature branch on
+     your own initiative.
 2. **Derive the description if none was given.** Read `git status --short` and
    then the diff itself — `git diff` and `git diff --stat`, plus the untracked
    files. The stat names files; the branch has to name the *change*, and only
@@ -70,17 +147,61 @@ nothing is lost and nothing needs stashing.
    plan all read the same. PR-01's title is
    `chore: solution structure, SDK pin, central package management, CI skeleton`
    → `chore/solution-structure`.
-4. **Check the name is free** — `git branch --list` and `git branch -a`. A
-   name that already exists locally or on the remote means the work may already
-   be underway; say so rather than picking a variant.
-5. **Create it** with `git checkout -b <name>`. No upstream is set here —
-   `/pr` does that on the first push.
+4. **Check the name and the directory are both free** — `git branch --list`,
+   `git branch -a` and `git worktree list`. A name that already exists locally
+   or on the remote means the work may already be underway; say so rather than
+   picking a variant. The same goes for the sibling directory: an existing
+   `../<checkout-name>-<slug>` is either a worktree this repo already knows
+   about — in which case it is the workspace and step 0's answer applies — or
+   something else entirely, which is a question for the user and not a name to
+   dodge.
+5. **Create the workspace, then move into it.** From a clean `main`, both
+   happen in one command:
+
+   ```bash
+   git worktree add ../<checkout-name>-<slug> -b <name> origin/main
+   ```
+
+   `origin/main` is the base rather than `HEAD`, for the reason step 1 fetched:
+   local `main` here is whatever it was when it was last pulled, and
+   `grok-review.sh` already carries a paragraph about a review diffed against a
+   stale base. Cutting the worktree from the remote-tracking ref is where that
+   is cheapest to get right.
+
+   Then switch the session into it with **`EnterWorktree`**, passing the new
+   directory as `path` — the worktree exists and `git worktree list` reports
+   it, which is what that form of the tool requires. Everything after this
+   command — `/commit`, `/pr`, both review loops, `dotnet test` — runs there.
+
+   **If the session cannot enter the worktree, stop and report the path.** Do
+   not carry on issuing `git -C` commands against a directory the session is
+   not in: the chain behind this command reads `git status`, writes
+   `suggestions.md` and shells a helper that resolves paths from the working
+   directory, and half of it in one tree and half in another is the failure
+   this whole section exists to prevent. Leave the worktree standing — it costs
+   nothing and it holds the branch.
+
+   On the dirty-`main` path of step 1 there is no worktree, and the branch is
+   made in place with `git checkout -b <name>`.
+
+   No upstream is set either way — `/pr` does that on the first push.
 
 ## Report
 
-The branch created, what it was cut from, and — if the tree was dirty — the
-files carried across, so the user can confirm they belong on this branch and
-not the next one.
+The branch created, what it was cut from, **the worktree it lives in and
+whether the session is now inside it**, and — if the tree was dirty — the files
+carried across, so the user can confirm they belong on this branch and not the
+next one.
+
+The workspace gets its own line whether or not one was created, and a branch
+made in place says so in the same breath as why. A reader who cannot tell which
+directory the next command will run in has to go and look, and the whole point
+of moving the session is that nobody should have to.
+
+**Nothing here removes a worktree.** The branch has a PR to open and two review
+loops to survive, so the directory outlives this command by design; whether it
+is kept or removed afterwards is the user's call, made with `git worktree
+remove` once the PR has landed.
 
 **A derived name is a guess, so show your work.** State that no description was
 passed, give the one-line reading of the diff the name came from, and say the

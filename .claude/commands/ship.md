@@ -1,7 +1,7 @@
 ---
-description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean, or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
+description: Fork a worktree, branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean, or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -47,11 +47,19 @@ skippable because an earlier run already did it:
 
 | State | What is owed |
 |---|---|
-| On `main` | All of it — start at step 1 |
+| On `main` | All of it — start at step 1, which forks the workspace |
 | On a branch, tree dirty | Checks, `/commit`, push, `/pr` |
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
+
+**The workspace is part of that state**, and it is read the way `/branch`
+step 0 reads it: `git rev-parse --git-dir --git-common-dir` differing, with no
+`--show-superproject-working-tree` to make it a submodule, means this session
+is already inside this PR's worktree. Then every row above is owed *there* and
+nothing forks a second directory. A run that starts in the main checkout on
+`main` is the only one that can fork a workspace at all — and only with a clean
+tree, per step 1's exception.
 
 **A loop's clean state cannot be read from the tree**, so a resumed run
 re-enters both loops rather than inferring they ran: `suggestions.md` is
@@ -62,10 +70,10 @@ requested Copilot review posts with zero comments — and that re-run is the
 proof, where the inference was a guess. The only "nothing owed" state is the
 one this run just produced by watching both loops end clean.
 
-`git status -sb`, `git branch --show-current`, `gh pr list --state open` and
-a look for `suggestions.md` (it decides recheck versus full review inside
-step 5, not whether step 5 runs) answer all five. Read them before doing
-anything.
+`git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
+`gh pr list --state open` and a look for `suggestions.md` (it decides recheck
+versus full review inside step 5, not whether step 5 runs) answer all five.
+Read them before doing anything.
 
 **Each loop's check count lives on the PR itself, where any resumed run can
 read it.** Step 5's checks are ledgered as PR comments — a reservation
@@ -101,12 +109,22 @@ same argument as never calling a branch clean because asking failed.
 
 1. **`/branch`**, passing $ARGUMENTS. Skip if already off `main`.
 
+   **This step is also where the workspace comes from.** `/branch` forks a
+   sibling worktree for the new branch and moves the session into it, so
+   **every step below runs in the PR's own directory** and the main checkout
+   stays on `main`. That command owns the naming, the placement and the one
+   exception — a dirty `main` branches in place, because uncommitted work
+   cannot follow a fresh checkout without a stash or a patch, and both are
+   refused here. Do not restate the rule; do report which of the two happened,
+   because it decides where the rest of this run lives.
+
    `/branch` stops when it is already on a branch and asks whether this is a
    second change or a continuation. In a chain that stop is wrong — being on a
    feature branch is the normal state of a resumed `/ship`. Take the current
    branch as this change's branch and carry on, but **say that you assumed it**
    and name the branch, so a tree that has drifted onto the wrong one is visible
-   before anything is committed to it.
+   before anything is committed to it. The same goes for the directory: name
+   the worktree the run is in, and if it is the main checkout say that too.
 
 2. **Checks** — `/validate-blueprint`, plus `/check-links` when the change
    touched links, cross-references or nav footers.
@@ -165,6 +183,13 @@ same argument as never calling a branch clean because asking failed.
       into this checkout — the one path the container must not mount. **Docker
       is required**; without it the helper exits 7 rather than falling back to
       the host.
+
+      That is about the copy the container reads, not about where this run
+      lives: since step 1, `/ship` normally runs **inside** a worktree, and
+      cloning out of one works — checked, not assumed, and the clone comes out
+      on the branch. The two uses of the word sit close enough together to
+      trip over, so it is worth reading twice before concluding the helper
+      cannot run here.
 
       **Exit 12 is out of usage limits, and it means skip — not fail.** The
       helper preflights the selected auth against Grok's limits before the
@@ -429,7 +454,12 @@ same argument as never calling a branch clean because asking failed.
 
 ## Report
 
-One line per step: done, skipped and why, or stopped and what is needed —
+**Open with the workspace**: the worktree this run happened in and the branch
+it holds, or the main checkout and why no worktree was forked. It is the one
+line that tells a reader where every path in the rest of the report is rooted,
+and a resumed run reports it whether or not this run created it.
+
+Then one line per step: done, skipped and why, or stopped and what is needed —
 including the push, which reports which of its three states it found even when
 that state was "nothing to do". Each review loop reports one line per round —
 findings raised, findings fixed, and what each round pushed — its running

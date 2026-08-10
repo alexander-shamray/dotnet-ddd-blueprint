@@ -1449,14 +1449,42 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until two consecutive reviews land with no new findings |
-| `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
+| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until two consecutive reviews land with no new findings |
+| `/branch` | Start a correctly named branch **in a sibling worktree** and move the session into it, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
 | `/review-grok` | Triage an external review into a resolution record |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 | `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
+
+**Every PR gets its own worktree, and `/branch` is where it comes from.** A new
+branch is cut into a sibling directory — `../ashamray-<slug>`, the shape
+`ashamray-groklimit` and `/security-sweep`'s `ashamray-sweep` already use — and
+the session moves into it, so the whole of `/ship` runs there and this checkout
+stays on `main`. Outside the repository tree is the load-bearing half rather
+than the naming: a worktree under `.claude/worktrees/` would be untracked
+content inside the checkout, which puts it in front of every `git status` the
+chain reads and inside `grok-review.sh`'s clean-tree refusal. A sibling needs
+no `.gitignore` entry because there is nothing to ignore.
+
+The review boundary is unchanged by any of this, and that was checked rather
+than assumed: `git clone --no-hardlinks .` **out of** a linked worktree works
+and the clone carries the branch, so `grok-review.sh` behaves the same there as
+here. Note the two senses of the word, because they sit one paragraph apart —
+the script refuses to *build* a worktree for the container, since a worktree's
+`.git` is a file pointing back into the checkout and that path is the one the
+container must not mount. Running *inside* one is a different thing entirely.
+
+**A dirty `main` is the one case that branches in place**, and the reason is
+that nothing can carry the work across: a worktree is a fresh checkout of
+committed state, so uncommitted changes would need a stash or a patch — the
+first is refused here because it hides work the user can see, the second
+because it is lossy about untracked files and about line endings in a
+repository that pins `*.cs` to CRLF and leaves everything else to the platform.
+The command says which of the two happened rather than deciding quietly.
+Committing the carried work first and re-entering `/branch` is the move if the
+worktree is wanted, and it is the user's to make.
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
 and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`
