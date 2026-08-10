@@ -302,6 +302,22 @@ not content.
    in-place branch is where they already are. So report the failure and say the
    sibling could not be created.
 
+   **Read the failure before falling back, because only one kind of failure
+   means this.** The layout case has a recognisable shape — git prints
+   `fatal: could not create leading directories of '<path>/.git': Permission
+   denied`, a refusal to create the path at all. A ref lock it could not take,
+   corrupt repository metadata, a full filesystem, a path the platform will not
+   accept: each of those also fails `git worktree add`, and none of them says
+   anything about the parent being unwritable. Falling back on all of them
+   alike would quietly downgrade the PR to the shared checkout and **report a
+   layout exception that did not happen** — a wrong reason recorded as a
+   handled case, which is worse than the raw error this handling exists to
+   replace.
+
+   So: fall back only when the message establishes that the path could not be
+   created for permission reasons. Anything else stops the command and is
+   reported verbatim, unnamed rather than misnamed.
+
    **Then check whether the branch survived, because it usually does.**
    `git worktree add -b` creates the branch *before* it creates the directory,
    so a failure at the directory leaves the branch behind — verified by
