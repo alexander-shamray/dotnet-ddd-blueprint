@@ -1449,14 +1449,64 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence, resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until two consecutive reviews land with no new findings |
-| `/branch` | Start a correctly named branch, carrying uncommitted work off `main` |
+| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads |
+| `/branch` | Start a correctly named branch — **in a sibling worktree** the session moves into, from a clean `main`; in place when the tree is dirty (carrying the work off `main`) or the parent is not writable |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
 | `/review-grok` | Triage an external review into a resolution record |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 | `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
+
+**A PR gets its own worktree by default, and `/branch` is where it comes
+from.** From a clean `main` with a writable parent — the ordinary case — the
+new branch is cut into a sibling directory (`../ashamray-<slug>`, the shape
+`ashamray-groklimit` is already on disk in) and the session moves into it, so
+the whole of `/ship` runs there and this checkout stays on `main`. The two
+paragraphs below name the cases where it cannot, and in both of them the branch
+is made in place and the command says so. Outside the
+repository tree is the load-bearing half rather than the naming: a worktree
+under `.claude/worktrees/` would be untracked content inside the checkout,
+which puts it in front of every `git status` the chain reads and inside
+`grok-review.sh`'s clean-tree refusal. A sibling needs no `.gitignore` entry
+because there is nothing to ignore.
+
+**`/security-sweep`'s worktree is not this one, and neither is the other's
+precedent.** That one is detached, lives under `mktemp -d`, carries no branch
+and is removed at the end — and it refuses a sibling *by name*, because a
+root-level or container layout has no writable parent, "both of which this repo
+runs under". This one holds a branch that a PR, two review loops and a person
+come back to, so it wants a stable named directory. The two commands are
+answering different questions; making one match the other would break whichever
+was changed. What the sweep's argument does carry across is the precondition:
+where the parent is not writable there is no sibling to create, so `/branch`
+names that case and branches in place rather than failing mid-`/ship`.
+
+The review boundary is unchanged by any of this, and that was checked rather
+than assumed: `git clone --no-hardlinks .` **out of** a linked worktree works
+and the clone carries the branch, so `grok-review.sh` behaves the same there as
+here. Note the two senses of the word, because they sit one paragraph apart —
+the script refuses to *build* a worktree for the container, since a worktree's
+`.git` is a file pointing back into the checkout and that path is the one the
+container must not mount. Running *inside* one is a different thing entirely.
+
+**A dirty `main` is the other case that branches in place**, and the reason is
+that nothing can carry the work across: a worktree is a fresh checkout of
+committed state, so uncommitted changes would need a stash or a patch — the
+first is refused here because it hides work the user can see, the second
+because it is lossy about untracked files and about line endings in a
+repository that pins `*.cs` to CRLF and leaves everything else to the platform.
+The command says which of the two happened rather than deciding quietly.
+
+**A branch that took either in-place path does not get a worktree later from
+`/branch`** — the two differ in their reason and not in this consequence — and
+the file says so rather than offering a re-entry that lands elsewhere: the
+command stops on an existing branch, refuses a name already taken, and cuts
+from `origin/main`, which would not carry the commits. Attaching one afterwards
+is manual — `git switch main` in this checkout, then `git worktree add
+../ashamray-<slug> <branch>`, then `EnterWorktree` — and the first of those is
+why it is manual, since a branch cannot be checked out in two worktrees at
+once.
 
 `/pr` pushes the branch itself, and `/ship` therefore runs past the open PR
 and into two review loops. First Grok: `grok-review.sh` runs `/review-branch`
@@ -1511,17 +1561,39 @@ returns 200 and registers nothing. The timeline's `review_requested` event,
 never the status code, is what proves a request took. `/review-copilot`
 triages what lands — suppressed comments included, which is where every real
 finding against the loop's own machinery has arrived — and the loop repeats
-until two consecutive requested reviews post with no new findings. The
+until one review posts with no new findings and no unresolved threads. The
 review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. **`ship.md` owns the stopping
-condition** and states it in two clauses: **two consecutive clean rounds** end
-it, and each loop carries its own ceiling of twelve rounds per PR. Two rather
-than one because one clean
-round is not convergence — see below — and because requiring two also means
-the loop can never end on a round whose findings were just fixed. Either loop
-also stops early on the finding class that is the user's: `Needs a decision`
-from the Grok triage, an open `Ask` thread from the Copilot one.
+condition**, and the two loops no longer share one: Grok ends on **two
+consecutive clean passes**, Copilot on the **first** clean round, and each
+carries its own ceiling of twelve rounds per PR. Either loop also stops early
+on the finding class that is the user's: `Needs a decision` from the Grok
+triage, an open `Ask` thread from the Copilot one.
+
+**The asymmetry is a decision with its cost on the record.** Two rather than
+one was Grok's rule for the reason below, and it holds there: one clean pass is
+not convergence, and requiring two also means the loop can never end on a round
+whose findings were just fixed. Copilot gives that up for speed, so everything
+now rests on the definition of clean — no inline comments, an empty suppressed
+block, no unresolved threads — and on the ceiling behind it. Read the
+suppressed block every round; under a one-round rule an unread one ends the
+loop.
+
+That state has a name and a durable home: **all-resolved**, which is the last
+landed Copilot review carrying zero of all three, **pinned to the `commit` oid
+it read** and with no `review_requested` event newer than it. A resumed `/ship`
+checks both and does not re-request when they hold — where the Grok half must
+re-enter, because `suggestions.md` is absent both before the first review and
+after a clean one and the two states are indistinguishable. The review says
+which commit it read; a missing file never could.
+
+**The newer-request half is what keeps the oid from being a trap.** A run
+interrupted between requesting a round and its landing leaves the previous
+clean review satisfying every other condition — same head, no threads, nothing
+suppressed — so on the oid alone a resume would declare all-resolved with a
+review it has never read still in flight. Copilot's own first review of PR #27
+found that, against the paragraph introducing the rule.
 
 The ceiling was three until PR-11, and the numbers are why it moved: the first
 seven Copilot rounds went 10 → 4 → 3 → 1 → 1 → 3 → 1 with every finding
@@ -1529,9 +1601,10 @@ accepted, and rounds four to seven caught a documented-but-unenforced
 constraint, an assertion that could not fail in one direction, and a fail-open
 in a manifest check. Three would have shipped all three. Copilot's late rounds
 surface findings in the **suppressed** block under a "generated no new
-comments" heading, so a clean inline verdict is not convergence — and one clean
-round is not two: round eight came back clean, and every round after it found
-more.
+comments" heading, so a clean inline verdict is not convergence — and round
+eight came back clean with every round after it finding more, which is the case
+the Copilot loop's one-round rule now trades away and the Grok loop's two still
+catches.
 What `.claude/settings.json` still denies is the narrow set
 that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
 push to `main`. A branch wanting one of those is raising a question, not
@@ -1571,6 +1644,74 @@ therefore a human's edit, made with the deny lifted. Like the push denies, it
 is defence in depth — `Bash` redirection can still write a file — but it
 removes the quiet path, which is the session's own editing tools acting on
 reviewed grants.
+
+**A helper is also the answer when a git grant is wider than the operation it
+buys**, and `/branch` now has three of them: `git-switch-existing.sh`,
+`git-worktree-fork.sh` and `git-branch-create.sh`. Each replaced a raw grant
+that reached past the deny list, and each was confirmed by running the
+offending form rather than reasoning about it:
+
+| Raw grant | What it also bought |
+|---|---|
+| `Bash(git switch:*)` | `--discard-changes` and `-C` — and the flags **combine**, so `git switch -fC <name> <start>` defeats any `Bash(git switch -C:*)` deny |
+| `Bash(git worktree add:*)` | `-B`, which resets an existing branch rather than creating one |
+| `Bash(git checkout -b:*)` | the trailing flag — `git checkout -b <name> -f origin/main` is accepted, discarding tracked modifications |
+
+All three are the operations `git reset --hard`, `git clean` and
+`git branch -D/-M` are denied for, reachable by another spelling. **A prefix
+rule cannot exclude a flag** — the refspec argument the push rules already
+make — so each helper fixes the whole command and shape-checks every argument.
+**No caller-controlled flag can reach git**, which is not the same as passing
+none: `git-switch-existing.sh` and `git-worktree-drop.sh` really do pass none,
+while `git-worktree-fork.sh`, `git-branch-create.sh` and
+`git-worktree-detach.sh` embed the flags the operation requires —
+`--no-track`, `-b`, `--detach` — decided in the file rather than by whoever
+calls it. That distinction is the point of the pattern and worth keeping in the
+summary, because the two are easy to collapse into a claim that is false of
+most of them.
+
+**What each one refuses differs, and reading "create only" across all three
+breaks the recovery path.** `git-worktree-fork.sh` and `git-branch-create.sh`
+create only: a name that already exists is refused, so a reset is not reachable
+by passing one. `git-switch-existing.sh` is the mirror image — it **requires**
+the branch to exist and only switches — which is exactly what the failed-fork
+recovery needs, since `git worktree add -b` leaves the branch behind when the
+directory fails. An agent that took the summary for all three would refuse that
+recovery, or retry the create helper and hit *branch already exists*.
+
+Copilot raised the first two against PR #27; the third was found by grepping
+for the same shape, which is the rule that says one site is never the only
+site. `/security-sweep`'s two — `git-worktree-detach.sh` and
+`git-worktree-drop.sh` — followed for the same reason: `-B` resets a branch,
+and `-f` on a removal defeats the refusal that command's teardown uses as its
+guard.
+
+**The same review then found the holes in the grants that were left raw**, and
+they were in the command frontmatter rather than in `.claude/settings.json` —
+worth knowing, because the global file had it right all along. Six commands
+carried `Bash(git branch:*)`, which admits `git branch -fd <name>`: force and
+delete behind a spelling the `-d`/`-D`/`--delete` denies do not match, verified
+by deleting a branch with it. Two carried `Bash(git reset HEAD:*)`, which
+admits `git reset HEAD --hard` — the `--hard` deny matches the *other* word
+order, and the reset was verified to discard a tracked modification.
+**A command's frontmatter is a grant like any other, and it is the one nobody
+reads twice.**
+
+The branch grant narrows cleanly to the read-only forms — `git branch
+--list:*`, `--show-current` and `-a`, with `--list` checked against a trailing
+`-D` and refusing it. **The reset grant does not narrow, and the attempt is
+the sharpest lesson here.** It was first "fixed" to `Bash(git reset HEAD --:*)`
+on the reasoning that `--` turns a later flag into a pathspec. That is true of
+*git* and irrelevant to the *rule*: a permission rule is a prefix match, and
+`git reset HEAD --hard` starts with `git reset HEAD --`, so the narrowed grant
+admitted the exact command it was written to exclude — while the commit message
+and this file both said the hole was closed. The git behaviour was verified and
+the matching was not.
+
+**A prefix rule cannot say "and then a space", so anything whose safety depends
+on what follows a token needs a helper**, not a cleverer pattern.
+`git-unstage.sh` writes the separator itself and refuses any argument beginning
+with `-`.
 
 **`sandbox/` is on that list for a reason worth keeping.** It arrived guarded
 by nothing, and a review caught it: the Dockerfile is a *build input to the

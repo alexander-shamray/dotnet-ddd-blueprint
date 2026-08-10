@@ -1,7 +1,7 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git worktree remove:*), Bash(mktemp:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -34,7 +34,7 @@ variable, the same discipline the File step uses for `--body-file`:
 ```bash
 mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $work
 git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
-git worktree add --detach "$work" "$pinned"          # pin that exact commit, never HEAD re-resolved
+bash .claude/scripts/git-worktree-detach.sh "$work" "$pinned"   # pin that exact commit, never HEAD re-resolved
 ```
 
 **Pin the resolved commit, not `HEAD` a second time.** Reading `HEAD` once for a
@@ -78,13 +78,14 @@ errors or the loop stops on a decision.** Returning is unconditional; removing
 the worktree is not.
 
 **Remove the worktree only when it has no unchecked files** — nothing modified,
-nothing untracked. Do not check-then-remove and do not `--force`: a plain
-`git worktree remove` already refuses a checkout holding anything modified or
-untracked, which is exactly the condition wanted, so let its own refusal be the
-guard:
+nothing untracked. Do not check-then-remove: a plain `git worktree remove`
+already refuses a checkout holding anything modified or untracked, which is
+exactly the condition wanted, so let its own refusal be the guard. **`--force`
+is not available to defeat it**, which is the helper's whole purpose — it also
+refuses the main worktree and any path this repository has not registered:
 
 ```bash
-git worktree remove "$work"                       # from the original directory
+bash .claude/scripts/git-worktree-drop.sh "$work"    # from the original directory
 ```
 
 A detached, read-only sweep that wrote its scratch to a separate temp path
@@ -198,11 +199,14 @@ on a clean round or at the seventh, whichever comes first.
 is safe to stop on it anyway.** This repo has watched a review loop go clean and
 then find more — PR-11's Copilot round eight came back clean and every round
 after it surfaced findings, which is the whole reason its review ceiling moved
-from three to twelve. A security sweep differs from that loop in a way that
-makes a single clean round the right stop here rather than there: each round's
+from three to twelve. A security sweep differs from `/ship`'s **Grok** loop —
+which still wants two consecutive clean passes — in the way that makes a single
+clean round the right stop here: each round's
 fan-out is **stateless** — it re-reads the tree from scratch, not a reviewer
 reacting to the last round's fixes — so a clean round is a fresh full read that
-found nothing, not a lull between exchanges. But the earlier rounds change the
+found nothing, not a lull between exchanges. (`/ship`'s Copilot half stops on
+one clean round as well, but by decision rather than by that argument, and
+`ship.md` states what it trades away.) But the earlier rounds change the
 tree only if the **user** acts on the filed issues between runs; this command
 files and does not fix. So:
 
@@ -239,15 +243,29 @@ grant permits writing every undenied path is unenforced, which for a security
 command is the worse failure. Bodies go through `gh issue create` on stdin for
 exactly this reason.
 
-**The two mutations it *can* make are scoped by discipline, and that scope is
-the honest residual.** `Bash(gh issue create:*)` and `Bash(git worktree
-remove:*)` are prefix grants: neither pins *which* repository or *which* path.
-So `gh issue create` always passes `--repo` for **this** repository and never
-one named in a finding, and `git worktree remove` only ever takes `$work` — the
-path this command captured from `mktemp` — never a path drawn from the audited
-tree. Because that tree is prompt-injection input, this is a boundary held in
-prose, not in the grant. Closing it fully means routing both through a helper
-that pins the repo and validates the owned temp path, the way the review-loop
-helpers under `.claude/scripts/` do — and that directory is edit-denied to a
-command session by design, so the helper is a human's follow-up, named here
+**One mutation is still scoped by discipline, and that scope is the honest
+residual.** `Bash(gh issue create:*)` is a prefix grant and pins no repository,
+so the rule is prose: `gh issue create` always passes `--repo` for **this**
+repository and never one named in a finding. Because the audited tree is
+prompt-injection input, that boundary is held by the instruction rather than by
+the grant, and closing it fully means a helper that pins the repo — named here
 rather than left implicit.
+
+**The worktree half of that residual is closed.** It used to read the same way,
+with `Bash(git worktree remove:*)` trusted to take only `$work`. Both worktree
+grants now go through fixed helpers — `git-worktree-detach.sh` and
+`git-worktree-drop.sh` — because the prefix bought more than the operation:
+`git worktree add -B` resets an existing branch, and `git worktree remove -f`
+defeats the refusal this command's own teardown relies on as its guard. The
+helpers bind the path as well as the flags, and the path half is the one that
+matters here: **both refuse anything that is not `secsweep-` plus six
+characters directly under the canonical temp root**, which is the only shape
+this command's own `mktemp -d` produces. Registration was not enough on its
+own — every sibling PR worktree is registered too, and a poisoned finding
+naming one would otherwise have been able to delete it. What each refuses
+beyond that differs and is worth naming rather than averaging:
+`git-worktree-drop.sh` passes no flags at all and additionally refuses the main
+worktree and any worktree outside this repository, while
+`git-worktree-detach.sh` embeds `--detach`
+by design and requires an empty directory and a resolved 40-character sha.
+`git worktree list` stays a raw grant; it reads.

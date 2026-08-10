@@ -1,7 +1,7 @@
 ---
 description: Split the working tree into semantic commits with bodies that argue the change
 argument-hint: "[what to commit — omit for everything staged and unstaged]"
-allowed-tools: Read, Grep, Glob, Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(wc:*)
+allowed-tools: Read, Grep, Glob, Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(wc:*)
 ---
 
 Commit the working tree. Scope: $1 — if empty, everything modified and
