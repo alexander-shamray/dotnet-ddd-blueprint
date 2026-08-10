@@ -152,11 +152,25 @@ image=$(docker build --quiet "${build_args[@]}" \
 # docker's argv, where every `ps` on this machine can read it for the life of
 # the container; the first forwards the value this process already holds.
 mounts=()
+limit_re='rate.?limit|429|quota|usage limit|too many requests|(no|any) credits'
+key_probe=""
 if [ -n "${XAI_API_KEY:-}" ] &&
-   docker run --rm --env XAI_API_KEY "$image" \
-     grok -p "ok" >/dev/null 2>&1; then
+   key_probe=$(docker run --rm --env XAI_API_KEY "$image" \
+     grok -p "ok" 2>&1); then
   mounts+=(--env XAI_API_KEY)
 else
+  # A key that answers with a limit signal is authenticated but out of window,
+  # and the two need different exits. With OAuth files present, fall through:
+  # the session may sit on a team whose window is open, and the preflight
+  # below judges whatever auth was actually selected. With no fallback,
+  # exit 8's "cannot authenticate" is the wrong class — authenticating is not
+  # the problem — so this is the preflight's skip, issued one step earlier.
+  if [ -n "${XAI_API_KEY:-}" ] && [ ! -f "$HOME/.grok/auth.json" ] &&
+     grep -qiE "$limit_re" <<<"$key_probe"; then
+    echo "grok is out of usage limits (API key, no OAuth fallback) — skipping this review, not failing it:" >&2
+    grep -ioE "$limit_re" <<<"$key_probe" | head -1 >&2
+    exit 12
+  fi
   [ -z "${XAI_API_KEY:-}" ] ||
     echo "XAI_API_KEY is set but did not authenticate — no credits on its team? Using the OAuth session instead." >&2
   [ -f "$HOME/.grok/auth.json" ] ||
@@ -198,9 +212,9 @@ fi
 # was actually selected, so the OAuth path (which the block above never probes)
 # is covered too.
 limit_probe=$(docker run --rm "${mounts[@]}" "$image" grok -p "ok" 2>&1) || true
-if grep -qiE 'rate.?limit|429|quota|usage limit|too many requests|(no|any) credits' <<<"$limit_probe"; then
+if grep -qiE "$limit_re" <<<"$limit_probe"; then
   echo "grok is out of usage limits — skipping this review, not failing it:" >&2
-  grep -ioE 'rate.?limit|429|quota|usage limit|too many requests|(no|any) credits' <<<"$limit_probe" | head -1 >&2
+  grep -ioE "$limit_re" <<<"$limit_probe" | head -1 >&2
   exit 12
 fi
 
