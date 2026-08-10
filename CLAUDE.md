@@ -1449,7 +1449,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until two consecutive reviews land with no new findings |
+| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads |
 | `/branch` | Start a correctly named branch **in a sibling worktree** and move the session into it, carrying uncommitted work off `main` |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -1539,17 +1539,32 @@ returns 200 and registers nothing. The timeline's `review_requested` event,
 never the status code, is what proves a request took. `/review-copilot`
 triages what lands — suppressed comments included, which is where every real
 finding against the loop's own machinery has arrived — and the loop repeats
-until two consecutive requested reviews post with no new findings. The
+until one review posts with no new findings and no unresolved threads. The
 review's depth is
 the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. **`ship.md` owns the stopping
-condition** and states it in two clauses: **two consecutive clean rounds** end
-it, and each loop carries its own ceiling of twelve rounds per PR. Two rather
-than one because one clean
-round is not convergence — see below — and because requiring two also means
-the loop can never end on a round whose findings were just fixed. Either loop
-also stops early on the finding class that is the user's: `Needs a decision`
-from the Grok triage, an open `Ask` thread from the Copilot one.
+condition**, and the two loops no longer share one: Grok ends on **two
+consecutive clean passes**, Copilot on the **first** clean round, and each
+carries its own ceiling of twelve rounds per PR. Either loop also stops early
+on the finding class that is the user's: `Needs a decision` from the Grok
+triage, an open `Ask` thread from the Copilot one.
+
+**The asymmetry is a decision with its cost on the record.** Two rather than
+one was Grok's rule for the reason below, and it holds there: one clean pass is
+not convergence, and requiring two also means the loop can never end on a round
+whose findings were just fixed. Copilot gives that up for speed, so everything
+now rests on the definition of clean — no inline comments, an empty suppressed
+block, no unresolved threads — and on the ceiling behind it. Read the
+suppressed block every round; under a one-round rule an unread one ends the
+loop.
+
+That state has a name and a durable home: **all-resolved**, which is the last
+landed Copilot review carrying zero of all three, **pinned to the `commit` oid
+it read**. A resumed `/ship` compares that oid against the pushed head and does
+not re-request when they match — where the Grok half must re-enter, because
+`suggestions.md` is absent both before the first review and after a clean one
+and the two states are indistinguishable. The review says which commit it read;
+a missing file never could.
 
 The ceiling was three until PR-11, and the numbers are why it moved: the first
 seven Copilot rounds went 10 → 4 → 3 → 1 → 1 → 3 → 1 with every finding
@@ -1557,9 +1572,10 @@ accepted, and rounds four to seven caught a documented-but-unenforced
 constraint, an assertion that could not fail in one direction, and a fail-open
 in a manifest check. Three would have shipped all three. Copilot's late rounds
 surface findings in the **suppressed** block under a "generated no new
-comments" heading, so a clean inline verdict is not convergence — and one clean
-round is not two: round eight came back clean, and every round after it found
-more.
+comments" heading, so a clean inline verdict is not convergence — and round
+eight came back clean with every round after it finding more, which is the case
+the Copilot loop's one-round rule now trades away and the Grok loop's two still
+catches.
 What `.claude/settings.json` still denies is the narrow set
 that is a decision rather than a step: `--force`, `-f`, `--delete`, and any
 push to `main`. A branch wanting one of those is raising a question, not

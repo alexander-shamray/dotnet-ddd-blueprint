@@ -1,5 +1,5 @@
 ---
-description: Fork a worktree, branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean, or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
+description: Fork a worktree, branch, commit, push and open a PR in one pass, then loop the external reviews — Grok until two consecutive clean passes, Copilot until one — or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
 argument-hint: "[what the change does] — omit and each step derives its own"
 allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
@@ -61,19 +61,30 @@ nothing forks a second directory. A run that starts in the main checkout on
 `main` is the only one that can fork a workspace at all — and only with a clean
 tree, per step 1's exception.
 
-**A loop's clean state cannot be read from the tree**, so a resumed run
-re-enters both loops rather than inferring they ran: `suggestions.md` is
-absent before the first review and after a clean one, and the two states are
-indistinguishable. Re-entering is safe because both loops are idempotent
-against a clean branch — a Grok full review of nothing writes nothing, and a
-requested Copilot review posts with zero comments — and that re-run is the
-proof, where the inference was a guess. The only "nothing owed" state is the
-one this run just produced by watching both loops end clean.
+**The Grok loop's clean state cannot be read from the tree**, so a resumed run
+re-enters step 5 rather than inferring it ran: `suggestions.md` is absent
+before the first review and after a clean one, and the two states are
+indistinguishable. Re-entering is safe because that loop is idempotent against
+a clean branch — a Grok full review of nothing writes nothing — and that re-run
+is the proof, where the inference was a guess.
+
+**The Copilot loop is the opposite, and deliberately so**: its clean state is
+not a missing file but a landed review, which is durable, on the PR, and
+carries the commit it read. A last landed review by
+`copilot-pull-request-reviewer` with no comments, nothing in its suppressed
+block, no unresolved threads on the PR, and a `commit` oid equal to the pushed
+head is **all-resolved** — step 6 is not owed, and re-requesting would be
+asking a question already answered on the record. Anything pushed after that
+review un-marks it, because the oid no longer matches and the clean verdict is
+then about a state the PR no longer carries. That pinning is what makes the
+inference safe here where it was a guess for Grok: the artefact says which
+commit it read, and `suggestions.md` never could.
 
 `git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
-`gh pr list --state open` and a look for `suggestions.md` (it decides recheck
-versus full review inside step 5, not whether step 5 runs) answer all five.
-Read them before doing anything.
+`gh pr list --state open`, `gh pr view <n> --json reviews` and a look for
+`suggestions.md` (it decides recheck versus full review inside step 5, not
+whether step 5 runs) answer all five rows and both loops. Read them before
+doing anything.
 
 **Each loop's check count lives on the PR itself, where any resumed run can
 read it.** Step 5's checks are ledgered as PR comments — a reservation
@@ -85,15 +96,18 @@ carries convergence as well as spend, because spend alone cannot tell a loop
 that converged on its last allowed check from one the ceiling cut off. The
 `converged` marker settles only that question — the report at the ceiling —
 and never excuses re-entry: the rule above stands, a resumed run re-enters
-both loops, and the marker is not pinned to a commit, so commits landing
-after it still get their re-review from the re-entry, budget allowing. Any
+step 5, and the marker is not pinned to a commit, so commits landing
+after it still get their re-review from the re-entry, budget allowing. That
+last clause is exactly what step 6's oid gives it and this marker cannot, and
+it is why only one of the two loops can be skipped on a resume. Any
 later reservation supersedes the marker, and it is read with
 `bash .claude/scripts/grok-ledger.sh <n> status` — the same author
 verification as the count, because a raw-comment read would take the
 marker from anyone. Step 6 needs no marker for the same
 question — its outcomes are already on the PR, so a resumed run reads the
-last landed reviews (comments and suppressed blocks alike) and the
-unresolved-thread list before declaring that loop owed or exhausted. The
+last landed review (comments and suppressed block alike), the commit it read
+and the unresolved-thread list before declaring that loop owed, all-resolved
+or exhausted. The
 count read goes through the same helper —
 `bash .claude/scripts/grok-ledger.sh <n> count` — because PR comments are
 unauthenticated state: on a public PR anyone can post a line that imitates
@@ -248,15 +262,16 @@ same argument as never calling a branch clean because asking failed.
      status exists because the finding is the user's call, and a loop that
      keeps running past it buries the one thing that needed a human.
    - **Two consecutive clean rounds end it; twelve rounds is the ceiling.**
-     Two clauses, and the first is deliberately *two*. Clean here means a pass
-     that leaves no `suggestions.md` — a full review with nothing to write, or
-     a recheck that removes the file; step 6 states its own clean in its own
-     vocabulary. One clean round is not convergence: PR-11's Copilot round
-     eight was clean and every round after it found more, so a rule
-     ending on the first clean pass would have stopped at exactly the round
-     that proves it should not. Requiring two also subsumes "never end on a
-     round that produced a fix", since a round with findings is not clean and
-     resets the count.
+     Two clauses, and the first is deliberately *two* — **in this loop only**.
+     Clean here means a pass that leaves no `suggestions.md` — a full review
+     with nothing to write, or a recheck that removes the file; step 6 states
+     its own clean in its own vocabulary and ends on one of them, by decision,
+     with the cost named where the rule is. One clean round is not
+     convergence: PR-11's Copilot round eight was clean and every round after
+     it found more, so a rule ending on the first clean pass would have
+     stopped at exactly the round that proves it should not. Requiring two
+     also subsumes "never end on a round that produced a fix", since a round
+     with findings is not clean and resets the count.
 
      Failing that, stop at twelve and hand over what survives — saying plainly
      that the loop ended on its ceiling rather than on convergence, because
@@ -411,13 +426,29 @@ same argument as never calling a branch clean because asking failed.
       round that a fresh clean review never repeats, so before declaring the
       loop done, list the PR's unresolved review threads — an unresolved
       `Ask` stops the loop exactly as a new one would, and any other
-      unresolved thread is triage the loop still owes. Zero findings and
-      zero unresolved threads → that is **one** clean round. The loop is done
-      only if the round before it was also clean; otherwise request another
-      and go back to (1). Count the streak explicitly rather than reading
-      "no new comments" as an ending — PR-11's round eight was clean and
-      every round after it found more.
-      Otherwise run `/review-copilot` **paused at its marker step**: let it
+      unresolved thread is triage the loop still owes.
+
+      **Zero findings and zero unresolved threads is all-resolved, and the
+      loop ends there.** Do not request another review to confirm it: this
+      loop stops on the first clean round, and a second request would be
+      asking a question the landed review has already answered on the PR.
+      Record the state by naming, in the report, the review that carried it
+      and the `commit` oid it read — that oid against the pushed head is what
+      a later `/ship` reads back, per *Resume, don't restart*, and it is the
+      whole of the marker. Nothing is posted to the PR to say so; the review
+      itself is the record, which is more than the Grok half has.
+
+      **All of that weight now sits on the definition of clean, so read it
+      strictly.** Clean is three things at once: no inline comments, an empty
+      or absent suppressed block, and no unresolved threads. The last two are
+      the ones that get skipped, and both have been — PR-11 posted "generated
+      no new comments" above a suppressed finding worth fixing on rounds four,
+      five and six, and under this rule each of those rounds would have ended
+      the loop had the block gone unread. A second round used to be the net
+      under that mistake and no longer is.
+
+      **Anything short of all three is a round with findings.** Run
+      `/review-copilot` **paused at its marker step**: let it
       triage and fix, then — because its tool grant cannot commit, and a
       `done` marker claims a committed fix — rerun the applicable step 2
       checks, `/commit` **scoped to the paths the triage touched**, and only
@@ -428,29 +459,38 @@ same argument as never calling a branch clean because asking failed.
       what the resume table forbids. Push the branch by name so the next
       request reviews the fixed state, and go back to (1).
 
-   The same stopping condition as step 5, in this loop's vocabulary: an
-   **`Ask`** thread — left open by `/review-copilot` by design — stops the
-   loop; otherwise it runs until **two consecutive** requested reviews land
-   with nothing at all, to this loop's own ceiling of twelve requested-review
-   rounds per PR — counted from the timeline's `review_requested` events, the
-   ones `copilot-request-count.sh` already proves each request by, so a
-   resumed run recovers this count with no ledger at all. The outcomes are
-   recoverable the same way: the landed reviews carry their comments and
-   suppressed blocks and the thread list its unresolved threads, so a run
-   that finds itself at the ceiling reads the last two landed reviews before
-   declaring the loop unconverged — the count alone cannot say which it
-   was. A request that
-   registers no review inside a reasonable wait is reported as the loop not
-   having finished, never marked clean by timeout.
+   **This loop does not share step 5's stopping condition, and the asymmetry
+   is the point rather than an oversight.** An **`Ask`** thread — left open by
+   `/review-copilot` by design — stops it, exactly as a `Needs a decision` row
+   stops the Grok half. Otherwise it ends on the **first** clean round, marked
+   all-resolved, where step 5 still wants two. The ceiling is unchanged:
+   twelve requested-review rounds per PR, counted from the timeline's
+   `review_requested` events, the ones `copilot-request-count.sh` already
+   proves each request by, so a resumed run recovers the count with no ledger
+   at all. The outcomes are recoverable the same way — the landed reviews
+   carry their comments and suppressed blocks and the thread list its
+   unresolved threads — so a run that finds itself at the ceiling reads the
+   last landed review before declaring the loop unconverged; the count alone
+   cannot say which it was. A request that registers no review inside a
+   reasonable wait is reported as the loop not having finished, never marked
+   clean by timeout.
 
-   **This is the loop that earns a ceiling that size.** Copilot's findings
-   arrive in the suppressed block long after the inline ones dry up, and they
-   do not taper the way a disagreement does: on PR-11 rounds four, five and
-   six each posted
-   "generated no new comments" above a suppressed finding that was worth
-   fixing. Do not read a clean *inline* verdict as convergence, and do not
-   stop early because the counts look small — a round costs minutes and the
-   things it finds at that depth are the ones nobody else will.
+   **The cost of stopping at one is on the record, and it is Copilot's own.**
+   This loop's findings arrive in the suppressed block long after the inline
+   ones dry up, and they do not taper the way a disagreement does: PR-11's
+   round eight came back clean and every round after it found more, which is
+   the case a second round was there to catch and this rule gives up. What
+   carries the weight instead is the strict definition of clean above — inline,
+   suppressed and threads, all three — and the ceiling behind it. So the loop
+   is now fast where it was thorough, and the one way to make that a bad trade
+   is to read "generated no new comments" as the verdict rather than opening
+   the block underneath it.
+
+   Two rounds is still available and costs one line: request another before
+   declaring all-resolved on a branch that wanted scrutiny — a lite-tier
+   review of a large change is exactly that branch. Say in the report that you
+   did, because a loop that ran longer than its rule is as much a departure as
+   one that ran shorter.
 
 ## Report
 
@@ -465,8 +505,12 @@ that state was "nothing to do". Each review loop reports one line per round —
 findings raised, findings fixed, and what each round pushed — its running
 check count against its twelve (the PR carries the durable copy: step 5's
 ledger comments, step 6's timeline events; the report line is the
-human-readable echo), and how it ended: clean, stopped on a decision or
-an open `Ask`, skipped on limits with re-entry owed, or stopped unconverged.
+human-readable echo), and how it ended, in that loop's own vocabulary: step 5
+clean, stopped on a decision, skipped on limits with re-entry owed, or stopped
+unconverged; step 6 **all-resolved, naming the review and the `commit` oid it
+read**, stopped on an open `Ask`, or stopped unconverged. The oid is not
+decoration — it is the whole of step 6's marker, and a later `/ship` compares
+it against the pushed head to decide whether that loop is owed at all.
 End with the PR URL.
 
 A step skipped on an assumption gets its assumption restated here rather than

@@ -198,11 +198,14 @@ on a clean round or at the seventh, whichever comes first.
 is safe to stop on it anyway.** This repo has watched a review loop go clean and
 then find more — PR-11's Copilot round eight came back clean and every round
 after it surfaced findings, which is the whole reason its review ceiling moved
-from three to twelve. A security sweep differs from that loop in a way that
-makes a single clean round the right stop here rather than there: each round's
+from three to twelve. A security sweep differs from `/ship`'s **Grok** loop —
+which still wants two consecutive clean passes — in the way that makes a single
+clean round the right stop here: each round's
 fan-out is **stateless** — it re-reads the tree from scratch, not a reviewer
 reacting to the last round's fixes — so a clean round is a fresh full read that
-found nothing, not a lull between exchanges. But the earlier rounds change the
+found nothing, not a lull between exchanges. (`/ship`'s Copilot half stops on
+one clean round as well, but by decision rather than by that argument, and
+`ship.md` states what it trades away.) But the earlier rounds change the
 tree only if the **user** acts on the filed issues between runs; this command
 files and does not fix. So:
 
