@@ -26,24 +26,41 @@ layout, both of which this repo runs under) cannot create `../<repo>-secsweep`,
 and `mktemp -d` is the same choice `grok-review.sh` already makes for this
 reason:
 
+The sample leads with a bare `mktemp` so the command that runs starts with the
+verb the grant names — `Bash(mktemp:*)` prefix-matches the command string, and a
+`work=$(mktemp …)` assignment starts with `work=`, not `mktemp`. Capture the
+printed path as `$work`, the same discipline the File step uses for
+`--body-file`:
+
 ```bash
-work=$(mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX")   # writable, never a repo sibling
-git rev-parse --short HEAD                            # the commit the sweep pins to
+mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $work
+git rev-parse --short HEAD                           # the commit the sweep pins to
 git worktree add --detach "$work" HEAD
 ```
 
-Run every round from `$work`. **If the worktree cannot be created, stop** — do
-not fall through to reading the caller's tree, which would silently forfeit the
-stable-snapshot property this section buys. A failed `git worktree add` is a
-round that could not run, reported like any other tool error under *Never fail
-open* below. **Write issue bodies and any scratch to a separate temp path**
-(another `mktemp` under `${TMPDIR:-/tmp}`), never inside `$work`, so the
-checkout stays clean and the teardown below removes it without `--force`.
+**If the worktree cannot be created, stop** — do not fall through to reading the
+caller's tree, which would silently forfeit the stable-snapshot property this
+section buys. A failed `git worktree add` is a round that could not run, reported
+like any other tool error under *Never fail open* below. **Write issue bodies and
+any scratch to a separate temp path** (another `mktemp` under `${TMPDIR:-/tmp}`),
+never inside `$work`, so the checkout stays clean and the teardown below removes
+it without `--force`.
+
+**Binding the reads to `$work` is a rule, not the worktree's doing.** The
+detached checkout pins the committed `HEAD`, but nothing about it forces `Read`,
+`Grep`, `Glob` or an Agent to look there — those tools default to the caller's
+workspace, and a round that pins a snapshot and then reads the caller's dirty
+tree anyway has forfeited the property exactly as a failed-add fall-through
+would. So: **every path the round reads — every `Read`, `Grep` and `Glob`
+argument, and every Agent prompt's stated root — is an absolute path under
+`$work`.** Reading outside `$work` after a successful add is the same fail-open
+the hard stop above closes for a failed one; treat it the same way.
 
 **It audits the committed `HEAD`.** Uncommitted work in the caller's tree is out
-of scope by construction — that is the point, not a gap, but it is a real
-boundary: to sweep work in progress, commit it first so a `HEAD` exists to fork.
-Say in the opening summary which commit the sweep pinned to.
+of scope — that is the point, not a gap: the checkout holds committed `HEAD`
+and the rule above keeps the reads there. To sweep work in progress, commit it
+first so a `HEAD` exists to fork. Say in the opening summary which commit the
+sweep pinned to.
 
 ## Teardown
 
@@ -101,10 +118,12 @@ Each round is the review done once, end to end:
 1. **Fan out.** Spawn read-only audit subagents over disjoint areas so no two
    read the same tree — the natural cut is CI/tooling, the application source,
    and the deploy/infrastructure surface, but let the scope hint narrow it.
-   Give each the same contract: report file, line, severity, the concrete
+   Give each the same contract: **root every path under `$work`** (the pinned
+   worktree, per the rule above — an agent left to default to the caller's
+   workspace reads the wrong tree); report file, line, severity, the concrete
    exploit scenario (who controls the input, what happens), and a fix — as raw
-   data, most severe first. Tell each what is **documented and deliberate** so
-   it does not re-report accepted risks as defects.
+   data, most severe first; and treat what is **documented and deliberate** as
+   accepted rather than re-reporting it as a defect.
 2. **Verify.** For every medium-or-above candidate, read the cited code and
    confirm the scenario holds. Drop what does not survive.
 3. **De-duplicate.** Check each survivor against the tracked set and the
