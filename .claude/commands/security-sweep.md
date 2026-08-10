@@ -26,17 +26,23 @@ layout, both of which this repo runs under) cannot create `../<repo>-secsweep`,
 and `mktemp -d` is the same choice `grok-review.sh` already makes for this
 reason:
 
-The sample leads with a bare `mktemp` so the command that runs starts with the
-verb the grant names — `Bash(mktemp:*)` prefix-matches the command string, and a
-`work=$(mktemp …)` assignment starts with `work=`, not `mktemp`. Capture the
-printed path as `$work`, the same discipline the File step uses for
-`--body-file`:
+Each capturing line leads with the verb its grant names — `Bash(mktemp:*)` and
+`Bash(git rev-parse:*)` prefix-match the command string, and a `work=$(mktemp …)`
+assignment starts with `work=`, not `mktemp`. Capture each output into the named
+variable, the same discipline the File step uses for `--body-file`:
 
 ```bash
 mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $work
-git rev-parse --short HEAD                           # the commit the sweep pins to
-git worktree add --detach "$work" HEAD
+git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
+git worktree add --detach "$work" "$pinned"          # pin that exact commit, never HEAD re-resolved
 ```
+
+**Pin the resolved commit, not `HEAD` a second time.** Reading `HEAD` once for a
+summary and again for `git worktree add` are two calls, and in a repo worked by
+several clients the branch can advance between them — the checkout and the
+reported commit would then be different commits, which is precisely the drift
+the snapshot exists to rule out. `$pinned` is captured once and passed to both,
+so the summary names the commit the sweep actually read.
 
 **If the worktree cannot be created, stop** — do not fall through to reading the
 caller's tree, which would silently forfeit the stable-snapshot property this
@@ -47,14 +53,22 @@ never inside `$work`, so the checkout stays clean and the teardown below removes
 it without `--force`.
 
 **Binding the reads to `$work` is a rule, not the worktree's doing.** The
-detached checkout pins the committed `HEAD`, but nothing about it forces `Read`,
-`Grep`, `Glob` or an Agent to look there — those tools default to the caller's
-workspace, and a round that pins a snapshot and then reads the caller's dirty
-tree anyway has forfeited the property exactly as a failed-add fall-through
-would. So: **every path the round reads — every `Read`, `Grep` and `Glob`
-argument, and every Agent prompt's stated root — is an absolute path under
-`$work`.** Reading outside `$work` after a successful add is the same fail-open
-the hard stop above closes for a failed one; treat it the same way.
+detached checkout pins the commit, but nothing about it forces a reader to look
+there — `Read`, `Grep`, `Glob` and an Agent default to the caller's workspace,
+and the granted shell readers (`grep`, `git grep`, `git log`) read whatever
+directory they run in, `git grep` and `git log` against that checkout's own
+`HEAD`. A round that pins a snapshot and then reads the caller's moving tree has
+forfeited the property exactly as a failed-add fall-through would. So, two rules
+that between them cover every reader the grant allows:
+
+- **Every built-in read** — every `Read`, `Grep`, `Glob` argument and every
+  Agent prompt's stated root — **is an absolute path under `$work`.**
+- **Every shell read runs with `$work` as its working directory**, so `grep`
+  resolves relative paths there and `git grep` / `git log` resolve against
+  `$pinned` rather than the caller's moving `HEAD`.
+
+Reading outside `$work` after a successful add is the same fail-open the hard
+stop above closes for a failed one; treat it the same way.
 
 **It audits the committed `HEAD`.** Uncommitted work in the caller's tree is out
 of scope — that is the point, not a gap: the checkout holds committed `HEAD`
@@ -99,14 +113,21 @@ or above.** Three gates, and each drops candidates the round must not file:
 - **Medium or above.** Low and info findings are recorded in the round summary
   for the user to weigh, not filed. The threshold is the user's to move, not
   this command's.
-- **Not already tracked.** Before filing, `gh issue list --state all` and read
-  the tracked set — **open and closed** — a finding that matches an existing
-  issue, or a documented time-boxed decision in the code (a `closed by PR-NN`
-  remark, an accepted risk named in a README), is **already tracked**. Closed
-  counts: a `wontfix` or already-remediated issue should still block a re-file.
-  Re-filing is the drift this repo exists to close, one issue tracker over. (The
-  prior-round caveat under *Where it stops* is a different set — issues still
-  **open** are a live-risk signal, not the de-duplication test.)
+- **Not already tracked.** Before filing, enumerate the **whole** issue set —
+  `gh issue list --state all --limit 1000`, because the default 30 hides older
+  issues and lets a duplicate straight through — and match each finding against
+  it. An open issue, a `wontfix`, or an accepted-risk record blocks a re-file;
+  **verify the accepted-risk claim rather than trusting the prose**, since a
+  `closed by PR-NN` remark in the audited tree is only as true as the code
+  around it still makes it. A closed issue that was *fixed* is the one
+  exception, and suppressing it blindly is the more dangerous error: it blocks a
+  re-file **only while its fix is still present** — if the finding **currently
+  reproduces** because the fix was reverted, the vulnerability is back, and it
+  re-files (or reopens the issue) rather than being silenced by a closure that
+  no longer holds. Re-filing a genuinely-tracked finding is the drift this repo
+  exists to close; suppressing a reintroduced one is worse. (The prior-round
+  caveat under *Where it stops* is a different set — issues still **open** are a
+  live-risk signal, not the de-duplication test.)
 
 A candidate that fails any gate is not a clean round's absence of findings — it
 is a finding handled without a new issue. Say which in the summary.
