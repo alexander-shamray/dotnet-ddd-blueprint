@@ -19,6 +19,13 @@ Unlike `/review-copilot`, this review arrives as prose from outside the repo
 with no line anchors, so the first job is to locate what each finding is
 actually about before deciding whether it is true.
 
+**This command triages a review that already ran; it does not invoke Grok and
+consumes no Grok usage.** So the usage-limit preflight (skip when out of limits)
+and the twelve-checks-per-PR cap live where Grok is actually run and looped —
+`grok-review.sh` (the preflight, exit 12 = skip) and `/ship` step 5 (the cap and
+the skip handling) — not here. Looking for either in this file is looking one
+step too late.
+
 ## Method
 
 1. **Enumerate first, fix nothing.** Split the review into discrete findings and

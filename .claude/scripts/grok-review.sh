@@ -187,6 +187,23 @@ else
   done
 fi
 
+# Usage-limit preflight — SKIP, never fail. Authentication being good is not the
+# same as the team being inside its window: a rate limit or an exhausted quota
+# answers the model call, not the handshake, so the credential probe above
+# passes and the review then dies mid-run and reports as "did not run" (exit 4).
+# A review the limits will not currently allow is not a defect in the branch and
+# must not halt the loop as one — the caller skips this round and moves on. The
+# exit is distinct (12) precisely so ship.md can tell a skip from a failure: a
+# failure stops the loop, a skip does not. One extra probe against the auth that
+# was actually selected, so the OAuth path (which the block above never probes)
+# is covered too.
+limit_probe=$(docker run --rm "${mounts[@]}" "$image" grok -p "ok" 2>&1) || true
+if grep -qiE 'rate.?limit|429|quota|usage limit|too many requests|(no|any) credits' <<<"$limit_probe"; then
+  echo "grok is out of usage limits — skipping this review, not failing it:" >&2
+  grep -ioE 'rate.?limit|429|quota|usage limit|too many requests|(no|any) credits' <<<"$limit_probe" | head -1 >&2
+  exit 12
+fi
+
 set +e
 docker run --rm \
   --volume "$(host_path "$work/repo"):/review:Z" \

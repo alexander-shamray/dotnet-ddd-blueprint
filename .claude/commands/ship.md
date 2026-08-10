@@ -133,6 +133,17 @@ anything.
       is required**; without it the helper exits 7 rather than falling back to
       the host.
 
+      **Exit 12 is out of usage limits, and it means skip — not fail.** The
+      helper preflights the selected auth against Grok's limits before the
+      review, and a rate-limited or quota-exhausted team is not a defect in the
+      branch: on exit 12 **skip the Grok loop for now and move to step 6**,
+      reporting the round as skipped rather than clean or failed — a review the
+      limits will not allow did not run, and neither a clean verdict nor a stop
+      may be minted from it. It is the one non-zero exit that does not halt the
+      chain; every other (2, 3, 4, 5, 6, 7) is the loop not having run and stops
+      it. Note in the report that the Grok half was skipped on limits so a later
+      `/ship` re-enters it.
+
       Residual, stated in the script and in `CLAUDE.md`: **egress is not
       restricted**. The container reaches the network, and confining it to
       `api.x.ai` needs an allow-list proxy Docker cannot supply alone. The
@@ -182,6 +193,15 @@ anything.
      that the loop ended on its ceiling rather than on convergence, because
      those are different states and only one of them is evidence.
 
+     **The twelve is a count of Grok checks per PR, not per session.** Every
+     `grok-review.sh` invocation is one check — a full review and a recheck
+     count the same — and the ceiling is **no more than twelve of them against
+     one PR**, carried across resumed `/ship` runs rather than reset each time
+     the chain re-enters. A skip on limits (exit 12) is not a check and does
+     not count; a review that ran and reported does. Track the running count in
+     the report so a resumed run knows how many remain, and when the twelfth is
+     spent, stop and say the PR reached its Grok ceiling.
+
      The ceiling was three, and three was wrong. By its seventh Copilot round
      PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
      and rounds four through seven caught a documented-but-unenforced
@@ -195,7 +215,10 @@ anything.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
-   silently skipped and never substituted with a self-review.
+   silently skipped and never substituted with a self-review. The exit-12
+   limits skip above is the one deliberate exception, and it is not silent: it
+   is reported as skipped-on-limits and moves to step 6, where "fails outright"
+   mints nothing and stops the chain.
 
 6. **The Copilot loop.** Once the Grok loop ends clean, hand the branch to the
    second reviewer and alternate the same way:
