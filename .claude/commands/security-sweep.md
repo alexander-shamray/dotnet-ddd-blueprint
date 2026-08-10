@@ -257,10 +257,15 @@ grants now go through fixed helpers — `git-worktree-detach.sh` and
 `git-worktree-drop.sh` — because the prefix bought more than the operation:
 `git worktree add -B` resets an existing branch, and `git worktree remove -f`
 defeats the refusal this command's own teardown relies on as its guard. The
-helpers validate the path, and no caller-controlled flag reaches git. What each
-refuses differs and is worth naming rather than averaging:
-`git-worktree-drop.sh` passes no flags at all and refuses the main worktree and
-any path this repository has not registered, while
+helpers bind the path as well as the flags, and the path half is the one that
+matters here: **both refuse anything that is not `secsweep-` plus six
+characters directly under the canonical temp root**, which is the only shape
+this command's own `mktemp -d` produces. Registration was not enough on its
+own — every sibling PR worktree is registered too, and a poisoned finding
+naming one would otherwise have been able to delete it. What each refuses
+beyond that differs and is worth naming rather than averaging:
+`git-worktree-drop.sh` passes no flags at all and additionally refuses the main
+worktree and any worktree outside this repository, while
 `git-worktree-detach.sh` embeds `--detach`
 by design and requires an empty directory and a resolved 40-character sha.
 `git worktree list` stays a raw grant; it reads.

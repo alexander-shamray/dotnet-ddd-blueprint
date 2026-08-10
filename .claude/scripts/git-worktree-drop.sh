@@ -1,30 +1,43 @@
 #!/usr/bin/env bash
-# Remove a worktree this repository registered, without -f.
+# Remove the throwaway worktree /security-sweep created, without -f.
 #
-# The missing flag is the point. /security-sweep's own prose leans on git
-# refusing to remove a checkout that holds anything modified or untracked —
-# "if `git worktree remove` refuses, leave the worktree standing and report
-# what it is holding" — and `git worktree remove -f` defeats exactly that
-# guard, which a `Bash(git worktree remove:*)` grant would license. Same shape
-# as the other helpers here: the flag is decided in the file, not by a caller.
+# The missing flag is half the point. That command's teardown leans on git
+# refusing to remove a checkout holding anything modified or untracked — "if
+# `git worktree remove` refuses, leave the worktree standing and report what it
+# is holding" — and `git worktree remove -f` defeats exactly that guard, which
+# a `Bash(git worktree remove:*)` grant would license.
 #
-# It also refuses the main worktree, so a mistyped argument cannot aim this at
-# the checkout the session is standing in.
+# The other half is WHICH path. Registration is not ownership: every sibling PR
+# worktree is registered too, and the audited tree is prompt-injection input, so
+# a path arriving here may have been chosen by it. Accepting any non-main
+# worktree would let a poisoned finding steer this at someone else's clean
+# workspace. So the path must be one only the sweep's own `mktemp -d` could have
+# produced: `secsweep-` plus six characters, directly under the canonical temp
+# root.
 set -euo pipefail
 [ "$#" -eq 1 ] || { echo "usage: git-worktree-drop.sh <path>" >&2; exit 2; }
 path="$1"
 case "$path" in -*) echo "path may not start with '-'" >&2; exit 2 ;; esac
 [ -d "$path" ] || { echo "not an existing directory: $path" >&2; exit 2; }
-# Resolve both sides before comparing: `git worktree list` prints absolute
-# paths, and the caller holds whatever spelling mktemp gave it.
+tmproot=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
+  { echo "cannot resolve the temp root" >&2; exit 4; }
 resolved=$(cd "$path" && pwd -P)
-main=$(git worktree list --porcelain | awk 'NR==1 && $1=="worktree" {print $2; exit}')
-main_resolved=$(cd "$main" && pwd -P)
-[ "$resolved" != "$main_resolved" ] ||
+case "$resolved" in
+  "$tmproot"/secsweep-??????) : ;;
+  *) echo "not a sweep-owned temp path: $path" >&2; exit 2 ;;
+esac
+# Ask git whether this is a linked worktree of THIS repository, rather than
+# comparing path strings against `git worktree list`. Under MSYS those strings
+# are not comparable at all — git prints `C:/Users/…/Temp/x` where `pwd -P`
+# prints `/tmp/x`, and a textual check refuses the sweep's own worktree on the
+# host this repository is developed on. Both values below come from git in one
+# format, so they compare.
+common_here=$(git rev-parse --path-format=absolute --git-common-dir)
+common_there=$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+  { echo "not a git worktree: $path" >&2; exit 3; }
+[ "$common_there" = "$common_here" ] ||
+  { echo "not a worktree of this repository: $path" >&2; exit 3; }
+dir_there=$(git -C "$path" rev-parse --path-format=absolute --git-dir)
+[ "$dir_there" != "$common_there" ] ||
   { echo "refusing to remove the main worktree: $path" >&2; exit 3; }
-git worktree list --porcelain |
-  awk -v t="$resolved" '$1=="worktree" {print $2}' |
-  while read -r w; do (cd "$w" 2>/dev/null && pwd -P); done |
-  grep -Fxq "$resolved" ||
-  { echo "not a worktree this repository registered: $path" >&2; exit 3; }
 git worktree remove "$resolved"
