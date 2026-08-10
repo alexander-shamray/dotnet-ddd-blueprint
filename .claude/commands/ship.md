@@ -47,7 +47,7 @@ skippable because an earlier run already did it:
 
 | State | What is owed |
 |---|---|
-| On `main` | All of it — start at step 1, which forks the workspace |
+| On `main` | All of it — start at step 1, which forks the workspace when the tree is clean and the parent is writable, and otherwise branches in place |
 | On a branch, tree dirty | Checks, `/commit`, push, `/pr` |
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
@@ -59,7 +59,7 @@ step 0 reads it: `git rev-parse --git-dir --git-common-dir` differing, with no
 is already inside this PR's worktree. Then every row above is owed *there* and
 nothing forks a second directory. A run that starts in the main checkout on
 `main` is the only one that can fork a workspace at all — and only with a clean
-tree, per step 1's exception.
+tree and a writable parent, per step 1's two exceptions.
 
 **The Grok loop's clean state cannot be read from the tree**, so a resumed run
 re-enters step 5 rather than inferring it ran: `suggestions.md` is absent
@@ -126,11 +126,13 @@ same argument as never calling a branch clean because asking failed.
    **This step is also where the workspace comes from.** `/branch` forks a
    sibling worktree for the new branch and moves the session into it, so
    **every step below runs in the PR's own directory** and the main checkout
-   stays on `main`. That command owns the naming, the placement and the one
-   exception — a dirty `main` branches in place, because uncommitted work
-   cannot follow a fresh checkout without a stash or a patch, and both are
-   refused here. Do not restate the rule; do report which of the two happened,
-   because it decides where the rest of this run lives.
+   stays on `main`. That command owns the naming, the placement and the two
+   exceptions that branch in place instead — a dirty `main`, because
+   uncommitted work cannot follow a fresh checkout without a stash or a patch
+   and both are refused here, and a checkout whose parent is not writable,
+   where there is nowhere beside it to put one. Do not restate the rules; do
+   report which case happened, because it decides where the rest of this run
+   lives.
 
    `/branch` stops when it is already on a branch and asks whether this is a
    second change or a continuation. In a chain that stop is wrong — being on a

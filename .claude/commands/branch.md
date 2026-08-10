@@ -1,5 +1,5 @@
 ---
-description: Start a correctly named working branch in its own worktree, carrying any uncommitted work with it
+description: Start a correctly named working branch — in its own sibling worktree from a clean main, in place when the tree is dirty or the parent is not writable
 argument-hint: "[what the change does] — omit to derive it from the uncommitted work"
 allowed-tools: Read, Grep, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git worktree add:*), Bash(git worktree list:*)
 ---
@@ -32,13 +32,25 @@ C:/dev/ashamray-groklimit           feat/grok-usage-limit-guard
 C:/dev/ashamray-masstransit         feat(template)/masstransit-registration
 ```
 
-`../<checkout-name>-<slug>` is the shape, and it matches what is already on
-disk (`ashamray-groklimit`) and what `/security-sweep` forks
-(`ashamray-sweep`). **Outside the repository tree is the load-bearing half**,
-not the naming: a worktree under `.claude/worktrees/` would sit inside the
-checkout, show up as untracked in every `git status` the chain reads, and put
+`../<checkout-name>-<slug>` is the shape, and `ashamray-groklimit` is already on
+disk in it. **Outside the repository tree is the load-bearing half**, not the
+naming: a worktree under `.claude/worktrees/` would sit inside the checkout,
+show up as untracked in every `git status` the chain reads, and put
 `grok-review.sh`'s clean-tree refusal in its blast radius. Nothing has to be
 added to `.gitignore` for a sibling, because there is nothing to ignore.
+
+**`/security-sweep` takes the opposite path deliberately, and the difference is
+the worktree's job.** That command forks a *detached* worktree under `mktemp -d`
+and removes it at the end; it carries no branch, nothing returns to it, and it
+must run where the repository's parent is not writable. This one holds a branch
+that a PR, two review loops and a person all come back to, so it wants a stable
+named directory beside the checkout rather than a temp path. Neither is the
+other's precedent — do not reconcile them by making one match.
+
+**That makes a writable parent this command's precondition**, and it is the one
+`/security-sweep` warns about: a root-level or container layout cannot create
+`../<checkout-name>-<slug>` at all. So the failure is named rather than left to
+surface as a raw `git` error mid-`/ship` — see step 5.
 
 The slug is the branch's kebab summary cut to the first word or two that name
 the change — it is a directory name, not a branch name, so the `<type>/` prefix
@@ -173,7 +185,18 @@ not content.
    it, which is what that form of the tool requires. Everything after this
    command — `/commit`, `/pr`, both review loops, `dotnet test` — runs there.
 
-   **If the session cannot enter the worktree, stop and report the path.** Do
+   **If the parent directory is not writable, `git worktree add` fails and the
+   answer is the in-place branch, not a temp path.** A root-level or container
+   layout has no `..` to write into — the case `/security-sweep` names — and
+   a workspace somewhere unrelated to the checkout would be worse than none: it
+   is a directory the user has to be told about and return to, where the
+   in-place branch is where they already are. So report the failure, say the
+   sibling could not be created, and fall through to `git checkout -b <name>`
+   exactly as the dirty-`main` path does. Both no-worktree states then look the
+   same to everything downstream, and there is only one of them to describe.
+
+   **If the session cannot enter a worktree that was created, stop and report
+   the path** — this is the other half and it fails the other way. Do
    not carry on issuing `git -C` commands against a directory the session is
    not in: the chain behind this command reads `git status`, writes
    `suggestions.md` and shells a helper that resolves paths from the working

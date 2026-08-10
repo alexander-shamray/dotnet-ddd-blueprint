@@ -1450,7 +1450,7 @@ Delivery:
 | | |
 |---|---|
 | `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads |
-| `/branch` | Start a correctly named branch **in a sibling worktree** and move the session into it, carrying uncommitted work off `main` |
+| `/branch` | Start a correctly named branch — **in a sibling worktree** the session moves into, from a clean `main`; in place when the tree is dirty (carrying the work off `main`) or the parent is not writable |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
@@ -1460,13 +1460,24 @@ Delivery:
 
 **Every PR gets its own worktree, and `/branch` is where it comes from.** A new
 branch is cut into a sibling directory — `../ashamray-<slug>`, the shape
-`ashamray-groklimit` and `/security-sweep`'s `ashamray-sweep` already use — and
-the session moves into it, so the whole of `/ship` runs there and this checkout
-stays on `main`. Outside the repository tree is the load-bearing half rather
-than the naming: a worktree under `.claude/worktrees/` would be untracked
-content inside the checkout, which puts it in front of every `git status` the
-chain reads and inside `grok-review.sh`'s clean-tree refusal. A sibling needs
-no `.gitignore` entry because there is nothing to ignore.
+`ashamray-groklimit` is already on disk in — and the session moves into it, so
+the whole of `/ship` runs there and this checkout stays on `main`. Outside the
+repository tree is the load-bearing half rather than the naming: a worktree
+under `.claude/worktrees/` would be untracked content inside the checkout,
+which puts it in front of every `git status` the chain reads and inside
+`grok-review.sh`'s clean-tree refusal. A sibling needs no `.gitignore` entry
+because there is nothing to ignore.
+
+**`/security-sweep`'s worktree is not this one, and neither is the other's
+precedent.** That one is detached, lives under `mktemp -d`, carries no branch
+and is removed at the end — and it refuses a sibling *by name*, because a
+root-level or container layout has no writable parent, "both of which this repo
+runs under". This one holds a branch that a PR, two review loops and a person
+come back to, so it wants a stable named directory. The two commands are
+answering different questions; making one match the other would break whichever
+was changed. What the sweep's argument does carry across is the precondition:
+where the parent is not writable there is no sibling to create, so `/branch`
+names that case and branches in place rather than failing mid-`/ship`.
 
 The review boundary is unchanged by any of this, and that was checked rather
 than assumed: `git clone --no-hardlinks .` **out of** a linked worktree works
@@ -1476,7 +1487,7 @@ the script refuses to *build* a worktree for the container, since a worktree's
 `.git` is a file pointing back into the checkout and that path is the one the
 container must not mount. Running *inside* one is a different thing entirely.
 
-**A dirty `main` is the one case that branches in place**, and the reason is
+**A dirty `main` is the other case that branches in place**, and the reason is
 that nothing can carry the work across: a worktree is a fresh checkout of
 committed state, so uncommitted changes would need a stash or a patch — the
 first is refused here because it hides work the user can see, the second
