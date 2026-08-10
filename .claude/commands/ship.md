@@ -1,7 +1,7 @@
 ---
 description: Branch, commit, push and open a PR in one pass, then loop the external reviews — Grok, then Copilot — until both come back clean
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr comment:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, Bash(git status:*), Bash(git diff:*), Bash(git branch:*), Bash(git log:*), Bash(git fetch:*), Bash(git checkout -b:*), Bash(git switch -c:*), Bash(git rev-parse:*), Bash(git add:*), Bash(git commit:*), Bash(git reset HEAD:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -226,18 +226,27 @@ same argument as never calling a branch clean because asking failed.
      against one PR**, carried across resumed `/ship` runs rather than reset
      each time the chain re-enters. A skip on limits (exit 12) is not a check
      and does not count; a review that ran and reported does. The ledger
-     writes **before** the model call, not after: post
-     `gh pr comment <n> --body "Grok check N/12 — reserved (<full|recheck>)"`,
-     then invoke the helper. The two orders fail in opposite directions and
-     only one is safe — written after, an interrupted run has spent the check
-     and left no record, and the resumed run spends a thirteenth; written
-     before, the worst case is a reservation for a check that never ran,
-     which wastes one of the twelve and never exceeds it. Exit 12 is the one
-     outcome that posts a second line —
-     `"Grok check N/12 — released: skipped on limits"` — because a skip is
-     not a check; every other outcome lets the reservation stand as the
-     record. A resumed run reads the highest N reserved and not released,
-     counting an unreleased reservation as spent. Keep the running count in
+     writes **before** the model call, not after:
+
+     ```bash
+     bash .claude/scripts/grok-ledger.sh <n> reserve <N> <full|recheck>
+     ```
+
+     then invoke the review helper. The two orders fail in opposite
+     directions and only one is safe — written after, an interrupted run has
+     spent the check and left no record, and the resumed run spends a
+     thirteenth; written before, the worst case is a reservation for a check
+     that never ran, which wastes one of the twelve and never exceeds it.
+     Exit 12 is the one outcome that posts a second line —
+     `grok-ledger.sh <n> release <N>` — because a skip is not a check; every
+     other outcome lets the reservation stand as the record. A resumed run
+     reads the highest N reserved and not released, counting an unreleased
+     reservation as spent. The ledger goes through its own fixed helper for
+     the same reason the Copilot request does: a `Bash(gh pr comment:*)`
+     grant would also license `--edit-last`, `--delete-last` and `--repo` —
+     editing history and writing across repositories — where the helper can
+     post exactly the two lines above to a PR of this repository, and is
+     edit-denied to the session that invokes it. Keep the running count in
      the report as well — the report line is for the reader, the ledger is
      for the machine — and when the twelfth is spent, stop and say the PR
      reached its Grok ceiling.
