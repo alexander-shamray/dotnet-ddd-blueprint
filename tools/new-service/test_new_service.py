@@ -137,6 +137,26 @@ class RendersTheTemplate(unittest.TestCase):
             "ZULU_MIGRATOR_CONNECTION", self.rendered.updated["deploy/compose/.env.example"]
         )
 
+    def test_the_messaging_registration_and_its_smoke_travel_with_the_template(self):
+        # PR-13's wiring is template, not slice: a new service owns a bus
+        # connection from its first commit, and the harness smoke proves the
+        # pipeline with no broker running.
+        messaging = self.rendered.created[
+            "src/Services/Zulu/Zulu.Infrastructure/Messaging/DependencyInjection.cs"
+        ]
+        self.assertIn("public static IServiceCollection AddMassTransitMessaging(", messaging)
+        self.assertIn('configuration.GetConnectionString("RabbitMq")', messaging)
+        self.assertIn("namespace Zulu.Infrastructure.Messaging;", messaging)
+
+        infrastructure = self.rendered.created[
+            "src/Services/Zulu/Zulu.Infrastructure/DependencyInjection.cs"
+        ]
+        self.assertIn("services.AddMassTransitMessaging(configuration);", infrastructure)
+
+        self.assertIn(
+            "tests/Zulu.Api.Tests/MessagingRegistrationTests.cs", self.rendered.created
+        )
+
 
 class OmitsTheSlice(unittest.TestCase):
     def setUp(self):
@@ -450,6 +470,20 @@ class EditsTheSharedFiles(unittest.TestCase):
         self.assertIn("ConnectionStrings__ZuluMigrator:", compose)
         self.assertIn("ConnectionStrings__Zulu:", compose)
         self.assertIn("condition: service_completed_successfully", compose)
+
+    def test_the_api_block_carries_the_bus_key_and_waits_for_the_broker(self):
+        # The bus wiring is template, not slice: AddMassTransitMessaging
+        # throws without the key, so a scaffolded api block missing it is a
+        # container that cannot start. The migrator half must NOT gain either
+        # line — a job host has no bus.
+        compose = self.rendered.updated["deploy/compose/docker-compose.yml"].replace("\r\n", "\n")
+        api = compose[compose.index("  zulu-api:"):]
+        api = api[: api.index("\n  otel-collector:")] if "\n  otel-collector:" in api else api
+        self.assertIn('ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"', api)
+        self.assertIn("rabbitmq: { condition: service_healthy }", api)
+
+        migrator = compose[compose.index("  zulu-migrator:"): compose.index("  zulu-api:")]
+        self.assertNotIn("RabbitMq", migrator)
 
     def test_both_halves_of_the_pair_join_the_excluded_profile(self):
         # §14.1's own rule: every application block added to docker-compose.yml
@@ -905,7 +939,7 @@ class TheCommandLine(unittest.TestCase):
 
             self.assertEqual(0, code)
             self.assertEqual("", err)
-            self.assertIn("35 files created, 5 updated", out)
+            self.assertIn("37 files created, 5 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

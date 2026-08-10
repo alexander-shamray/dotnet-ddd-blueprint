@@ -91,6 +91,7 @@ COPIED = frozenset(
         "src/Services/Catalog/Catalog.Domain/Catalog.Domain.csproj",
         "src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj",
         "src/Services/Catalog/Catalog.Infrastructure/DependencyInjection.cs",
+        "src/Services/Catalog/Catalog.Infrastructure/Messaging/DependencyInjection.cs",
         "src/Services/Catalog/Catalog.Infrastructure/SqlConnectionFactory.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/CatalogDbContext.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/EfUnitOfWork.cs",
@@ -109,6 +110,7 @@ COPIED = frozenset(
         "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs",
         "tests/Catalog.Api.Tests/HostSmokeTests.cs",
         "tests/Catalog.Api.Tests/IntegrationCollection.cs",
+        "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs",
         "tests/Catalog.Api.Tests/TransientFaultInjection.cs",
         "tests/Catalog.TestSupport/Catalog.TestSupport.csproj",
         "tests/Catalog.TestSupport/CatalogApiFactory.cs",
@@ -387,15 +389,13 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "    /// fixture claims.\n",
         ),
         (
-            "/// machine cannot disagree about the engine. §12.4's name and §4.1's home:\n"
-            "/// the fixture serves <c>Catalog.Application.Tests</c> and\n"
-            "/// <c>Catalog.Api.Tests</c>, which cannot reference each other — each\n"
-            "/// declares its own <c>IntegrationCollection</c> over this one type. SQL\n",
-            "/// machine cannot disagree about the engine. §12.4's name and §4.1's home:\n"
-            "/// the fixture serves <c>Catalog.Api.Tests</c> today, and the application\n"
-            "/// suite the moment that suite gains a handler test — the two cannot\n"
-            "/// reference each other, so each declares its own\n"
-            "/// <c>IntegrationCollection</c> over this one type. SQL\n",
+            "/// the engine. §12.4's name and §4.1's home: the fixture serves\n"
+            "/// <c>Catalog.Application.Tests</c> and <c>Catalog.Api.Tests</c>, which\n"
+            "/// cannot reference each other — each declares its own\n",
+            "/// the engine. §12.4's name and §4.1's home: the fixture serves\n"
+            "/// <c>Catalog.Api.Tests</c> today, and the application suite the moment that\n"
+            "/// suite gains a handler test — the two cannot reference each other, so each\n"
+            "/// declares its own\n",
         ),
     ),
     "tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj": (
@@ -424,11 +424,10 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "tests/Catalog.Api.Tests/HostSmokeTests.cs": (
         (
-            "/// has a readiness check and a host without one does not; Catalog acquired both\n"
-            "/// in PR-08, and <c>AddSqlServer</c> throws on a null connection string — so a\n",
-            "/// has a readiness check and a host without one does not; this service has\n"
-            "/// both from its first commit, and <c>AddSqlServer</c> throws on a null\n"
-            "/// connection string — so a\n",
+            "/// string has a readiness check and a host without one does not; Catalog\n"
+            "/// acquired the SQL pair in PR-08 and the bus pair in PR-13, and both\n",
+            "/// string has a readiness check and a host without one does not; this\n"
+            "/// service has both pairs from its first commit, and both\n",
         ),
     ),
     "tests/Catalog.Api.Tests/TransientFaultInjection.cs": (
