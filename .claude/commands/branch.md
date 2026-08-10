@@ -207,11 +207,19 @@ not content.
    or on the remote means the work may already be underway; say so rather than
    picking a variant.
 
-   **The directory takes a second check, because `git worktree list` cannot
-   see most of what could be in the way** — it reports registered worktrees
-   and nothing else, so an ordinary file or directory at
-   `../<checkout-name>-<slug>` passes it silently and only fails inside step
-   5's `git worktree add`. Look at the path itself:
+   **The directory check runs only on the path that uses the directory** —
+   step 1's clean-`main` case in the main checkout, the one row of step 5's
+   table that reaches `git worktree add`. The other three branch in place and
+   never touch the sibling path, so a stranger sitting at
+   `../<checkout-name>-<slug>` must not stop them: refusing to carry dirty work
+   off `main` because an unrelated directory shares a two-word slug is a
+   blocked command with no defect behind it.
+
+   **On that one path the directory takes a second check, because
+   `git worktree list` cannot see most of what could be in the way** — it
+   reports registered worktrees and nothing else, so an ordinary file or
+   directory at `../<checkout-name>-<slug>` passes it silently and only fails
+   inside step 5's `git worktree add`. Look at the path itself:
 
    ```bash
    ls -d ../<checkout-name>-<slug>
