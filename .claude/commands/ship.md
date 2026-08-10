@@ -74,9 +74,12 @@ skip (step 5 has both forms) — and a resumed run recovers the count as the
 highest N reserved and not released; an unreleased reservation counts as
 spent, and no ledger comment means a fresh PR with nothing spent. The ledger
 carries convergence as well as spend, because spend alone cannot tell a loop
-that converged on its last allowed check from one the ceiling cut off: a
-`converged` marker as the last Grok row means step 5 owes nothing, and any
-later reservation supersedes it. Step 6 needs no marker for the same
+that converged on its last allowed check from one the ceiling cut off. The
+`converged` marker settles only that question — the report at the ceiling —
+and never excuses re-entry: the rule above stands, a resumed run re-enters
+both loops, and the marker is not pinned to a commit, so commits landing
+after it still get their re-review from the re-entry, budget allowing. Any
+later reservation supersedes the marker. Step 6 needs no marker for the same
 question — its outcomes are already on the PR, so a resumed run reads the
 last landed reviews (comments and suppressed blocks alike) and the
 unresolved-thread list before declaring that loop owed or exhausted. The
@@ -247,8 +250,12 @@ same argument as never calling a branch clean because asking failed.
      then invoke the review helper. A reservation is an election, not just a
      write: two resumed runs can read the same count and claim the same slot,
      so the helper settles it after posting — the earliest comment for the
-     slot wins, and a losing claim exits 4 having spent nothing, which means
-     re-read the count and reserve the next slot. The two orders fail in
+     slot wins, and a losing claim exits 4 having spent nothing. Losing
+     means a concurrent `/ship` is mid-check on this PR, so stop the loop
+     and say so — never reserve the next slot instead: two Grok runs share
+     one root `suggestions.md`, and the later finisher would overwrite the
+     earlier's findings or pass off its rival's clean pass as its own
+     convergence. The two orders fail in
      opposite directions and only one is safe — written after, an
      interrupted run has spent the check and left no record, and the
      resumed run spends a

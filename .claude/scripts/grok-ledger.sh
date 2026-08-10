@@ -31,8 +31,10 @@
 # same count and claim the same slot; posting is not atomic, so the claim is
 # settled after the fact: the first reservation posted after the slot's most
 # recent release wins — first-ever would refuse a released slot forever —
-# and a later claimant exits 4 without running anything, re-reads the count
-# and reserves the next slot. The losing comment stays on the PR; `count`
+# and a later claimant exits 4 without running anything. Losing does not
+# mean take the next slot: a losing claim is a concurrent run mid-check on
+# this PR, and two Grok runs share one root suggestions.md, so the loser
+# stops its loop and says so. The losing comment stays on the PR; `count`
 # folds duplicates for a slot into one spend, so the noise costs nothing.
 set -euo pipefail
 
@@ -156,7 +158,7 @@ if [ "$op" = "reserve" ]; then
       index($2, r) == 1 && cand == "" { cand = $1 }
       END { print cand }')
   if [ "$winner" != "$mine" ]; then
-    echo "slot $n was claimed first by comment $winner — this claim lost; re-read the count and reserve the next slot" >&2
+    echo "slot $n was claimed first by comment $winner — a concurrent run is mid-check on this PR; stop this loop and let it finish" >&2
     exit 4
   fi
 fi
