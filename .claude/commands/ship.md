@@ -237,8 +237,12 @@ same argument as never calling a branch clean because asking failed.
      bash .claude/scripts/grok-ledger.sh <n> reserve <N> <full|recheck>
      ```
 
-     then invoke the review helper. The two orders fail in opposite
-     directions and only one is safe — written after, an interrupted run has
+     then invoke the review helper. A reservation is an election, not just a
+     write: two resumed runs can read the same count and claim the same slot,
+     so the helper settles it after posting — the earliest comment for the
+     slot wins, and a losing claim exits 4 having spent nothing, which means
+     re-read the count and reserve the next slot. The two orders fail in
+     opposite directions and only one is safe — written after, an interrupted run has
      spent the check and left no record, and the resumed run spends a
      thirteenth; written before, the worst case is a reservation for a check
      that never ran, which wastes one of the twelve and never exceeds it.

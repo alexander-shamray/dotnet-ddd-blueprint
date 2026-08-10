@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The Grok check ledger: writes one line of it to a PR, or counts what stands.
+# The Grok check ledger: reserves a check slot on a PR, releases one, or
+# counts what stands.
 #
 # The write could have been a Bash(gh pr comment:*) grant, and briefly was —
 # but a Bash rule matches a command prefix, so that grant also licensed
@@ -15,11 +16,19 @@
 # state. On a public PR anyone can post "Grok check 12/12 — reserved (full)"
 # to jam the cap shut, or a released line to hold it open, so a reader that
 # greps arbitrary comments is counting an attacker's arithmetic. `count`
-# therefore accepts only the two exact shapes this file writes, only from the
-# account gh is authenticated as — the writer and the reader are the same
-# login by construction — and takes the last event per N, so a released
-# reservation can be legitimately re-spent and a stale release cannot hide a
-# later one.
+# accepts only whole bodies matching the two exact shapes this file writes,
+# only from the account gh is authenticated as — writer and reader are the
+# same login by construction — and takes the last event per N, so a released
+# slot can be legitimately re-spent and a stale release cannot hide a later
+# one.
+#
+# `reserve` is an election, not just a write. Two resumed runs can read the
+# same count and claim the same slot; posting is not atomic, so the claim is
+# settled after the fact: the earliest reservation comment for the slot wins,
+# and a later claimant exits 4 without running anything — it re-reads the
+# count and reserves the next slot. The losing comment stays on the PR;
+# `count` folds duplicates for a slot into one spend, so the noise costs
+# nothing.
 set -euo pipefail
 
 usage() {
@@ -38,18 +47,34 @@ mode="${4:-}"
 # ledger's whole vocabulary: twelve checks, so 1..12 and nothing else.
 [[ "$pr" =~ ^[0-9]+$ ]] || usage
 
-if [ "$op" = "count" ]; then
-  [ -z "$n" ] || usage
-  # Fixed endpoint, paginated so a busy PR cannot truncate the ledger, and
-  # filtered to the authenticated login before any shape is considered.
+# One fixed read, shared by count and the election: whole comment bodies by
+# the authenticated login that match a ledger shape, oldest first (the REST
+# endpoint returns issue comments in posting order). Shape filtering happens
+# on the whole body in jq — anchored test(), no multiline flag — so a
+# ledger-looking line buried inside a longer comment is not state, and every
+# row that survives is one line. The regex backslashes are doubled because a
+# jq string spends one level on its own escaping: \\( reaches the regex
+# engine as \(, where a bare \( would be jq's interpolation syntax.
+ledger_rows() {
+  local me
   me=$(gh api user --jq .login)
   [ -n "$me" ] || { echo "cannot resolve the authenticated gh login" >&2; exit 3; }
   gh api "repos/{owner}/{repo}/issues/$pr/comments" --paginate \
-    --jq ".[] | select(.user.login == \"$me\") | .body" |
-  grep -E '^Grok check ([1-9]|1[0-2])/12 — (reserved \((full|recheck)\)|released: skipped on limits)$' |
-  awk '
-    match($0, /^Grok check ([0-9]+)\/12/, m) {
-      state[m[1]] = /released/ ? "released" : "reserved"
+    --jq '.[] | select(.user.login == "'"$me"'")
+      | select(.body | test("^Grok check ([1-9]|1[0-2])/12 — (reserved \\((full|recheck)\\)|released: skipped on limits)$"))
+      | "\(.id)\t\(.body)"'
+}
+
+if [ "$op" = "count" ]; then
+  [ -z "$n" ] || usage
+  # POSIX awk only — no gawk match(..., m) — and empty input must still reach
+  # END and print 0: a fresh PR's ledger is legitimately empty, and pipefail
+  # turning that into a failure was this helper's first field defect.
+  ledger_rows | awk -F'\t' '
+    {
+      split($2, a, "/")
+      sub(/^Grok check /, "", a[1])
+      state[a[1] + 0] = ($2 ~ /released/) ? "released" : "reserved"
     }
     END {
       max = 0
@@ -78,5 +103,21 @@ case "$op" in
   *) usage ;;
 esac
 
-gh pr comment "$pr" --body "$body" >/dev/null
+url=$(gh pr comment "$pr" --body "$body")
+mine="${url##*issuecomment-}"
+[[ "$mine" =~ ^[0-9]+$ ]] ||
+  { echo "posted, but could not read the comment id back from: $url" >&2; exit 3; }
+
+if [ "$op" = "reserve" ]; then
+  # The election. Earliest reservation for this slot wins, either mode; ids
+  # are assigned in posting order, so the smallest id is the earliest claim.
+  earliest=$(ledger_rows |
+    awk -F'\t' -v slot="Grok check $n/12 — reserved " '
+      index($2, slot) == 1 { print $1; exit }')
+  if [ "$earliest" != "$mine" ]; then
+    echo "slot $n was reserved first by comment $earliest — this claim lost; re-read the count and reserve the next slot" >&2
+    exit 4
+  fi
+fi
+
 echo "$body"
