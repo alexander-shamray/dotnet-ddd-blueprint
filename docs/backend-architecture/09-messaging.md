@@ -170,13 +170,22 @@ payload is written at `StageAsync` (the port below), not at commit, so a total a
 two lines later commits an outbox row that disagrees with the row beside it.
 Both leave the transaction together and only one of them is right.
 
+**The port is common; only the allow-list is per-service.** `DomainEventDispatcher`
+([§7.5](07-persistence.md)) injects `IIntegrationEventMapper`, and common code cannot name a
+per-service type — the same split this section already applies to
+`IIntegrationEventPublisher` below.
+
 ```csharp
-namespace Ordering.Application.Integration;
+namespace Common.Application;
 
 public interface IIntegrationEventMapper
 {
     IReadOnlyList<object> Map(IReadOnlyList<IDomainEvent> domainEvents);
 }
+```
+
+```csharp
+namespace Ordering.Application.Integration;
 
 internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
 {
@@ -392,7 +401,7 @@ public sealed class OutboxMessage
 
     public static OutboxMessage Stage(
         object message, OutboxLane lane, Guid correlationId,
-        DateTimeOffset now, MessageTypeMap types) => new()
+        DateTimeOffset now, MessageTypeMap types, OutboxJson json) => new()
     {
         // One identity, not two. An integration event already carries its
         // MessageId and CorrelationId in the envelope the mapper filled in
@@ -407,7 +416,7 @@ public sealed class OutboxMessage
         MessageId = message is IIntegrationEvent e ? e.MessageId : Guid.CreateVersion7(),
         CorrelationId = message is IIntegrationEvent c ? c.CorrelationId : correlationId,
         MessageType = types.NameOf(message.GetType()),
-        Payload = JsonSerializer.Serialize(message, message.GetType(), OutboxJson.Options),
+        Payload = JsonSerializer.Serialize(message, message.GetType(), json.Options),
         Lane = lane,
         OccurredAt = now
     };
@@ -551,32 +560,48 @@ true and together they are a trap: a member renamed between the stage and the
 deliver silently deserialises to its default, because that is what
 `System.Text.Json` does with a property it cannot match.
 
-Two rules, and one line of code that makes the first checkable:
+Two rules, and one registration that makes the first checkable:
 
 ```csharp
 namespace Common.Infrastructure.Outbox;
 
-public static class OutboxJson
+/// <summary>
+/// One instance, registered as a singleton, resolved by both sides. Staging
+/// and delivering must agree, and the way they stop agreeing is one of them
+/// picking up a host-wide default that was changed for an API's benefit.
+/// </summary>
+public sealed class OutboxJson
 {
-    /// <summary>
-    /// The single options instance used to stage and to deliver. Both sides
-    /// must agree, and the way they stop agreeing is one of them picking up a
-    /// host-wide default that was changed for an API's benefit.
-    /// </summary>
-    public static readonly JsonSerializerOptions Options = new()
+    public OutboxJson(IEnumerable<JsonConverter> converters)
     {
-        // Explicitly the defaults that matter, rather than inherited ones:
-        // property names as declared, numbers as numbers, no case-insensitive
-        // rescue on the way back in — a payload that only round-trips because
-        // matching is lenient is a payload that will not survive a rename.
-        PropertyNamingPolicy = null,
-        PropertyNameCaseInsensitive = false,
-        NumberHandling = JsonNumberHandling.Strict
-    };
+        Options = new JsonSerializerOptions
+        {
+            // Explicitly the defaults that matter, rather than inherited ones:
+            // property names as declared, numbers as numbers, no case-insensitive
+            // rescue on the way back in — a payload that only round-trips because
+            // matching is lenient is a payload that will not survive a rename.
+            PropertyNamingPolicy = null,
+            PropertyNameCaseInsensitive = false,
+            NumberHandling = JsonNumberHandling.Strict
+        };
+
+        foreach (JsonConverter converter in converters)
+            Options.Converters.Add(converter);
+
+        // Frozen at construction, because the instance is reached from a
+        // background service and from every command scope at once and
+        // JsonSerializerOptions is only thread-safe once it is read-only.
+        // populateMissingResolver, because freezing is a promise that nothing
+        // more will be discovered — the reflection-based default has to be
+        // attached here rather than on first use.
+        Options.MakeReadOnly(populateMissingResolver: true);
+    }
+
+    public JsonSerializerOptions Options { get; }
 }
 ```
 
-**Domain events on the `Local` lane must round-trip through these options**, and
+**Domain events on the `Local` lane must round-trip through this instance**, and
 that is asserted in [§12.4](12-test-strategy.md) — `Every_stageable_domain_event_round_trips_through_the_outbox_options`,
 written out there with the other outbox tests. It does **not** join §12.6's
 contract suite, which selects on the `Common.Contracts.` namespace and so can
@@ -586,6 +611,26 @@ contracts.
 The assertion catches the private constructor, the computed-property-with-no-setter
 and the interface-typed member on the day it is introduced rather than on the
 day a deploy happens to land mid-batch.
+
+> **A value object needs a converter, and the service's Infrastructure owes it.**
+> §5.3's `Money` is a `readonly record struct` with a private constructor and
+> two get-only properties, and `System.Text.Json` does not refuse that shape —
+> a struct always has a parameterless constructor, so it builds the default,
+> finds no setter to call, and returns `Amount = 0` with a null `Currency`.
+> Every domain event carrying one deserialises to nonsense on this lane.
+>
+> The domain must not fix it. A `[JsonConstructor]` puts `System.Text.Json` in
+> a domain assembly, which §4.2's allow-list gate forbids by name; making the
+> constructor public gives up the always-valid principle §5.3 is built on, and
+> does not even work — for a struct the implicit parameterless constructor
+> wins, so a public parameterised one is never selected. What does work is a
+> `JsonConverter<Money>` registered by the service's Infrastructure, beside the
+> `ComplexProperty` mapping that already turns the same type into two columns.
+> Same layer, same reason, and the domain type knows about neither.
+>
+> This is why `OutboxJson` takes its converters rather than declaring options
+> and nothing else: the converters are half of what "both sides agree" means,
+> and a static field could only ever have said the other half.
 
 **And a renamed member is a migration, exactly as a renamed type is.** The drain
 rule above covers both: unprocessed rows name types *and* describe shapes, and
@@ -613,9 +658,50 @@ succeeds or fails on its own.
 > every other service. The lanes can only be alerted on separately (§13.6) if
 > they can actually fail separately.
 
+The dispatcher lives in `Common.Infrastructure`, so its three statements
+cannot name a schema — `ordering.` below is what the sample would be in
+Ordering's assembly, and there is no such assembly. The schema is a registered
+value instead:
+
 ```csharp
-public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<OutboxDispatcher> log)
-    : BackgroundService
+namespace Common.Infrastructure.Outbox;
+
+/// <summary>
+/// Where this service's outbox lives. Shape-checked on construction, because
+/// the schema is interpolated into the statements below rather than
+/// parameterised — a schema cannot be a parameter, and what cannot be a
+/// parameter has to be a value the type refuses to hold wrongly.
+/// </summary>
+public sealed partial class OutboxTable
+{
+    public OutboxTable(string schema)
+    {
+        if (!Identifier().IsMatch(schema))
+            throw new ArgumentException(
+                $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
+                "into the dispatcher's statements rather than parameterised.",
+                nameof(schema));
+
+        QualifiedName = $"{schema}.OutboxMessages";
+        Schema = schema;
+    }
+
+    public string Schema { get; }
+
+    public string QualifiedName { get; }
+
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]
+    private static partial Regex Identifier();
+}
+```
+
+> **The alternative is a dispatcher per service, and that is §9.3's prohibition
+> on a second outbox table set arriving by the back door.** Two dispatchers
+> means two retention policies, two sets of ordering guarantees, and one of
+> them being the one nobody monitors.
+
+```csharp
+public sealed class OutboxDispatcher : BackgroundService
 {
     private const int MaxAttempts = 10;
 
@@ -634,68 +720,86 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
             new EventId(2, nameof(DeliveryFailed)),
             "Outbox message {MessageId} on lane {Lane} failed, attempt {Attempt} of {Max}.");
 
-    // Atomic claim: selects and leases in one statement, so two replicas
-    // cannot take the same row. READPAST skips rows another replica holds.
-    private const string ClaimSql =
-        """
-        WITH claimable AS (
-            SELECT TOP (100) *
-            FROM ordering.OutboxMessages WITH (UPDLOCK, READPAST, ROWLOCK)
-            WHERE ProcessedAt IS NULL
-                AND Attempts < @MaxAttempts
-                AND (LockedUntil IS NULL OR LockedUntil < SYSDATETIMEOFFSET())
-            ORDER BY OccurredAt
-        )
-        UPDATE claimable
-        SET LockedUntil = DATEADD(second, 60, SYSDATETIMEOFFSET())
-        OUTPUT
-            inserted.Id,
-            inserted.MessageId,
-            inserted.CorrelationId,
-            inserted.MessageType,
-            inserted.Payload,
-            inserted.Lane,
-            inserted.Attempts,
-            inserted.OccurredAt;
-        """;
+    private readonly IServiceScopeFactory _scopes;
+    private readonly ILogger<OutboxDispatcher> _log;
 
-    private const string CompleteSql =
-        """
-        UPDATE ordering.OutboxMessages
-        SET ProcessedAt = SYSDATETIMEOFFSET(), LockedUntil = NULL
-        WHERE Id = @Id;
-        """;
+    // Composed once from the registered table. Instance fields rather than
+    // consts for that reason and no other.
+    private readonly string _claimSql;
+    private readonly string _completeSql;
+    private readonly string _failSql;
 
-    // Increments the attempt counter and backs off exponentially by pushing
-    // the lease forward. This is what makes the cap — and the abandoned-row
-    // alert in §13.6 — reachable.
-    private const string FailSql =
-        """
-        UPDATE ordering.OutboxMessages
-        SET
-            Attempts    = Attempts + 1,
-            LastError   = LEFT(@Error, 2000),
-            LockedUntil = DATEADD(
-                second,
-                POWER(2, CASE WHEN Attempts > 8 THEN 8 ELSE Attempts END) * 5,
-                SYSDATETIMEOFFSET())
-        WHERE Id = @Id;
-        """;
+    public OutboxDispatcher(IServiceScopeFactory scopes, OutboxTable table, ILogger<OutboxDispatcher> log)
+    {
+        _scopes = scopes;
+        _log = log;
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+        // Atomic claim: selects and leases in one statement, so two replicas
+        // cannot take the same row. READPAST skips rows another replica holds.
+        _claimSql =
+            $"""
+            WITH claimable AS (
+                SELECT TOP (100) *
+                FROM {table.QualifiedName} WITH (UPDLOCK, READPAST, ROWLOCK)
+                WHERE ProcessedAt IS NULL
+                    AND Attempts < @MaxAttempts
+                    AND (LockedUntil IS NULL OR LockedUntil < SYSDATETIMEOFFSET())
+                ORDER BY OccurredAt
+            )
+            UPDATE claimable
+            SET LockedUntil = DATEADD(second, 60, SYSDATETIMEOFFSET())
+            OUTPUT
+                inserted.Id,
+                inserted.MessageId,
+                inserted.CorrelationId,
+                inserted.MessageType,
+                inserted.Payload,
+                inserted.Lane,
+                inserted.Attempts,
+                inserted.OccurredAt;
+            """;
+
+        _completeSql =
+            $"""
+            UPDATE {table.QualifiedName}
+            SET ProcessedAt = SYSDATETIMEOFFSET(), LockedUntil = NULL
+            WHERE Id = @Id;
+            """;
+
+        // Increments the attempt counter and backs off exponentially by
+        // pushing the lease forward. This is what makes the cap — and the
+        // abandoned-row alert in §13.6 — reachable.
+        _failSql =
+            $"""
+            UPDATE {table.QualifiedName}
+            SET
+                Attempts    = Attempts + 1,
+                LastError   = LEFT(@Error, 2000),
+                LockedUntil = DATEADD(
+                    second,
+                    POWER(2, CASE WHEN Attempts > 8 THEN 8 ELSE Attempts END) * 5,
+                    SYSDATETIMEOFFSET())
+            WHERE Id = @Id;
+            """;
+    }
+
+    // stoppingToken, not ct: CA1725 requires an override to keep the base's
+    // parameter name (ADR-019 makes it an error), and a reader consulting
+    // BackgroundService's documentation is reading about that one.
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using PeriodicTimer timer = new(TimeSpan.FromMilliseconds(500));
 
-        while (await timer.WaitForNextTickAsync(ct))
+        while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             try
             {
-                await ProcessBatchAsync(ct);
+                await ProcessBatchAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The claim itself failed — database unreachable. Next tick.
-                ClaimFailed(log, ex);
+                ClaimFailed(_log, ex);
             }
         }
     }
@@ -706,7 +810,7 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
     /// </summary>
     public async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
-        await using AsyncServiceScope scope = scopes.CreateAsyncScope();
+        await using AsyncServiceScope scope = _scopes.CreateAsyncScope();
         IServiceProvider sp = scope.ServiceProvider;
 
         // Disposed every pass — the loop runs twice a second, so a leaked
@@ -717,7 +821,7 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
         // OutboxClaim, not OutboxMessage — the claim projects only the columns
         // the OUTPUT clause returns. See Appendix D.
         List<OutboxClaim> claimed =
-            (await connection.QueryAsync<OutboxClaim>(ClaimSql, new { MaxAttempts })).AsList();
+            [.. await connection.QueryAsync<OutboxClaim>(_claimSql, new { MaxAttempts })];
 
         int completed = 0;
 
@@ -726,15 +830,15 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
             try
             {
                 await DeliverAsync(sp, message, ct);
-                await connection.ExecuteAsync(CompleteSql, new { message.Id });
+                await connection.ExecuteAsync(_completeSql, new { message.Id });
                 completed++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // One bad message does not affect the other 99.
-                await connection.ExecuteAsync(FailSql, new { message.Id, Error = ex.ToString() });
+                await connection.ExecuteAsync(_failSql, new { message.Id, Error = ex.ToString() });
 
-                DeliveryFailed(log, message.MessageId, message.Lane, message.Attempts + 1, MaxAttempts, ex);
+                DeliveryFailed(_log, message.MessageId, message.Lane, message.Attempts + 1, MaxAttempts, ex);
             }
         }
 
@@ -749,7 +853,13 @@ public sealed class OutboxDispatcher(IServiceScopeFactory scopes, ILogger<Outbox
         Type type = sp
             .GetRequiredService<MessageTypeMap>()
             .Resolve(message.MessageType);
-        object payload = JsonSerializer.Deserialize(message.Payload, type, OutboxJson.Options)!;
+        // The same registered instance Stage wrote through, converters
+        // included — which is what "both sides must agree" means now that a
+        // value object's shape depends on one.
+        object payload = JsonSerializer.Deserialize(
+            message.Payload,
+            type,
+            sp.GetRequiredService<OutboxJson>().Options)!;
 
         if (message.Lane is "Broker")
         {

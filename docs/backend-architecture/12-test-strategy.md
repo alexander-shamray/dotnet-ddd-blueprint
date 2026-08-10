@@ -377,6 +377,15 @@ public sealed class ServiceFixture : IAsyncLifetime
     public Task<int> ProcessOutboxBatchAsync(CancellationToken ct = default) =>
         Factory.Services.GetRequiredService<OutboxDispatcher>().ProcessBatchAsync(ct);
 
+    /// <summary>
+    /// The host's own map and payload format (§9.4), with this assembly's
+    /// events and the service's converters in them — so a row a test stages is
+    /// a row the running dispatcher can read back.
+    /// </summary>
+    public MessageTypeMap MessageTypes => Factory.Services.GetRequiredService<MessageTypeMap>();
+
+    public OutboxJson OutboxJson => Factory.Services.GetRequiredService<OutboxJson>();
+
     public IDbConnection CreateConnection() => new SqlConnection(_sql.GetConnectionString());
 
     /// <summary>
@@ -633,8 +642,8 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     public async Task A_failing_row_does_not_block_healthy_rows()
     {
         await fixture.StageOutboxAsync(
-            Poison.Row(fixture.MessageTypes),          // its handler always throws
-            Healthy.Row(fixture.MessageTypes), Healthy.Row(fixture.MessageTypes));
+            Poison.Row(fixture),          // its handler always throws
+            Healthy.Row(fixture), Healthy.Row(fixture));
 
         await fixture.ProcessOutboxBatchAsync();
 
@@ -651,7 +660,7 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task A_row_stops_being_claimed_at_the_attempt_cap()
     {
-        OutboxMessage poison = Poison.Row(fixture.MessageTypes);
+        OutboxMessage poison = Poison.Row(fixture);
         await fixture.StageOutboxAsync(poison);
         await fixture.SetOutboxAttemptsAsync(poison.MessageId, 9);
 
@@ -672,7 +681,7 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task A_local_row_with_no_registered_handler_fails_loudly()
     {
-        await fixture.StageOutboxAsync(LocalRowFor<UnhandledEvent>(fixture.MessageTypes));
+        await fixture.StageOutboxAsync(LocalRowFor<UnhandledEvent>(fixture));
 
         await fixture.ProcessOutboxBatchAsync();
 
@@ -718,19 +727,25 @@ The builders those tests use are ordinary factories over `OutboxMessage`
 // which is the one thing these builders exist to prove does not happen.
 internal static class Poison
 {
-    public static OutboxMessage Row(MessageTypeMap types) =>
-        OutboxMessage.Stage(new AlwaysThrows(), OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now, types);
+    public static OutboxMessage Row(ServiceFixture fixture) => Local(new AlwaysThrows(), fixture);
 }
 
 internal static class Healthy
 {
-    public static OutboxMessage Row(MessageTypeMap types) =>
-        OutboxMessage.Stage(new NoOpEvent(), OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now, types);
+    public static OutboxMessage Row(ServiceFixture fixture) => Local(new NoOpEvent(), fixture);
 }
 
-internal static OutboxMessage LocalRowFor<TEvent>(MessageTypeMap types)
+internal static OutboxMessage LocalRowFor<TEvent>(ServiceFixture fixture)
     where TEvent : new() =>
-    OutboxMessage.Stage(new TEvent(), OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now, types);
+    Local(new TEvent(), fixture);
+
+// The fixture rather than the map alone, because a staged row needs both
+// halves of the host's agreement about the format: the persisted name and the
+// converters. A row written without the Money converter round-trips to zero.
+private static OutboxMessage Local(object message, ServiceFixture fixture) =>
+    OutboxMessage.Stage(
+        message, OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now,
+        fixture.MessageTypes, fixture.OutboxJson);
 ```
 
 `AlwaysThrows` has a registered `IProjectionHandler<AlwaysThrows>` that throws;
@@ -765,7 +780,7 @@ public void Stage_takes_the_message_id_from_the_envelope()
 
     var row = OutboxMessage.Stage(
         placed, OutboxLane.Broker, correlationId: Guid.CreateVersion7(),
-        now: TestClock.Now, types: TestTypeMap);
+        now: TestClock.Now, types: TestTypeMap, json: TestOutboxJson);
 
     // Both from the envelope, not minted here — and CorrelationId in
     // particular, because a caller-supplied one is passed in and ignored for
@@ -803,13 +818,20 @@ public void Every_stageable_domain_event_round_trips_through_the_outbox_options(
 {
     // Not "every IDomainEvent": the map is the set the outbox can actually
     // carry, and a type it does not know cannot reach a payload column.
+    // The REGISTERED options, converters included. A hand-built OutboxJson
+    // listing the service's converters would assert that they work — which
+    // nobody doubts — and stay green if a registration were deleted, while the
+    // running host wrote a zero-valued Money into every row. Registration is
+    // what can silently go missing, so registration is what this resolves.
+    JsonSerializerOptions options = fixture.OutboxJson.Options;
+
     foreach (Type type in fixture.MessageTypes.StageableDomainEvents)
     {
         object sample = DomainEventSamples.Create(type);
-        string json = JsonSerializer.Serialize(sample, type, OutboxJson.Options);
+        string json = JsonSerializer.Serialize(sample, type, options);
 
         JsonSerializer
-            .Deserialize(json, type, OutboxJson.Options)
+            .Deserialize(json, type, options)
             .ShouldBeEquivalentTo(sample, $"{type.Name} cannot survive the Local lane");
     }
 }
