@@ -72,13 +72,24 @@ is the proof, where the inference was a guess.
 not a missing file but a landed review, which is durable, on the PR, and
 carries the commit it read. A last landed review by
 `copilot-pull-request-reviewer` with no comments, nothing in its suppressed
-block, no unresolved threads on the PR, and a `commit` oid equal to the pushed
-head is **all-resolved** — step 6 is not owed, and re-requesting would be
-asking a question already answered on the record. Anything pushed after that
-review un-marks it, because the oid no longer matches and the clean verdict is
-then about a state the PR no longer carries. That pinning is what makes the
-inference safe here where it was a guess for Grok: the artefact says which
-commit it read, and `suggestions.md` never could.
+block, no unresolved threads on the PR, a `commit` oid equal to the pushed
+head, **and no `review_requested` event newer than it**, is **all-resolved** —
+step 6 is not owed, and re-requesting would be asking a question already
+answered on the record. Anything pushed after that review un-marks it, because
+the oid no longer matches and the clean verdict is then about a state the PR no
+longer carries. That pinning is what makes the inference safe here where it was
+a guess for Grok: the artefact says which commit it read, and `suggestions.md`
+never could.
+
+**The newer-request clause is not redundant with the oid**, and leaving it out
+is how a resume ships past a review it never read. A run interrupted between
+requesting a round and its landing leaves the PR in a state where the
+*previous* clean review still satisfies every other condition — same head, no
+threads, nothing suppressed — so a resume would call it all-resolved while a
+review it has not seen is in flight. The timeline `copilot-request-count.sh`
+already reads is the check: compare the newest `review_requested` timestamp
+against the candidate review's `submittedAt`, and if a request is outstanding,
+wait for its review rather than inheriting the verdict of the one before it.
 
 `git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
 `gh pr list --state open`, `gh pr view <n> --json reviews` and a look for
@@ -439,9 +450,17 @@ same argument as never calling a branch clean because asking failed.
       asking a question the landed review has already answered on the PR.
       Record the state by naming, in the report, the review that carried it
       and the `commit` oid it read — that oid against the pushed head is what
-      a later `/ship` reads back, per *Resume, don't restart*, and it is the
-      whole of the marker. Nothing is posted to the PR to say so; the review
-      itself is the record, which is more than the Grok half has.
+      a later `/ship` reads back, per *Resume, don't restart*, and with the
+      no-newer-request clause stated there it is the whole of the marker.
+      Nothing is posted to the PR to say so; the review itself is the record,
+      which is more than the Grok half has.
+
+      **If an optional extra round was requested, the loop is not done until
+      it lands.** The paragraph below allows one on a branch that wanted
+      scrutiny, and a request in flight is precisely the state the resume
+      clause refuses to read as all-resolved — so having asked for it, wait
+      for it and judge on that review, rather than declaring the state from
+      the round before.
 
       **All of that weight now sits on the definition of clean, so read it
       strictly.** Clean is three things at once: no inline comments, an empty

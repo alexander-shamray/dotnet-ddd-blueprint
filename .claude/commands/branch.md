@@ -89,10 +89,18 @@ not content.
 
    The first two differing — with no superproject, which would make it a
    submodule instead — means this session is already in a linked worktree.
-   **That worktree is this change's workspace**; report its path and its
-   branch and go no further, because forking a second one from inside the
-   first is how a chain ends up with two directories and one branch's work
-   split across them.
+   **That worktree is this change's workspace, and step 5 is off** — forking a
+   second one from inside the first is how a chain ends up with two directories
+   and one branch's work split across them. Report its path and its branch.
+
+   **What this step switches off is worktree *creation*, and nothing else.**
+   Carry on into step 1 and let it read the branch and the tree as usual: a
+   linked worktree says where the session is, never that the branch under it is
+   the one this change wants. Entering `/branch` from a previous PR's worktree
+   is the case that matters, and stopping here would silently adopt that
+   branch — where step 1's **already on a branch** case stops and asks, which
+   is exactly the guard wanted. A detached worktree reaches the same question
+   with no branch to name.
 1. **Read the current state.** `git branch --show-current` and
    `git status --short`. Three cases:
    - **On `main`, clean** — fetch, then cut the worktree from `origin/main`.
@@ -188,8 +196,10 @@ not content.
    about — in which case it is the workspace and step 0's answer applies — or
    something else entirely, which is a question for the user and not a name to
    dodge.
-5. **Create the workspace, then move into it.** From a clean `main`, both
-   happen in one command:
+5. **Create the workspace, then move into it.** **Skipped entirely when step 0
+   found the session already inside a linked worktree** — the workspace exists
+   and the branch question was settled by step 1. Otherwise, from a clean
+   `main`, both halves happen in one command:
 
    ```bash
    git worktree add ../<checkout-name>-<slug> -b <name> origin/main

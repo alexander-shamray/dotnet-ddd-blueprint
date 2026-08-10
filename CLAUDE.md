@@ -1582,11 +1582,18 @@ loop.
 
 That state has a name and a durable home: **all-resolved**, which is the last
 landed Copilot review carrying zero of all three, **pinned to the `commit` oid
-it read**. A resumed `/ship` compares that oid against the pushed head and does
-not re-request when they match — where the Grok half must re-enter, because
-`suggestions.md` is absent both before the first review and after a clean one
-and the two states are indistinguishable. The review says which commit it read;
-a missing file never could.
+it read** and with no `review_requested` event newer than it. A resumed `/ship`
+checks both and does not re-request when they hold — where the Grok half must
+re-enter, because `suggestions.md` is absent both before the first review and
+after a clean one and the two states are indistinguishable. The review says
+which commit it read; a missing file never could.
+
+**The newer-request half is what keeps the oid from being a trap.** A run
+interrupted between requesting a round and its landing leaves the previous
+clean review satisfying every other condition — same head, no threads, nothing
+suppressed — so on the oid alone a resume would declare all-resolved with a
+review it has never read still in flight. Copilot's own first review of PR #27
+found that, against the paragraph introducing the rule.
 
 The ceiling was three until PR-11, and the numbers are why it moved: the first
 seven Copilot rounds went 10 → 4 → 3 → 1 → 1 → 3 → 1 with every finding
