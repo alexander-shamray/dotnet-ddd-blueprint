@@ -1027,12 +1027,20 @@ public async Task Commands_are_sent_and_events_are_published()
 > **A matching assertion returns at once; a non-matching one always bills the
 > timeout in full.** That is what makes the number a judgement rather than a
 > constant to copy, because it is the `ShouldBeFalse` assertions that pay for
-> it: the sample above asserts two negatives, so its floor is twice whatever
-> is chosen, and its 10 s is that trade-off taken rather than a number to
-> carry into a suite of a different shape. There is no per-assertion escape —
-> the synchronous `Select` overload waits on the same token, timed at the pin
-> rather than assumed. `StartHarnessAsync` in the second test is where a suite
-> states this once, and the one thing it must not do is leave it unstated.
+> it, once each: the first sample carries one, so its floor is the whole
+> inactivity timeout, and a suite of "a few" saga tests pays that again for
+> every negative it asserts. There is no per-assertion escape — the
+> synchronous `Select` overload waits on the same token, timed at the pin
+> rather than assumed. So the value wants to be the smallest that still
+> absorbs scheduling latency, which is why 10 s here where a composition
+> smoke asserting only positives can afford 30 s.
+
+> **Where the number lives is the other half.** The first sample states it in
+> its own registration, which is the honest place while the suite has one
+> harness; a suite that grows a second wants the call hoisted into the shared
+> `StartHarnessAsync` rather than copied per test, so that a test cannot
+> quietly run on a different wait from its neighbour. What it must never be
+> is unstated.
 
 ## 12.6 Contract tests
 
