@@ -23,8 +23,12 @@ public static class DependencyInjection
         // broker configured must not start. Read inside UsingRabbitMq's
         // callback instead, the missing key would surface at bus start —
         // after the host is up, past ValidateOnBuild, in a background
-        // service's log.
-        string connectionString = configuration.GetConnectionString("RabbitMq") ??
+        // service's log. IsNullOrWhiteSpace, not a null check, on the Redis
+        // helper's argument: an empty environment variable configures an
+        // empty string, and letting it through defers the failure to the
+        // same place the eager read exists to avoid.
+        string? connectionString = configuration.GetConnectionString("RabbitMq");
+        if (string.IsNullOrWhiteSpace(connectionString))
             throw new InvalidOperationException(
                 "ConnectionStrings:RabbitMq is not configured. The bus cannot start without it (§13.5).");
 

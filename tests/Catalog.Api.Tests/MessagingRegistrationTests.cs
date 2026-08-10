@@ -37,8 +37,8 @@ public class MessagingRegistrationTests
     /// unresolvable one means a test that accidentally reaches for the real
     /// transport fails loudly (§12.4's <c>.invalid</c> convention).
     /// </summary>
-    private static IConfiguration Configuration(string? rabbitConnectionString =
-        "amqp://guest:guest@catalog-rabbit.invalid:5672") =>
+    private static IConfiguration Configuration(
+        string? rabbitConnectionString = "amqp://guest:guest@catalog-rabbit.invalid:5672") =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(rabbitConnectionString is null
                 ? []
@@ -67,9 +67,11 @@ public class MessagingRegistrationTests
         var id = Guid.CreateVersion7();
         await harness.Bus.Publish(new ProbeMessage(id), TestContext.Current.CancellationToken);
 
-        (await harness.Published.Any<ProbeMessage>(m => m.Context.Message.Id == id,
+        (await harness.Published.Any<ProbeMessage>(
+            m => m.Context.Message.Id == id,
             TestContext.Current.CancellationToken)).ShouldBeTrue();
-        (await harness.Consumed.Any<ProbeMessage>(m => m.Context.Message.Id == id,
+        (await harness.Consumed.Any<ProbeMessage>(
+            m => m.Context.Message.Id == id,
             TestContext.Current.CancellationToken)).ShouldBeTrue(
             "the harness replaced the RabbitMQ transport, so a message that publishes but is never " +
             "consumed means the helper's registrations did not compose with the consumer bindings — " +
@@ -109,16 +111,21 @@ public class MessagingRegistrationTests
             .Value.Enabled.ShouldBeFalse("§13.2 owns this platform's telemetry, and none of it leaves silently");
     }
 
-    [Fact]
-    public void A_missing_connection_string_fails_at_registration_naming_the_key()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void A_missing_or_blank_connection_string_fails_at_registration_naming_the_key(string? value)
     {
         // Eager, like AddSqlServer one folder over (§13.5): read lazily inside
         // UsingRabbitMq, the missing key would surface at bus start — after
         // the host is up, past ValidateOnBuild, in a background service's log.
+        // Blank rows because an empty environment variable configures an empty
+        // string, which a null-only guard waves through.
         ServiceCollection services = new();
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(() =>
-            services.AddMassTransitMessaging(Configuration(rabbitConnectionString: null)));
+            services.AddMassTransitMessaging(Configuration(rabbitConnectionString: value)));
 
         exception.Message.ShouldContain("ConnectionStrings:RabbitMq");
     }
