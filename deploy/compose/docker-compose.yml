@@ -84,16 +84,22 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       # Runtime identity (DML only) — never the migrator connection.
       ConnectionStrings__Catalog: "${CATALOG_CONNECTION:-Server=sql;Database=Catalog;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
+      # The bus (§9), read by AddMassTransitMessaging — which throws without
+      # it, so this line is what lets the host start. A plain value, no ${…}
+      # variable: guest/guest is RabbitMQ's documented local default (§14.1's
+      # endpoint table), not a secret with a production shape, and
+      # .env.example's contract covers variables, not constants.
+      ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-      # No Redis, RabbitMQ or Identity__Authority keys: Catalog reads none of
-      # them yet — PR-12's Redis helpers wired no service, so the Redis keys
-      # join when Catalog first consumes a cache; the bus, the outbox and JWT
-      # validation arrive with PR-13, PR-14 and PR-16. An env var nothing
-      # reads is the container form of an unused registration: each joins
-      # with the PR whose code reads it.
+      # No Redis or Identity__Authority keys: Catalog reads neither yet — the
+      # Redis keys join when Catalog first consumes a cache, the outbox with
+      # PR-14, JWT validation with PR-16. An env var nothing reads is the
+      # container form of an unused registration: each joins with the PR
+      # whose code reads it.
     ports: [ "5102:8080" ]
     depends_on:
       catalog-migrator: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

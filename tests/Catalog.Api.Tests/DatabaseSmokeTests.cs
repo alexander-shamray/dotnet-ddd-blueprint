@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using Catalog.Infrastructure;
 using Catalog.Infrastructure.Persistence;
@@ -70,14 +71,33 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
     }
 
     [Fact]
-    public async Task Ready_probe_returns_200_against_a_real_database()
+    public async Task Ready_probe_reaches_200_once_the_bus_connects()
     {
+        // A poll, not a single request, and the shape is the claim:
+        // WaitUntilStarted is false (the registration argues it), so the host
+        // starts while the bus connects in the background and a 503 in the
+        // first moments is the designed behaviour — Kubernetes holds traffic
+        // until the flip, which is exactly what this asserts. It is also "the
+        // bus connects" (Appendix C, PR-13) proven against a real broker
+        // rather than inferred from the in-memory harness.
         using HttpClient client = fixture.Factory.CreateClient();
 
-        HttpResponseMessage response =
-            await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        HttpStatusCode status = HttpStatusCode.ServiceUnavailable;
+        Stopwatch stopwatch = Stopwatch.StartNew();
 
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            using HttpResponseMessage response =
+                await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+            status = response.StatusCode;
+
+            if (status == HttpStatusCode.OK)
+                break;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), TestContext.Current.CancellationToken);
+        }
+
+        status.ShouldBe(HttpStatusCode.OK, "SQL is up and the bus should finish connecting inside the deadline");
     }
 
     [Fact]
@@ -275,7 +295,15 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         ServiceCollection services = new();
         services.AddCatalogInfrastructure(new ConfigurationBuilder()
             .AddInMemoryCollection(
-                new Dictionary<string, string?> { ["ConnectionStrings:Catalog"] = fixture.ConnectionString })
+                new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Catalog"] = fixture.ConnectionString,
+                    // AddMassTransitMessaging throws without it. Unreachable
+                    // rather than the fixture's broker on the §12.4 .invalid
+                    // convention: no host runs here, so the bus never starts
+                    // and nothing should be able to dial one.
+                    ["ConnectionStrings:RabbitMq"] = "amqp://guest:guest@catalog-rabbit.invalid:5672"
+                })
             .Build());
 
         ServiceDescriptor options =

@@ -1,4 +1,5 @@
 using Catalog.Domain.Products;
+using Catalog.Infrastructure.Messaging;
 using Catalog.Infrastructure.Persistence;
 using Common.Application;
 using Microsoft.EntityFrameworkCore;
@@ -47,6 +48,11 @@ public static class DependencyInjection
         // identity would be §7.1's boundary failing quietly.
         services.AddSingleton<IDbConnectionFactory>(
             new SqlConnectionFactory(configuration.GetConnectionString("Catalog")!));
+
+        // The bus (§9). Its readiness needs no line below: AddMassTransit
+        // registers the bus health check itself — "masstransit-bus", tagged
+        // ready — argued at the registration.
+        services.AddMassTransitMessaging(configuration);
 
         // Readiness lives here, not in Common.Web, because it needs the
         // connection string the shared host package does not have (§13.5).

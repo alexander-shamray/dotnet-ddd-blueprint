@@ -41,17 +41,19 @@ run shows exactly the five and the new directories.
 [§4.1](../../docs/backend-architecture/04-solution-structure.md)'s five
 service projects, three test projects and the `TestSupport` library — nine in
 all, and §4.1 is explicit that the last is not a test project — with
-everything PR-07 through PR-10 built
-into the template: `DbContext` and conventions, `EfUnitOfWork`, the
-connection factory, the readiness check, the §7.4 migrator host, the
-`InitialCreate` migration that creates the schema, both Dockerfiles, the
-Compose pair, and the architecture gates of
+everything the delivery plan has built into the template through PR-13:
+`DbContext` and conventions, `EfUnitOfWork`, the connection factory, the
+readiness checks, the §7.4 migrator host, the `InitialCreate` migration that
+creates the schema, the §9 bus registration — a scaffolded host refuses to
+start without `ConnectionStrings:RabbitMq` — both Dockerfiles, the Compose
+pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
 
-The service builds and its twenty-four tests pass before you have written a
-line, and eleven of them run against a real SQL Server: the migrator's exit
-code, §7.1's two-key boundary, the readiness probe, and `EfUnitOfWork`'s
-commit, rollback and retry semantics.
+The service builds and its thirty tests pass before you have written a
+line, and eleven of them run against real SQL Server and RabbitMQ containers:
+the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
+only once the bus connects — and `EfUnitOfWork`'s commit, rollback and retry
+semantics.
 
 ## What you do next
 

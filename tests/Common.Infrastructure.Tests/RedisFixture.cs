@@ -63,7 +63,16 @@ public sealed class RedisFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        await _cache.DisposeAsync();
-        await _coordination.DisposeAsync();
+        // Each teardown runs even when the other throws: a failed cache
+        // disposal must not leave the coordination container running for the
+        // rest of the CI job.
+        try
+        {
+            await _cache.DisposeAsync();
+        }
+        finally
+        {
+            await _coordination.DisposeAsync();
+        }
     }
 }

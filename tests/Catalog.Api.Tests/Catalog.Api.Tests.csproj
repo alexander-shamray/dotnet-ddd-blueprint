@@ -27,6 +27,10 @@
          retry test inject a fault the strategy treats as transient. Already
          pinned centrally and in Appendix B via Catalog.Infrastructure. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <!-- The in-memory harness for the messaging smoke (§12.5). Core, not
+         MassTransit.RabbitMQ: the harness swaps the transport out, and a test
+         project that uses no transport must not claim one. -->
+    <PackageReference Include="MassTransit" />
   </ItemGroup>
 
   <ItemGroup>

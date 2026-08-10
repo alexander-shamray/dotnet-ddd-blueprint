@@ -5,7 +5,7 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-12 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-13 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
 CI and the licence gate — the building blocks: `Common.Domain`,
@@ -14,8 +14,9 @@ test project — §14.1's Compose infrastructure, with the CI smoke that proves
 it — Catalog as the first real service: §4.1's five projects, §4.2's gates
 live, PR-08's persistence, PR-09's transaction behaviour, and PR-10's
 vertical slice with its containers — PR-11's scaffold under
-`tools/new-service/` — and PR-12's Redis helpers, §8 as code. The phase
-section below carries the current state; this sentence only names the shape.
+`tools/new-service/` — PR-12's Redis helpers, §8 as code — and PR-13's bus
+registration, the first of §9's three instalments. The phase section below
+carries the current state; this sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
@@ -147,10 +148,13 @@ src/Services/Catalog/
                                  §7.2's conventions, EfUnitOfWork,
                                  ProductConfiguration, ProductRepository,
                                  SqlConnectionFactory over the runtime key,
-                                 §13.5's SQL readiness check, and two
-                                 migrations — InitialCreate (hand-written
-                                 EnsureSchema) and AddProducts (generated DDL,
-                                 hand-dressed only)
+                                 §13.5's SQL readiness check, two migrations —
+                                 InitialCreate (hand-written EnsureSchema) and
+                                 AddProducts (generated DDL, hand-dressed
+                                 only) — and, since PR-13, Messaging/
+                                 AddMassTransitMessaging: the RabbitMQ bus,
+                                 eager ConnectionStrings:RabbitMq read, usage
+                                 telemetry off, no consumers yet
   Catalog.Migrator/              §7.4's job host: MigratorHost builds it,
                                  MigrationRunner migrates and returns 0 or 1.
                                  Reads ConnectionStrings:CatalogMigrator and
@@ -180,8 +184,9 @@ tests/
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
-                                 SQL container, real migrator run, Respawn
-                                 reset — and CatalogApiFactory, shared by the
+                                 SQL and RabbitMQ containers, real migrator
+                                 run, Respawn reset — and CatalogApiFactory
+                                 (both connection strings), shared by the
                                  two suites below, which cannot reference
                                  each other
   Catalog.Domain.Tests/          §4.2's gates in §12.1's homes: domain isolation
@@ -190,12 +195,14 @@ tests/
                                  ↛ MassTransit, + registration surface +
                                  validator unit tests + the container-backed
                                  handler and pagination suites; endpoints ↛
-                                 Infrastructure, + the host smoke, the
-                                 endpoint contract tests and the
-                                 Testcontainers suite over the real migrator
-                                 and EfUnitOfWork — with Common.Infrastructure
-                                 .Tests above, three projects now need Docker,
-                                 one collection each
+                                 Infrastructure, + the host smoke (now two
+                                 ready checks, sql and masstransit-bus), the
+                                 messaging harness smoke, the endpoint
+                                 contract tests and the Testcontainers suite
+                                 over the real migrator, EfUnitOfWork and the
+                                 bus-connect readiness poll — with
+                                 Common.Infrastructure.Tests above, three
+                                 projects need Docker, one collection each
 ```
 
 The second block is PR-01's, the third PR-02's through PR-05's, the
@@ -307,16 +314,51 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds seventeen projects and `dotnet test` runs 241 tests, so
+`Platform.slnx` holds seventeen projects and `dotnet test` runs 247 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`py -3.12 -m unittest` in `tools/new-service` runs 71, and CI has a `scaffold`
-job for them beside `licence-gate`. **PR-13 is next**
-(`feat(template): MassTransit RabbitMQ registration and harness smoke`).
+`py -3.12 -m unittest` in `tools/new-service` runs 73, and CI has a `scaffold`
+job for them beside `licence-gate`. **PR-14 is next**
+(`feat(template): transactional outbox and allow-list event mapper`).
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-13 landed the bus — `AddMassTransitMessaging` in
+`Catalog.Infrastructure/Messaging`, the RabbitMQ registration of §9 with no
+consumer on it yet — and five of its decisions bind what comes after:
+
+- **The helper is per-service, in the `Redis/DependencyInjection` shape.** It
+  is where each service's consumers, sagas and receive endpoints will be
+  configured (§9.6 registers Ordering's saga inside it), and it keeps
+  MassTransit out of `Common.Infrastructure` until PR-14's outbox — the first
+  common code that names a MassTransit type (`IPublishEndpoint`).
+- **Broker readiness is MassTransit's own health check.** `AddMassTransit`
+  registers `masstransit-bus`, tagged `ready`, itself — verified in the 8.5.3
+  source — so no health-check line exists for the bus and the
+  `AspNetCore.HealthChecks.Rabbitmq` pin is gone: its parameterless
+  `AddRabbitMQ()` resolves an `IConnection` nothing registers, a latent
+  defect §13.5 now documents. `WaitUntilStarted` stays false; readiness
+  carries the wait, and `DatabaseSmokeTests` polls ready to 200 to prove the
+  bus connects against a real broker.
+- **`ConnectionStrings:RabbitMq` is read eagerly and throws naming the key**
+  (the `AddSqlServer` posture), so every host over `Program` — fixtures
+  included — must supply one; `ServiceFixture` therefore carries a RabbitMQ
+  Testcontainer beside SQL, and `CatalogApiFactory` takes both connection
+  strings.
+- **Usage telemetry is off.** MassTransit 8.5 reports anonymous usage data to
+  a vendor endpoint by default; `DisableUsageTelemetry()` is called with the
+  argument in the registration — §13.2 owns this platform's telemetry.
+- **The harness smoke proves composition; the readiness poll proves the
+  transport.** `AddMassTransitTestHarness` replaces an existing
+  `AddMassTransit` bus with the in-memory transport (verified at the pin), so
+  `MessagingRegistrationTests` proves the helper composes and the pipeline
+  delivers — and deliberately not the `UsingRabbitMq` half, which the swap
+  removes and `DatabaseSmokeTests` asserts against a real broker. A
+  test-local record carries the smoke: no contract invented before
+  `Common.Contracts` (PR-15), no retry policy before the receive endpoints
+  it attaches to (§9.8).
 
 PR-12 landed §8 as code — `Common.Infrastructure`, the fourth building block,
 one `Redis/` folder — and five of its decisions bind what comes after:
@@ -364,11 +406,12 @@ after:
   `tools/new-service`'s suite red, and reconciling the script belongs in the
   same change.
 - **The scaffold copies no domain.** The slice is excluded by name, so a new
-  service is PR-07's state with PR-08's, PR-09's and PR-10's wiring on it — five
-  service projects, three test projects and a `TestSupport` library (§4.1 calls
-  that last one *not* a test project, and counting it as one is a drift a
-  review has already caught here), both images, the Compose pair, the
-  `InitialCreate` migration and twenty-four passing tests, and no aggregate.
+  service is PR-07's state with the wiring accumulated through PR-13 on it —
+  five service projects, three test projects and a `TestSupport` library
+  (§4.1 calls that last one *not* a test project, and counting it as one is a
+  drift a review has already caught here), both images, the Compose pair, the
+  `InitialCreate` migration, the bus registration with its harness smoke, and
+  thirty passing tests, and no aggregate.
   Three things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
   wiring and the two silent-scan registration tests.
@@ -532,7 +575,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 71 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 73 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
