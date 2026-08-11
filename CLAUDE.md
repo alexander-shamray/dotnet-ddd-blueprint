@@ -1205,16 +1205,30 @@ already written against it.
   `WriteAsJsonAsync(new ProblemDetails { … }, ct)` is the same shape with an
   object initialiser in the lambda's place, and §10.3 had one.
 
-  **Two greps find every shape of this, and both are needed.** The arrow —
+  **Two greps narrow this down and neither closes it.** The arrow —
   `\(.+,\s*\w+\s*=>\s*$` — catches a lambda left hanging off a call that has a
   leading argument, which is now wrong whatever its body looks like. The closer
-  — `^\s*[}\])],\s*\S` — catches the other half: a bracket closing at the head
-  of a line with an element still after it, which is what
-  `Publish(payload, type, c => { … }, ct)` and
-  `WriteAsJsonAsync(new ProblemDetails { … }, ct)` look like from below, and
-  which the arrow pattern cannot see. Run both. Under the old carve-out the
-  arrow pattern also needed a body-kind exemption applied by hand, and every
-  count taken while that was true came out short.
+  — `^\s*[]})],\s*\S` — catches a bracket closing at the head of a line with an
+  element still after it, which is what `Publish(payload, type, c => { … }, ct)`
+  and `WriteAsJsonAsync(new ProblemDetails { … }, ct)` look like from below and
+  the arrow cannot see.
+
+  **What neither sees is the plain one**: a broken list whose continuation line
+  simply carries two ordinary arguments, `SendAsync(` / `new
+  CancelOrderCommand(…), ct);`. No arrow, no bracket at the head of the line —
+  nothing to anchor a pattern to, and it was found by a reviewer reading rather
+  than by either grep. Treat the two as a sieve that catches the disguised
+  cases, not as a proof the corpus is clean.
+
+  **Write the closer for the tool you are running it in**, because
+  `[}\])]` is not one pattern. Ripgrep reads `\]` as an escaped bracket and
+  builds the class `}` `]` `)`; POSIX `grep` treats a backslash inside a
+  bracket expression as literal, so the class closes at the first `]` and the
+  pattern becomes "`}` or `\`, then `)`, then `]`" — which matches nothing, ever.
+  It does not error; it reports zero and exits 1, which reads exactly like a
+  clean sweep. That is how the `src/` half of this rule's own sweep was
+  certified clean while `TransactionBehavior.cs` still held a violation. Put
+  the `]` first — `[]})]` — and it means the same thing in both.
 
   ```csharp
   actual.ShouldBe(
