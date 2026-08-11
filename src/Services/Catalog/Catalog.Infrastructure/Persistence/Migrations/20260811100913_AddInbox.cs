@@ -18,6 +18,16 @@ namespace Catalog.Infrastructure.Persistence.Migrations;
 /// every pass. That is the same argument that keeps <c>AddOutbox</c> in the
 /// scaffold's output, inverted: the dispatcher would fail a claim, this would
 /// fail a delete.
+/// <para>
+/// <b><c>Endpoint</c> carries a binary collation because it is half a key.</b>
+/// SQL Server's default is case-insensitive and a broker's queue names are
+/// not, so <c>orders</c> and <c>Orders</c> — two endpoints — would collide, and
+/// a message that arrived on one would be dropped as a duplicate on the other.
+/// That is the once-per-endpoint guarantee the composite key exists to give,
+/// defeated by how the column compares rather than by what it holds.
+/// <c>BIN2</c> rather than <c>CS_AS</c>: an endpoint address is an identifier
+/// matched exactly, and linguistic comparison has no meaning over it.
+/// </para>
 /// </remarks>
 public partial class AddInbox : Migration
 {
@@ -29,7 +39,7 @@ public partial class AddInbox : Migration
             columns: table => new
             {
                 MessageId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                Endpoint = table.Column<string>(type: "varchar(300)", unicode: false, maxLength: 300, nullable: false),
+                Endpoint = table.Column<string>(type: "varchar(300)", unicode: false, maxLength: 300, nullable: false, collation: "Latin1_General_BIN2"),
                 HandledAt = table.Column<DateTimeOffset>(type: "datetimeoffset(7)", nullable: false)
             },
             constraints: table =>

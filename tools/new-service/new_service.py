@@ -758,9 +758,9 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
             "        // apply every migration in sequence, and a count alone would pass on\n"
-            "        // one of four applied twice. Four is what a scaffolded service\n"
-            "        // starts with — the schema, then §9.4's outbox table, §9.5's inbox\n"
-            "        // and the index the retention purge deletes through, all of them\n"
+            "        // a shorter prefix of them applied twice. What a scaffolded service\n"
+            "        // starts with is the schema, then §9.4's outbox table, §9.5's inbox\n"
+            "        // and the index the retention purge deletes through — all of them\n"
             "        // wiring every service has rather than anything this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
             "        applied.Length.ShouldBe(4);\n"
@@ -1140,7 +1140,12 @@ def classify(repo_root: Path) -> list[str]:
     # that ships a dispatcher with no table behind it.
     for shape, label in zip(
         TEMPLATE_MIGRATIONS,
-        ("InitialCreate", "AddOutbox", "AddInbox", "AddOutboxRetentionIndex"),
+        (
+            "InitialCreate",
+            "AddOutbox",
+            "AddInbox",
+            "AddOutboxRetentionIndex",
+        ),
         strict=True,
     ):
         pair = [p for p in copied if shape.fullmatch(PurePosixPath(p).name)]
@@ -1377,7 +1382,11 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
         # claims a table it never creates — and would trip the slice check
         # below, which is the guard that made this obvious.
         if PurePosixPath(relative).name.endswith(
-            ("_AddOutbox.Designer.cs", "_AddInbox.Designer.cs", "_AddOutboxRetentionIndex.Designer.cs")):
+            (
+                "_AddOutbox.Designer.cs",
+                "_AddInbox.Designer.cs",
+                "_AddOutboxRetentionIndex.Designer.cs",
+            )):
             text = without_slice_entity(text)
 
         # Before the rename, where a slice token means only itself. Doing this

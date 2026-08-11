@@ -88,6 +88,34 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Two_endpoints_differing_only_by_case_are_two_rows()
+    {
+        // The composite key is only once-per-endpoint if the database agrees
+        // with the broker about what two endpoints are. SQL Server's default
+        // collation is case-insensitive and a queue name is not, so `orders`
+        // and `Orders` would collide — and the second endpoint's message would
+        // be dropped as a duplicate of a delivery it never received. The
+        // column is `Latin1_General_BIN2` for exactly this.
+        //
+        // Written here rather than through the filter because what is under
+        // test is the key's comparison semantics: two inserts that differ in
+        // one character's case must both survive.
+        var messageId = Guid.CreateVersion7();
+
+        // Two calls, so two contexts. One would put both rows in a single
+        // change tracker, and EF's in-memory identity map answers a different
+        // question from the one under test — what the *database* considers a
+        // duplicate key is what decides whether a second endpoint's message
+        // survives, and the filter only ever adds one row per consume anyway.
+        await fixture.StageInboxAsync(new InboxMessage(messageId, "catalog-orders", Recently));
+        await fixture.StageInboxAsync(new InboxMessage(messageId, "catalog-Orders", Recently));
+
+        (await fixture.InboxAsync()).Count.ShouldBe(
+            2,
+            "case-insensitive collation would have made the second insert a primary-key violation");
+    }
+
+    [Fact]
     public async Task An_inbox_row_is_purged_on_age_alone()
     {
         // The asymmetry with the outbox, and it is deliberate: an inbox row

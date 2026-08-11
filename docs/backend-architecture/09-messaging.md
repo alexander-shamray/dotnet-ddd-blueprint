@@ -1490,7 +1490,14 @@ ones, and a shared inbox would couple every consumer's deployment together.
 CREATE TABLE ordering.InboxMessages
 (
     MessageId   UNIQUEIDENTIFIER NOT NULL,
-    Endpoint    VARCHAR(300)     NOT NULL,   -- receive endpoint, not message type
+    -- The receive endpoint, not the message type. Binary collation because
+    -- this column is half a key: SQL Server's default is case-insensitive and
+    -- a broker's queue names are not, so `orders` and `Orders` are two
+    -- endpoints that the default would treat as one — and a message that
+    -- arrived on the second would be suppressed as a duplicate of a delivery
+    -- it never received. BIN2 rather than CS_AS: an endpoint address is
+    -- matched exactly, and linguistic comparison has no meaning over it.
+    Endpoint    VARCHAR(300) COLLATE Latin1_General_BIN2 NOT NULL,
     HandledAt   DATETIMEOFFSET   NOT NULL,
     CONSTRAINT PK_InboxMessages PRIMARY KEY (MessageId, Endpoint)
 );

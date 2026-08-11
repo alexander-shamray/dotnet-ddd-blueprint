@@ -37,7 +37,22 @@ internal sealed class InboxMessageConfiguration : IEntityTypeConfiguration<Inbox
         builder
             .Property(m => m.Endpoint)
             .HasMaxLength(300)
-            .IsUnicode(false);
+            .IsUnicode(false)
+
+            // Binary collation, because this column is half a key rather than
+            // text. SQL Server's default is case-insensitive, and a broker's
+            // queue names are not: `orders` and `Orders` are two queues, and
+            // under the default collation the second one's row collides with
+            // the first's. The message is then dropped as a duplicate on an
+            // endpoint that never saw it — the exact once-per-endpoint
+            // guarantee the composite key exists to provide, defeated by the
+            // column's comparison semantics rather than by its contents.
+            //
+            // BIN2 rather than a CS_AS collation: an endpoint address is an
+            // identifier to be matched exactly, and linguistic comparison has
+            // no meaning over it. Accents and width would be the same argument
+            // one rule further on.
+            .UseCollation("Latin1_General_BIN2");
 
         // The purge's predicate (§9.5). Non-covering and non-filtered, unlike
         // the outbox's: there is no unprocessed subset to narrow to here — every

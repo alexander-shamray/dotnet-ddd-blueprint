@@ -420,7 +420,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 341 tests, so
+`Platform.slnx` holds nineteen projects and `dotnet test` runs 343 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 80, and CI has a `scaffold`
@@ -654,7 +654,7 @@ after:
   `AddOutboxRetentionIndex` beside it, the bus
   registration with its harness smoke, §9.4's outbox and §9.5's inbox wired and
   empty, the retention purge over both tables, and
-  fifty-four passing tests, and no aggregate.
+  fifty-five passing tests, and no aggregate.
   Four things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
   wiring, the two silent-scan registration tests, and — with the first domain

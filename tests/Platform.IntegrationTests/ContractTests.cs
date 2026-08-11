@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Common.Contracts;
@@ -127,6 +128,41 @@ public class ContractTests
         Type[] orphaned = [.. ContractSamples.Sampled.Except(Contracts)];
 
         orphaned.ShouldBeEmpty($"these samples name types no longer public contracts: {Names(orphaned)}");
+    }
+
+    [Fact]
+    public void No_contract_can_be_constructed_half_filled()
+    {
+        // The third rule this suite's summary claims and did not enforce.
+        // §12.6 calls `required` members mechanical, so this is a test rather
+        // than a review note — and removing `required` from a contract property
+        // leaves every other assertion here green, because the JSON is
+        // unchanged either way. What breaks is a producer's ability to omit the
+        // member, which no serialisation test can see.
+        //
+        // The rule is really "there is no way to build one incompletely", and
+        // there are two shapes that satisfy it. A positional record takes its
+        // values in a primary constructor and needs no `required` at all —
+        // `PlacedLine`, `StockLine`, `ShippingAddressV1`. A property-based
+        // record can be built by `new()` and needs every property marked. So
+        // the assertion is on the shape that actually has the hole: a contract
+        // with a public parameterless constructor must mark every settable
+        // property `required`.
+        foreach (Type type in Contracts.Where(t => t.GetConstructor(Type.EmptyTypes) is not null))
+        {
+            string[] optional =
+            [
+                .. type
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(p => p.SetMethod is not null &&
+                        !p.IsDefined(typeof(RequiredMemberAttribute), inherit: false))
+                    .Select(p => $"{type.Name}.{p.Name}")
+            ];
+
+            optional.ShouldBeEmpty(
+                $"{type.FullName} can be constructed without these, so a producer can omit them " +
+                "and every consumer reads a default (§12.6)");
+        }
     }
 
     [Fact]

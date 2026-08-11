@@ -1544,12 +1544,22 @@ public class ContractTests
     // all of them — and then ask ContractSamples for an instance of it.
     private static readonly Type[] Contracts =
     [
-        .. typeof(OrderPlaced).Assembly
-            .GetTypes()
-            .Where(t => t.IsPublic &&
-                t is { IsInterface: false, IsAbstract: false } &&
-                t.Namespace?.StartsWith("Common.Contracts.") == true)
+        .. typeof(OrderPlaced).Assembly.GetTypes().Where(IsContract)
     ];
+
+    // The ROOT namespace is included, and a trailing dot is what excluded it.
+    // `StartsWith("Common.Contracts.")` reads as "everything in the assembly"
+    // and is not: a concrete type declared straight into `Common.Contracts`,
+    // with no version namespace at all, falls outside discovery — so it
+    // bypasses the versioned-namespace check, the sample check and the
+    // round-trip, and leaves the suite green over the one mistake §9.2 exists
+    // to reject. Exposed as a method so a positive control can ask it about a
+    // type declared, in the *test* assembly, in exactly that namespace.
+    internal static bool IsContract(Type type) =>
+        type.IsPublic &&
+        type is { IsInterface: false, IsAbstract: false } &&
+        type.Namespace is string ns &&
+        (ns == "Common.Contracts" || ns.StartsWith("Common.Contracts.", StringComparison.Ordinal));
 
     [Fact]
     public void No_contract_names_a_domain_type()
@@ -1620,6 +1630,17 @@ middle of a round-trip loop; and a sample naming a type that is no longer a
 public contract fails too, which is the direction throwing cannot catch — that
 entry compiles until the type is deleted and is dead weight from the moment the
 contract was renamed.
+
+**The third rule this suite claims — `required` members — needs an assertion of
+its own, because no serialisation test can see it.** Dropping `required` from a
+contract property changes no JSON, so the round-trip and the wire-member check
+both stay green; what it changes is a producer's ability to omit the member, and
+every consumer's reading a default when one does. The rule is really *there is
+no way to build one incompletely*, and two shapes satisfy it: a positional
+record takes its values in a primary constructor and needs no `required` at all,
+while a property-based record can be built by `new()` and needs every property
+marked. So the assertion applies to the shape with the hole — a contract with a
+public parameterless constructor must mark every settable property.
 
 > **Every sample gives every member a distinct, non-default value.** A sample of
 > zeroes and empty strings round-trips perfectly through a serialiser that
