@@ -1192,6 +1192,17 @@ public class SubjectBindingTests(ServiceFixture fixture) : IAsyncLifetime
             currentUser: Anonymous);
 
         result.IsSuccess.ShouldBeTrue();
+
+        // The status, for the same reason the owner case asserts it: a handler
+        // that short-circuits system commands with Result.Success() and touches
+        // no aggregate satisfies IsSuccess while leaving every compensation
+        // ineffective — which is the failure this pair exists to catch, wearing
+        // a success code.
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        Order order = await db.Orders.SingleAsync(o => o.Id == new OrderId(orderId));
+
+        order.Status.ShouldBe(OrderStatus.Cancelled);
     }
 }
 ```
@@ -1321,7 +1332,12 @@ public void The_mapper_is_what_makes_a_message_system_initiated()
     CancelOrderCommand command = new CancelOrderMapper().Map(
         new CancelOrder(Guid.CreateVersion7(), CancelReasons.OutOfStock));
 
+    // Both halves of what the mapper does. The stamp is the new one, but the
+    // parse is the older claim and equally unasserted: every recognised code
+    // could map to the wrong domain reason and this test would still pass on
+    // the origin alone.
     command.InitiatedBy.ShouldBe(CommandOrigin.System);
+    command.Reason.ShouldBe(CancellationReason.OutOfStock);
 }
 
 [Fact]
