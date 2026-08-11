@@ -1381,7 +1381,7 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
         # check immediately below is exactly the check that should see the
         # result — a Product block surviving the removal must stop the run, not
         # reach the file the service ships.
-        # Both designers, not only the last one. Each describes the model as of
+        # Every designer, not only the last one. Each describes the model as of
         # its own migration and each therefore carries Catalog's aggregate, so
         # leaving the earlier one alone would ship a service a designer that
         # claims a table it never creates — and would trip the slice check

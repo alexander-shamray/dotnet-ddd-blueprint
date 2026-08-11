@@ -1555,8 +1555,15 @@ public class ContractTests
     // round-trip, and leaves the suite green over the one mistake §9.2 exists
     // to reject. Exposed as a method so a positive control can ask it about a
     // type declared, in the *test* assembly, in exactly that namespace.
+    //
+    // IsVisible, not IsPublic, and that is a second hole of the same kind:
+    // IsPublic is false for EVERY nested type, including one declared `public`
+    // inside a public class — those report IsNestedPublic. A contract nested in
+    // a public type is as reachable by a consumer as any other and fell out of
+    // discovery entirely. IsVisible asks the question actually meant: can
+    // something outside this assembly name it.
     internal static bool IsContract(Type type) =>
-        type.IsPublic &&
+        type.IsVisible &&
         type is { IsInterface: false, IsAbstract: false } &&
         type.Namespace is string ns &&
         (ns == "Common.Contracts" || ns.StartsWith("Common.Contracts.", StringComparison.Ordinal));

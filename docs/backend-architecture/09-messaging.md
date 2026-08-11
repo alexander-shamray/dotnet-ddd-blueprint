@@ -1479,8 +1479,13 @@ WHERE ProcessedAt IS NOT NULL
 
 ## 9.5 Idempotent consumers — the inbox
 
-The consumer-side counterpart. Before handling a message, record its ID; if it
-is already recorded, skip.
+The consumer-side counterpart. Check the message's ID first and skip if it is
+already recorded; otherwise handle it and record the ID **afterwards**, so a
+handler that threw leaves no row claiming it succeeded.
+
+That ordering is stated here rather than left to the filter below, because
+"record, then handle" is the obvious reading of an inbox and is wrong twice
+over — the trap under the sample says why.
 
 The inbox table lives in the **service's own database** alongside the outbox —
 database-per-service (§7.1) applies to technical tables as much as business
