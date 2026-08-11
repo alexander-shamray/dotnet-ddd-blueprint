@@ -1062,25 +1062,23 @@ internal sealed class OutboxStats(IServiceScopeFactory scopes) : IOutboxStats
     // aggregate queries over a filtered index, not free.
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
 
-    public double OldestAgeSeconds(OutboxLane lane) =>
-        _cache.GetOrCreate(
-            $"oldest:{lane}",
-            e =>
-            {
-                e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5);
-                using IServiceScope scope = scopes.CreateScope();
-                using IDbConnection connection =
-                    scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
+    public double OldestAgeSeconds(OutboxLane lane) => _cache.GetOrCreate(
+        $"oldest:{lane}", e =>
+        {
+            e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5);
+            using IServiceScope scope = scopes.CreateScope();
+            using IDbConnection connection =
+                scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
-                return connection.ExecuteScalar<double?>(
-                    """
-                    SELECT DATEDIFF(second, MIN(OccurredAt), SYSDATETIMEOFFSET())
-                    FROM ordering.OutboxMessages
-                    WHERE ProcessedAt IS NULL
-                        AND Lane = @lane;
-                    """,
-                    new { lane = lane.ToString() }) ?? 0;
-            });
+            return connection.ExecuteScalar<double?>(
+                """
+                SELECT DATEDIFF(second, MIN(OccurredAt), SYSDATETIMEOFFSET())
+                FROM ordering.OutboxMessages
+                WHERE ProcessedAt IS NULL
+                    AND Lane = @lane;
+                """,
+                new { lane = lane.ToString() }) ?? 0;
+        });
 
     // PendingCount and AbandonedCount follow the same shape — same cache, same
     // scope-per-call, same @lane parameter — over COUNT(*) with
