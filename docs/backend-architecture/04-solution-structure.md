@@ -339,14 +339,6 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddSingleton<JsonConverter, MoneyJsonConverter>();
     services.AddSingleton<OutboxJson>();
 
-    services.AddSingleton<MessagingMetrics>();                            // §13.3
-
-    // AddHostedService<T>, not a factory over a registered singleton: the
-    // generic overload records an ImplementationType, and §12.4's fixture
-    // matches on it to remove *only* this hosted service. MassTransit's bus is
-    // one too, so a RemoveAll<IHostedService>() would stop the broker.
-    services.AddHostedService<OutboxDispatcher>();                        // §9.4
-
     // Plain ports — not open generics, so the §6.2 scan does not see them and
     // each needs a line here. Omitting one fails at DI resolution on the first
     // request that needs it, not at startup — unless ValidateOnBuild is on.
@@ -366,8 +358,14 @@ public static IServiceCollection AddOrderingInfrastructure(
     // over the broker. The one host in this blueprint that calls a peer is the
     // BFF (§9.7), and outbound identity belongs to it (§11.5).
 
-    // Registered by type, not by factory: the integration-test fixture locates
-    // and removes this exact descriptor (§12.4).
+    // Registered by type, not by factory: the generic overload records an
+    // ImplementationType, and the integration-test fixture matches on it to
+    // locate and remove this exact descriptor (§12.4). MassTransit registers
+    // its bus as a hosted service too, so the fixture cannot simply call
+    // RemoveAll<IHostedService>() — and a factory registration here would
+    // leave ImplementationType null, so the removal it does make would match
+    // nothing and the dispatcher would drain rows underneath the assertions
+    // about them.
     services.AddHostedService<OutboxDispatcher>();
 
     // Outbox metrics (§13.6) read the database, so they belong here.

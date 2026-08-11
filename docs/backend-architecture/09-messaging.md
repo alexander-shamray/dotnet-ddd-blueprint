@@ -418,7 +418,9 @@ public sealed class OutboxMessage
         // payload, and the only way to notice is to compare two logs.
         //
         // A Local-lane row carries a domain event, which has no envelope and
-        // never reaches a broker, so the row mints both.
+        // never reaches a broker, so the row mints its own id and takes the
+        // caller's correlation — which OutboxPublisher makes one value per
+        // scope, so rows staged by the same command correlate with each other.
         MessageId = message is IIntegrationEvent e ? e.MessageId : Guid.CreateVersion7(),
         CorrelationId = message is IIntegrationEvent c ? c.CorrelationId : correlationId,
         MessageType = types.NameOf(message.GetType()),
