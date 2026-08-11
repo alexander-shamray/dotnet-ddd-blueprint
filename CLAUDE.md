@@ -1317,18 +1317,34 @@ already written against it.
   clarifies no nesting. A body that does not fit takes the next line at + 4 as
   usual, and a block body opens its `{` under the rule that governs braces.
 
-  The single-argument DSL forms are untouched by this, because there is no
-  earlier argument for the `=>` to trail — `ReceiveEndpoint("q", e => { … })`
-  and `ComplexProperty(o => o.ShippingAddress, address => { … })` both keep
-  their shape, the second because its final argument's block owns every line
-  after it rather than wrapping raggedly into one.
+  The **block**-bodied DSL forms are untouched by this, and the block is the
+  reason rather than the argument count — `ReceiveEndpoint("q", e => { … })`
+  has an earlier argument like any other, and so does
+  `ComplexProperty(o => o.ShippingAddress, address => { … })`. Both keep their
+  shape because the final argument's `{` owns every line after it, so nothing
+  wraps raggedly back into the opening line. An expression-bodied lambda has no
+  such anchor, which is precisely why §9.6's `.Send(queue, ctx => …)` family
+  could not stay as it was.
 
   **Nothing enforces this either**, and that was measured rather than assumed:
   a probe carrying both forms built clean under IDE0055 and
   `TreatWarningsAsErrors`, and `dotnet format whitespace` over it rewrote
   nothing but the line endings. So the rule joins the `[` placement rule and
-  the `new()` rule as review's. Two sites in the corpus had the wrong form, in
-  §7.5 and §13.6, and both were found by reading rather than by a tool.
+  the `new()` rule as review's. **Fourteen** sites in the corpus had the wrong
+  form — §7.5, §13.6, ten `.Send` calls in §9.6's saga, and §10.3's two
+  `AddPolicy` calls — and none of them was found by a tool.
+
+  This file said "two". A review then found §9.6's family, and the sweep that
+  answered it found §10.3's pair as well. That progression is the finding
+  rather than the tally: the rule was written from the two sites that prompted
+  it, the corpus was never swept, and each later reader measured only as far as
+  the site in front of them. State a rule and sweep for it in the same change,
+  or the count becomes a claim nobody re-measures.
+
+  The fixes divide the way the rule predicts. Eight of §9.6's ten fitted inside
+  120 columns the moment the lambda stopped hanging, so joining them was the
+  whole fix; `ReserveStock`, `AuthorisePayment` and both `AddPolicy` calls were
+  too long for that and break at their own parenthesis instead.
 - **Break at the outermost bracket, never a nested one.** When a call's argument
   is itself a call, it is the outer parenthesis that opens the line — reaching
   past it to break the inner one leaves the outer call glued to its argument and
@@ -1347,8 +1363,16 @@ already written against it.
   The argument moves to the next line **whole**; break it further only if it
   still does not fit, and then one element per line as usual. This is the same
   principle as the lambda rule above — a nested construct starts its own line —
-  and it is why `.Send(queue, ctx => new CancelOrder(…))` breaks after `ctx =>`
-  rather than after `CancelOrder(`.
+  and the two compose rather than compete: a call whose last argument is a
+  lambda breaks at its **own** parenthesis, which puts the lambda on a line of
+  its own, and never after the `=>`.
+
+  This sentence used to say the opposite, naming
+  `.Send(queue, ctx => new CancelOrder(…))` as a break after `ctx =>`. It was
+  written before the lambda rule above and survived it, so for one branch the
+  file prescribed a form it also forbade — and §9.6, which the sentence
+  described, had ten instances of it. A rule added beside an older one has to
+  be read against it, not only against the code it was written for.
 - **A multi-line condition takes trailing operators, four-space continuations,
   and braces on its body.** The braces are what make four safe: without them the
   last `&&` line and the body sit in the same column and the reader cannot see
