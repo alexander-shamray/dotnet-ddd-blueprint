@@ -16,8 +16,14 @@ internal static class TelemetryHost
 
     /// <param name="environmentName">
     /// Overrides <see cref="EnvironmentName"/>. Only the JWT tests pass one,
-    /// because <c>RequireHttpsMetadata</c> is the one thing in
-    /// <c>AddCommonWebDefaults</c> that reads the environment.
+    /// because <c>RequireHttpsMetadata</c> is the only thing in
+    /// <c>AddCommonWebDefaults</c> whose <em>behaviour</em> turns on it —
+    /// Development alone allows metadata over plain HTTP (§11.3), so a test
+    /// asserting either side of that has to say which side it is on.
+    /// <c>AddObservability</c> also reads the environment, as
+    /// <c>deployment.environment</c> on the resource (§13.2), so overriding
+    /// this changes that attribute too. Nothing asserts both at once today, and
+    /// a test that did would have to pass the same name to both expectations.
     /// </param>
     internal static HostApplicationBuilder Builder(string? environmentName = null)
     {
