@@ -133,7 +133,10 @@ public class RealmImportTests
 
         tokenClient.GetProperty("defaultClientScopes").EnumerateArray()
             .Select(s => s.GetString())
-            .ShouldContain(Audience, $"'{TokenClient}' does not hold {Audience} as a default scope, so its tokens carry no audience this platform accepts");
+            .ShouldContain(
+                Audience,
+                $"'{TokenClient}' does not hold {Audience} as a default scope, so its " +
+                "tokens carry no audience this platform accepts");
     }
 
     [Fact]
@@ -247,7 +250,10 @@ public class RealmImportTests
         string[] names = [.. ClientScopes.Select(s => s.GetProperty("name").GetString()).OfType<string>()];
 
         foreach (string builtin in builtins)
-            names.ShouldContain(builtin, $"'{builtin}' is a Keycloak built-in; a realm that declares clientScopes and omits it never creates it");
+            names.ShouldContain(
+                builtin,
+                $"'{builtin}' is a Keycloak built-in; a realm that declares clientScopes " +
+                "and omits it never creates it");
 
         // Declared is not assigned, and the gap between them is the same defect
         // by a shorter route: dropping `basic` from web-app's defaultClientScopes
@@ -263,7 +269,10 @@ public class RealmImportTests
         ];
 
         foreach (string builtin in builtins)
-            assigned.ShouldContain(builtin, $"'{TokenClient}' does not receive '{builtin}', so its tokens are missing what that scope carries");
+            assigned.ShouldContain(
+                builtin,
+                $"'{TokenClient}' does not receive '{builtin}', so its tokens are missing " +
+                "what that scope carries");
     }
 
     [Fact]
@@ -304,6 +313,8 @@ public class RealmImportTests
         // exactly the change this suite exists to catch.
         return File.Exists(path)
             ? path
-            : throw new FileNotFoundException($"'{relativePath}' is not in the repository at '{directory.FullName}'.", path);
+            : throw new FileNotFoundException(
+                $"'{relativePath}' is not in the repository at '{directory.FullName}'.",
+                path);
     }
 }
