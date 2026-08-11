@@ -64,8 +64,10 @@ internal sealed class RecordedMeasurements : IDisposable
     private void Record(Instrument instrument, double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
         // The span cannot escape the callback, so it is copied before the lock
-        // rather than inside it.
-        KeyValuePair<string, object?>[] copied = tags.ToArray();
+        // rather than inside it. A spread, not a terminal ToArray(): the target
+        // type is on the left, which is the whole of that rule's argument, and
+        // a collection expression takes a ReadOnlySpan source like any other.
+        KeyValuePair<string, object?>[] copied = [.. tags];
 
         lock (_gate)
             _taken.Add(new Measurement(instrument.Name, value, copied));

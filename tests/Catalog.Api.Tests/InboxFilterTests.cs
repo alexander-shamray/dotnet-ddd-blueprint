@@ -73,6 +73,33 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
             throw new InvalidOperationException("this consumer always throws");
     }
 
+    /// <summary>
+    /// Clears the change tracker on the service's context, which is the first
+    /// thing <c>EfUnitOfWork.ExecuteAsync</c> does on every attempt (§7.5,
+    /// PR-09) — and therefore the first thing every message-borne command does,
+    /// since §6.3's <c>TransactionBehavior</c> wraps each handler in that call.
+    /// </summary>
+    /// <remarks>
+    /// <b>The line rather than the type, and the reason is access rather than
+    /// preference.</b> <c>EfUnitOfWork</c> is internal to
+    /// <c>Catalog.Infrastructure</c> — nothing outside resolves it by type,
+    /// only through <c>IUnitOfWork</c>, and registering it here would need an
+    /// <c>InternalsVisibleTo</c> for one call. What has to be reproduced is the
+    /// interaction, not the wrapper: a tracked entity added before the consumer
+    /// runs does not survive a consumer that clears the tracker, and this is
+    /// the shortest consumer that does that on the same context the filter
+    /// writes through.
+    /// </remarks>
+    public sealed class ClearsTheChangeTrackerConsumer(DbContext db) : IConsumer<ProbeMessage>
+    {
+        public Task Consume(ConsumeContext<ProbeMessage> context)
+        {
+            db.ChangeTracker.Clear();
+
+            return Task.CompletedTask;
+        }
+    }
+
     public async ValueTask InitializeAsync()
     {
         FirstConsumer.Consumed.Clear();
@@ -97,6 +124,12 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
 
         services.AddDbContext<CatalogDbContext>(o => o.UseSqlServer(fixture.ConnectionString));
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<CatalogDbContext>());
+
+        // The clock the filter stamps HandledAt from. The retention purge reads
+        // its cutoff from the same abstraction, which is the point: §12.7 makes
+        // the clock a seam, and two clocks for one window is a row that looks
+        // expired the moment it is written.
+        services.AddSingleton(TimeProvider.System);
 
         services.AddMassTransitTestHarness(x =>
         {
@@ -141,18 +174,50 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         // The same transport id twice, which is what a redelivery is. §9.1's
         // single-identity rule is what makes this the id the inbox keys on:
         // body, row, header and inbox key are one GUID.
-        for (int delivery = 0; delivery < 2; delivery++)
-        {
-            await harness.Bus.Publish(
-                new ProbeMessage(id),
-                c => c.MessageId = messageId,
-                TestContext.Current.CancellationToken);
+        //
+        // Sequenced, not published back to back, and the sequencing is the
+        // claim rather than a convenience. A redelivery follows a failure or a
+        // broker retry — it arrives *after* the first attempt finished, which
+        // is the only case the filter suppresses. Two deliveries genuinely in
+        // flight at once both pass the AnyAsync check before either row is
+        // committed, so both run; the composite primary key then fails the
+        // second SaveChanges and the message is retried into the suppression
+        // this test is about. That is §9.5's own "duplicate suppression, not
+        // an atomic guarantee — the common duplicate, not every duplicate",
+        // and asserting otherwise here would be asserting something the
+        // chapter does not claim.
+        await harness.Bus.Publish(
+            new ProbeMessage(id),
+            c => c.MessageId = messageId,
+            TestContext.Current.CancellationToken);
 
-            (await harness.Consumed.Any<ProbeMessage>(TestContext.Current.CancellationToken))
-                .ShouldBeTrue();
-        }
+        // The row, not the consume: the row is what the second delivery reads,
+        // and it is committed after the consumer returns.
+        await Eventually(() => fixture.InboxAsync(), expected: 1);
 
-        FirstConsumer.Consumed.ShouldBe([id]);
+        await harness.Bus.Publish(
+            new ProbeMessage(id),
+            c => c.MessageId = messageId,
+            TestContext.Current.CancellationToken);
+
+        // Waiting for BOTH deliveries to be recorded, not for "a" delivery.
+        // `Consumed.Any<ProbeMessage>()` matches the first one the moment it
+        // lands, so a wait on it after the second publish returns immediately
+        // and the assertions below run while the redelivery is still in the
+        // pipe — the test would then pass whether the filter suppressed the
+        // duplicate or simply had not seen it yet, which is the wrong way
+        // round for a duplicate-suppression test to fail.
+        //
+        // The filter runs ahead of the consumer, so a suppressed message is
+        // consumed-and-dropped rather than never consumed: both deliveries
+        // reach `Consumed` and only one reaches FirstConsumer, which is what
+        // makes counting them the right signal.
+        await Eventually(
+            () => Task.FromResult<IReadOnlyList<object>>(
+                [.. harness.Consumed.Select<ProbeMessage>()]),
+            expected: 2);
+
+        FirstConsumer.Consumed.ShouldBe([id], "the filter must drop the second delivery");
         (await fixture.InboxAsync()).ShouldHaveSingleItem().MessageId.ShouldBe(messageId);
     }
 
@@ -207,6 +272,44 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_consumer_that_clears_the_change_tracker_still_gets_its_inbox_row()
+    {
+        // The regression test for the defect this suite did not have. Every
+        // message-borne command reaches §6.3's TransactionBehavior, which runs
+        // the handler inside EfUnitOfWork.ExecuteAsync — and that opens each
+        // attempt with db.ChangeTracker.Clear(), so PR-09's retry can never
+        // re-commit the previous attempt's mutations.
+        //
+        // With the inbox row staged BEFORE next.Send, that clear discarded it:
+        // SaveChangesAsync then wrote nothing, no command was ever recorded,
+        // and every redelivery of every command was reprocessed. Nothing threw
+        // and nothing logged — the table simply stayed empty. Two mechanisms
+        // already in this blueprint, in tension, and invisible until a consumer
+        // exercised both.
+        //
+        // The other suites here could not see it: their consumers do no work.
+        await using ServiceProvider provider = BuildHost<ClearsTheChangeTrackerConsumer>();
+        ITestHarness harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        var messageId = Guid.CreateVersion7();
+
+        await harness.Bus.Publish(
+            new ProbeMessage(Guid.CreateVersion7()),
+            c => c.MessageId = messageId,
+            TestContext.Current.CancellationToken);
+
+        (await harness.Consumed.Any<ProbeMessage>(TestContext.Current.CancellationToken)).ShouldBeTrue();
+
+        IReadOnlyList<InboxMessage> rows =
+            await Eventually(() => fixture.InboxAsync(), expected: 1);
+
+        rows.ShouldHaveSingleItem(
+            "the row is staged after the consumer returns precisely so the unit of work's " +
+            "ChangeTracker.Clear() cannot take it").MessageId.ShouldBe(messageId);
+    }
+
+    [Fact]
     public async Task The_filters_context_is_the_services_own_instance()
     {
         // AddScoped<DbContext, CatalogDbContext>() compiles, resolves and is
@@ -232,11 +335,11 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
     /// concurrently the second one's <c>SaveChangesAsync</c> may still be in
     /// flight, and a fixed wait would be a sleep §12.8 forbids.
     /// </summary>
-    private static async Task<IReadOnlyList<InboxMessage>> Eventually(
-        Func<Task<IReadOnlyList<InboxMessage>>> read,
+    private static async Task<IReadOnlyList<T>> Eventually<T>(
+        Func<Task<IReadOnlyList<T>>> read,
         int expected)
     {
-        IReadOnlyList<InboxMessage> rows = [];
+        IReadOnlyList<T> rows = [];
 
         for (int attempt = 0; attempt < 100; attempt++)
         {

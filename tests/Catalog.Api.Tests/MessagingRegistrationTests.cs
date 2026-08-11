@@ -174,6 +174,8 @@ public class MessagingRegistrationTests
             "MassTransit starts the bus from a hosted service; without it the registration is inert");
     }
 
+
+
     [Fact]
     public void Catalog_binds_no_consumer_and_therefore_declares_no_receive_endpoint()
     {
@@ -198,10 +200,50 @@ public class MessagingRegistrationTests
         services.AddMassTransitMessaging(Configuration());
 
         services.ShouldNotContain(
-            d => d.ServiceType.IsGenericType &&
-                d.ServiceType.GetGenericTypeDefinition() == typeof(IConsumer<>),
+            d => IsConsumerRegistration(d),
             "a consumer here is a subscription §3.2 does not give Catalog — and one bound with no " +
             "IIntegrationEventHandler registered would fault every message it received");
+    }
+
+    [Fact]
+    public void The_no_consumer_assertion_can_actually_fail()
+    {
+        // The positive control for the test above, and it exists because that
+        // test was written wrong and passed anyway. It matched on
+        // `ServiceType` closing IConsumer<>, which MassTransit never registers:
+        // at the 8.5.3 pin AddConsumer<T> calls TryAddScoped<T>() — the
+        // CONCRETE type — so the predicate found nothing whether or not a
+        // consumer was present. An assertion that cannot fail in one direction
+        // is the fail-open shape this repository has been caught by before.
+        //
+        // Verified by running it: with the old predicate this test goes red.
+        // Deliberately NOT through AddMassTransitMessaging: that helper calls
+        // AddMassTransit itself, and MassTransit permits exactly one such call
+        // per container. What this control has to establish is what a consumer
+        // registration looks like, and a bare AddMassTransit establishes it.
+        ServiceCollection services = new();
+
+        services.AddMassTransit(x => x.AddConsumer<ProbeConsumer>());
+
+        services.ShouldContain(
+            d => IsConsumerRegistration(d),
+            "if this cannot see a consumer that IS registered, the assertion above proves nothing");
+    }
+
+    /// <summary>
+    /// A registration MassTransit made for a consumer. The implementation type
+    /// is what carries the interface — the service type is the consumer class
+    /// itself — so this asks what the registered type implements rather than
+    /// what it is registered as.
+    /// </summary>
+    private static bool IsConsumerRegistration(ServiceDescriptor descriptor)
+    {
+        Type? candidate = descriptor.ImplementationType ?? descriptor.ServiceType;
+
+        return candidate is not null &&
+            Array.Exists(
+                candidate.GetInterfaces(),
+                i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IConsumer<>));
     }
 
     [Fact]

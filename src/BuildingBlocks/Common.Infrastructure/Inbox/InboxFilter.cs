@@ -37,7 +37,7 @@ namespace Common.Infrastructure.Inbox;
 /// common duplicate, not every duplicate (§9.5).
 /// </para>
 /// </remarks>
-public sealed class InboxFilter<T>(DbContext db) : IFilter<ConsumeContext<T>>
+public sealed class InboxFilter<T>(DbContext db, TimeProvider clock) : IFilter<ConsumeContext<T>>
     where T : class
 {
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
@@ -62,14 +62,38 @@ public sealed class InboxFilter<T>(DbContext db) : IFilter<ConsumeContext<T>>
         if (alreadyHandled)
             return;                     // Silently drop the duplicate.
 
-        db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, DateTimeOffset.UtcNow));
-
         // Ordering matters, and it is the one thing in this file that must not
         // be rearranged: the handler runs FIRST, and the inbox row is only
-        // committed if it succeeded. Recording before would mark a message
+        // written if it succeeded. Recording before would mark a message
         // handled that never was, losing it permanently on the next delivery —
         // because a suppressed redelivery is not retried, it is dropped.
         await next.Send(context);
+
+        // Added AFTER the consumer, not before it, and that is a correctness
+        // fix rather than a tidy-up. Staged before `next.Send`, the row is a
+        // *tracked* entity on a context the consumer also uses — and a
+        // message-borne command reaches §6.3's TransactionBehavior, whose
+        // EfUnitOfWork.ExecuteAsync opens every attempt with
+        // `db.ChangeTracker.Clear()` so a retry cannot re-commit the previous
+        // attempt's mutations (§7.5, PR-09). That clear takes the pending inbox
+        // row with it, `SaveChangesAsync` below then persists nothing, and the
+        // command is never deduplicated — silently, on every redelivery.
+        //
+        // Two mechanisms this blueprint already had, in tension, and neither
+        // wrong on its own. The cost of resolving it this way is stated in
+        // §9.5's table: a handler running inside the command pipeline has
+        // already committed its own transaction by the time control returns
+        // here, so its inbox row is a second transaction — the "No" row. A
+        // handler that writes through this context and does *not* SaveChanges
+        // itself still commits with the row below, which is the "Yes" row and
+        // the case IntegrationEventConsumer's handlers are in.
+        db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, clock.GetUtcNow()));
+
+        // The registered clock, never DateTimeOffset.UtcNow: RetentionPurgeService
+        // computes its cutoff from TimeProvider, and a service that substitutes
+        // one — every test host does — would otherwise write rows on the wall
+        // clock and purge them against a different one, making new rows look
+        // expired or old ones immortal.
         await db.SaveChangesAsync(context.CancellationToken);
     }
 

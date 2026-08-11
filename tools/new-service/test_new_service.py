@@ -38,6 +38,8 @@ MIGRATION_ID = "20260809120000"
 OUTBOX_MIGRATION_ID = "20260809120100"
 # And the inbox migration's, one minute on again, spelt out for the same reason.
 INBOX_MIGRATION_ID = "20260809120200"
+# And the retention index's, one minute on again.
+RETENTION_MIGRATION_ID = "20260809120300"
 PORT = 5101
 
 
@@ -409,6 +411,32 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         self.assertIn('name: "InboxMessages"', self.rendered.created[migration])
         self.assertLess(OUTBOX_MIGRATION_ID, INBOX_MIGRATION_ID)
 
+    def test_it_copies_the_retention_index_under_the_id_after_that(self):
+        # The purge's index travels for the same reason the two tables do, and
+        # its absence is the quietest of the three: the claim's index is
+        # filtered `WHERE ProcessedAt IS NULL`, so it excludes every row the
+        # purge deletes and the hourly pass scans the whole outbox table. A
+        # service scaffolded without it pays that from its first boot, and the
+        # cost grows exactly as the processed rows do.
+        migration = f"{self.prefix}/{RETENTION_MIGRATION_ID}_AddOutboxRetentionIndex.cs"
+        self.assertIn(migration, self.rendered.created)
+        self.assertIn('name: "IX_Outbox_Processed"', self.rendered.created[migration])
+        self.assertIn('filter: "[ProcessedAt] IS NOT NULL"', self.rendered.created[migration])
+        self.assertLess(INBOX_MIGRATION_ID, RETENTION_MIGRATION_ID)
+
+    def test_the_snapshot_comes_from_the_last_migrations_designer(self):
+        # The snapshot describes the model the service ends up with, so it is
+        # derived from whichever template migration applies last — and that
+        # moved twice in one PR, from AddOutbox to AddInbox to this one. Taking
+        # an earlier designer is a defect with no symptom until the service's
+        # first `migrations add`, where EF would emit a CreateTable for a table
+        # its own migrations had already created.
+        snapshot = self.rendered.created[f"{self.prefix}/ZuluDbContextModelSnapshot.cs"]
+        self.assertNotIn("[Migration(", snapshot)
+        self.assertNotIn("partial class AddOutboxRetentionIndex", snapshot)
+        self.assertIn('modelBuilder.Entity("Common.Infrastructure.Inbox.InboxMessage"', snapshot)
+        self.assertIn('.HasDatabaseName("IX_Outbox_Processed")', snapshot)
+
     def test_the_inbox_migration_keeps_no_claim_about_the_templates_own_row(self):
         # The template carries this table while binding no receive endpoint,
         # and *why* is a fact about its row in §3.2 rather than about the
@@ -419,10 +447,10 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         self.assertNotIn("Consumes cell", migration)
 
     def test_it_leaves_no_later_catalog_migration_behind(self):
-        # Seven files: three migrations, their three designers, and the
-        # snapshot. Catalog's own AddProducts is what must not be here.
+        # Nine files: four migrations, their four designers, and the snapshot.
+        # Catalog's own AddProducts is what must not be here.
         migrations = [path for path in self.rendered.created if path.startswith(self.prefix)]
-        self.assertEqual(7, len(migrations), migrations)
+        self.assertEqual(9, len(migrations), migrations)
         self.assertFalse([path for path in migrations if "AddProducts" in path])
 
     def test_the_snapshot_describes_both_messaging_tables_and_nothing_else(self):
@@ -1016,7 +1044,7 @@ class TheCommandLine(unittest.TestCase):
 
             self.assertEqual(0, code)
             self.assertEqual("", err)
-            self.assertIn("51 files created, 5 updated", out)
+            self.assertIn("53 files created, 5 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

@@ -97,5 +97,21 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
             .HasDatabaseName("IX_Outbox_Unprocessed")
             .IncludeProperties(m => new { m.Lane, m.Attempts, m.LockedUntil })
             .HasFilter("[ProcessedAt] IS NULL");
+
+        // The retention purge's index, and it has to be a second one: the
+        // filtered index above is `WHERE ProcessedAt IS NULL`, which excludes
+        // by construction every row `DELETE … WHERE ProcessedAt IS NOT NULL AND
+        // ProcessedAt < @Before` targets. Without this the hourly purge scans
+        // the whole table — and it is the processed rows that make the table
+        // large, so the scan grows exactly as the purge matters more.
+        //
+        // Filtered the other way for the same reason its twin is: the purge
+        // never looks at an unprocessed row, so the index stays the size of the
+        // undeleted backlog rather than the size of the table. Nothing is
+        // included — the delete needs the clustered key, which it already has.
+        builder
+            .HasIndex(m => m.ProcessedAt)
+            .HasDatabaseName("IX_Outbox_Processed")
+            .HasFilter("[ProcessedAt] IS NOT NULL");
     }
 }

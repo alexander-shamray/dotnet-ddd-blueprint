@@ -420,10 +420,10 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 336 tests, so
+`Platform.slnx` holds nineteen projects and `dotnet test` runs 338 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`py -3.12 -m unittest` in `tools/new-service` runs 78, and CI has a `scaffold`
+`py -3.12 -m unittest` in `tools/new-service` runs 80, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-16 is next**
 (`feat(security): JWT bearer with mandatory per-service re-validation`), which
 is also what closes the deliberately unauthenticated endpoints PR-10's README
@@ -632,10 +632,11 @@ after:
   five service projects, three test projects and a `TestSupport` library
   (§4.1 calls that last one *not* a test project, and counting it as one is a
   drift a review has already caught here), both images, the Compose pair, the
-  `InitialCreate` migration with `AddOutbox` and `AddInbox` beside it, the bus
+  `InitialCreate` migration with `AddOutbox`, `AddInbox` and
+  `AddOutboxRetentionIndex` beside it, the bus
   registration with its harness smoke, §9.4's outbox and §9.5's inbox wired and
   empty, the retention purge over both tables, and
-  fifty-one passing tests, and no aggregate.
+  fifty-three passing tests, and no aggregate.
   Four things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
   wiring, the two silent-scan registration tests, and — with the first domain
@@ -839,7 +840,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 78 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 80 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 

@@ -369,6 +369,15 @@ CREATE INDEX IX_Outbox_Unprocessed
     ON ordering.OutboxMessages (OccurredAt)
     INCLUDE (Lane, Attempts, LockedUntil)
     WHERE ProcessedAt IS NULL;
+
+-- And its complement, for the retention purge. The two filters are opposites,
+-- so the index above cannot serve the delete below by construction — it
+-- excludes every row that delete targets. Without this one the hourly purge
+-- scans the whole table, and it is the processed rows that make the table
+-- large, so the scan grows exactly as the purge starts to matter.
+CREATE INDEX IX_Outbox_Processed
+    ON ordering.OutboxMessages (ProcessedAt)
+    WHERE ProcessedAt IS NOT NULL;
 ```
 
 `Lane` is what makes one table serve both after-commit destinations (§7.5).
@@ -1588,7 +1597,7 @@ namespace Common.Infrastructure.Inbox;
 // history, and EF-based handlers can share its transaction. `DbContext` rather
 // than `OrderingDbContext`, because this filter is common code: it reaches the
 // entity through Set<T>() so one implementation serves every service.
-public sealed class InboxFilter<T>(DbContext db) : IFilter<ConsumeContext<T>>
+public sealed class InboxFilter<T>(DbContext db, TimeProvider clock) : IFilter<ConsumeContext<T>>
     where T : class
 {
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
@@ -1609,12 +1618,16 @@ public sealed class InboxFilter<T>(DbContext db) : IFilter<ConsumeContext<T>>
         if (alreadyHandled)
             return;   // Silently drop the duplicate.
 
-        db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, DateTimeOffset.UtcNow));
-
         // Ordering matters: the handler runs FIRST, and the inbox row is only
-        // committed if it succeeded. Recording before would mark a message
+        // written if it succeeded. Recording before would mark a message
         // handled that never was, losing it permanently on the next delivery.
         await next.Send(context);
+
+        // Added AFTER the consumer, not before it — see the trap below. The
+        // registered clock, never DateTimeOffset.UtcNow: the purge reads its
+        // cutoff from TimeProvider, and two clocks for one window make a new
+        // row look expired or an old one immortal.
+        db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, clock.GetUtcNow()));
         await db.SaveChangesAsync(context.CancellationToken);
     }
 
@@ -1623,6 +1636,23 @@ public sealed class InboxFilter<T>(DbContext db) : IFilter<ConsumeContext<T>>
     public void Probe(ProbeContext context) => context.CreateFilterScope("inbox");
 }
 ```
+
+> **Trap — staging the row before the consumer runs.** It reads better there,
+> beside the check it follows from, and it silently disables the inbox for
+> every message-borne command. The row would be a *tracked* entity on a context
+> the consumer also uses, and a command reaches §6.3's `TransactionBehavior`,
+> whose `EfUnitOfWork.ExecuteAsync` opens every attempt with
+> `db.ChangeTracker.Clear()` — so that a transient-fault retry cannot re-commit
+> the previous attempt's mutations ([§7.5](07-persistence.md)). The clear takes
+> the pending inbox row with it, `SaveChangesAsync` writes nothing, and no
+> command is ever recorded. Nothing throws and nothing logs; the table simply
+> stays empty and every redelivery is reprocessed.
+>
+> Two mechanisms this document already had, correct on their own and in
+> tension where they meet. Neither can give way — the clear is what makes the
+> retry safe, and the row is what makes the redelivery safe — so the ordering
+> is what moves. A consumer that does no work will not show this, which is why
+> the test that covers it drives one that clears the tracker.
 
 That `DbContext` has to be **the service's own instance**, and each service
 registers the alias that makes it one:
@@ -1644,12 +1674,19 @@ services.AddScoped<DbContext>(sp => sp.GetRequiredService<OrderingDbContext>());
 >
 > | Handler style | Atomic with the inbox row? |
 > |---|---|
-> | Writes through the injected `OrderingDbContext` | **Yes** — one `SaveChangesAsync`, one transaction |
+> | Writes through the injected `OrderingDbContext`, leaving the save to the filter | **Yes** — one `SaveChangesAsync`, one transaction |
 > | Writes through `IDbConnectionFactory` + Dapper, like the projection in §6.6 | **No** — separate connection, separate transaction |
+> | A **command**, through `CommandConsumer` and the §6.3 pipeline | **No** — `TransactionBehavior` has already committed by the time the filter writes |
 >
-> For the second kind, a crash between `next.Send` returning and
+> For the second and third kinds, a crash between `next.Send` returning and
 > `SaveChangesAsync` committing leaves the work done and the message
 > unrecorded, so redelivery runs it again.
+>
+> The third row is a consequence of the trap above rather than a separate
+> decision, and it is the one that changed: staging the row earlier would make
+> it atomic on paper and lose it entirely in practice. An inbox row written in
+> its own transaction after a committed command is worth having; one discarded
+> by the change tracker is not.
 >
 > That is acceptable — but only because handlers are idempotent anyway. The
 > inbox removes the *common* duplicate, not every duplicate. Treating it as a

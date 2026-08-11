@@ -743,24 +743,26 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // two of three applied twice.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(4);\n"
+            "        applied.Length.ShouldBe(5);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddProducts\");\n"
             "        applied[2].ShouldEndWith(\"_AddOutbox\");\n"
-            "        applied[3].ShouldEndWith(\"_AddInbox\");\n",
+            "        applied[3].ShouldEndWith(\"_AddInbox\");\n"
+            "        applied[4].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n",
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
             "        // apply every migration in sequence, and a count alone would pass on\n"
-            "        // one of three applied twice. Three is what a scaffolded service\n"
-            "        // starts with — the schema, then §9.4's outbox table and §9.5's\n"
-            "        // inbox, which are wiring every service has rather than anything\n"
-            "        // this one chose.\n"
+            "        // one of four applied twice. Four is what a scaffolded service\n"
+            "        // starts with — the schema, then §9.4's outbox table, §9.5's inbox\n"
+            "        // and the index the retention purge deletes through, all of them\n"
+            "        // wiring every service has rather than anything this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(3);\n"
+            "        applied.Length.ShouldBe(4);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddOutbox\");\n"
-            "        applied[2].ShouldEndWith(\"_AddInbox\");\n",
+            "        applied[2].ShouldEndWith(\"_AddInbox\");\n"
+            "        applied[3].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n",
         ),
     ),
 }
@@ -835,6 +837,38 @@ INBOX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
         "/// and a purge against a table that is not there logs a failure every pass.\n"
         "/// That is the same argument that keeps the outbox migration here, inverted:\n"
         "/// the dispatcher would fail a claim, this would fail a delete.\n",
+    ),
+)
+
+# The retention index's, shape-keyed like the two above. What is dropped is the
+# prose about how the gap was found — a scaffolded service inherits the index
+# without inheriting the review that noticed its absence.
+RETENTION_INDEX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
+    (
+        "/// The index §9.4's retention purge deletes through, generated from\n"
+        "/// <see cref=\"OutboxMessageConfiguration\"/> on <c>AddInbox</c>'s terms — the\n"
+        "/// configuration is the source of truth and only this file's dress is\n"
+        "/// hand-authored. The <c>.Designer.cs</c> and the snapshot beside it are\n"
+        "/// machine-owned and untouched.\n",
+        "/// The index §9.4's retention purge deletes through, generated from\n"
+        "/// <see cref=\"OutboxMessageConfiguration\"/> — the configuration is the source\n"
+        "/// of truth and only this file's dress is hand-authored. The\n"
+        "/// <c>.Designer.cs</c> and the snapshot beside it are machine-owned and\n"
+        "/// untouched.\n",
+    ),
+    (
+        "/// <para>\n"
+        "/// The inbox got its <c>IX_Inbox_HandledAt</c> when its purge was written and\n"
+        "/// this one did not, which is the asymmetry a review caught. Filtered the other\n"
+        "/// way for the same reason its twin is filtered: the purge never reads an\n"
+        "/// unprocessed row, so the index stays the size of the undeleted backlog rather\n"
+        "/// than of the table.\n"
+        "/// </para>\n",
+        "/// <para>\n"
+        "/// Filtered the other way for the same reason its twin is filtered: the purge\n"
+        "/// never reads an unprocessed row, so the index stays the size of the undeleted\n"
+        "/// backlog rather than of the table.\n"
+        "/// </para>\n",
     ),
 )
 
@@ -930,6 +964,13 @@ OUTBOX_MIGRATION = re.compile(r"^\d{14}_AddOutbox(\.Designer)?\.cs$")
 # failed delete every pass. Consuming nothing does not exempt it — Catalog
 # itself consumes nothing and has the table for exactly this.
 INBOX_MIGRATION = re.compile(r"^\d{14}_AddInbox(\.Designer)?\.cs$")
+# The purge's index, and it travels for the same reason the two tables do: the
+# claim's index is filtered `WHERE ProcessedAt IS NULL` and so excludes every
+# row the purge deletes. A service scaffolded without this one scans its whole
+# outbox table hourly from its first boot — the same class of silent cost as a
+# dispatcher with no table, and invisible for exactly as long as the table is
+# small.
+RETENTION_INDEX_MIGRATION = re.compile(r"^\d{14}_AddOutboxRetentionIndex(\.Designer)?\.cs$")
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The migrations a scaffolded service starts with, in the order they are
@@ -937,7 +978,12 @@ LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 # than three named constants, because every place below that cares needs the
 # position rather than the name: the id is the base plus the index in minutes,
 # and the snapshot is derived from the last one's designer.
-TEMPLATE_MIGRATIONS = (INITIAL_CREATE, OUTBOX_MIGRATION, INBOX_MIGRATION)
+TEMPLATE_MIGRATIONS = (
+    INITIAL_CREATE,
+    OUTBOX_MIGRATION,
+    INBOX_MIGRATION,
+    RETENTION_INDEX_MIGRATION,
+)
 
 # The two files that accumulate a block per service, and the markers that bound
 # one block. Both were sliced to the end of the file once, which is the same
@@ -1087,7 +1133,11 @@ def classify(repo_root: Path) -> list[str]:
     # Each pair counted separately. One number for all three would be satisfied
     # by six InitialCreate files and no outbox — which is precisely the state
     # that ships a dispatcher with no table behind it.
-    for shape, label in zip(TEMPLATE_MIGRATIONS, ("InitialCreate", "AddOutbox", "AddInbox"), strict=True):
+    for shape, label in zip(
+        TEMPLATE_MIGRATIONS,
+        ("InitialCreate", "AddOutbox", "AddInbox", "AddOutboxRetentionIndex"),
+        strict=True,
+    ):
         pair = [p for p in copied if shape.fullmatch(PurePosixPath(p).name)]
         if len(pair) != 2:
             raise ScaffoldError(
@@ -1209,9 +1259,9 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
     text = designer
     for needle, replacement in (
         ("using Microsoft.EntityFrameworkCore.Migrations;\n", ""),
-        (f'    [Migration("{migration_id}_AddInbox")]\n', ""),
+        (f'    [Migration("{migration_id}_AddOutboxRetentionIndex")]\n', ""),
         (
-            "    partial class AddInbox\n",
+            "    partial class AddOutboxRetentionIndex\n",
             "    partial class CatalogDbContextModelSnapshot : ModelSnapshot\n",
         ),
         ("        /// <inheritdoc />\n", ""),
@@ -1220,7 +1270,7 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
             "        protected override void BuildModel(ModelBuilder modelBuilder)\n",
         ),
     ):
-        require_once(text, needle, "AddInbox.Designer.cs")
+        require_once(text, needle, "AddOutboxRetentionIndex.Designer.cs")
         text = text.replace(needle, replacement)
     return text
 
@@ -1305,6 +1355,8 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
             patches = (*patches, *OUTBOX_MIGRATION_PATCHES)
         elif PurePosixPath(relative).name.endswith("_AddInbox.cs"):
             patches = (*patches, *INBOX_MIGRATION_PATCHES)
+        elif PurePosixPath(relative).name.endswith("_AddOutboxRetentionIndex.cs"):
+            patches = (*patches, *RETENTION_INDEX_MIGRATION_PATCHES)
         for needle, replacement in patches:
             require_once(text, needle, relative)
             text = text.replace(needle, replacement)
@@ -1319,7 +1371,8 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
         # leaving the earlier one alone would ship a service a designer that
         # claims a table it never creates — and would trip the slice check
         # below, which is the guard that made this obvious.
-        if PurePosixPath(relative).name.endswith(("_AddOutbox.Designer.cs", "_AddInbox.Designer.cs")):
+        if PurePosixPath(relative).name.endswith(
+            ("_AddOutbox.Designer.cs", "_AddInbox.Designer.cs", "_AddOutboxRetentionIndex.Designer.cs")):
             text = without_slice_entity(text)
 
         # Before the rename, where a slice token means only itself. Doing this
