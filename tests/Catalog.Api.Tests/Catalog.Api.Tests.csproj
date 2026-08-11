@@ -37,10 +37,6 @@
          fake by hand means stubbing an interface with a dozen members nobody
          calls. -->
     <PackageReference Include="NSubstitute" />
-    <!-- FakeTimeProvider. §13.3's two lags are a clock subtracted from a
-         timestamp made elsewhere, and a test that let the real clock decide
-         the difference could only assert that it was positive. -->
-    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <ItemGroup>

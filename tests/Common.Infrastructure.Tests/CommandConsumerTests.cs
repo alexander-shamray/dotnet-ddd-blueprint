@@ -1,4 +1,3 @@
-using System.Diagnostics.Metrics;
 using Common.Application;
 using Common.Infrastructure.Messaging;
 using MassTransit;

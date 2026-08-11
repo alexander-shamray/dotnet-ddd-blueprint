@@ -1,4 +1,3 @@
-using Common.Contracts;
 using Common.Contracts.Catalog.V1;
 using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
