@@ -71,10 +71,11 @@ services:
       KC_HEALTH_ENABLED: "true"
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
-    # The image ships no curl, so this is a bash TCP redirection against the
-    # management port — the form Keycloak's own documentation gives. Without a
-    # healthcheck `up --wait` returns when the process launches rather than when
-    # the realm is importable, and the first token request races the import.
+    # The image has a shell but no HTTP client, so this is a bash TCP
+    # redirection against the management port — the form Keycloak's own
+    # documentation gives. Without a healthcheck `up --wait` returns when the
+    # process launches rather than when the realm is importable, and the first
+    # token request races the import.
     healthcheck:
       test:
         [

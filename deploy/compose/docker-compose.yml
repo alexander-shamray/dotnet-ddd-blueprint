@@ -74,12 +74,13 @@ services:
       KC_HEALTH_ENABLED: "true"
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
-    # The image ships no shell and no curl — it is a distroless-style build — so
-    # the check is a bash TCP redirection against the management port, which is
-    # the form Keycloak's own documentation gives for exactly this reason.
-    # Without it `up --wait` returns as soon as the process launches, and the
-    # README's token command can reach a realm that has not finished importing:
-    # a 404 on the token endpoint, on a stack that just reported healthy.
+    # The image has a shell — CMD-SHELL below needs one — but no HTTP client:
+    # no curl, no wget. So the check is a bash TCP redirection against the
+    # management port, which is the form Keycloak's own documentation gives for
+    # exactly that reason. Without it `up --wait` returns as soon as the process
+    # launches, and the README's token command can reach a realm that has not
+    # finished importing: a 404 on the token endpoint, on a stack that has just
+    # reported healthy.
     healthcheck:
       test:
         [
