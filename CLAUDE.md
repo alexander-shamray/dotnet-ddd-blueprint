@@ -1733,12 +1733,18 @@ unreachable path is a note), the fan-out cut (six areas by tree, partitioning
 the repository rather than sampling it, against
 security's three), and what confirmation can mean.
 
-**That last one is the interesting one: `/bug-sweep` runs none of the code it
-audits, and its grant withholds a build deliberately.** Its shell reaches
-`mktemp`, the two worktree helpers and `gh` — the worktree and the issue
-tracker, never the tree's own build. The reason is the one that shapes the
-agent profile: building a tree executes it — MSBuild targets, source
-generators, analysers, and under `dotnet test` the tree's own test code — and
+**That last one is the interesting one: `/bug-sweep` executes none of the
+snapshot it audits, and its grant withholds a build deliberately.** Its shell
+reaches `mktemp`, the two worktree helpers and `gh` — the worktree and the issue
+tracker, never the tree's own build. **The snapshot, not "the code it audits":**
+the tooling row covers `.claude/**`, so the two helpers are audited *and* run,
+and the honest claim is that they execute from the caller's checkout and never
+from the pinned worktree. That they are trustworthy is a separate assumption,
+resting on the `Edit(.claude/scripts/**)` deny and on review — the one `/ship`
+and `/branch` already make of the same files. The reason for withholding the
+build is the one that shapes the agent profile: building a tree executes it —
+MSBuild targets, source generators, analysers, and under `dotnet test` the
+tree's own test code — and
 the audited repository is prompt-injection input, so a build grant hands that
 input arbitrary code execution on the host. The suite also needs Docker. So a
 defect claim there is confirmed by reading, the issue body says so, and the

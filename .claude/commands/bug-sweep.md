@@ -78,12 +78,30 @@ recorded, not filed.
 
 ## Confirmation is by reading, and that is the honest limit
 
-**Nothing in this command runs the code it is auditing.** There is no compiler,
-no test runner and no shell reader in the grant; the shell it does have reaches
-`mktemp`, the two worktree helpers and `gh`, which touch the worktree and the
-issue tracker and never the tree's own build. So "confirmed" means: read the
-cited code, trace the values, find the caller, and reproduce the reasoning until
-the failure scenario holds — never "the agent said so".
+**Nothing in this command executes the snapshot it audits.** There is no
+compiler, no test runner and no shell reader in the grant; the shell it does
+have reaches `mktemp`, the two worktree helpers and `gh`, which touch the
+worktree and the issue tracker and never the tree's own build. So "confirmed"
+means: read the cited code, trace the values, find the caller, and reproduce the
+reasoning until the failure scenario holds — never "the agent said so".
+
+**"The snapshot", not "the code it is auditing" — because the two worktree
+helpers are both.** They live in `.claude/scripts/`, the tooling row audits
+`.claude/**`, and this command runs them; a flat claim that no audited code
+executes is therefore false, and it became false when the tooling row was
+widened to close a coverage gap. What is true is narrower and is the property
+actually worth having: the helpers run from the **caller's checkout**, never
+from `$work`, so nothing in the pinned snapshot is executed and a defect the
+sweep is reading about cannot become a defect the sweep is running.
+
+Their trustworthiness is a separate assumption and is named rather than folded
+into the stronger claim. It rests on `Edit(.claude/scripts/**)` denying the
+session that invokes them, on review, and on their being committed content that
+no finding can introduce — the same assumption `/ship` and `/branch` already
+make, since they invoke the same two helpers. A sweep that audits its own
+tooling and then runs it is not a contradiction, but it is not a boundary
+either, and calling it one would be the kind of protection-that-does-not-protect
+this command's own bar ranks critical.
 
 **The absence of a build grant is a decision, and the reason is the one that
 shapes the agent profile.** Building a tree *executes* it: MSBuild targets,
@@ -351,9 +369,19 @@ Each round is the review done once, end to end:
    sweep. That is this command's own fail-open, and it is the failure
    class the bar ranks critical when it finds it in someone else's code. Before
    fanning out on a whole-repo run, `Glob` the repository root and check every
-   entry against the table; if one has no owner, widen a row in the same run and
-   say so in the summary. A narrowing scope hint is the one case where coverage
-   is deliberately partial, and the summary says which rows it dropped.
+   **tracked** entry against the table; if one has no owner, widen a row in the
+   same run and say so in the summary. A narrowing scope hint is the one case
+   where coverage is deliberately partial, and the summary says which rows it
+   dropped.
+
+   **"Tracked" is doing real work in that sentence, and `.git` is why.** A
+   linked worktree carries a `.git` **file** at its root and the main checkout a
+   `.git` directory; the root row owns tracked files only, so a preflight
+   counting every entry would find `.git` unowned on every single run — either
+   reporting a permanent false gap or widening an audit into git plumbing.
+   Anything `.gitignore` covers is out for the same reason, and the reason is
+   not convenience: this command audits the committed `HEAD`, so untracked and
+   ignored paths were never in its subject.
 
    **A row bounds what an auditor reports, never what it may read**, and
    collapsing those two loses real defects quietly. Reachability is evidence a
