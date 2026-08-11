@@ -728,11 +728,60 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "/// string has a readiness check and a host without one does not; this\n"
             "/// service has both pairs from its first commit, and both\n",
         ),
+        # The production-scheme host survives the copy — every service wants
+        # one — but two claims in its comment are Catalog's rather than the
+        # mechanism's. "The one host in the repository" is false the moment a
+        # second service is scaffolded, and EndpointSecurityTests is omitted
+        # here, so the sentence naming what restoring the base call would
+        # delete names a file the reader cannot find.
+        (
+            "        /// The one host in the repository that keeps the production JWT scheme.\n"
+            "        /// Every other factory swaps in <c>TestAuthHandler</c>, which is what\n"
+            "        /// lets those suites authenticate at all — and precisely why none of\n"
+            "        /// them can say whether its headers mean anything to a real\n"
+            "        /// deployment. A test scheme cannot prove its own absence.\n",
+            "        /// This service's one host that keeps the production JWT scheme. Every\n"
+            "        /// other factory swaps in <c>TestAuthHandler</c>, which is what lets\n"
+            "        /// those suites authenticate at all — and precisely why none of them\n"
+            "        /// can say whether its headers mean anything to a real deployment. A\n"
+            "        /// test scheme cannot prove its own absence.\n",
+        ),
+        (
+            "            // Deliberately empty. Not \"not yet\" — restoring the base call here\n"
+            "            // would silently delete EndpointSecurityTests, which is the only\n"
+            "            // suite that reads this host as a deployment rather than a fixture.\n",
+            "            // Deliberately empty. Not \"not yet\" — this host is the only one\n"
+            "            // that reads as a deployment rather than a fixture, and restoring\n"
+            "            // the base call would silently take that with it. The forged-header\n"
+            "            // suite that reads it arrives with the first endpoint to forge\n"
+            "            // against.\n",
+        ),
     ),
     "tests/Catalog.Api.Tests/TransientFaultInjection.cs": (
         (
             "/// of the retry defect is assertable before PR-10's first aggregate exists.\n",
             "/// of the retry defect is assertable before this service has an aggregate.\n",
+        ),
+    ),
+    "tests/Catalog.TestSupport/CatalogApiFactory.cs": (
+        # The override still matters — it is what a service's first endpoint
+        # test will use — but "the forged-header case PR-16 owes" is a delivery
+        # fact about Catalog, and PR-16 has landed. A generated file scheduling
+        # a landed PR is the false claim GeneratedGuidanceIsTrue exists to
+        # catch, which is also why the Program.cs note went the same way.
+        (
+            "    /// Virtual, and the one override matters. A host that keeps the production\n"
+            "    /// scheme is the only thing that can prove <see cref=\"TestAuthHandler\"/>'s\n"
+            "    /// headers mean nothing to a real deployment — the forged-header case\n"
+            "    /// PR-16 owes (Appendix C). A flag would say the same thing; a method says\n"
+            "    /// it at the site that makes the decision, which is where the argument for\n"
+            "    /// it belongs.\n",
+            "    /// Virtual, and the one override matters. A host that keeps the production\n"
+            "    /// scheme is the only thing that can prove <see cref=\"TestAuthHandler\"/>'s\n"
+            "    /// headers mean nothing to a real deployment, so it arrives with the first\n"
+            "    /// endpoint there is anything to forge against. A flag would say the same\n"
+            "    /// thing; a method says it at the site that makes the decision, which is\n"
+            "    /// where the argument for it belongs.\n",
         ),
     ),
     "tests/Catalog.TestSupport/Catalog.TestSupport.csproj": (
