@@ -57,6 +57,34 @@ public static class AuthenticationExtensions
                 "answer the first request without a principal.");
         }
 
+        // Blank was only the commonest malformed value, not the only one.
+        // `keycloak:8080/realms/commerce` — a scheme somebody dropped — is
+        // non-blank and still not an address: JwtBearer builds its metadata
+        // URL from it and fails when the handler is first resolved, which is
+        // during traffic. The guard is worth exactly as much as the set of
+        // wrong values it catches, so it takes the whole shape.
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out Uri? parsed) ||
+            (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException(
+                $"'{AuthorityKey}' is '{configured}', which is not an absolute http or https URL. " +
+                "It is the base address a discovery document is fetched from (§11.3), so a value " +
+                "that cannot be one fails the deployment rather than the first request.");
+        }
+
+        // And https everywhere but Development, which is the same rule
+        // RequireHttpsMetadata applies below — moved to startup, where it is a
+        // deployment error rather than a 500 on the first token. The two read
+        // the same environment on purpose: a host that would refuse to fetch
+        // metadata over plain HTTP should not start claiming it will.
+        if (!builder.Environment.IsDevelopment() && parsed.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException(
+                $"'{AuthorityKey}' is '{configured}', which is plain HTTP outside Development. " +
+                "Signing keys fetched over a channel an attacker can rewrite make every " +
+                "validation below decorative (§11.3).");
+        }
+
         // A local, because the options lambda below captures it and nullable
         // flow analysis does not reach across that boundary.
         string authority = configured;
@@ -74,6 +102,16 @@ public static class AuthenticationExtensions
                 // an attacker can rewrite, which would make every other
                 // validation below decorative.
                 options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+
+                // The framework default, written out because §11.4's whole
+                // subject rule rests on it. Keycloak issues `sub`;
+                // ICurrentUser.Id reads ClaimTypes.NameIdentifier, and this is
+                // the only thing that turns one into the other. Set it false —
+                // or have a future release change the default — and every
+                // authenticated request throws on a token that is perfectly
+                // valid, which is a failure no realm test and no unit test
+                // over an injected principal can see.
+                options.MapInboundClaims = true;
 
                 // Assigned whole rather than mutated, because the four
                 // Validate* flags default to true and writing them out is the

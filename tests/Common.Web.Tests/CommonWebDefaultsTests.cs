@@ -134,4 +134,56 @@ public class CommonWebDefaultsTests
 
         thrown.Message.ShouldContain(AuthenticationExtensions.AuthorityKey);
     }
+
+    [Theory]
+    [InlineData("keycloak:8080/realms/commerce")]   // the scheme somebody dropped
+    [InlineData("/realms/commerce")]                // a path, from a copied fragment
+    [InlineData("ftp://identity.example/realms/commerce")]
+    public void An_authority_that_is_not_an_http_url_is_a_missing_one(string configured)
+    {
+        // Blank was the commonest wrong value, not the only one. Each of these
+        // is non-blank and still not an address a discovery document can be
+        // fetched from, so a guard that only asks "is it empty?" lets the host
+        // start and moves the failure into the first request that carries a
+        // token — which is the trade the eager read exists to refuse.
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        builder.Configuration[AuthenticationExtensions.AuthorityKey] = configured;
+
+        InvalidOperationException thrown =
+            Should.Throw<InvalidOperationException>(builder.AddCommonWebDefaults);
+
+        thrown.Message.ShouldContain(AuthenticationExtensions.AuthorityKey);
+        thrown.Message.ShouldContain(configured, Case.Sensitive);
+    }
+
+    [Fact]
+    public void A_plain_http_authority_outside_development_does_not_start()
+    {
+        // The same rule RequireHttpsMetadata applies, moved to startup. Signing
+        // keys fetched over a channel an attacker can rewrite make every
+        // validation in §11.3 decorative, and a host that would refuse to fetch
+        // them should refuse to start rather than accept traffic first.
+        HostApplicationBuilder builder = TelemetryHost.Builder(Environments.Production);
+        builder.Configuration[AuthenticationExtensions.AuthorityKey] =
+            "http://keycloak:8080/realms/commerce";
+
+        InvalidOperationException thrown =
+            Should.Throw<InvalidOperationException>(builder.AddCommonWebDefaults);
+
+        thrown.Message.ShouldContain(AuthenticationExtensions.AuthorityKey);
+    }
+
+    [Fact]
+    public void A_plain_http_authority_in_development_is_the_documented_local_setup()
+    {
+        // The other side of the same line, and the reason it is scoped to the
+        // environment rather than absolute: §14.1's Compose stack runs Keycloak
+        // on http://localhost:8080, and a rule with no carve-out would make the
+        // documented local flow impossible.
+        HostApplicationBuilder builder = TelemetryHost.Builder(Environments.Development);
+        builder.Configuration[AuthenticationExtensions.AuthorityKey] =
+            "http://localhost:8080/realms/commerce";
+
+        Should.NotThrow(builder.AddCommonWebDefaults);
+    }
 }

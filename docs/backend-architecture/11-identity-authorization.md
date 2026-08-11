@@ -76,6 +76,23 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
             "answer the first request without a principal.");
     }
 
+    // Nor is blank the only malformed value. `keycloak:8080/realms/commerce` —
+    // a dropped scheme — is non-blank and still not an address, and https is
+    // required everywhere but Development, which is the same rule
+    // RequireHttpsMetadata applies below, moved to startup.
+    if (!Uri.TryCreate(configured, UriKind.Absolute, out Uri? parsed) ||
+        (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
+    {
+        throw new InvalidOperationException(
+            $"'{AuthorityKey}' is '{configured}', which is not an absolute http or https URL. ...");
+    }
+
+    if (!builder.Environment.IsDevelopment() && parsed.Scheme != Uri.UriSchemeHttps)
+    {
+        throw new InvalidOperationException(
+            $"'{AuthorityKey}' is '{configured}', which is plain HTTP outside Development. ...");
+    }
+
     string authority = configured;
 
     builder.Services
@@ -85,6 +102,12 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
             options.Authority = authority;
             options.Audience = Audience;
             options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+
+            // The framework default, written out because §11.4's subject rule
+            // rests on it: Keycloak issues `sub`, ICurrentUser.Id reads
+            // ClaimTypes.NameIdentifier, and this is the only thing that turns
+            // one into the other.
+            options.MapInboundClaims = true;
 
             options.TokenValidationParameters = new TokenValidationParameters
             {
@@ -508,8 +531,17 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
 
 **Three places have to agree on which claim identifies a user**, and they do:
 `ClaimTypes.NameIdentifier` here, in §10.3's rate-limit partition key, and in
-the `TestAuthHandler` of [§12.4](12-test-strategy.md). Keycloak's `sub` maps to it under the default
-inbound claim mapping.
+the `TestAuthHandler` of [§12.4](12-test-strategy.md).
+
+> **A fourth thing has to agree, and it is a setting rather than a place.**
+> Keycloak issues `sub`; everything above reads `NameIdentifier`, and
+> `MapInboundClaims` is the only thing that turns one into the other. §11.3
+> writes it out rather than inheriting the framework default, because nothing
+> else in the platform would notice it changing: a realm test proves the token
+> carries `sub`, and a unit test over an injected principal starts from a
+> `NameIdentifier` that is already there. Both stay green while every
+> authenticated request throws on a perfectly valid token. The end-to-end
+> assertion belongs in the one suite that starts from a signed token.
 
 `NameClaimType = "preferred_username"` in §11.3 does **not** compete with this.
 It sets what `ClaimsPrincipal.Identity.Name` returns — a display name, for logs

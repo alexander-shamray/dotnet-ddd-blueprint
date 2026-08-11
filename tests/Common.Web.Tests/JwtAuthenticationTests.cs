@@ -75,6 +75,15 @@ public class JwtAuthenticationTests
         // somebody changed their username (§11.4).
         options.TokenValidationParameters.NameClaimType.ShouldBe("preferred_username");
         options.TokenValidationParameters.RoleClaimType.ShouldBe("roles");
+
+        // And the step that connects the two claim vocabularies at all.
+        // Keycloak issues `sub`; ICurrentUser.Id reads NameIdentifier. This is
+        // the framework default, pinned because §11.4's whole subject rule
+        // rests on it and a changed default would break every authenticated
+        // request in the platform without breaking a single assertion above.
+        // InboundClaimMappingTests exercises the effect end to end; this line
+        // is the cheap guard that says which value the effect depends on.
+        options.MapInboundClaims.ShouldBeTrue();
     }
 
     [Fact]
