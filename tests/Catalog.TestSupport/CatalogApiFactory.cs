@@ -119,10 +119,10 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
     /// <remarks>
     /// Virtual, and the one override matters. A host that keeps the production
     /// scheme is the only thing that can prove <see cref="TestAuthHandler"/>'s
-    /// headers mean nothing to a real deployment — the forged-header case
-    /// PR-16 owes (Appendix C). A flag would say the same thing; a method says
-    /// it at the site that makes the decision, which is where the argument for
-    /// it belongs.
+    /// headers mean nothing to a real deployment, which is what
+    /// <c>EndpointSecurityTests</c> reads it for. A flag would say the same
+    /// thing; a method says it at the site that makes the decision, which is
+    /// where the argument for it belongs.
     ///
     /// Only the authenticate and challenge schemes move. Forbid is left on the
     /// bearer default deliberately: <c>JwtBearerHandler</c> answers it with a

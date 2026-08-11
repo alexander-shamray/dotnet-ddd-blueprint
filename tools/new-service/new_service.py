@@ -765,17 +765,18 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "tests/Catalog.TestSupport/CatalogApiFactory.cs": (
         # The override still matters — it is what a service's first endpoint
-        # test will use — but "the forged-header case PR-16 owes" is a delivery
-        # fact about Catalog, and PR-16 has landed. A generated file scheduling
-        # a landed PR is the false claim GeneratedGuidanceIsTrue exists to
-        # catch, which is also why the Program.cs note went the same way.
+        # test will use — but the Catalog source names EndpointSecurityTests as
+        # the suite that reads it, and the scaffold omits that file. A generated
+        # comment pointing at a suite the service has not got is the same class
+        # of false claim as one scheduling a landed PR, which is what the
+        # Catalog text used to say and what GeneratedGuidanceIsTrue caught.
         (
             "    /// Virtual, and the one override matters. A host that keeps the production\n"
             "    /// scheme is the only thing that can prove <see cref=\"TestAuthHandler\"/>'s\n"
-            "    /// headers mean nothing to a real deployment — the forged-header case\n"
-            "    /// PR-16 owes (Appendix C). A flag would say the same thing; a method says\n"
-            "    /// it at the site that makes the decision, which is where the argument for\n"
-            "    /// it belongs.\n",
+            "    /// headers mean nothing to a real deployment, which is what\n"
+            "    /// <c>EndpointSecurityTests</c> reads it for. A flag would say the same\n"
+            "    /// thing; a method says it at the site that makes the decision, which is\n"
+            "    /// where the argument for it belongs.\n",
             "    /// Virtual, and the one override matters. A host that keeps the production\n"
             "    /// scheme is the only thing that can prove <see cref=\"TestAuthHandler\"/>'s\n"
             "    /// headers mean nothing to a real deployment, so it arrives with the first\n"
