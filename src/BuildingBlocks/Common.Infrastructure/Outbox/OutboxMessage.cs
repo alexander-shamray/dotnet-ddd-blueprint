@@ -68,6 +68,17 @@ public sealed class OutboxMessage
         // dispatcher would publish it. That is precisely the leak §5.5 forbids
         // and §12.4 asserts against, and until this guard existed the only
         // thing preventing it was the mapper being written correctly.
+        // Every value first, because both checks below test for one lane and
+        // let everything else past: `(OutboxLane)42` is neither Broker nor
+        // Local, so it satisfies neither guard, commits, and then fails in
+        // the dispatcher once per attempt until the cap abandons it. A cast
+        // is all it takes to produce one — C# does not confine an enum to its
+        // declared members.
+        if (lane is not (OutboxLane.Broker or OutboxLane.Local))
+            throw new InvalidOperationException(
+                $"{lane} is not a lane. A row carries Broker or Local (§9.4), and one that " +
+                "carries neither can only be discovered after it is committed.");
+
         if (lane is OutboxLane.Broker && message is not IIntegrationEvent)
             throw new InvalidOperationException(
                 $"{message.GetType().Name} is not an {nameof(IIntegrationEvent)} and cannot be " +

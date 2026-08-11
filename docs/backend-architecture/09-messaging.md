@@ -1088,6 +1088,19 @@ Consequences of the per-row design worth stating explicitly:
 Three handler interfaces exist, and confusing them is the most likely mistake in
 this area. They differ by where the message came from:
 
+> **All three are invariant, and the missing `in` is a decision.** Declaring
+> them contravariant would advertise that an
+> `IProjectionHandler<IDomainEvent>` handles every concrete event — and
+> nothing here delivers on it. The §6.2 scan registers each implementation
+> under the exact interface it implements, the registry and the invoker both
+> ask for the closed type, and the built-in container does no variance lookup:
+> `GetServices` matches the closed type or nothing. A broad handler would be
+> registered, invisible and silent — the registry finds none, no `Local` row
+> is staged, and the projection never runs while the dashboards stay green.
+> That is exactly the failure the "empty is a decision" table below exists to
+> rule out, so the signatures state the exact-match semantics the container
+> actually has.
+
 ```csharp
 namespace Common.Application;
 
@@ -1095,7 +1108,7 @@ namespace Common.Application;
 /// Reacts to this service's OWN events after commit, via the Local outbox lane.
 /// Read-model projections, local cache invalidation. Never a public contract.
 /// </summary>
-public interface IProjectionHandler<in TEvent>
+public interface IProjectionHandler<TEvent>
 {
     Task HandleAsync(TEvent domainEvent, CancellationToken ct);
 }
@@ -1104,7 +1117,7 @@ public interface IProjectionHandler<in TEvent>
 /// Reacts to an integration event published by ANOTHER service, delivered by
 /// the broker. Invoked by the consumer adapter below, behind the inbox filter.
 /// </summary>
-public interface IIntegrationEventHandler<in TEvent> where TEvent : class
+public interface IIntegrationEventHandler<TEvent> where TEvent : class
 {
     Task HandleAsync(TEvent integrationEvent, CancellationToken ct);
 }

@@ -128,6 +128,24 @@ public class OutboxMessageTests
     }
 
     [Fact]
+    public void A_lane_that_is_no_lane_is_refused()
+    {
+        // Both interface guards test for one lane and let everything else
+        // past, so an undefined value satisfies neither — it commits, and the
+        // dispatcher then fails it once per attempt until the cap abandons
+        // it. A cast is all it takes: C# does not confine an enum to its
+        // declared members.
+        Should
+            .Throw<InvalidOperationException>(() => OutboxMessage.Stage(
+                new SampleDomainEvent(Now, "raised"),
+                (OutboxLane)42,
+                Guid.CreateVersion7(),
+                Types,
+                Json))
+            .Message.ShouldContain("is not a lane");
+    }
+
+    [Fact]
     public void A_contract_cannot_be_staged_on_the_local_lane()
     {
         // The mirror, and it costs one line: the Local lane hands its payload

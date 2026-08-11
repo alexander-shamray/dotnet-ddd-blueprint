@@ -643,7 +643,8 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     {
         await fixture.StageOutboxAsync(
             OutboxRows.Poison(fixture),          // its handler always throws
-            OutboxRows.Healthy(fixture), OutboxRows.Healthy(fixture));
+            OutboxRows.Healthy(fixture),
+            OutboxRows.Healthy(fixture));
 
         await fixture.ProcessOutboxBatchAsync();
 
@@ -754,8 +755,11 @@ public static class OutboxRows
     // to a zero amount and a null currency.
     private static OutboxMessage Local(object message, ServiceFixture fixture) =>
         OutboxMessage.Stage(
-            message, OutboxLane.Local, Guid.CreateVersion7(),
-            fixture.MessageTypes, fixture.OutboxJson);
+            message,
+            OutboxLane.Local,
+            Guid.CreateVersion7(),
+            fixture.MessageTypes,
+            fixture.OutboxJson);
 }
 ```
 
@@ -798,8 +802,11 @@ public void Stage_takes_the_message_id_from_the_envelope()
     V1.OrderPlaced placed = Contracts.OrderPlaced(SeedData.OrderId);
 
     var row = OutboxMessage.Stage(
-        placed, OutboxLane.Broker, correlationId: Guid.CreateVersion7(),
-        types: Types, json: Json);
+        placed,
+        OutboxLane.Broker,
+        correlationId: Guid.CreateVersion7(),
+        types: Types,
+        json: Json);
 
     // Both from the envelope, not minted here — and CorrelationId in
     // particular, because a caller-supplied one is passed in and ignored for
