@@ -103,8 +103,7 @@ namespace Catalog.Infrastructure.Persistence.Migrations
                     b.Property<string>("MessageType")
                         .IsRequired()
                         .HasMaxLength(300)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(300)");
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<DateTimeOffset>("OccurredAt")
                         .HasColumnType("datetimeoffset(7)");

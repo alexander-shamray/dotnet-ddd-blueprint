@@ -21,8 +21,8 @@ public partial class AddOutbox : Migration
     // A field rather than the generated `new[] { … }` argument, which is what
     // CA1861 asks for and the only shape available: Annotation takes an
     // object, so a collection expression has no target type to convert to.
-    // AddProducts met the same rule inline because CreateIndex's parameter is
-    // a string[] and could.
+    // A CreateIndex call meets the same rule inline, because its columns
+    // parameter is a string[] and a collection expression converts to one.
     private static readonly string[] IncludedColumns = ["Lane", "Attempts", "LockedUntil"];
 
     protected override void Up(MigrationBuilder migrationBuilder)
@@ -36,7 +36,7 @@ public partial class AddOutbox : Migration
                     .Annotation("SqlServer:Identity", "1, 1"),
                 MessageId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 CorrelationId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                MessageType = table.Column<string>(type: "varchar(300)", unicode: false, maxLength: 300, nullable: false),
+                MessageType = table.Column<string>(type: "nvarchar(300)", maxLength: 300, nullable: false),
                 Payload = table.Column<string>(type: "nvarchar(max)", nullable: false),
                 Lane = table.Column<string>(type: "varchar(16)", unicode: false, maxLength: 16, nullable: false),
                 OccurredAt = table.Column<DateTimeOffset>(type: "datetimeoffset(7)", nullable: false),

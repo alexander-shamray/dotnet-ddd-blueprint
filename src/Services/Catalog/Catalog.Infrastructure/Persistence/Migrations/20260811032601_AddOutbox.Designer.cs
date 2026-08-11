@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Catalog.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CatalogDbContext))]
-    [Migration("20260810215200_AddOutbox")]
+    [Migration("20260811032601_AddOutbox")]
     partial class AddOutbox
     {
         /// <inheritdoc />
@@ -106,8 +106,7 @@ namespace Catalog.Infrastructure.Persistence.Migrations
                     b.Property<string>("MessageType")
                         .IsRequired()
                         .HasMaxLength(300)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(300)");
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<DateTimeOffset>("OccurredAt")
                         .HasColumnType("datetimeoffset(7)");

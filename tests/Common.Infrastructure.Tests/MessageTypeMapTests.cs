@@ -65,6 +65,17 @@ public class MessageTypeMapTests
     }
 
     [Fact]
+    public void A_non_ascii_type_name_round_trips_through_the_map()
+    {
+        // The premise the varchar column rested on — "a FullName is ASCII by
+        // construction" — is false, and this is the type that shows it. The
+        // map has always accepted such a name; the column now stores it.
+        MessageTypeMap map = Map();
+
+        map.Resolve(map.NameOf(typeof(CommandeCréée))).ShouldBe(typeof(CommandeCréée));
+    }
+
+    [Fact]
     public void An_assembly_listed_twice_fails_the_host()
     {
         // The realistic way two entries collide, and the reason

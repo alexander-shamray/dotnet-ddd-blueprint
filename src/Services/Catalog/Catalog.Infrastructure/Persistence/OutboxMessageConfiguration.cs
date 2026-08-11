@@ -31,14 +31,27 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         // "was this message processed?" stops having an answer.
         builder.HasIndex(m => m.MessageId).IsUnique();
 
-        // Non-Unicode and bounded: a type's FullName is ASCII by construction
-        // and 300 is generous for one. The §7.2 string convention would
-        // otherwise make this nvarchar(400), which doubles the width of a
-        // column every claim reads.
+        // Unicode, and bounded at 300. This column was varchar until a review
+        // checked the premise: "a type's FullName is ASCII by construction" is
+        // simply false — C# permits Unicode identifiers, so `CommandeCréée` is
+        // a legal event name and `MessageTypeMap` accepts it. Persisted to
+        // varchar it would be mangled by the database code page, and `Resolve`
+        // would then fail on a name that no longer matched any type: ten
+        // attempts and an abandoned row, for a type that was never wrong.
+        //
+        // The alternative was to refuse non-ASCII names when the map is built.
+        // That is the cheaper fix and the wrong one, for the reason
+        // MoneyJsonConverter exists rather than a [JsonConstructor]: what a
+        // type may be called is the domain's business, and a storage choice
+        // does not get to narrow it. This blueprint is adapted by people whose
+        // domain language is not English.
+        //
+        // The cost is 300 bytes per unprocessed row. It is not paid by the
+        // claim's index, which covers OccurredAt and includes only Lane,
+        // Attempts and LockedUntil.
         builder
             .Property(m => m.MessageType)
-            .HasMaxLength(300)
-            .IsUnicode(false);
+            .HasMaxLength(300);
 
         // The one deliberate exception to §7.2's max-length convention. A
         // payload is a contract or a domain event of unknown size, and a

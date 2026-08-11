@@ -347,7 +347,7 @@ CREATE TABLE ordering.OutboxMessages
     Id             BIGINT IDENTITY(1,1) PRIMARY KEY,
     MessageId      UNIQUEIDENTIFIER NOT NULL UNIQUE,
     CorrelationId  UNIQUEIDENTIFIER NOT NULL,
-    MessageType    VARCHAR(300)     NOT NULL,
+    MessageType    NVARCHAR(300)    NOT NULL,   -- a FullName is not ASCII by construction
     Payload        NVARCHAR(MAX)    NOT NULL,
     Lane           VARCHAR(16)      NOT NULL,   -- 'Broker' | 'Local'
     OccurredAt     DATETIMEOFFSET   NOT NULL,

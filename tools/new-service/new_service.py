@@ -722,12 +722,6 @@ OUTBOX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
         "/// for). The <c>.Designer.cs</c> and the snapshot beside it are machine-owned\n"
         "/// and untouched.\n",
     ),
-    (
-        "    // AddProducts met the same rule inline because CreateIndex's parameter is\n"
-        "    // a string[] and could.\n",
-        "    // A CreateIndex call meets the same rule inline, because its columns\n"
-        "    // parameter is a string[] and a collection expression converts to one.\n",
-    ),
 )
 
 # The one file with no counterpart in Catalog, and it is written to be deleted.

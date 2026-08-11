@@ -30,5 +30,14 @@ public sealed record SampleDomainEvent(DateTimeOffset OccurredAt, string Note) :
 /// </summary>
 public readonly record struct SampleValueTypeDomainEvent(DateTimeOffset OccurredAt) : IDomainEvent;
 
+/// <summary>
+/// A domain event whose name is not ASCII. C# permits Unicode identifiers, so
+/// this is a legal event in a codebase whose domain language is not English —
+/// and the map accepts it, which is why <c>MessageType</c> is nvarchar: under
+/// varchar the database code page would mangle the persisted name and
+/// <c>Resolve</c> would fail on a type that was never wrong.
+/// </summary>
+public sealed record CommandeCréée(DateTimeOffset OccurredAt) : IDomainEvent;
+
 /// <summary>Neither, so <c>NameOf</c> must refuse it.</summary>
 public sealed record NotAMessage(string Note);
