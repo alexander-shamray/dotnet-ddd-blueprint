@@ -133,8 +133,8 @@ structurally always null on one path.
 | `OrderFulfilmentSaga`, `Endpoints` | §9.6 | Saga and its command destinations |
 | `ServiceFixture` | §12.4 | Testcontainers `IAsyncLifetime` fixture; owns the `WebApplicationFactory`. One per service, in that service's `*.TestSupport` (§4.1) — Catalog's is the first built, and §12.4's worked example is Ordering's |
 | `TestAuthHandler` | §12.4 | `AuthenticationHandler<AuthenticationSchemeOptions>`; issues the principal a test names in headers. Also `Ordering.TestSupport` |
-| `TestCurrentUser`, `Authenticated`, `Anonymous` | §12.4 | The scoped `ICurrentUser` double and its two factories — one reporting a given subject, one with `IsAuthenticated` false and a throwing `Id`, which is the consumer path's shape. Registered for every test as an authenticated default, so a test silent about the caller still has one. `TestAuthHandler` is the boundary equivalent; these are for the states `RequireAuthorization` stops a request from reaching |
-| `ServiceFixture.DispatchAsync` | §12.4 | Opens a scope, points its `TestCurrentUser` at a named principal and dispatches. The seam the subject tests use to reach a handler with no caller — which HTTP cannot produce against an endpoint group carrying `RequireAuthorization` |
+| `TestCurrentUser`, `Principals` | §12.4 | The scoped `ICurrentUser` double and its three values — `Default`, `Authenticated(subject, permissions)` and `Anonymous`. It **delegates** rather than replacing: unset inside a request it resolves through `HttpContext` exactly as production does, so `TestAuthHandler` keeps driving the endpoint tests; unset below HTTP it is `Default`; set, it is whatever the test said. A flat double would break the ownership-404 test by passing for the wrong reason |
+| `ServiceFixture.DispatchAsync` | §12.4 | Opens a scope, points its `TestCurrentUser` at a named principal and dispatches; one overload each for `ICommand<T>` and `IQuery<T>`. The seam the subject tests use to reach a handler with no caller — which HTTP cannot produce against an endpoint group carrying `RequireAuthorization` |
 
 ## D.5 Referenced but deliberately not shown
 

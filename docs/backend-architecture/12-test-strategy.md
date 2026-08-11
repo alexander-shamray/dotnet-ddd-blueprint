@@ -353,6 +353,20 @@ public sealed class ServiceFixture : IAsyncLifetime
 
                     // Still resolvable directly, so tests can drive one pass.
                     services.AddSingleton<OutboxDispatcher>();
+
+                    // ICurrentUser (§11.4) has two callers with incompatible
+                    // needs, so the double DELEGATES rather than replacing.
+                    // Over HTTP the principal must keep coming from
+                    // TestAuthHandler through HttpContext, exactly as
+                    // production resolves it — a flat replacement would make
+                    // Hides_another_customers_order_behind_a_404 pass because
+                    // the default subject happens to differ from the owner,
+                    // which is passing for the wrong reason, and would break
+                    // every HTTP path that needs the header principal.
+                    services.RemoveAll<ICurrentUser>();
+                    services.AddScoped<TestCurrentUser>();
+                    services.AddScoped<ICurrentUser>(
+                        sp => sp.GetRequiredService<TestCurrentUser>());
                 }));
 
         // Tests deliberately collapse the two database identities of §7.1 —
@@ -385,6 +399,26 @@ public sealed class ServiceFixture : IAsyncLifetime
     public MessageTypeMap MessageTypes => Factory.Services.GetRequiredService<MessageTypeMap>();
 
     public OutboxJson OutboxJson => Factory.Services.GetRequiredService<OutboxJson>();
+
+    /// <summary>
+    /// Dispatches below HTTP with a stated principal (§11.4's subject rule).
+    /// The scope is what makes that safe: TestCurrentUser is scoped, so a
+    /// principal set here cannot leak into another test or into a concurrent
+    /// request. There is a matching IQuery overload — the read-side subject
+    /// test needs one, and it differs only in the interface it constrains.
+    /// </summary>
+    public async Task<TResult> DispatchAsync<TResult>(
+        ICommand<TResult> command,
+        ICurrentUser currentUser,
+        CancellationToken ct = default)
+    {
+        using IServiceScope scope = Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<TestCurrentUser>().Set(currentUser);
+
+        return await scope.ServiceProvider
+            .GetRequiredService<IDispatcher>()
+            .SendAsync(command, ct);
+    }
 
     public IDbConnection CreateConnection() => new SqlConnection(_sql.GetConnectionString());
 
@@ -566,9 +600,10 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
             scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
 
         // No CustomerId on the command — the handler reads it from
-        // ICurrentUser (§11.4). The fixture registers an authenticated default
-        // in every scope, so a test that does not care about the subject says
-        // nothing about it; the subject tests below override it per dispatch.
+        // ICurrentUser (§11.4). This scope has no HttpContext, so the
+        // fixture's TestCurrentUser answers as Principals.Default: a test
+        // that does not care about the subject says nothing about it. The
+        // subject tests below state one per dispatch instead.
         Result<Guid> result = await dispatcher.SendAsync(
             new PlaceOrderCommand(
                 CommandId: Guid.CreateVersion7(),
@@ -1031,7 +1066,18 @@ public async Task A_customer_reads_only_their_own_orders()
 {
     var owner = Guid.CreateVersion7();
     var stranger = Guid.CreateVersion7();
-    await fixture.SeedOrderAsync(customerId: owner);
+
+    // Seeded through the write path, not SeedOrderAsync. That helper persists
+    // an Order and its lines through EF and nothing else, which the level-1
+    // query reads — but §6.6 rewrites this slice IN PLACE to read
+    // ordering.OrderSummaries, and an EF-seeded aggregate never reaches that
+    // table. A test seeded that way would pass today and start failing on the
+    // PR that escalates the read side, with the stranger's empty page still
+    // passing for the wrong reason. Dispatching and draining the outbox fills
+    // whatever the live handler reads: the aggregate at level 1, the
+    // projection at level 2.
+    await DispatchAsync(CommandBuilder.PlaceOrder(), currentUser: Authenticated(owner));
+    await fixture.ProcessOutboxBatchAsync();
 
     CursorPage<OrderSummaryDto> seen = await DispatchAsync(
         new GetOrderSummariesQuery(Cursor: null, Limit: 20),
@@ -1085,14 +1131,59 @@ public async Task A_system_initiated_command_cancels_without_a_caller()
 }
 ```
 
-`DispatchAsync` is a `ServiceFixture` helper these tests add: it opens a scope,
-points that scope's `TestCurrentUser` at the principal named, and dispatches.
-The fixture registers `TestCurrentUser` as the scoped `ICurrentUser` for every
-test — authenticated, on a fresh subject — so the tests above that say nothing
-about the caller still get one, and these four override it explicitly.
-`Authenticated` returns an instance reporting the given subject; `Anonymous` is
-its counterpart, with `IsAuthenticated` false and an `Id` that throws, which is
-the shape `HttpContextCurrentUser` takes off the consumer path (§11.4).
+`DispatchAsync` is the fixture helper above: it opens a scope, points that
+scope's `TestCurrentUser` at the principal named, and dispatches. The double
+itself is the part worth reading, because a simpler one breaks the HTTP suite:
+
+```csharp
+/// <summary>
+/// The scoped ICurrentUser every test runs on, in three states.
+/// </summary>
+public sealed class TestCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
+{
+    // Unset inside a request: the real seam — TestAuthHandler through
+    // HttpContext through HttpContextCurrentUser, resolved exactly as
+    // production resolves it, so §12.4's endpoint tests keep asserting on
+    // the principal their headers named.
+    //
+    // Unset below HTTP: an authenticated stand-in, so a handler test that
+    // says nothing about the caller still has one. Without this branch every
+    // pre-existing dispatcher test would throw on currentUser.Id the moment
+    // §6.4's handler started reading it.
+    //
+    // Set: whatever the test said. The only route to a handler with no
+    // caller at all, which is the state RequireAuthorization stops a request
+    // from ever producing (§11.4).
+    private ICurrentUser? _stated;
+
+    public void Set(ICurrentUser principal) => _stated = principal;
+
+    private ICurrentUser Effective =>
+        _stated ?? (accessor.HttpContext is not null
+            ? new HttpContextCurrentUser(accessor)
+            : Principals.Default);
+
+    public bool IsAuthenticated => Effective.IsAuthenticated;
+
+    public Guid Id => Effective.Id;
+
+    public bool HasPermission(string permission) => Effective.HasPermission(permission);
+}
+```
+
+`Principals` holds the three values: `Default`, the authenticated stand-in
+above; `Authenticated(subject, permissions)`, which the subject tests name
+explicitly; and `Anonymous`, with `IsAuthenticated` false and an `Id` that
+throws — the shape `HttpContextCurrentUser` takes off the consumer path
+(§11.4).
+
+**Delegating rather than replacing is the whole design**, and the flat version
+is worth naming because it looks simpler and is wrong. A double that always
+answers from its own field would make
+`Hides_another_customers_order_behind_a_404` pass because the fixture's default
+subject happens not to be the seeded owner — the right status for the wrong
+reason, on the one test whose entire point is that the status is right — and
+would strand every HTTP path that needs the header principal.
 
 The class seeds prices in `InitializeAsync` exactly as `PlaceOrderHandlerTests`
 does, for the same reason: an unseeded projection fails a `PlaceOrder` with
