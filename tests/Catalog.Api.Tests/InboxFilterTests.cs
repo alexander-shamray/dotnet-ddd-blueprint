@@ -266,7 +266,23 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
             c => c.MessageId = Guid.CreateVersion7(),
             TestContext.Current.CancellationToken);
 
-        (await harness.Consumed.Any<ProbeMessage>(TestContext.Current.CancellationToken)).ShouldBeTrue();
+        // The completed record, not `Consumed.Any`. That predicate is satisfied
+        // when the harness observes the consume *attempt*, which can be before
+        // the throwing pipeline has unwound — so the negative assertion below
+        // could run while the attempt was still in flight and pass over a row
+        // written a moment later. A negative assertion that can be satisfied by
+        // "not yet" is the fail-open shape this suite has already been caught
+        // by once, in the redelivery test.
+        //
+        // Waiting on the exception is what makes it the finished attempt: the
+        // filter's SaveChangesAsync is downstream of `next.Send` throwing, so
+        // by the time the fault is recorded there is nothing left to write.
+        IReceivedMessage<ProbeMessage> received = await harness.Consumed
+            .SelectAsync<ProbeMessage>(TestContext.Current.CancellationToken)
+            .FirstOrDefault();
+
+        received.ShouldNotBeNull();
+        received.Exception.ShouldBeOfType<InvalidOperationException>();
 
         (await fixture.InboxAsync()).ShouldBeEmpty();
     }
