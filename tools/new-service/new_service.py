@@ -32,7 +32,7 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
 TEMPLATE = "Catalog"
@@ -87,14 +87,17 @@ COPIED = frozenset(
         "src/Services/Catalog/Catalog.Api/Program.cs",
         "src/Services/Catalog/Catalog.Application/Catalog.Application.csproj",
         "src/Services/Catalog/Catalog.Application/DependencyInjection.cs",
-        "src/Services/Catalog/Catalog.Application/NullDomainEventDispatcher.cs",
+        "src/Services/Catalog/Catalog.Application/Integration/CatalogIntegrationEventMapper.cs",
         "src/Services/Catalog/Catalog.Domain/Catalog.Domain.csproj",
         "src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj",
         "src/Services/Catalog/Catalog.Infrastructure/DependencyInjection.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Messaging/DependencyInjection.cs",
         "src/Services/Catalog/Catalog.Infrastructure/SqlConnectionFactory.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/CatalogDbContext.cs",
+        "src/Services/Catalog/Catalog.Infrastructure/Persistence/EfDomainEventCollector.cs",
+        "src/Services/Catalog/Catalog.Infrastructure/Persistence/OutboxPublisher.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/EfUnitOfWork.cs",
+        "src/Services/Catalog/Catalog.Infrastructure/Persistence/OutboxMessageConfiguration.cs",
         "src/Services/Catalog/Catalog.Migrator/Catalog.Migrator.csproj",
         "src/Services/Catalog/Catalog.Migrator/Dockerfile",
         "src/Services/Catalog/Catalog.Migrator/MigrationRunner.cs",
@@ -111,9 +114,12 @@ COPIED = frozenset(
         "tests/Catalog.Api.Tests/HostSmokeTests.cs",
         "tests/Catalog.Api.Tests/IntegrationCollection.cs",
         "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs",
+        "tests/Catalog.Api.Tests/OutboxDispatcherTests.cs",
         "tests/Catalog.Api.Tests/TransientFaultInjection.cs",
         "tests/Catalog.TestSupport/Catalog.TestSupport.csproj",
         "tests/Catalog.TestSupport/CatalogApiFactory.cs",
+        "tests/Catalog.TestSupport/Outbox/OutboxRows.cs",
+        "tests/Catalog.TestSupport/Outbox/OutboxTestEvents.cs",
         "tests/Catalog.TestSupport/ServiceFixture.cs",
     }
 )
@@ -136,11 +142,14 @@ OMITTED = frozenset(
         "src/Services/Catalog/Catalog.Domain/Products/Product.cs",
         "src/Services/Catalog/Catalog.Domain/Products/ProductId.cs",
         "src/Services/Catalog/Catalog.Domain/Products/ProductPublishedDomainEvent.cs",
+        "src/Services/Catalog/Catalog.Infrastructure/Persistence/MoneyJsonConverter.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/ProductConfiguration.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/ProductRepository.cs",
         "tests/Catalog.Domain.Tests/MoneyTests.cs",
         "tests/Catalog.Domain.Tests/ProductTests.cs",
+        "tests/Catalog.Application.Tests/CatalogIntegrationEventMapperTests.cs",
         "tests/Catalog.Application.Tests/GetProductsHandlerTests.cs",
+        "tests/Catalog.Application.Tests/OutboxSerialisationTests.cs",
         "tests/Catalog.Application.Tests/PublishProductHandlerTests.cs",
         "tests/Catalog.Application.Tests/PublishProductValidatorTests.cs",
         "tests/Catalog.Api.Tests/ProductEndpointsTests.cs",
@@ -172,13 +181,15 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ("using Catalog.Application.Products.PublishProduct;\n", ""),
         (
             "        // Explicit rather than scanned, beside the dispatcher it serves —\n"
-            "        // §4.2's registration sample is the shape. Since PR-10 the null\n"
-            "        // object drops real ProductPublished events, stated in CLAUDE.md's\n"
-            "        // phase note; PR-14's outbox dispatcher takes this line over.\n",
+            "        // §4.2's registration sample is the shape. §7.5's real dispatcher\n"
+            "        // since PR-14; the NullDomainEventDispatcher that dropped every\n"
+            "        // ProductPublishedDomainEvent between PR-10 and here is deleted, not\n"
+            "        // disabled, so nothing can register it back by accident.\n",
             "        // Explicit rather than scanned, beside the dispatcher it serves —\n"
-            "        // §4.2's registration sample is the shape. The null object drops\n"
-            "        // whatever the first aggregate raises until PR-14's outbox\n"
-            "        // dispatcher takes this line over.\n",
+            "        // §4.2's registration sample is the shape. It stages nothing until\n"
+            "        // this service has an aggregate raising domain events, and needs no\n"
+            "        // null object to say so: a collector over an empty change tracker\n"
+            "        // returns nothing and the dispatcher exits early (§7.5).\n",
         ),
         (
             "        services.AddValidatorsFromAssemblyContaining<PublishProductValidator>();\n",
@@ -193,23 +204,70 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);\n",
         ),
     ),
-    "src/Services/Catalog/Catalog.Application/NullDomainEventDispatcher.cs": (
+    "src/Services/Catalog/Catalog.Application/Integration/CatalogIntegrationEventMapper.cs": (
         (
-            "/// Drops what it is handed, and since PR-10 it is handed something real:\n"
-            "/// every <c>Product.Publish</c> raises a <c>ProductPublishedDomainEvent</c>\n"
-            "/// that ends here, because there is no outbox to stage into until PR-14 —\n"
-            "/// whose real dispatcher replaces this class. The drop is stated in\n"
-            "/// CLAUDE.md's phase note rather than hidden; the aggregate raises anyway,\n"
-            "/// so PR-14 picks the events up without touching the domain (§5.5). In\n"
-            "/// Application because §4.2's registration sample puts the real one there,\n"
-            "/// beside the dispatcher it serves.\n",
-            "/// Drops what it is handed, which is nothing until this service has an\n"
-            "/// aggregate — and everything it raises after that, because there is no\n"
-            "/// outbox to stage into until PR-14, whose real dispatcher replaces this\n"
-            "/// class. The aggregate must raise anyway: the domain cannot be allowed to\n"
-            "/// teach the defect of not raising, and PR-14 then picks the events up\n"
-            "/// without touching it (§5.5). In Application because §4.2's registration\n"
-            "/// sample puts the real one there, beside the dispatcher it serves.\n",
+            "using Catalog.Domain.Products;\n"
+            "using Common.Application;\n"
+            "using Common.Contracts.Catalog.V1;\n"
+            "using Common.Domain;\n",
+            "using Common.Application;\n"
+            "using Common.Domain;\n",
+        ),
+        (
+            "    // The allow-list. Catalog's other two facts of §3.2 — PriceChanged and\n"
+            "    // ProductDiscontinued — join it with the domain operations that raise\n"
+            "    // them; an entry here with no domain event behind it would not compile,\n"
+            "    // which is the property that keeps this list honest.\n"
+            "    private static readonly Dictionary<Type, Func<IDomainEvent, object>> Registry = new()\n"
+            "    {\n"
+            "        // Domain type in, contract type out. The suffix (§5.5) is what makes\n"
+            "        // that visible — with one name for both, this reads as identity, and\n"
+            "        // §12.4's \"the domain type never reaches the broker\" would have\n"
+            "        // nothing to assert against.\n"
+            "        [typeof(ProductPublishedDomainEvent)] = e => ToContract((ProductPublishedDomainEvent)e)\n"
+            "    };\n",
+            "    // The allow-list, empty until this service publishes something. Every\n"
+            "    // domain event it raises is local-only while this dictionary is empty,\n"
+            "    // which is the correct state for a service with no contracts — and not\n"
+            "    // a gap, because §9.3 makes translation opt-in precisely so that a new\n"
+            "    // event is internal until somebody decides otherwise.\n"
+            "    //\n"
+            "    // An entry is one line and one private ToContract method beside it:\n"
+            "    //\n"
+            "    //     [typeof(OrderPlacedDomainEvent)] = e => ToContract((OrderPlacedDomainEvent)e)\n"
+            "    //\n"
+            "    // with the contract living in Common.Contracts under a versioned\n"
+            "    // namespace (§9.2), carrying primitives only, and taking its MessageId\n"
+            "    // and CorrelationId from the mapper rather than from Stage (§9.1).\n"
+            "    private static readonly Dictionary<Type, Func<IDomainEvent, object>> Registry = [];\n",
+        ),
+        (
+            "\n"
+            "    // V1.ProductPublished, not ProductPublishedDomainEvent: Money is\n"
+            "    // decomposed into a decimal and an ISO code, because a contract may not\n"
+            "    // carry domain types (§9.1).\n"
+            "    private static ProductPublished ToContract(ProductPublishedDomainEvent e) => new()\n"
+            "    {\n"
+            "        // Minted here and nowhere else. Stage copies both onto the row and\n"
+            "        // DeliverAsync copies them onto the transport, so the body, the row,\n"
+            "        // the broker header and the inbox key are one GUID (§9.1).\n"
+            "        MessageId = Guid.CreateVersion7(),\n"
+            "        // The product, not an ambient request id: a business correlation is\n"
+            "        // what a support tool follows across services, and §9.3 sets it from\n"
+            "        // the aggregate for exactly that reason.\n"
+            "        CorrelationId = e.ProductId.Value,\n"
+            "        OccurredAt = e.OccurredAt,\n"
+            "        ProductId = e.ProductId.Value,\n"
+            "        Name = e.Name,\n"
+            "        ThumbnailUrl = e.ThumbnailUrl,\n"
+            "        Amount = e.Price.Amount,\n"
+            "        Currency = e.Price.Currency\n"
+            "    };\n",
+            "",
+        ),
+        (
+            "/// §9.3's allow-list for Catalog. §5.5 states the principle — never publish a\n",
+            "/// §9.3's allow-list for this service. §5.5 states the principle — never publish a\n",
         ),
     ),
     "src/Services/Catalog/Catalog.Application/Catalog.Application.csproj": (
@@ -225,8 +283,32 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "         not be making. -->\n",
         ),
     ),
+    "src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj": (
+        (
+            "    <!-- §9.4's outbox: the entity this assembly maps, the type map, the\n"
+            "         metrics and the dispatcher it hosts. PR-14's edge, and the reason\n"
+            "         Common.Infrastructure stopped being a project no service referenced —\n"
+            "         PR-12's Redis helpers are still nobody's dependency here, and the\n"
+            "         first service to wire them will not need a new reference. -->\n",
+            "    <!-- §9.4's outbox: the entity this assembly maps, the type map, the\n"
+            "         metrics and the dispatcher it hosts. §8's Redis helpers ride in on\n"
+            "         the same reference, so wiring a cache later costs no new one. -->\n",
+        ),
+        (
+            "    <!-- typeof(ProductPublished).Assembly, the Broker lane's half of\n"
+            "         MessageTypeSource. Transitive through Catalog.Application, named\n"
+            "         directly because this file names the type. -->\n",
+            "    <!-- MessageTypeSource's Broker half. Named through IIntegrationEvent\n"
+            "         until this service has a contract of its own, at which point the\n"
+            "         anchor becomes that contract — same assembly either way. -->\n",
+        ),
+    ),
     "src/Services/Catalog/Catalog.Infrastructure/DependencyInjection.cs": (
-        ("using Catalog.Domain.Products;\n", ""),
+        # Domain, not Domain.Products: the aggregate goes with the slice, and
+        # the AssemblyMarker that MessageTypeSource anchors on stays — it lives
+        # one namespace up, and dropping the using outright left the generated
+        # service naming a type it could not see.
+        ("using Catalog.Domain.Products;\n", "using Catalog.Domain;\n"),
         (
             "/// <c>typeof</c> anchor. The <c>IConfiguration</c> parameter arrives with PR-08\n"
             "/// because PR-08 is the first thing that reads one — an unused parameter is the\n"
@@ -242,6 +324,36 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "\n"
             "        // §5.6's repository registrations join with the first aggregate.\n",
         ),
+        ("using Common.Contracts.Catalog.V1;\n", "using Common.Contracts;\n"),
+        (
+            "        services.AddSingleton(\n"
+            "            new MessageTypeSource(typeof(ProductPublished).Assembly, typeof(Product).Assembly));\n",
+            "        // IIntegrationEvent and AssemblyMarker stand in for the two anchors\n"
+            "        // §9.4 names — this service's contracts and its domain — because it\n"
+            "        // has neither yet. Both point at the right assemblies regardless, so\n"
+            "        // the first contract and the first aggregate change what these lines\n"
+            "        // say and not what they resolve to.\n"
+            "        services.AddSingleton(\n"
+            "            new MessageTypeSource(typeof(IIntegrationEvent).Assembly, typeof(AssemblyMarker).Assembly));\n",
+        ),
+        (
+            "        // The payload format (§9.4), and the converters that make this\n"
+            "        // service's value objects part of it. MoneyJsonConverter is the same\n"
+            "        // decision as ProductConfiguration's ComplexProperty one file over —\n"
+            "        // Money is persisted twice, as two columns and as two JSON members,\n"
+            "        // and knows about neither. Its absence is silent: a Money round-trips\n"
+            "        // to zero and a null currency rather than throwing.\n"
+            "        services.AddSingleton<JsonConverter, MoneyJsonConverter>();\n"
+            "        services.AddSingleton<OutboxJson>();\n",
+            "        // The payload format (§9.4). No converters yet, and the first value\n"
+            "        // object this service puts on a domain event needs one registered\n"
+            "        // here — a type with a private constructor and get-only properties\n"
+            "        // does not fail loudly on the Local lane, it deserialises to its\n"
+            "        // default. §12.4's round-trip assertion is what catches that, and it\n"
+            "        // arrives with the first domain event for the same reason.\n"
+            "        services.AddSingleton<OutboxJson>();\n",
+        ),
+        ("using System.Text.Json.Serialization;\n", ""),
     ),
     "src/Services/Catalog/Catalog.Infrastructure/Persistence/CatalogDbContext.cs": (
         (
@@ -458,14 +570,25 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema creates it; "
             "AddProducts' is a no-op after it\");\n"
             "\n"
+            "        // Named and ordered, not merely counted: the migrator's job is to\n"
+            "        // apply every migration in sequence, and a count alone would pass on\n"
+            "        // two of three applied twice.\n"
+            "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
+            "        applied.Length.ShouldBe(3);\n"
+            "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
+            "        applied[1].ShouldEndWith(\"_AddProducts\");\n"
+            "        applied[2].ShouldEndWith(\"_AddOutbox\");\n",
+            "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
+            "\n"
+            "        // Named and ordered, not merely counted: the migrator's job is to\n"
+            "        // apply every migration in sequence, and a count alone would pass on\n"
+            "        // one of two applied twice. Two is what a scaffolded service starts\n"
+            "        // with — the schema, then §9.4's outbox table, which is wiring every\n"
+            "        // service has rather than anything this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
             "        applied.Length.ShouldBe(2);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
-            "        applied[1].ShouldEndWith(\"_AddProducts\");\n",
-            "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
-            "\n"
-            "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.ShouldHaveSingleItem().ShouldEndWith(\"_InitialCreate\");\n",
+            "        applied[1].ShouldEndWith(\"_AddOutbox\");\n",
         ),
     ),
 }
@@ -488,6 +611,30 @@ INITIAL_CREATE_PATCHES: tuple[tuple[str, str], ...] = (
         "/// The schema is the one piece of Catalog's shape that exists before its first\n"
         "/// table, and creating it here means the first <c>CREATE TABLE</c> lands in a\n"
         "/// schema that is already there rather than being ordered against it.\n",
+    ),
+)
+
+# The outbox migration's twin, shape-keyed for the same reason: its path carries
+# Catalog's timestamp. Only the prose is patched — the DDL below it is the
+# tool's own output and is what gives a scaffolded service its outbox table.
+OUTBOX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
+    (
+        "/// §9.4's outbox table, generated from <see cref=\"OutboxMessageConfiguration\"/>\n"
+        "/// on AddProducts' terms — the configuration is the source of truth and only\n"
+        "/// this file's dress is hand-authored (file-scoped namespace, this comment,\n"
+        "/// the field CA1861 asks for). The <c>.Designer.cs</c> and the snapshot beside\n"
+        "/// it are machine-owned and untouched.\n",
+        "/// §9.4's outbox table, generated from <see cref=\"OutboxMessageConfiguration\"/>\n"
+        "/// — the configuration is the source of truth and only this file's dress is\n"
+        "/// hand-authored (file-scoped namespace, this comment, the field CA1861 asks\n"
+        "/// for). The <c>.Designer.cs</c> and the snapshot beside it are machine-owned\n"
+        "/// and untouched.\n",
+    ),
+    (
+        "    // AddProducts met the same rule inline because CreateIndex's parameter is\n"
+        "    // a string[] and could.\n",
+        "    // A CreateIndex call meets the same rule inline, because its columns\n"
+        "    // parameter is a string[] and a collection expression converts to one.\n",
     ),
 )
 
@@ -572,6 +719,11 @@ MIGRATION_ID = re.compile(r"^\d{14}$")
 # The three shapes EF puts in a migrations directory. Anything else there is
 # somebody's addition, and the scaffold refuses rather than dropping it.
 INITIAL_CREATE = re.compile(r"^\d{14}_InitialCreate(\.Designer)?\.cs$")
+# The outbox table is wiring, not slice: §9.4 gives every service one, and a
+# scaffolded service that carried the dispatcher without the table would log a
+# failed claim twice a second from its first boot. So this migration is copied
+# with InitialCreate rather than dropped with Catalog's model changes.
+OUTBOX_MIGRATION = re.compile(r"^\d{14}_AddOutbox(\.Designer)?\.cs$")
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The two files that accumulate a block per service, and the markers that bound
@@ -700,7 +852,7 @@ def classify(repo_root: Path) -> list[str]:
             # the guard below ever seeing it — the one directory where the
             # scaffold's "it will not guess" promise silently did not hold.
             name = PurePosixPath(relative).name
-            if INITIAL_CREATE.fullmatch(name):
+            if INITIAL_CREATE.fullmatch(name) or OUTBOX_MIGRATION.fullmatch(name):
                 copied.append(relative)
             elif LATER_MIGRATION.fullmatch(name) or name == f"{TEMPLATE}DbContextModelSnapshot.cs":
                 pass
@@ -719,12 +871,16 @@ def classify(repo_root: Path) -> list[str]:
                 f"the scaffold will not guess."
             )
 
-    initial = [p for p in copied if p.startswith(MIGRATIONS + "/")]
-    if len(initial) != 2:
-        raise ScaffoldError(
-            f"expected InitialCreate.cs and InitialCreate.Designer.cs under "
-            f"{MIGRATIONS}, found {len(initial)}"
-        )
+    # Two pairs, counted separately. One number for both would be satisfied by
+    # four InitialCreate files and no outbox — which is precisely the state
+    # that ships a dispatcher with no table behind it.
+    for shape, label in ((INITIAL_CREATE, "InitialCreate"), (OUTBOX_MIGRATION, "AddOutbox")):
+        pair = [p for p in copied if shape.fullmatch(PurePosixPath(p).name)]
+        if len(pair) != 2:
+            raise ScaffoldError(
+                f"expected {label}.cs and {label}.Designer.cs under "
+                f"{MIGRATIONS}, found {len(pair)}"
+            )
 
     # The mirror of the check above, and the half that was missing. A file
     # *added* to Catalog stops the run; a file *deleted* from it did not — the
@@ -750,23 +906,93 @@ def classify(repo_root: Path) -> list[str]:
     return copied
 
 
+SLICE_ENTITY = f'            modelBuilder.Entity("{TEMPLATE}.Domain.Products.Product", b =>\n'
+# The leading newline matters: without it this matches inside a nested block's
+# deeper closer, because sixteen spaces then `});` is a substring of
+# twenty-four spaces then `});`. The ComplexProperty block inside Catalog's
+# aggregate is exactly that shape, so the removal stopped halfway and left the
+# entity's own tail behind — caught by the check at the end of the function,
+# which is the reason that check is there rather than trusted away.
+ENTITY_END = "\n                });\n\n"
+
+
+def without_slice_entity(designer: str) -> str:
+    """The model body with Catalog's aggregate removed, and nothing else touched.
+
+    A scaffolded service has the outbox entity and no aggregate, so the model
+    EF would describe for it is exactly Catalog's minus one `Entity(...)`
+    block. Removing that block is the one edit made to a machine-owned file
+    here, and it is anchored at both ends rather than parsed: the opening line
+    is exact and unique, and the closing `});` at that indent is the first one
+    after it. Everything else — property order, annotations, the `using` block
+    — stays byte-for-byte what the tool wrote.
+
+    The alternative was to keep deriving from `InitialCreate.Designer.cs`,
+    which describes an empty model. That stopped being the truth when the
+    outbox joined the template: the snapshot would omit an entity the
+    `DbContext` maps, and the first `migrations add` in a scaffolded service
+    would generate a second `CreateTable` for a table its own InitialCreate had
+    already created.
+    """
+    require_once(designer, SLICE_ENTITY, "the outbox migration's designer")
+    start = designer.index(SLICE_ENTITY)
+
+    end = designer.find(ENTITY_END, start)
+    if end == -1:
+        raise ScaffoldError(
+            "the slice entity block in the designer has no closing `});` at its own indent"
+        )
+
+    stripped = designer[:start] + designer[end + len(ENTITY_END):]
+
+    # The aggregate took a using with it. EF emits
+    # `using System.Collections.Generic;` for a ComplexProperty mapped as a
+    # Dictionary<string, object>, which is how §5.3's Money reaches the model —
+    # so with the entity gone the using is unreferenced, and EF would not have
+    # written it. Guarded rather than assumed: if any Dictionary< survives the
+    # removal the using is still earning its place and stays.
+    #
+    # Found by diffing against the tool, which is the only way it could be:
+    # the scaffolded service built and its migration produced an empty Up, and
+    # the sole difference from EF's own rewritten snapshot was this line.
+    dictionary_using = "using System.Collections.Generic;\n"
+    if "Dictionary<" not in stripped and dictionary_using in stripped:
+        stripped = stripped.replace(dictionary_using, "", 1)
+
+    # Masked, like the render loop's own check: EF stamps a ProductVersion
+    # annotation on every model it describes, and that token is nobody's
+    # aggregate.
+    if SLICE_TOKEN.search(BENIGN.sub("", stripped)) is not None:
+        raise ScaffoldError(
+            "the designer still names the slice after its entity block was removed — "
+            "Catalog has gained a second entity, and the scaffold will not guess which"
+        )
+    return stripped
+
+
 def snapshot_from_designer(designer: str, migration_id: str) -> str:
-    """The model snapshot for an empty model, from the tool's own description of one.
+    """The model snapshot, from the tool's own description of the same model.
 
     Catalog's snapshot cannot be copied — it describes `Product`, and the next
-    `migrations add` in a service that has no such entity would generate a drop.
-    Writing one by hand would break the rule that machine-owned files are left
-    exactly as the tool wrote them. `InitialCreate.Designer.cs` resolves both:
-    it already holds EF's own description of an empty model with a default
-    schema, which is exactly the model a fresh service has, so only the class
-    wrapper is rewritten and the model body is never retyped.
+    `migrations add` in a service that has no such entity would generate a
+    drop. Writing one by hand would break the rule that machine-owned files are
+    left exactly as the tool wrote them. The outbox migration's designer
+    resolves both: it already holds EF's description of a model with the outbox
+    entity in it, which is what a scaffolded service has once
+    `without_slice_entity` has taken the aggregate out, so the class wrapper is
+    rewritten and the model body is never retyped.
+
+    The designer reaching here has already had the aggregate removed — the
+    render loop does that before its slice check, so that a failed removal
+    stops the run rather than reaching a shipped file. Stripping again here
+    would find nothing and `require_once` would say so.
     """
     text = designer
     for needle, replacement in (
         ("using Microsoft.EntityFrameworkCore.Migrations;\n", ""),
-        (f'    [Migration("{migration_id}_InitialCreate")]\n', ""),
+        (f'    [Migration("{migration_id}_AddOutbox")]\n', ""),
         (
-            "    partial class InitialCreate\n",
+            "    partial class AddOutbox\n",
             "    partial class CatalogDbContextModelSnapshot : ModelSnapshot\n",
         ),
         ("        /// <inheritdoc />\n", ""),
@@ -775,7 +1001,7 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
             "        protected override void BuildModel(ModelBuilder modelBuilder)\n",
         ),
     ):
-        require_once(text, needle, "InitialCreate.Designer.cs")
+        require_once(text, needle, "AddOutbox.Designer.cs")
         text = text.replace(needle, replacement)
     return text
 
@@ -803,11 +1029,31 @@ def sort_usings(text: str) -> str:
     # plain line sort puts Microsoft.EntityFrameworkCore.Infrastructure ahead
     # of Microsoft.EntityFrameworkCore and disagrees with the tool. Also found
     # by diffing against it.
-    def namespace(line: str) -> str:
-        return line[len("using "):].strip().rstrip(";")
+    #
+    # System first, which is the other half of the tool's order and did not
+    # show until the outbox designer arrived: until then the only usings were
+    # Microsoft.* and the service's own, and a plain sort happened to agree.
+    # EF writes `using System;` and `using System.Collections.Generic;` above
+    # everything else, so a service whose name sorts before `System` — every
+    # one of them, since these are the only two — would otherwise get a block
+    # the next `migrations add` immediately rewrites.
+    def namespace(line: str) -> tuple[int, str]:
+        name = line[len("using "):].strip().rstrip(";")
+        return (0 if name == "System" or name.startswith("System.") else 1, name)
 
     lines[first:last] = sorted(lines[first:last], key=namespace)
     return "".join(lines)
+
+
+def next_migration_id(migration_id: str) -> str:
+    """The id one minute after the given one, keeping EF's 14-digit shape.
+
+    A plain `int(...) + 1` is wrong on every boundary the format has: second 59
+    rolls into 60, and so do minute, hour and month. Parsed and re-formatted
+    instead, which is the only arithmetic that is right for all of them.
+    """
+    stamp = datetime.strptime(migration_id, "%Y%m%d%H%M%S") + timedelta(minutes=1)
+    return stamp.strftime("%Y%m%d%H%M%S")
 
 
 def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[str, str]:
@@ -823,9 +1069,19 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
         patches = PATCHES.get(relative, ())
         if PurePosixPath(relative).name.endswith("_InitialCreate.cs"):
             patches = (*patches, *INITIAL_CREATE_PATCHES)
+        elif PurePosixPath(relative).name.endswith("_AddOutbox.cs"):
+            patches = (*patches, *OUTBOX_MIGRATION_PATCHES)
         for needle, replacement in patches:
             require_once(text, needle, relative)
             text = text.replace(needle, replacement)
+
+        # The outbox designer describes Catalog's whole model, aggregate
+        # included. Stripped here rather than further down, because the slice
+        # check immediately below is exactly the check that should see the
+        # result — a Product block surviving the removal must stop the run, not
+        # reach the file the service ships.
+        if PurePosixPath(relative).name.endswith("_AddOutbox.Designer.cs"):
+            text = without_slice_entity(text)
 
         # Before the rename, where a slice token means only itself. Doing this
         # after it — with the requested name masked, as the template check
@@ -845,15 +1101,25 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
         if relative.startswith(MIGRATIONS + "/"):
             name = PurePosixPath(relative).name
             template_id = name.split("_", 1)[0]
-            target = f"{MIGRATIONS}/{name.replace(template_id, migration_id, 1)}"
-            text = text.replace(template_id, migration_id)
+
+            # Two migrations, so two ids, and the order between them is the
+            # order they are applied in. The outbox one takes the second, a
+            # minute later: EF sorts by this prefix, and a service whose outbox
+            # table were ordered before its schema would fail on the first run.
+            new_id = migration_id if INITIAL_CREATE.fullmatch(name) else next_migration_id(migration_id)
+            target = f"{MIGRATIONS}/{name.replace(template_id, new_id, 1)}"
+            text = text.replace(template_id, new_id)
             rendered = names.rename(text)
             if name.endswith(".Designer.cs"):
                 rendered = sort_usings(rendered)
-                snapshot = names.rename(snapshot_from_designer(text, migration_id))
-                created[names.rename(f"{MIGRATIONS}/{TEMPLATE}DbContextModelSnapshot.cs")] = (
-                    restore(sort_usings(snapshot), newline)
-                )
+                if OUTBOX_MIGRATION.fullmatch(name):
+                    # Only the last migration's designer describes the model
+                    # the service ends up with, and the snapshot is a
+                    # description of exactly that.
+                    snapshot = names.rename(snapshot_from_designer(text, new_id))
+                    created[names.rename(f"{MIGRATIONS}/{TEMPLATE}DbContextModelSnapshot.cs")] = (
+                        restore(sort_usings(snapshot), newline)
+                    )
 
         created[names.rename(target)] = restore(rendered, newline)
 
