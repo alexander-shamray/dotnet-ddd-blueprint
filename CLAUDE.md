@@ -1330,21 +1330,27 @@ already written against it.
   a probe carrying both forms built clean under IDE0055 and
   `TreatWarningsAsErrors`, and `dotnet format whitespace` over it rewrote
   nothing but the line endings. So the rule joins the `[` placement rule and
-  the `new()` rule as review's. **Fourteen** sites in the corpus had the wrong
-  form — §7.5, §13.6, ten `.Send` calls in §9.6's saga, and §10.3's two
-  `AddPolicy` calls — and none of them was found by a tool.
+  the `new()` rule as review's. **Seventeen** sites in the corpus had the
+  ragged form, sixteen of them lambdas: §7.5, §13.6, ten `.Send` calls in
+  §9.6's saga, §10.3's two `AddPolicy` calls, §6.3's `unitOfWork.ExecuteAsync`
+  and §9.4's outbox `Publish`. The seventeenth is an object initialiser —
+  §10.3's `WriteAsJsonAsync(new ProblemDetails { … }, ct)` — which breaks the
+  older list rule in the same shape and was fixed with them.
 
-  This file said "two". A review then found §9.6's family, and the sweep that
-  answered it found §10.3's pair as well. That progression is the finding
-  rather than the tally: the rule was written from the two sites that prompted
-  it, the corpus was never swept, and each later reader measured only as far as
-  the site in front of them. State a rule and sweep for it in the same change,
-  or the count becomes a claim nobody re-measures.
+  This file said "two", then "fourteen", and each count was made by someone who
+  had stopped looking. The progression is the finding rather than the tally,
+  and the last step names the trap: **the block exemption is about being the
+  final argument, not about the next line being `{`.** A sweep that greps for a
+  trailing `=>` and accepts any `{` beneath it walks straight past
+  `Publish(payload, type, c => { … }, ct)`, where an argument follows the
+  closing brace and the block therefore owns nothing. The detector that catches
+  those is the closer rather than the arrow — `^\s*[}\])],\s*\S`, a bracket
+  closing at the head of a line with an argument still after it. Run both.
 
   The fixes divide the way the rule predicts. Eight of §9.6's ten fitted inside
   120 columns the moment the lambda stopped hanging, so joining them was the
-  whole fix; `ReserveStock`, `AuthorisePayment` and both `AddPolicy` calls were
-  too long for that and break at their own parenthesis instead.
+  whole fix; every other site breaks at its own parenthesis with one argument
+  per line, the trailing `ct` included.
 - **Break at the outermost bracket, never a nested one.** When a call's argument
   is itself a call, it is the outer parenthesis that opens the line — reaching
   past it to break the inner one leaves the outer call glued to its argument and

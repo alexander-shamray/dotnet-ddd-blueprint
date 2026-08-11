@@ -286,12 +286,14 @@ builder.Services.AddRateLimiter(options =>
             context.HttpContext.Response.Headers.RetryAfter =
                 ((int)retryAfter.TotalSeconds).ToString();
 
-        await context.HttpContext.Response.WriteAsJsonAsync(new ProblemDetails
-        {
-            Status = StatusCodes.Status429TooManyRequests,
-            Title = "Too many requests",
-            Type = "https://tools.ietf.org/html/rfc6585#section-4"
-        }, ct);
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new ProblemDetails
+            {
+                Status = StatusCodes.Status429TooManyRequests,
+                Title = "Too many requests",
+                Type = "https://tools.ietf.org/html/rfc6585#section-4"
+            },
+            ct);
     };
 });
 ```
