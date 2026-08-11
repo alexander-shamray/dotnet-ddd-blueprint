@@ -722,8 +722,10 @@ public sealed class OutboxDispatcher : BackgroundService
             new EventId(1, nameof(ClaimFailed)),
             "Outbox claim failed; retrying next tick.");
 
-    private static readonly Action<ILogger, Guid, OutboxLane, int, int, Exception?> DeliveryFailed =
-        LoggerMessage.Define<Guid, OutboxLane, int, int>(
+    // string, not OutboxLane: the claim reads the column, and OutboxClaim.Lane
+    // is a string for the reason its own summary gives.
+    private static readonly Action<ILogger, Guid, string, int, int, Exception?> DeliveryFailed =
+        LoggerMessage.Define<Guid, string, int, int>(
             LogLevel.Error,
             new EventId(2, nameof(DeliveryFailed)),
             "Outbox message {MessageId} on lane {Lane} failed, attempt {Attempt} of {Max}.");
@@ -869,7 +871,7 @@ public sealed class OutboxDispatcher : BackgroundService
             type,
             sp.GetRequiredService<OutboxJson>().Options)!;
 
-        if (message.Lane is "Broker")
+        if (message.Lane == nameof(OutboxLane.Broker))
         {
             await sp.GetRequiredService<IPublishEndpoint>().Publish(payload, type, c =>
             {
@@ -878,6 +880,19 @@ public sealed class OutboxDispatcher : BackgroundService
             }, ct);
             return;
         }
+
+        // Anything that is neither is a column that has drifted, and guessing
+        // at it would run an unknown payload through the projection handlers.
+        // Throwing leaves the row for §13.6's abandoned-row alert with its own
+        // lane value in LastError.
+        //
+        // nameof rather than a literal on both branches: the enum is what
+        // writes this column, so a member renamed without a migration should
+        // stop compiling here rather than silently stop matching.
+        if (message.Lane != nameof(OutboxLane.Local))
+            throw new InvalidOperationException(
+                $"Outbox row {message.MessageId} carries lane '{message.Lane}', which is neither " +
+                "Broker nor Local.");
 
         // Local lane: this service's own projection handlers, running safely
         // outside the write transaction that produced the event (§7.5).

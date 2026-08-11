@@ -156,7 +156,7 @@ their declaration.
 | `IDistributedLockFactory`, `IDistributedLock` | §8.1's lock and its held handle: `TryAcquireAsync(name, duration, ct)` returns null under contention, the TTL is mandatory, and disposal is the token-checked release |
 | `BuildInfo` | Assembly version stamped onto OTel resource attributes (§13.2) |
 | `OrderBuilder`, `AddressBuilder`, `CommandBuilder`, `SeedData` | Test data builders (§12.3) |
-| `Poison`, `Healthy`, `LocalRowFor<T>`, `TestClock` | Outbox test builders (§12.4). Each takes the **fixture**, not the map alone: a staged row needs both halves of the host's agreement about the format, and one written without the service's converters round-trips to a defaulted value object |
+| `OutboxRows` | Outbox test builders (§12.4) — `Poison`, `Healthy`, `Unhandled` and `Verbose`, one class rather than one per case. Each takes the **fixture**, not the map alone: a staged row needs both halves of the host's agreement about the format, and one written without the service's converters round-trips to a defaulted value object. `Raised` is a fixed instant, because `OccurredAt` is what §13.7's lag is measured from |
 | `Contracts`, `ContractSamples` | Test builders for `required`-member contract messages — one sample per contract type, and the reason the §12.6 suite cannot silently skip a new one |
 | `AlwaysThrows`, `NoOpEvent`, `UnhandledEvent` | Test event types with throwing / no-op / no handler |
 | `IntegrationCollection` (xUnit) | The `[CollectionDefinition]` sharing one `ServiceFixture` across test classes — declared once **per test assembly** (§12.4). Named for what it groups, and deliberately not `ServiceCollection`: that name is taken by `Microsoft.Extensions.DependencyInjection`, and the local type would win in every test file that also builds a provider |
@@ -167,7 +167,7 @@ their declaration.
 | `StartHarnessAsync` | Test helper returning a started MassTransit harness, and where a saga suite states both harness bounds — the inactivity timeout its negative assertions wait on, and the `TestTimeout` that would otherwise cap them (§12.5) |
 | `Realm`, `Catalog`, `Audiences()` | Fixture handles on the Keycloak and Catalog containers, and a `aud`-claim reader over the decoded token — the realm-configuration assertions in §11.5 |
 | `MessageTypes` | Fixture handle on the real `MessageTypeMap` (§12.4). **Not `Types`**: that name belongs to `NetArchTest.Rules.Types`, which §4.2's architecture tests call as `Types.InAssembly(...)`, and a fixture member would shadow it in any file holding both — the `ServiceCollection` collision again, two rows above |
-| `TestTypeMap`, `TestOutboxJson` | A `MessageTypeMap` over the contract and test assemblies and an `OutboxJson` with no converters, built once as statics in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture |
+| `Types`, `Json` | A `MessageTypeMap` over the contract and test assemblies and an `OutboxJson` with no converters, built once as private statics in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture, which is the point of it |
 | `OutboxJson` (fixture member) | Fixture handle on the registered `OutboxJson` (§12.4), so a staged row and a delivered one agree about converters as well as settings |
 | `DomainEventSamples` | One sample per stageable domain event, so a new event without one fails §12.4's round-trip rather than being skipped — `ContractSamples`' counterpart for the Local lane |
 | `ConcurrentRequestException` | Thrown when an idempotency key is claimed but unfinished (§8.5) |

@@ -642,8 +642,8 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     public async Task A_failing_row_does_not_block_healthy_rows()
     {
         await fixture.StageOutboxAsync(
-            Poison.Row(fixture),          // its handler always throws
-            Healthy.Row(fixture), Healthy.Row(fixture));
+            OutboxRows.Poison(fixture),          // its handler always throws
+            OutboxRows.Healthy(fixture), OutboxRows.Healthy(fixture));
 
         await fixture.ProcessOutboxBatchAsync();
 
@@ -660,7 +660,7 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task A_row_stops_being_claimed_at_the_attempt_cap()
     {
-        OutboxMessage poison = Poison.Row(fixture);
+        OutboxMessage poison = OutboxRows.Poison(fixture);
         await fixture.StageOutboxAsync(poison);
         await fixture.SetOutboxAttemptsAsync(poison.MessageId, 9);
 
@@ -681,7 +681,7 @@ public class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task A_local_row_with_no_registered_handler_fails_loudly()
     {
-        await fixture.StageOutboxAsync(LocalRowFor<UnhandledEvent>(fixture));
+        await fixture.StageOutboxAsync(OutboxRows.Unhandled(fixture));
 
         await fixture.ProcessOutboxBatchAsync();
 
@@ -703,11 +703,16 @@ would otherwise repeat eight assignments to vary one:
 ```csharp
 internal static class Contracts
 {
+    // A fixed instant, as the outbox builders below use: OccurredAt is what
+    // §13.7's delivery lag is measured from, and a builder reaching for the
+    // system clock would have every test assert against a lag it just made.
+    private static readonly DateTimeOffset Raised = new(2026, 8, 11, 0, 0, 0, TimeSpan.Zero);
+
     public static V1.OrderPlaced OrderPlaced(Guid orderId, decimal total = 25.00m, string currency = "EUR") => new()
     {
         MessageId = Guid.CreateVersion7(),
         CorrelationId = orderId,
-        OccurredAt = TestClock.Now,
+        OccurredAt = Raised,
         OrderId = orderId,
         CustomerId = Guid.CreateVersion7(),
         TotalAmount = total,
@@ -718,34 +723,40 @@ internal static class Contracts
 ```
 
 The builders those tests use are ordinary factories over `OutboxMessage`
-([Appendix D](appendix-d-type-inventory.md)). `Poison` stages a message whose registered handler always throws;
-`LocalRowFor<T>` stages a `Local` row for an event type with no handler at all:
+([Appendix D](appendix-d-type-inventory.md)), one class rather than one per
+case — they differ only in which event they stage, and three classes with a
+`Row` method each said that three times:
 
 ```csharp
-// The map is the real one, resolved from the fixture's provider (§9.4). A test
-// double here would let a test stage a type the running host cannot resolve,
-// which is the one thing these builders exist to prove does not happen.
-internal static class Poison
+// The map and the payload format are the real ones, resolved from the
+// fixture's provider (§9.4). A double for either would let a test stage a row
+// the running host cannot read back, which is the one thing these builders
+// exist to prove does not happen.
+public static class OutboxRows
 {
-    public static OutboxMessage Row(ServiceFixture fixture) => Local(new AlwaysThrows(), fixture);
+    // A fixed instant, not the system clock: OccurredAt is what §13.7's
+    // projection lag is measured from, and a test that staged "now" would
+    // assert against a lag it had just created.
+    private static readonly DateTimeOffset Raised = new(2026, 8, 11, 0, 0, 0, TimeSpan.Zero);
+
+    public static OutboxMessage Poison(ServiceFixture fixture) =>
+        Local(new AlwaysThrows { OccurredAt = Raised }, fixture);
+
+    public static OutboxMessage Healthy(ServiceFixture fixture) =>
+        Local(new NoOpEvent { OccurredAt = Raised }, fixture);
+
+    public static OutboxMessage Unhandled(ServiceFixture fixture) =>
+        Local(new UnhandledEvent { OccurredAt = Raised }, fixture);
+
+    // The fixture rather than the map alone, because a staged row needs both
+    // halves of the host's agreement about the format: the persisted name and
+    // the converters. A row written without the Money converter round-trips
+    // to a zero amount and a null currency.
+    private static OutboxMessage Local(object message, ServiceFixture fixture) =>
+        OutboxMessage.Stage(
+            message, OutboxLane.Local, Guid.CreateVersion7(), Raised,
+            fixture.MessageTypes, fixture.OutboxJson);
 }
-
-internal static class Healthy
-{
-    public static OutboxMessage Row(ServiceFixture fixture) => Local(new NoOpEvent(), fixture);
-}
-
-internal static OutboxMessage LocalRowFor<TEvent>(ServiceFixture fixture)
-    where TEvent : new() =>
-    Local(new TEvent(), fixture);
-
-// The fixture rather than the map alone, because a staged row needs both
-// halves of the host's agreement about the format: the persisted name and the
-// converters. A row written without the Money converter round-trips to zero.
-private static OutboxMessage Local(object message, ServiceFixture fixture) =>
-    OutboxMessage.Stage(
-        message, OutboxLane.Local, Guid.CreateVersion7(), TestClock.Now,
-        fixture.MessageTypes, fixture.OutboxJson);
 ```
 
 `AlwaysThrows` has a registered `IProjectionHandler<AlwaysThrows>` that throws;
@@ -788,7 +799,7 @@ public void Stage_takes_the_message_id_from_the_envelope()
 
     var row = OutboxMessage.Stage(
         placed, OutboxLane.Broker, correlationId: Guid.CreateVersion7(),
-        now: TestClock.Now, types: TestTypeMap, json: TestOutboxJson);
+        now: Now, types: Types, json: Json);
 
     // Both from the envelope, not minted here — and CorrelationId in
     // particular, because a caller-supplied one is passed in and ignored for
