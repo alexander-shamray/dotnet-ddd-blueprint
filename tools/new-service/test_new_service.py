@@ -332,10 +332,7 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
         """
         allowed = (
             "PR-07's OpenAPI deliverable",          # Appendix C's row for the host
-            "does not exist until PR-15",           # Common.Contracts, still unbuilt
             "unauthenticated until PR-16",          # the security PR, for any service
-            "until PR-14",                          # the outbox, for any service
-            "PR-14's outbox",
             "category is PR-22's",                  # Testcontainers categories
             "Appendix C's PR-09 test",              # names the test's origin, not the service's
             "drift PR-08 forbids",                  # a rule, cited like an ADR

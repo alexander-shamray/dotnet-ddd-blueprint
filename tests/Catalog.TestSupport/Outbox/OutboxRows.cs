@@ -1,4 +1,5 @@
 using Common.Application;
+using Common.Contracts.Catalog.V1;
 using Common.Infrastructure.Outbox;
 
 namespace Catalog.TestSupport.Outbox;
@@ -29,6 +30,33 @@ public static class OutboxRows
     /// </summary>
     public static OutboxMessage Verbose(ServiceFixture fixture, string note) =>
         Local(new NoOpEvent { OccurredAt = Raised, Note = note }, fixture);
+
+    /// <summary>A row whose handler waits on <see cref="DeliveryGate"/>.</summary>
+    public static OutboxMessage Blocking(ServiceFixture fixture) =>
+        Local(new BlocksUntilReleased { OccurredAt = Raised }, fixture);
+
+    /// <summary>
+    /// A Broker-lane row carrying a real contract, so the publish half of
+    /// <c>DeliverAsync</c> is exercised against the running broker rather than
+    /// inferred from the staging tests.
+    /// </summary>
+    public static OutboxMessage Broker(ServiceFixture fixture, Guid productId) =>
+        OutboxMessage.Stage(
+            new ProductPublished
+            {
+                MessageId = Guid.CreateVersion7(),
+                CorrelationId = productId,
+                OccurredAt = Raised,
+                ProductId = productId,
+                Name = "Walnut desk",
+                ThumbnailUrl = null,
+                Amount = 19.99m,
+                Currency = "EUR"
+            },
+            OutboxLane.Broker,
+            productId,
+            fixture.MessageTypes,
+            fixture.OutboxJson);
 
     /// <summary>A row for an event type with no handler at all.</summary>
     public static OutboxMessage Unhandled(ServiceFixture fixture) =>

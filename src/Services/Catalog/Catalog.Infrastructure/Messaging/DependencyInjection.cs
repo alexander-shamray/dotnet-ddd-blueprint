@@ -9,9 +9,11 @@ namespace Catalog.Infrastructure.Messaging;
 /// <c>Common.Infrastructure/Redis</c> established. Per-service rather than
 /// common, because this is where a service's consumers, sagas and receive
 /// endpoints are configured (§9.6 registers Ordering's saga inside its
-/// <c>AddMassTransitMessaging</c>) — and because no common code names a
-/// MassTransit type until PR-14's outbox, so a shared home today would be a
-/// package reference nothing uses.
+/// <c>AddMassTransitMessaging</c>). Common code does name a MassTransit type
+/// since PR-14 — <c>IPublishEndpoint</c>, on the Broker half of the outbox
+/// dispatcher — and that changed nothing here: what keeps this per-service is
+/// the transport, not the reference. <c>UsingRabbitMq</c>, the consumers and
+/// the receive endpoints are each service's own.
 /// </summary>
 public static class DependencyInjection
 {

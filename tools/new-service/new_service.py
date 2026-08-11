@@ -493,6 +493,72 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "}\n",
         ),
     ),
+    "tests/Catalog.TestSupport/Outbox/OutboxRows.cs": (
+        ("using Common.Contracts.Catalog.V1;\n", ""),
+        (
+            "    /// <summary>\n"
+            "    /// A Broker-lane row carrying a real contract, so the publish half of\n"
+            "    /// <c>DeliverAsync</c> is exercised against the running broker rather than\n"
+            "    /// inferred from the staging tests.\n"
+            "    /// </summary>\n"
+            "    public static OutboxMessage Broker(ServiceFixture fixture, Guid productId) =>\n"
+            "        OutboxMessage.Stage(\n"
+            "            new ProductPublished\n"
+            "            {\n"
+            "                MessageId = Guid.CreateVersion7(),\n"
+            "                CorrelationId = productId,\n"
+            "                OccurredAt = Raised,\n"
+            "                ProductId = productId,\n"
+            "                Name = \"Walnut desk\",\n"
+            "                ThumbnailUrl = null,\n"
+            "                Amount = 19.99m,\n"
+            "                Currency = \"EUR\"\n"
+            "            },\n"
+            "            OutboxLane.Broker,\n"
+            "            productId,\n"
+            "            fixture.MessageTypes,\n"
+            "            fixture.OutboxJson);\n"
+            "\n",
+            "    // A Broker-lane builder returns with this service's first contract,\n"
+            "    // together with the dispatcher test that uses it: staging that lane\n"
+            "    // needs a type Common.Contracts publishes on this service's behalf,\n"
+            "    // and the allow-list mapper is empty until there is one (§9.3).\n"
+            "\n",
+        ),
+    ),
+    "tests/Catalog.Api.Tests/OutboxDispatcherTests.cs": (
+        (
+            "\n"
+            "    [Fact]\n"
+            "    public async Task A_broker_row_is_published_and_completed()\n"
+            "    {\n"
+            "        // The Broker half of DeliverAsync, against the real RabbitMQ the\n"
+            "        // fixture runs. Everything else here exercises the Local lane, so\n"
+            "        // without this a failure in payload deserialisation, type resolution\n"
+            "        // or the publish call would ship while the staging tests and the\n"
+            "        // direct-bus smoke both stayed green.\n"
+            "        //\n"
+            "        // What is asserted is that the row completed — not what reached the\n"
+            "        // transport. §12.4 refuses the latter deliberately: observing the\n"
+            "        // headers needs an ITestHarness, and this fixture runs the real host\n"
+            "        // against the real broker on purpose. Publishing without throwing and\n"
+            "        // marking the row processed is the part this suite owns.\n"
+            "        await fixture.StageOutboxAsync(OutboxRows.Broker(fixture, Guid.CreateVersion7()));\n"
+            "\n"
+            "        (await fixture.ProcessOutboxBatchAsync()).ShouldBe(1);\n"
+            "\n"
+            "        OutboxMessage row = (await fixture.OutboxAsync()).ShouldHaveSingleItem();\n"
+            "        row.Lane.ShouldBe(OutboxLane.Broker);\n"
+            "        row.ProcessedAt.ShouldNotBeNull();\n"
+            "        row.LastError.ShouldBeNull();\n"
+            "    }\n",
+            "\n"
+            "    // The Broker lane's own test returns with this service's first\n"
+            "    // contract, beside the OutboxRows.Broker builder it needs. Until\n"
+            "    // then the allow-list is empty and nothing stages that lane, so a\n"
+            "    // test for it would assert against a row no code here can produce.\n",
+        ),
+    ),
     "tests/Catalog.TestSupport/ServiceFixture.cs": (
         (
             "    /// this context's <c>HasDefaultSchema</c>, and is no part of what PR-08\n"

@@ -41,6 +41,58 @@ public sealed record UnhandledEvent : IDomainEvent
     public DateTimeOffset OccurredAt { get; init; }
 }
 
+/// <summary>
+/// Blocks its handler until a test releases it, so a claim can be observed
+/// while it is still held. Nothing else can show the 60-second lease: a row
+/// that fails immediately has its lease replaced by the retry backoff, and one
+/// that succeeds is processed before a second pass could run.
+/// </summary>
+public sealed record BlocksUntilReleased : IDomainEvent
+{
+    public DateTimeOffset OccurredAt { get; init; }
+}
+
+/// <summary>
+/// Holds <see cref="BlocksUntilReleased"/>'s handler until a test opens it.
+/// Static because the handler is resolved by the container per row and a test
+/// has no reference to the instance — and reset by each test that uses it, so
+/// no state carries between them (§12.8).
+/// </summary>
+public static class DeliveryGate
+{
+    private static TaskCompletionSource _open = Opened();
+
+    /// <summary>Signals that a handler has entered and is now waiting.</summary>
+    public static TaskCompletionSource Entered { get; private set; } = new();
+
+    public static Task Wait => _open.Task;
+
+    public static void Close()
+    {
+        _open = new TaskCompletionSource();
+        Entered = new TaskCompletionSource();
+    }
+
+    public static void Open() => _open.TrySetResult();
+
+    private static TaskCompletionSource Opened()
+    {
+        TaskCompletionSource source = new();
+        source.SetResult();
+        return source;
+    }
+}
+
+/// <summary>Waits on the gate, so the row it belongs to stays claimed.</summary>
+public sealed class BlockingProjection : IProjectionHandler<BlocksUntilReleased>
+{
+    public async Task HandleAsync(BlocksUntilReleased domainEvent, CancellationToken ct)
+    {
+        DeliveryGate.Entered.TrySetResult();
+        await DeliveryGate.Wait;
+    }
+}
+
 /// <summary>Fails every delivery, so a row backs off and accumulates attempts.</summary>
 public sealed class AlwaysThrowsProjection : IProjectionHandler<AlwaysThrows>
 {

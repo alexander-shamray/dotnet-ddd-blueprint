@@ -1,5 +1,6 @@
 using Catalog.TestSupport;
 using Catalog.TestSupport.Outbox;
+using Common.Application;
 using Common.Infrastructure.Outbox;
 using Shouldly;
 using Xunit;
@@ -76,19 +77,68 @@ public sealed class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifeti
     }
 
     [Fact]
-    public async Task A_claimed_row_is_leased_so_a_second_replica_skips_it()
+    public async Task A_row_still_being_delivered_is_not_claimed_by_a_second_pass()
     {
-        // Two passes with no delivery possible in between: the second must
-        // claim nothing, because the first pushed LockedUntil sixty seconds
-        // out. This is the property READPAST and the lease exist for, and
-        // without it two dispatcher replicas publish every message twice.
-        await fixture.StageOutboxAsync(OutboxRows.Poison(fixture));
+        // The lease, observed while it is held — which takes two overlapping
+        // passes and cannot be done with sequential ones. An earlier version
+        // of this test staged a poison row and ran two passes back to back,
+        // and proved nothing about the lease at all: the first pass fails the
+        // row, `_failSql` immediately replaces the 60-second lease with the
+        // 5-second retry backoff, and the second pass is then blocked by the
+        // backoff. It would have passed with the lease removed entirely.
+        //
+        // So: a handler that blocks, a first pass left in flight, and a second
+        // pass run while the first still holds the claim. This is what
+        // UPDLOCK, READPAST and LockedUntil exist for — without them two
+        // replicas deliver the same row at the same time.
+        DeliveryGate.Close();
+        try
+        {
+            await fixture.StageOutboxAsync(OutboxRows.Blocking(fixture));
 
-        (await fixture.ProcessOutboxBatchAsync()).ShouldBe(0);
-        (await fixture.ProcessOutboxBatchAsync()).ShouldBe(0);
+            Task<int> inFlight = fixture.ProcessOutboxBatchAsync();
+            await DeliveryGate.Entered.Task.WaitAsync(
+                TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+            // The row is claimed and its delivery has not finished.
+            (await fixture.ProcessOutboxBatchAsync()).ShouldBe(
+                0, "a leased row must be invisible to a concurrent pass");
+
+            DeliveryGate.Open();
+            (await inFlight).ShouldBe(1);
+        }
+        finally
+        {
+            // Opened whatever happened, so a failure here cannot hang the
+            // rest of the collection on a gate nobody closes.
+            DeliveryGate.Open();
+        }
+
+        (await fixture.OutboxAsync()).ShouldHaveSingleItem().ProcessedAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task A_broker_row_is_published_and_completed()
+    {
+        // The Broker half of DeliverAsync, against the real RabbitMQ the
+        // fixture runs. Everything else here exercises the Local lane, so
+        // without this a failure in payload deserialisation, type resolution
+        // or the publish call would ship while the staging tests and the
+        // direct-bus smoke both stayed green.
+        //
+        // What is asserted is that the row completed — not what reached the
+        // transport. §12.4 refuses the latter deliberately: observing the
+        // headers needs an ITestHarness, and this fixture runs the real host
+        // against the real broker on purpose. Publishing without throwing and
+        // marking the row processed is the part this suite owns.
+        await fixture.StageOutboxAsync(OutboxRows.Broker(fixture, Guid.CreateVersion7()));
+
+        (await fixture.ProcessOutboxBatchAsync()).ShouldBe(1);
 
         OutboxMessage row = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
-        row.Attempts.ShouldBe(1, "the second pass must not have re-claimed a leased row");
+        row.Lane.ShouldBe(OutboxLane.Broker);
+        row.ProcessedAt.ShouldNotBeNull();
+        row.LastError.ShouldBeNull();
     }
 
     [Fact]

@@ -132,17 +132,30 @@ public sealed class OutboxDispatcher : BackgroundService
     /// </summary>
     public async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
-        await using AsyncServiceScope scope = _scopes.CreateAsyncScope();
-        IServiceProvider sp = scope.ServiceProvider;
+        // The claim's own scope, holding nothing but the connection. Delivery
+        // gets a scope per row below, so this one exists only to resolve the
+        // factory — and the connection deliberately outlives those scopes,
+        // because the claim, the completes and the fails are one row-keeping
+        // conversation with the database rather than part of any delivery.
+        await using AsyncServiceScope claimScope = _scopes.CreateAsyncScope();
 
         // Disposed every pass — the loop runs twice a second, so a leaked
         // connection here exhausts the pool within a minute.
-        using IDbConnection connection = sp.GetRequiredService<IDbConnectionFactory>().Create();
+        using IDbConnection connection =
+            claimScope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
         // OutboxClaim, not OutboxMessage — the claim projects only the columns
         // the OUTPUT clause returns. See Appendix D.
+        //
+        // CommandDefinition, so the token reaches the database command: with
+        // the plain overload a shutdown cannot interrupt a blocked claim, and
+        // the host waits out the SQL command timeout before ExecuteAsync
+        // returns. §6.5's read handlers pass it the same way.
         List<OutboxClaim> claimed =
-            [.. await connection.QueryAsync<OutboxClaim>(_claimSql, new { MaxAttempts })];
+        [
+            .. await connection.QueryAsync<OutboxClaim>(
+                new CommandDefinition(_claimSql, new { MaxAttempts }, cancellationToken: ct))
+        ];
 
         int completed = 0;
 
@@ -150,14 +163,28 @@ public sealed class OutboxDispatcher : BackgroundService
         {
             try
             {
-                await DeliverAsync(sp, message, ct);
-                await connection.ExecuteAsync(_completeSql, new { message.Id });
+                // A scope per row, not per batch, and this is what makes the
+                // per-row isolation above true rather than merely intended.
+                // Projection handlers are scoped and so is anything they
+                // inject — a DbContext most of all — so one scope for a
+                // hundred rows means a handler that throws mid-write hands
+                // the next row its own tracked, half-mutated state. The row
+                // that failed is then not the only row that fails, and the
+                // §13.6 lane alerts stop meaning what they say.
+                await using AsyncServiceScope delivery = _scopes.CreateAsyncScope();
+
+                await DeliverAsync(delivery.ServiceProvider, message, ct);
+
+                await connection.ExecuteAsync(
+                    new CommandDefinition(_completeSql, new { message.Id }, cancellationToken: ct));
                 completed++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // One bad message does not affect the other 99.
-                await connection.ExecuteAsync(_failSql, new { message.Id, Error = ex.ToString() });
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        _failSql, new { message.Id, Error = ex.ToString() }, cancellationToken: ct));
 
                 DeliveryFailed(_log, message.MessageId, message.Lane, message.Attempts + 1, MaxAttempts, ex);
             }
