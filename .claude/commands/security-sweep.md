@@ -119,8 +119,10 @@ or above.** Three gates, and each drops candidates the round must not file:
   exception, and suppressing it blindly is the more dangerous error: it blocks a
   re-file **only while its fix is still present** — if the finding **currently
   reproduces** because the fix was reverted, the vulnerability is back, and it
-  re-files (or reopens the issue) rather than being silenced by a closure that
-  no longer holds. Re-filing a genuinely-tracked finding is the drift this repo
+  re-files rather than being silenced by a closure that no longer holds —
+  **re-files**, because the grant carries `gh issue create` and no `reopen`,
+  and a duplicate that says why beats a capability this command does not have.
+  Re-filing a genuinely-tracked finding is the drift this repo
   exists to close; suppressing a reintroduced one is worse. (The prior-round
   caveat under *Where it stops* is a different set — issues still **open** are a
   live-risk signal, not the de-duplication test.)

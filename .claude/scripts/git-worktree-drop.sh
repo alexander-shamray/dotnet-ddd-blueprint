@@ -2,7 +2,7 @@
 # Remove the throwaway worktree a sweep created — /security-sweep or
 # /bug-sweep — without -f.
 #
-# The missing flag is half the point. That command's teardown leans on git
+# The missing flag is half the point. A sweep's teardown leans on git
 # refusing to remove a checkout holding anything modified or untracked — "if
 # `git worktree remove` refuses, leave the worktree standing and report what it
 # is holding" — and `git worktree remove -f` defeats exactly that guard, which
