@@ -37,6 +37,7 @@ repeatable check; noticing by eye is not.
 | `ServiceOptions` | §15.4 | Static constants only — not bound, not validated, not deployable |
 | `PluggableInterfaces`, `AddPluggableFrom` | §6.2 | The one list of scanned interfaces, and the per-assembly scan that reads it |
 | `AddDispatcher` | §6.2 | Registers `IDispatcher`. It exists because `Dispatcher` is internal to `Common.Application`, so no service can write the `AddScoped` line itself |
+| `AddDomainEventDispatcher` | §7.5 | Its twin, for the same reason: `DomainEventDispatcher`, `ProjectionRegistry` and `ProjectionRegistryCache` are all internal. Registers the cache as a **singleton** and the other two scoped |
 | `IIntegrationEventMapper` | §9.3 | Domain → integration allow-list |
 | `IIntegrationEventPublisher` | §9.3 | Stages outbox rows on the current transaction |
 | `IProjectionHandler<T>` | §9.4 | Reacts to own events, local lane, after commit |

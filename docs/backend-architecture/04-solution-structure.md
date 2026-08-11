@@ -262,8 +262,12 @@ public static IServiceCollection AddOrderingApplication(this IServiceCollection 
     // Not AddScoped<IDispatcher, Dispatcher>: Dispatcher is internal to
     // Common.Application (§6.2), so this assembly cannot name it.
     services.AddDispatcher();
-    services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
-    services.AddScoped<IProjectionRegistry, ProjectionRegistry>();      // §7.5
+
+    // The same reason, one section over: DomainEventDispatcher,
+    // ProjectionRegistry and its cache are all internal to Common.Application
+    // (§7.5), so the three AddScoped lines they need are not lines this
+    // assembly can write either.
+    services.AddDomainEventDispatcher();                                // §7.5
 
     // Not an open generic, so the §6.2 scan cannot find it — one service, one
     // mapper, registered by hand. DomainEventDispatcher injects it, so a

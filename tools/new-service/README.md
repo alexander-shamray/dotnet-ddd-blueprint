@@ -41,7 +41,7 @@ run shows exactly the five and the new directories.
 [§4.1](../../docs/backend-architecture/04-solution-structure.md)'s five
 service projects, three test projects and the `TestSupport` library — nine in
 all, and §4.1 is explicit that the last is not a test project — with
-everything the delivery plan has built into the template through PR-13:
+everything the delivery plan has built into the template through PR-14:
 `DbContext` and conventions, `EfUnitOfWork`, the connection factory, the
 readiness checks, the §7.4 migrator host, the `InitialCreate` migration that
 creates the schema and the `AddOutbox` one beside it, §9.4's outbox with its

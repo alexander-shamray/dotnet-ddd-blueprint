@@ -5,18 +5,19 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-13 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-14 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
-CI and the licence gate — the building blocks: `Common.Domain`,
-`Common.Application`, `Common.Infrastructure` and `Common.Web`, each with its
-test project — §14.1's Compose infrastructure, with the CI smoke that proves
+CI and the licence gate — all five building blocks: `Common.Domain`,
+`Common.Application`, `Common.Contracts`, `Common.Infrastructure` and
+`Common.Web`, each with a test project but Contracts — §14.1's Compose
+infrastructure, with the CI smoke that proves
 it — Catalog as the first real service: §4.1's five projects, §4.2's gates
 live, PR-08's persistence, PR-09's transaction behaviour, and PR-10's
 vertical slice with its containers — PR-11's scaffold under
-`tools/new-service/` — PR-12's Redis helpers, §8 as code — and PR-13's bus
-registration, the first of §9's three instalments. The phase section below
-carries the current state; this sentence only names the shape.
+`tools/new-service/` — PR-12's Redis helpers, §8 as code — PR-13's bus
+registration and PR-14's outbox, two of §9's three instalments. The phase
+section below carries the current state; this sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
 for it, and Appendix C sequences that code into 26 pull requests starting with
