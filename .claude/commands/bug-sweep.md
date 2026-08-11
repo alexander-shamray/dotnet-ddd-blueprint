@@ -213,13 +213,16 @@ the `mktemp` one above: compare `dirname "$resolved"` against `$tmproot` and
 match the basename alone, in both helpers, which is the same edit with the
 same deny lifted.
 
-**Both helpers' own comments still say "directly under", and they are the one
-pair of sites this file could not correct.** `.claude/scripts/**` is
-`Edit`-denied to a command session, so a reader who opens
-`git-worktree-detach.sh` will find the old claim in place until that follow-up
-lands. Naming it here is the only correction available from this side, and it
-is a poor substitute for the comment being right — say so rather than assume
-the reader of a helper has read this file first.
+**Both helpers now say this in their own comments**, which matters because a
+reader of a helper has not necessarily read this file first, and for two
+rounds the correction lived only here while the scripts still claimed the
+guarantee. Each spells out what the check excludes (sibling PR worktrees,
+anything outside the temp root), what it does not prove (that a sweep created
+the path), what it is not (a direct-child check), and the one line owed. That
+edit needed `Edit(.claude/scripts/**)` lifted for comments only — the shape
+check, `--detach` and the absent `-f` are untouched, and the sole code change
+was an error string reading `not a sweep-owned temp path`, which asserted the
+same ownership the check does not establish and now reads `sweep-shaped`.
 
 **What it costs is attribution, not safety.** The accepted path set is
 unchanged, `mktemp -d` names are unique so two sweeps cannot collide, and the

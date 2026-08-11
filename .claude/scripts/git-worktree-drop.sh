@@ -12,9 +12,17 @@
 # worktree is registered too, and the audited tree is prompt-injection input, so
 # a path arriving here may have been chosen by it. Accepting any non-main
 # worktree would let a poisoned finding steer this at someone else's clean
-# workspace. So the path must be one only the sweep's own `mktemp -d` could have
-# produced: `secsweep-` plus six characters, directly under the canonical temp
-# root.
+# workspace. So the path must match `secsweep-` plus six characters under the
+# canonical temp root.
+#
+# That EXCLUDES sibling PR worktrees and anything outside the temp root, which
+# is what it is for. It does NOT prove a sweep created the path — `mktemp` takes
+# an arbitrary template, and this helper accepts any registered worktree of the
+# right shape — and it is NOT strictly a direct-child check, because `?` matches
+# `/` in a bash `case` (no pathname expansion), so $tmproot/secsweep-a/bbbb
+# passes. Verified by running both through a `case`. Fix owed, one line:
+# compare `dirname "$resolved"` against "$tmproot" and match the basename
+# alone; git-worktree-detach.sh owes the same.
 set -euo pipefail
 [ "$#" -eq 1 ] || { echo "usage: git-worktree-drop.sh <path>" >&2; exit 2; }
 path="$1"
