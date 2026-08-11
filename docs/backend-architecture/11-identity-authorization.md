@@ -387,13 +387,24 @@ from it. A field that does not exist cannot be forgotten, and the read path is
 where forgetting is most expensive: §6.5 returns a page of another customer's
 history rather than a single record.
 
-Two cases genuinely need a subject the caller names, and both are explicit
-rather than incidental. An administrator acting for a customer is a **separate
-command** carrying the target subject, gated by an `orders:admin` policy at the
-endpoint and by a permission check in the handler — it is a different operation
-and reads as one. And a handler reachable by message has no principal at all,
-which `InitiatedBy` above answers: the subject comes off the aggregate, and the
-origin says why no check applies.
+Two cases genuinely need something other than the caller's own subject, and both
+are explicit rather than incidental. An administrator acting for a customer is a
+**separate command** carrying the target subject, with its own registered
+endpoint policy and an `orders:admin` claim check in the handler — it is a
+different operation and reads as one. And a handler reachable by message has no
+principal at all, which `InitiatedBy` above answers: the subject comes off the
+aggregate, and the origin says why no check applies.
+
+**Overriding ownership is not the same as naming a subject**, and
+`CancelOrderHandler` above does the first without breaching the rule. Its
+`HasPermission("orders:admin")` branch admits an administrator to an order the
+caller has already identified by `OrderId`, and the owner it compares against is
+read off the loaded aggregate rather than off the command — so nothing in the
+request says whose order it is. Naming somebody else's subject is what needs a
+second command type; relaxing the ownership test on an operation that is
+otherwise identical is a claim check on the same one. Both readings keep the
+paragraph above intact: `orders:admin` is a claim throughout, and never one of
+the registered policy names.
 
 ## 11.5 Service-to-service authentication
 
