@@ -84,15 +84,19 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
         // challenge stands.
         //
         // §12.4 calls this "the test that catches UseAuthentication being
-        // dropped from the pipeline". It is not, and the claim was removed
-        // from the chapter rather than restated here: commenting that line out
-        // leaves every test in this class green. AuthorizationMiddleware
-        // evaluates through PolicyEvaluator, which falls back to
-        // context.AuthenticateAsync() whenever the policy names no schemes —
-        // so authorization keeps working on its own, and what a missing
-        // UseAuthentication actually costs is HttpContext.User for everything
-        // downstream that reads it. AuthenticationMiddlewareTests asserts that
-        // half.
+        // dropped from the pipeline". It is not, and the claim was removed from
+        // the chapter rather than restated here: commenting that line out
+        // leaves every test in this class green, because WebApplication adds
+        // the authentication middleware itself whenever the services are
+        // registered. The explicit call moves it earlier; it is not what puts
+        // it there, so deleting it changes the pipeline's order and nothing a
+        // status code can see. AuthenticationMiddlewareTests carries that
+        // whole argument and the regression guard under it.
+        //
+        // (PolicyEvaluator is not the reason, though it is the plausible one:
+        // for a policy naming no schemes it succeeds with the existing
+        // HttpContext.User rather than authenticating anything itself. This
+        // comment said otherwise until a review checked it.)
         //
         // What this one does catch is the policy being dropped from the
         // endpoint, which is the commoner edit and the one a reviewer skims
