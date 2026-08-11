@@ -123,6 +123,12 @@ csharp_new_line_before_members_in_anonymous_types = true
 #     `=>` never trails the argument before it. `f(a, x => g(x))` either fits on
 #     one line or becomes `f(`/`a,`/`x => g(x))` — never `f(a, x =>` with the
 #     body hanging below, which is the ragged middle the list rule forbids.
+#     That governs EXPRESSION bodies. A BLOCK-bodied lambda that is the FINAL
+#     argument keeps its shape — `ReceiveEndpoint("q", e => { … })` — because
+#     its `{` owns every line after it, so nothing wraps back into the opening
+#     line. Not final and the exemption lapses: `Publish(a, b, c => { … }, ct)`
+#     is ragged like any other list, an argument sitting after the closing
+#     brace. CLAUDE.md carries the worked cases and the two greps that find them.
 #     Checked against the tools rather than assumed, the way the bracket rule
 #     above was: a probe file carrying both forms was built with IDE0055 at
 #     warning and ADR-019's TreatWarningsAsErrors — 0 warnings, so the ragged
