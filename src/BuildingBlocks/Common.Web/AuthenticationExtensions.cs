@@ -39,11 +39,27 @@ public static class AuthenticationExtensions
         // fixture comment named OptionsValidationException here and was
         // amended in this change — the failure is this line, and it says which
         // key is missing, which the options exception could not.
-        string authority = builder.Configuration[AuthorityKey] ??
+        //
+        // Blank counts as missing, and the distinction is not academic: an
+        // environment variable set to the empty string reaches Configuration as
+        // "" rather than null, so a null-only guard admits Identity__Authority=
+        // — the commonest way a deployment gets this wrong — and hands
+        // JwtBearer an authority it cannot build a metadata address from. The
+        // host would then start, having promised it would not, and fail the
+        // first token-bearing request instead of the deployment.
+        string? configured = builder.Configuration[AuthorityKey];
+
+        if (string.IsNullOrWhiteSpace(configured))
+        {
             throw new InvalidOperationException(
                 $"'{AuthorityKey}' is not configured. Every host re-validates inbound tokens (§11.2), " +
                 "so one that cannot name its identity provider must refuse to start rather than " +
                 "answer the first request without a principal.");
+        }
+
+        // A local, because the options lambda below captures it and nullable
+        // flow analysis does not reach across that boundary.
+        string authority = configured;
 
         builder.Services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

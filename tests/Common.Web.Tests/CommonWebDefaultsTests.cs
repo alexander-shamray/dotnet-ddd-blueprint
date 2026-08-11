@@ -113,4 +113,25 @@ public class CommonWebDefaultsTests
         // and "Identity:Authority" is the search term that ends it.
         thrown.Message.ShouldContain(AuthenticationExtensions.AuthorityKey);
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void A_blank_authority_is_a_missing_one(string configured)
+    {
+        // An environment variable set to nothing — `Identity__Authority=`, the
+        // commonest way a deployment gets this wrong — reaches Configuration
+        // as "" rather than null, so a null-only guard admits it. The host then
+        // starts, having promised it would not, and JwtBearer fails building a
+        // metadata address on the first request that carries a token: a 500
+        // during traffic instead of a refusal at boot, which is the whole
+        // difference the eager read exists to buy.
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        builder.Configuration[AuthenticationExtensions.AuthorityKey] = configured;
+
+        InvalidOperationException thrown =
+            Should.Throw<InvalidOperationException>(builder.AddCommonWebDefaults);
+
+        thrown.Message.ShouldContain(AuthenticationExtensions.AuthorityKey);
+    }
 }
