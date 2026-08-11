@@ -1282,6 +1282,31 @@ the other direction, and the direction that fails silently — refusing
 compensations — surfaces as orders stuck in `AwaitingStock` long after the
 deployment that caused it.
 
+**All four state an origin, and none of them earns one.** They construct
+`CommandOrigin.System` directly, which is the right way to test the *check* —
+but it leaves the only production code that assigns it, `CancelOrderMapper`
+(§9.4), unasserted. A mapper stamping `User` would pass every test above and
+reject every real compensation, which is the failure the pair was written to
+catch, arriving by the one route the pair cannot see. One line closes it:
+
+```csharp
+[Fact]
+public void The_mapper_is_what_makes_a_message_system_initiated()
+{
+    CancelOrderCommand command = new CancelOrderMapper().Map(
+        new CancelOrder(Guid.CreateVersion7(), CancelReasons.OutOfStock));
+
+    command.InitiatedBy.ShouldBe(CommandOrigin.System);
+}
+```
+
+No `[Collection]` and no fixture: the mapper is a pure function, so this sits
+beside `Stage_takes_the_message_id_from_the_envelope` above — same project, same
+absence of infrastructure — rather than inside the container-backed class. It is
+the second half of a boundary whose first half is the endpoint's literal, and
+that half is already covered: the API-contract tests reach the handler through
+HTTP, so they fail if `User` stops being stamped.
+
 ## 12.5 Testing the saga
 
 Saga logic is where cross-service bugs live, and MassTransit's in-memory test

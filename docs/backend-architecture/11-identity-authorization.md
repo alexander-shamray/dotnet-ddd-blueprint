@@ -151,7 +151,8 @@ public static class OrderEndpoints
                     // request that could set it would be the fail-open this
                     // replaces, spelt as a field (see below).
                     Result result = await dispatcher.SendAsync(
-                        new CancelOrderCommand(id, reason, CommandOrigin.User), ct);
+                        new CancelOrderCommand(id, reason, CommandOrigin.User),
+                        ct);
 
                     return result.ToHttpResult();
                 })

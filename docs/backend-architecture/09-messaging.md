@@ -1325,12 +1325,24 @@ public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, Cance
                 $"Unknown cancellation reason '{message.Reason}' on {nameof(CancelOrder)}.");
 
         // CommandOrigin.System, written here and nowhere else. The message
-        // carries no origin field, so a peer cannot claim one — arriving on
-        // this service's command queue is what earns it (§11.4).
+        // carries no origin field, so nothing a peer sends can forge one —
+        // arriving on this service's command queue is what earns it (§11.4).
+        // How much that earns is the callout below.
         return new CancelOrderCommand(message.OrderId, reason, CommandOrigin.System);
     }
 }
 ```
+
+> **Queue arrival is a weaker boundary than it reads as.** No part of the
+> payload can claim `System` — that is the whole reason the contract has no
+> origin field — but what *earns* the stamp is arrival on `ordering-commands`,
+> and that is only as restrictive as the broker's authorisation. Today there is
+> none to speak of: one shared principal, `guest/guest` locally ([§14.1](14-local-development.md)),
+> so any service that can reach the broker can publish onto that queue and be
+> mapped as system-initiated. `CommandOrigin` therefore **narrows** §11.4's
+> failure rather than closing it — it stops a caller-less command inheriting an
+> owner's privileges, and says nothing about who may publish. Per-service
+> broker identity is what closes it, and this chapter does not specify one.
 
 **A command reachable both ways has exactly two mappings of its origin**, and
 both are literals: `CommandOrigin.User` at the endpoint, `CommandOrigin.System`
@@ -1920,7 +1932,8 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork)
                 INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)
                 VALUES (@OrderId, @Reason, SYSDATETIMEOFFSET());
             """,
-            new { command.OrderId, command.Reason }, ct);
+            new { command.OrderId, command.Reason },
+            ct);
 
         return Result.Success();
     }
