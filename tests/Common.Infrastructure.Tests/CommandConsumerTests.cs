@@ -31,6 +31,9 @@ public class CommandConsumerTests
     private static readonly Error Refused =
         new("probe.refused", "the domain refused this", ErrorType.Rule);
 
+    private static readonly Error Unreachable =
+        new("probe.unreachable", "a dependency is down", ErrorType.Unavailable);
+
     private static CommandConsumer<ProbeMessage, ProbeCommand> Build(
         Result outcome,
         MessagingMetrics metrics,
@@ -148,6 +151,48 @@ public class CommandConsumerTests
         CommandConsumer<ProbeMessage, ProbeCommand> consumer = Build(Result.Success(), Metrics());
 
         await consumer.Consume(Context(new ProbeMessage(Guid.CreateVersion7())));
+
+        measurements.For("command.domain_rejected").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task An_unavailable_result_is_thrown_so_the_retry_policy_can_see_it()
+    {
+        // The half `IsFailure` swept in. §9.8's rule is that retry is for faults
+        // time might fix, and ErrorType.Unavailable is exactly that — a
+        // downstream dependency that is down — arriving as a returned value
+        // rather than a thrown one. §10.5 answers it over HTTP with a 503 and
+        // the caller retries; this path has no caller, so acking is the end of
+        // the command and the inbox row (§9.5) makes even a manual replay a
+        // no-op.
+        CommandConsumer<ProbeMessage, ProbeCommand> consumer =
+            Build(Result.Failure(Unreachable), Metrics());
+
+        UnavailableResultException thrown = await Should.ThrowAsync<UnavailableResultException>(
+            () => consumer.Consume(Context(new ProbeMessage(Guid.CreateVersion7()))));
+
+        // The code travels with it, because the fault MassTransit logs is the
+        // only record this outcome gets — there is no counter for it, by
+        // design: a transient failure that clears on retry is not an event, and
+        // one that does not reaches the error queue, where §13.6 already alerts.
+        thrown.Error?.Code.ShouldBe(Unreachable.Code);
+    }
+
+    [Fact]
+    public async Task An_unavailable_result_is_not_counted_as_a_domain_rejection()
+    {
+        // The other direction, and the one that would go quiet if the throw were
+        // added above the counter rather than instead of it. `command.domain_rejected`
+        // belongs on a dashboard rather than a pager (§9.8) precisely because
+        // every value in it is an answer the domain gave; a downstream outage
+        // counted there reads as a business signal and moves with load.
+        using RecordedMeasurements measurements = new("Commerce.Messaging");
+
+        CommandConsumer<ProbeMessage, ProbeCommand> consumer =
+            Build(Result.Failure(Unreachable), Metrics());
+
+        await Should.ThrowAsync<UnavailableResultException>(
+            () => consumer.Consume(Context(new ProbeMessage(Guid.CreateVersion7()))));
 
         measurements.For("command.domain_rejected").ShouldBeEmpty();
     }

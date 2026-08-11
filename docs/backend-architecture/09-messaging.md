@@ -1344,6 +1344,15 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         // This is the last place that can tell a rejection from a fault. An
         // exception from the dispatcher propagates and MassTransit retries it,
         // which is correct: that is a fault. Everything below is the other case.
+        //
+        // Unavailable is not the other case, and reading `IsFailure` as "the
+        // domain refused" swept it in. It is a fault that time might fix,
+        // arriving as a returned value rather than a thrown one — §10.5 answers
+        // it over HTTP with a 503 so the caller retries, and this path has no
+        // caller to do that.
+        if (result.IsFailure && result.Error.Type == ErrorType.Unavailable)
+            throw new UnavailableResultException(result.Error);
+
         if (result.IsFailure)
         {
             metrics.Rejected(typeof(TMessage).Name, result.Error.Code);
@@ -2567,6 +2576,18 @@ was wrong in a way that looked careful:
 The middle option was the previous revision of this document. It fixed the
 backoff and left the alert, which is the half-fix that reads as done: the
 message arrives faster at a place it should never have been.
+
+> **A rejection is an `ErrorType`, not an `IsFailure`.** Only `NotFound` and
+> `Rule` are answers; `Unavailable` (§10.5) is a fault that time might fix,
+> which is the very definition two paragraphs down — it just arrives as a
+> returned value rather than a thrown one, which is what let the first revision
+> of the consumer ack it. Over HTTP the ack is harmless because 503 tells a
+> caller to try again. Here there is no caller: the sender is a saga that has
+> already moved on (§9.7), so the ack is the last thing that ever happens to the
+> command, and the inbox row committed on the way out (§9.5) means a redelivery
+> — or a hand-driven replay of the same message — is dropped as already handled.
+> `CommandConsumer` throws `UnavailableResultException` instead, and the
+> endpoint's retry policy below is what catches it.
 
 The objection to acking was that a swallowed command disappears. That was true
 when there was nothing else recording it, and stopped being true once the

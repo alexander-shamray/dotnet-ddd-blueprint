@@ -57,6 +57,19 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         // which is correct: that is a fault. Everything below is the other case,
         // and keeping it out of the error queue is what lets §13.6's depth
         // alert stay at a threshold nobody has to interpret.
+        //
+        // Unavailable is not that case, and reading `IsFailure` as "the domain
+        // refused" swept it in. §9.8's own rule is that retry is for faults time
+        // might fix, and ErrorType.Unavailable is that fault arriving as a
+        // returned value rather than a thrown one — a downstream dependency that
+        // is down, which §10.5 answers over HTTP with a 503 so the caller tries
+        // again. There is no caller here to do that: the saga that sent it has
+        // moved on (§9.7), so acking is the end of the command, and the inbox
+        // row committed on the way out (§9.5) means even a manual replay of the
+        // same message is dropped as already handled.
+        if (result.IsFailure && result.Error.Type == ErrorType.Unavailable)
+            throw new UnavailableResultException(result.Error);
+
         if (result.IsFailure)
         {
             metrics.Rejected(typeof(TMessage).Name, result.Error.Code);
