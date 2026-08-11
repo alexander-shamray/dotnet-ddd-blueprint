@@ -1732,8 +1732,10 @@ vulnerability is a liability the moment it exists where a latent defect on an
 unreachable path is a note), the fan-out cut (five areas by tree, against
 security's three), and what confirmation can mean.
 
-**That last one is the interesting one: `/bug-sweep` cannot execute anything,
-and its grant withholds a build deliberately.** `dotnet build` or `dotnet test`
+**That last one is the interesting one: `/bug-sweep` runs none of the code it
+audits, and its grant withholds a build deliberately.** Its shell reaches
+`mktemp`, the two worktree helpers and `gh` — the worktree and the issue
+tracker, never the tree's own build. `dotnet build` or `dotnet test`
 inside the pinned worktree writes `bin/` and `obj/` into it, and the teardown
 both commands share leans on `git worktree remove` refusing a checkout holding
 untracked files as its guard — a sweep that built would trip that guard on its
