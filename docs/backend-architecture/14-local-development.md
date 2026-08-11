@@ -183,10 +183,18 @@ rather than at once. PR-06 ships the seven infrastructure services above;
 each application block lands with the PR that builds its image — the
 scaffold of [§4.5](04-solution-structure.md) writes the pair per service,
 along with both `infra-only` exclusions below, its `.env.example` variables
-and its row in `deploy/compose/README.md` — and the realm file ships as a
-placeholder, realm name and `enabled` only, until PR-16's import replaces
-it. The `docker-compose.infra-only.yml` override below arrives with the
-first containerised service, there being nothing to exclude before it.
+and its row in `deploy/compose/README.md`. The
+`docker-compose.infra-only.yml` override below arrives with the first
+containerised service, there being nothing to exclude before it.
+
+The realm file shipped as a placeholder — realm name and `enabled` only —
+from PR-06 until PR-16 replaced it with a full Keycloak export: the
+`commerce-api` client scope with its audience and permission mappers, the
+`commerce-api` client holding the permission vocabulary as client roles, a
+browser client, and two development logins. **A full export rather than a
+readable summary, and [§11.5](11-identity-authorization.md) argues why** —
+Keycloak treats a `clientScopes` array as the complete set, so a trimmed file
+silently drops the built-in scopes and with them `sub`.
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up -d --wait
@@ -198,6 +206,12 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 | Keycloak | http://localhost:8080 (admin/admin) |
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
+
+The realm's own logins are `demo/demo`, which holds `catalog:write`, and
+`browser/browser`, which holds nothing and is the account a refusal is proved
+against. Both are development defaults on the same terms as the three above —
+the deliberate local-development exception to §11.6, which every deployed
+environment replaces with real users out of a directory.
 
 `deploy/compose/README.md` is the keyboard inventory of what runs today —
 every port and credential of the seven infrastructure services, beside the
