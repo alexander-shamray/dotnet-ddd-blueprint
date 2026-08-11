@@ -407,38 +407,58 @@ public sealed class OutboxMessage
 
     public static OutboxMessage Stage(
         object message, OutboxLane lane, Guid correlationId,
-        MessageTypeMap types, OutboxJson json) => new()
+        MessageTypeMap types, OutboxJson json)
     {
-        // One identity, not two. An integration event already carries its
-        // MessageId and CorrelationId in the envelope the mapper filled in
-        // (§9.3), and DeliverAsync copies the row's values onto the transport —
-        // so minting a second GUID here would give the body one id and the
-        // broker header another. The inbox dedupes on the transport id (§9.5),
-        // which would then disagree with the id a support tool reads out of the
-        // payload, and the only way to notice is to compare two logs.
-        //
-        // A Local-lane row carries a domain event, which has no envelope and
-        // never reaches a broker, so the row mints its own id and takes the
-        // caller's correlation — which OutboxPublisher makes one value per
-        // scope, so rows staged by the same command correlate with each other.
-        MessageId = message is IIntegrationEvent e ? e.MessageId : Guid.CreateVersion7(),
-        CorrelationId = message is IIntegrationEvent c ? c.CorrelationId : correlationId,
-        MessageType = types.NameOf(message.GetType()),
-        Payload = JsonSerializer.Serialize(message, message.GetType(), json.Options),
-        Lane = lane,
+        // The lane decides which interface the payload must satisfy, and this
+        // is what makes §9.3's allow-list structural rather than a
+        // convention. `Map` returns `object` and the type map admits domain
+        // events and contracts alike, so a mapper that returned the event it
+        // was handed would stage it here and the dispatcher would publish it —
+        // the leak §5.5 forbids, prevented by the mapper being written
+        // correctly and by nothing else.
+        if (lane is OutboxLane.Broker && message is not IIntegrationEvent)
+            throw new InvalidOperationException(
+                $"{message.GetType().Name} is not an {nameof(IIntegrationEvent)} and cannot be " +
+                "staged on the Broker lane. Map it to a contract first.");
 
-        // The message's own timestamp, never a staging clock. §13.7 defines
-        // projection.lag as "event raised to projection applied", and a row
-        // stamped when Stage ran drops the interval between the two — small,
-        // and measured by the one metric whose name says it is included.
-        //
-        // No fallback arm and no `now` parameter: NameOf has already thrown
-        // for anything the map does not hold, and the map admits only these
-        // two interfaces, so one of them always matches.
-        OccurredAt = message is IIntegrationEvent o
-            ? o.OccurredAt
-            : ((IDomainEvent)message).OccurredAt
-    };
+        if (lane is OutboxLane.Local && message is not IDomainEvent)
+            throw new InvalidOperationException(
+                $"{message.GetType().Name} is not an {nameof(IDomainEvent)} and cannot be staged " +
+                "on the Local lane, which carries this service's own events to its handlers.");
+
+        return new OutboxMessage
+        {
+            // One identity, not two. An integration event already carries its
+            // MessageId and CorrelationId in the envelope the mapper filled in
+            // (§9.3), and DeliverAsync copies the row's values onto the transport —
+            // so minting a second GUID here would give the body one id and the
+            // broker header another. The inbox dedupes on the transport id (§9.5),
+            // which would then disagree with the id a support tool reads out of the
+            // payload, and the only way to notice is to compare two logs.
+            //
+            // A Local-lane row carries a domain event, which has no envelope and
+            // never reaches a broker, so the row mints its own id and takes the
+            // caller's correlation — which OutboxPublisher makes one value per
+            // scope, so rows staged by the same command correlate with each other.
+            MessageId = message is IIntegrationEvent e ? e.MessageId : Guid.CreateVersion7(),
+            CorrelationId = message is IIntegrationEvent c ? c.CorrelationId : correlationId,
+            MessageType = types.NameOf(message.GetType()),
+            Payload = JsonSerializer.Serialize(message, message.GetType(), json.Options),
+            Lane = lane,
+
+            // The message's own timestamp, never a staging clock. §13.7 defines
+            // projection.lag as "event raised to projection applied", and a row
+            // stamped when Stage ran drops the interval between the two — small,
+            // and measured by the one metric whose name says it is included.
+            //
+            // No fallback arm and no `now` parameter: NameOf has already thrown
+            // for anything the map does not hold, and the map admits only these
+            // two interfaces, so one of them always matches.
+            OccurredAt = message is IIntegrationEvent o
+                ? o.OccurredAt
+                : ((IDomainEvent)message).OccurredAt
+        };
+    }
 }
 
 /// <summary>
@@ -522,7 +542,12 @@ public sealed class MessageTypeMap
         [
             .. assemblies
                 .SelectMany(a => a.GetTypes())
-                .Where(t => t is { IsClass: true, IsAbstract: false } &&
+                // Not IsClass: neither interface carries a class constraint,
+                // so a `readonly record struct` domain event compiles, raises
+                // and dispatches like any other — and an IsClass filter drops
+                // it here in silence, leaving NameOf to throw inside the
+                // transaction that staged it.
+                .Where(t => t is { IsAbstract: false, IsInterface: false } &&
                     (t.IsAssignableTo(typeof(IIntegrationEvent)) ||
                         t.IsAssignableTo(typeof(IDomainEvent))))
                 .Select(t => (Name: t.FullName!, Type: t))
@@ -701,7 +726,13 @@ public sealed partial class OutboxTable
                 "into the dispatcher's statements rather than parameterised.",
                 nameof(schema));
 
-        QualifiedName = $"{schema}.OutboxMessages";
+        // Delimited: the pattern above admits reserved words and a service
+        // may legitimately be called `User`, whose `FROM user.OutboxMessages`
+        // SQL Server cannot read. Brackets rather than a keyword blacklist,
+        // which would need extending with every release — and nothing needs
+        // escaping inside them, because the pattern has already refused
+        // everything but letters, digits and underscore.
+        QualifiedName = $"[{schema}].OutboxMessages";
         Schema = schema;
     }
 
