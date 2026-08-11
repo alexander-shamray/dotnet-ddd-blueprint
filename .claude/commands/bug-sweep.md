@@ -78,10 +78,12 @@ recorded, not filed.
 
 ## Confirmation is by reading, and that is the honest limit
 
-**Nothing in this command executes anything.** There is no compiler, no test
-runner and no shell reader in the grant. So "confirmed" means: read the cited
-code, trace the values, find the caller, and reproduce the reasoning until the
-failure scenario holds — never "the agent said so".
+**Nothing in this command runs the code it is auditing.** There is no compiler,
+no test runner and no shell reader in the grant; the shell it does have reaches
+`mktemp`, the two worktree helpers and `gh`, which touch the worktree and the
+issue tracker and never the tree's own build. So "confirmed" means: read the
+cited code, trace the values, find the caller, and reproduce the reasoning until
+the failure scenario holds — never "the agent said so".
 
 **The absence of a build grant is a decision, not an oversight, and it has two
 reasons.** The first is the teardown: `dotnet build` or `dotnet test` inside the
@@ -107,9 +109,13 @@ implying the sweep is stronger than it is.
 for the type and the member. What turns up decides the candidate:
 
 - **A test that asserts the behaviour and would fail if the defect were real**
-  is strong evidence against the finding, because the suite is green at this
-  commit. Read the test rather than counting it — then drop the candidate, or
-  explain in the issue why the test passes anyway.
+  is reason to re-read the candidate, not proof against it. Read the test as
+  written, and **do not lean on the suite being green** — nothing here runs it,
+  so its passing at this commit is an assumption rather than an observation:
+  CI's verdict belongs to a commit this command never checks, and three of the
+  projects need a Docker daemon that may not have been present. Drop the
+  candidate when the test's own text shows the failure scenario cannot hold; if
+  it is filed anyway, say in the issue why the test passes regardless.
 - **A test that covers the line and could not fail** is not evidence of
   anything, and the sweep has now found **two** findings rather than none: the
   original defect, and a vacuous test that is itself critical by the table
@@ -160,11 +166,18 @@ that exists.
 **What it costs is attribution, not safety.** The accepted path set is
 unchanged, `mktemp -d` names are unique so two sweeps cannot collide, and the
 drop helper removes only the exact path handed to it. What is lost is that a
-stray temp directory no longer says which of the two commands left it. Fixing it
-properly means generalising the prefix in both helpers — a human's edit, made
-with the deny lifted, and a one-line change in each. Until then this is a
-residual named rather than hidden, and the run summary says which command owns
-the directory it reports.
+stray temp directory no longer says which of the two commands left it. Until
+that is fixed this is a residual named rather than hidden, and the run summary
+says which command owns the directory it reports.
+
+**Both helpers' header comments are stale for the same reason**, and reading
+them will tell you this command has no business calling them: they name
+`/security-sweep` as their only caller — "and nothing else", "the throwaway
+worktree `/security-sweep` created", "only **this command's** own `mktemp -d`".
+The behaviour is right and only the wording is singular. Fixing it properly
+means retitling both headers for "a sweep" and generalising the prefix in the
+same pass — a human's edit, made with the deny lifted, a line or two in each,
+and no change to the accepted path set.
 
 **Pin the resolved commit, not `HEAD` a second time.** Reading `HEAD` once for a
 summary and again for `git worktree add` are two calls, and in a repo worked by

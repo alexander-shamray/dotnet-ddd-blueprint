@@ -1718,7 +1718,7 @@ Delivery:
 | `/review-grok` | Triage an external review into a resolution record |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 | `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
-| `/bug-sweep` | The same loop aimed at defects rather than vulnerabilities — logic and execution bugs, filed at **critical or high** only, confirmed by reading because the grant runs nothing |
+| `/bug-sweep` | The same loop aimed at defects rather than vulnerabilities — logic and execution bugs, filed at **critical or high** only, confirmed by reading because the grant runs no build |
 
 **The two sweeps are one shape asking two questions, and the split is by what
 makes a finding rather than by where it looks.** `/security-sweep` files what an
@@ -1750,8 +1750,20 @@ worktree and having it deleted. Those helpers are `Edit`-denied to a command
 session, so `/bug-sweep` satisfies the shape that exists rather than widening
 it. The accepted path set is unchanged and `mktemp -d` names are unique, so
 nothing is less safe; what is lost is attribution, since a stray temp directory
-no longer says which sweep left it. Generalising the prefix in both helpers is
-a human's edit with the deny lifted, one line each.
+no longer says which sweep left it.
+
+**Both helpers' header comments still name `/security-sweep` as their only
+caller**, and that wording is now wrong in exactly the way the four prose sites
+above were: `git-worktree-detach.sh` opens "the detached, pinned worktree
+`/security-sweep` audits in, **and nothing else**", `git-worktree-drop.sh` opens
+"the throwaway worktree `/security-sweep` created", and the detach body argues
+its path check from "only **this command's** own `mktemp -d`". Two commands
+produce that shape now. The behaviour is right and only the prose is stale, but
+it is stale, and it is recorded here rather than left for a reader to hit —
+because the file that would say so is the file a command session may not touch.
+Retitling both headers for "a sweep" and generalising the prefix are the same
+human edit with the deny lifted, a line or two in each, and neither changes the
+accepted path set.
 
 **A PR gets its own worktree by default, and `/branch` is where it comes
 from.** From a clean `main` with a writable parent — the ordinary case — the
