@@ -1274,9 +1274,10 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         // The mapper is also where a command carrying a CommandOrigin (§11.4)
         // gets CommandOrigin.System. That belongs here rather than on the
         // message: the wire contract is written by a peer service, so an origin
-        // travelling on it would be an origin the sender chooses. This consumer
-        // is the trust boundary — reaching it is what makes the command
-        // system-initiated, and the mapper is the one line that knows it.
+        // travelling on it would be an origin the sender chooses. Arrival here
+        // is what makes the command system-initiated, and the mapper is the one
+        // line that knows it — though arrival is a weaker boundary than it
+        // sounds, which the callout below the mapper spells out.
         TCommand command = mapper.Map(context.Message);
 
         Result result =
