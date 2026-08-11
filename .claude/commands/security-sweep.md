@@ -182,6 +182,25 @@ Each round is the review done once, end to end:
 5. **Summarise the round.** New issues filed (with numbers), candidates dropped
    at each gate and why, and the lows/infos recorded but not filed.
 
+**Residual — the parent verifies while holding the mutation grants.** The
+read-only fan-out contains the *auditor*: it cannot act on what it reads
+because it has no tool to act with. The parent is the opposite — it holds
+`gh issue create`, `gh label create`, `mktemp` and the two worktree helpers —
+and step 2 requires it to read the cited code **itself**, deliberately, because
+an unverified agent claim must never become an issue. So untrusted text reaches
+the one stage that can mutate, *after* the isolated stage has finished.
+Containment is deferred, not achieved.
+
+Three things narrow it and none closes it: the path check at the head of step 2
+drops a candidate citing anything outside `$work` before the code is opened;
+the three available mutations each carry a stated rule (`--repo`, never
+`--force`, the temp-path shape); and with no `Write`, no `Edit` and no
+`git push`, no file and no branch can move. What is unbounded is what an issue
+says and where it is filed. Closing it means helpers that pin the repository
+and label so no free parameter remains, or a verify stage returning a
+structured verdict the parent files on without composing a body from text it
+has read — the same class of decision as the container named below.
+
 **Residual — the auditor reads the host, not only `$work`.** `Read`, `Grep` and
 `Glob` are not confined to the pinned worktree; the "root every path under
 `$work`" rule and the verify-step path check are the whole of the boundary, and

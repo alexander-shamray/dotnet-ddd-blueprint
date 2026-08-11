@@ -220,9 +220,13 @@ guarantee. Each spells out what the check excludes (sibling PR worktrees,
 anything outside the temp root), what it does not prove (that a sweep created
 the path), what it is not (a direct-child check), and the one line owed. That
 edit needed `Edit(.claude/scripts/**)` lifted for comments only — the shape
-check, `--detach` and the absent `-f` are untouched, and the sole code change
-was an error string reading `not a sweep-owned temp path`, which asserted the
-same ownership the check does not establish and now reads `sweep-shaped`.
+check, `--detach` and the absent `-f` are untouched, and the only code change
+was in **both** helpers' refusal message: `not a sweep-owned temp path`
+asserted in an error string the very ownership the check does not establish,
+and now reads `sweep-shaped`. It was fixed in one helper first and in the other
+a round later, which is the fifth time on this branch a claim was corrected
+where a review pointed and left standing where it did not — grep the string you
+are replacing, never the file you are editing.
 
 **What it costs is attribution, not safety.** The accepted path set is
 unchanged, `mktemp -d` names are unique so two sweeps cannot collide, and the
@@ -446,6 +450,32 @@ Each round is the review done once, end to end:
 5. **Summarise the round.** New issues filed (with numbers), candidates dropped
    at each gate and why, the mediums and lows recorded but not filed, and the
    by-inspection limit restated.
+
+**Residual — the parent verifies while holding the mutation grants.** The
+read-only fan-out contains the *auditor*: it cannot act on what it reads
+because it has no tool to act with. The parent is the opposite — it holds
+`gh issue create`, `gh label create`, `mktemp` and the two worktree helpers —
+and step 2 requires it to read the cited code **itself**, which is deliberate,
+because an unverified agent claim must never become an issue. The consequence
+is that untrusted text reaches the one stage that can mutate, *after* the
+isolated stage has finished. Containment is deferred, not achieved, and the
+agent profile's argument does not cover this.
+
+Three things narrow it and none of them closes it. The path check at the head
+of step 2 drops any candidate citing a path outside `$work` before the code is
+opened. The mutations available are three, each with a stated rule — `--repo`
+for this repository, never `--force`, and the temp-path shape. And there is no
+`Write`, no `Edit` and no `git push`, so no file and no branch can move
+whatever the parent is persuaded of; the unbounded part is *what an issue says
+and where it is filed*.
+
+Closing it properly is infrastructure rather than prose, and there are two
+directions. Helpers that pin the repository and the label name would leave the
+mutation surface with no free parameter for a finding to supply. A verify stage
+that returns a **structured verdict** rather than prose — the parent filing on
+the verdict without composing a body from text it has read — would keep the
+untrusted string out of the mutating stage altogether. Both are the same class
+of decision as the container named below, and neither is a command edit.
 
 **Residual — the auditor reads the host, not only `$work`.** `Read`, `Grep` and
 `Glob` are not confined to the pinned worktree; the "root every path under

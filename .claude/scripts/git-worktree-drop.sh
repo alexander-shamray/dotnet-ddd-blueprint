@@ -33,7 +33,7 @@ tmproot=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
 resolved=$(cd "$path" && pwd -P)
 case "$resolved" in
   "$tmproot"/secsweep-??????) : ;;
-  *) echo "not a sweep-owned temp path: $path" >&2; exit 2 ;;
+  *) echo "not a sweep-shaped temp path: $path" >&2; exit 2 ;;
 esac
 # Ask git whether this is a linked worktree of THIS repository, rather than
 # comparing path strings against `git worktree list`. Under MSYS those strings
