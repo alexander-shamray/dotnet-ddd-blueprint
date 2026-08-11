@@ -151,6 +151,8 @@ public class RealmImportTests
         JsonElement tokenClient = Root.GetProperty("clients").EnumerateArray()
             .Single(c => c.GetProperty("clientId").GetString() == TokenClient);
 
+        tokenClient.GetProperty("enabled").GetBoolean()
+            .ShouldBeTrue($"a disabled '{TokenClient}' satisfies both flags below and issues nothing");
         tokenClient.GetProperty("directAccessGrantsEnabled").GetBoolean()
             .ShouldBeTrue($"the README obtains a token by password grant against '{TokenClient}'");
         tokenClient.GetProperty("publicClient").GetBoolean()
@@ -186,11 +188,13 @@ public class RealmImportTests
         browser.TryGetProperty("clientRoles", out JsonElement granted)
             .ShouldBeFalse("'browser' exists to prove a refusal, so it must hold no client role at all");
 
-        // And that both can log in at all. A user disabled, or carrying a
-        // credential Keycloak marks temporary — which forces a password reset
-        // the README's non-interactive grant cannot perform — fails the
-        // documented commands with a 401 while every role assertion above
-        // stays green.
+        // And that both can log in at all, with the password the README prints.
+        // A user disabled, a credential Keycloak marks temporary — which forces
+        // a password reset the README's non-interactive grant cannot perform —
+        // or simply a different password: each fails the documented commands
+        // with a 401 while every role assertion above stays green. The value is
+        // pinned rather than merely present, because §11.6's carve-out is for
+        // *documented* local defaults, and one nobody can guess is not one.
         foreach (string username in (string[])["demo", "browser"])
         {
             JsonElement user = users.EnumerateArray()
@@ -201,6 +205,9 @@ public class RealmImportTests
 
             JsonElement password = user.GetProperty("credentials").EnumerateArray()
                 .Single(c => c.GetProperty("type").GetString() == "password");
+
+            password.GetProperty("value").GetString()
+                .ShouldBe(username, $"the compose README documents '{username}' as its own password");
 
             password.GetProperty("temporary").GetBoolean()
                 .ShouldBeFalse($"a temporary credential makes '{username}' unusable by the README's password grant");
@@ -273,6 +280,21 @@ public class RealmImportTests
                 builtin,
                 $"'{TokenClient}' does not receive '{builtin}', so its tokens are missing " +
                 "what that scope carries");
+
+        // And present and assigned is still not carrying: `basic` matters only
+        // because of the mapper inside it. Deleting that mapper, or turning off
+        // its access.token.claim, leaves the scope declared and assigned while
+        // every token loses `sub` — which is the exact failure the whole test
+        // is named for, reached by the one route the two checks above do not
+        // cover. ICurrentUser.Id reads that claim and would throw on every
+        // authenticated request in the platform.
+        JsonElement basic = ClientScopes.Single(s => s.GetProperty("name").GetString() == "basic");
+
+        JsonElement subject = MappersOf(basic).Single(
+            m => m.GetProperty("protocolMapper").GetString() == "oidc-sub-mapper");
+
+        subject.GetProperty("config").GetProperty("access.token.claim").GetString()
+            .ShouldBe("true", "a `sub` on the id token alone is invisible to a bearer check");
     }
 
     [Fact]
