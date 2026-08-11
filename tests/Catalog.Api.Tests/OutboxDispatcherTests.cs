@@ -98,11 +98,13 @@ public sealed class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifeti
 
             Task<int> inFlight = fixture.ProcessOutboxBatchAsync();
             await DeliveryGate.Entered.Task.WaitAsync(
-                TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+                TimeSpan.FromSeconds(30),
+                TestContext.Current.CancellationToken);
 
             // The row is claimed and its delivery has not finished.
             (await fixture.ProcessOutboxBatchAsync()).ShouldBe(
-                0, "a leased row must be invisible to a concurrent pass");
+                0,
+                "a leased row must be invisible to a concurrent pass");
 
             DeliveryGate.Open();
             (await inFlight).ShouldBe(1);

@@ -77,7 +77,11 @@ public sealed class OutboxTransportIdentityTests(ServiceFixture fixture) : IAsyn
                 IPublishEndpoint endpoint = Substitute.For<IPublishEndpoint>();
 
                 endpoint
-                    .Publish(Arg.Any<object>(), Arg.Any<Type>(), Arg.Any<IPipe<PublishContext>>(), Arg.Any<CancellationToken>())
+                    .Publish(
+                        Arg.Any<object>(),
+                        Arg.Any<Type>(),
+                        Arg.Any<IPipe<PublishContext>>(),
+                        Arg.Any<CancellationToken>())
                     .Returns(call =>
                     {
                         Captured = call.Arg<IPipe<PublishContext>>();
