@@ -51,6 +51,34 @@ public class RealmImportTests
     private static JsonElement.ArrayEnumerator MappersOf(JsonElement scope) =>
         scope.GetProperty("protocolMappers").EnumerateArray();
 
+    /// <summary>
+    /// Keycloak speaks more than one protocol, and every assertion in this file
+    /// is about a JWT. A client, a scope or a mapper switched to <c>saml</c>
+    /// keeps its name, its flags and its config — so every other test here
+    /// stays green while the thing they describe stops being an OIDC token.
+    /// </summary>
+    private const string Protocol = "openid-connect";
+
+    [Fact]
+    public void Every_part_of_the_token_path_speaks_openid_connect()
+    {
+        // The client the README logs in through, the scope that carries the
+        // audience and the permissions, and the two mappers that write them.
+        // Nothing else in this suite reads `protocol` at all, so this is the
+        // one assertion standing between a realm that issues JWTs and one that
+        // issues something no part of this platform can validate.
+        JsonElement tokenClient = Root.GetProperty("clients").EnumerateArray()
+            .Single(c => c.GetProperty("clientId").GetString() == TokenClient);
+
+        tokenClient.GetProperty("protocol").GetString().ShouldBe(Protocol);
+        CommerceApiScope.GetProperty("protocol").GetString().ShouldBe(Protocol);
+
+        foreach (JsonElement mapper in MappersOf(CommerceApiScope))
+            mapper.GetProperty("protocol").GetString().ShouldBe(
+                Protocol,
+                $"'{mapper.GetProperty("name").GetString()}' writes into a token this platform reads");
+    }
+
     [Fact]
     public void The_realm_is_the_one_every_host_is_pointed_at()
     {
