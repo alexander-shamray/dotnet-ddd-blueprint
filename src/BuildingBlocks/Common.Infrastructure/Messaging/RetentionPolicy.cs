@@ -48,8 +48,20 @@ public sealed record RetentionPolicy
     /// a first run against a table that was never purged loops until it is
     /// empty, holding a connection and competing with the dispatcher for as
     /// long as that takes. With it the backlog drains over several passes and
-    /// each pass is bounded — 20 × 5000 is 100,000 rows an hour per table,
-    /// comfortably past any rate the dispatcher can create them at.
+    /// each pass is bounded.
     /// </summary>
+    /// <remarks>
+    /// <b>The bound is real and it is below the dispatcher's, which is the
+    /// opposite of what it looks like.</b> Twenty batches of 5,000 an hour is
+    /// 100,000 rows per table — about 28 a second — where <c>OutboxDispatcher</c>
+    /// claims up to 100 rows twice a second, so a service sustaining its full
+    /// delivery rate produces processed rows some seven times faster than this
+    /// reclaims them. That is not a competition at ordinary load, because a row
+    /// is only purgeable a week after it was processed and a week of backlog is
+    /// what <see cref="OutboxWindow"/> is for; it is one at sustained peak, and
+    /// the answer there is a shorter <see cref="Interval"/> or a larger ceiling
+    /// rather than a different design — §13.6's outbox-growth alert is what
+    /// makes the need visible before the table does.
+    /// </remarks>
     public int MaxBatchesPerPass { get; init; } = 20;
 }
