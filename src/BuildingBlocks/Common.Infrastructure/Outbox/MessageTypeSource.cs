@@ -18,6 +18,7 @@ public sealed class MessageTypeSource(params Assembly[] assemblies)
 {
     private readonly List<Assembly> _assemblies = [.. assemblies];
     private readonly Dictionary<string, Type> _aliases = [];
+    private readonly Dictionary<Type, string> _written = [];
 
     public IEnumerable<Assembly> Assemblies => _assemblies;
 
@@ -52,5 +53,38 @@ public sealed class MessageTypeSource(params Assembly[] assemblies)
         return this;
     }
 
+    /// <summary>
+    /// Keeps writing a type's previous persisted name, so rows this instance
+    /// stages stay readable by instances that have not been replaced yet.
+    /// </summary>
+    /// <remarks>
+    /// <b><see cref="Alias"/> alone does not make a rolling rename safe, and
+    /// saying it did was wrong.</b> An alias is inward: it lets a new instance
+    /// resolve the old name. It does nothing about the other direction, which
+    /// is live for exactly as long — a new instance writes the new name
+    /// immediately, and the old instances sharing the table cannot resolve it,
+    /// so their dispatchers burn the attempt cap on rows that are perfectly
+    /// good. Half the deployment window, in the opposite direction, silently.
+    /// <para>
+    /// The pair makes it expand and contract, over three releases:
+    /// </para>
+    /// <list type="number">
+    /// <item>Alias the new name to the type and <see cref="WriteAs"/> the old
+    /// one. Every instance resolves both and writes what every instance can
+    /// read.</item>
+    /// <item>Drop the <see cref="WriteAs"/>. The new name is written; release
+    /// one's instances still resolve it through their alias.</item>
+    /// <item>Drop the <see cref="Alias"/>, once no unprocessed row names the
+    /// old one.</item>
+    /// </list>
+    /// </remarks>
+    public MessageTypeSource WriteAs(Type type, string persistedName)
+    {
+        _written.Add(type, persistedName);
+        return this;
+    }
+
     public IReadOnlyDictionary<string, Type> Aliases => _aliases;
+
+    public IReadOnlyDictionary<Type, string> WrittenNames => _written;
 }

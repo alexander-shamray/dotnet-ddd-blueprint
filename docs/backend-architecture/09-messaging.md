@@ -579,7 +579,7 @@ public sealed class MessageTypeMap
             : throw new InvalidOperationException(
                 $"Unknown message type '{name}'. A type was renamed or removed " +
                 "while rows naming it were still unprocessed — drain the outbox " +
-                "before deleting a message type (§7.4).");
+                "before deleting a message type (§9.4).");
 }
 ```
 
@@ -589,30 +589,44 @@ fails rather than the outbox filling with rows nobody can deliver. `Resolve`
 fails on the dispatcher, where the message that names a departed type is the one
 that lands in the retry log with its own name in it.
 
-> **A renamed message type is a migration.** The rule that follows from this map
-> is the one nobody remembers under deadline: a type may not be renamed or
-> deleted while unprocessed rows still name it. Deploy the rename in one release
-> with both names resolving to the same type, drain, then remove the old name in
-> the next — the same shape as every backward-compatible schema change (ADR-007).
+> **A renamed message type is a migration, and it takes three releases.** The
+> rule that follows from this map is the one nobody remembers under deadline: a
+> type may not be renamed or deleted while unprocessed rows still name it. It
+> is expand and contract, the same shape as every backward-compatible schema
+> change (ADR-007) — and both directions are live, which is the half that is
+> easy to miss.
 >
-> **`MessageTypeSource.Alias` is what makes that first release expressible**,
-> and without it the procedure above is a description of something the code
-> cannot do: the map derives only the current `FullName`, so during a rolling
-> deploy the instances that have not been replaced go on staging the old name
-> while the new dispatcher resolves nothing, and those rows abandon at the
-> attempt cap. The safe procedure would have been the lossy one.
+> During a rolling deploy the two versions share the table. An **alias** lets a
+> replaced instance resolve the name its predecessors write. It does nothing
+> about the other direction: a replaced instance also *writes* the new name
+> immediately, and the instances still running cannot resolve that, so their
+> dispatchers burn the attempt cap on rows that are perfectly good. Fixing one
+> direction and calling the rename safe is how the procedure loses messages
+> while looking careful.
+>
+> So `WriteAs` pairs with `Alias`, and the compatibility release uses both:
 >
 > ```csharp
+> // Release 1 — everything resolves both names, everything writes the old one.
 > new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
->     .Alias("Ordering.Domain.Orders.Events.OrderPlaced", typeof(OrderPlacedDomainEvent));
+>     .Alias("Ordering.Domain.Orders.OrderPlacedDomainEvent", typeof(OrderPlacedDomainEvent))
+>     .WriteAs(typeof(OrderPlacedDomainEvent), "Ordering.Domain.Orders.OrderPlacedDomainEvent");
 > ```
 >
-> Aliases resolve **inward only**. `NameOf` goes on writing the current name,
-> so the old one drains and never comes back — which is what makes the second
-> release a deletion rather than a migration of its own. An alias that shadows
-> a live type name fails the host, on the duplicate-name argument one
-> indirection over: two types would answer to one name and which resolves is
-> not decidable.
+> **Release 2** drops the `WriteAs`: the new name is written, and release one's
+> instances resolve it through their alias. **Release 3** drops the `Alias`,
+> once no unprocessed row still names the old one — which is the deletion the
+> drain rule above is about.
+>
+> Three guards keep the pair honest, and each fails the host rather than a
+> message. An alias that shadows a live type name is refused, on the
+> duplicate-name argument one indirection over: two types would answer to one
+> name and which resolves is not decidable. An alias onto a type the map does
+> not carry is refused, because the dispatcher trusts the row's `Lane` rather
+> than re-deriving it — an old `Broker` name pointed at a domain event would
+> publish that domain event, reopening the leak `Stage`'s guards close. And a
+> `WriteAs` naming something the map cannot resolve is refused, because that
+> instance would stage rows it could not itself deliver.
 
 ### The payload is a persisted format too
 

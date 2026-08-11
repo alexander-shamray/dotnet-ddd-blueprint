@@ -93,6 +93,52 @@ public class MessageTypeMapTests
     }
 
     [Fact]
+    public void The_compatibility_release_writes_the_old_name_and_resolves_both()
+    {
+        // Release one of §9.4's rename: every instance, replaced or not,
+        // resolves both names and writes the one all of them can read. An
+        // alias alone would have new instances writing the new name
+        // immediately, which the un-replaced ones cannot resolve — the same
+        // loss as no alias at all, pointed the other way.
+        const string old = "Old.Namespace.SampleDomainEvent";
+
+        MessageTypeMap map = new(
+            [typeof(SampleDomainEvent).Assembly],
+            new Dictionary<string, Type> { [old] = typeof(SampleDomainEvent) },
+            new Dictionary<Type, string> { [typeof(SampleDomainEvent)] = old });
+
+        map.NameOf(typeof(SampleDomainEvent)).ShouldBe(old);
+        map.Resolve(old).ShouldBe(typeof(SampleDomainEvent));
+        map.Resolve("Common.Infrastructure.Tests.SampleDomainEvent").ShouldBe(typeof(SampleDomainEvent));
+    }
+
+    [Fact]
+    public void Writing_a_name_the_map_cannot_resolve_fails_the_host()
+    {
+        // The override without the alias: this instance would stage rows it
+        // could not itself deliver.
+        Should
+            .Throw<InvalidOperationException>(() => new MessageTypeMap(
+                [typeof(SampleDomainEvent).Assembly],
+                new Dictionary<string, Type>(),
+                new Dictionary<Type, string> { [typeof(SampleDomainEvent)] = "Nothing.Resolves.This" }))
+            .Message.ShouldContain("cannot resolve");
+    }
+
+    [Fact]
+    public void An_alias_onto_a_type_the_map_does_not_carry_fails_the_host()
+    {
+        // The dispatcher trusts the row's Lane rather than re-deriving it, so
+        // an alias onto something Stage would refuse is a second door into the
+        // leak the lane guards close.
+        Should
+            .Throw<InvalidOperationException>(() => new MessageTypeMap(
+                [typeof(SampleDomainEvent).Assembly],
+                new Dictionary<string, Type> { ["Some.Old.Name"] = typeof(NotAMessage) }))
+            .Message.ShouldContain("does not carry");
+    }
+
+    [Fact]
     public void An_alias_that_shadows_a_live_name_fails_the_host()
     {
         // Two types would answer to one name and which resolves is not

@@ -1,6 +1,7 @@
 using System.Data;
 using System.Text.Json;
 using Common.Application;
+using Common.Contracts;
 using Dapper;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
@@ -224,6 +225,19 @@ public sealed class OutboxDispatcher : BackgroundService
 
         if (message.Lane == nameof(OutboxLane.Broker))
         {
+            // Checked again here, not only in Stage. The lane arrives from a
+            // database column and the payload type from a name in another
+            // column, so nothing about this pair was validated by the process
+            // that is about to publish it — a row written before a guard
+            // existed, or edited during an incident, reaches exactly this
+            // line. §5.5's rule is that a domain event never goes to the bus,
+            // and the last place able to enforce it is the one that publishes.
+            if (payload is not IIntegrationEvent)
+                throw new InvalidOperationException(
+                    $"Outbox row {message.MessageId} is on the Broker lane carrying " +
+                    $"{type.Name}, which is not an {nameof(IIntegrationEvent)}. Publishing it " +
+                    "would put a domain event on the bus (§5.5).");
+
             await sp.GetRequiredService<IPublishEndpoint>().Publish(
                 payload,
                 type,

@@ -43,6 +43,14 @@ public sealed class MessageTypeMap
     }
 
     public MessageTypeMap(IEnumerable<Assembly> assemblies, IReadOnlyDictionary<string, Type> aliases)
+        : this(assemblies, aliases, new Dictionary<Type, string>())
+    {
+    }
+
+    public MessageTypeMap(
+        IEnumerable<Assembly> assemblies,
+        IReadOnlyDictionary<string, Type> aliases,
+        IReadOnlyDictionary<Type, string> writtenNames)
     {
         // FullName, not AssemblyQualifiedName: namespace and type name, no
         // version and no assembly. For contracts the namespace is already
@@ -103,13 +111,40 @@ public sealed class MessageTypeMap
                 throw new InvalidOperationException(
                     $"'{alias.Name}' is an alias and also a live type name. One of them resolves " +
                     "and which is not decidable — rename the alias or drop it.");
+
+            // The target has to be a type this map already carries. An alias
+            // onto anything else is a name that resolves to a type Stage
+            // would refuse, and the dispatcher trusts the row's Lane rather
+            // than re-deriving it — so an old Broker name aliased onto a
+            // domain event would publish that domain event, which is the leak
+            // Stage's guards exist to close, reopened through the alias door.
+            if (!pairs.Any(p => p.Type == alias.Type))
+                throw new InvalidOperationException(
+                    $"'{alias.Name}' aliases {alias.Type.Name}, which this map does not carry. An " +
+                    "alias names a type that is still stageable — one that is not is a row nobody " +
+                    "can deliver and a guard nobody applies.");
         }
 
         _byName = pairs
             .Select(p => (p.Name, p.Type))
             .Concat(aliases.Select(a => (Name: a.Key, Type: a.Value)))
             .ToFrozenDictionary(p => p.Name, p => p.Type);
-        _byType = pairs.ToFrozenDictionary(p => p.Type, p => p.Name);
+
+        // An overridden name must be one this map can read back. Writing a
+        // name nothing resolves is the failure the override exists to prevent,
+        // pointed the other way.
+        foreach ((Type Type, string Name) written in writtenNames.Select(w => (w.Key, w.Value)))
+        {
+            if (!_byName.ContainsKey(written.Name))
+                throw new InvalidOperationException(
+                    $"{written.Type.Name} is written as '{written.Name}', which this map cannot " +
+                    "resolve. Alias that name to the type in the same release, or the rows this " +
+                    "instance stages are rows it cannot itself deliver.");
+        }
+
+        _byType = pairs.ToFrozenDictionary(
+            p => p.Type,
+            p => writtenNames.TryGetValue(p.Type, out string? written) ? written : p.Name);
     }
 
     /// <summary>
@@ -136,5 +171,5 @@ public sealed class MessageTypeMap
             : throw new InvalidOperationException(
                 $"Unknown message type '{name}'. A type was renamed or removed " +
                 "while rows naming it were still unprocessed — drain the outbox " +
-                "before deleting a message type (§7.4).");
+                "before deleting a message type (§9.4).");
 }

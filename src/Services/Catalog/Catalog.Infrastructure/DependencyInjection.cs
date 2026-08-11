@@ -72,7 +72,7 @@ public static class DependencyInjection
         services.AddSingleton(sp =>
         {
             MessageTypeSource source = sp.GetRequiredService<MessageTypeSource>();
-            return new MessageTypeMap(source.Assemblies, source.Aliases);
+            return new MessageTypeMap(source.Assemblies, source.Aliases, source.WrittenNames);
         });
         services.AddHostedService<MessageTypeMapValidator>();
 
