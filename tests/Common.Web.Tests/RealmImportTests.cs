@@ -30,6 +30,13 @@ public class RealmImportTests
 {
     private const string Audience = AuthenticationExtensions.Audience;
 
+    /// <summary>
+    /// The client the compose README's login names, and the only one in the
+    /// realm that mints a token a person uses — the other seven are Keycloak's
+    /// own. Assertions about "a usable token" are about this client's.
+    /// </summary>
+    private const string TokenClient = "web-app";
+
     private static readonly JsonDocument Realm = JsonDocument.Parse(
         File.ReadAllText(RepositoryFile("deploy/compose/keycloak/realm-export.json")));
 
@@ -116,11 +123,17 @@ public class RealmImportTests
         }
 
         // Not vacuous: with no client holding it at all, the loop above passes
-        // and no token in the realm ever gets an audience.
-        Root.GetProperty("clients").EnumerateArray()
-            .Where(c => c.TryGetProperty("defaultClientScopes", out JsonElement d) &&
-                d.EnumerateArray().Any(s => s.GetString() == Audience))
-            .ShouldNotBeEmpty($"no client has {Audience} as a default scope, so nothing can obtain a usable token");
+        // and no token in the realm ever gets an audience. Named rather than
+        // counted, because "some client has it" is satisfied by any of the six
+        // built-in ones — account, broker, realm-management — none of which
+        // mints a token anybody uses. web-app is the client the README's login
+        // names, so it is the one whose tokens have to carry the audience.
+        JsonElement tokenClient = Root.GetProperty("clients").EnumerateArray()
+            .Single(c => c.GetProperty("clientId").GetString() == TokenClient);
+
+        tokenClient.GetProperty("defaultClientScopes").EnumerateArray()
+            .Select(s => s.GetString())
+            .ShouldContain(Audience, $"'{TokenClient}' does not hold {Audience} as a default scope, so its tokens carry no audience this platform accepts");
     }
 
     [Fact]
