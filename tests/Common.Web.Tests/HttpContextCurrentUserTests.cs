@@ -87,6 +87,33 @@ public class HttpContextCurrentUserTests
     }
 
     [Fact]
+    public void An_unauthenticated_identity_carrying_claims_answers_none_of_them()
+    {
+        // The sharp version of the test above, and the one that fails if any
+        // member reads HttpContext.User directly. Claims and authentication are
+        // independent: a ClaimsIdentity with no authentication type holds
+        // whatever claims it was built with, quite happily, and IsAuthenticated
+        // is still false. So a member that reads the claim without asking the
+        // question answers an identity the interface says is not a caller —
+        // which is a permission granted to nobody in particular.
+        DefaultHttpContext context = new()
+        {
+            User = new ClaimsPrincipal(
+                new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, Guid.CreateVersion7().ToString()),
+                    new Claim(PermissionClaim.Type, "catalog:write")
+                ]))
+        };
+
+        HttpContextCurrentUser user = new(new HttpContextAccessor { HttpContext = context });
+
+        user.IsAuthenticated.ShouldBeFalse();
+        user.HasPermission("catalog:write").ShouldBeFalse();
+        Should.Throw<InvalidOperationException>(() => user.Id);
+    }
+
+    [Fact]
     public void A_permission_is_the_claim_the_policies_require()
     {
         // The same claim type AuthorizationPolicyExtensions.RequirePermission

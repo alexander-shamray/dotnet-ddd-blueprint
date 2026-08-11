@@ -93,9 +93,16 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
 }
 ```
 
-The default `ClockSkew` is five minutes, which means a revoked or expired token
-keeps working for five minutes longer than it should. Thirty seconds is enough
-to absorb real clock drift between NTP-synced hosts.
+The default `ClockSkew` is five minutes, which means an expired token keeps
+working for five minutes past its own `exp`. Thirty seconds is enough to absorb
+real clock drift between NTP-synced hosts.
+
+**It buys nothing against revocation, and reading it as though it did is the
+mistake worth naming.** A lifetime check reads `nbf` and `exp` and nothing
+else, so a token the provider revoked a second ago is accepted here until it
+expires on its own — at any skew. Observing revocation needs introspection or a
+deny list, neither of which this platform has; what bounds the exposure is
+token lifetime, which is the realm's setting rather than this one.
 
 **The authority is read eagerly and the throw names the key**, which is the
 posture `AddSqlServer` and `AddMassTransitMessaging` already take: a host that
@@ -420,12 +427,16 @@ public interface ICurrentUser
 // AddHttpContextAccessor(). Scoped: it is per request.
 public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 {
-    private ClaimsPrincipal? User => accessor.HttpContext?.User;
+    // Authenticated or nothing — every member below reads this rather than
+    // HttpContext.User, so no claim can be answered from an identity
+    // IsAuthenticated denies.
+    private ClaimsPrincipal? Caller =>
+        accessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;
 
-    public bool IsAuthenticated => User?.Identity?.IsAuthenticated == true;
+    public bool IsAuthenticated => Caller is not null;
 
     public Guid Id => Guid.Parse(
-        User?.FindFirstValue(ClaimTypes.NameIdentifier) ??
+        Caller?.FindFirstValue(ClaimTypes.NameIdentifier) ??
             throw new InvalidOperationException(
                 "No authenticated caller. Guard with IsAuthenticated — a handler " +
                 "reached by a consumer (§9.4) has no HttpContext."));
@@ -433,9 +444,18 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
     // The same claim type §11.4's policies require, so an endpoint policy and
     // a resource check can never disagree about what a permission is.
     public bool HasPermission(string permission) =>
-        User?.HasClaim("permission", permission) == true;
+        Caller?.HasClaim("permission", permission) == true;
 }
 ```
+
+> **Claims and authentication are independent, so the gate belongs in one
+> place rather than in each member.** A `ClaimsIdentity` built with no
+> authentication type carries whatever claims it was given and still reports
+> `IsAuthenticated` false; a member reading `HttpContext.User` directly would
+> therefore answer a subject and grant a permission for a principal this
+> interface says is not a caller. Routing all three through one authenticated
+> projection is what makes the contract above true rather than merely
+> documented.
 
 > **Both types are common, not per-service, and the namespaces above say so.**
 > They read `Ordering.Application` and `Ordering.Infrastructure` until PR-16,

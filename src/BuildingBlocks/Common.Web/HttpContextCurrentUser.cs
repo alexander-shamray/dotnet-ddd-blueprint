@@ -21,9 +21,19 @@ namespace Common.Web;
 /// </remarks>
 public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 {
-    private ClaimsPrincipal? User => accessor.HttpContext?.User;
+    /// <summary>
+    /// The principal, but only once it is authenticated — every member below
+    /// reads this rather than <c>HttpContext.User</c>, so a claim can never be
+    /// answered from an identity <see cref="IsAuthenticated"/> denies. A
+    /// <see cref="ClaimsIdentity"/> with no authentication type carries claims
+    /// perfectly happily; the two are independent, and reading the claims
+    /// without the check is what turns the interface's fail-closed contract
+    /// into a suggestion.
+    /// </summary>
+    private ClaimsPrincipal? Caller =>
+        accessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;
 
-    public bool IsAuthenticated => User?.Identity?.IsAuthenticated == true;
+    public bool IsAuthenticated => Caller is not null;
 
     /// <summary>
     /// <c>ClaimTypes.NameIdentifier</c>, which is where Keycloak's <c>sub</c>
@@ -32,11 +42,11 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
     /// same claim, so all three agree on which claim identifies a caller.
     /// </summary>
     public Guid Id => Guid.Parse(
-        User?.FindFirstValue(ClaimTypes.NameIdentifier) ??
+        Caller?.FindFirstValue(ClaimTypes.NameIdentifier) ??
             throw new InvalidOperationException(
                 "No authenticated caller. Guard with IsAuthenticated — a handler " +
                 "reached by a consumer (§9.4) has no HttpContext."));
 
     public bool HasPermission(string permission) =>
-        User?.HasClaim(PermissionClaim.Type, permission) == true;
+        Caller?.HasClaim(PermissionClaim.Type, permission) == true;
 }
