@@ -1284,6 +1284,42 @@ already written against it.
   the `=>` line's + 4: a signature that itself wraps puts its parameters at + 4
   already, and measuring from there would indent the body to match them. Join
   the signature where it fits inside 120 and the question does not arise.
+
+  **A lambda in argument position buys the list no exemption**, and this is the
+  half the rule above did not say. When the argument list breaks, the lambda is
+  an element like any other and starts its own line — its `=>` may never trail
+  the argument before it:
+
+  ```csharp
+  // Wrong — a ragged middle. Argument 1 and the head of argument 2 share the
+  // opening line, so the list is neither on one line nor one element per line.
+  Cache.GetOrAdd(domainEvent.GetType(), type =>
+      services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
+
+  // Right.
+  Cache.GetOrAdd(
+      domainEvent.GetType(),
+      type => services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
+  ```
+
+  Once the lambda has its own line, "inside 120 columns it stays on one" is
+  measured on **that** line, not on the statement: the body above is 100 columns
+  and stays put, and breaking it after the `=>` would add an indent level that
+  clarifies no nesting. A body that does not fit takes the next line at + 4 as
+  usual, and a block body opens its `{` under the rule that governs braces.
+
+  The single-argument DSL forms are untouched by this, because there is no
+  earlier argument for the `=>` to trail — `ReceiveEndpoint("q", e => { … })`
+  and `ComplexProperty(o => o.ShippingAddress, address => { … })` both keep
+  their shape, the second because its final argument's block owns every line
+  after it rather than wrapping raggedly into one.
+
+  **Nothing enforces this either**, and that was measured rather than assumed:
+  a probe carrying both forms built clean under IDE0055 and
+  `TreatWarningsAsErrors`, and `dotnet format whitespace` over it rewrote
+  nothing but the line endings. So the rule joins the `[` placement rule and
+  the `new()` rule as review's. Two sites in the corpus had the wrong form, in
+  §7.5 and §13.6, and both were found by reading rather than by a tool.
 - **Break at the outermost bracket, never a nested one.** When a call's argument
   is itself a call, it is the outer parenthesis that opens the line — reaching
   past it to break the inner one leaves the outer call glued to its argument and
@@ -1310,9 +1346,10 @@ already written against it.
   where the condition stops.
 
   ```csharp
-  if (currentUser.IsAuthenticated &&
-      order.CustomerId.Value != currentUser.Id &&
-      !currentUser.HasPermission("orders:admin"))
+  if (!command.IsSystemInitiated &&
+      (!currentUser.IsAuthenticated ||
+          (order.CustomerId.Value != currentUser.Id &&
+              !currentUser.HasPermission("orders:admin"))))
   {
       return Result.Failure(OrderErrors.NotFound);
   }
@@ -1322,8 +1359,16 @@ already written against it.
   omit braces, unless the condition it hangs off is wrapped. Prefer not to wrap
   at all; joining is the better fix, and it has already been applied everywhere
   it fits. The block above is the corpus: one wrapped header, in §11.4, kept
-  because the three clauses of an ownership check do not join inside 120. A
+  because an ownership check that fails closed does not join inside 120. A
   second one appearing is a signal to join, not a precedent.
+
+  **A parenthesised group that breaks indents a further four**, so nesting depth
+  is visible — the same rule the SQL section states for a broken `OR` group, and
+  for the same reason. Never align under the opening bracket: continuations
+  indent four here as everywhere else. The check above gained its second level
+  when the guard was rewritten to fail closed; the earlier form led with
+  `currentUser.IsAuthenticated &&`, which read as a guard and behaved as an
+  exemption, admitting every caller that arrived with no principal at all.
 - **Operators go at the end of the line they continue from**, not the start of
   the next (`dotnet_style_operator_placement_when_wrapping = end_of_line`). Each
   line then ends by announcing that more is coming. This holds for `&&`, `||`,
