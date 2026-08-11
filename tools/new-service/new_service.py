@@ -154,6 +154,7 @@ OMITTED = frozenset(
         "tests/Catalog.TestSupport/Outbox/StagesThenFails.cs",
         "tests/Catalog.Application.Tests/PublishProductHandlerTests.cs",
         "tests/Catalog.Application.Tests/PublishProductValidatorTests.cs",
+        "tests/Catalog.Api.Tests/OutboxTransportIdentityTests.cs",
         "tests/Catalog.Api.Tests/ProductEndpointsTests.cs",
         # Not slice, but container wiring with nothing left to wire: with the
         # handler tests gone, the collection has no member and the fixture no
@@ -579,10 +580,12 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        row.LastError.ShouldBeNull();\n"
             "    }\n",
             "\n"
-            "    // The Broker lane's own test returns with this service's first\n"
-            "    // contract, beside the OutboxRows.Broker builder it needs. Until\n"
-            "    // then the allow-list is empty and nothing stages that lane, so a\n"
-            "    // test for it would assert against a row no code here can produce.\n",
+            "    // The Broker lane's two tests return with this service's first\n"
+            "    // contract, beside the OutboxRows.Broker builder they need — this\n"
+            "    // one and OutboxTransportIdentityTests, which pins §9.1's single\n"
+            "    // identity onto the transport. Until then the allow-list is empty\n"
+            "    // and nothing stages that lane, so either would assert against a\n"
+            "    // row no code here can produce.\n",
         ),
     ),
     "tests/Catalog.TestSupport/ServiceFixture.cs": (

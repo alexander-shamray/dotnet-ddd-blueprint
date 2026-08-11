@@ -25,6 +25,15 @@ namespace Common.Infrastructure.Outbox;
 /// </remarks>
 public sealed class MessageTypeMap
 {
+    /// <summary>
+    /// The widest name the <c>MessageType</c> column holds, and the reason
+    /// this constant lives here rather than beside the EF configuration that
+    /// spells it: the map is what decides a type is stageable, so the map is
+    /// what has to refuse a name the column cannot keep. Defined once and
+    /// read by both.
+    /// </summary>
+    public const int MaxNameLength = 300;
+
     private readonly FrozenDictionary<string, Type> _byName;
     private readonly FrozenDictionary<Type, string> _byType;
 
@@ -52,6 +61,25 @@ public sealed class MessageTypeMap
                         t.IsAssignableTo(typeof(IDomainEvent))))
                 .Select(t => (Name: t.FullName!, Type: t))
         ];
+
+        // Checked at startup, where MessageTypeMapValidator resolves the map,
+        // rather than at SaveChanges. A deep namespace with nested generic
+        // arguments passes every other guard and then fails the insert on a
+        // truncation error — the command lost, the row never written, and the
+        // cause named nowhere. `StageableDomainEvents` must not report a type
+        // that cannot actually be persisted.
+        // A loop, not FirstOrDefault: the sequence is of value tuples, so
+        // "no match" comes back as (null, null) rather than as null, and a
+        // nullable wrapper around it is never null. The guard then fired on
+        // every map and dereferenced the null name — caught immediately,
+        // because the fixture builds a real host.
+        foreach ((string Name, Type Type) pair in pairs)
+        {
+            if (pair.Name.Length > MaxNameLength)
+                throw new InvalidOperationException(
+                    $"{pair.Type.Name}'s persisted name is {pair.Name.Length} characters and the " +
+                    $"outbox column holds {MaxNameLength}. Shorten the namespace, or move the type.");
+        }
 
         IGrouping<string, (string Name, Type Type)>? clash =
             pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);

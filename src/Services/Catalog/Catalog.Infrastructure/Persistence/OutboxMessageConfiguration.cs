@@ -49,9 +49,12 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         // The cost is 300 bytes per unprocessed row. It is not paid by the
         // claim's index, which covers OccurredAt and includes only Lane,
         // Attempts and LockedUntil.
+        // MessageTypeMap.MaxNameLength, not a literal 300: the map refuses a
+        // longer name at startup, and two independent numbers would let the
+        // guard and the column drift into disagreeing about what fits.
         builder
             .Property(m => m.MessageType)
-            .HasMaxLength(300);
+            .HasMaxLength(MessageTypeMap.MaxNameLength);
 
         // The one deliberate exception to §7.2's max-length convention. A
         // payload is a contract or a domain event of unknown size, and a
