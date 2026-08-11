@@ -60,6 +60,30 @@ public class OutboxSerialisationTests
         }
     }
 
+    [Theory]
+    [InlineData("""{"Amount":19.99,"Currency":"EUR","Note":{"Amount":1,"Currency":"USD"}}""")]
+    [InlineData("""{"Note":{"Amount":1,"Currency":"USD"},"Amount":19.99,"Currency":"EUR"}""")]
+    [InlineData("""{"Amount":19.99,"Note":[{"Amount":1}],"Currency":"EUR"}""")]
+    public void A_money_payload_ignores_members_a_later_version_added(string json)
+    {
+        // §9.2 makes an added member an ordinary, backward-compatible change,
+        // so a payload written by a later deployment is a thing this converter
+        // will meet — a row staged before a rollback is the cheapest way to
+        // get one.
+        //
+        // Reading it must skip the whole unknown value. Reading only its first
+        // token leaves the reader inside the nested object: its Amount is
+        // taken for this one and its EndObject ends the loop, so the money
+        // deserialises to the wrong number without anything throwing. All
+        // three orderings, because the defect only bites when the unknown
+        // member sits before the one it shadows.
+        using ServiceProvider provider = Registered();
+
+        JsonSerializer
+            .Deserialize<Money>(json, provider.GetRequiredService<OutboxJson>().Options)
+            .ShouldBe(Money.Of(19.99m, "EUR"));
+    }
+
     [Fact]
     public void There_is_a_stageable_domain_event_to_round_trip()
     {

@@ -36,7 +36,6 @@ public class OutboxMessageTests
             message,
             OutboxLane.Broker,
             correlationId: Guid.CreateVersion7(),
-            now: Now,
             types: Types,
             json: Json);
 
@@ -59,7 +58,6 @@ public class OutboxMessageTests
             new SampleDomainEvent(Now, "raised"),
             OutboxLane.Local,
             correlationId,
-            Now,
             Types,
             Json);
 
@@ -77,12 +75,16 @@ public class OutboxMessageTests
             new SampleDomainEvent(Now, "raised"),
             OutboxLane.Local,
             Guid.CreateVersion7(),
-            Now,
             Types,
             Json);
 
         row.MessageType.ShouldBe(Types.NameOf(typeof(SampleDomainEvent)));
         row.Lane.ShouldBe(OutboxLane.Local);
+
+        // The event's own instant, not the staging clock. §13.7 measures
+        // projection.lag from this column and calls it "event raised to
+        // projection applied", so a row stamped when Stage ran would drop the
+        // interval the metric's own name says it covers.
         row.OccurredAt.ShouldBe(Now);
 
         // Serialised through the declared type, so a payload staged as
@@ -103,7 +105,6 @@ public class OutboxMessageTests
             new NotAMessage("nope"),
             OutboxLane.Broker,
             Guid.CreateVersion7(),
-            Now,
             Types,
             Json));
     }

@@ -754,7 +754,7 @@ public static class OutboxRows
     // to a zero amount and a null currency.
     private static OutboxMessage Local(object message, ServiceFixture fixture) =>
         OutboxMessage.Stage(
-            message, OutboxLane.Local, Guid.CreateVersion7(), Raised,
+            message, OutboxLane.Local, Guid.CreateVersion7(),
             fixture.MessageTypes, fixture.OutboxJson);
 }
 ```
@@ -799,7 +799,7 @@ public void Stage_takes_the_message_id_from_the_envelope()
 
     var row = OutboxMessage.Stage(
         placed, OutboxLane.Broker, correlationId: Guid.CreateVersion7(),
-        now: Now, types: Types, json: Json);
+        types: Types, json: Json);
 
     // Both from the envelope, not minted here — and CorrelationId in
     // particular, because a caller-supplied one is passed in and ignored for

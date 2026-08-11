@@ -39,7 +39,6 @@ public static class OutboxRows
             message,
             OutboxLane.Local,
             Guid.CreateVersion7(),
-            Raised,
             fixture.MessageTypes,
             fixture.OutboxJson);
 }

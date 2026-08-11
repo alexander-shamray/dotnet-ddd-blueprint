@@ -49,6 +49,15 @@ internal sealed class MoneyJsonConverter : JsonConverter<Money>
                 amount = reader.GetDecimal();
             else if (property == nameof(Money.Currency))
                 currency = reader.GetString();
+            else
+                // Skip the whole value, not just its first token. Without
+                // this an unknown property whose value is an object or an
+                // array leaves the reader *inside* it: a nested `Amount`
+                // would be taken for this one, and the nested `EndObject`
+                // would end the loop early — so a payload written by a later
+                // version, which §9.2 makes an ordinary thing to meet,
+                // deserialises to the wrong money without anything throwing.
+                reader.Skip();
         }
 
         if (amount is null || currency is null)

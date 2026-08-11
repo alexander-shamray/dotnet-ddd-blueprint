@@ -407,7 +407,7 @@ public sealed class OutboxMessage
 
     public static OutboxMessage Stage(
         object message, OutboxLane lane, Guid correlationId,
-        DateTimeOffset now, MessageTypeMap types, OutboxJson json) => new()
+        MessageTypeMap types, OutboxJson json) => new()
     {
         // One identity, not two. An integration event already carries its
         // MessageId and CorrelationId in the envelope the mapper filled in
@@ -426,7 +426,18 @@ public sealed class OutboxMessage
         MessageType = types.NameOf(message.GetType()),
         Payload = JsonSerializer.Serialize(message, message.GetType(), json.Options),
         Lane = lane,
-        OccurredAt = now
+
+        // The message's own timestamp, never a staging clock. §13.7 defines
+        // projection.lag as "event raised to projection applied", and a row
+        // stamped when Stage ran drops the interval between the two — small,
+        // and measured by the one metric whose name says it is included.
+        //
+        // No fallback arm and no `now` parameter: NameOf has already thrown
+        // for anything the map does not hold, and the map admits only these
+        // two interfaces, so one of them always matches.
+        OccurredAt = message is IIntegrationEvent o
+            ? o.OccurredAt
+            : ((IDomainEvent)message).OccurredAt
     };
 }
 
@@ -898,10 +909,10 @@ public sealed class OutboxDispatcher : BackgroundService
         // outside the write transaction that produced the event (§7.5).
         // OccurredAt comes from the row, not the payload: the invoker is
         // generic and unconstrained, so it has no typed access to a member the
-        // payload may or may not have (§13.3). It is the time the aggregate
-        // raised the event — Stage() is called inside the write transaction —
-        // so the lag §13.7 measures includes the commit, which is the honest
-        // reading of "how stale is this read model".
+        // payload may or may not have (§13.3). The row carries the instant the
+        // aggregate raised the event, copied there by Stage — so the lag
+        // §13.7 measures spans the raise, the commit and the poll, which is
+        // the honest reading of "how stale is this read model".
         await ProjectionInvoker.InvokeAllAsync(sp, payload, type, message.OccurredAt, ct);
     }
 }
@@ -989,6 +1000,25 @@ Consequences of the per-row design worth stating explicitly:
 - **The 60-second lease bounds crash recovery.** If a dispatcher dies mid-batch,
   its claimed rows become available again a minute later rather than being stuck
   behind a lock that no longer has an owner.
+- **And it can expire while the batch is still being delivered, which is a
+  known residual rather than an oversight.** A claim leases up to 100 rows for
+  60 seconds and delivers them one at a time; a batch slower than the lease
+  lets a second replica reclaim the rows this one has not reached yet, and
+  `CompleteSql` and `FailSql` match on `Id` alone, so the slow worker can then
+  write over a lease it no longer holds. Every outcome is a **duplicate
+  delivery**, which is exactly what at-least-once already promises and what
+  §9.5's inbox and §6.6's idempotent projections already absorb — so nothing
+  here is unsound, and the cost is a redelivery rather than a lost or
+  double-applied message.
+
+  Closing it properly means a claim token: the claim returns the
+  `LockedUntil` it set, and completion carries `AND LockedUntil = @Claimed` so
+  a stale worker's update matches no row. That is a change to the claim
+  protocol and to every test that drives it, and it belongs with the §13.6
+  work that alerts on this table rather than riding in on the PR that first
+  creates it. Until then the mitigation is operational and stated: a lane
+  whose delivery approaches a second per row wants a smaller `TOP` or a longer
+  lease, and §13.6's outbox-age alert is what makes that visible.
 
 ### Handler contracts
 

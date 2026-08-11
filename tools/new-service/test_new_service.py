@@ -1017,6 +1017,24 @@ class TheCommandLine(unittest.TestCase):
                 main(["Zulu"])
         self.assertEqual(2, exit_code.exception.code)
 
+    def test_fourteen_digits_that_are_not_a_date_refuse_in_one_line(self):
+        # MIGRATION_ID checks the shape, which is its job — month thirteen is
+        # fourteen digits. next_migration_id is what notices, and strptime's
+        # ValueError is not a ScaffoldError, so before this the CLI answered a
+        # bad flag with a traceback where every other refusal is one line.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+
+            code, _, err = self.run_main(
+                "Zulu", "--port", str(PORT),
+                "--migration-id", "20261301000000",
+                "--repo-root", str(root),
+            )
+
+            self.assertEqual(1, code)
+            self.assertNotIn("Traceback", err)
+            self.assertIn("20261301000000", err)
+
     def test_the_migration_id_defaults_to_a_utc_timestamp(self):
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))

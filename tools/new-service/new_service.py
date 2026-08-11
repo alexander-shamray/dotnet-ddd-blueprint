@@ -1051,8 +1051,21 @@ def next_migration_id(migration_id: str) -> str:
     A plain `int(...) + 1` is wrong on every boundary the format has: second 59
     rolls into 60, and so do minute, hour and month. Parsed and re-formatted
     instead, which is the only arithmetic that is right for all of them.
+
+    MIGRATION_ID accepts any fourteen digits, which is the right shape check
+    and not a calendar one — `20261301000000` passes it and is month thirteen.
+    `strptime` is what notices, and its ValueError is not a ScaffoldError, so
+    without this the CLI printed a traceback where every other refusal prints
+    one line. OverflowError joins it for the year-9999 end of the range, where
+    adding a minute leaves what `datetime` can represent.
     """
-    stamp = datetime.strptime(migration_id, "%Y%m%d%H%M%S") + timedelta(minutes=1)
+    try:
+        stamp = datetime.strptime(migration_id, "%Y%m%d%H%M%S") + timedelta(minutes=1)
+    except (ValueError, OverflowError) as error:
+        raise ScaffoldError(
+            f"--migration-id {migration_id} is fourteen digits but not a timestamp: {error}"
+        ) from error
+
     return stamp.strftime("%Y%m%d%H%M%S")
 
 

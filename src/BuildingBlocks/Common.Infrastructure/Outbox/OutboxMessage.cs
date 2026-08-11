@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Common.Application;
 using Common.Contracts;
+using Common.Domain;
 
 namespace Common.Infrastructure.Outbox;
 
@@ -44,7 +45,6 @@ public sealed class OutboxMessage
         object message,
         OutboxLane lane,
         Guid correlationId,
-        DateTimeOffset now,
         MessageTypeMap types,
         OutboxJson json)
     {
@@ -66,7 +66,21 @@ public sealed class OutboxMessage
             MessageType = types.NameOf(message.GetType()),
             Payload = JsonSerializer.Serialize(message, message.GetType(), json.Options),
             Lane = lane,
-            OccurredAt = now
+
+            // The message's own timestamp, never the staging clock. §13.7
+            // defines projection.lag as "event raised to projection applied",
+            // and a row stamped at staging time silently drops the interval
+            // between the two — small, but measured by the one metric whose
+            // name says it is included.
+            //
+            // No fallback is needed and none is written: NameOf has already
+            // thrown for anything the map does not hold, and the map admits
+            // only these two interfaces (§9.4), so one of the two arms always
+            // matches. A `now` parameter here would be dead weight the caller
+            // still had to find a clock for.
+            OccurredAt = message is IIntegrationEvent o
+                ? o.OccurredAt
+                : ((IDomainEvent)message).OccurredAt
         };
     }
 }

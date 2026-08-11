@@ -59,13 +59,19 @@ public static class DependencyInjection
 
         // The persisted type names (§9.4). Both singletons, and the source is
         // registered separately so a test host can Add its own assembly
-        // without replacing the production pair — resolved into the map at
-        // startup, so a duplicate FullName fails the host rather than the
-        // first message.
+        // without replacing the production pair.
+        //
+        // The map's factory is lazy, and MessageTypeMapValidator is what makes
+        // "a duplicate FullName fails the host rather than the first message"
+        // true: nothing else resolves the map until the dispatcher has claimed
+        // a row, so without that hosted service the constructor's throw would
+        // land on a background thread in a host that had been ready for hours.
+        // It is registered first, because hosted services start in order.
         services.AddSingleton(
             new MessageTypeSource(typeof(ProductPublished).Assembly, typeof(Product).Assembly));
         services.AddSingleton(sp =>
             new MessageTypeMap(sp.GetRequiredService<MessageTypeSource>().Assemblies));
+        services.AddHostedService<MessageTypeMapValidator>();
 
         // The payload format (§9.4), and the converters that make this
         // service's value objects part of it. MoneyJsonConverter is the same

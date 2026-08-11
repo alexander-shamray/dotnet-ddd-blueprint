@@ -17,8 +17,7 @@ namespace Catalog.Infrastructure.Persistence;
 internal sealed class OutboxPublisher(
     CatalogDbContext db,
     MessageTypeMap types,
-    OutboxJson json,
-    TimeProvider clock)
+    OutboxJson json)
     : IIntegrationEventPublisher
 {
     // One correlation id per scope, and a scope is one command (§6.2). Rows
@@ -36,11 +35,14 @@ internal sealed class OutboxPublisher(
         // NameOf throws here, inside the transaction, so staging something
         // unstageable fails the command rather than writing a row the
         // dispatcher will spend ten attempts failing to resolve (§9.4).
+        //
+        // No clock: Stage reads OccurredAt off the message, which is the
+        // instant the aggregate raised it rather than the instant it reached
+        // this method.
         OutboxMessage row = OutboxMessage.Stage(
             message,
             lane,
             _correlationId ??= Guid.CreateVersion7(),
-            clock.GetUtcNow(),
             types,
             json);
 
