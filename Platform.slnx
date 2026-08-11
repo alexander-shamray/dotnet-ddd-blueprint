@@ -24,5 +24,6 @@
     <Project Path="tests/Common.Domain.Tests/Common.Domain.Tests.csproj" />
     <Project Path="tests/Common.Infrastructure.Tests/Common.Infrastructure.Tests.csproj" />
     <Project Path="tests/Common.Web.Tests/Common.Web.Tests.csproj" />
+    <Project Path="tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj" />
   </Folder>
 </Solution>

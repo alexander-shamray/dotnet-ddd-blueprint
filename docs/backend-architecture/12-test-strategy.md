@@ -1382,11 +1382,15 @@ public async Task Payment_declined_releases_stock_before_cancelling()
 
     var orderId = Guid.CreateVersion7();
 
-    // Every member of V1.OrderPlaced is `required`, so there is no partial
-    // construction to elide — a builder keeps that from filling the test.
+    // Every member of every V1 contract is `required` — the §9.1 envelope
+    // included — so there is no partial construction to elide anywhere here,
+    // and a builder keeps that from filling the test. `new StockReserved
+    // { OrderId = orderId }` does not compile: the three envelope members are
+    // as required as the payload, which is the point of §9.1 declaring them on
+    // an interface rather than leaving them to convention.
     await harness.Bus.Publish(Contracts.OrderPlaced(orderId));
-    await harness.Bus.Publish(new StockReserved { OrderId = orderId });
-    await harness.Bus.Publish(new PaymentDeclined { OrderId = orderId, Reason = "insufficient_funds" });
+    await harness.Bus.Publish(Contracts.StockReserved(orderId));
+    await harness.Bus.Publish(Contracts.PaymentDeclined(orderId, "insufficient_funds"));
 
     // Sent, not Published — the saga issues these as commands to a single
     // owner (§9.6). The harness tracks the two separately, so asserting on
@@ -1410,7 +1414,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId, asRecorded.Token))
         .ShouldBeFalse();
 
-    await harness.Bus.Publish(new StockReleased { OrderId = orderId });
+    await harness.Bus.Publish(Contracts.StockReleased(orderId));
 
     // The reason, not just the send. Both exits from Compensating read
     // ctx.Saga.CancelReason (§9.6), so a transition that forgets to set it on
@@ -1563,18 +1567,50 @@ public class ContractTests
         {
             object instance = ContractSamples.Create(type);
             string json = JsonSerializer.Serialize(instance, type);
+            object? returned = JsonSerializer.Deserialize(json, type);
 
-            JsonSerializer.Deserialize(json, type).ShouldBeEquivalentTo(instance);
+            JsonSerializer.Serialize(returned, type).ShouldBe(json, type.FullName);
         }
     }
 }
 ```
+
+> **The comparison is between two serialised forms, and `ShouldBeEquivalentTo`
+> on the objects is what it replaced.** The object graph carries a detail the
+> contract does not specify: a collection expression assigned to an
+> `IReadOnlyList<T>` member compiles to a synthesised read-only list, and
+> `System.Text.Json` returns a `List<T>` — so an equivalence check fails on
+> `OrderPlaced` for a difference that is nowhere in the wire format. Making the
+> samples construct a `List<T>` instead would fix the symptom by coupling every
+> sample to the serialiser's current choice of collection type. The wire form
+> *is* the contract, so comparing it is both the cheaper fix and the one that
+> says what this suite is for.
+
+That comparison has one blind spot, and it takes a second assertion rather than
+a cleverer first one: a member that fails to serialise **at all** is absent from
+both forms, so the contract silently loses a field and the round-trip passes. So
+a companion test asks the type for its public instance properties and requires
+every one of them to appear in the JSON — which is also what fails when a member
+is added to a record and not to its sample.
 
 `ContractSamples.Create` is the reason this suite stays honest as contracts
 grow. Every member of a V1 contract is `required` (§12.5), so there is no
 reflection shortcut that constructs one — a new contract without a sample fails
 here rather than being quietly skipped, which is the failure mode of every
 "iterate over all the types" test that defaults to `Activator.CreateInstance`.
+
+Two assertions guard the registry itself, in both directions. A contract with no
+sample fails **by name**, in its own test, rather than as one message from the
+middle of a round-trip loop; and a sample naming a type that is no longer a
+public contract fails too, which is the direction throwing cannot catch — that
+entry compiles until the type is deleted and is dead weight from the moment the
+contract was renamed.
+
+> **Every sample gives every member a distinct, non-default value.** A sample of
+> zeroes and empty strings round-trips perfectly through a serialiser that
+> dropped the member entirely, which turns the assertion it feeds into one that
+> cannot fail. The same rule makes `OccurredAt` a fixed instant with a non-zero
+> offset: `DateTimeOffset.MinValue` survives every serialiser bug there is.
 
 ## 12.7 Test doubles
 
