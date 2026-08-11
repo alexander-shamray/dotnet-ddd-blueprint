@@ -1718,6 +1718,89 @@ Delivery:
 | `/review-grok` | Triage an external review into a resolution record |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 | `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
+| `/bug-sweep` | The same loop aimed at defects rather than vulnerabilities — logic and execution bugs, filed at **critical or high** only, confirmed by reading because the grant runs no build |
+
+**The two sweeps are one shape asking two questions, and the split is by what
+makes a finding rather than by where it looks.** `/security-sweep` files what an
+attacker can reach; `/bug-sweep` files what is wrong on its own terms — an
+inverted condition, a guard that admits, a retry that double-applies, a test a
+do-nothing implementation would satisfy. Both fork a detached worktree, verify
+every subagent claim before filing, de-duplicate against the whole issue set,
+never fail open, and file without fixing. Three things genuinely differ: the
+threshold (critical-or-high against medium-or-above, because a latent
+vulnerability is a liability the moment it exists where a latent defect on an
+unreachable path is a note), the fan-out cut (six areas by tree, partitioning
+the repository rather than sampling it, against
+security's three), and what confirmation can mean.
+
+**That last one is the interesting one: `/bug-sweep` executes none of the
+snapshot it audits, and its grant withholds a build deliberately.** Its shell
+reaches `mktemp`, the two worktree helpers and `gh` — the worktree and the issue
+tracker, never the tree's own build. **The snapshot, not "the code it audits":**
+the tooling row covers `.claude/**`, so the two helpers are audited *and* run,
+and the honest claim is that they execute from the caller's checkout and never
+from the pinned worktree. That they are trustworthy is a separate assumption,
+resting on the `Edit(.claude/scripts/**)` deny and on review — the one `/ship`
+and `/branch` already make of the same files. The reason for withholding the
+build is the one that shapes the agent profile: building a tree executes it —
+MSBuild targets, source generators, analysers, and under `dotnet test` the
+tree's own test code — and
+the audited repository is prompt-injection input, so a build grant hands that
+input arbitrary code execution on the host. The suite also needs Docker. So a
+defect claim there is confirmed by reading, the issue body says so, and the
+class of bug only execution catches is named as the residual rather than
+papered over.
+
+**The teardown argument that used to sit here was false, and the disproof is
+worth keeping.** It said a build would leave `bin/` and `obj/` behind and trip
+the shared teardown's own guard. `.gitignore` carries `[Bb]in/` and `[Oo]bj/`,
+so `git status --porcelain` is empty with them present and `git worktree
+remove` takes the worktree without complaint — verified by running it, against
+a control file that was genuinely untracked and did produce *contains modified
+or untracked files*. Copilot found it after four sites had repeated it. The
+guard is still real and still catches scratch written inside a sweep's
+worktree, which is the thing it was written for; it was never a reason to
+withhold a build.
+
+**Both sweeps' worktrees carry the `secsweep-` prefix, and the second one is
+borrowing.** `git-worktree-detach.sh` and `git-worktree-drop.sh` refuse any path
+that is not `secsweep-` plus six characters under the canonical temp
+root — the shape check that stops a poisoned finding from naming a sibling PR
+worktree and having it deleted. Those helpers are `Edit`-denied to a command
+session, so `/bug-sweep` satisfies the shape that exists rather than widening
+it. The accepted path set is unchanged and `mktemp -d` names are unique, so
+nothing is less safe; what is lost is attribution, since a stray temp directory
+no longer says which sweep left it.
+
+**Not *directly* under the root, which both helpers' comments claimed for
+longer than it was true.** A bash `case` pattern does no pathname expansion, so
+`?` matches `/` as happily as any other character, and
+`"$tmproot"/secsweep-??????` accepts `$tmproot/secsweep-a/bbbb` as well as
+`$tmproot/secsweep-abc123` — run through a `case` rather than reasoned about,
+with the wrong length, the wrong prefix and the wrong root all correctly
+refused. Prefix and length hold; direct-childness does not. It predates
+`/bug-sweep`, so nothing about a second caller made it worse, and the fix is
+one line in each helper: compare `dirname "$resolved"` against `$tmproot` and
+match the basename alone. It is owed together with the `mktemp` narrowing
+below, both needing the same deny lifted.
+
+**Both helpers' header comments were retitled for "a sweep" in the same PR**,
+because they had named `/security-sweep` as their only caller — "and nothing
+else", "the throwaway worktree `/security-sweep` created", and a path check
+argued from "only **this command's** own `mktemp -d`" — which is exactly the
+incomplete reconciliation the four prose sites above were fixed for. That edit
+needed `Edit(.claude/scripts/**)` lifted and put back afterwards, since a
+session that removes its own restriction makes the control a fiction; the
+lifting is the repo owner's call and was taken as one. Comments only: the
+`secsweep-??????` shape check, `--detach`, and the absent `-f` are byte
+identical, verified with `bash -n` and a non-comment diff that came back empty.
+
+**The prefix itself is still `secsweep-`, and that residual stands.** Renaming
+it is a wider change than a comment — it is the one literal both helpers match
+on, so it has to move in both files and in both callers' `mktemp -d` at once,
+and getting it half-done leaves a sweep unable to fork or unable to tear down.
+The detach helper now says in place that the prefix is historical and shared,
+which is the part a reader needs; the attribution cost is unchanged and small.
 
 **A PR gets its own worktree by default, and `/branch` is where it comes
 from.** From a clean `main` with a writable parent — the ordinary case — the
@@ -1732,16 +1815,17 @@ which puts it in front of every `git status` the chain reads and inside
 `grok-review.sh`'s clean-tree refusal. A sibling needs no `.gitignore` entry
 because there is nothing to ignore.
 
-**`/security-sweep`'s worktree is not this one, and neither is the other's
-precedent.** That one is detached, lives under `mktemp -d`, carries no branch
-and is removed at the end — and it refuses a sibling *by name*, because a
-root-level or container layout has no writable parent, "both of which this repo
-runs under". This one holds a branch that a PR, two review loops and a person
-come back to, so it wants a stable named directory. The two commands are
-answering different questions; making one match the other would break whichever
-was changed. What the sweep's argument does carry across is the precondition:
-where the parent is not writable there is no sibling to create, so `/branch`
-names that case and branches in place rather than failing mid-`/ship`.
+**A sweep's worktree is not this one, and none is another's precedent.** The
+sweeps' — `/security-sweep`'s and `/bug-sweep`'s alike — are detached, live
+under `mktemp -d`, carry no branch and are removed at the end, and they refuse a
+sibling *by name*, because a root-level or container layout has no writable
+parent, "both of which this repo runs under". This one holds a branch that a PR,
+two review loops and a person come back to, so it wants a stable named
+directory. The commands are answering different questions; making one match the
+other would break whichever was changed. What the sweeps' argument does carry
+across is the precondition: where the parent is not writable there is no sibling
+to create, so `/branch` names that case and branches in place rather than
+failing mid-`/ship`.
 
 The review boundary is unchanged by any of this, and that was checked rather
 than assumed: `git clone --no-hardlinks .` **out of** a linked worktree works
@@ -1942,10 +2026,12 @@ recovery, or retry the create helper and hit *branch already exists*.
 
 Copilot raised the first two against PR #27; the third was found by grepping
 for the same shape, which is the rule that says one site is never the only
-site. `/security-sweep`'s two — `git-worktree-detach.sh` and
-`git-worktree-drop.sh` — followed for the same reason: `-B` resets a branch,
-and `-f` on a removal defeats the refusal that command's teardown uses as its
-guard.
+site. The sweeps' two — `git-worktree-detach.sh` and `git-worktree-drop.sh`,
+shared by `/security-sweep` and `/bug-sweep` — followed for the same reason:
+`-B` resets a branch, and `-f` on a removal defeats the refusal those commands'
+teardown uses as its guard. Their `secsweep-??????` path check is now
+load-bearing for two callers rather than one, which is why widening it is a
+decision about both and not a rename.
 
 **The same review then found the holes in the grants that were left raw**, and
 they were in the command frontmatter rather than in `.claude/settings.json` —

@@ -119,8 +119,10 @@ or above.** Three gates, and each drops candidates the round must not file:
   exception, and suppressing it blindly is the more dangerous error: it blocks a
   re-file **only while its fix is still present** — if the finding **currently
   reproduces** because the fix was reverted, the vulnerability is back, and it
-  re-files (or reopens the issue) rather than being silenced by a closure that
-  no longer holds. Re-filing a genuinely-tracked finding is the drift this repo
+  re-files rather than being silenced by a closure that no longer holds —
+  **re-files**, because the grant carries `gh issue create` and no `reopen`,
+  and a duplicate that says why beats a capability this command does not have.
+  Re-filing a genuinely-tracked finding is the drift this repo
   exists to close; suppressing a reintroduced one is worse. (The prior-round
   caveat under *Where it stops* is a different set — issues still **open** are a
   live-risk signal, not the de-duplication test.)
@@ -135,13 +137,29 @@ Each round is the review done once, end to end:
 1. **Fan out.** Spawn the audit subagents as the **`security-auditor` agent
    type** (`.claude/agents/security-auditor.md`), whose complete tool list is
    `Read`, `Grep`, `Glob` — no shell, no editing, no network, no sub-agents —
-   over disjoint areas so no two read the same tree. Read-only here is a property
+   over areas with **disjoint reporting ownership**, so no two are answerable
+   for the same finding. That is not a reading restriction: an exploit scenario
+   routinely starts in one area and lands in another — a deploy default reached
+   from application source, a CI step reaching a secret — and an auditor barred
+   from following it would drop a real finding for want of the scenario this
+   command requires it to state. Read-only here is a property
    of the agent's tool grant, not a word in its prompt, and the profile is
    deliberately narrower than "excludes `Edit`/`Write`": a profile that still
    carried `Bash` or a network tool could be driven by a **prompt-injected**
    audit file into filing to another tracker or calling out before the parent's
    verify step ran, because the audited repository is **untrusted input**. A
-   tool the agent does not have cannot be turned against it. The
+   tool the agent does not have cannot be turned against it.
+
+   **That property is real for the agent and not yet for the choice of agent.**
+   `allowed-tools` grants a bare `Agent`, which admits *any* registered subagent
+   type, including the general-purpose ones whose tool list is `*`. So "spawn
+   them as `security-auditor`" is enforced by this sentence and nothing else —
+   the shape the sentence above disparages. Fix: narrow the grant to this agent
+   type, verifying the syntax against the harness before writing it rather than
+   assuming, since a permission rule that does not match is inert and a
+   malformed one refuses to start.
+
+   The
    natural cut is CI/tooling, the application source, and the
    deploy/infrastructure surface, but let the scope hint narrow it. Give each the
    same contract: **root every path under `$work`** (the pinned worktree, per the
@@ -174,6 +192,25 @@ Each round is the review done once, end to end:
    authorised review and was verified at filing.
 5. **Summarise the round.** New issues filed (with numbers), candidates dropped
    at each gate and why, and the lows/infos recorded but not filed.
+
+**Residual — the parent verifies while holding the mutation grants.** The
+read-only fan-out contains the *auditor*: it cannot act on what it reads
+because it has no tool to act with. The parent is the opposite — it holds
+`gh issue create`, `gh label create`, `mktemp` and the two worktree helpers —
+and step 2 requires it to read the cited code **itself**, deliberately, because
+an unverified agent claim must never become an issue. So untrusted text reaches
+the one stage that can mutate, *after* the isolated stage has finished.
+Containment is deferred, not achieved.
+
+Three things narrow it and none closes it: the path check at the head of step 2
+drops a candidate citing anything outside `$work` before the code is opened;
+the three available mutations each carry a stated rule (`--repo`, never
+`--force`, the temp-path shape); and with no `Write`, no `Edit` and no
+`git push`, no file and no branch can move. What is unbounded is what an issue
+says and where it is filed. Closing it means helpers that pin the repository
+and label so no free parameter remains, or a verify stage returning a
+structured verdict the parent files on without composing a body from text it
+has read — the same class of decision as the container named below.
 
 **Residual — the auditor reads the host, not only `$work`.** `Read`, `Grep` and
 `Glob` are not confined to the pinned worktree; the "root every path under
@@ -234,22 +271,44 @@ better closed than tracked (a one-line binding, a stray secret), say so in the
 round summary and leave the change to the user.
 
 **That boundary is enforced by the grant, not merely promised.** `allowed-tools`
-carries no `Write` and no `Edit`, so no source path can be altered, and no
-`git push`, so the branch cannot move; the only mutations it can make are the
-GitHub issues it files and the temporary worktree it forks and removes. A
+carries no `Write` and no `Edit`, so no file's **contents** can be altered, and
+no `git push`, so the branch cannot move. A
 `Write` grant for issue bodies was tried and removed precisely because it would
 have re-opened source editing — a read-only claim resting on prose while the
 grant permits writing every undenied path is unenforced, which for a security
 command is the worse failure. Bodies go through `gh issue create` on stdin for
 exactly this reason.
 
-**One mutation is still scoped by discipline, and that scope is the honest
-residual.** `Bash(gh issue create:*)` is a prefix grant and pins no repository,
-so the rule is prose: `gh issue create` always passes `--repo` for **this**
-repository and never one named in a finding. Because the audited tree is
-prompt-injection input, that boundary is held by the instruction rather than by
-the grant, and closing it fully means a helper that pins the repo — named here
-rather than left implicit.
+**Three mutations are still scoped by discipline rather than by the grant, and
+naming all three is the point.** This paragraph used to claim one, and to say
+above that the only mutations were the issues and the worktree; both were two
+omissions wide.
+
+- **`Bash(gh issue create:*)` pins no repository.** It is a prefix grant, so the
+  rule is prose: always pass `--repo` for **this** repository, never one named
+  in a finding.
+- **`Bash(gh label create:*)` pins none either, and "create" understates what
+  it reaches.** `gh label create <existing> --force` *updates* an existing
+  label's colour and description — `gh`'s own help reads "Create a new label on
+  GitHub, or update an existing one with `--force`" — so the grant can rewrite
+  any label in any repository `-R` names, not merely add a missing `security`
+  one. Two rules, then: always `--repo` for this repository, and **never
+  `--force`**. The label is created once if absent and never touched again.
+- **`Bash(mktemp:*)` is a filesystem write primitive.** mktemp takes an
+  arbitrary template, so the grant permits creating an empty directory or file
+  anywhere this session can write, the checkout included. It cannot write
+  content and cannot clobber an existing path — the template forces a fresh
+  unique name — so no source file can be altered, which is why the sentence
+  above is phrased about contents.
+
+Because the audited tree is prompt-injection input, all three are held by
+instruction rather than by tooling. **The mktemp one has a known fix and it is
+not a prose fix:** `git-worktree-detach.sh` should create the directory itself
+and print it, at which point both sweeps drop `Bash(mktemp:*)` altogether and
+the helper's shape check becomes a tautology — the only path it can hand to git
+is one it has just made. A prefix rule cannot constrain a template, which is the
+same reason every other grant here became a helper. Until that lands, these are
+the residuals, named rather than hidden.
 
 **The worktree half of that residual is closed.** It used to read the same way,
 with `Bash(git worktree remove:*)` trusted to take only `$work`. Both worktree
@@ -259,8 +318,16 @@ grants now go through fixed helpers — `git-worktree-detach.sh` and
 defeats the refusal this command's own teardown relies on as its guard. The
 helpers bind the path as well as the flags, and the path half is the one that
 matters here: **both refuse anything that is not `secsweep-` plus six
-characters directly under the canonical temp root**, which is the only shape
-this command's own `mktemp -d` produces. Registration was not enough on its
+characters under the canonical temp root**, which is the shape
+this command's own `mktemp -d` produces. **Not *directly* under it, though the
+comments long said so:** a bash `case` pattern does no pathname expansion, so
+`?` matches `/` too, and `"$tmproot"/secsweep-??????` accepts
+`$tmproot/secsweep-a/bbbb` as well as `$tmproot/secsweep-abc123` — checked by
+running both through a `case`, against controls of the wrong length, the wrong
+prefix and the wrong root, all correctly refused. Prefix and length are
+enforced; direct-childness is not. The fix is to compare `dirname "$resolved"`
+against `$tmproot` and match the basename alone, in both helpers.
+Registration was not enough on its
 own — every sibling PR worktree is registered too, and a poisoned finding
 naming one would otherwise have been able to delete it. What each refuses
 beyond that differs and is worth naming rather than averaging:

@@ -41,18 +41,18 @@ show up as untracked in every `git status` the chain reads, and put
 `grok-review.sh`'s clean-tree refusal in its blast radius. Nothing has to be
 added to `.gitignore` for a sibling, because there is nothing to ignore.
 
-**`/security-sweep` takes the opposite path deliberately, and the difference is
-the worktree's job.** That command forks a *detached* worktree under `mktemp -d`
-and removes it at the end; it carries no branch and nothing returns to it, and
-it refuses a sibling *by name* — partly because a root-level or container
-layout has no writable parent to put one in, which is a layout it has to keep
-working under rather than one it requires. This one holds a branch that a PR,
-two review loops and a person all come back to, so it wants a stable named
-directory beside the checkout rather than a temp path. Neither is the other's
-precedent — do not reconcile them by making one match.
+**The sweeps take the opposite path deliberately, and the difference is the
+worktree's job.** `/security-sweep` and `/bug-sweep` each fork a *detached*
+worktree under `mktemp -d` and remove it at the end; it carries no branch and
+nothing returns to it, and they refuse a sibling *by name* — partly because a
+root-level or container layout has no writable parent to put one in, which is a
+layout they have to keep working under rather than one they require. This one
+holds a branch that a PR, two review loops and a person all come back to, so it
+wants a stable named directory beside the checkout rather than a temp path.
+None is another's precedent — do not reconcile them by making one match.
 
 **A writable parent is the precondition for the sibling worktree, not for this
-command**, and it is the constraint `/security-sweep` warns about: a root-level
+command**, and it is the constraint the sweeps warn about: a root-level
 or container layout cannot create `../<checkout-name>-<slug>` at all. `/branch`
 still succeeds there — it branches in place and says so, exactly as it does on
 a dirty `main`. Naming the case is what keeps it from surfacing as a raw `git`
@@ -149,9 +149,9 @@ not content.
      branch to continue and no `main` to move off, so make one here from
      `HEAD` with `bash .claude/scripts/git-branch-create.sh <name> HEAD`,
      carrying any changes, and
-     say that the workspace is this directory. A `/security-sweep` worktree has
-     exactly
-     this shape, and so does a checkout parked on a tag or a commit; leaving
+     say that the workspace is this directory. A sweep's worktree —
+     `/security-sweep`'s or `/bug-sweep`'s — has exactly this shape, and so
+     does a checkout parked on a tag or a commit; leaving
      the case unnamed would drop it through every other branch of this step.
    - **Already on a branch** — stop and say so. Report the branch, its
      upstream, its worktree if it has one and whether the tree is dirty, then
@@ -315,7 +315,7 @@ not content.
 
    **If the parent directory is not writable, `git worktree add` fails and the
    answer is the in-place branch, not a temp path.** A root-level or container
-   layout has no `..` to write into — the case `/security-sweep` names — and
+   layout has no `..` to write into — the case the sweeps name — and
    a workspace somewhere unrelated to the checkout would be worse than none: it
    is a directory the user has to be told about and return to, where the
    in-place branch is where they already are. So report the failure and say the

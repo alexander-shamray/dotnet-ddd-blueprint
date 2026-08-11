@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Remove the throwaway worktree /security-sweep created, without -f.
+# Remove the throwaway worktree a sweep created — /security-sweep or
+# /bug-sweep — without -f.
 #
-# The missing flag is half the point. That command's teardown leans on git
+# The missing flag is half the point. A sweep's teardown leans on git
 # refusing to remove a checkout holding anything modified or untracked — "if
 # `git worktree remove` refuses, leave the worktree standing and report what it
 # is holding" — and `git worktree remove -f` defeats exactly that guard, which
@@ -11,9 +12,17 @@
 # worktree is registered too, and the audited tree is prompt-injection input, so
 # a path arriving here may have been chosen by it. Accepting any non-main
 # worktree would let a poisoned finding steer this at someone else's clean
-# workspace. So the path must be one only the sweep's own `mktemp -d` could have
-# produced: `secsweep-` plus six characters, directly under the canonical temp
-# root.
+# workspace. So the path must match `secsweep-` plus six characters under the
+# canonical temp root.
+#
+# That EXCLUDES sibling PR worktrees and anything outside the temp root, which
+# is what it is for. It does NOT prove a sweep created the path — `mktemp` takes
+# an arbitrary template, and this helper accepts any registered worktree of the
+# right shape — and it is NOT strictly a direct-child check, because `?` matches
+# `/` in a bash `case` (no pathname expansion), so $tmproot/secsweep-a/bbbb
+# passes. Verified by running both through a `case`. Fix owed, one line:
+# compare `dirname "$resolved"` against "$tmproot" and match the basename
+# alone; git-worktree-detach.sh owes the same.
 set -euo pipefail
 [ "$#" -eq 1 ] || { echo "usage: git-worktree-drop.sh <path>" >&2; exit 2; }
 path="$1"
@@ -24,7 +33,7 @@ tmproot=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
 resolved=$(cd "$path" && pwd -P)
 case "$resolved" in
   "$tmproot"/secsweep-??????) : ;;
-  *) echo "not a sweep-owned temp path: $path" >&2; exit 2 ;;
+  *) echo "not a sweep-shaped temp path: $path" >&2; exit 2 ;;
 esac
 # Ask git whether this is a linked worktree of THIS repository, rather than
 # comparing path strings against `git worktree list`. Under MSYS those strings
