@@ -300,9 +300,9 @@ the host name, because the compose file publishes each port:
 
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
-export ConnectionStrings__Catalog="Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True"
-export ConnectionStrings__RabbitMq="amqp://guest:guest@localhost:5672"
-export Identity__Authority="http://localhost:8080/realms/commerce"
+export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
+export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
+export Identity__Authority='http://localhost:8080/realms/commerce'
 ```
 
 **The environment is the first line and is not decoration.** No project ships a

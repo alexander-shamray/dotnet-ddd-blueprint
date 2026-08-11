@@ -85,9 +85,9 @@ reads eagerly (§11.3). Same values, host names in place of service names:
 
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
-export ConnectionStrings__Catalog="Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True"
-export ConnectionStrings__RabbitMq="amqp://guest:guest@localhost:5672"
-export Identity__Authority="http://localhost:8080/realms/commerce"
+export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
+export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
+export Identity__Authority='http://localhost:8080/realms/commerce'
 dotnet run --project src/Services/Catalog/Catalog.Api
 ```
 
@@ -105,6 +105,6 @@ connection string, because §7.1 keeps the two identities apart even where the
 local login is one:
 
 ```bash
-export ConnectionStrings__CatalogMigrator="Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True"
+export ConnectionStrings__CatalogMigrator='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
 dotnet run --project src/Services/Catalog/Catalog.Migrator
 ```
