@@ -9,6 +9,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Respawn;
 using Testcontainers.MsSql;
 using Testcontainers.RabbitMq;
@@ -307,6 +308,29 @@ public sealed class ServiceFixture : IAsyncLifetime
         Factory.Services
             .GetRequiredService<RetentionPurgeService>()
             .PurgeAsync(TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// One pass under a policy of the test's own, for the batching edges the
+    /// registered one cannot show: a batch of 5,000 would need 10,001 rows
+    /// before a second batch ran at all.
+    /// </summary>
+    /// <remarks>
+    /// Constructed rather than resolved, because the policy is a constructor
+    /// argument and the service composes its two statements from the same
+    /// registered tables either way — so what varies is the batching and
+    /// nothing else.
+    /// </remarks>
+    public Task<(int Outbox, int Inbox)> PurgeWithAsync(RetentionPolicy policy)
+    {
+        RetentionPurgeService purge = new(
+            Factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Factory.Services.GetRequiredService<OutboxTable>(),
+            Factory.Services.GetRequiredService<InboxTable>(),
+            policy,
+            Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
+
+        return purge.PurgeAsync(TestContext.Current.CancellationToken);
+    }
 
     /// <summary>Rows the transaction probe holds for one id.</summary>
     public Task<int> ProbeRowCountAsync(Guid id) =>

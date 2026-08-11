@@ -31,15 +31,34 @@ public class ContractTests
     /// knowing: a C# <c>static class</c> compiles to <c>abstract sealed</c>, so
     /// the vocabularies are excluded by the same clause that excludes a genuine
     /// abstract base, with no name-based special case to keep up to date.
+    /// <para>
+    /// <b>The root namespace is included, and a trailing dot is what excluded
+    /// it.</b> <c>StartsWith("Common.Contracts.")</c> reads as "everything in
+    /// the assembly" and is not: a concrete type declared directly in
+    /// <c>Common.Contracts</c>, with no version namespace at all, fell outside
+    /// discovery entirely — so it bypassed the versioned-namespace check, the
+    /// sample check, the wire-member check and the round-trip, and left every
+    /// test green. That unversioned contract is the exact mistake §9.2 exists
+    /// to reject, and it was the one shape this suite could not see.
+    /// </para>
     /// </remarks>
     private static readonly Type[] Contracts =
     [
-        .. typeof(OrderPlaced).Assembly
-            .GetTypes()
-            .Where(t => t.IsPublic &&
-                t is { IsInterface: false, IsAbstract: false } &&
-                t.Namespace?.StartsWith("Common.Contracts.", StringComparison.Ordinal) == true)
+        .. typeof(OrderPlaced).Assembly.GetTypes().Where(IsContract)
     ];
+
+    /// <summary>§9.2's shape: <c>Common.Contracts.&lt;Service&gt;.V&lt;n&gt;</c>.</summary>
+    private const string VersionedNamespace = @"^Common\.Contracts\.[A-Za-z]+\.V\d+$";
+
+    /// <summary>
+    /// A concrete, public type anywhere under <c>Common.Contracts</c> — the
+    /// root included, which is the half a trailing dot silently dropped.
+    /// </summary>
+    internal static bool IsContract(Type type) =>
+        type.IsPublic &&
+        type is { IsInterface: false, IsAbstract: false } &&
+        type.Namespace is string ns &&
+        (ns == "Common.Contracts" || ns.StartsWith("Common.Contracts.", StringComparison.Ordinal));
 
     [Fact]
     public void No_contract_names_a_domain_type()
@@ -56,12 +75,34 @@ public class ContractTests
     }
 
     [Fact]
+    public void Discovery_sees_a_contract_that_forgot_its_version_namespace()
+    {
+        // The positive control for the filter above, and it exists because that
+        // filter was written with a trailing dot and so could not see the one
+        // shape it most needed to: a concrete type declared straight into
+        // `Common.Contracts`, with no `V1` at all. Such a type fell out of
+        // discovery entirely, which meant the versioned-namespace test never
+        // judged it, no sample was demanded for it, and every test stayed green
+        // over exactly the mistake §9.2 forbids.
+        //
+        // Asserted against the predicate rather than the assembly, because the
+        // only way to have such a type is to declare one — and declaring it in
+        // Common.Contracts would be committing the defect to prove it can be
+        // caught. The type below lives in this test assembly, in that namespace.
+        IsContract(typeof(Common.Contracts.UnversionedProbe)).ShouldBeTrue(
+            "a contract with no version namespace must reach the checks, not slip past them");
+
+        Regex.IsMatch(typeof(Common.Contracts.UnversionedProbe).Namespace!, VersionedNamespace)
+            .ShouldBeFalse("and it must then fail the rule it breaks");
+    }
+
+    [Fact]
     public void Every_contract_lives_in_a_versioned_namespace()
     {
         // Common.Contracts.<Service>.V<n> — §9.2. A contract that lands one
         // namespace short is a v1 that can never be superseded.
         Contracts.ShouldAllBe(t =>
-            Regex.IsMatch(t.Namespace!, @"^Common\.Contracts\.[A-Za-z]+\.V\d+$"));
+            Regex.IsMatch(t.Namespace!, VersionedNamespace));
     }
 
     [Fact]

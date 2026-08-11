@@ -420,7 +420,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 338 tests, so
+`Platform.slnx` holds nineteen projects and `dotnet test` runs 341 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 80, and CI has a `scaffold`
@@ -472,6 +472,24 @@ decisions bind what comes after:
   service carrying it without the table logs a failed delete every pass —
   where a dispatcher without its table logs a failed claim twice a second.
   Consuming nothing does not exempt a service; Catalog itself is the proof.
+- **The inbox row is staged *after* the consumer returns, and staging it
+  earlier is a silent disabling of the whole mechanism.** A row added before
+  `next.Send` is a tracked entity on the context the consumer also uses, and
+  every message-borne command reaches §6.3's `TransactionBehavior` →
+  `EfUnitOfWork.ExecuteAsync` → `db.ChangeTracker.Clear()`, PR-09's line. The
+  clear takes the pending row, the following `SaveChangesAsync` writes nothing,
+  and no command is ever recorded. Two mechanisms already here, each right on
+  its own, in tension where they meet — and invisible until a consumer does
+  work, which is why the covering test drives one that clears the tracker.
+- **A rolled-back unit of work now clears the tracker too, and the comment that
+  said it need not is the lesson.** `EfUnitOfWork` returned on a failed
+  `Result` leaving the rejected mutations tracked, because "§6.3's behaviour
+  declines to SaveChanges … which is enough for tracked changes" — true while
+  that behaviour was the *only* caller of `SaveChanges` on the scope. The inbox
+  filter is the second, and it saves unconditionally, so a domain refusal
+  would have committed its own mutations outside the rolled-back transaction.
+  **A premise about who calls a method is falsified by the next PR that calls
+  it**, and this one was.
 - **`ProcessedAt IS NOT NULL` on the outbox purge is load-bearing, and is
   tested as such.** Purging on age alone deletes the abandoned rows §13.6's
   alert exists to surface — permanent data loss presenting as a clean, empty
@@ -636,7 +654,7 @@ after:
   `AddOutboxRetentionIndex` beside it, the bus
   registration with its harness smoke, §9.4's outbox and §9.5's inbox wired and
   empty, the retention purge over both tables, and
-  fifty-three passing tests, and no aggregate.
+  fifty-four passing tests, and no aggregate.
   Four things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
   wiring, the two silent-scan registration tests, and — with the first domain

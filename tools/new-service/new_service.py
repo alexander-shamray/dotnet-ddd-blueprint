@@ -158,6 +158,11 @@ OMITTED = frozenset(
         "tests/Catalog.Application.Tests/PublishProductHandlerTests.cs",
         "tests/Catalog.Application.Tests/PublishProductValidatorTests.cs",
         "tests/Catalog.Api.Tests/OutboxTransportIdentityTests.cs",
+        # Not slice by subject — it is about EfUnitOfWork's rollback — but slice
+        # by requirement: the claim is that a rejected command leaves nothing
+        # tracked, and making it needs a tracked aggregate. A service with no
+        # entity cannot assert it, so it returns with the first real slice.
+        "tests/Catalog.Api.Tests/UnitOfWorkRollbackTests.cs",
         "tests/Catalog.Api.Tests/ProductEndpointsTests.cs",
         # Not slice, but container wiring with nothing left to wire: with the
         # handler tests gone, the collection has no member and the fixture no
@@ -741,7 +746,7 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
             "        // apply every migration in sequence, and a count alone would pass on\n"
-            "        // two of three applied twice.\n"
+            "        // a shorter prefix of them applied twice.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
             "        applied.Length.ShouldBe(5);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
@@ -1394,16 +1399,17 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
             name = PurePosixPath(relative).name
             template_id = name.split("_", 1)[0]
 
-            # Two migrations, so two ids, and the order between them is the
-            # order they are applied in. The outbox one takes the second, a
-            # minute later: EF sorts by this prefix, and a service whose outbox
-            # table were ordered before its schema would fail on the first run.
-            # Three migrations, so three ids, and the order between them is the
+            # One id per template migration, and the order between them is the
             # order they are applied in — EF sorts by this prefix, so a service
             # whose outbox table were ordered before its schema would fail on
-            # the first run. One minute apart, by position in the list rather
-            # than by name: a fourth template migration is then an entry there
-            # and no arithmetic here.
+            # the first run. A minute apart, spaced by position in
+            # TEMPLATE_MIGRATIONS rather than by name, so the next one added is
+            # an entry in that tuple and no arithmetic here.
+            #
+            # No count in this comment on purpose. It has said two, then three,
+            # then four inside one pull request, and the stale sentences stacked
+            # rather than being replaced — three contradictory claims about the
+            # same tuple, which is what a review caught. The tuple is the count.
             offset = next(
                 index for index, shape in enumerate(TEMPLATE_MIGRATIONS) if shape.fullmatch(name)
             )

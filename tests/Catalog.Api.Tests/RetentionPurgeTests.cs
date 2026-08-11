@@ -1,6 +1,7 @@
 using Catalog.TestSupport;
 using Catalog.TestSupport.Outbox;
 using Common.Infrastructure.Inbox;
+using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
 using Shouldly;
 using Xunit;
@@ -102,6 +103,42 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
 
         InboxMessage survivor = (await fixture.InboxAsync()).ShouldHaveSingleItem();
         survivor.HandledAt.ShouldBeGreaterThan(LongAgo);
+    }
+
+    [Fact]
+    public async Task A_backlog_larger_than_one_batch_drains_over_batches_and_stops_at_the_ceiling()
+    {
+        // Two claims the single-row tests above could not make, because one row
+        // never reaches a second batch: that the loop continues while a batch
+        // comes back full, and that it stops at MaxBatchesPerPass rather than
+        // running until the table is empty. The plan for this PR asked for the
+        // first and the review noticed neither was covered.
+        //
+        // A policy of its own rather than the registered one: five rows against
+        // a batch of two makes both edges observable in a test that stays fast,
+        // where the real 5,000 would need 10,001 rows to show the same thing.
+        for (int row = 0; row < 5; row++)
+        {
+            OutboxMessage processed = OutboxRows.Healthy(fixture);
+            await fixture.StageOutboxAsync(processed);
+            await fixture.SetOutboxProcessedAtAsync(processed.MessageId, LongAgo);
+        }
+
+        RetentionPolicy twoAtATime = new() { BatchSize = 2, MaxBatchesPerPass = 2 };
+
+        // Four of five: two batches of two, then the ceiling. A loop with no
+        // ceiling would return five here and hold its connection until the
+        // table was empty, which is the behaviour a first run against a service
+        // that has never purged must not have.
+        (await fixture.PurgeWithAsync(twoAtATime)).Outbox.ShouldBe(4);
+        (await fixture.OutboxAsync()).Count.ShouldBe(1);
+
+        // The next pass takes the remainder and stops short of its ceiling,
+        // because a batch that comes back under BatchSize means the table is
+        // drained — which is the loop's other exit, and the one that keeps an
+        // idle service from running twenty statements an hour for nothing.
+        (await fixture.PurgeWithAsync(twoAtATime)).Outbox.ShouldBe(1);
+        (await fixture.OutboxAsync()).ShouldBeEmpty();
     }
 
     [Fact]
