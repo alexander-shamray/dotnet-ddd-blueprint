@@ -2,6 +2,7 @@ using System.Data;
 using System.Text.Json;
 using Common.Application;
 using Common.Contracts;
+using Common.Domain;
 using Dapper;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
@@ -264,6 +265,21 @@ public sealed class OutboxDispatcher : BackgroundService
         // raised the event — Stage() is called inside the write transaction —
         // so the lag §13.7 measures includes the commit, which is the honest
         // reading of "how stale is this read model".
+        // The Broker guard's mirror, needed for the same reason and against
+        // the same rows. Stage refuses anything but a domain event on this
+        // lane, so a row carrying one arrived without passing it — an alias
+        // repointed during a rename, a row edited during an incident, a row
+        // written before either guard existed. ProjectionInvoker is generic
+        // and unconstrained, so it would hand an integration contract to a
+        // matching IProjectionHandler<T> and mark the row processed; a
+        // payload that deserialises to null reaches a handler that ignores
+        // its argument and is marked processed too. Neither leaves a trace.
+        if (payload is not IDomainEvent)
+            throw new InvalidOperationException(
+                $"Outbox row {message.MessageId} is on the Local lane carrying {type.Name}, " +
+                $"which is not an {nameof(IDomainEvent)}. Projections run on domain events " +
+                "(§7.5).");
+
         await ProjectionInvoker.InvokeAllAsync(sp, payload, type, message.OccurredAt, ct);
     }
 }

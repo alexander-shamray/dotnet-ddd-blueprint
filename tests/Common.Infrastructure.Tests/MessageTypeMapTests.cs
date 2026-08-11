@@ -126,6 +126,38 @@ public class MessageTypeMapTests
     }
 
     [Fact]
+    public void Writing_a_name_that_resolves_to_another_type_fails_the_host()
+    {
+        // The worst thing this class can do, and the only guard whose failure
+        // has no symptom: the row is written, claimed and delivered, and the
+        // payload is read back as a type it never was.
+        Should
+            .Throw<InvalidOperationException>(() => new MessageTypeMap(
+                [typeof(SampleDomainEvent).Assembly],
+                new Dictionary<string, Type>(),
+                new Dictionary<Type, string>
+                {
+                    [typeof(SampleDomainEvent)] = typeof(SampleValueTypeDomainEvent).FullName!
+                }))
+            .Message.ShouldContain("resolves to");
+    }
+
+    [Fact]
+    public void An_alias_longer_than_the_column_fails_the_host()
+    {
+        // Every other name is derived from a type and checked above; an alias
+        // is typed by hand, so it is the one that can exceed the column.
+        Should
+            .Throw<InvalidOperationException>(() => new MessageTypeMap(
+                [typeof(SampleDomainEvent).Assembly],
+                new Dictionary<string, Type>
+                {
+                    [new string('n', MessageTypeMap.MaxNameLength + 1)] = typeof(SampleDomainEvent)
+                }))
+            .Message.ShouldContain("No row can carry it");
+    }
+
+    [Fact]
     public void An_alias_onto_a_type_the_map_does_not_carry_fails_the_host()
     {
         // The dispatcher trusts the row's Lane rather than re-deriving it, so

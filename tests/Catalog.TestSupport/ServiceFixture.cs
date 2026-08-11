@@ -1,6 +1,7 @@
 using System.Data.Common;
 using Catalog.Infrastructure.Persistence;
 using Catalog.Migrator;
+using Common.Application;
 using Common.Infrastructure.Outbox;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -237,6 +238,20 @@ public sealed class ServiceFixture : IAsyncLifetime
         ExecuteAsync(
             "UPDATE catalog.OutboxMessages SET Attempts = {0} WHERE MessageId = {1};",
             attempts,
+            messageId);
+
+    /// <summary>
+    /// Repoints a staged row at the other lane, which is the only way to
+    /// produce the row <see cref="OutboxMessage.Stage"/> refuses: a lane that
+    /// disagrees with its payload. Written through SQL on purpose — the point
+    /// of the dispatcher's re-checks is rows that reached the table without
+    /// passing the staging guards, and a test that could build one in process
+    /// would be testing a different claim.
+    /// </summary>
+    public Task SetOutboxLaneAsync(Guid messageId, OutboxLane lane) =>
+        ExecuteAsync(
+            "UPDATE catalog.OutboxMessages SET Lane = {0} WHERE MessageId = {1};",
+            lane.ToString(),
             messageId);
 
     /// <summary>

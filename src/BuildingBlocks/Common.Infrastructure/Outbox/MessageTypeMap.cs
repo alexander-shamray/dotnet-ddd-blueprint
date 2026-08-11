@@ -102,11 +102,22 @@ public sealed class MessageTypeMap
                 $"Two staged types share the name '{clash.Key}'. The outbox " +
                 "column cannot distinguish them.");
 
-        // Aliases resolve inward only: _byName carries them so a row written
-        // before a rename still resolves, and _byType does not, so NameOf goes
-        // on writing the current name and the old one drains away.
+        // An alias resolves inward: _byName carries it so a row written before
+        // a rename still resolves. Outward is the separate, opt-in half below
+        // — without a WriteAs, NameOf goes on writing the current name and the
+        // old one drains away, which is the second release of §9.4's three.
         foreach ((string Name, Type Type) alias in aliases.Select(a => (a.Key, a.Value)))
         {
+            // Every other name in this map is derived from a type and length
+            // checked above; an alias is typed by hand, so it is the one that
+            // can exceed the column. Unwritable is not harmless either way:
+            // as a resolve-only name it can never match a row, and under a
+            // WriteAs it truncates at the insert.
+            if (alias.Name.Length > MaxNameLength)
+                throw new InvalidOperationException(
+                    $"The alias '{alias.Name}' is {alias.Name.Length} characters and the outbox " +
+                    $"column holds {MaxNameLength}. No row can carry it.");
+
             if (pairs.Any(p => p.Name == alias.Name))
                 throw new InvalidOperationException(
                     $"'{alias.Name}' is an alias and also a live type name. One of them resolves " +
@@ -135,11 +146,24 @@ public sealed class MessageTypeMap
         // pointed the other way.
         foreach ((Type Type, string Name) written in writtenNames.Select(w => (w.Key, w.Value)))
         {
-            if (!_byName.ContainsKey(written.Name))
+            if (!_byName.TryGetValue(written.Name, out Type? resolves))
                 throw new InvalidOperationException(
                     $"{written.Type.Name} is written as '{written.Name}', which this map cannot " +
                     "resolve. Alias that name to the type in the same release, or the rows this " +
                     "instance stages are rows it cannot itself deliver.");
+
+            // Resolving is not enough — it has to resolve back to this type.
+            // A name that resolves to a different one is the worst outcome
+            // this class can produce: the row is written, claimed and
+            // delivered, and the payload is deserialised as something it
+            // never was. A failed delivery is loud and this is silent, so it
+            // is checked here rather than left to the one-character typo that
+            // makes the two names look alike.
+            if (resolves != written.Type)
+                throw new InvalidOperationException(
+                    $"{written.Type.Name} is written as '{written.Name}', which resolves to " +
+                    $"{resolves.Name}. Every row staged for {written.Type.Name} would be read " +
+                    $"back as {resolves.Name} — a substitution, not a delivery failure.");
         }
 
         _byType = pairs.ToFrozenDictionary(

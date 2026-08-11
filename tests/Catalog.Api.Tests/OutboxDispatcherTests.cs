@@ -1,6 +1,8 @@
 using Catalog.TestSupport;
 using Catalog.TestSupport.Outbox;
 using Common.Application;
+using Common.Contracts;
+using Common.Domain;
 using Common.Infrastructure.Outbox;
 using Shouldly;
 using Xunit;
@@ -59,6 +61,43 @@ public sealed class OutboxDispatcherTests(ServiceFixture fixture) : IAsyncLifeti
         OutboxMessage row = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
         row.Attempts.ShouldBe(10);                // not 11 — never re-claimed
         row.ProcessedAt.ShouldBeNull();           // visible to the §13.6 alert
+    }
+
+    [Fact]
+    public async Task A_domain_event_on_the_broker_lane_is_never_published()
+    {
+        // §5.5's rule, enforced at the last place able to enforce it. Stage
+        // refuses this pairing, so the row is built the only way the failure
+        // can actually occur: written correctly, then repointed — a rename
+        // that aliased an old Broker name onto a domain event, or a row
+        // edited during an incident.
+        OutboxMessage row = OutboxRows.Healthy(fixture);
+        await fixture.StageOutboxAsync(row);
+        await fixture.SetOutboxLaneAsync(row.MessageId, OutboxLane.Broker);
+
+        await fixture.ProcessOutboxBatchAsync();
+
+        OutboxMessage failed = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
+        failed.ProcessedAt.ShouldBeNull();
+        failed.LastError.ShouldNotBeNull().ShouldContain(nameof(IIntegrationEvent));
+    }
+
+    [Fact]
+    public async Task An_integration_event_on_the_local_lane_never_reaches_a_projection()
+    {
+        // The mirror, and the quieter of the two: ProjectionInvoker is
+        // generic and unconstrained, so without the guard a contract would be
+        // offered to any matching IProjectionHandler<T> and the row marked
+        // processed — no publish, no handler, no trace.
+        OutboxMessage row = OutboxRows.Broker(fixture, Guid.CreateVersion7());
+        await fixture.StageOutboxAsync(row);
+        await fixture.SetOutboxLaneAsync(row.MessageId, OutboxLane.Local);
+
+        await fixture.ProcessOutboxBatchAsync();
+
+        OutboxMessage failed = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
+        failed.ProcessedAt.ShouldBeNull();
+        failed.LastError.ShouldNotBeNull().ShouldContain(nameof(IDomainEvent));
     }
 
     [Fact]
