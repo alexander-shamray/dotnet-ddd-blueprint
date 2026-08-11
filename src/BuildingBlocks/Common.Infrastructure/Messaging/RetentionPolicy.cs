@@ -22,6 +22,20 @@ namespace Common.Infrastructure.Messaging;
 /// debugging (§9.4) — but its <em>predicate</em> is not soft at all, and lives
 /// in <see cref="RetentionPurgeService"/> rather than here.
 /// </para>
+/// <para>
+/// <b>Every member is validated, and this is <see cref="Outbox.OutboxTable"/>'s
+/// principle applied to the other registered value.</b> The numbers are
+/// caller-supplied by design, and what is caller-supplied has to be a value the
+/// type refuses to hold wrongly. Each is refused rather than clamped because
+/// each fails somewhere the reader is not looking: a negative window puts the
+/// cutoff in the <em>future</em> and deletes rows written a second ago — the
+/// inbox one silently disabling deduplication; a non-positive
+/// <see cref="BatchSize"/> or <see cref="MaxBatchesPerPass"/> turns every pass
+/// into a no-op, so retention stops with the tables growing and nothing to see;
+/// and the two upper bounds exist because a value their consumers reject throws
+/// on a background thread or inside a swallowed pass rather than at the
+/// registration that set it.
+/// </para>
 /// </remarks>
 public sealed record RetentionPolicy
 {
@@ -94,27 +108,6 @@ public sealed record RetentionPolicy
     }
 
     /// <summary>
-    /// Every member of this type is a positive quantity, and each of them
-    /// drives something that fails differently when it is not.
-    /// </summary>
-    /// <remarks>
-    /// This is <see cref="Outbox.OutboxTable"/>'s principle applied to the
-    /// other registered value: a policy is service-configurable by design
-    /// (§9.5 tells the reader to check the inbox window against their broker),
-    /// so it is caller-supplied, and what is caller-supplied has to be a value
-    /// the type refuses to hold wrongly.
-    /// <para>
-    /// The failures are worth naming because none of them throws. A negative
-    /// window puts the cutoff in the <em>future</em> and deletes the rows that
-    /// were just written — the inbox one silently disabling deduplication.
-    /// A zero <see cref="MaxBatchesPerPass"/> or <see cref="BatchSize"/> turns
-    /// every pass into a no-op, so retention stops with the tables growing and
-    /// nothing to see. Only a non-positive <see cref="Interval"/> is loud, and
-    /// it is loud in the wrong place: <c>PeriodicTimer</c> throws on a
-    /// background thread inside a host that has already reported ready.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// <c>PeriodicTimer</c>'s largest accepted period, which is where
     /// <see cref="Interval"/> is actually spent.
     /// </summary>
@@ -159,6 +152,7 @@ public sealed record RetentionPolicy
             : throw new ArgumentOutOfRangeException(
                 member,
                 value,
-                $"{member} must be positive. A non-positive retention setting does not fail — " +
-                "it deletes rows that were just written, or purges nothing at all.");
+                $"{member} must be positive. A non-positive count does not fail where it is " +
+                "set — it makes every pass a no-op, so retention stops with the tables growing " +
+                "and nothing to see.");
 }
