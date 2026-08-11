@@ -15,7 +15,7 @@ namespace Common.Contracts;
 
 /// <summary>
 /// Implemented by every integration event. No behaviour and no domain types —
-/// three primitives, which is what keeps this legal under §9.6's rule that a
+/// three primitives, which is what keeps this legal under §9.1's rule that a
 /// contract may not name a domain type.
 /// </summary>
 public interface IIntegrationEvent
@@ -750,6 +750,42 @@ Ordering's assembly, and there is no such assembly. The schema is a registered
 value instead:
 
 ```csharp
+namespace Common.Infrastructure;
+
+/// <summary>
+/// The one place a schema is checked and delimited. Two registered values need
+/// it — OutboxTable and §9.5's InboxTable — and a second copy of the pattern is
+/// a second answer to "what is a legal schema here", which is not a question
+/// that gets to have two.
+/// </summary>
+internal static partial class SqlSchema
+{
+    public static string Qualify(string schema, string table, string paramName)
+    {
+        if (!Identifier().IsMatch(schema))
+            throw new ArgumentException(
+                $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
+                "into this service's messaging statements rather than parameterised.",
+                paramName);
+
+        // Delimited: the pattern above admits reserved words and a service
+        // may legitimately be called `User`, whose `FROM user.OutboxMessages`
+        // SQL Server cannot read. Brackets rather than a keyword blacklist,
+        // which would need extending with every release — and nothing needs
+        // escaping inside them, because the pattern has already refused
+        // everything but letters, digits and underscore. The table name is a
+        // literal supplied by the two types below, never by a caller.
+        return $"[{schema}].{table}";
+    }
+
+    // Bounded at 128, which is what `sysname` holds: a longer schema
+    // constructs happily and then fails every statement composed from it.
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    private static partial Regex Identifier();
+}
+```
+
+```csharp
 namespace Common.Infrastructure.Outbox;
 
 /// <summary>
@@ -758,36 +794,28 @@ namespace Common.Infrastructure.Outbox;
 /// parameterised — a schema cannot be a parameter, and what cannot be a
 /// parameter has to be a value the type refuses to hold wrongly.
 /// </summary>
-public sealed partial class OutboxTable
+public sealed class OutboxTable
 {
     public OutboxTable(string schema)
     {
-        if (!Identifier().IsMatch(schema))
-            throw new ArgumentException(
-                $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
-                "into the dispatcher's statements rather than parameterised.",
-                nameof(schema));
-
-        // Delimited: the pattern above admits reserved words and a service
-        // may legitimately be called `User`, whose `FROM user.OutboxMessages`
-        // SQL Server cannot read. Brackets rather than a keyword blacklist,
-        // which would need extending with every release — and nothing needs
-        // escaping inside them, because the pattern has already refused
-        // everything but letters, digits and underscore.
-        QualifiedName = $"[{schema}].OutboxMessages";
+        QualifiedName = SqlSchema.Qualify(schema, "OutboxMessages", nameof(schema));
         Schema = schema;
     }
 
     public string Schema { get; }
 
     public string QualifiedName { get; }
-
-    // Bounded at 128, which is what `sysname` holds: a longer schema
-    // constructs happily and then fails every statement composed from it.
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-    private static partial Regex Identifier();
 }
 ```
+
+> **The check is shared, and that is the whole reason it is a separate type.**
+> §9.5's `InboxTable` is this class with one word changed, so a reader who
+> copies the constructor above rather than calling `SqlSchema` gets two answers
+> to one question — the 128-character bound, the reserved-word argument and the
+> bracket-quoting, maintained twice. Each service builds both tables from
+> **one** schema literal (§4.2), which is what keeps the pair from naming
+> different schemas; sharing the guard is what keeps them from disagreeing
+> about what a schema may be.
 
 > **The alternative is a dispatcher per service, and that is §9.3's prohibition
 > on a second outbox table set arriving by the back door.** Two dispatchers
@@ -1734,7 +1762,12 @@ public static class CancelReasons
 public sealed record ConfirmOrder(Guid OrderId, string PaymentReference);
 ```
 
-> **A contract may not name a domain type.** It is the easiest rule in this
+> **A contract may not name a domain type.** §9.1 states it of events, in the
+> sentence that says a contract is primitives; it is restated here because
+> commands are where it is easiest to break, and because the reason is
+> different — an event carrying a domain type is a leak, where a *command*
+> carrying one pins that type's member names as wire format for everybody who
+> sends the command. It is the easiest rule in this
 > document to break, because the domain type is always right there and always
 > more expressive. The test is mechanical: if the contract assembly needs a
 > project reference to any `*.Domain`, the contract is wrong. Enums are the

@@ -1527,7 +1527,7 @@ public async Task Commands_are_sent_and_events_are_published()
 
 The saga tests above prove one service's coordination. The only thing left that
 is genuinely *between* services is the contract assembly, and its rules are all
-stated elsewhere as things reviewers should notice: §9.6's "a contract may not
+stated elsewhere as things reviewers should notice: §9.1's "a contract may not
 name a domain type", §9.2's versioned namespace, `required` members. Each is
 mechanical, so each is a test rather than a review note.
 
@@ -1554,7 +1554,7 @@ public class ContractTests
     [Fact]
     public void No_contract_names_a_domain_type()
     {
-        // §9.6's rule, and the one that silently drags Ordering.Domain into
+        // §9.1's rule, and the one that silently drags Ordering.Domain into
         // every consuming service. Checked at the assembly level because a
         // contract cannot reference a domain type without the reference.
         typeof(OrderPlaced).Assembly
