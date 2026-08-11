@@ -35,14 +35,14 @@ public sealed record RetentionPolicy
     public TimeSpan OutboxWindow
     {
         get => _outboxWindow;
-        init => _outboxWindow = Positive(value);
+        init => _outboxWindow = InRange(value, MaxWindow);
     }
 
     /// <summary>Inbox rows handled longer ago than this are deleted.</summary>
     public TimeSpan InboxWindow
     {
         get => _inboxWindow;
-        init => _inboxWindow = Positive(value);
+        init => _inboxWindow = InRange(value, MaxWindow);
     }
 
     /// <summary>
@@ -64,7 +64,7 @@ public sealed record RetentionPolicy
     public TimeSpan Interval
     {
         get => _interval;
-        init => _interval = Positive(value);
+        init => _interval = InRange(value, MaxInterval);
     }
 
     /// <summary>
@@ -114,13 +114,45 @@ public sealed record RetentionPolicy
     /// background thread inside a host that has already reported ready.
     /// </para>
     /// </remarks>
-    private static TimeSpan Positive(TimeSpan value, [CallerMemberName] string member = "") =>
-        value > TimeSpan.Zero ? value
+    /// <summary>
+    /// <c>PeriodicTimer</c>'s largest accepted period, which is where
+    /// <see cref="Interval"/> is actually spent.
+    /// </summary>
+    /// <remarks>
+    /// Observed rather than read off the documentation:
+    /// <c>TimeSpan.FromMilliseconds(uint.MaxValue - 1)</c> constructs a timer
+    /// and <c>uint.MaxValue</c> milliseconds throws — about 49.7 days either
+    /// way. Anything larger is refused here rather than by the constructor in
+    /// <c>ExecuteAsync</c>, where it would throw on a background thread inside
+    /// a host that had already reported ready.
+    /// </remarks>
+    private static readonly TimeSpan MaxInterval = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
+    /// <summary>Ten years, which is a configuration error rather than a policy.</summary>
+    /// <remarks>
+    /// A bound is needed at all because the cutoff is <c>now - window</c> and
+    /// <c>DateTimeOffset</c> subtraction throws when the result is not
+    /// representable — verified with <c>TimeSpan.MaxValue</c>. That throw
+    /// lands inside <c>PurgeAsync</c>, whose caller logs and swallows, so an
+    /// unbounded window buys a purge that never runs and says so once an hour
+    /// in a log nobody reads. Ten years rather than the representable maximum
+    /// because the two failures are different: past a decade the value is a
+    /// mistake, and refusing it at the registration is worth more than
+    /// tolerating it until the arithmetic gives out.
+    /// </remarks>
+    private static readonly TimeSpan MaxWindow = TimeSpan.FromDays(3650);
+
+    private static TimeSpan InRange(
+        TimeSpan value,
+        TimeSpan maximum,
+        [CallerMemberName] string member = "") =>
+        value > TimeSpan.Zero && value <= maximum ? value
             : throw new ArgumentOutOfRangeException(
                 member,
                 value,
-                $"{member} must be positive. A non-positive retention setting does not fail — " +
-                "it deletes rows that were just written, or purges nothing at all.");
+                $"{member} must be positive and at most {maximum}. A retention setting outside " +
+                "that range does not fail where it is set — it deletes rows that were just " +
+                "written, purges nothing at all, or throws where the exception is swallowed.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

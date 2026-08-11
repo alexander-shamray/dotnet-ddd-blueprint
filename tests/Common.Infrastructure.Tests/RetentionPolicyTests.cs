@@ -69,6 +69,50 @@ public class RetentionPolicyTests
     }
 
     [Fact]
+    public void A_value_too_large_to_run_is_refused_as_well_as_one_too_small()
+    {
+        // Positive was not enough, and both directions fail out of sight.
+        // `PeriodicTimer` rejects a period above uint.MaxValue - 1
+        // milliseconds — verified, about 49.7 days — and it does so from
+        // ExecuteAsync, on a background thread, in a host that has already
+        // reported ready. A window large enough to make `now - window`
+        // unrepresentable throws inside PurgeAsync instead, where the caller
+        // logs and swallows: a purge that never runs, once an hour, quietly.
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { Interval = TimeSpan.MaxValue });
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { Interval = TimeSpan.FromDays(50) });
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { OutboxWindow = TimeSpan.MaxValue });
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { InboxWindow = TimeSpan.FromDays(3651) });
+    }
+
+    [Fact]
+    public void The_largest_accepted_interval_is_one_PeriodicTimer_takes()
+    {
+        // The bound is only right if it is the consumer's own. Constructed
+        // here rather than asserted against a constant, so a framework change
+        // to that limit fails this test rather than the running host.
+        RetentionPolicy policy = new() { Interval = TimeSpan.FromMilliseconds(uint.MaxValue - 1) };
+
+        using PeriodicTimer timer = new(policy.Interval);
+
+        timer.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void The_largest_accepted_window_still_gives_a_representable_cutoff()
+    {
+        // Same test from the other side: the window is spent as `now - window`
+        // in PurgeAsync, so the maximum this type accepts has to be one that
+        // subtraction survives.
+        RetentionPolicy policy = new() { OutboxWindow = TimeSpan.FromDays(3650) };
+
+        Should.NotThrow(() => DateTimeOffset.UtcNow - policy.OutboxWindow);
+    }
+
+    [Fact]
     public void The_refusal_names_the_setting_that_was_wrong()
     {
         // Five settings of two shapes: a message saying only "must be positive"

@@ -39,7 +39,12 @@ public partial class AddInbox : Migration
             columns: table => new
             {
                 MessageId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                Endpoint = table.Column<string>(type: "varchar(300)", unicode: false, maxLength: 300, nullable: false, collation: "Latin1_General_BIN2"),
+                Endpoint = table.Column<string>(
+                    type: "varchar(300)",
+                    unicode: false,
+                    maxLength: 300,
+                    nullable: false,
+                    collation: "Latin1_General_BIN2"),
                 HandledAt = table.Column<DateTimeOffset>(type: "datetimeoffset(7)", nullable: false)
             },
             constraints: table =>
