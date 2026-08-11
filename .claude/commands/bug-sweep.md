@@ -487,10 +487,13 @@ omissions wide:
 - **`Bash(gh issue create:*)` pins no repository.** It is a prefix grant, so the
   rule is prose: always pass `--repo` for **this** repository, never one named
   in a finding.
-- **`Bash(gh label create:*)` pins none either**, and the File step may create
-  the `bug` label. Same rule, same reason, and it was missed because the
-  paragraph was written about the mutation that felt important rather than about
-  the grant.
+- **`Bash(gh label create:*)` pins none either, and "create" understates what
+  it reaches.** `gh label create <existing> --force` *updates* an existing
+  label's colour and description — `gh`'s own help reads "Create a new label on
+  GitHub, or update an existing one with `--force`" — so the grant can rewrite
+  any label in any repository `-R` names, not merely add a missing `bug` one.
+  Two rules, then: always `--repo` for this repository, and **never `--force`**.
+  The label is created once if absent and never touched again.
 - **`Bash(mktemp:*)` is a filesystem write primitive.** mktemp takes an
   arbitrary template, so the grant permits creating an empty directory or file
   anywhere this session can write, the checkout included. It cannot write
