@@ -98,8 +98,12 @@ deleted before the real aggregate can be written.
      to skip: a value object with a private constructor does not throw on the
      outbox's `Local` lane, it deserialises to its default, and the symptom is
      a projection running on a zero (§9.4).
-4. Map the first endpoint in `Program.cs`. It is unauthenticated until PR-16;
-   say so in `deploy/compose/README.md`, as Catalog does (§C.4).
+4. Map the first endpoint in `Program.cs`, behind `RequireAuthorization()` at
+   the group (§11.4) — fail closed, and let any deliberately public endpoint
+   say `AllowAnonymous()` out loud. The permission it needs is a
+   `{Service}Permissions` constant and a policy registered beside the other
+   two `Add*` calls; add `AuthorizationPolicyTests` in the same change, which
+   is what stops a policy name resolving to nothing.
 
 Not in scope, and not silently missing: the gateway route (PR-17 builds the
 gateway), the Helm chart (PR-23), and a Worker host in place of an API — §4.1

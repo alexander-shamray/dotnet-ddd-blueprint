@@ -285,7 +285,29 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
     def test_the_host_does_not_cite_itself_as_the_precedent(self):
         program = self.claim("src/Services/Yankee/Yankee.Api/Program.cs")
         self.assertNotIn("as Yankee does", program)
-        self.assertIn("deploy/compose/README.md when it lands (§C.4)", program)
+
+        # PR-16 replaced the "unauthenticated until PR-16" note this used to
+        # pin — the gap it named is closed, and a generated comment scheduling
+        # a PR that has landed is exactly the false claim this class exists to
+        # catch. What replaced it has to keep saying where the first endpoint
+        # goes, and now also what shape it takes.
+        self.assertIn("This service maps no endpoint of its own yet", program)
+        self.assertIn("behind RequireAuthorization at the group (§11.4)", program)
+        self.assertIn("This service registers no permission policy", program)
+
+    def test_the_host_keeps_the_middleware_but_not_the_policies(self):
+        # The split PR-16 forced: a policy belongs to the endpoint that names
+        # it and leaves with the slice, while token validation belongs to every
+        # host (§11.2) and stays. A scaffolded service that dropped both would
+        # serve its probes as the only thing anybody had ever checked.
+        program = self.claim("src/Services/Yankee/Yankee.Api/Program.cs")
+
+        self.assertIn("app.UseAuthentication();", program)
+        self.assertIn("app.UseAuthorization();", program)
+        # The commented example in the generated guidance keeps the name, so
+        # match on the executable form: a real call sits at the head of a line.
+        self.assertNotIn("\n    .AddAuthorizationBuilder()", program)
+        self.assertNotIn("AddPolicy(YankeePermissions", program)
 
     def test_the_registration_suite_does_not_send_the_reader_to_itself(self):
         tests = self.claim("tests/Yankee.Application.Tests/DependencyInjectionTests.cs")
@@ -336,7 +358,6 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
         """
         allowed = (
             "PR-07's OpenAPI deliverable",          # Appendix C's row for the host
-            "unauthenticated until PR-16",          # the security PR, for any service
             "category is PR-22's",                  # Testcontainers categories
             "Appendix C's PR-09 test",              # names the test's origin, not the service's
             "drift PR-08 forbids",                  # a rule, cited like an ADR
@@ -1044,7 +1065,10 @@ class TheCommandLine(unittest.TestCase):
 
             self.assertEqual(0, code)
             self.assertEqual("", err)
-            self.assertIn("53 files created, 5 updated", out)
+            # 54 since PR-16 added TestAuthHandler to Catalog.TestSupport,
+            # which every service carries because CatalogApiFactory installs
+            # it unconditionally.
+            self.assertIn("54 files created, 5 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

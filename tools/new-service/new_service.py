@@ -122,6 +122,11 @@ COPIED = frozenset(
         "tests/Catalog.Api.Tests/TransientFaultInjection.cs",
         "tests/Catalog.TestSupport/Catalog.TestSupport.csproj",
         "tests/Catalog.TestSupport/CatalogApiFactory.cs",
+        # §12.4's test scheme. Copied rather than omitted even though a
+        # scaffolded service has no endpoint to authorise: CatalogApiFactory
+        # installs it unconditionally, so a service without this file does not
+        # compile, and the first slice needs it on the day it arrives.
+        "tests/Catalog.TestSupport/TestAuthHandler.cs",
         "tests/Catalog.TestSupport/Outbox/OutboxRows.cs",
         "tests/Catalog.TestSupport/Outbox/OutboxTestEvents.cs",
         "tests/Catalog.TestSupport/ServiceFixture.cs",
@@ -135,6 +140,14 @@ COPIED = frozenset(
 OMITTED = frozenset(
     {
         "src/Services/Catalog/Catalog.Api/Endpoints/ProductEndpoints.cs",
+        # The permission vocabulary (§11.4) is the slice's, not the service's.
+        # A host with no endpoint requires no permission, and carrying
+        # `ordering:write` into a service that grants it to nothing would put a
+        # name in the realm nobody can act on — the same objection as a policy
+        # registered and never referenced. The first slice brings the first
+        # permission, and the Program.cs patch below drops the policy that
+        # names this one.
+        "src/Services/Catalog/Catalog.Api/CatalogPermissions.cs",
         "src/Services/Catalog/Catalog.Application/Products/GetProducts/GetProductsHandler.cs",
         "src/Services/Catalog/Catalog.Application/Products/GetProducts/GetProductsQuery.cs",
         "src/Services/Catalog/Catalog.Application/Products/GetProducts/ProductSummaryDto.cs",
@@ -158,6 +171,17 @@ OMITTED = frozenset(
         "tests/Catalog.Application.Tests/PublishProductHandlerTests.cs",
         "tests/Catalog.Application.Tests/PublishProductValidatorTests.cs",
         "tests/Catalog.Api.Tests/OutboxTransportIdentityTests.cs",
+        # Both name /v1/catalog/products, so both are slice by requirement:
+        # they read the host as a deployment rather than a fixture, and a
+        # service with no endpoint has nothing to read. They return with the
+        # first slice, beside the endpoint tests below. HostSmokeTests keeps
+        # the factory they share — which is why those two tests live in a file
+        # of their own rather than in it.
+        "tests/Catalog.Api.Tests/EndpointSecurityTests.cs",
+        # §11.4's callout, executed: every policy an endpoint names must
+        # resolve. With no endpoint there is no policy to enumerate, and the
+        # suite's own guard against passing vacuously is what fails first.
+        "tests/Catalog.Api.Tests/AuthorizationPolicyTests.cs",
         # Not slice by subject — it is about EfUnitOfWork's rollback — but slice
         # by requirement: the claim is that a rejected command leaves nothing
         # tracked, and making it needs a tracked aggregate. A service with no
@@ -404,16 +428,51 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
     "src/Services/Catalog/Catalog.Api/Program.cs": (
-        ("using Catalog.Api.Endpoints;\n", ""),
+        ("using Catalog.Api;\nusing Catalog.Api.Endpoints;\n", ""),
+        # The permission policies leave with the slice that names them. What
+        # stays is UseAuthentication/UseAuthorization below: every host
+        # validates its own tokens (§11.2) whether or not it has an endpoint,
+        # and a service that acquired the middleware only with its first slice
+        # would be a service whose health probes were briefly the only thing
+        # anybody had checked.
+        (
+            "// Catalog's permission policies (§11.4). Deliberately not inside either helper\n"
+            "// above: Application knows nothing about HTTP, and Common.Web must not know\n"
+            "// Catalog's names. One policy, because one endpoint names one — the write\n"
+            "// path. A policy nothing references would be an unused registration, and\n"
+            "// §11.4's callout is about the opposite mistake: a name an endpoint uses and\n"
+            "// nobody registered throws InvalidOperationException on the first request that\n"
+            "// reaches it, never at startup. AuthorizationPolicyTests asserts both\n"
+            "// directions, from the endpoint metadata rather than from this list.\n"
+            "//\n"
+            "// RequirePermission rather than RequireClaim(\"permission\", …): the claim type\n"
+            "// is Common.Web's (§11.4), so a policy here and the resource-level check\n"
+            "// behind ICurrentUser cannot drift apart.\n"
+            "builder.Services\n"
+            "    .AddAuthorizationBuilder()\n"
+            "    .AddPolicy(CatalogPermissions.Write, p => p.RequirePermission(CatalogPermissions.Write));\n"
+            "\n",
+            "// This service registers no permission policy, because it names no endpoint\n"
+            "// that needs one. The first slice brings both together (§11.4):\n"
+            "//\n"
+            "//     builder.Services\n"
+            "//         .AddAuthorizationBuilder()\n"
+            "//         .AddPolicy(<Service>Permissions.Write, p => p.RequirePermission(…));\n"
+            "//\n"
+            "// A policy registered before an endpoint names it is an unused registration;\n"
+            "// an endpoint naming one nobody registered throws on the first request that\n"
+            "// reaches it, never at startup. Add AuthorizationPolicyTests with the slice —\n"
+            "// it enumerates the endpoints and requires every policy they name to resolve.\n"
+            "\n",
+        ),
         (
             "app.MapOpenApi();\n"
-            "app.MapProductEndpoints();        "
-            "// deliberately unauthenticated until PR-16 (Appendix C)\n",
+            "app.MapProductEndpoints();        // §11.4\n",
             "app.MapOpenApi();\n"
             "\n"
             "// This service maps no endpoint of its own yet. The first one goes here,\n"
-            "// and it is unauthenticated until PR-16 — say so in\n"
-            "// deploy/compose/README.md when it lands (§C.4).\n",
+            "// behind RequireAuthorization at the group (§11.4) — fail closed, and let\n"
+            "// any deliberately public endpoint say AllowAnonymous out loud.\n",
         ),
     ),
     "tests/Catalog.Domain.Tests/ArchitectureTests.cs": (
