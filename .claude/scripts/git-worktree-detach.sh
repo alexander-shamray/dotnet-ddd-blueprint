@@ -27,8 +27,9 @@ case "$path" in -*) echo "path may not start with '-'" >&2; exit 2 ;; esac
 # not which flags. So the path must be one only a sweep's own `mktemp -d` could
 # have produced: `secsweep-` plus six characters — a prefix that is historical
 # and shared, /bug-sweep having borrowed it rather than widen this check —
-# directly under the canonical temp root. An unrelated empty directory elsewhere on the host, or a
-# sibling PR worktree that happens to be registered, is refused.
+# directly under the canonical temp root. An unrelated empty directory
+# elsewhere on the host, or a sibling PR worktree that happens to be
+# registered, is refused.
 tmproot=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
   { echo "cannot resolve the temp root" >&2; exit 4; }
 resolved=$(cd "$path" && pwd -P)

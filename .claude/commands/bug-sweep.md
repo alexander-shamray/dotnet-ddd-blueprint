@@ -292,15 +292,30 @@ Each round is the review done once, end to end:
    verify step ran, because the audited repository is **untrusted input**. A
    tool the agent does not have cannot be turned against it.
 
-   The natural cut is five areas, and the scope hint narrows it:
+   The natural cut is six areas, and the scope hint narrows it:
 
    | | |
    |---|---|
    | Building blocks | `src/BuildingBlocks/**` — the dispatcher and its behaviours, the outbox, the Redis helpers, the web middleware |
    | The service | `src/Services/**` — domain invariants, EF mappings and migrations, endpoints, the migrator |
    | The suites | `tests/**` — where the cannot-fail class lives, and the only area whose defects are all of one kind |
-   | Tooling | `tools/**`, `.github/**`, `.claude/scripts/**` — Python and shell, where this repo's bugs have historically been |
+   | Tooling | `tools/**`, `.github/**`, `.claude/**` — Python, shell, and the command and agent definitions, where this repo's bugs have historically been |
+   | Deployment and configuration | `deploy/**`, `.config/**`, and the root build files — `Directory.*.props`, `Platform.slnx`, `global.json`, `.editorconfig`, `.gitattributes` |
    | Samples | `docs/**` fenced code, audited as code but excerpt-aware |
+
+   **The rows have to partition the repository, not merely sample it.** Each
+   auditor is bounded to its own row and sees nothing else, so a path no row
+   owns is not a path without defects — it is a path nobody looked at, reported
+   as a clean sweep. That is this command's own fail-open, and it is the failure
+   class the bar ranks critical when it finds it in someone else's code. Before
+   fanning out on a whole-repo run, check every top-level entry against the
+   table; if one has no owner, widen a row in the same run and say so in the
+   summary. A narrowing scope hint is the one case where coverage is
+   deliberately partial, and the summary says which rows it dropped.
+
+   **`.claude/**` includes this command and its agent**, which is intended
+   rather than awkward: a sweep that cannot audit its own definition is one
+   more protection exempting itself from the thing it protects against.
 
    Give each the same contract: **root every path under `$work`** (the pinned
    worktree, per the rule above — an agent left to default to the caller's
