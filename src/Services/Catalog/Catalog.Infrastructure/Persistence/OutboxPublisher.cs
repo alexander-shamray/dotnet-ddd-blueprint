@@ -14,7 +14,7 @@ namespace Catalog.Infrastructure.Persistence;
 /// <c>SaveChanges</c> — a publish here, or a second connection, is precisely
 /// the dual write the outbox exists to eliminate.
 /// </remarks>
-internal sealed class EfIntegrationEventPublisher(
+internal sealed class OutboxPublisher(
     CatalogDbContext db,
     MessageTypeMap types,
     OutboxJson json,

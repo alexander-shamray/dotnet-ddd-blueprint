@@ -50,7 +50,7 @@ public static class DependencyInjection
         // scoped, because the context is — a singleton either side would
         // stage into a transaction that had already closed.
         services.AddScoped<IDomainEventCollector, EfDomainEventCollector>();
-        services.AddScoped<IIntegrationEventPublisher, EfIntegrationEventPublisher>();
+        services.AddScoped<IIntegrationEventPublisher, OutboxPublisher>();
 
         // The schema the dispatcher's three statements are composed against.
         // A value rather than a literal in Common.Infrastructure, because

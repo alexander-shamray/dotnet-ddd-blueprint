@@ -77,10 +77,10 @@ public class DependencyInjectionTests
             .ShouldHaveSingleItem();
         dispatcher.Lifetime.ShouldBe(ServiceLifetime.Scoped);
 
-        // Named, not merely counted. The NullDomainEventDispatcher this
-        // replaced satisfied every other assertion in this test while
-        // dropping every event Product.Publish raised, which is exactly the
-        // failure a shape-only check cannot see.
+        // Named, not merely counted. The null object this replaced satisfied
+        // every other assertion in this test while dropping every domain event
+        // the aggregate raised, which is exactly the failure a shape-only
+        // check cannot see.
         dispatcher.ImplementationType!.Name.ShouldBe("DomainEventDispatcher");
     }
 
