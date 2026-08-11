@@ -19,9 +19,25 @@ public static class AuthorizationPolicyExtensions
     /// mapping from role to permission belongs in one place — here that place
     /// is the realm's claim mapper (§11.5), so the platform never sees a role
     /// at all.
+    ///
+    /// <para>
+    /// <b>Authentication is required here rather than assumed from the group.</b>
+    /// <c>RequireClaim</c> alone evaluates the claims on
+    /// <c>HttpContext.User</c> and asks nothing about whether anything
+    /// authenticated it — the same independence that made
+    /// <see cref="HttpContextCurrentUser"/> read only authenticated identities.
+    /// Catalog is safe today because its route group adds
+    /// <c>RequireAuthorization()</c> and the two policies combine, but that is
+    /// a property of one caller rather than of this method, and the next
+    /// service to map an endpoint with the named policy alone would authorize
+    /// an unauthenticated principal that happens to carry the claim. A
+    /// building block cannot rely on every caller remembering the other half.
+    /// </para>
     /// </remarks>
     public static AuthorizationPolicyBuilder RequirePermission(
         this AuthorizationPolicyBuilder builder,
         string permission) =>
-        builder.RequireClaim(PermissionClaim.Type, permission);
+        builder
+            .RequireAuthenticatedUser()
+            .RequireClaim(PermissionClaim.Type, permission);
 }
