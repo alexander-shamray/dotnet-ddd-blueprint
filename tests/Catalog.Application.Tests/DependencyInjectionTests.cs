@@ -62,13 +62,12 @@ public class DependencyInjectionTests
     }
 
     [Fact]
-    public void AddCatalogApplication_registers_the_null_domain_event_dispatcher_scoped()
+    public void AddCatalogApplication_registers_the_real_domain_event_dispatcher_scoped()
     {
-        // §4.2 registers the dispatcher's IDomainEventDispatcher in
-        // Application, beside AddDispatcher — the null object sits where
-        // PR-14's real one will, so that PR replaces a line in place. Without
-        // this registration the first resolved TransactionBehavior throws,
-        // and nothing resolves one before the first dispatched command.
+        // §4.2 registers IDomainEventDispatcher in Application, beside
+        // AddDispatcher. Without it the first resolved TransactionBehavior
+        // throws, and nothing resolves one before the first dispatched
+        // command.
         ServiceCollection services = new();
 
         services.AddCatalogApplication();
@@ -77,7 +76,44 @@ public class DependencyInjectionTests
             .Where(d => d.ServiceType == typeof(IDomainEventDispatcher))
             .ShouldHaveSingleItem();
         dispatcher.Lifetime.ShouldBe(ServiceLifetime.Scoped);
-        dispatcher.ImplementationType!.Name.ShouldBe("NullDomainEventDispatcher");
+
+        // Named, not merely counted. The null object this replaced satisfied
+        // every other assertion in this test while dropping every domain event
+        // the aggregate raised, which is exactly the failure a shape-only
+        // check cannot see.
+        dispatcher.ImplementationType!.Name.ShouldBe("DomainEventDispatcher");
+    }
+
+    [Fact]
+    public void AddCatalogApplication_registers_the_projection_registry_scoped()
+    {
+        // Scoped, not singleton: the registry resolves scoped handlers, and
+        // GetServices for a scoped service from the root provider throws
+        // (§7.5). Its memo is the singleton beside it, keyed to the container.
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        services
+            .Where(d => d.ServiceType == typeof(IProjectionRegistry))
+            .ShouldHaveSingleItem()
+            .Lifetime.ShouldBe(ServiceLifetime.Scoped);
+    }
+
+    [Fact]
+    public void AddCatalogApplication_registers_the_allow_list_mapper()
+    {
+        // The one registration that decides what Catalog publishes (§9.3).
+        // Explicit rather than scanned, so "Catalog publishes these facts" is
+        // not a property of which types happen to be in the assembly.
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        services
+            .Where(d => d.ServiceType == typeof(IIntegrationEventMapper))
+            .ShouldHaveSingleItem()
+            .ImplementationType!.Name.ShouldBe("CatalogIntegrationEventMapper");
     }
 
     [Fact]

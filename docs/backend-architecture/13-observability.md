@@ -377,6 +377,12 @@ public sealed class RequestMetrics
 ```csharp
 // Common.Infrastructure — registered by AddOrderingInfrastructure, because
 // all three call sites are Infrastructure types (§9.4).
+//
+// The finished class. It grows in instalments, on PluggableInterfaces.All's
+// terms: Projected lands with the outbox, because ProjectionInvoker is its
+// only call site, and the other two with the consumers that record them. Two
+// instruments nothing writes to would be an empty series on a dashboard
+// rather than a signal — see Appendix D, which records where the code is.
 public sealed class MessagingMetrics
 {
     private readonly Histogram<double> _deliveryLag;
@@ -419,7 +425,8 @@ different lanes. `Delivered` reads it **off the message**: it covers the broker
 lane, every integration event carries the field (§9.1), and
 `IntegrationEventConsumer<T>` reaches it through the `IIntegrationEvent`
 constraint — so there is no header to define and nothing to keep in sync.
-`Projected` reads it **off the outbox row**, which the claim now returns (§9.4).
+`Projected` reads it **off the outbox row**, which the claim now returns (§9.4)
+and which `Stage` copies from the message rather than from a clock.
 It has to: the local lane carries domain events, and `ProjectionInvoker<TEvent>`
 is deliberately unconstrained — `IProjectionHandler<T>` is satisfied by any
 type, including the read-model-shaped events a projection may prefer. Every

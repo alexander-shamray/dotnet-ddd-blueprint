@@ -24,10 +24,11 @@ namespace Catalog.Api.Tests;
 /// <c>DatabaseSmokeTests</c>, against a real broker.
 /// </summary>
 /// <remarks>
-/// The message and consumer are test-local on purpose.
-/// <c>Common.Contracts</c> does not exist until PR-15, and a message type
-/// invented early is a project invented early — the smoke needs a payload the
-/// pipeline can carry, not a contract anything else may come to depend on.
+/// The message and consumer are test-local on purpose, and stay that way now
+/// that <c>Common.Contracts</c> exists: this smoke needs a payload the
+/// pipeline can carry, not a published contract other services may come to
+/// depend on. A real contract here would make every change to it a change to
+/// this test, and the test is about the registration rather than the message.
 /// </remarks>
 public class MessagingRegistrationTests
 {

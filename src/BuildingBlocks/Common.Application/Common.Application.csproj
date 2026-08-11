@@ -3,22 +3,20 @@
   <!--
     Settings come from Directory.Build.props (§4.4).
 
-    No reference to Common.Domain yet. §4.2 permits one; nothing here needs one,
-    because no type in this assembly names a domain type. An unused project
-    reference is a claim about the dependency graph that nothing makes true.
+    Common.Domain, §4.2's second row, drawn by PR-14 and not before. The edge
+    belongs to the first type here that genuinely names a domain type, and
+    that is §7.5's IDomainEventCollector — IReadOnlyList&lt;IDomainEvent&gt; in
+    a signature. IIntegrationEventMapper, IProjectionRegistry and
+    DomainEventDispatcher all name one too, and all four arrive together.
 
-    Not "TransactionBehavior counts IAggregateRoot", which this comment said
-    until a review checked it. §6.3's behaviour reads
+    What did NOT draw it is worth keeping, because the argument still governs
+    the two files concerned. Not "TransactionBehavior counts IAggregateRoot",
+    which this comment said until a review checked it: §6.3's behaviour reads
     IUnitOfWork.ModifiedAggregateCount — an int — and calls
     IDomainEventDispatcher.DispatchAsync(CancellationToken); neither signature
     names a domain type. The `is IAggregateRoot` test lives in EfUnitOfWork,
-    over EF's change tracker, and Infrastructure already references Domain.
-    That separation is the whole point of counting behind the port.
-
-    The edge is drawn by the first Application type that genuinely names a
-    domain type. On the plan that is §7.5's IDomainEventCollector, whose
-    CollectAndClear returns IReadOnlyList&lt;IDomainEvent&gt; — so it arrives
-    with the outbox, not with PR-09.
+    over EF's change tracker, and counting behind the port is the whole point.
+    A reference existing is not permission for those two to start using it.
   -->
 
   <ItemGroup>
@@ -31,6 +29,10 @@
     <PackageReference Include="Scrutor" />
     <!-- ValidationBehavior's IValidator<T> and ValidationException (§6.3). -->
     <PackageReference Include="FluentValidation" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Common.Domain\Common.Domain.csproj" />
   </ItemGroup>
 
 </Project>

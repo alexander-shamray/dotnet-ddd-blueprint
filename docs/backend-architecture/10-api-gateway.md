@@ -254,8 +254,9 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    options.AddPolicy("anonymous", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
+    options.AddPolicy(
+        "anonymous",
+        context => RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             factory: _ => new FixedWindowRateLimiterOptions
             {
@@ -264,8 +265,9 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             }));
 
-    options.AddPolicy("authenticated", context =>
-        RateLimitPartition.GetTokenBucketLimiter(
+    options.AddPolicy(
+        "authenticated",
+        context => RateLimitPartition.GetTokenBucketLimiter(
             partitionKey: context.User.FindFirstValue(ClaimTypes.NameIdentifier) ??
                 context.Connection.RemoteIpAddress?.ToString() ??
                 "unknown",

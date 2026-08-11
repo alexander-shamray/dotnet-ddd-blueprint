@@ -32,6 +32,10 @@ from new_service import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_ID = "20260809120000"
+# The outbox migration's id, one minute on — the script derives it, and spelling
+# it out here rather than calling next_migration_id keeps the assertion
+# independent of the arithmetic it is checking.
+OUTBOX_MIGRATION_ID = "20260809120100"
 PORT = 5101
 
 
@@ -222,11 +226,15 @@ class OmitsTheSlice(unittest.TestCase):
         self.assertNotIn('PackageReference Include="Dapper"', csproj)
         self.assertIn('PackageReference Include="FluentValidation"', csproj)
 
-    def test_the_registration_suite_keeps_the_five_tests_about_the_template(self):
-        # The exact set, not a subset. Written as four `assertIn`s it both
-        # miscounted — the null-dispatcher test is copied too — and could not
-        # fail if that test were dropped, which is the one registration whose
+    def test_the_registration_suite_keeps_the_tests_about_the_template(self):
+        # The exact set, not a subset. Written as `assertIn`s it both
+        # miscounted — the dispatcher test is copied too — and could not fail
+        # if that test were dropped, which is the one registration whose
         # absence makes the first resolved TransactionBehavior throw.
+        #
+        # In declaration order, which is also the order the registrations run
+        # in: a set comparison would pass on a suite that had lost the pipeline
+        # ordering test and gained a duplicate of another.
         tests = self.rendered.created["tests/Zulu.Application.Tests/DependencyInjectionTests.cs"]
 
         self.assertEqual(
@@ -234,7 +242,9 @@ class OmitsTheSlice(unittest.TestCase):
                 "AddZuluApplication_registers_the_dispatcher_scoped",
                 "AddZuluApplication_registers_the_system_clock",
                 "AddZuluApplication_registers_the_request_metrics_singleton",
-                "AddZuluApplication_registers_the_null_domain_event_dispatcher_scoped",
+                "AddZuluApplication_registers_the_real_domain_event_dispatcher_scoped",
+                "AddZuluApplication_registers_the_projection_registry_scoped",
+                "AddZuluApplication_registers_the_allow_list_mapper",
                 "AddZuluApplication_registers_the_three_behaviours_in_pipeline_order",
             ],
             re.findall(r"public void (\w+)\(\)", tests),
@@ -322,10 +332,7 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
         """
         allowed = (
             "PR-07's OpenAPI deliverable",          # Appendix C's row for the host
-            "does not exist until PR-15",           # Common.Contracts, still unbuilt
             "unauthenticated until PR-16",          # the security PR, for any service
-            "until PR-14",                          # the outbox, for any service
-            "PR-14's outbox",
             "category is PR-22's",                  # Testcontainers categories
             "Appendix C's PR-09 test",              # names the test's origin, not the service's
             "drift PR-08 forbids",                  # a rule, cited like an ADR
@@ -375,21 +382,45 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         designer = self.rendered.created[f"{self.prefix}/{MIGRATION_ID}_InitialCreate.Designer.cs"]
         self.assertIn(f'[Migration("{MIGRATION_ID}_InitialCreate")]', designer)
 
-    def test_it_leaves_no_later_catalog_migration_behind(self):
-        migrations = [path for path in self.rendered.created if path.startswith(self.prefix)]
-        self.assertEqual(3, len(migrations), migrations)
+    def test_it_copies_the_outbox_migration_under_the_next_id(self):
+        # §9.4's table is wiring every service has, so it travels with
+        # InitialCreate rather than being dropped with Catalog's model changes.
+        # A scaffolded service without it would carry the dispatcher and log a
+        # failed claim twice a second from its first boot.
+        migration = f"{self.prefix}/{OUTBOX_MIGRATION_ID}_AddOutbox.cs"
+        self.assertIn(migration, self.rendered.created)
+        self.assertIn('name: "OutboxMessages"', self.rendered.created[migration])
 
-    def test_the_snapshot_describes_an_empty_model_with_the_default_schema(self):
+    def test_the_outbox_migration_is_ordered_after_the_schema(self):
+        # EF applies in id order, and the outbox table cannot be created in a
+        # schema that does not exist yet.
+        self.assertLess(MIGRATION_ID, OUTBOX_MIGRATION_ID)
+
+    def test_it_leaves_no_later_catalog_migration_behind(self):
+        # Five files: two migrations, their two designers, and the snapshot.
+        # Catalog's own AddProducts is what must not be here.
+        migrations = [path for path in self.rendered.created if path.startswith(self.prefix)]
+        self.assertEqual(5, len(migrations), migrations)
+        self.assertFalse([path for path in migrations if "AddProducts" in path])
+
+    def test_the_snapshot_describes_the_outbox_and_nothing_else(self):
         # Catalog's snapshot cannot be copied — it describes Product, and the
         # next `migrations add` here would generate a drop for a table that
-        # never existed. This one is EF's own description of an empty model,
-        # lifted from the designer file beside it.
+        # never existed. This one is EF's own description of the model a
+        # scaffolded service actually has: the outbox entity, no aggregate.
+        #
+        # Both halves matter. Without the outbox entity the first
+        # `migrations add` would emit a second CreateTable for a table
+        # InitialCreate's neighbour has already created; with Product in it,
+        # a drop.
         snapshot = self.rendered.created[f"{self.prefix}/ZuluDbContextModelSnapshot.cs"]
         self.assertIn("partial class ZuluDbContextModelSnapshot : ModelSnapshot", snapshot)
         self.assertIn("protected override void BuildModel(ModelBuilder modelBuilder)", snapshot)
         self.assertIn('.HasDefaultSchema("zulu")', snapshot)
         self.assertNotIn("[Migration(", snapshot)
-        self.assertNotIn("modelBuilder.Entity(", snapshot)
+        self.assertIn('modelBuilder.Entity("Common.Infrastructure.Outbox.OutboxMessage"', snapshot)
+        self.assertEqual(1, snapshot.count("modelBuilder.Entity("))
+        self.assertNotIn("Product", snapshot.replace("ProductVersion", ""))
 
     def test_the_machine_owned_files_keep_the_sorted_using_block_ef_writes(self):
         # The rename moves the service's own namespace past Microsoft's in the
@@ -399,6 +430,18 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         # Spelt out rather than re-derived, so the assertion is independent of
         # the sort the script applies: this is the order `dotnet ef migrations
         # add` produced against a scaffolded service.
+        # System first, which is EF's order and not a plain alphabetical one —
+        # the outbox designer is the first machine-owned file here to carry a
+        # System using at all, and it is what made the difference visible.
+        #
+        # System.Collections.Generic appears in neither, though Catalog's own
+        # outbox designer carries it: EF emits it for the
+        # Dictionary<string, object> a ComplexProperty is mapped as, which is
+        # how §5.3's Money reaches the model. The aggregate is removed from
+        # both files here, so the using goes with it — verified against a real
+        # `migrations add` in a scaffolded service, whose Up came out empty and
+        # whose rewritten snapshot was byte-identical to the emitted one.
+        system = ["using System;"]
         efcore = [
             "using Microsoft.EntityFrameworkCore;",
             "using Microsoft.EntityFrameworkCore.Infrastructure;",
@@ -412,7 +455,15 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
                 *tail,
                 "using Zulu.Infrastructure.Persistence;",
             ],
+            f"{self.prefix}/{OUTBOX_MIGRATION_ID}_AddOutbox.Designer.cs": [
+                *system,
+                *efcore,
+                "using Microsoft.EntityFrameworkCore.Migrations;",
+                *tail,
+                "using Zulu.Infrastructure.Persistence;",
+            ],
             f"{self.prefix}/ZuluDbContextModelSnapshot.cs": [
+                *system,
                 *efcore,
                 *tail,
                 "using Zulu.Infrastructure.Persistence;",
@@ -820,13 +871,13 @@ class RefusesToRun(unittest.TestCase):
         # succeeded with a service missing a piece.
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))
-            dispatcher = "src/Services/Catalog/Catalog.Application/NullDomainEventDispatcher.cs"
+            dispatcher = "src/Services/Catalog/Catalog.Infrastructure/Persistence/EfDomainEventCollector.cs"
             (root / dispatcher).unlink()
 
             with self.assertRaises(ScaffoldError) as raised:
                 render(repo_root=root)
             self.assertIn("no longer has", str(raised.exception))
-            self.assertIn("NullDomainEventDispatcher.cs", str(raised.exception))
+            self.assertIn("EfDomainEventCollector.cs", str(raised.exception))
 
     def test_a_template_file_nobody_classified(self):
         # The hole the straggler check cannot see: a new Catalog folder carries
@@ -939,7 +990,7 @@ class TheCommandLine(unittest.TestCase):
 
             self.assertEqual(0, code)
             self.assertEqual("", err)
-            self.assertIn("37 files created, 5 updated", out)
+            self.assertIn("46 files created, 5 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 
@@ -962,6 +1013,24 @@ class TheCommandLine(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()):
                 main(["Zulu"])
         self.assertEqual(2, exit_code.exception.code)
+
+    def test_fourteen_digits_that_are_not_a_date_refuse_in_one_line(self):
+        # MIGRATION_ID checks the shape, which is its job — month thirteen is
+        # fourteen digits. next_migration_id is what notices, and strptime's
+        # ValueError is not a ScaffoldError, so before this the CLI answered a
+        # bad flag with a traceback where every other refusal is one line.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+
+            code, _, err = self.run_main(
+                "Zulu", "--port", str(PORT),
+                "--migration-id", "20261301000000",
+                "--repo-root", str(root),
+            )
+
+            self.assertEqual(1, code)
+            self.assertNotIn("Traceback", err)
+            self.assertIn("20261301000000", err)
 
     def test_the_migration_id_defaults_to_a_utc_timestamp(self):
         with tempfile.TemporaryDirectory() as directory:

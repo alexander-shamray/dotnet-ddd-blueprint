@@ -12,10 +12,10 @@ python tools/new-service/new_service.py Ordering --port 5101
 |---|---|
 | `name` | The service, PascalCase. It becomes the namespace root, the project names, the database, the SQL schema, both connection-string keys and both Compose service names |
 | `--port` | The host port the API publishes. **Required** — a port is an allocation recorded in [§14.1](../../docs/backend-architecture/14-local-development.md) and in `deploy/compose/README.md`, and a script that derived one would quietly disagree with a printed chapter. The run refuses a port another service already publishes |
-| `--migration-id` | The `InitialCreate` id. Defaults to the current UTC timestamp; the tests pass a fixed one |
+| `--migration-id` | The `InitialCreate` id, and the base for the outbox migration one minute after it. Defaults to the current UTC timestamp; the tests pass a fixed one |
 | `--repo-root` | Defaults to this script's repository |
 
-It writes thirty-five files and edits five. The five are `Platform.slnx`,
+It writes forty-six files and edits five. The five are `Platform.slnx`,
 `deploy/compose/docker-compose.yml`, `docker-compose.infra-only.yml`,
 `.env.example` and `deploy/compose/README.md`.
 
@@ -41,19 +41,27 @@ run shows exactly the five and the new directories.
 [§4.1](../../docs/backend-architecture/04-solution-structure.md)'s five
 service projects, three test projects and the `TestSupport` library — nine in
 all, and §4.1 is explicit that the last is not a test project — with
-everything the delivery plan has built into the template through PR-13:
+everything the delivery plan has built into the template through PR-14:
 `DbContext` and conventions, `EfUnitOfWork`, the connection factory, the
 readiness checks, the §7.4 migrator host, the `InitialCreate` migration that
-creates the schema, the §9 bus registration — a scaffolded host refuses to
-start without `ConnectionStrings:RabbitMq` — both Dockerfiles, the Compose
-pair, and the architecture gates of
+creates the schema and the `AddOutbox` one beside it, §9.4's outbox with its
+dispatcher and allow-list mapper, the §9 bus registration — a scaffolded host
+refuses to start without `ConnectionStrings:RabbitMq` — both Dockerfiles, the
+Compose pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
 
-The service builds and its thirty-one tests pass before you have written a
-line, and eleven of them run against real SQL Server and RabbitMQ containers:
+The service builds and its forty-one tests pass before you have written a
+line, and sixteen of them run against real SQL Server and RabbitMQ containers:
 the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
-only once the bus connects — and `EfUnitOfWork`'s commit, rollback and retry
-semantics.
+only once the bus connects — `EfUnitOfWork`'s commit, rollback and retry
+semantics, and the outbox dispatcher's per-row isolation, attempt cap and
+loud failure on a `Local` row with no registered handler.
+
+**The outbox arrives wired and empty**, which is the state to expect: the
+allow-list mapper has no entries, so every domain event this service raises is
+local-only until somebody adds one (§9.3 makes translation opt-in for exactly
+that reason), and no `IProjectionHandler` is registered, so no `Local` row is
+staged either. The table, the dispatcher and the type map are all live.
 
 ## What you do next
 
@@ -65,9 +73,13 @@ deleted before the real aggregate can be written.
    re-anchor `ArchitectureTests` in `{Service}.Domain.Tests` and
    `{Service}.Application.Tests` on it.
 2. Add the entity configuration and run `dotnet ef migrations add` — the
-   generated snapshot already describes the empty model, so the first
-   migration is the first table and nothing else.
-3. Add the first command or query. Three things come back, each with the one
+   generated snapshot already describes the model the service ships with,
+   which is the outbox table and nothing else, so the first migration is the
+   first aggregate's table and nothing else. Verified rather than argued: a
+   scaffolded service was built, `migrations add` was run against it, the
+   generated `Up` came out empty and EF's rewritten snapshot was byte-identical
+   to the emitted one.
+3. Add the first command or query. Four things come back, each with the one
    that needs it and each noted at the line concerned in the generated code —
    they are **not** a set to restore together:
    - **The first handler of either kind** brings the container wiring in
@@ -80,6 +92,12 @@ deleted before the real aggregate can be written.
    - **The first query** brings `Dapper` to `{Service}.Application.csproj`,
      for §6.5's read side. A command-only slice must not add it: an unused
      package reference is a claim the project would not be making.
+   - **The first domain event** brings §12.4's round-trip assertion, and with
+     it a `JsonConverter` in `{Service}.Infrastructure` for any value object
+     the event carries. This one is the least obvious and the most expensive
+     to skip: a value object with a private constructor does not throw on the
+     outbox's `Local` lane, it deserialises to its default, and the symptom is
+     a projection running on a zero (§9.4).
 4. Map the first endpoint in `Program.cs`. It is unauthenticated until PR-16;
    say so in `deploy/compose/README.md`, as Catalog does (§C.4).
 

@@ -31,6 +31,12 @@
          MassTransit.RabbitMQ: the harness swaps the transport out, and a test
          project that uses no transport must not claim one. -->
     <PackageReference Include="MassTransit" />
+    <!-- One substitute, for one assertion: capturing the IPipe<PublishContext>
+         the outbox dispatcher hands IPublishEndpoint, so §9.1's single-identity
+         rule can be checked on the transport rather than inferred. Writing that
+         fake by hand means stubbing an interface with a dozen members nobody
+         calls. -->
+    <PackageReference Include="NSubstitute" />
   </ItemGroup>
 
   <ItemGroup>

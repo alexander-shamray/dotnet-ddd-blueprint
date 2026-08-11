@@ -262,8 +262,13 @@ public static IServiceCollection AddOrderingApplication(this IServiceCollection 
     // Not AddScoped<IDispatcher, Dispatcher>: Dispatcher is internal to
     // Common.Application (§6.2), so this assembly cannot name it.
     services.AddDispatcher();
-    services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
-    services.AddScoped<IProjectionRegistry, ProjectionRegistry>();      // §7.5
+
+    // The same reason, one section over: DomainEventDispatcher,
+    // ProjectionRegistry and its cache are all internal to Common.Application
+    // (§7.5), so the three registration lines they need are not lines this
+    // assembly can write either. Not three AddScoped lines — the cache is a
+    // singleton, for the reason §7.5 gives beside it.
+    services.AddDomainEventDispatcher();                                // §7.5
 
     // Not an open generic, so the §6.2 scan cannot find it — one service, one
     // mapper, registered by hand. DomainEventDispatcher injects it, so a
@@ -312,11 +317,36 @@ public static IServiceCollection AddOrderingInfrastructure(
     // line leaves no way to. Adding to the source is not the same as replacing
     // the map: the production assemblies stay in the list, so a test still
     // cannot stage something the real host would reject.
-    services.AddSingleton<MessageTypeSource>(_ =>
+    //
+    // An instance, not a factory, and that is what makes the sentence above
+    // true — a test resolves the registered descriptor and calls Add on it.
+    // A factory would leave a test with nothing to reach, and re-registering
+    // a second source is the replacement this is written to avoid.
+    services.AddSingleton(
         new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly));
 
     services.AddSingleton(sp =>
         new MessageTypeMap(sp.GetRequiredService<MessageTypeSource>().Assemblies));
+
+    // The map's factory is lazy, and this is what makes "a duplicate name
+    // fails the host" true: ValidateOnBuild checks the call site and never
+    // invokes it, so without a hosted service resolving the map the
+    // constructor's throw lands on a background thread in a host that has
+    // been ready for hours. Registered before the dispatcher, because hosted
+    // services start in order.
+    services.AddHostedService<MessageTypeMapValidator>();                 // §9.4
+
+    // The schema the dispatcher composes its three statements against (§9.4).
+    // A value, because Common.Infrastructure is every service's and cannot
+    // hold a literal.
+    services.AddSingleton(new OutboxTable("ordering"));
+
+    // The payload format, and the converters that put this service's value
+    // objects in it. Money has a private constructor, so without its converter
+    // it deserialises to a zero amount and a null currency and nothing says so
+    // (§9.4).
+    services.AddSingleton<JsonConverter, MoneyJsonConverter>();
+    services.AddSingleton<OutboxJson>();
 
     // Plain ports — not open generics, so the §6.2 scan does not see them and
     // each needs a line here. Omitting one fails at DI resolution on the first
@@ -337,8 +367,14 @@ public static IServiceCollection AddOrderingInfrastructure(
     // over the broker. The one host in this blueprint that calls a peer is the
     // BFF (§9.7), and outbound identity belongs to it (§11.5).
 
-    // Registered by type, not by factory: the integration-test fixture locates
-    // and removes this exact descriptor (§12.4).
+    // Registered by type, not by factory: the generic overload records an
+    // ImplementationType, and the integration-test fixture matches on it to
+    // locate and remove this exact descriptor (§12.4). MassTransit registers
+    // its bus as a hosted service too, so the fixture cannot simply call
+    // RemoveAll<IHostedService>() — and a factory registration here would
+    // leave ImplementationType null, so the removal it does make would match
+    // nothing and the dispatcher would drain rows underneath the assertions
+    // about them.
     services.AddHostedService<OutboxDispatcher>();
 
     // Outbox metrics (§13.6) read the database, so they belong here.
@@ -695,9 +731,11 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.1" />
     <!-- Exact major. v9 is commercially licensed — see ADR-003. The core
          package is a transitive of the transport one, pinned separately
-         because the harness smoke references it directly — the in-memory
-         harness is core API, not transport, and a test project that uses no
-         transport must not claim one. Same version: they ship as one
+         because two things reference it directly: the harness smoke, since
+         the in-memory harness is core API and a test project that uses no
+         transport must not claim one, and Common.Infrastructure since PR-14,
+         for the IPublishEndpoint the outbox dispatcher publishes the Broker
+         lane through (§9.4). Same version as the transport: they ship as one
          release. -->
     <PackageVersion Include="MassTransit" Version="8.5.3" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
@@ -881,11 +919,14 @@ connection factory ([§6.5](06-cqrs.md)), the readiness checks
 [§9](09-messaging.md), whose eager read means a scaffolded host refuses to
 start without `ConnectionStrings:RabbitMq`, the migration job host
 ([§7.4](07-persistence.md)), the `InitialCreate` migration that creates the
-schema, both images ([§15.2](15-cicd-deployment.md)) and §4.2's architecture
-gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
+schema and the `AddOutbox` one beside it — §9.4's table is wiring every
+service has, and a service carrying the dispatcher without it would log a
+failed claim twice a second from its first boot — the outbox itself with its
+empty allow-list mapper, both images ([§15.2](15-cicd-deployment.md)) and
+§4.2's architecture gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, and the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
-builds and its tests pass before a line of it is written, eleven of them
+builds and its tests pass before a line of it is written, sixteen of them
 against real SQL Server and RabbitMQ containers.
 
 **There is no template directory, and that is the design.** The script reads

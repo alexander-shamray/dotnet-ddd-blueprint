@@ -30,6 +30,29 @@ public static class DependencyInjection
         }
 
         /// <summary>
+        /// Registers §7.5's dispatcher and the projection registry behind it.
+        /// Both scoped: the registry resolves scoped handlers, and the
+        /// dispatcher runs inside the command's transaction.
+        /// </summary>
+        /// <remarks>
+        /// This exists for the same reason <see cref="AddDispatcher"/> does —
+        /// both implementations are internal to this assembly, so a service
+        /// cannot write the <c>AddScoped</c> lines itself. §7.5 prints them
+        /// bare because it is describing the registrations rather than the
+        /// accessibility; the method is where they actually live.
+        /// </remarks>
+        public IServiceCollection AddDomainEventDispatcher()
+        {
+            // Singleton, and the one lifetime on this line that is not
+            // obvious: the memo is keyed to the container, not to the scope
+            // that first asked (ProjectionRegistryCache argues why).
+            services.AddSingleton<ProjectionRegistryCache>();
+            services.AddScoped<IProjectionRegistry, ProjectionRegistry>();
+            services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+            return services;
+        }
+
+        /// <summary>
         /// Registers every implementation of a <see cref="PluggableInterfaces"/>
         /// contract found in <paramref name="assembly"/>.
         /// </summary>

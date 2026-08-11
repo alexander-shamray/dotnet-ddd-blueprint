@@ -1,3 +1,4 @@
+using Catalog.Application.Integration;
 using Catalog.Application.Products.PublishProduct;
 using Common.Application;
 using FluentValidation;
@@ -18,10 +19,17 @@ public static class DependencyInjection
         services.AddDispatcher();
 
         // Explicit rather than scanned, beside the dispatcher it serves —
-        // §4.2's registration sample is the shape. Since PR-10 the null
-        // object drops real ProductPublished events, stated in CLAUDE.md's
-        // phase note; PR-14's outbox dispatcher takes this line over.
-        services.AddScoped<IDomainEventDispatcher, NullDomainEventDispatcher>();
+        // §4.2's registration sample is the shape. §7.5's real dispatcher
+        // since PR-14; the NullDomainEventDispatcher that dropped every
+        // ProductPublishedDomainEvent between PR-10 and here is deleted, not
+        // disabled, so nothing can register it back by accident.
+        services.AddDomainEventDispatcher();
+
+        // The allow-list of §9.3, and the one registration that decides what
+        // this service publishes. Explicit rather than scanned: a mapper
+        // discovered by convention would make "Catalog publishes these three
+        // facts" a property of which types happen to be in the assembly.
+        services.AddScoped<IIntegrationEventMapper, CatalogIntegrationEventMapper>();
 
         // The clock (§5.4) and the request histogram (§13.3): LoggingBehavior
         // injects both, and nothing catches an omission before the first

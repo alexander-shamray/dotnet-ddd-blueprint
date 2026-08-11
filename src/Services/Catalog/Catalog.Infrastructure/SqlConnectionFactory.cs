@@ -7,11 +7,14 @@ namespace Catalog.Infrastructure;
 /// <summary>
 /// The implementation behind §6.5's port, over the RUNTIME identity of §7.1 —
 /// a query has no business on the migrator's connection. Service-local rather
-/// than a building block, still: <c>Common.Infrastructure</c> exists since
-/// PR-12 but takes no project references, and a factory that names
-/// <c>IDbConnectionFactory</c> would draw the <c>Common.Application</c> edge
-/// the Redis helpers deliberately do not have. It moves, if ever, with the
-/// PR whose types need it there.
+/// than a building block, and PR-14 changed the reason without changing the
+/// answer. The old one was that <c>Common.Infrastructure</c> took no project
+/// references, so a factory naming <c>IDbConnectionFactory</c> would draw the
+/// <c>Common.Application</c> edge; that edge now exists, and §9.4's dispatcher
+/// resolves the <em>port</em> from the container rather than this type. What
+/// keeps the implementation here is the provider: moving it would put
+/// <c>Microsoft.Data.SqlClient</c> in every service's dependency graph to
+/// serve the ones that happen to use SQL Server.
 /// </summary>
 /// <remarks>
 /// <c>Create</c> only constructs — Dapper opens a closed connection itself,

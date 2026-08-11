@@ -373,15 +373,21 @@ public interface IProjectionRegistry
     bool HasHandler(IDomainEvent domainEvent);
 }
 
-internal sealed class ProjectionRegistry(IServiceProvider services) : IProjectionRegistry
+/// <summary>The memo, a singleton, so its lifetime is the container's.</summary>
+internal sealed class ProjectionRegistryCache
 {
-    private static readonly ConcurrentDictionary<Type, bool> Cache = new();
+    public ConcurrentDictionary<Type, bool> HasHandler { get; } = new();
+}
 
+internal sealed class ProjectionRegistry(IServiceProvider services, ProjectionRegistryCache cache)
+    : IProjectionRegistry
+{
     // Derived from the DI container rather than a hand-maintained list, so it
     // cannot drift from what is actually registered (§6.2).
     public bool HasHandler(IDomainEvent domainEvent) =>
-        Cache.GetOrAdd(domainEvent.GetType(), type =>
-            services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
+        cache.HasHandler.GetOrAdd(
+            domainEvent.GetType(),
+            type => services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
 }
 
 internal sealed class DomainEventDispatcher(
@@ -417,13 +423,37 @@ an invisible no-op.
 
 > **`ProjectionRegistry` must be registered scoped**, not singleton. Handlers are
 > scoped (§6.2), and `GetServices` for a scoped service from the root provider
-> throws *"Cannot resolve scoped service from root provider"*. The static cache
-> is safe across scopes because DI registrations do not change at runtime — it
-> memoises a question about the container's shape, not about any instance.
+> throws *"Cannot resolve scoped service from root provider"*. The cache is safe
+> across scopes because DI registrations do not change at runtime — it memoises
+> a question about the container's shape, not about any instance.
+>
+> **Which is exactly why it is a singleton and not a `static` field.** That
+> reasoning holds for one container and fails for a process holding several:
+> two `WebApplicationFactory` hosts in one test assembly, or a host beside a
+> bare `ServiceCollection`, would share whichever answer was computed first. A
+> suite proving that an event with no handler stages no `Local` row would then
+> poison the suite proving that one with a handler does, in whichever order
+> they happened to run. Keyed to the container, the memo still answers a
+> question about registrations — which is the property that made it safe.
+
+Both implementations are internal to `Common.Application`, so a service cannot
+write those two lines itself — the registration is an extension method, on the
+same terms as §6.2's `AddDispatcher()`:
 
 ```csharp
-services.AddScoped<IProjectionRegistry, ProjectionRegistry>();
-services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+// Common.Application, called by AddOrderingApplication (§4.2).
+public IServiceCollection AddDomainEventDispatcher()
+{
+    // Singleton, and the one lifetime here that is not obvious: the memo is
+    // keyed to the container rather than to the scope that first asked. A
+    // static field would answer for the process, so a second host in the same
+    // test assembly would inherit the first one's answer about registrations
+    // it does not have.
+    services.AddSingleton<ProjectionRegistryCache>();
+    services.AddScoped<IProjectionRegistry, ProjectionRegistry>();
+    services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+    return services;
+}
 ```
 
 **The dispatcher performs no I/O beyond staging rows.** It does not invoke a

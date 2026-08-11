@@ -29,6 +29,16 @@
   <ItemGroup>
     <ProjectReference Include="..\Catalog.Domain\Catalog.Domain.csproj" />
     <ProjectReference Include="..\Catalog.Application\Catalog.Application.csproj" />
+    <!-- §9.4's outbox: the entity this assembly maps, the type map, the
+         metrics and the dispatcher it hosts. PR-14's edge, and the reason
+         Common.Infrastructure stopped being a project no service referenced —
+         PR-12's Redis helpers are still nobody's dependency here, and the
+         first service to wire them will not need a new reference. -->
+    <ProjectReference Include="..\..\..\BuildingBlocks\Common.Infrastructure\Common.Infrastructure.csproj" />
+    <!-- typeof(ProductPublished).Assembly, the Broker lane's half of
+         MessageTypeSource. Transitive through Catalog.Application, named
+         directly because this file names the type. -->
+    <ProjectReference Include="..\..\..\BuildingBlocks\Common.Contracts\Common.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

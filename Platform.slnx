@@ -2,6 +2,7 @@
   <Folder Name="/src/" />
   <Folder Name="/src/BuildingBlocks/">
     <Project Path="src/BuildingBlocks/Common.Application/Common.Application.csproj" />
+    <Project Path="src/BuildingBlocks/Common.Contracts/Common.Contracts.csproj" />
     <Project Path="src/BuildingBlocks/Common.Domain/Common.Domain.csproj" />
     <Project Path="src/BuildingBlocks/Common.Infrastructure/Common.Infrastructure.csproj" />
     <Project Path="src/BuildingBlocks/Common.Web/Common.Web.csproj" />
