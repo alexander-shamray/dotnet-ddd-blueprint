@@ -15,7 +15,7 @@ namespace Common.Contracts;
 
 /// <summary>
 /// Implemented by every integration event. No behaviour and no domain types —
-/// three primitives, which is what keeps this legal under §9.6's rule that a
+/// three primitives, which is what keeps this legal under §9.1's rule that a
 /// contract may not name a domain type.
 /// </summary>
 public interface IIntegrationEvent
@@ -369,6 +369,15 @@ CREATE INDEX IX_Outbox_Unprocessed
     ON ordering.OutboxMessages (OccurredAt)
     INCLUDE (Lane, Attempts, LockedUntil)
     WHERE ProcessedAt IS NULL;
+
+-- And its complement, for the retention purge. The two filters are opposites,
+-- so the index above cannot serve the delete below by construction — it
+-- excludes every row that delete targets. Without this one the hourly purge
+-- scans the whole table, and it is the processed rows that make the table
+-- large, so the scan grows exactly as the purge starts to matter.
+CREATE INDEX IX_Outbox_Processed
+    ON ordering.OutboxMessages (ProcessedAt)
+    WHERE ProcessedAt IS NOT NULL;
 ```
 
 `Lane` is what makes one table serve both after-commit destinations (§7.5).
@@ -750,6 +759,42 @@ Ordering's assembly, and there is no such assembly. The schema is a registered
 value instead:
 
 ```csharp
+namespace Common.Infrastructure;
+
+/// <summary>
+/// The one place a schema is checked and delimited. Two registered values need
+/// it — OutboxTable and §9.5's InboxTable — and a second copy of the pattern is
+/// a second answer to "what is a legal schema here", which is not a question
+/// that gets to have two.
+/// </summary>
+internal static partial class SqlSchema
+{
+    public static string Qualify(string schema, string table, string paramName)
+    {
+        if (!Identifier().IsMatch(schema))
+            throw new ArgumentException(
+                $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
+                "into this service's messaging statements rather than parameterised.",
+                paramName);
+
+        // Delimited: the pattern above admits reserved words and a service
+        // may legitimately be called `User`, whose `FROM user.OutboxMessages`
+        // SQL Server cannot read. Brackets rather than a keyword blacklist,
+        // which would need extending with every release — and nothing needs
+        // escaping inside them, because the pattern has already refused
+        // everything but letters, digits and underscore. The table name is a
+        // literal supplied by the two types below, never by a caller.
+        return $"[{schema}].{table}";
+    }
+
+    // Bounded at 128, which is what `sysname` holds: a longer schema
+    // constructs happily and then fails every statement composed from it.
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    private static partial Regex Identifier();
+}
+```
+
+```csharp
 namespace Common.Infrastructure.Outbox;
 
 /// <summary>
@@ -758,36 +803,28 @@ namespace Common.Infrastructure.Outbox;
 /// parameterised — a schema cannot be a parameter, and what cannot be a
 /// parameter has to be a value the type refuses to hold wrongly.
 /// </summary>
-public sealed partial class OutboxTable
+public sealed class OutboxTable
 {
     public OutboxTable(string schema)
     {
-        if (!Identifier().IsMatch(schema))
-            throw new ArgumentException(
-                $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
-                "into the dispatcher's statements rather than parameterised.",
-                nameof(schema));
-
-        // Delimited: the pattern above admits reserved words and a service
-        // may legitimately be called `User`, whose `FROM user.OutboxMessages`
-        // SQL Server cannot read. Brackets rather than a keyword blacklist,
-        // which would need extending with every release — and nothing needs
-        // escaping inside them, because the pattern has already refused
-        // everything but letters, digits and underscore.
-        QualifiedName = $"[{schema}].OutboxMessages";
+        QualifiedName = SqlSchema.Qualify(schema, "OutboxMessages", nameof(schema));
         Schema = schema;
     }
 
     public string Schema { get; }
 
     public string QualifiedName { get; }
-
-    // Bounded at 128, which is what `sysname` holds: a longer schema
-    // constructs happily and then fails every statement composed from it.
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-    private static partial Regex Identifier();
 }
 ```
+
+> **The check is shared, and that is the whole reason it is a separate type.**
+> §9.5's `InboxTable` is this class with one word changed, so a reader who
+> copies the constructor above rather than calling `SqlSchema` gets two answers
+> to one question — the 128-character bound, the reserved-word argument and the
+> bracket-quoting, maintained twice. Each service builds both tables from
+> **one** schema literal (§4.2), which is what keeps the pair from naming
+> different schemas; sharing the guard is what keeps them from disagreeing
+> about what a schema may be.
 
 > **The alternative is a dispatcher per service, and that is §9.3's prohibition
 > on a second outbox table set arriving by the back door.** Two dispatchers
@@ -1195,11 +1232,20 @@ operation whether a user submitted it or a saga sent it, and it must not grow a
 second implementation because of how it arrived.
 
 The bridge from the broker to `IIntegrationEventHandler` is a single generic
-MassTransit consumer. This is the only place a MassTransit type meets
-application code, which is what ADR-014 depends on:
+MassTransit consumer. With `CommandConsumer<,>` below it, this is the only place
+a MassTransit type meets application code, which is what ADR-014 depends on:
+
+> **Both consumers are common code, and the per-service half is the binding.**
+> Nothing in either is specific to a service: the closed generic is built by the
+> container, the handler list comes from the §6.2 scan, and the metrics are
+> `Common.Infrastructure`'s. What *is* per-service is which endpoint binds which
+> contract, and that lives in each service's `AddMassTransitMessaging` where
+> §9.8 configures it. This is `OutboxTable`'s finding one type over — common
+> code that names one service's schema, or one service's namespace, is common
+> code that has quietly stopped being common.
 
 ```csharp
-namespace Ordering.Infrastructure.Messaging;
+namespace Common.Infrastructure.Messaging;
 
 public sealed class IntegrationEventConsumer<TEvent>(
     IEnumerable<IIntegrationEventHandler<TEvent>> handlers,
@@ -1221,14 +1267,22 @@ public sealed class IntegrationEventConsumer<TEvent>(
         // (§9.5) commits its row once Consume returns, so redelivery is
         // suppressed and the message is gone for good. Throwing sends it to
         // retry and then the error queue, which §13.6 alerts on.
-        if (!handlers.Any())
+        //
+        // Materialised once, and asked once. `handlers` is a lazily resolved
+        // enumerable, so counting it and then iterating it asks the container
+        // for a SECOND set of scoped instances — the handlers that run are then
+        // not the handlers that were counted, and any state one of them held
+        // for the other is quietly gone.
+        IIntegrationEventHandler<TEvent>[] resolved = [.. handlers];
+
+        if (resolved.Length == 0)
             throw new InvalidOperationException(
                 $"No IIntegrationEventHandler<{typeof(TEvent).Name}> is registered, " +
                 $"but {typeof(TEvent).Name} is bound on this endpoint. Check the §6.2 scan.");
 
         // Duplicate suppression happens in the inbox filter (§9.5), which is
         // configured on the receive endpoint ahead of this consumer.
-        foreach (IIntegrationEventHandler<TEvent> handler in handlers)
+        foreach (IIntegrationEventHandler<TEvent> handler in resolved)
             await handler.HandleAsync(context.Message, context.CancellationToken);
     }
 }
@@ -1240,7 +1294,7 @@ than to a projection handler — so a command that arrives by message goes throu
 exactly the same behaviours (§6.3) as one that arrives by HTTP:
 
 ```csharp
-namespace Ordering.Infrastructure.Messaging;
+namespace Common.Infrastructure.Messaging;
 
 /// <summary>
 /// Bridges an inbound command message to the application dispatcher. TMessage
@@ -1290,6 +1344,15 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         // This is the last place that can tell a rejection from a fault. An
         // exception from the dispatcher propagates and MassTransit retries it,
         // which is correct: that is a fault. Everything below is the other case.
+        //
+        // Unavailable is not the other case, and reading `IsFailure` as "the
+        // domain refused" swept it in. It is a fault that time might fix,
+        // arriving as a returned value rather than a thrown one — §10.5 answers
+        // it over HTTP with a 503 so the caller retries, and this path has no
+        // caller to do that.
+        if (result.IsFailure && result.Error.Type == ErrorType.Unavailable)
+            throw new UnavailableResultException(result.Error);
+
         if (result.IsFailure)
         {
             metrics.Rejected(typeof(TMessage).Name, result.Error.Code);
@@ -1370,8 +1433,11 @@ cfg.ReceiveEndpoint(
 
             r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
         });
-        e.UseInMemoryOutbox();
+        // The inbox goes OUTSIDE the in-memory outbox — a correctness rule
+        // rather than a preference, and the callout below says what the other
+        // order costs.
         e.UseConsumeFilter(typeof(InboxFilter<>), context);
+        e.UseInMemoryOutbox();
 
         // One per command in §3.2's Accepts column. The saga sends four; a type
         // missing here is sent into a queue that ignores it.
@@ -1425,8 +1491,13 @@ WHERE ProcessedAt IS NOT NULL
 
 ## 9.5 Idempotent consumers — the inbox
 
-The consumer-side counterpart. Before handling a message, record its ID; if it
-is already recorded, skip.
+The consumer-side counterpart. Check the message's ID first and skip if it is
+already recorded; otherwise handle it and record the ID **afterwards**, so a
+handler that threw leaves no row claiming it succeeded.
+
+That ordering is stated here rather than left to the filter below, because
+"record, then handle" is the obvious reading of an inbox and is wrong twice
+over — the trap under the sample says why.
 
 The inbox table lives in the **service's own database** alongside the outbox —
 database-per-service (§7.1) applies to technical tables as much as business
@@ -1436,10 +1507,33 @@ ones, and a shared inbox would couple every consumer's deployment together.
 CREATE TABLE ordering.InboxMessages
 (
     MessageId   UNIQUEIDENTIFIER NOT NULL,
-    Endpoint    VARCHAR(300)     NOT NULL,   -- receive endpoint, not message type
+    -- The receive endpoint, not the message type. Binary collation because
+    -- this column is half a key: SQL Server's default is case-insensitive and
+    -- a broker's queue names are not, so `orders` and `Orders` are two
+    -- endpoints that the default would treat as one — and a message that
+    -- arrived on the second would be suppressed as a duplicate of a delivery
+    -- it never received. BIN2 rather than CS_AS: an endpoint address is
+    -- matched exactly, and linguistic comparison has no meaning over it.
+    --
+    -- NVARCHAR for the same reason one rule earlier. AMQP 0-9-1 gives a queue
+    -- name up to 255 bytes of UTF-8, so under VARCHAR two legal endpoints
+    -- differing outside the code page both store as the same run of `?` and
+    -- collide in the key below — the collation compares faithfully what the
+    -- column already lost.
+    Endpoint    NVARCHAR(300) COLLATE Latin1_General_BIN2 NOT NULL,
     HandledAt   DATETIMEOFFSET   NOT NULL,
     CONSTRAINT PK_InboxMessages PRIMARY KEY (MessageId, Endpoint)
 );
+
+-- The shape, not a script: this table is generated by EF from the entity
+-- configuration, exactly as the outbox above is.
+
+-- The purge's predicate, and the only column it filters on. Neither filtered
+-- nor covering, unlike the outbox's: every row here is handled by
+-- construction, so there is no unprocessed subset to narrow to, and the delete
+-- already has the key from the clustered primary key. Without it the hourly
+-- purge scans the whole inbox to find a week-old row.
+CREATE INDEX IX_Inbox_HandledAt ON ordering.InboxMessages (HandledAt);
 ```
 
 The second key column is the **receive endpoint**, and that choice is the whole
@@ -1476,7 +1570,44 @@ the error queue before being replayed. Seven days is a starting point to check
 against RabbitMQ's configured limits, not a default to accept.
 
 Both purges — inbox and outbox (§9.4) — run from the same hosted service on a
-slow schedule, batched so neither holds a long lock.
+slow schedule, batched so neither holds a long lock. `RetentionPurgeService` in
+`Common.Infrastructure.Messaging` is that service: it composes the two
+statements above from the registered `OutboxTable` and `InboxTable`, takes its
+windows and its batch size from a registered `RetentionPolicy`, and exposes
+`PurgeAsync` publicly so tests drive one pass rather than racing a timer — the
+seam `OutboxDispatcher.ProcessBatchAsync` already offers, for the same reason.
+
+Two of its details are decisions rather than defaults. It **logs and swallows**
+a failed pass, because an exception out of `ExecuteAsync` stops the host and a
+database blip during housekeeping must not take the service down. And it stops
+after a fixed number of batches per table per pass, so a first run against a
+table nobody has ever purged drains over several passes instead of holding a
+connection until it is empty.
+
+> **That ceiling is a real throughput bound, and it is below the dispatcher's.**
+> Twenty batches of 5,000 an hour is 100,000 rows per table per pass-hour —
+> about 28 a second — where the claim above it processes up to 100 rows twice a
+> second, so a service that sustained its full delivery rate would create
+> processed rows some seven times faster than this reclaims them. The two
+> numbers are not in competition at any ordinary load, because a row is only
+> purgeable a week after it was processed and a week of backlog is what the
+> window is for. They are in competition at sustained peak, and the resolution
+> is operational rather than structural: a service whose steady-state
+> throughput approaches that figure wants a shorter interval or a larger
+> ceiling, and §13.6's outbox-growth alert is what makes the need visible
+> before the table does.
+>
+> Stated because the arithmetic is easy to assume the other way round. An
+> earlier revision of this paragraph — and of the code comment beside the
+> constant — claimed the ceiling sat comfortably *above* any rate the
+> dispatcher could produce, which is the opposite of what §9.4's own `TOP (100)`
+> and 500 ms imply.
+
+> **The windows are registered rather than `const`, and the inbox one is why.**
+> A number this chapter tells the reader to check against their broker's
+> configured limits has to be a number the service can change without editing
+> common code. The outbox window is softer and travels with it for symmetry;
+> the outbox *predicate* is not soft at all and stays in the statement.
 
 ```csharp
 namespace Common.Infrastructure.Inbox;
@@ -1490,9 +1621,13 @@ public sealed class InboxMessage(Guid messageId, string endpoint, DateTimeOffset
 ```
 
 ```csharp
+namespace Common.Infrastructure.Inbox;
+
 // The service DbContext — not a separate one. Same database, one migration
-// history, and EF-based handlers can share its transaction.
-public sealed class InboxFilter<T>(OrderingDbContext db) : IFilter<ConsumeContext<T>>
+// history, and EF-based handlers can share its transaction. `DbContext` rather
+// than `OrderingDbContext`, because this filter is common code: it reaches the
+// entity through Set<T>() so one implementation serves every service.
+public sealed class InboxFilter<T>(DbContext db, TimeProvider clock) : IFilter<ConsumeContext<T>>
     where T : class
 {
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
@@ -1505,22 +1640,63 @@ public sealed class InboxFilter<T>(OrderingDbContext db) : IFilter<ConsumeContex
         string endpoint =
             context.ReceiveContext.InputAddress.AbsolutePath.TrimStart('/');
 
-        bool alreadyHandled = await db.InboxMessages
-            .AnyAsync(m => m.MessageId == messageId && m.Endpoint == endpoint);
+        bool alreadyHandled = await db.Set<InboxMessage>()
+            .AnyAsync(
+                m => m.MessageId == messageId && m.Endpoint == endpoint,
+                context.CancellationToken);
 
         if (alreadyHandled)
             return;   // Silently drop the duplicate.
 
-        db.InboxMessages.Add(new InboxMessage(messageId, endpoint, DateTimeOffset.UtcNow));
-
         // Ordering matters: the handler runs FIRST, and the inbox row is only
-        // committed if it succeeded. Recording before would mark a message
+        // written if it succeeded. Recording before would mark a message
         // handled that never was, losing it permanently on the next delivery.
         await next.Send(context);
-        await db.SaveChangesAsync();
+
+        // Added AFTER the consumer, not before it — see the trap below. The
+        // registered clock, never DateTimeOffset.UtcNow: the purge reads its
+        // cutoff from TimeProvider, and two clocks for one window make a new
+        // row look expired or an old one immortal.
+        db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, clock.GetUtcNow()));
+        await db.SaveChangesAsync(context.CancellationToken);
     }
+
+    // Required by IFilter and absent from the excerpt above until it was
+    // compiled: the scope name is what identifies this filter in a probe.
+    public void Probe(ProbeContext context) => context.CreateFilterScope("inbox");
 }
 ```
+
+> **Trap — staging the row before the consumer runs.** It reads better there,
+> beside the check it follows from, and it silently disables the inbox for
+> every message-borne command. The row would be a *tracked* entity on a context
+> the consumer also uses, and a command reaches §6.3's `TransactionBehavior`,
+> whose `EfUnitOfWork.ExecuteAsync` opens every attempt with
+> `db.ChangeTracker.Clear()` — so that a transient-fault retry cannot re-commit
+> the previous attempt's mutations ([§7.5](07-persistence.md)). The clear takes
+> the pending inbox row with it, `SaveChangesAsync` writes nothing, and no
+> command is ever recorded. Nothing throws and nothing logs; the table simply
+> stays empty and every redelivery is reprocessed.
+>
+> Two mechanisms this document already had, correct on their own and in
+> tension where they meet. Neither can give way — the clear is what makes the
+> retry safe, and the row is what makes the redelivery safe — so the ordering
+> is what moves. A consumer that does no work will not show this, which is why
+> the test that covers it drives one that clears the tracker.
+
+That `DbContext` has to be **the service's own instance**, and each service
+registers the alias that makes it one:
+
+```csharp
+services.AddScoped<DbContext>(sp => sp.GetRequiredService<OrderingDbContext>());
+```
+
+> **The delegate is load-bearing and its absence is silent.**
+> `AddScoped<DbContext, OrderingDbContext>()` compiles, resolves, and builds a
+> **second** context in the same scope — so the inbox row commits in its own
+> transaction and the "Yes" row of the table below quietly becomes the "No" row.
+> Nothing fails; the guarantee just stops holding, which is why a test asserts
+> that both resolutions return one instance rather than leaving it to review.
 
 > **The inbox is duplicate *suppression*, and only sometimes an atomic
 > guarantee.** Whether the handler's work and the inbox record commit together
@@ -1528,12 +1704,19 @@ public sealed class InboxFilter<T>(OrderingDbContext db) : IFilter<ConsumeContex
 >
 > | Handler style | Atomic with the inbox row? |
 > |---|---|
-> | Writes through the injected `OrderingDbContext` | **Yes** — one `SaveChangesAsync`, one transaction |
+> | Writes through the injected `OrderingDbContext`, leaving the save to the filter | **Yes** — one `SaveChangesAsync`, one transaction |
 > | Writes through `IDbConnectionFactory` + Dapper, like the projection in §6.6 | **No** — separate connection, separate transaction |
+> | A **command**, through `CommandConsumer` and the §6.3 pipeline | **No** — `TransactionBehavior` has already committed by the time the filter writes |
 >
-> For the second kind, a crash between `next.Send` returning and
+> For the second and third kinds, a crash between `next.Send` returning and
 > `SaveChangesAsync` committing leaves the work done and the message
 > unrecorded, so redelivery runs it again.
+>
+> The third row is a consequence of the trap above rather than a separate
+> decision, and it is the one that changed: staging the row earlier would make
+> it atomic on paper and lose it entirely in practice. An inbox row written in
+> its own transaction after a committed command is worth having; one discarded
+> by the change tracker is not.
 >
 > That is acceptable — but only because handlers are idempotent anyway. The
 > inbox removes the *common* duplicate, not every duplicate. Treating it as a
@@ -1646,7 +1829,12 @@ public static class CancelReasons
 public sealed record ConfirmOrder(Guid OrderId, string PaymentReference);
 ```
 
-> **A contract may not name a domain type.** It is the easiest rule in this
+> **A contract may not name a domain type.** §9.1 states it of events, in the
+> sentence that says a contract is primitives; it is restated here because
+> commands are where it is easiest to break, and because the reason is
+> different — an event carrying a domain type is a leak, where a *command*
+> carrying one pins that type's member names as wire format for everybody who
+> sends the command. It is the easiest rule in this
 > document to break, because the domain type is always right there and always
 > more expressive. The test is mechanical: if the contract assembly needs a
 > project reference to any `*.Domain`, the contract is wrong. Enums are the
@@ -2292,22 +2480,48 @@ cfg.ReceiveEndpoint(
                 maxInterval: TimeSpan.FromMinutes(1),
                 intervalDelta: TimeSpan.FromSeconds(2)));
 
-        // Defers any Publish/Send until the consumer completes, so a retry does
-        // not re-emit messages the failed attempt already sent.
-        e.UseInMemoryOutbox();
-
         // Duplicate suppression — §9.5. On this endpoint and on
         // ordering-commands, and on any endpoint added later: at-least-once
         // delivery is a property of the broker, not of the message type or of
         // what the consumer does with it. The saga endpoint below is the one
         // exception, and says why.
+        //
+        // BEFORE the in-memory outbox, so the inbox row is committed after the
+        // buffered sends have flushed rather than before. The callout under
+        // this block is the argument.
         e.UseConsumeFilter(typeof(InboxFilter<>), context);
+
+        // Defers any Publish/Send until the consumer completes, so a retry does
+        // not re-emit messages the failed attempt already sent.
+        e.UseInMemoryOutbox();
 
         e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
         e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
         e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
     });
 ```
+
+> **Trap — the inbox filter inside the in-memory outbox.** Filters added first
+> are outermost, so `UseInMemoryOutbox()` before `UseConsumeFilter(…)` puts the
+> outbox *outside* the inbox — and the in-memory outbox flushes its buffered
+> `Publish`/`Send` calls **after** the inner pipeline returns. The inbox row is
+> then committed first and the messages go out second, which is the wrong way
+> round in the one case that matters: if the flush fails, the broker redelivers,
+> the filter finds its own row and drops the message without rerunning the
+> consumer, and the buffered messages are never sent by anybody. A message
+> acknowledged, its effects lost, and nothing in either mechanism able to
+> notice.
+>
+> Ordering the inbox first fixes it by construction. A failed flush then throws
+> *through* the filter, which has not saved yet, so no row is written and the
+> redelivery does the work again — at-least-once, as designed. Both mechanisms
+> are correct on their own and only their nesting decides which of the two
+> stories you get, which is why the order is written out with a reason at every
+> endpoint rather than left to the order somebody typed the lines in.
+>
+> The same argument is why a consumer whose sends must survive its own commit
+> wants §9.4's transactional outbox rather than the in-memory one: the in-memory
+> outbox defers, it does not persist.
 
 And the **saga** endpoint, which receives the fulfilment events (§9.6):
 
@@ -2368,6 +2582,18 @@ was wrong in a way that looked careful:
 The middle option was the previous revision of this document. It fixed the
 backoff and left the alert, which is the half-fix that reads as done: the
 message arrives faster at a place it should never have been.
+
+> **A rejection is an `ErrorType`, not an `IsFailure`.** Only `NotFound` and
+> `Rule` are answers; `Unavailable` (§10.5) is a fault that time might fix,
+> which is the very definition two paragraphs down — it just arrives as a
+> returned value rather than a thrown one, which is what let the first revision
+> of the consumer ack it. Over HTTP the ack is harmless because 503 tells a
+> caller to try again. Here there is no caller: the sender is a saga that has
+> already moved on (§9.7), so the ack is the last thing that ever happens to the
+> command, and the inbox row committed on the way out (§9.5) means a redelivery
+> — or a hand-driven replay of the same message — is dropped as already handled.
+> `CommandConsumer` throws `UnavailableResultException` instead, and the
+> endpoint's retry policy below is what catches it.
 
 The objection to acking was that a swallowed command disappears. That was true
 when there was nothing else recording it, and stopped being true once the

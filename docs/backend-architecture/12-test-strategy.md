@@ -338,21 +338,36 @@ public sealed class ServiceFixture : IAsyncLifetime
                         .AddAuthentication()
                         .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.Scheme, _ => { });
 
-                    // Remove ONLY the outbox dispatcher, not every hosted
-                    // service: MassTransit registers its bus as one, so
-                    // RemoveAll<IHostedService>() would stop the broker from
-                    // starting and silently disable every consumption test.
+                    // Remove ONLY the two background services this suite
+                    // drives, not every hosted service: MassTransit registers
+                    // its bus as one, so RemoveAll<IHostedService>() would stop
+                    // the broker from starting and silently disable every
+                    // consumption test.
                     //
                     // The dispatcher polls every 500 ms; left running it drains
                     // outbox rows underneath assertions about them. Tests that
                     // want it call fixture.ProcessOutboxBatchAsync() explicitly.
-                    ServiceDescriptor hosted = services.Single(
-                        d => d.ServiceType == typeof(IHostedService) &&
-                            d.ImplementationType == typeof(OutboxDispatcher));
-                    services.Remove(hosted);
+                    //
+                    // Both matches are on ImplementationType, which is why
+                    // §4.2 registers each with the generic AddHostedService<T>
+                    // rather than a factory: a factory registration leaves that
+                    // property null and these removals would match nothing.
+                    foreach (Type background in (Type[])[typeof(OutboxDispatcher), typeof(RetentionPurgeService)])
+                    {
+                        ServiceDescriptor hosted = services.Single(
+                            d => d.ServiceType == typeof(IHostedService) &&
+                                d.ImplementationType == background);
+                        services.Remove(hosted);
+                    }
 
-                    // Still resolvable directly, so tests can drive one pass.
+                    // Still resolvable directly, so tests can drive one pass of
+                    // each. The purge's timer is an hour rather than 500 ms, so
+                    // it would not race an assertion in a run this short — but a
+                    // test asserting that an abandoned row SURVIVES retention
+                    // cannot tell "the pass spared the row" from "the pass never
+                    // ran" unless it drives the pass itself.
                     services.AddSingleton<OutboxDispatcher>();
+                    services.AddSingleton<RetentionPurgeService>();
 
                     // ICurrentUser (§11.4) has two callers with incompatible
                     // needs, so the double DELEGATES rather than replacing.
@@ -1382,11 +1397,15 @@ public async Task Payment_declined_releases_stock_before_cancelling()
 
     var orderId = Guid.CreateVersion7();
 
-    // Every member of V1.OrderPlaced is `required`, so there is no partial
-    // construction to elide — a builder keeps that from filling the test.
+    // Every member of every V1 contract is `required` — the §9.1 envelope
+    // included — so there is no partial construction to elide anywhere here,
+    // and a builder keeps that from filling the test. `new StockReserved
+    // { OrderId = orderId }` does not compile: the three envelope members are
+    // as required as the payload, which is the point of §9.1 declaring them on
+    // an interface rather than leaving them to convention.
     await harness.Bus.Publish(Contracts.OrderPlaced(orderId));
-    await harness.Bus.Publish(new StockReserved { OrderId = orderId });
-    await harness.Bus.Publish(new PaymentDeclined { OrderId = orderId, Reason = "insufficient_funds" });
+    await harness.Bus.Publish(Contracts.StockReserved(orderId));
+    await harness.Bus.Publish(Contracts.PaymentDeclined(orderId, "insufficient_funds"));
 
     // Sent, not Published — the saga issues these as commands to a single
     // owner (§9.6). The harness tracks the two separately, so asserting on
@@ -1410,7 +1429,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId, asRecorded.Token))
         .ShouldBeFalse();
 
-    await harness.Bus.Publish(new StockReleased { OrderId = orderId });
+    await harness.Bus.Publish(Contracts.StockReleased(orderId));
 
     // The reason, not just the send. Both exits from Compensating read
     // ctx.Saga.CancelReason (§9.6), so a transition that forgets to set it on
@@ -1508,7 +1527,7 @@ public async Task Commands_are_sent_and_events_are_published()
 
 The saga tests above prove one service's coordination. The only thing left that
 is genuinely *between* services is the contract assembly, and its rules are all
-stated elsewhere as things reviewers should notice: §9.6's "a contract may not
+stated elsewhere as things reviewers should notice: §9.1's "a contract may not
 name a domain type", §9.2's versioned namespace, `required` members. Each is
 mechanical, so each is a test rather than a review note.
 
@@ -1525,17 +1544,34 @@ public class ContractTests
     // all of them — and then ask ContractSamples for an instance of it.
     private static readonly Type[] Contracts =
     [
-        .. typeof(OrderPlaced).Assembly
-            .GetTypes()
-            .Where(t => t.IsPublic &&
-                t is { IsInterface: false, IsAbstract: false } &&
-                t.Namespace?.StartsWith("Common.Contracts.") == true)
+        .. typeof(OrderPlaced).Assembly.GetTypes().Where(IsContract)
     ];
+
+    // The ROOT namespace is included, and a trailing dot is what excluded it.
+    // `StartsWith("Common.Contracts.")` reads as "everything in the assembly"
+    // and is not: a concrete type declared straight into `Common.Contracts`,
+    // with no version namespace at all, falls outside discovery — so it
+    // bypasses the versioned-namespace check, the sample check and the
+    // round-trip, and leaves the suite green over the one mistake §9.2 exists
+    // to reject. Exposed as a method so a positive control can ask it about a
+    // type declared, in the *test* assembly, in exactly that namespace.
+    //
+    // IsVisible, not IsPublic, and that is a second hole of the same kind:
+    // IsPublic is false for EVERY nested type, including one declared `public`
+    // inside a public class — those report IsNestedPublic. A contract nested in
+    // a public type is as reachable by a consumer as any other and fell out of
+    // discovery entirely. IsVisible asks the question actually meant: can
+    // something outside this assembly name it.
+    internal static bool IsContract(Type type) =>
+        type.IsVisible &&
+        type is { IsInterface: false, IsAbstract: false } &&
+        type.Namespace is string ns &&
+        (ns == "Common.Contracts" || ns.StartsWith("Common.Contracts.", StringComparison.Ordinal));
 
     [Fact]
     public void No_contract_names_a_domain_type()
     {
-        // §9.6's rule, and the one that silently drags Ordering.Domain into
+        // §9.1's rule, and the one that silently drags Ordering.Domain into
         // every consuming service. Checked at the assembly level because a
         // contract cannot reference a domain type without the reference.
         typeof(OrderPlaced).Assembly
@@ -1563,18 +1599,61 @@ public class ContractTests
         {
             object instance = ContractSamples.Create(type);
             string json = JsonSerializer.Serialize(instance, type);
+            object? returned = JsonSerializer.Deserialize(json, type);
 
-            JsonSerializer.Deserialize(json, type).ShouldBeEquivalentTo(instance);
+            JsonSerializer.Serialize(returned, type).ShouldBe(json, type.FullName);
         }
     }
 }
 ```
+
+> **The comparison is between two serialised forms, and `ShouldBeEquivalentTo`
+> on the objects is what it replaced.** The object graph carries a detail the
+> contract does not specify: a collection expression assigned to an
+> `IReadOnlyList<T>` member compiles to a synthesised read-only list, and
+> `System.Text.Json` returns a `List<T>` — so an equivalence check fails on
+> `OrderPlaced` for a difference that is nowhere in the wire format. Making the
+> samples construct a `List<T>` instead would fix the symptom by coupling every
+> sample to the serialiser's current choice of collection type. The wire form
+> *is* the contract, so comparing it is both the cheaper fix and the one that
+> says what this suite is for.
+
+That comparison has one blind spot, and it takes a second assertion rather than
+a cleverer first one: a member that fails to serialise **at all** is absent from
+both forms, so the contract silently loses a field and the round-trip passes. So
+a companion test asks the type for its public instance properties and requires
+every one of them to appear in the JSON — which is also what fails when a member
+is added to a record and not to its sample.
 
 `ContractSamples.Create` is the reason this suite stays honest as contracts
 grow. Every member of a V1 contract is `required` (§12.5), so there is no
 reflection shortcut that constructs one — a new contract without a sample fails
 here rather than being quietly skipped, which is the failure mode of every
 "iterate over all the types" test that defaults to `Activator.CreateInstance`.
+
+Two assertions guard the registry itself, in both directions. A contract with no
+sample fails **by name**, in its own test, rather than as one message from the
+middle of a round-trip loop; and a sample naming a type that is no longer a
+public contract fails too, which is the direction throwing cannot catch — that
+entry compiles until the type is deleted and is dead weight from the moment the
+contract was renamed.
+
+**The third rule this suite claims — `required` members — needs an assertion of
+its own, because no serialisation test can see it.** Dropping `required` from a
+contract property changes no JSON, so the round-trip and the wire-member check
+both stay green; what it changes is a producer's ability to omit the member, and
+every consumer's reading a default when one does. The rule is really *there is
+no way to build one incompletely*, and two shapes satisfy it: a positional
+record takes its values in a primary constructor and needs no `required` at all,
+while a property-based record can be built by `new()` and needs every property
+marked. So the assertion applies to the shape with the hole — a contract with a
+public parameterless constructor must mark every settable property.
+
+> **Every sample gives every member a distinct, non-default value.** A sample of
+> zeroes and empty strings round-trips perfectly through a serialiser that
+> dropped the member entirely, which turns the assertion it feeds into one that
+> cannot fail. The same rule makes `OccurredAt` a fixed instant with a non-zero
+> offset: `DateTimeOffset.MinValue` survives every serialiser bug there is.
 
 ## 12.7 Test doubles
 

@@ -301,6 +301,14 @@ public static IServiceCollection AddOrderingInfrastructure(
     // Application — scanning only Application would skip them all (§6.2).
     services.AddPluggableFrom(typeof(OrderRepository).Assembly);
 
+    // §9.5's inbox filter is common code, so it names DbContext rather than
+    // this service's derived type — and this alias is what makes that legal.
+    // GetRequiredService, not AddScoped<DbContext, OrderingDbContext>(): the
+    // second form compiles, resolves and builds a SECOND context in the same
+    // scope, so the inbox row commits in its own transaction and §9.5's
+    // atomic-with-the-handler row silently becomes its non-atomic one.
+    services.AddScoped<DbContext>(sp => sp.GetRequiredService<OrderingDbContext>());
+
     services.AddScoped<IUnitOfWork, EfUnitOfWork>();                    // §6.3
     services.AddScoped<IDomainEventCollector, EfDomainEventCollector>(); // §7.5
     services.AddScoped<IIntegrationEventPublisher, OutboxPublisher>();   // §9.3
@@ -336,10 +344,19 @@ public static IServiceCollection AddOrderingInfrastructure(
     // services start in order.
     services.AddHostedService<MessageTypeMapValidator>();                 // §9.4
 
-    // The schema the dispatcher composes its three statements against (§9.4).
-    // A value, because Common.Infrastructure is every service's and cannot
-    // hold a literal.
-    services.AddSingleton(new OutboxTable("ordering"));
+    // The schemas the dispatcher and the retention purge compose their
+    // statements against (§9.4, §9.5). Values, because Common.Infrastructure
+    // is every service's and cannot hold a literal — and both from ONE local,
+    // so the two tables cannot end up naming different schemas.
+    const string schema = "ordering";
+    services.AddSingleton(new OutboxTable(schema));
+    services.AddSingleton(new InboxTable(schema));
+
+    // The retention windows, the batch size and the per-pass ceiling (§9.5).
+    // Registered rather than const: §9.5 tells the reader to check the inbox
+    // window against their broker's redelivery limits, and a number a chapter
+    // says to check has to be one a service can change.
+    services.AddSingleton(new RetentionPolicy());
 
     // The payload format, and the converters that put this service's value
     // objects in it. Money has a private constructor, so without its converter
@@ -376,6 +393,13 @@ public static IServiceCollection AddOrderingInfrastructure(
     // nothing and the dispatcher would drain rows underneath the assertions
     // about them.
     services.AddHostedService<OutboxDispatcher>();
+
+    // §9.4's and §9.5's retention, in the one hosted service §9.5 asks for.
+    // Registered last, so it is the first stopped: hosted services stop in
+    // reverse, and a deploy that interrupts a purge loses nothing an hour will
+    // not redo — where the dispatcher stopping first is what keeps the
+    // transport up while it drains.
+    services.AddHostedService<RetentionPurgeService>();
 
     // Outbox metrics (§13.6) read the database, so they belong here.
     // OrderMetrics does not — it is an Application type (§13.3) and is
@@ -672,6 +696,12 @@ EF Core minor versions and behave differently under identical code.
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup Label="Runtime">
+    <!-- The base package, referenced only by Common.Infrastructure: §9.5's
+         InboxFilter writes through the service's DbContext because sharing
+         the handler's transaction is the point of it, and common code may
+         name the base type but never a provider. Every service's own
+         Infrastructure takes the provider below instead. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
     <!-- Design-time only, referenced by each *.Migrator with PrivateAssets.
          `dotnet ef migrations add` (§7.4) needs it in the startup project and

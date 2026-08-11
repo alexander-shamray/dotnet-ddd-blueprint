@@ -649,13 +649,31 @@ internal sealed class EfUnitOfWork(OrderingDbContext db) : IUnitOfWork
                 TResult result = await operation(token);
 
                 // The commit decision belongs with the commit. §6.3's behaviour
-                // declines to SaveChanges on a failed Result, which is enough
-                // for tracked changes — but ExecuteRawAsync writes on this
-                // transaction's connection immediately, and only a rollback
-                // undoes that. Returning without committing disposes the
-                // transaction, which rolls it back.
+                // declines to SaveChanges on a failed Result — but
+                // ExecuteRawAsync writes on this transaction's connection
+                // immediately, and only a rollback undoes that. Returning
+                // without committing disposes the transaction, which rolls it
+                // back.
                 if (result is Result { IsFailure: true })
+                {
+                    // And the tracker goes with it, because a rollback that
+                    // leaves the rejected mutations tracked is only half a
+                    // rollback. This line was once unnecessary and this comment
+                    // once said so: "declines to SaveChanges … which is enough
+                    // for tracked changes" held while this behaviour was the
+                    // ONLY caller of SaveChanges on the scope.
+                    //
+                    // §9.5's inbox filter is the second. It runs after the
+                    // consumer returns and saves unconditionally — it has its
+                    // own row to write — so anything a rejected handler left
+                    // tracked would be persisted by it, outside the transaction
+                    // just rolled back. A domain refusal committing its own
+                    // mutations is the one outcome this boundary exists to
+                    // prevent.
+                    db.ChangeTracker.Clear();
+
                     return result;
+                }
 
                 await tx.CommitAsync(token);
                 return result;

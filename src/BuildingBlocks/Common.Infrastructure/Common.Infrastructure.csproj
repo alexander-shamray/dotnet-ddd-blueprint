@@ -34,10 +34,16 @@
          broker — the transport package stays in each service's
          Infrastructure, where UsingRabbitMq lives. -->
     <PackageReference Include="MassTransit" />
-    <!-- The claim, complete and fail statements. Raw SQL on a connection the
-         port hands out, never EF: the dispatcher runs outside the command's
-         transaction by design. -->
+    <!-- The claim, complete and fail statements, and PR-15's retention purge.
+         Raw SQL on a connection the port hands out, never EF: both run
+         outside any command's transaction by design. -->
     <PackageReference Include="Dapper" />
+    <!-- The inbox (§9.5), and the opposite decision to the line above it.
+         InboxFilter writes through the *service's* DbContext because sharing
+         the handler's transaction is the entire point of it, so this assembly
+         names the base type — never a provider, which stays in each service's
+         Infrastructure with its connection string. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <!-- LoggerMessage.Define in OutboxDispatcher, and ILogger<T> behind it. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>

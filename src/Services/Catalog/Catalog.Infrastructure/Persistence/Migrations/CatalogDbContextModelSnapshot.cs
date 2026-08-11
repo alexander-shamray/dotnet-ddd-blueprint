@@ -70,6 +70,27 @@ namespace Catalog.Infrastructure.Persistence.Migrations
                     b.ToTable("Products", "catalog");
                 });
 
+            modelBuilder.Entity("Common.Infrastructure.Inbox.InboxMessage", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Endpoint")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)")
+                        .UseCollation("Latin1_General_BIN2");
+
+                    b.Property<DateTimeOffset>("HandledAt")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.HasKey("MessageId", "Endpoint");
+
+                    b.HasIndex("HandledAt")
+                        .HasDatabaseName("IX_Inbox_HandledAt");
+
+                    b.ToTable("InboxMessages", "catalog");
+                });
+
             modelBuilder.Entity("Common.Infrastructure.Outbox.OutboxMessage", b =>
                 {
                     b.Property<long>("Id")
@@ -125,6 +146,10 @@ namespace Catalog.Infrastructure.Persistence.Migrations
                         .HasFilter("[ProcessedAt] IS NULL");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("OccurredAt"), new[] { "Lane", "Attempts", "LockedUntil" });
+
+                    b.HasIndex("ProcessedAt")
+                        .HasDatabaseName("IX_Outbox_Processed")
+                        .HasFilter("[ProcessedAt] IS NOT NULL");
 
                     b.ToTable("OutboxMessages", "catalog");
                 });

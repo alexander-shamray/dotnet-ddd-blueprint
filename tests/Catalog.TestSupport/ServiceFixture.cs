@@ -2,11 +2,14 @@ using System.Data.Common;
 using Catalog.Infrastructure.Persistence;
 using Catalog.Migrator;
 using Common.Application;
+using Common.Infrastructure.Inbox;
+using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Respawn;
 using Testcontainers.MsSql;
 using Testcontainers.RabbitMq;
@@ -261,6 +264,73 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// </summary>
     public Task ExpireOutboxLeasesAsync() =>
         ExecuteAsync("UPDATE catalog.OutboxMessages SET LockedUntil = NULL WHERE ProcessedAt IS NULL;");
+
+    /// <summary>Every inbox row, untracked, for asserting over (§9.5).</summary>
+    public async Task<IReadOnlyList<InboxMessage>> InboxAsync()
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+
+        return await db.InboxMessages
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Writes inbox rows directly, for tests about the purge rather than the
+    /// filter. The filter's own tests go through a consume pipeline, because
+    /// what they are about is which of <c>MessageId</c> and <c>Endpoint</c> the
+    /// row is keyed on and when it is committed.
+    /// </summary>
+    public async Task StageInboxAsync(params InboxMessage[] rows)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+
+        db.InboxMessages.AddRange(rows);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Ages a processed outbox row, which is how a retention test reaches the
+    /// window without a fake clock: the purge resolves <c>TimeProvider</c> from
+    /// its own scope inside the host, and moving a row backwards is both
+    /// simpler and closer to what the table actually looks like.
+    /// </summary>
+    public Task SetOutboxProcessedAtAsync(Guid messageId, DateTimeOffset processedAt) =>
+        ExecuteAsync(
+            "UPDATE catalog.OutboxMessages SET ProcessedAt = {0} WHERE MessageId = {1};",
+            processedAt,
+            messageId);
+
+    /// <summary>Runs exactly one retention pass over both tables. No timers, no waiting.</summary>
+    public Task<(int Outbox, int Inbox)> PurgeRetentionAsync() =>
+        Factory.Services
+            .GetRequiredService<RetentionPurgeService>()
+            .PurgeAsync(TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// One pass under a policy of the test's own, for the batching edges the
+    /// registered one cannot show: a batch of 5,000 would need 10,001 rows
+    /// before a second batch ran at all.
+    /// </summary>
+    /// <remarks>
+    /// Constructed rather than resolved, because the policy is a constructor
+    /// argument and the service composes its two statements from the same
+    /// registered tables either way — so what varies is the batching and
+    /// nothing else.
+    /// </remarks>
+    public Task<(int Outbox, int Inbox)> PurgeWithAsync(RetentionPolicy policy)
+    {
+        RetentionPurgeService purge = new(
+            Factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Factory.Services.GetRequiredService<OutboxTable>(),
+            Factory.Services.GetRequiredService<InboxTable>(),
+            policy,
+            Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
+
+        return purge.PurgeAsync(TestContext.Current.CancellationToken);
+    }
 
     /// <summary>Rows the transaction probe holds for one id.</summary>
     public Task<int> ProbeRowCountAsync(Guid id) =>

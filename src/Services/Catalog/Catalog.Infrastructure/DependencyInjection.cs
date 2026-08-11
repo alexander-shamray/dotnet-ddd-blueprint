@@ -4,6 +4,7 @@ using Catalog.Infrastructure.Messaging;
 using Catalog.Infrastructure.Persistence;
 using Common.Application;
 using Common.Contracts.Catalog.V1;
+using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,16 @@ public static class DependencyInjection
                 configuration.GetConnectionString("Catalog"),
                 sql => sql.EnableRetryOnFailure()));
 
+        // §9.5's inbox filter is common code, so it names DbContext rather than
+        // this service's derived type — and this alias is what makes that
+        // legal. GetRequiredService, not AddScoped<DbContext, CatalogDbContext>():
+        // the second form compiles, resolves and builds a *second* context in
+        // the same scope, so the inbox row would commit in its own transaction
+        // and §9.5's atomic-with-the-handler row would silently become its
+        // non-atomic one. Nothing fails; the guarantee just stops holding.
+        // Asserted by a test that both resolutions are one instance.
+        services.AddScoped<DbContext>(sp => sp.GetRequiredService<CatalogDbContext>());
+
         // Each layer scans itself (§6.2): projections, cache invalidators and
         // command mappers will live here, and scanning only Application would
         // skip them all. Finding nothing yet is the truthful state.
@@ -52,10 +63,20 @@ public static class DependencyInjection
         services.AddScoped<IDomainEventCollector, EfDomainEventCollector>();
         services.AddScoped<IIntegrationEventPublisher, OutboxPublisher>();
 
-        // The schema the dispatcher's three statements are composed against.
-        // A value rather than a literal in Common.Infrastructure, because
-        // that assembly is every service's (§9.4).
-        services.AddSingleton(new OutboxTable("catalog"));
+        // The schema the dispatcher's three statements and the purge's two are
+        // composed against. Values rather than literals in
+        // Common.Infrastructure, because that assembly is every service's
+        // (§9.4, §9.5) — and both built from one local, so the two tables
+        // cannot end up naming different schemas.
+        const string schema = "catalog";
+        services.AddSingleton(new OutboxTable(schema));
+        services.AddSingleton(new InboxTable(schema));
+
+        // The retention windows of §9.4 and §9.5 at their defaults. Registered
+        // rather than const, because §9.5 tells the reader to check the inbox
+        // window against the broker's configured redelivery limits — and a
+        // number a chapter says to check has to be one the service can change.
+        services.AddSingleton(new RetentionPolicy());
 
         // The persisted type names (§9.4). Both singletons, and the source is
         // registered separately so a test host can Add its own assembly
@@ -118,6 +139,14 @@ public static class DependencyInjection
         // once per deploy. Startup runs the other way for the same reason:
         // validator, bus, dispatcher.
         services.AddHostedService<OutboxDispatcher>();
+
+        // §9.4's and §9.5's retention, in the one hosted service §9.5 asks for.
+        // Registered last, so it is the first stopped: it is pure housekeeping,
+        // and a deploy that interrupts a purge loses nothing an hour will not
+        // redo — where the dispatcher stopping first is what keeps the
+        // transport up while it drains, and the same rule puts this line here
+        // rather than above it.
+        services.AddHostedService<RetentionPurgeService>();
 
         // §6.5's read side. Singleton, as §4.2's sample has it: the factory
         // holds a string and constructs per call — the connections it hands

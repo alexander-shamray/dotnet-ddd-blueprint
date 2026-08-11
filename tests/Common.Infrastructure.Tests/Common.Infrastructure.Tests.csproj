@@ -22,6 +22,14 @@
          in-memory rather than substituted. -->
     <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Testcontainers.Redis" />
+    <!-- The in-memory harness for §9.4's two consumers. Core, not
+         MassTransit.RabbitMQ: the harness swaps the transport out, and the
+         consumers under test know nothing about one. -->
+    <PackageReference Include="MassTransit" />
+    <!-- FakeTimeProvider. §13.3's delivery lag is a clock subtracted from a
+         timestamp made elsewhere, and a test that let the real clock decide
+         the difference could only assert that it was positive. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <!-- Reads the Redis client spans back out of a real tracer — the §13.2
          claim that AddRedisConnections instruments its own connections. -->
     <PackageReference Include="OpenTelemetry.Exporter.InMemory" />

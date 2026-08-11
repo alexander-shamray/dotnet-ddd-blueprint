@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Common.Infrastructure.Outbox;
 
 /// <summary>
@@ -14,34 +12,17 @@ namespace Common.Infrastructure.Outbox;
 /// dispatchers, two retention policies, two sets of ordering guarantees, and
 /// one of them being the one nobody monitors.
 /// <para>
-/// The table name is fixed and the schema is shape-checked, so no
-/// caller-supplied text reaches SQL unvalidated. The check is not defensive
-/// decoration: this is the one place in the codebase where an identifier is
-/// interpolated into a statement rather than parameterised, because a schema
-/// cannot be a parameter, and a value that cannot be a parameter has to be a
-/// value the type refuses to hold wrongly.
+/// The table name is fixed and the schema is shape-checked by
+/// <see cref="SqlSchema"/>, which <see cref="Inbox.InboxTable"/> shares: the
+/// check, the 128-character bound and the bracket-quoting are one answer, not
+/// two that agree today.
 /// </para>
 /// </remarks>
-public sealed partial class OutboxTable
+public sealed class OutboxTable
 {
     public OutboxTable(string schema)
     {
-        if (!Identifier().IsMatch(schema))
-            throw new ArgumentException(
-                $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
-                "into the dispatcher's statements rather than parameterised.",
-                nameof(schema));
-
-        // Delimited, because the pattern above admits reserved words and the
-        // scaffold admits a service called `User`: `FROM user.OutboxMessages`
-        // is not a schema reference SQL Server can parse. Brackets rather than
-        // a keyword blacklist — the reserved list grows with each release, and
-        // a delimiter is right for every name at once.
-        //
-        // Nothing has to be escaped inside them. `]` is the only character
-        // that would need doubling, and the pattern has already refused
-        // everything but letters, digits and underscore.
-        QualifiedName = $"[{schema}].OutboxMessages";
+        QualifiedName = SqlSchema.Qualify(schema, "OutboxMessages", nameof(schema));
         Schema = schema;
     }
 
@@ -49,12 +30,4 @@ public sealed partial class OutboxTable
 
     /// <summary>Schema-qualified and delimited, ready to interpolate.</summary>
     public string QualifiedName { get; }
-
-    // Bounded at 128, which is what `sysname` holds: a longer schema
-    // constructs happily here and then fails every statement composed
-    // from it at runtime. One leading character plus 127 more. The
-    // scaffold already refuses a service name past this limit, and a
-    // value it lets through must not fail deeper in.
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-    private static partial Regex Identifier();
 }

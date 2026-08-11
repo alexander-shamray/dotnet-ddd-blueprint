@@ -343,11 +343,13 @@ of its call sites are — two consumers and the outbox dispatcher's invoker.
 `OutboxMetrics` is separate from both because it reads the database, which is
 also why it is observable rather than pushed (§13.6).
 
-One instrument on this list feeds no SLO row: `command.domain_rejected` is a
-business signal that happens to share `MessagingMetrics`' meter (§9.8). It is
-mentioned here so the count in the table above matches the class below it —
-a discrepancy between the two is how the previous version of this heading came
-to claim there were three of them.
+**The table's last column is what each source contributes to §13.7, not what it
+declares.** `MessagingMetrics` publishes a third instrument that appears nowhere
+in it: `command.domain_rejected` feeds no SLO row at all, being a business
+signal that happens to share the meter (§9.8). So the class below has three
+instruments and its row above lists two, and both are right — a reader counting
+one against the other will find a difference that is not a defect, which is why
+it is said here rather than left to be noticed.
 
 ```csharp
 // Common.Application — registered by AddOrderingApplication (§4.2) and forced

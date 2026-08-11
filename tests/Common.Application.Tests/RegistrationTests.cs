@@ -40,6 +40,50 @@ public class RegistrationTests
     }
 
     [Fact]
+    public void The_scan_registers_an_implementation_of_every_pluggable_interface()
+    {
+        // The positive control the test above cannot be, and the reason is its
+        // first line: it derives what to look for from PluggableInterfaces.All,
+        // so deleting an entry takes the interface out of the production scan
+        // AND out of its own guard. Both stay green over a handler nothing will
+        // ever invoke — the exact trap that class says it exists to prevent,
+        // reached through the guard rather than around it.
+        //
+        // Every closed type below is named in source. That is the whole point:
+        // a deletion from the list fails here rather than being followed.
+        using ServiceProvider provider = TestContainer.Build();
+        using IServiceScope scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetService<ICommandHandler<Ping, string>>()
+            .ShouldNotBeNull("ICommandHandler<,> — §6.2");
+        scope.ServiceProvider.GetService<IQueryHandler<Ask, string>>()
+            .ShouldNotBeNull("IQueryHandler<,> — §6.5");
+        scope.ServiceProvider.GetService<IProjectionHandler<ScannedEvent>>()
+            .ShouldNotBeNull("IProjectionHandler<> — §7.5, the local outbox lane");
+        scope.ServiceProvider.GetService<IIntegrationEventHandler<ScannedEvent>>()
+            .ShouldNotBeNull("IIntegrationEventHandler<> — §9.4, another service's events");
+        scope.ServiceProvider.GetService<ICommandMessageMapper<ScannedMessage, ScannedCommand>>()
+            .ShouldNotBeNull("ICommandMessageMapper<,> — §9.4, wire contract to command");
+    }
+
+    [Fact]
+    public void The_pluggable_list_holds_exactly_the_five_interfaces_the_scan_is_for()
+    {
+        // Pinned independently, so the list cannot quietly lose a member or
+        // gain one. Order is not asserted — the scan does not depend on it, and
+        // IPipelineBehavior's absence is a separate claim below.
+        PluggableInterfaces.All.ShouldBe(
+            [
+                typeof(ICommandHandler<,>),
+                typeof(IQueryHandler<,>),
+                typeof(IProjectionHandler<>),
+                typeof(IIntegrationEventHandler<>),
+                typeof(ICommandMessageMapper<,>)
+            ],
+            ignoreOrder: true);
+    }
+
+    [Fact]
     public void The_scan_finds_something_to_register()
     {
         // Without this the test above is satisfied by a scan that found no

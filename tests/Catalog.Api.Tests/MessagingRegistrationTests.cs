@@ -174,6 +174,78 @@ public class MessagingRegistrationTests
             "MassTransit starts the bus from a hosted service; without it the registration is inert");
     }
 
+
+
+    [Fact]
+    public void Catalog_binds_no_consumer_and_therefore_declares_no_receive_endpoint()
+    {
+        // Asserted rather than assumed, which is PR-14's shape one lane over:
+        // that PR asserted Catalog stages no Local row rather than leaving the
+        // absence to be inferred.
+        //
+        // §3.2 gives Catalog exactly one Consumes cell — StockLevelChanged,
+        // owned by Inventory, which does not exist. Even with the contract now
+        // present (PR-15), binding it would create an endpoint whose every
+        // message reaches §9.4's throw: "the endpoint binds this type, so
+        // something should handle it" is one of the two sites where an empty
+        // handler list must fail, and §8.4's cache invalidator — the handler
+        // that eventually arrives — needs a cached query to invalidate.
+        //
+        // Consumers rather than endpoints, because ConfigureEndpoints is what
+        // turns one into the other: with none registered there is nothing for
+        // it to declare, and a test reading the bus topology would be asserting
+        // MassTransit's behaviour rather than this service's decision.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        services.ShouldNotContain(
+            d => IsConsumerRegistration(d),
+            "a consumer here is a subscription §3.2 does not give Catalog — and one bound with no " +
+            "IIntegrationEventHandler registered would fault every message it received");
+    }
+
+    [Fact]
+    public void The_no_consumer_assertion_can_actually_fail()
+    {
+        // The positive control for the test above, and it exists because that
+        // test was written wrong and passed anyway. It matched on
+        // `ServiceType` closing IConsumer<>, which MassTransit never registers:
+        // at the 8.5.3 pin AddConsumer<T> calls TryAddScoped<T>() — the
+        // CONCRETE type — so the predicate found nothing whether or not a
+        // consumer was present. An assertion that cannot fail in one direction
+        // is the fail-open shape this repository has been caught by before.
+        //
+        // Verified by running it: with the old predicate this test goes red.
+        // Deliberately NOT through AddMassTransitMessaging: that helper calls
+        // AddMassTransit itself, and MassTransit permits exactly one such call
+        // per container. What this control has to establish is what a consumer
+        // registration looks like, and a bare AddMassTransit establishes it.
+        ServiceCollection services = new();
+
+        services.AddMassTransit(x => x.AddConsumer<ProbeConsumer>());
+
+        services.ShouldContain(
+            d => IsConsumerRegistration(d),
+            "if this cannot see a consumer that IS registered, the assertion above proves nothing");
+    }
+
+    /// <summary>
+    /// A registration MassTransit made for a consumer. The implementation type
+    /// is what carries the interface — the service type is the consumer class
+    /// itself — so this asks what the registered type implements rather than
+    /// what it is registered as.
+    /// </summary>
+    private static bool IsConsumerRegistration(ServiceDescriptor descriptor)
+    {
+        Type? candidate = descriptor.ImplementationType ?? descriptor.ServiceType;
+
+        return candidate is not null &&
+            Array.Exists(
+                candidate.GetInterfaces(),
+                i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IConsumer<>));
+    }
+
     [Fact]
     public void Usage_telemetry_is_disabled_by_the_production_registration_alone()
     {

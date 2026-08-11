@@ -1,3 +1,4 @@
+using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
 
@@ -27,6 +28,16 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     /// mechanism. §12.4's tests read it through this property.
     /// </summary>
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    /// <summary>
+    /// §9.5's inbox. Declared for the same reason as the outbox above and read
+    /// by nothing in production: <c>InboxFilter&lt;T&gt;</c> is common code and
+    /// reaches the entity through <c>Set&lt;InboxMessage&gt;()</c>, which is
+    /// what lets one filter serve every service. The property is here so this
+    /// context states its whole model, and so §12.4's tests can read the table
+    /// the way they read the other one.
+    /// </summary>
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

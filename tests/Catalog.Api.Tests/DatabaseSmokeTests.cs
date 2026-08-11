@@ -41,12 +41,14 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
 
         // Named and ordered, not merely counted: the migrator's job is to
         // apply every migration in sequence, and a count alone would pass on
-        // two of three applied twice.
+        // a shorter prefix of them applied twice.
         string[] applied = await fixture.AppliedMigrationsAsync();
-        applied.Length.ShouldBe(3);
+        applied.Length.ShouldBe(5);
         applied[0].ShouldEndWith("_InitialCreate");
         applied[1].ShouldEndWith("_AddProducts");
         applied[2].ShouldEndWith("_AddOutbox");
+        applied[3].ShouldEndWith("_AddInbox");
+        applied[4].ShouldEndWith("_AddOutboxRetentionIndex");
     }
 
     [Fact]
