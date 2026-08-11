@@ -16,15 +16,16 @@ public static class PluggableInterfaces
     [
         typeof(ICommandHandler<,>),          // §6.2 — HTTP and message-borne
         typeof(IQueryHandler<,>),            // §6.5
-        typeof(IProjectionHandler<>)         // §7.5 — the local outbox lane
+        typeof(IProjectionHandler<>),        // §7.5 — the local outbox lane
+        typeof(IIntegrationEventHandler<>),  // §9.4 — another service's events
+        typeof(ICommandMessageMapper<,>)     // §9.4 — wire contract → command
 
-        // Two more join this list in the PR that defines them:
-        // IIntegrationEventHandler<> and ICommandMessageMapper<,> (§9.4, the
-        // broker lane and the wire contract → command mapper). Listing an
-        // interface before it exists would not compile; listing one that
-        // exists and is never scanned is the trap this class was built for —
-        // and the scan is the *only* registration a projection handler gets,
-        // so a missing entry here is a Local row that reaches §9.4's throw.
+        // The list is complete at five, and the last two joined with PR-15's
+        // consumers rather than earlier: listing an interface before it exists
+        // would not compile, and listing one that exists and is never scanned
+        // is the trap this class was built for — the scan is the *only*
+        // registration a handler gets, so a missing entry is a message that
+        // reaches §9.4's throw with the dashboards green.
         //
         // IPipelineBehavior<,> is deliberately absent, and stays absent.
         // Registration order is pipeline order (§6.3), and a scan gives no

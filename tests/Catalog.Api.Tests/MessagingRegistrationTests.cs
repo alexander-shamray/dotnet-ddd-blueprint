@@ -175,6 +175,36 @@ public class MessagingRegistrationTests
     }
 
     [Fact]
+    public void Catalog_binds_no_consumer_and_therefore_declares_no_receive_endpoint()
+    {
+        // Asserted rather than assumed, which is PR-14's shape one lane over:
+        // that PR asserted Catalog stages no Local row rather than leaving the
+        // absence to be inferred.
+        //
+        // §3.2 gives Catalog exactly one Consumes cell — StockLevelChanged,
+        // owned by Inventory, which does not exist. Even with the contract now
+        // present (PR-15), binding it would create an endpoint whose every
+        // message reaches §9.4's throw: "the endpoint binds this type, so
+        // something should handle it" is one of the two sites where an empty
+        // handler list must fail, and §8.4's cache invalidator — the handler
+        // that eventually arrives — needs a cached query to invalidate.
+        //
+        // Consumers rather than endpoints, because ConfigureEndpoints is what
+        // turns one into the other: with none registered there is nothing for
+        // it to declare, and a test reading the bus topology would be asserting
+        // MassTransit's behaviour rather than this service's decision.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        services.ShouldNotContain(
+            d => d.ServiceType.IsGenericType &&
+                d.ServiceType.GetGenericTypeDefinition() == typeof(IConsumer<>),
+            "a consumer here is a subscription §3.2 does not give Catalog — and one bound with no " +
+            "IIntegrationEventHandler registered would fault every message it received");
+    }
+
+    [Fact]
     public void Usage_telemetry_is_disabled_by_the_production_registration_alone()
     {
         // Deliberately no harness: AddMassTransitTestHarness disables usage
