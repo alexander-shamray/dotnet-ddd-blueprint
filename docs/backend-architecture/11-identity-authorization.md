@@ -63,11 +63,20 @@ public const string AuthorityKey = "Identity:Authority";
 
 public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplicationBuilder builder)
 {
-    string authority = builder.Configuration[AuthorityKey] ??
+    // Blank counts as missing: an environment variable set to the empty string
+    // reaches Configuration as "" rather than null, so `??` alone admits
+    // Identity__Authority= and the host starts having promised it would not.
+    string? configured = builder.Configuration[AuthorityKey];
+
+    if (string.IsNullOrWhiteSpace(configured))
+    {
         throw new InvalidOperationException(
             $"'{AuthorityKey}' is not configured. Every host re-validates inbound tokens (§11.2), " +
             "so one that cannot name its identity provider must refuse to start rather than " +
             "answer the first request without a principal.");
+    }
+
+    string authority = configured;
 
     builder.Services
         .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -427,11 +436,21 @@ public interface ICurrentUser
 // AddHttpContextAccessor(). Scoped: it is per request.
 public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 {
-    // Authenticated or nothing — every member below reads this rather than
-    // HttpContext.User, so no claim can be answered from an identity
-    // IsAuthenticated denies.
-    private ClaimsPrincipal? Caller =>
-        accessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;
+    // The authenticated identities and nothing else — every member below reads
+    // this rather than HttpContext.User, so no claim can be answered from an
+    // identity IsAuthenticated denies. Filtered rather than tested, because
+    // ClaimsPrincipal.Identity is the *primary* identity while FindFirst and
+    // HasClaim search every one of them.
+    private ClaimsPrincipal? Caller
+    {
+        get
+        {
+            ClaimsIdentity[] authenticated =
+                [.. accessor.HttpContext?.User.Identities.Where(i => i.IsAuthenticated) ?? []];
+
+            return authenticated.Length == 0 ? null : new ClaimsPrincipal(authenticated);
+        }
+    }
 
     public bool IsAuthenticated => Caller is not null;
 
@@ -441,10 +460,13 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
                 "No authenticated caller. Guard with IsAuthenticated — a handler " +
                 "reached by a consumer (§9.4) has no HttpContext."));
 
-    // The same claim type §11.4's policies require, so an endpoint policy and
-    // a resource check can never disagree about what a permission is.
+    // PermissionClaim.Type, not a literal — the same constant §11.4's policies
+    // read, so an endpoint policy and a resource check can never disagree
+    // about what a permission is. Four things must agree on this string and
+    // three of them are code; spelling it here would make it four places to
+    // change and one to forget.
     public bool HasPermission(string permission) =>
-        Caller?.HasClaim("permission", permission) == true;
+        Caller?.HasClaim(PermissionClaim.Type, permission) == true;
 }
 ```
 
@@ -456,6 +478,15 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
 > interface says is not a caller. Routing all three through one authenticated
 > projection is what makes the contract above true rather than merely
 > documented.
+>
+> **Filtering the identities is not the same as testing the principal, and the
+> difference is a hole.** `ClaimsPrincipal.Identity` returns the **primary**
+> identity, while `FindFirst` and `HasClaim` search **every** identity the
+> principal holds — so `User is { Identity.IsAuthenticated: true }` passes on
+> an authenticated first identity and then reads claims from an unauthenticated
+> second one. Any host authenticating over two schemes can produce that
+> principal, and `AddIdentity` produces it in one line. The projection above
+> keeps only the identities that answer for themselves.
 
 > **Both types are common, not per-service, and the namespaces above say so.**
 > They read `Ordering.Application` and `Ordering.Infrastructure` until PR-16,
