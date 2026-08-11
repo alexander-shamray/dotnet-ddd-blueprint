@@ -137,6 +137,54 @@ public class RealmImportTests
     }
 
     [Fact]
+    public void The_documented_login_can_actually_be_performed()
+    {
+        // The audience assertion above says the token would be usable; this
+        // says one can be obtained at all. The compose README's recipe is a
+        // password grant against web-app, which needs the direct access grant
+        // enabled and a public client — turn either off and every other test
+        // in this file stays green while the documented flow returns 401 from
+        // Keycloak before the platform is even reached.
+        JsonElement tokenClient = Root.GetProperty("clients").EnumerateArray()
+            .Single(c => c.GetProperty("clientId").GetString() == TokenClient);
+
+        tokenClient.GetProperty("directAccessGrantsEnabled").GetBoolean()
+            .ShouldBeTrue($"the README obtains a token by password grant against '{TokenClient}'");
+        tokenClient.GetProperty("publicClient").GetBoolean()
+            .ShouldBeTrue($"the README's grant sends no secret, and none is committed for '{TokenClient}'");
+    }
+
+    [Fact]
+    public void Both_development_logins_hold_exactly_what_the_readme_says()
+    {
+        // The two halves of §11.5's demonstration, and the negative one is the
+        // one worth a test: `browser` proving a refusal is only a proof while
+        // it holds nothing. Granting it catalog:write — the obvious "fix" for
+        // a 403 somebody did not expect — turns the 403 case into a second
+        // success case, and nothing else here would notice.
+        JsonElement users = Root.GetProperty("users");
+
+        string[] Permissions(string username) =>
+        [
+            .. users.EnumerateArray()
+                .Single(u => u.GetProperty("username").GetString() == username)
+                .GetProperty("clientRoles")
+                .GetProperty(Audience)
+                .EnumerateArray()
+                .Select(r => r.GetString())
+                .OfType<string>()
+        ];
+
+        Permissions("demo").ShouldBe(["catalog:write"]);
+
+        JsonElement browser = users.EnumerateArray()
+            .Single(u => u.GetProperty("username").GetString() == "browser");
+
+        browser.TryGetProperty("clientRoles", out JsonElement granted)
+            .ShouldBeFalse("'browser' exists to prove a refusal, so it must hold no client role at all");
+    }
+
+    [Fact]
     public void The_permission_vocabulary_is_a_closed_set_of_client_roles()
     {
         // The permissions a policy can require have to exist somewhere a person
