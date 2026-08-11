@@ -1212,11 +1212,46 @@ public sealed class TestCurrentUser(IHttpContextAccessor accessor) : ICurrentUse
 }
 ```
 
-`Principals` holds the three values: `Default`, the authenticated stand-in
-above; `Authenticated(subject, permissions)`, which the subject tests name
-explicitly; and `Anonymous`, with `IsAuthenticated` false and an `Id` that
-throws — the shape `HttpContextCurrentUser` takes off the consumer path
-(§11.4).
+`Principals` supplies the values that double answers from — two a test names
+explicitly, and the one it falls back to when a test names none:
+
+```csharp
+/// <summary>
+/// The principals a test can state, and the one it gets by stating none.
+/// </summary>
+public static class Principals
+{
+    // Fixed rather than a fresh subject per access: two dispatches in one test
+    // that both say nothing about the caller have to agree about who it was, or
+    // a read-after-write assertion fails for a reason the test never mentions.
+    public static ICurrentUser Default { get; } = Authenticated(SeedData.CustomerId);
+
+    // IsAuthenticated false and an Id that throws — the shape
+    // HttpContextCurrentUser takes off the consumer path (§11.4), so a handler
+    // reading Id without guarding fails here the way it fails in production.
+    public static ICurrentUser Anonymous { get; } = new Principal(null, []);
+
+    // params, so the subject tests name a caller and nothing else; the
+    // permissions are what §11.4's orders:admin branch reads.
+    public static ICurrentUser Authenticated(Guid subject, params string[] permissions) =>
+        new Principal(subject, permissions);
+
+    private sealed class Principal(Guid? subject, string[] permissions) : ICurrentUser
+    {
+        public bool IsAuthenticated => subject is not null;
+
+        public Guid Id => subject ?? throw new InvalidOperationException(
+            "No authenticated caller. Guard with IsAuthenticated.");
+
+        public bool HasPermission(string permission) => permissions.Contains(permission);
+    }
+}
+```
+
+**`Anonymous` is a property and `Authenticated` a method**, which is what makes
+`currentUser: Anonymous` and `currentUser: Authenticated(caller)` read as they
+do above. The subject is nullable in one place only — inside `Principal`,
+where the absence *is* the state being modelled.
 
 **Delegating rather than replacing is the whole design**, and the flat version
 is worth naming because it looks simpler and is wrong. A double that always
@@ -1234,7 +1269,7 @@ repository underneath these tests, and none of them does — the orders are real
 rows in a real database, seeded through the aggregate.
 
 These four run at the dispatcher rather than over HTTP, and that is not a
-shortcut. Three of them describe states HTTP cannot produce against §11.4's
+shortcut. Two of them describe states HTTP cannot produce against §11.4's
 endpoint group: `RequireAuthorization` turns a caller-less request into a 401
 before any handler runs, so the fail-open the old guard admitted is invisible
 from outside, and the compensation path has no HTTP surface at all. The
