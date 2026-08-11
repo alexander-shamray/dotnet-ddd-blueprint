@@ -111,6 +111,13 @@ csharp_new_line_before_members_in_anonymous_types = true
 #   - `=>` trails the signature of an expression-bodied member, with the body
 #     at the DECLARATION's indent + 4 (not the `=>` line's).
 #   - A broken fluent chain puts every call on its own line, first one included.
+#   - A wrapped argument list goes one argument per line, and a trailing
+#     lambda is an argument like any other — never some arguments up on the
+#     call's line with the last one hanging. The carve-out is a trailing
+#     lambda whose body is a BRACED BLOCK, which keeps the leading arguments
+#     where they are; CLAUDE.md argues both halves. Checked rather than
+#     assumed: `dotnet format` neither introduces the ragged form nor undoes
+#     the corrected one, so nothing has to be pinned to keep a run idempotent.
 #   - A break goes at the outermost bracket, never a nested one.
 #   - A wrapped condition takes braces on its body.
 #   - `[` opens a line of its own at its construct's column, as `{` does and

@@ -39,6 +39,7 @@ internal sealed class ProjectionRegistry(IServiceProvider services, ProjectionRe
     : IProjectionRegistry
 {
     public bool HasHandler(IDomainEvent domainEvent) =>
-        cache.HasHandler.GetOrAdd(domainEvent.GetType(), type =>
-            services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
+        cache.HasHandler.GetOrAdd(
+            domainEvent.GetType(),
+            type => services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
 }

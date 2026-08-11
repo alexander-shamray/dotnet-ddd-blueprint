@@ -1101,6 +1101,52 @@ already written against it.
   line, arguments go one per line at + 4, and a collection expression among
   them opens at its own argument's column.
 
+  **A trailing lambda is an argument like any other, and does not get to hang
+  off the opening line.** This is the ragged middle in its commonest disguise,
+  because the lambda reads as a body rather than as a list element:
+
+  ```csharp
+  // Wrong — one argument up on the call's line, one wrapped under it.
+  cache.HasHandler.GetOrAdd(domainEvent.GetType(), type =>
+      services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
+
+  // Right.
+  cache.HasHandler.GetOrAdd(
+      domainEvent.GetType(),
+      type => services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
+  ```
+
+  Note what happens to the lambda in the corrected form: its body comes back
+  **up** onto the `=>` line. The lambda-body rule below breaks a body onto its
+  own line to make nesting legible, and there is no nesting left to clarify
+  once the argument owns a line — so the two rules resolve in one move rather
+  than trading off, and the result is one line per argument with nothing
+  wrapped inside either.
+
+  **The carve-out is a trailing lambda whose body is a braced block**, which
+  keeps the leading arguments on the call's line:
+
+  ```csharp
+  cfg.ReceiveEndpoint("ordering-commands", e =>
+  {
+      e.UseInMemoryOutbox();
+  });
+  ```
+
+  A braced body is a container whose extent its own braces already show, and
+  `});` marks where the call ends — the two things one-argument-per-line would
+  otherwise be buying. This is the same distinction that makes `(` hug its call
+  while `{` and `[` take lines of their own, and it is what the corpus has
+  always done: **twelve** block-lambda sites — eleven across §7.2, §9.4, §9.6
+  and §9.8, plus `ProductConfiguration` — are written this way, and applying
+  the list rule through the carve-out would rewrite every builder DSL in the
+  blueprint into a shape no C# codebase uses. The **eighteen** sites that were
+  genuinely ragged were corrected in the same pass.
+
+  **Nothing carves out an argument that follows the lambda.** `Publish(payload,
+  type, c => { … }, ct)` has a real element after the block, so the block stops
+  being trailing and the whole list breaks one per line.
+
   ```csharp
   actual.ShouldBe(
       [

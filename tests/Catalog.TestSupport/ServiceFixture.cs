@@ -102,11 +102,13 @@ public sealed class ServiceFixture : IAsyncLifetime
         await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         // dbo is excluded, so EF's migration history survives the truncation.
-        _respawner ??= await Respawner.CreateAsync(connection, new RespawnerOptions
-        {
-            DbAdapter = DbAdapter.SqlServer,
-            SchemasToInclude = ["catalog"]
-        });
+        _respawner ??= await Respawner.CreateAsync(
+            connection,
+            new RespawnerOptions
+            {
+                DbAdapter = DbAdapter.SqlServer,
+                SchemasToInclude = ["catalog"]
+            });
 
         await _respawner.ResetAsync(connection);
     }

@@ -910,11 +910,15 @@ public sealed class OutboxDispatcher : BackgroundService
 
         if (message.Lane == nameof(OutboxLane.Broker))
         {
-            await sp.GetRequiredService<IPublishEndpoint>().Publish(payload, type, c =>
-            {
-                c.MessageId = message.MessageId;
-                c.CorrelationId = message.CorrelationId;
-            }, ct);
+            await sp.GetRequiredService<IPublishEndpoint>().Publish(
+                payload,
+                type,
+                c =>
+                {
+                    c.MessageId = message.MessageId;
+                    c.CorrelationId = message.CorrelationId;
+                },
+                ct);
             return;
         }
 
@@ -1611,8 +1615,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 // Send, not Publish — these are commands with one owner.
                 // Mapped, not forwarded: ReserveStock owns its line type, so
                 // versioning OrderPlaced does not version Inventory's command.
-                .Send(InventoryQueue, ctx =>
-                    new ReserveStock(
+                .Send(
+                    InventoryQueue,
+                    ctx => new ReserveStock(
                         ctx.Saga.OrderId,
                         [.. ctx.Message.Lines.Select(l => new StockLine(l.ProductId, l.Quantity))]))
                 .TransitionTo(AwaitingStock));
@@ -1623,8 +1628,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Unschedule(StockTimeout)
                 // Currency travels with the amount — a bare decimal is a
                 // charge waiting to be made in the wrong denomination.
-                .Send(PaymentsQueue, ctx =>
-                    new AuthorisePayment(
+                .Send(
+                    PaymentsQueue,
+                    ctx => new AuthorisePayment(
                         ctx.Saga.OrderId,
                         ctx.Saga.CustomerId,
                         ctx.Saga.Total,
@@ -1636,21 +1642,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             When(StockReservationFailed)
                 .Unschedule(StockTimeout)
                 // String codes, not the domain enum — see the contracts above.
-                .Send(OrderingQueue, ctx =>
-                    new CancelOrder(ctx.Saga.OrderId, CancelReasons.OutOfStock))
+                .Send(
+                    OrderingQueue,
+                    ctx => new CancelOrder(ctx.Saga.OrderId, CancelReasons.OutOfStock))
                 .Finalize(),
 
             When(StockTimeout.Received)
-                .Send(OrderingQueue, ctx =>
-                    new CancelOrder(ctx.Saga.OrderId, CancelReasons.StockTimeout))
+                .Send(
+                    OrderingQueue,
+                    ctx => new CancelOrder(ctx.Saga.OrderId, CancelReasons.StockTimeout))
                 .Finalize());
 
         During(
             AwaitingPayment,
             When(PaymentAuthorised)
                 .Unschedule(PaymentTimeout)
-                .Send(OrderingQueue, ctx =>
-                    new ConfirmOrder(ctx.Saga.OrderId, ctx.Message.Reference))
+                .Send(
+                    OrderingQueue,
+                    ctx => new ConfirmOrder(ctx.Saga.OrderId, ctx.Message.Reference))
                 // Not Finalize: the order is confirmed, not finished. It is now
                 // waiting on Shipping, and that wait needs a state to live in.
                 .Schedule(DespatchTimeout, ctx => new DespatchExpired(ctx.Saga.OrderId))
@@ -1684,15 +1693,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             Confirmed,
             When(ShipmentDispatched)
                 .Unschedule(DespatchTimeout)
-                .Send(OrderingQueue, ctx =>
-                    new MarkOrderShipped(ctx.Saga.OrderId, ctx.Message.TrackingNumber))
+                .Send(
+                    OrderingQueue,
+                    ctx => new MarkOrderShipped(ctx.Saga.OrderId, ctx.Message.TrackingNumber))
                 .Finalize(),
 
             When(DespatchTimeout.Received)
                 // Escalation, not compensation. The saga finalises because it
                 // has nothing further to coordinate; a human now owns the order.
-                .Send(OrderingQueue, ctx =>
-                    new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotDespatched))
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotDespatched))
                 .Finalize());
 
         During(
@@ -1701,18 +1712,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Unschedule(ReleaseTimeout)
                 // The reason recorded on entry, not a literal: this transition
                 // is reached from a decline and from a timeout alike.
-                .Send(OrderingQueue, ctx =>
-                    new CancelOrder(ctx.Saga.OrderId, ctx.Saga.CancelReason))
+                .Send(
+                    OrderingQueue,
+                    ctx => new CancelOrder(ctx.Saga.OrderId, ctx.Saga.CancelReason))
                 .Finalize(),
 
             When(ReleaseTimeout.Received)
                 // Cancel the order regardless — the customer must not be left
                 // waiting on Inventory. The stranded reservation is escalated
                 // separately, because it is Inventory's to resolve.
-                .Send(OrderingQueue, ctx =>
-                    new CancelOrder(ctx.Saga.OrderId, ctx.Saga.CancelReason))
-                .Send(OrderingQueue, ctx =>
-                    new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
+                .Send(
+                    OrderingQueue,
+                    ctx => new CancelOrder(ctx.Saga.OrderId, ctx.Saga.CancelReason))
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
                 .Finalize());
 
         SetCompletedWhenFinalized();

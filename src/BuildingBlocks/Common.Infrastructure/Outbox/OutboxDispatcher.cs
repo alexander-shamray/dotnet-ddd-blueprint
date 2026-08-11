@@ -224,11 +224,15 @@ public sealed class OutboxDispatcher : BackgroundService
 
         if (message.Lane == nameof(OutboxLane.Broker))
         {
-            await sp.GetRequiredService<IPublishEndpoint>().Publish(payload, type, c =>
-            {
-                c.MessageId = message.MessageId;
-                c.CorrelationId = message.CorrelationId;
-            }, ct);
+            await sp.GetRequiredService<IPublishEndpoint>().Publish(
+                payload,
+                type,
+                c =>
+                {
+                    c.MessageId = message.MessageId;
+                    c.CorrelationId = message.CorrelationId;
+                },
+                ct);
             return;
         }
 

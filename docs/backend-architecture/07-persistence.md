@@ -385,8 +385,9 @@ internal sealed class ProjectionRegistry(IServiceProvider services, ProjectionRe
     // Derived from the DI container rather than a hand-maintained list, so it
     // cannot drift from what is actually registered (§6.2).
     public bool HasHandler(IDomainEvent domainEvent) =>
-        cache.HasHandler.GetOrAdd(domainEvent.GetType(), type =>
-            services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
+        cache.HasHandler.GetOrAdd(
+            domainEvent.GetType(),
+            type => services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
 }
 
 internal sealed class DomainEventDispatcher(

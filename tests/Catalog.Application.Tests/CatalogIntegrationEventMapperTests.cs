@@ -39,8 +39,14 @@ public class CatalogIntegrationEventMapperTests
         var productId = ProductId.New();
 
         IReadOnlyList<object> mapped = Mapper().Map(
-            [new ProductPublishedDomainEvent(productId, "Walnut desk", "https://cdn.example/d.jpg",
-                Money.Of(19.99m, "eur"), Raised)]);
+            [
+                new ProductPublishedDomainEvent(
+                    productId,
+                    "Walnut desk",
+                    "https://cdn.example/d.jpg",
+                    Money.Of(19.99m, "eur"),
+                    Raised)
+            ]);
 
         ProductPublished contract = mapped.ShouldHaveSingleItem().ShouldBeOfType<ProductPublished>();
 
