@@ -341,6 +341,64 @@ public class RealmImportTests
         }
     }
 
+    [Fact]
+    public void The_resource_client_can_mint_no_token_of_its_own()
+    {
+        // Why the absent secret above is safe rather than merely tidy: Keycloak
+        // generates one on import, so `commerce-api` has a working credential
+        // in every running realm. What makes that harmless is that it has no
+        // flow to spend it on — the client exists to own the permission
+        // vocabulary and to name an audience, and nothing else.
+        //
+        // Enable any one of these four and the regenerated secret becomes a
+        // way to obtain tokens carrying every permission in the platform, with
+        // the secret test above still green because the file still ships none.
+        JsonElement resource = Root.GetProperty("clients").EnumerateArray()
+            .Single(c => c.GetProperty("clientId").GetString() == Audience);
+
+        foreach (string flow in (string[])
+        [
+            "standardFlowEnabled",
+            "implicitFlowEnabled",
+            "directAccessGrantsEnabled",
+            "serviceAccountsEnabled"
+        ])
+        {
+            resource.GetProperty(flow).GetBoolean().ShouldBeFalse(
+                $"'{Audience}' owns the permission vocabulary; '{flow}' would let it mint tokens too");
+        }
+    }
+
+    [Fact]
+    public void No_realm_role_grants_a_permission_by_composition()
+    {
+        // `browser` proving a refusal rests on it holding no permission, and
+        // the test above checks the direct grant only. Every user also holds
+        // `default-roles-commerce`, which is a composite — so a permission
+        // added to that composite, or to any realm role it includes, reaches
+        // the token through the same client-role mapper while `browser` still
+        // has no `clientRoles` property of its own and every other assertion
+        // here stays green. The documented 403 becomes a 200 and nothing says
+        // so.
+        //
+        // This is the realm-role hazard §11.5 already names from the other
+        // direction: a realm-role mapper would have put Keycloak's internals
+        // into the permission claim. Composition is the same leak by
+        // inheritance rather than by mapper.
+        foreach (JsonElement role in Root.GetProperty("roles").GetProperty("realm").EnumerateArray())
+        {
+            if (!role.TryGetProperty("composites", out JsonElement composites) ||
+                !composites.TryGetProperty("client", out JsonElement clients))
+            {
+                continue;
+            }
+
+            clients.TryGetProperty(Audience, out JsonElement granted).ShouldBeFalse(
+                $"realm role '{role.GetProperty("name").GetString()}' composes a '{Audience}' role, " +
+                "so every user holding it carries that permission");
+        }
+    }
+
     /// <summary>
     /// Walks up from the test binary to the repository root, which is the one
     /// directory <c>Platform.slnx</c> sits in. Not a relative path from the
