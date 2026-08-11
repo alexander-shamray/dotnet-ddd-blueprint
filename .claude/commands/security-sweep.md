@@ -236,22 +236,41 @@ better closed than tracked (a one-line binding, a stray secret), say so in the
 round summary and leave the change to the user.
 
 **That boundary is enforced by the grant, not merely promised.** `allowed-tools`
-carries no `Write` and no `Edit`, so no source path can be altered, and no
-`git push`, so the branch cannot move; the only mutations it can make are the
-GitHub issues it files and the temporary worktree it forks and removes. A
+carries no `Write` and no `Edit`, so no file's **contents** can be altered, and
+no `git push`, so the branch cannot move. A
 `Write` grant for issue bodies was tried and removed precisely because it would
 have re-opened source editing — a read-only claim resting on prose while the
 grant permits writing every undenied path is unenforced, which for a security
 command is the worse failure. Bodies go through `gh issue create` on stdin for
 exactly this reason.
 
-**One mutation is still scoped by discipline, and that scope is the honest
-residual.** `Bash(gh issue create:*)` is a prefix grant and pins no repository,
-so the rule is prose: `gh issue create` always passes `--repo` for **this**
-repository and never one named in a finding. Because the audited tree is
-prompt-injection input, that boundary is held by the instruction rather than by
-the grant, and closing it fully means a helper that pins the repo — named here
-rather than left implicit.
+**Three mutations are still scoped by discipline rather than by the grant, and
+naming all three is the point.** This paragraph used to claim one, and to say
+above that the only mutations were the issues and the worktree; both were two
+omissions wide.
+
+- **`Bash(gh issue create:*)` pins no repository.** It is a prefix grant, so the
+  rule is prose: always pass `--repo` for **this** repository, never one named
+  in a finding.
+- **`Bash(gh label create:*)` pins none either**, and the File step may create
+  the `security` label. Same rule, same reason, and it was missed because the
+  paragraph was written about the mutation that felt important rather than about
+  the grant.
+- **`Bash(mktemp:*)` is a filesystem write primitive.** mktemp takes an
+  arbitrary template, so the grant permits creating an empty directory or file
+  anywhere this session can write, the checkout included. It cannot write
+  content and cannot clobber an existing path — the template forces a fresh
+  unique name — so no source file can be altered, which is why the sentence
+  above is phrased about contents.
+
+Because the audited tree is prompt-injection input, all three are held by
+instruction rather than by tooling. **The mktemp one has a known fix and it is
+not a prose fix:** `git-worktree-detach.sh` should create the directory itself
+and print it, at which point both sweeps drop `Bash(mktemp:*)` altogether and
+the helper's shape check becomes a tautology — the only path it can hand to git
+is one it has just made. A prefix rule cannot constrain a template, which is the
+same reason every other grant here became a helper. Until that lands, these are
+the residuals, named rather than hidden.
 
 **The worktree half of that residual is closed.** It used to read the same way,
 with `Bash(git worktree remove:*)` trusted to take only `$work`. Both worktree
