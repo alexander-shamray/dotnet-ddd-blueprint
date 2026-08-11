@@ -114,6 +114,35 @@ public class HttpContextCurrentUserTests
     }
 
     [Fact]
+    public void A_second_unauthenticated_identity_contributes_nothing()
+    {
+        // ClaimsPrincipal.Identity is the *primary* identity; FindFirst and
+        // HasClaim search every identity the principal holds. So a check that
+        // tests the principal and then reads its claims is testing one thing
+        // and reading another — and a host authenticating over two schemes
+        // produces exactly this shape. The authenticated identity here carries
+        // the subject and no permission; the unauthenticated one carries the
+        // permission, and must not be able to grant it.
+        Guid subject = Guid.CreateVersion7();
+
+        ClaimsPrincipal principal = new(
+            new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, subject.ToString())],
+                authenticationType: "Test"));
+
+        principal.AddIdentity(
+            new ClaimsIdentity([new Claim(PermissionClaim.Type, "catalog:write")]));
+
+        DefaultHttpContext context = new() { User = principal };
+
+        HttpContextCurrentUser user = new(new HttpContextAccessor { HttpContext = context });
+
+        user.IsAuthenticated.ShouldBeTrue();
+        user.Id.ShouldBe(subject);
+        user.HasPermission("catalog:write").ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_permission_is_the_claim_the_policies_require()
     {
         // The same claim type AuthorizationPolicyExtensions.RequirePermission

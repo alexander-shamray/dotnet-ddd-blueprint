@@ -22,16 +22,34 @@ namespace Common.Web;
 public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 {
     /// <summary>
-    /// The principal, but only once it is authenticated — every member below
-    /// reads this rather than <c>HttpContext.User</c>, so a claim can never be
-    /// answered from an identity <see cref="IsAuthenticated"/> denies. A
-    /// <see cref="ClaimsIdentity"/> with no authentication type carries claims
-    /// perfectly happily; the two are independent, and reading the claims
-    /// without the check is what turns the interface's fail-closed contract
-    /// into a suggestion.
+    /// The caller's authenticated identities and nothing else — every member
+    /// below reads this rather than <c>HttpContext.User</c>, so a claim can
+    /// never be answered from an identity <see cref="IsAuthenticated"/> denies.
+    /// A <see cref="ClaimsIdentity"/> with no authentication type carries
+    /// claims perfectly happily; the two are independent, and reading the
+    /// claims without the check is what turns the interface's fail-closed
+    /// contract into a suggestion.
     /// </summary>
-    private ClaimsPrincipal? Caller =>
-        accessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;
+    /// <remarks>
+    /// The identities are filtered rather than the principal tested, because
+    /// <see cref="ClaimsPrincipal.Identity"/> is the <em>primary</em> identity
+    /// while <c>FindFirst</c> and <c>HasClaim</c> search every one of them. A
+    /// principal whose first identity is authenticated and whose second is not
+    /// would otherwise answer with the second's subject and grant the second's
+    /// permissions — the same defect as reading <c>HttpContext.User</c>
+    /// directly, one layer in, and a shape any host authenticating over two
+    /// schemes can produce.
+    /// </remarks>
+    private ClaimsPrincipal? Caller
+    {
+        get
+        {
+            ClaimsIdentity[] authenticated =
+                [.. accessor.HttpContext?.User.Identities.Where(i => i.IsAuthenticated) ?? []];
+
+            return authenticated.Length == 0 ? null : new ClaimsPrincipal(authenticated);
+        }
+    }
 
     public bool IsAuthenticated => Caller is not null;
 
