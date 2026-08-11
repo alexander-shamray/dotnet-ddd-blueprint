@@ -72,6 +72,22 @@ public static class AuthenticationExtensions
                 "that cannot be one fails the deployment rather than the first request.");
         }
 
+        // A query or a fragment is absolute, http, and still not a base
+        // address. JwtBearer builds its metadata address by appending
+        // `/.well-known/openid-configuration` to this string, and appending to
+        // `…/realms/commerce#x` puts the suffix inside the fragment — which is
+        // never sent to a server. The host would start and the first bearer
+        // request would fetch the realm's own page instead of the discovery
+        // document, which is exactly the deferred failure the whole guard
+        // exists to convert into a deployment error.
+        if (parsed.Query.Length > 0 || parsed.Fragment.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"'{AuthorityKey}' is '{configured}', which carries a query or fragment. It is a " +
+                "base address that a well-known path is appended to (§11.3), so anything after " +
+                "the path makes the discovery document unreachable.");
+        }
+
         // And https everywhere but Development, which is the same rule
         // RequireHttpsMetadata applies below — moved to startup, where it is a
         // deployment error rather than a 500 on the first token. The two read

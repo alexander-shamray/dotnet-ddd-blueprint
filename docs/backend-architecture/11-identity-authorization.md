@@ -87,6 +87,15 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
             $"'{AuthorityKey}' is '{configured}', which is not an absolute http or https URL. ...");
     }
 
+    // A query or fragment is absolute, http, and still not a base address:
+    // JwtBearer appends `/.well-known/openid-configuration` to this string, and
+    // appending to `…/commerce#x` puts the suffix inside the fragment.
+    if (parsed.Query.Length > 0 || parsed.Fragment.Length > 0)
+    {
+        throw new InvalidOperationException(
+            $"'{AuthorityKey}' is '{configured}', which carries a query or fragment. ...");
+    }
+
     if (!builder.Environment.IsDevelopment() && parsed.Scheme != Uri.UriSchemeHttps)
     {
         throw new InvalidOperationException(
@@ -480,10 +489,12 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
     public Guid Id => Guid.Parse(
         Caller?.FindFirstValue(ClaimTypes.NameIdentifier) ??
             throw new InvalidOperationException(
-                $"No subject: either there is no authenticated caller — guard with " +
-                $"IsAuthenticated, since a handler reached by a consumer (§9.4) has no " +
-                $"HttpContext — or the principal carries no '{ClaimTypes.NameIdentifier}' " +
-                "claim, which means the identity provider is not issuing 'sub' (§11.5)."));
+                "No subject. Either there is no authenticated caller — guard with " +
+                "IsAuthenticated, since a handler reached by a consumer (§9.4) has no " +
+                $"HttpContext — or the principal carries no '{ClaimTypes.NameIdentifier}'. " +
+                "That second case has two causes and they are in different components: " +
+                "the identity provider is not issuing 'sub' (§11.5), or MapInboundClaims " +
+                "is off and the raw 'sub' was never translated (§11.3)."));
 
     // PermissionClaim.Type, not a literal — the same constant §11.4's policies
     // read, so an endpoint policy and a resource check can never disagree

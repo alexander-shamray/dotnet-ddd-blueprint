@@ -136,6 +136,28 @@ public class CommonWebDefaultsTests
     }
 
     [Theory]
+    [InlineData("https://identity.example/realms/commerce#fragment")]
+    [InlineData("https://identity.example/realms/commerce?tenant=a")]
+    public void An_authority_carrying_a_query_or_fragment_is_not_a_base_address(string configured)
+    {
+        // Absolute, https, and still not somewhere a discovery document can be
+        // fetched from: JwtBearer appends `/.well-known/openid-configuration`
+        // to this string, and appending to a fragment puts the suffix in a part
+        // of the URL no server ever sees. The host would start and the first
+        // bearer request would fetch the realm page instead — the deferred
+        // failure this guard exists to turn into a deployment error, reached by
+        // a value the shape check above accepts.
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        builder.Configuration[AuthenticationExtensions.AuthorityKey] = configured;
+
+        InvalidOperationException thrown =
+            Should.Throw<InvalidOperationException>(builder.AddCommonWebDefaults);
+
+        thrown.Message.ShouldContain(AuthenticationExtensions.AuthorityKey);
+        thrown.Message.ShouldContain(configured, Case.Sensitive);
+    }
+
+    [Theory]
     [InlineData("keycloak:8080/realms/commerce")]   // the scheme somebody dropped
     [InlineData("/realms/commerce")]                // a path, from a copied fragment
     [InlineData("ftp://identity.example/realms/commerce")]
