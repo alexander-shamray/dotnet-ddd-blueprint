@@ -404,8 +404,7 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// Dispatches below HTTP with a stated principal (§11.4's subject rule).
     /// The scope is what makes that safe: TestCurrentUser is scoped, so a
     /// principal set here cannot leak into another test or into a concurrent
-    /// request. There is a matching IQuery overload — the read-side subject
-    /// test needs one, and it differs only in the interface it constrains.
+    /// request.
     /// </summary>
     public async Task<TResult> DispatchAsync<TResult>(
         ICommand<TResult> command,
@@ -418,6 +417,25 @@ public sealed class ServiceFixture : IAsyncLifetime
         return await scope.ServiceProvider
             .GetRequiredService<IDispatcher>()
             .SendAsync(command, ct);
+    }
+
+    /// <summary>
+    /// The query half, which the read-side subject test needs. Written out
+    /// rather than described as "the same with IQuery": §6.2 gives IDispatcher
+    /// two methods, so swapping only the constraint leaves SendAsync refusing
+    /// an IQuery. The body differs too, and that is the whole of the difference.
+    /// </summary>
+    public async Task<TResult> DispatchAsync<TResult>(
+        IQuery<TResult> query,
+        ICurrentUser currentUser,
+        CancellationToken ct = default)
+    {
+        using IServiceScope scope = Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<TestCurrentUser>().Set(currentUser);
+
+        return await scope.ServiceProvider
+            .GetRequiredService<IDispatcher>()
+            .QueryAsync(query, ct);
     }
 
     public IDbConnection CreateConnection() => new SqlConnection(_sql.GetConnectionString());
@@ -1041,93 +1059,116 @@ another customer — and a rule that holds by omission is one a later refactor
 reinstates without noticing. These four are what make it fail loudly instead.
 
 ```csharp
-[Fact]
-public async Task An_order_is_attributed_to_the_caller()
+using static Ordering.TestSupport.Principals;   // Authenticated, Anonymous
+
+[Collection(nameof(IntegrationCollection))]
+public class SubjectBindingTests(ServiceFixture fixture) : IAsyncLifetime
 {
-    var caller = Guid.CreateVersion7();
+    public async ValueTask InitializeAsync()
+    {
+        await fixture.ResetAsync();
 
-    Result<Guid> result = await DispatchAsync(
-        CommandBuilder.PlaceOrder(),
-        currentUser: Authenticated(caller));
+        // Same reason PlaceOrderHandlerTests seeds here: the write path reads
+        // prices locally (§6.4), and an unseeded projection fails every
+        // PlaceOrder with ProductsUnavailable — which would read as the
+        // subject assertion failing rather than as missing fixture data.
+        await fixture.SeedPriceAsync(SeedData.ProductId, 12.50m);
+    }
 
-    using IServiceScope scope = fixture.Factory.Services.CreateScope();
-    OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
-    Order order = await db.Orders.SingleAsync(o => o.Id == new OrderId(result.Value));
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // The row's owner came from the principal. Before the subject rule this
-    // assertion passed for the wrong reason — the command carried a CustomerId
-    // and the handler copied it — so what makes it meaningful now is the
-    // compile error a reinstated field would cause in CommandBuilder.
-    order.CustomerId.ShouldBe(new CustomerId(caller));
-}
+    [Fact]
+    public async Task An_order_is_attributed_to_the_caller()
+    {
+        var caller = Guid.CreateVersion7();
 
-[Fact]
-public async Task A_customer_reads_only_their_own_orders()
-{
-    var owner = Guid.CreateVersion7();
-    var stranger = Guid.CreateVersion7();
+        Result<Guid> result = await fixture.DispatchAsync(
+            CommandBuilder.PlaceOrder(),
+            currentUser: Authenticated(caller));
 
-    // Seeded through the write path, not SeedOrderAsync. That helper persists
-    // an Order and its lines through EF and nothing else, which the level-1
-    // query reads — but §6.6 rewrites this slice IN PLACE to read
-    // ordering.OrderSummaries, and an EF-seeded aggregate never reaches that
-    // table. A test seeded that way would pass today and start failing on the
-    // PR that escalates the read side, with the stranger's empty page still
-    // passing for the wrong reason. Dispatching and draining the outbox fills
-    // whatever the live handler reads: the aggregate at level 1, the
-    // projection at level 2.
-    await DispatchAsync(CommandBuilder.PlaceOrder(), currentUser: Authenticated(owner));
-    await fixture.ProcessOutboxBatchAsync();
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        Order order = await db.Orders.SingleAsync(o => o.Id == new OrderId(result.Value));
 
-    CursorPage<OrderSummaryDto> seen = await DispatchAsync(
-        new GetOrderSummariesQuery(Cursor: null, Limit: 20),
-        currentUser: Authenticated(stranger));
+        // The row's owner came from the principal. Before the subject rule
+        // this assertion passed for the wrong reason — the command carried a
+        // CustomerId and the handler copied it — so what makes it meaningful
+        // now is the compile error a reinstated field would cause in
+        // CommandBuilder.
+        order.CustomerId.ShouldBe(new CustomerId(caller));
+    }
 
-    // Empty, and provably not empty by accident: the same query as the owner
-    // returns the seeded row, so the filter is discriminating rather than
-    // broken. One assertion without the other passes against a handler that
-    // returns nothing to anybody.
-    seen.Items.ShouldBeEmpty();
+    [Fact]
+    public async Task A_customer_reads_only_their_own_orders()
+    {
+        var owner = Guid.CreateVersion7();
+        var stranger = Guid.CreateVersion7();
 
-    CursorPage<OrderSummaryDto> own = await DispatchAsync(
-        new GetOrderSummariesQuery(Cursor: null, Limit: 20),
-        currentUser: Authenticated(owner));
+        // Seeded through the write path, not SeedOrderAsync. That helper
+        // persists an Order and its lines through EF and nothing else, which
+        // the level-1 query reads — but §6.6 rewrites this slice IN PLACE to
+        // read ordering.OrderSummaries, and an EF-seeded aggregate never
+        // reaches that table. A test seeded that way would pass today and
+        // start failing on the PR that escalates the read side, with the
+        // stranger's empty page still passing for the wrong reason.
+        // Dispatching and draining the outbox fills whatever the live handler
+        // reads: the aggregate at level 1, the projection at level 2.
+        await fixture.DispatchAsync(
+            CommandBuilder.PlaceOrder(),
+            currentUser: Authenticated(owner));
+        await fixture.ProcessOutboxBatchAsync();
 
-    own.Items.ShouldHaveSingleItem();
-}
+        CursorPage<OrderSummaryDto> seen = await fixture.DispatchAsync(
+            new GetOrderSummariesQuery(Cursor: null, Limit: 20),
+            currentUser: Authenticated(stranger));
 
-[Fact]
-public async Task A_user_command_with_no_caller_is_refused()
-{
-    // The one case HTTP cannot produce: §11.4's endpoint group carries
-    // RequireAuthorization, so an unauthenticated request never reaches the
-    // handler and a 401 would prove nothing about the check inside it. This
-    // is the fail-open the old IsAuthenticated guard admitted — a command on
-    // the user path with no principal behind it.
-    var owner = Guid.CreateVersion7();
-    Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
+        // Empty, and provably not empty by accident: the same query as the
+        // owner returns the seeded row, so the filter is discriminating rather
+        // than broken. One assertion without the other passes against a
+        // handler that returns nothing to anybody.
+        seen.Items.ShouldBeEmpty();
 
-    Result result = await DispatchAsync(
-        new CancelOrderCommand(orderId, CancellationReason.CustomerRequest, CommandOrigin.User),
-        currentUser: Anonymous);
+        CursorPage<OrderSummaryDto> own = await fixture.DispatchAsync(
+            new GetOrderSummariesQuery(Cursor: null, Limit: 20),
+            currentUser: Authenticated(owner));
 
-    result.Error.ShouldBe(OrderErrors.NotFound);
-}
+        own.Items.ShouldHaveSingleItem();
+    }
 
-[Fact]
-public async Task A_system_initiated_command_cancels_without_a_caller()
-{
-    // The control, and the reason the origin exists at all. Without it the
-    // test above passes against a handler that refuses every compensation,
-    // which would break §9.6's saga in a way no ordering test would catch.
-    var owner = Guid.CreateVersion7();
-    Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
+    [Fact]
+    public async Task A_user_command_with_no_caller_is_refused()
+    {
+        // The one case HTTP cannot produce: §11.4's endpoint group carries
+        // RequireAuthorization, so an unauthenticated request never reaches
+        // the handler and a 401 would prove nothing about the check inside it.
+        // This is the fail-open the old IsAuthenticated guard admitted — a
+        // command on the user path with no principal behind it.
+        var owner = Guid.CreateVersion7();
+        Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
 
-    Result result = await DispatchAsync(
-        new CancelOrderCommand(orderId, CancellationReason.OutOfStock, CommandOrigin.System),
-        currentUser: Anonymous);
+        Result result = await fixture.DispatchAsync(
+            new CancelOrderCommand(orderId, CancellationReason.CustomerRequest, CommandOrigin.User),
+            currentUser: Anonymous);
 
-    result.IsSuccess.ShouldBeTrue();
+        result.Error.ShouldBe(OrderErrors.NotFound);
+    }
+
+    [Fact]
+    public async Task A_system_initiated_command_cancels_without_a_caller()
+    {
+        // The control, and the reason the origin exists at all. Without it
+        // the test above passes against a handler that refuses every
+        // compensation, which would break §9.6's saga in a way no ordering
+        // test would catch.
+        var owner = Guid.CreateVersion7();
+        Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
+
+        Result result = await fixture.DispatchAsync(
+            new CancelOrderCommand(orderId, CancellationReason.OutOfStock, CommandOrigin.System),
+            currentUser: Anonymous);
+
+        result.IsSuccess.ShouldBeTrue();
+    }
 }
 ```
 
@@ -1184,10 +1225,6 @@ answers from its own field would make
 subject happens not to be the seeded owner — the right status for the wrong
 reason, on the one test whose entire point is that the status is right — and
 would strand every HTTP path that needs the header principal.
-
-The class seeds prices in `InitializeAsync` exactly as `PlaceOrderHandlerTests`
-does, for the same reason: an unseeded projection fails a `PlaceOrder` with
-`ProductsUnavailable`, which would read as the subject assertion failing.
 
 **A double is the right call here and §12.7's rule says so**, though it needs
 reading twice to see it: `ICurrentUser` is a port over `HttpContext`, so the
