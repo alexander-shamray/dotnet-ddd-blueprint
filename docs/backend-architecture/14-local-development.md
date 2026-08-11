@@ -60,8 +60,31 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # One issuer, whichever host asks. Without it Keycloak derives the issuer
+      # from each request's Host header, so a token minted through
+      # localhost:8080 and a discovery document read through keycloak:8080
+      # disagree — and ValidateIssuer (§11.3) rejects every token obtained the
+      # way this chapter documents. The second variable puts the backchannel
+      # back on the container route, which is the half the services need.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
+    # The image ships no curl, so this is a bash TCP redirection against the
+    # management port — the form Keycloak's own documentation gives. Without a
+    # healthcheck `up --wait` returns when the process launches rather than when
+    # the realm is importable, and the first token request races the import.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/localhost/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
@@ -144,7 +167,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     ports: [ "5000:8080" ]
     depends_on:
-      keycloak: { condition: service_started }
+      keycloak: { condition: service_healthy }
       ordering-api: { condition: service_started }
 
   # The one host with client credentials, because it is the one host that calls
@@ -170,7 +193,7 @@ services:
       # Keycloak only. catalog-api is elided from this file (see the comment
       # above the gateway), and Compose rejects a dependency on a service it
       # cannot see — one undefined name fails the whole `up`, not one service.
-      keycloak: { condition: service_started }
+      keycloak: { condition: service_healthy }
 
 volumes:
   sql-data:
@@ -283,10 +306,11 @@ export Identity__Authority="http://localhost:8080/realms/commerce"
 
 **The environment is the first line and is not decoration.** No project ships a
 `launchSettings.json`, so `dotnet run` is Production unless told otherwise, and
-`RequireHttpsMetadata` is on in Production ([§11.3](11-identity-authorization.md)) — against a plain-HTTP local
-authority the host will not fetch the discovery document at all, and every
-bearer request fails before validation starts. The containers set the same
-variable, which is why only the host path shows this.
+`RequireHttpsMetadata` is on in Production
+([§11.3](11-identity-authorization.md)) — against a plain-HTTP local authority
+the host will not fetch the discovery document at all, and every bearer request
+fails before validation starts. The containers set the same variable, which is
+why only the host path shows this.
 
 The override excludes each service's **migrator** beside its API, so the schema
 is the host's job too — under §7.4's separate key

@@ -69,8 +69,27 @@ services:
       # resolves the endpoints from the request host while the issuer stays
       # frontend, which is exactly the split this needs.
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # Turns on /health/ready, on the management port, which is what the
+      # healthcheck below reads. Off by default.
+      KC_HEALTH_ENABLED: "true"
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
+    # The image ships no shell and no curl — it is a distroless-style build — so
+    # the check is a bash TCP redirection against the management port, which is
+    # the form Keycloak's own documentation gives for exactly this reason.
+    # Without it `up --wait` returns as soon as the process launches, and the
+    # README's token command can reach a realm that has not finished importing:
+    # a 404 on the token endpoint, on a stack that just reported healthy.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/localhost/9000; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   # §14.1's pair rule: a {service}-migrator one-shot plus the service itself,
   # gated on `condition: service_completed_successfully` — every service owns
@@ -119,12 +138,13 @@ services:
     depends_on:
       catalog-migrator: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
-      # service_started, not service_healthy: the Keycloak image declares no
-      # healthcheck, and `up --wait` on a dependency that can never report
-      # healthy hangs until it times out. The host does not need the realm at
-      # startup either — JwtBearer fetches the discovery document lazily, on
-      # the first request that carries a token.
-      keycloak: { condition: service_started }
+      # service_healthy since the block above declares a healthcheck. The API
+      # itself does not need it — JwtBearer fetches the discovery document
+      # lazily, on the first request that carries a token — but `up --wait`
+      # gates on every service's health, and the value is for whoever types the
+      # README's token command the moment it returns. Under service_started
+      # that command races the realm import and can be handed a 404.
+      keycloak: { condition: service_healthy }
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
