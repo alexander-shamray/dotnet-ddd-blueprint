@@ -62,10 +62,12 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
     public Guid Id => Guid.Parse(
         Caller?.FindFirstValue(ClaimTypes.NameIdentifier) ??
             throw new InvalidOperationException(
-                $"No subject: either there is no authenticated caller — guard with " +
-                $"IsAuthenticated, since a handler reached by a consumer (§9.4) has no " +
-                $"HttpContext — or the principal carries no '{ClaimTypes.NameIdentifier}' " +
-                "claim, which means the identity provider is not issuing 'sub' (§11.5)."));
+                "No subject. Either there is no authenticated caller — guard with " +
+                "IsAuthenticated, since a handler reached by a consumer (§9.4) has no " +
+                $"HttpContext — or the principal carries no '{ClaimTypes.NameIdentifier}'. " +
+                "That second case has two causes and they are in different components: " +
+                "the identity provider is not issuing 'sub' (§11.5), or MapInboundClaims " +
+                "is off and the raw 'sub' was never translated (§11.3)."));
 
     public bool HasPermission(string permission) =>
         Caller?.HasClaim(PermissionClaim.Type, permission) == true;
