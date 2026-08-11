@@ -15,7 +15,7 @@ python tools/new-service/new_service.py Ordering --port 5101
 | `--migration-id` | The `InitialCreate` id, and the base for the outbox migration one minute after it. Defaults to the current UTC timestamp; the tests pass a fixed one |
 | `--repo-root` | Defaults to this script's repository |
 
-It writes forty-five files and edits five. The five are `Platform.slnx`,
+It writes forty-six files and edits five. The five are `Platform.slnx`,
 `deploy/compose/docker-compose.yml`, `docker-compose.infra-only.yml`,
 `.env.example` and `deploy/compose/README.md`.
 

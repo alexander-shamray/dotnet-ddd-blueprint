@@ -265,8 +265,9 @@ public static IServiceCollection AddOrderingApplication(this IServiceCollection 
 
     // The same reason, one section over: DomainEventDispatcher,
     // ProjectionRegistry and its cache are all internal to Common.Application
-    // (§7.5), so the three AddScoped lines they need are not lines this
-    // assembly can write either.
+    // (§7.5), so the three registration lines they need are not lines this
+    // assembly can write either. Not three AddScoped lines — the cache is a
+    // singleton, for the reason §7.5 gives beside it.
     services.AddDomainEventDispatcher();                                // §7.5
 
     // Not an open generic, so the §6.2 scan cannot find it — one service, one
@@ -910,11 +911,14 @@ connection factory ([§6.5](06-cqrs.md)), the readiness checks
 [§9](09-messaging.md), whose eager read means a scaffolded host refuses to
 start without `ConnectionStrings:RabbitMq`, the migration job host
 ([§7.4](07-persistence.md)), the `InitialCreate` migration that creates the
-schema, both images ([§15.2](15-cicd-deployment.md)) and §4.2's architecture
-gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
+schema and the `AddOutbox` one beside it — §9.4's table is wiring every
+service has, and a service carrying the dispatcher without it would log a
+failed claim twice a second from its first boot — the outbox itself with its
+empty allow-list mapper, both images ([§15.2](15-cicd-deployment.md)) and
+§4.2's architecture gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, and the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
-builds and its tests pass before a line of it is written, eleven of them
+builds and its tests pass before a line of it is written, sixteen of them
 against real SQL Server and RabbitMQ containers.
 
 **There is no template directory, and that is the design.** The script reads

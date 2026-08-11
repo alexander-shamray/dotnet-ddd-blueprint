@@ -96,12 +96,14 @@ public sealed class PublishProductHandlerTests(ServiceFixture fixture) : IAsyncL
     }
 
     [Fact]
-    public async Task A_rejected_command_leaves_no_outbox_row_either()
+    public async Task A_rejected_command_never_reaches_the_outbox()
     {
-        // The other half of atomicity, and the one a passing happy path cannot
-        // show: a row staged inside a transaction that rolls back would
-        // announce a state change that did not happen — the dual write in
-        // reverse, and the failure the broker cannot take back.
+        // Validation runs before Transaction opens anything (§6.3), so this
+        // proves the row is never staged — not that a staged row rolls back.
+        // The test below is the one that proves the second thing, and the two
+        // are separate on purpose: this assertion would hold even if staging
+        // wrote outside the aggregate's transaction, because staging never
+        // happens at all.
         await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
         IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
 
@@ -111,6 +113,34 @@ public sealed class PublishProductHandlerTests(ServiceFixture fixture) : IAsyncL
                 TestContext.Current.CancellationToken));
 
         (await fixture.OutboxAsync()).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_command_that_fails_after_staging_leaves_neither_row()
+    {
+        // The other half of atomicity, and the half a rejection cannot show: a
+        // row staged inside a transaction that then rolls back would announce
+        // a state change that did not happen — the dual write in reverse, and
+        // the one the broker cannot take back.
+        //
+        // StageThenFailCommand publishes two aggregates, so §6.3's
+        // one-aggregate assertion throws *after* DispatchAsync has staged an
+        // event for each. That is the only failure point on the far side of
+        // staging that needs no fault injection and no seam in production
+        // code.
+        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
+        IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
+
+        await Should.ThrowAsync<InvariantViolationException>(() =>
+            dispatcher.SendAsync(
+                new StageThenFailCommand("Walnut desk"),
+                TestContext.Current.CancellationToken));
+
+        // Neither the aggregates nor the rows their events produced.
+        (await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products"))
+            .ShouldBe(0);
+        (await fixture.OutboxAsync()).ShouldBeEmpty(
+            "the staged rows must roll back with the transaction that staged them");
     }
 
     [Fact]

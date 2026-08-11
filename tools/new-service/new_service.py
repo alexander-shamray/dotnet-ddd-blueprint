@@ -113,6 +113,7 @@ COPIED = frozenset(
         "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs",
         "tests/Catalog.Api.Tests/HostSmokeTests.cs",
         "tests/Catalog.Api.Tests/IntegrationCollection.cs",
+        "tests/Catalog.Api.Tests/MessageTypeMapValidatorTests.cs",
         "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs",
         "tests/Catalog.Api.Tests/OutboxDispatcherTests.cs",
         "tests/Catalog.Api.Tests/TransientFaultInjection.cs",
@@ -150,6 +151,7 @@ OMITTED = frozenset(
         "tests/Catalog.Application.Tests/CatalogIntegrationEventMapperTests.cs",
         "tests/Catalog.Application.Tests/GetProductsHandlerTests.cs",
         "tests/Catalog.Application.Tests/OutboxSerialisationTests.cs",
+        "tests/Catalog.TestSupport/Outbox/StagesThenFails.cs",
         "tests/Catalog.Application.Tests/PublishProductHandlerTests.cs",
         "tests/Catalog.Application.Tests/PublishProductValidatorTests.cs",
         "tests/Catalog.Api.Tests/ProductEndpointsTests.cs",
@@ -271,6 +273,30 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
     "src/Services/Catalog/Catalog.Application/Catalog.Application.csproj": (
+        # The mapper's registry is emptied and its `using` removed, so nothing
+        # in a generated Application project names a contract. Keeping the
+        # reference would be the untruth this repository refuses everywhere
+        # else: an unused project reference is a claim about the dependency
+        # graph that nothing makes true. It returns with the first contract,
+        # beside the first registry entry.
+        (
+            "    <ProjectReference Include=\"..\\..\\..\\BuildingBlocks\\Common.Contracts\\Common.Contracts.csproj\" />\n",
+            "",
+        ),
+        (
+            "    Domain, Common.Application and Common.Contracts — the §4.2 dependency\n"
+            "    table's second row, complete since PR-14. Contracts arrives with the §9.3\n"
+            "    mapper, which is the only type here that names one: the allow-list turns a\n"
+            "    domain event into a public record, so the layer that owns the allow-list\n"
+            "    is the layer that pays for the reference. §4.3's one assembly that crosses\n"
+            "    a service boundary, and it crosses at the mapper.\n",
+            "    Domain and Common.Application — the §4.2 dependency table's second row,\n"
+            "    minus Common.Contracts. The §9.3 mapper is the only type that would name\n"
+            "    a contract, and its allow-list is empty until this service publishes\n"
+            "    something — so the reference joins with the first entry in it, and not\n"
+            "    before. §4.3's one assembly that crosses a service boundary; it crosses\n"
+            "    at the mapper or nowhere.\n",
+        ),
         (
             "  <ItemGroup>\n"
             "    <!-- The read side of §6.5: query handlers use Dapper directly, never EF —\n"

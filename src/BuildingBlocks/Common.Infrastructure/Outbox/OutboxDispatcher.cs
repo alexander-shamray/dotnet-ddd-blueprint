@@ -118,9 +118,16 @@ public sealed class OutboxDispatcher : BackgroundService
             {
                 await ProcessBatchAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 // The claim itself failed — database unreachable. Next tick.
+                //
+                // The filter asks the token, not the exception type. An
+                // OperationCanceledException is only shutdown when shutdown is
+                // what happened: a projection enforcing its own deadline
+                // throws the same type while this token is still live, and
+                // testing the type alone would let that escape the loop and
+                // fault the whole background service.
                 ClaimFailed(_log, ex);
             }
         }
@@ -179,9 +186,16 @@ public sealed class OutboxDispatcher : BackgroundService
                     new CommandDefinition(_completeSql, new { message.Id }, cancellationToken: ct));
                 completed++;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 // One bad message does not affect the other 99.
+                //
+                // Again the token rather than the type. A handler with its own
+                // deadline throws OperationCanceledException while ct is still
+                // live, and the type test let that row escape without an
+                // attempt recorded, without a LastError, and with every row
+                // behind it left leased until the lease expired — a delivery
+                // failure disguised as a shutdown.
                 await connection.ExecuteAsync(
                     new CommandDefinition(
                         _failSql, new { message.Id, Error = ex.ToString() }, cancellationToken: ct));
