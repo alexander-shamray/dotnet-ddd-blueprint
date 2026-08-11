@@ -25,6 +25,11 @@
          pipeline, so the redactor and the meter list are asserted through the
          path a host actually uses rather than through a stub. -->
     <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
+    <!-- JwtBearerDefaults and JwtBearerOptions, read back to pin §11.3's
+         validation parameters. Carried transitively by the project reference
+         below; named here because this assembly uses the types directly, on
+         the register's honesty rule. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
   </ItemGroup>
 
   <ItemGroup>

@@ -34,12 +34,36 @@ and exits, then `catalog-api` starts (§14.1's pair rule).
 |---|---|---|
 | Catalog API | http://localhost:5102 | `/health/live`, `/health/ready`, `/openapi/v1.json`, `/v1/catalog/products` |
 
-**Catalog's endpoints are deliberately unauthenticated.** Security lands with
-PR-16's Keycloak realm and JWT validation
-([Appendix C](../../docs/backend-architecture/appendix-c-delivery-plan.md));
-until then anything that can reach port 5102 can publish and list products.
-Naming the temporary gap here and scheduling its closure is the honest
-version of shipping it (§C.4).
+## Getting a token
+
+PR-16 closed the gap this file used to name: publishing a product now needs a
+bearer token carrying `catalog:write`. **Listing products does not, and that is
+permanent** — [§10.2](../../docs/backend-architecture/10-api-gateway.md)'s
+`catalog-public` route is GET-only and carries no authorization policy, so a
+product listing is public at the edge and public here.
+
+The realm ships two logins, both development defaults in the sense §14.1
+already uses for `admin/admin` and `guest/guest`:
+
+| User | Password | Holds |
+|---|---|---|
+| `demo` | `demo` | `catalog:write` |
+| `browser` | `browser` | nothing — the account that proves a refusal |
+
+```bash
+TOKEN=$(curl -s http://localhost:8080/realms/commerce/protocol/openid-connect/token \
+    -d grant_type=password -d client_id=web-app \
+    -d username=demo -d password=demo |
+    python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+curl -X POST http://localhost:5102/v1/catalog/products \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"name":"Walnut desk","amount":19.99,"currency":"EUR"}'
+```
+
+The same call as `browser` is a 403 and the same call with no header is a 401.
+Both are worth running once: they are the difference between a token being
+*checked* and a token being *carried*.
 
 Override connection strings with `CATALOG_CONNECTION` and
 `CATALOG_MIGRATOR_CONNECTION`; both default to the `sa` login above, and only

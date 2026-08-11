@@ -90,16 +90,27 @@ services:
       # endpoint table), not a secret with a production shape, and
       # .env.example's contract covers variables, not constants.
       ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
+      # The authority, to validate inbound tokens (§11.2). Read eagerly by
+      # AddJwtAuthentication, which throws naming the key — so this line is
+      # what lets the host start, exactly like the bus one above. No
+      # Identity__Client__*: Catalog calls no peer synchronously, and outbound
+      # identity belongs to the BFF alone (§9.7, §11.5).
+      Identity__Authority: "http://keycloak:8080/realms/commerce"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-      # No Redis or Identity__Authority keys: Catalog reads neither yet — the
-      # Redis keys join when Catalog first consumes a cache, the outbox with
-      # PR-14, JWT validation with PR-16. An env var nothing reads is the
-      # container form of an unused registration: each joins with the PR
-      # whose code reads it.
+      # Still no Redis keys: Catalog reads none yet, and they join when it
+      # first consumes a cache. An env var nothing reads is the container form
+      # of an unused registration — each joins with the PR whose code reads it,
+      # which is what brought the line above with PR-16.
     ports: [ "5102:8080" ]
     depends_on:
       catalog-migrator: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
+      # service_started, not service_healthy: the Keycloak image declares no
+      # healthcheck, and `up --wait` on a dependency that can never report
+      # healthy hangs until it times out. The host does not need the realm at
+      # startup either — JwtBearer fetches the discovery document lazily, on
+      # the first request that carries a token.
+      keycloak: { condition: service_started }
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

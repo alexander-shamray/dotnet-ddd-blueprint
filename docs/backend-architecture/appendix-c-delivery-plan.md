@@ -78,7 +78,7 @@ Phase names map to the `phase` column. Dependencies are PR numbers.
 
 | PR | Title | Depends | Delivers |
 |---|---|---|---|
-| **16** | `feat(security): JWT bearer with mandatory per-service re-validation` | 03, 10 | Keycloak realm import, JWT validation in `Common.Web`, permission policies, test auth handler. **Security tests: forged header without a token → 401; user A reading user B's resource → 404** |
+| **16** | `feat(security): JWT bearer with mandatory per-service re-validation` | 03, 10 | Keycloak realm import, JWT validation in `Common.Web`, permission policies, test auth handler, and §11.4's `ICurrentUser` — common rather than per-service, the chapter amended to match. Closes PR-10's deliberately unauthenticated write path; the listing stays anonymous, because [§10.2](10-api-gateway.md)'s `catalog-public` route is GET-only and carries no policy. **Security tests: forged header without a token → 401, and a caller holding the wrong permission → 403.** The **404 half moves to PR-18**: hiding user B's resource from user A needs a resource with an owner, and Catalog has none — every product is public to every caller by design. Ordering's `CancelOrderHandler` is the first aggregate the check applies to |
 | **17** | `feat(gateway): YARP routing, JWT, rate limiting, CORS` | 06, 16, 10 | The gateway from §10, dual-version route example with matched prefix strips, rate-limit policies, the gateway's own `inventory:admin` authorization policy, correlation ID assignment. **Two config tests, both on `ReverseProxy:Routes`: every `AuthorizationPolicy` and `RateLimiterPolicy` named resolves — an unresolvable one drops the route silently — and every route's match minus its `PathRemovePrefix` equals the group its service maps (§10.2), which the in-process API tests cannot see** |
 | **18** | `feat(ordering): second service from the scaffold` | 11, 08, 16 | Proves the scaffold. Own database, own migrator, gateway route |
 
@@ -183,6 +183,13 @@ PR-16. Naming a temporary gap in the README and scheduling its closure is
 honest; discovering it in a pen test six months later is not. The alternative —
 blocking the first vertical slice on the full auth stack — delays the feedback
 that the slice exists to provide.
+
+PR-16 closed it, and closing it settled a question the note could not: **only
+the write path was a gap.** The listing is anonymous permanently, because
+[§10.2](10-api-gateway.md)'s `catalog-public` route matches GET alone and
+carries no authorization policy. A scheduled closure is worth having partly for
+this — the PR that pays the debt is the one that reads the whole design and
+finds out how much of it was ever owed.
 
 **PR-11 is dogfooded by PR-18.** The scaffold script is proven by the next real
 service, not by intent. If the script cannot produce Ordering, it is not

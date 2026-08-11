@@ -29,6 +29,13 @@
          400 row. Common.Application carries the package transitively; the
          direct reference states the direct use. -->
     <PackageReference Include="FluentValidation" />
+    <!-- §11.3's AddJwtBearer and TokenValidationParameters. NOT in the shared
+         framework: Microsoft.AspNetCore.App carries the authentication
+         abstractions and the cookie handler, and every JWT handler since
+         ASP.NET Core 3.0 has shipped as this package. The one host package
+         Common.Web adds, and the reason is §11.2's — every service
+         re-validates, so the registration cannot live in the gateway. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
   </ItemGroup>
 
   <ItemGroup>

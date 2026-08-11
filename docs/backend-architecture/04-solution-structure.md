@@ -370,11 +370,12 @@ public static IServiceCollection AddOrderingInfrastructure(
     // request that needs it, not at startup — unless ValidateOnBuild is on.
     services.AddScoped<IProductPriceReader, ProjectedPriceReader>();      // §6.4
 
-    // Scoped, and paired with the accessor it depends on — ASP.NET Core does
-    // not register IHttpContextAccessor by default, so omitting the second
-    // line fails ValidateOnBuild rather than at the first ownership check.
-    services.AddHttpContextAccessor();
-    services.AddScoped<ICurrentUser, HttpContextCurrentUser>();           // §11.4
+    // No ICurrentUser and no AddHttpContextAccessor. Both were here until
+    // PR-16 and both moved to AddCommonWebDefaults (§11.4, §13.2): neither type
+    // names a service, and the implementation reads IHttpContextAccessor, which
+    // arrives with a FrameworkReference that only Common.Web has. Every host
+    // that authenticates has a current user, which is the criterion that helper
+    // exists for.
 
     services.AddScoped<IIdempotencyStore, RedisIdempotencyStore>();       // §8.5
 
@@ -461,11 +462,16 @@ builder.Services.AddOrderingInfrastructure(builder.Configuration);  // above
 // helper: Application knows nothing about HTTP, and Common.Web must not know
 // Ordering's names. A policy named by an endpoint and registered nowhere
 // throws on the first request that reaches it — never at startup.
+//
+// RequirePermission rather than RequireClaim("permission", …), and constants
+// rather than literals: the claim type belongs to Common.Web so a policy and a
+// resource check cannot drift apart, and the name is written twice — here and
+// at the endpoint — so the compiler should be the thing comparing them.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy("orders:read", p => p.RequireClaim("permission", "orders:read"))
-    .AddPolicy("orders:write", p => p.RequireClaim("permission", "orders:write"))
-    .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
+    .AddPolicy(OrderingPermissions.Read, p => p.RequirePermission(OrderingPermissions.Read))
+    .AddPolicy(OrderingPermissions.Write, p => p.RequirePermission(OrderingPermissions.Write))
+    .AddPolicy(OrderingPermissions.Cancel, p => p.RequirePermission(OrderingPermissions.Cancel));
 
 WebApplication app = builder.Build();
 
@@ -495,15 +501,28 @@ that no test catches by accident:
 | Rule | What breaks otherwise |
 |---|---|
 | `UseCorrelationId` before everything that logs, `UseExceptionHandler` alone above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to be outermost to catch faults in the middleware below it, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)) |
-| `UseAuthentication` before `UseAuthorization` | `User` is unpopulated when policies evaluate; every authenticated request 403s |
+| `UseAuthentication` before `UseAuthorization` | Nothing, in a `WebApplication` — see the callout below. In any other host, `User` is unpopulated when policies evaluate and every authenticated request 401s |
 | `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket |
 | Both before endpoint mapping | `RequireAuthorization` has nothing to evaluate against |
 | Health endpoints mapped **anonymous** | Probes 401, Kubernetes reads that as unhealthy, and the pod is killed in a loop |
 
 Registration without middleware is the quiet failure mode here. `AddRateLimiter`
-and `AddAuthentication` both succeed and do nothing if `UseRateLimiter` and
-`UseAuthentication` are absent — no error, no warning, no failing test unless
-one specifically asserts a 401.
+succeeds and does nothing if `UseRateLimiter` is absent — no error, no warning,
+no failing test unless one specifically asserts on a limit.
+
+> **`AddAuthentication` is not in that class, and saying it was cost this table
+> a wrong row.** `WebApplication` adds the authentication and authorization
+> middleware itself whenever the matching services are registered, so deleting
+> `app.UseAuthentication()` from a service host changes nothing observable —
+> verified by deleting it from `Catalog.Api/Program.cs`, after which every test
+> in the repository still passed. The two lines above are about **order**: they
+> have to sit below `UseCorrelationId` and above anything that reads the
+> caller, and the framework's own insertion point is not where a composition
+> root wants them.
+>
+> So write them, and do not expect a test to miss them. The rate limiter is the
+> genuine case of the failure mode this paragraph describes, and it is the
+> gateway's alone (§10.1).
 
 The **gateway** has its own pipeline and is the only place rate limiting is
 applied (§10.1); a service behind it does not call `UseRateLimiter`:
@@ -531,7 +550,7 @@ builder.Services.AddRateLimiter(/* §10.3 */);
 // every other route keeps serving.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy("inventory:admin", p => p.RequireClaim("permission", "inventory:admin"));
+    .AddPolicy(GatewayPermissions.InventoryAdmin, p => p.RequirePermission(GatewayPermissions.InventoryAdmin));
 
 // Both of the following are conditional on the deployment shape, and each is
 // REQUIRED once switched on. "Off" and "on but unconfigured" are different
@@ -784,6 +803,12 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
     <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- §11.3's JWT bearer handler, referenced by Common.Web. Not carried by
+         Microsoft.AspNetCore.App — the shared framework has the authentication
+         abstractions and the cookie handler, and the JWT one has been a package
+         since ASP.NET Core 3.0. Same version line as the runtime: it ships with
+         the framework and moves with it. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
     <!-- PR-07's OpenAPI deliverable (Appendix C): the framework's own document
          generator — AddOpenApi/MapOpenApi, document only, no UI. -->
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />

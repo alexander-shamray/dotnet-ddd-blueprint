@@ -1,0 +1,94 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.IdentityModel.Tokens;
+
+namespace Common.Web;
+
+/// <summary>
+/// §11.3's JWT bearer registration, composed by <c>AddCommonWebDefaults</c>
+/// rather than called directly by a host. Every service validates the token
+/// itself: the gateway doing it is not sufficient, because anything reaching a
+/// service by another path — a misconfigured network policy, a port-forward,
+/// another service — would otherwise be unauthenticated (§11.2). Validation is
+/// cheap; assume the network is hostile.
+/// </summary>
+public static class AuthenticationExtensions
+{
+    /// <summary>
+    /// The audience every host in the platform validates. A constant rather
+    /// than configuration: §11.5 settles on one audience for the whole platform
+    /// — per-service audiences are a later split — and §15.4's rule is that an
+    /// options type needs a member that differs between environments. This one
+    /// is the same string in Compose, in the fixture and in production.
+    /// </summary>
+    public const string Audience = "commerce-api";
+
+    /// <summary>The configuration key the authority is read from (§14.1, §15.4).</summary>
+    public const string AuthorityKey = "Identity:Authority";
+
+    public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplicationBuilder builder)
+    {
+        // Read eagerly and throw naming the key — the posture AddSqlServer and
+        // AddMassTransitMessaging already take, so a host that cannot name its
+        // identity provider does not start. Deliberately NOT an options type
+        // with ValidateOnStart: §15.4 makes ServiceIdentityOptions the only
+        // one in the solution and argues why, and a second bag bound to a
+        // section holding one value is the shape that rule forbids. §12.4's
+        // fixture comment named OptionsValidationException here and was
+        // amended in this change — the failure is this line, and it says which
+        // key is missing, which the options exception could not.
+        string authority = builder.Configuration[AuthorityKey] ??
+            throw new InvalidOperationException(
+                $"'{AuthorityKey}' is not configured. Every host re-validates inbound tokens (§11.2), " +
+                "so one that cannot name its identity provider must refuse to start rather than " +
+                "answer the first request without a principal.");
+
+        builder.Services
+            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
+            {
+                options.Authority = authority;
+                options.Audience = Audience;
+
+                // Metadata over plain HTTP is a development affordance only —
+                // §14.1's Keycloak is http://keycloak:8080. Anywhere else this
+                // is what stops the signing keys being fetched over a channel
+                // an attacker can rewrite, which would make every other
+                // validation below decorative.
+                options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+
+                // Assigned whole rather than mutated, because the four
+                // Validate* flags default to true and writing them out is the
+                // point: this block is the checklist a reader audits, and a
+                // default is not a decision anybody can see. The post-configure
+                // step still fills ValidAudience from Audience above and the
+                // issuer from the discovery document, so nothing is lost.
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+
+                    // The default is five minutes, which keeps a revoked or
+                    // expired token working for five minutes longer than it
+                    // should. Thirty seconds absorbs real drift between
+                    // NTP-synced hosts and nothing else (§11.3).
+                    ClockSkew = TimeSpan.FromSeconds(30),
+
+                    // A display name, for logs and audit lines. It does NOT
+                    // compete with the subject: NameIdentifier stays the stable
+                    // identifier ICurrentUser.Id reads, and reading
+                    // Identity.Name as the key to a record would work in every
+                    // test and break the first time somebody changed their
+                    // username (§11.4).
+                    NameClaimType = "preferred_username",
+                    RoleClaimType = "roles"
+                };
+            });
+
+        return builder;
+    }
+}

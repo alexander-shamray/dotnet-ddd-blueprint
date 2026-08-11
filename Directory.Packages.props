@@ -87,6 +87,12 @@
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
     <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- §11.3's JWT bearer handler, referenced by Common.Web. Not carried by
+         Microsoft.AspNetCore.App — the shared framework has the authentication
+         abstractions and the cookie handler, and the JWT one has been a
+         package since ASP.NET Core 3.0. Same version line as the runtime
+         above: it ships with the framework and moves with it. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
     <!-- PR-07's OpenAPI deliverable (Appendix C): the framework's own document
          generator — AddOpenApi/MapOpenApi, document only, no UI. -->
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />

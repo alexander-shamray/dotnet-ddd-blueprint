@@ -127,10 +127,12 @@ public class HealthEndpointTests
     [Fact]
     public async Task Every_probe_allows_anonymous()
     {
-        // Asserted on the metadata rather than by an unauthenticated request:
-        // there is no authentication scheme to be anonymous against until
-        // PR-16, and a request would pass for the wrong reason today and stop
-        // meaning anything the moment one exists.
+        // Asserted on the metadata rather than by an unauthenticated request.
+        // This host maps no endpoint behind a policy, so an unauthenticated
+        // request would answer 200 whether or not the probes were anonymous —
+        // it would pass for a reason that has nothing to do with the claim.
+        // §13.5's rule is about the metadata anyway: a probe that 401s is read
+        // by the kubelet as unhealthy and the pod is killed in a loop.
         using IHost host = await StartAsync(_ => { });
 
         IReadOnlyList<Endpoint> endpoints = host.Services

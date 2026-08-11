@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Catalog.Api;
 using Catalog.TestSupport;
 using Shouldly;
 using Xunit;
@@ -8,10 +9,17 @@ namespace Catalog.Api.Tests;
 
 /// <summary>
 /// §12.4's third level: HTTP in, HTTP out, covering what the levels below
-/// structurally cannot — status codes and serialisation. The authorization
-/// half of that mandate is PR-16's; these endpoints are deliberately
-/// unauthenticated (Appendix C) and no test here pretends otherwise.
+/// structurally cannot — status codes, serialisation and, since PR-16, the
+/// endpoint's authorization.
 /// </summary>
+/// <remarks>
+/// Every write here states a principal, and states the narrowest one that
+/// works: §12.4's rule is that a fixture handing out a blanket claim set makes
+/// the §11.4 policies untestable and, worse, makes them look tested — the
+/// endpoints are reached, the assertions pass, and the one behaviour nobody
+/// exercises is the refusal. So the two tests that assert a refusal grant
+/// nothing and grant the wrong thing respectively.
+/// </remarks>
 [Collection(nameof(IntegrationCollection))]
 public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifetime
 {
@@ -40,10 +48,95 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
         DateTimeOffset PublishedAt);
 
     private Task<HttpResponseMessage> PublishAsync(string name, decimal amount = 10m) =>
-        _client.PostAsJsonAsync(
-            "/v1/catalog/products",
+        PostAsync(
             new { Name = name, ThumbnailUrl = (string?)null, Amount = amount, Currency = "EUR" },
+            CatalogPermissions.Write);
+
+    /// <summary>
+    /// A publish request as a caller holding <paramref name="permissions"/> —
+    /// a space-separated grant, or null for no principal at all. Explicit at
+    /// every call site rather than defaulted into the client's headers: a
+    /// default grant is how a suite ends up proving the policy is applied by
+    /// never once arriving without it.
+    /// </summary>
+    private Task<HttpResponseMessage> PostAsync(object body, string? permissions)
+    {
+        HttpRequestMessage request = new(HttpMethod.Post, "/v1/catalog/products")
+        {
+            Content = JsonContent.Create(body)
+        };
+
+        if (permissions is not null)
+        {
+            request.Headers.Add(TestAuthHandler.UserHeader, Guid.CreateVersion7().ToString());
+            request.Headers.Add(TestAuthHandler.PermissionsHeader, permissions);
+        }
+
+        return _client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Publishing_without_a_token_is_a_401()
+    {
+        // No X-Test-User header, so TestAuthHandler returns NoResult and the
+        // challenge stands.
+        //
+        // §12.4 calls this "the test that catches UseAuthentication being
+        // dropped from the pipeline". It is not, and the claim was removed
+        // from the chapter rather than restated here: commenting that line out
+        // leaves every test in this class green. AuthorizationMiddleware
+        // evaluates through PolicyEvaluator, which falls back to
+        // context.AuthenticateAsync() whenever the policy names no schemes —
+        // so authorization keeps working on its own, and what a missing
+        // UseAuthentication actually costs is HttpContext.User for everything
+        // downstream that reads it. CommonWebDefaultsTests asserts that half.
+        //
+        // What this one does catch is the policy being dropped from the
+        // endpoint, which is the commoner edit and the one a reviewer skims
+        // past.
+        HttpResponseMessage response = await PostAsync(
+            new { Name = "Walnut desk", ThumbnailUrl = (string?)null, Amount = 10m, Currency = "EUR" },
+            permissions: null);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+
+        int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");
+        rows.ShouldBe(0, "a refused request must not reach the handler");
+    }
+
+    [Fact]
+    public async Task Publishing_with_the_wrong_permission_is_a_403()
+    {
+        // Authenticated, and carrying a permission that is not the one this
+        // endpoint requires — the case a fixture that grants everything hides.
+        // catalog:read is deliberately a permission no policy in this service
+        // registers (CatalogPermissions has one entry): the caller is real, the
+        // grant is real, and it is simply not this grant.
+        HttpResponseMessage response = await PostAsync(
+            new { Name = "Walnut desk", ThumbnailUrl = (string?)null, Amount = 10m, Currency = "EUR" },
+            permissions: "catalog:read");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");
+        rows.ShouldBe(0, "a refused request must not reach the handler");
+    }
+
+    [Fact]
+    public async Task The_listing_is_reachable_without_a_token()
+    {
+        // §10.2's catalog-public route is GET-only and carries no
+        // AuthorizationPolicy, so the group's RequireAuthorization must not
+        // reach this endpoint. Over the wire is the only place that is visible:
+        // AllowAnonymous is metadata, and metadata that fails to suppress the
+        // group's policy looks identical to metadata that succeeds until a
+        // request without a token arrives.
+        HttpResponseMessage response = await _client.GetAsync(
+            "/v1/catalog/products",
             TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
 
     [Fact]
     public async Task Publishing_a_product_returns_200_with_the_new_id()
@@ -66,10 +159,12 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
         // one. The command's nullable Amount plus the validator's NotNull
         // turn the omission into the field-keyed 400 every other bad field
         // gets — and only this boundary can see the omission at all.
-        HttpResponseMessage response = await _client.PostAsJsonAsync(
-            "/v1/catalog/products",
+        // Authorised, so the 400 is the validator's answer and not the
+        // pipeline's: an unauthenticated request would 401 here and read as
+        // this assertion passing on the wrong grounds.
+        HttpResponseMessage response = await PostAsync(
             new { Name = "Walnut desk", Currency = "EUR" },
-            TestContext.Current.CancellationToken);
+            CatalogPermissions.Write);
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
