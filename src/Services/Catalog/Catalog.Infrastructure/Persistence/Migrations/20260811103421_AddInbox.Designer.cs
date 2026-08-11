@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Catalog.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CatalogDbContext))]
-    [Migration("20260811100913_AddInbox")]
+    [Migration("20260811103421_AddInbox")]
     partial class AddInbox
     {
         /// <inheritdoc />
@@ -150,10 +150,6 @@ namespace Catalog.Infrastructure.Persistence.Migrations
                         .HasFilter("[ProcessedAt] IS NULL");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("OccurredAt"), new[] { "Lane", "Attempts", "LockedUntil" });
-
-                    b.HasIndex("ProcessedAt")
-                        .HasDatabaseName("IX_Outbox_Processed")
-                        .HasFilter("[ProcessedAt] IS NOT NULL");
 
                     b.ToTable("OutboxMessages", "catalog");
                 });

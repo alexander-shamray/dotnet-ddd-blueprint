@@ -6,8 +6,8 @@ namespace Common.Infrastructure.Inbox;
 /// <summary>
 /// §9.5's duplicate suppression, configured on a receive endpoint ahead of its
 /// consumers with <c>UseConsumeFilter(typeof(InboxFilter&lt;&gt;), context)</c>.
-/// Before handling a message it records the id; if the id is already recorded
-/// for this endpoint, the message is dropped.
+/// If the id is already recorded for this endpoint the message is dropped;
+/// otherwise the consumer runs and the id is recorded <em>afterwards</em>.
 /// </summary>
 /// <remarks>
 /// <b>Common, not per-service, and the chapter's sample says otherwise for the

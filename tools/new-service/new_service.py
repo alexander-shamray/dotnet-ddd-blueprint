@@ -979,10 +979,14 @@ RETENTION_INDEX_MIGRATION = re.compile(r"^\d{14}_AddOutboxRetentionIndex(\.Desig
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The migrations a scaffolded service starts with, in the order they are
-# applied — which is the order their ids have to be generated in. A list rather
-# than three named constants, because every place below that cares needs the
-# position rather than the name: the id is the base plus the index in minutes,
-# and the snapshot is derived from the last one's designer.
+# applied — which is the order their ids have to be generated in. A tuple
+# rather than one named constant each, because every place below that cares
+# needs the position rather than the name: the id is the base plus the index in
+# minutes, and the snapshot is derived from the last one's designer.
+#
+# No count anywhere in this comment, and that is deliberate. It has said two,
+# then three, then four inside one pull request, and each stale sentence
+# survived alongside its replacement. The tuple is the count.
 TEMPLATE_MIGRATIONS = (
     INITIAL_CREATE,
     OUTBOX_MIGRATION,
@@ -1135,9 +1139,10 @@ def classify(repo_root: Path) -> list[str]:
                 f"the scaffold will not guess."
             )
 
-    # Each pair counted separately. One number for all three would be satisfied
-    # by six InitialCreate files and no outbox — which is precisely the state
-    # that ships a dispatcher with no table behind it.
+    # Each pair counted separately, one shape at a time. A single total over
+    # the whole directory would be satisfied by duplicates of one migration and
+    # none of another — which is precisely the state that ships a dispatcher
+    # with no table behind it, or a purge with no index.
     for shape, label in zip(
         TEMPLATE_MIGRATIONS,
         (

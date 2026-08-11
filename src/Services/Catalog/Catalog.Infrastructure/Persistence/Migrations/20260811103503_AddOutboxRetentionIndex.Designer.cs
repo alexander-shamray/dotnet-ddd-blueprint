@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Catalog.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CatalogDbContext))]
-    [Migration("20260811101001_AddOutboxRetentionIndex")]
+    [Migration("20260811103503_AddOutboxRetentionIndex")]
     partial class AddOutboxRetentionIndex
     {
         /// <inheritdoc />

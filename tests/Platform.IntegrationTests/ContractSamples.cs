@@ -18,10 +18,13 @@ namespace Platform.IntegrationTests;
 /// </summary>
 /// <remarks>
 /// Every sample carries a <b>distinct, non-default value in every member</b>,
-/// and that is a rule rather than a habit. The round-trip assertion compares a
-/// deserialised instance against this one, and a member left at its default
-/// round-trips through a serialiser that dropped it entirely — so a sample of
-/// zeroes turns the assertion it is the input to into one that cannot fail.
+/// and that is a rule rather than a habit. Two assertions read these, and both
+/// go quiet on a sample of zeroes: the round-trip serialises, deserialises and
+/// re-serialises, so a member a serialiser dropped entirely is absent from both
+/// forms and compares equal; and the wire-member check asks that every declared
+/// property appears in the JSON, which a defaulted one still does. A sample
+/// that cannot distinguish a working serialiser from a broken one is a sample
+/// that turns both assertions into ones that cannot fail.
 /// </remarks>
 internal static class ContractSamples
 {
