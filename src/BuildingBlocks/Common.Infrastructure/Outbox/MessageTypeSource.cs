@@ -68,12 +68,19 @@ public sealed class MessageTypeSource(params Assembly[] assemblies)
     /// <para>
     /// The pair makes it expand and contract, over three releases:
     /// </para>
+    /// <para>
+    /// <b>Both calls name the old name, and getting that backwards fails the
+    /// host.</b> Once the type is renamed the map derives the <i>new</i> name
+    /// itself, so aliasing that is aliasing a live name — the collision guard
+    /// refuses it. The alias exists for the name nothing derives any more.
+    /// </para>
     /// <list type="number">
-    /// <item>Alias the new name to the type and <see cref="WriteAs"/> the old
-    /// one. Every instance resolves both and writes what every instance can
-    /// read.</item>
-    /// <item>Drop the <see cref="WriteAs"/>. The new name is written; release
-    /// one's instances still resolve it through their alias.</item>
+    /// <item><see cref="Alias"/> the old name onto the renamed type, and
+    /// <see cref="WriteAs"/> that same old name. Every instance now resolves
+    /// both names and writes the one its predecessors can read.</item>
+    /// <item>Drop the <see cref="WriteAs"/>. The new name is written, and
+    /// release one's instances resolve it because they already carry the
+    /// renamed type — derived, not aliased.</item>
     /// <item>Drop the <see cref="Alias"/>, once no unprocessed row names the
     /// old one.</item>
     /// </list>

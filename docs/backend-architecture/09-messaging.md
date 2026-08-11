@@ -485,7 +485,7 @@ obvious implementation — `AssemblyQualifiedName` out, `Type.GetType` back —
 wrong in a way that only shows in production:
 
 ```
-Ordering.Domain.Orders.OrderPlacedDomainEvent, Ordering.Domain,
+Ordering.Domain.Orders.Events.OrderPlacedDomainEvent, Ordering.Domain,
 Version=1.0.0.0, Culture=neutral, PublicKeyToken=null
 ```
 
@@ -604,29 +604,38 @@ that lands in the retry log with its own name in it.
 > direction and calling the rename safe is how the procedure loses messages
 > while looking careful.
 >
-> So `WriteAs` pairs with `Alias`, and the compatibility release uses both:
+> So `WriteAs` pairs with `Alias`, and **both calls name the old name** — the
+> renamed type's current name is derived, and aliasing a name the map already
+> derives is what the collision guard exists to refuse:
 >
 > ```csharp
-> // Release 1 — everything resolves both names, everything writes the old one.
+> // Release 1 — the type is now OrderPlacedDomainEvent; rows in flight say
+> // OrderPlaced. Resolve both, write the one every instance can read.
 > new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
->     .Alias("Ordering.Domain.Orders.OrderPlacedDomainEvent", typeof(OrderPlacedDomainEvent))
->     .WriteAs(typeof(OrderPlacedDomainEvent), "Ordering.Domain.Orders.OrderPlacedDomainEvent");
+>     .Alias("Ordering.Domain.Orders.Events.OrderPlaced", typeof(OrderPlacedDomainEvent))
+>     .WriteAs(typeof(OrderPlacedDomainEvent), "Ordering.Domain.Orders.Events.OrderPlaced");
 > ```
 >
 > **Release 2** drops the `WriteAs`: the new name is written, and release one's
-> instances resolve it through their alias. **Release 3** drops the `Alias`,
-> once no unprocessed row still names the old one — which is the deletion the
-> drain rule above is about.
+> instances resolve it because they already carry the renamed type — derived,
+> not aliased, which is why nothing has to be added for them. **Release 3**
+> drops the `Alias`, once no unprocessed row still names the old one — the
+> deletion the drain rule above is about.
 >
-> Three guards keep the pair honest, and each fails the host rather than a
-> message. An alias that shadows a live type name is refused, on the
+> Five guards keep the pair honest, and each fails the host rather than a
+> message. An alias that **shadows a live type name** is refused, on the
 > duplicate-name argument one indirection over: two types would answer to one
-> name and which resolves is not decidable. An alias onto a type the map does
-> not carry is refused, because the dispatcher trusts the row's `Lane` rather
+> name and which resolves is not decidable. An alias **onto a type the map does
+> not carry** is refused, because the dispatcher trusts the row's `Lane` rather
 > than re-deriving it — an old `Broker` name pointed at a domain event would
-> publish that domain event, reopening the leak `Stage`'s guards close. And a
-> `WriteAs` naming something the map cannot resolve is refused, because that
-> instance would stage rows it could not itself deliver.
+> publish that domain event, reopening the leak `Stage`'s guards close. An
+> alias **longer than the column** is refused, since no row can ever carry it.
+> A `WriteAs` naming something **the map cannot resolve** is refused, because
+> that instance would stage rows it could not itself deliver. And a `WriteAs`
+> naming **another type** is refused, which is the quiet one: the row is
+> written, claimed and delivered, and the payload is deserialised as something
+> it never was — a substitution rather than a failure, and the only one of the
+> five with no symptom to notice.
 
 ### The payload is a persisted format too
 
