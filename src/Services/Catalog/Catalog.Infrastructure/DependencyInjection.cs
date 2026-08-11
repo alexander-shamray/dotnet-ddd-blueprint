@@ -89,6 +89,11 @@ public static class DependencyInjection
         // AddObservability already collects.
         services.AddSingleton<MessagingMetrics>();
 
+        // The bus (§9). Its readiness needs no line below: AddMassTransit
+        // registers the bus health check itself — "masstransit-bus", tagged
+        // ready — argued at the registration.
+        services.AddMassTransitMessaging(configuration);
+
         // The poll loop of §9.4. AddHostedService<T>, not a factory over a
         // registered singleton, and the difference is load-bearing: the
         // generic overload records an ImplementationType, which is what
@@ -102,6 +107,16 @@ public static class DependencyInjection
         // Nothing here resolves OutboxDispatcher by type, so nothing else
         // registers it. The fixture adds that singleton itself, for the one
         // reason it needs one: driving a single pass with no timer to race.
+        //
+        // Registered after the bus, and the order is a shutdown decision
+        // rather than a startup one: hosted services stop in reverse, so the
+        // last one registered is the first one stopped. With the dispatcher
+        // last it stops first, and the transport it publishes through is
+        // still up while it drains. Registered before the bus, every
+        // deployment would stop the broker underneath a dispatcher still
+        // claiming rows — publish failures and backoff on a healthy service,
+        // once per deploy. Startup runs the other way for the same reason:
+        // validator, bus, dispatcher.
         services.AddHostedService<OutboxDispatcher>();
 
         // §6.5's read side. Singleton, as §4.2's sample has it: the factory
@@ -111,11 +126,6 @@ public static class DependencyInjection
         // identity would be §7.1's boundary failing quietly.
         services.AddSingleton<IDbConnectionFactory>(
             new SqlConnectionFactory(configuration.GetConnectionString("Catalog")!));
-
-        // The bus (§9). Its readiness needs no line below: AddMassTransit
-        // registers the bus health check itself — "masstransit-bus", tagged
-        // ready — argued at the registration.
-        services.AddMassTransitMessaging(configuration);
 
         // Readiness lives here, not in Common.Web, because it needs the
         // connection string the shared host package does not have (§13.5).
