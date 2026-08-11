@@ -1195,11 +1195,20 @@ operation whether a user submitted it or a saga sent it, and it must not grow a
 second implementation because of how it arrived.
 
 The bridge from the broker to `IIntegrationEventHandler` is a single generic
-MassTransit consumer. This is the only place a MassTransit type meets
-application code, which is what ADR-014 depends on:
+MassTransit consumer. With `CommandConsumer<,>` below it, this is the only place
+a MassTransit type meets application code, which is what ADR-014 depends on:
+
+> **Both consumers are common code, and the per-service half is the binding.**
+> Nothing in either is specific to a service: the closed generic is built by the
+> container, the handler list comes from the §6.2 scan, and the metrics are
+> `Common.Infrastructure`'s. What *is* per-service is which endpoint binds which
+> contract, and that lives in each service's `AddMassTransitMessaging` where
+> §9.8 configures it. This is `OutboxTable`'s finding one type over — common
+> code that names one service's schema, or one service's namespace, is common
+> code that has quietly stopped being common.
 
 ```csharp
-namespace Ordering.Infrastructure.Messaging;
+namespace Common.Infrastructure.Messaging;
 
 public sealed class IntegrationEventConsumer<TEvent>(
     IEnumerable<IIntegrationEventHandler<TEvent>> handlers,
@@ -1240,7 +1249,7 @@ than to a projection handler — so a command that arrives by message goes throu
 exactly the same behaviours (§6.3) as one that arrives by HTTP:
 
 ```csharp
-namespace Ordering.Infrastructure.Messaging;
+namespace Common.Infrastructure.Messaging;
 
 /// <summary>
 /// Bridges an inbound command message to the application dispatcher. TMessage
@@ -1476,7 +1485,26 @@ the error queue before being replayed. Seven days is a starting point to check
 against RabbitMQ's configured limits, not a default to accept.
 
 Both purges — inbox and outbox (§9.4) — run from the same hosted service on a
-slow schedule, batched so neither holds a long lock.
+slow schedule, batched so neither holds a long lock. `RetentionPurgeService` in
+`Common.Infrastructure.Messaging` is that service: it composes the two
+statements above from the registered `OutboxTable` and `InboxTable`, takes its
+windows and its batch size from a registered `RetentionPolicy`, and exposes
+`PurgeAsync` publicly so tests drive one pass rather than racing a timer — the
+seam `OutboxDispatcher.ProcessBatchAsync` already offers, for the same reason.
+
+Two of its details are decisions rather than defaults. It **logs and swallows** a
+failed pass, because an exception out of `ExecuteAsync` stops the host and a
+database blip during housekeeping must not take the service down. And it stops
+after a fixed number of batches per table per pass, so a first run against a
+table nobody has ever purged drains over several passes instead of holding a
+connection until it is empty — a ceiling, not a target, and comfortably above
+any rate the dispatcher can create rows at.
+
+> **The windows are registered rather than `const`, and the inbox one is why.**
+> A number this chapter tells the reader to check against their broker's
+> configured limits has to be a number the service can change without editing
+> common code. The outbox window is softer and travels with it for symmetry;
+> the outbox *predicate* is not soft at all and stays in the statement.
 
 ```csharp
 namespace Common.Infrastructure.Inbox;
@@ -1490,9 +1518,13 @@ public sealed class InboxMessage(Guid messageId, string endpoint, DateTimeOffset
 ```
 
 ```csharp
+namespace Common.Infrastructure.Inbox;
+
 // The service DbContext — not a separate one. Same database, one migration
-// history, and EF-based handlers can share its transaction.
-public sealed class InboxFilter<T>(OrderingDbContext db) : IFilter<ConsumeContext<T>>
+// history, and EF-based handlers can share its transaction. `DbContext` rather
+// than `OrderingDbContext`, because this filter is common code: it reaches the
+// entity through Set<T>() so one implementation serves every service.
+public sealed class InboxFilter<T>(DbContext db) : IFilter<ConsumeContext<T>>
     where T : class
 {
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
@@ -1505,22 +1537,42 @@ public sealed class InboxFilter<T>(OrderingDbContext db) : IFilter<ConsumeContex
         string endpoint =
             context.ReceiveContext.InputAddress.AbsolutePath.TrimStart('/');
 
-        bool alreadyHandled = await db.InboxMessages
-            .AnyAsync(m => m.MessageId == messageId && m.Endpoint == endpoint);
+        bool alreadyHandled = await db.Set<InboxMessage>()
+            .AnyAsync(
+                m => m.MessageId == messageId && m.Endpoint == endpoint,
+                context.CancellationToken);
 
         if (alreadyHandled)
             return;   // Silently drop the duplicate.
 
-        db.InboxMessages.Add(new InboxMessage(messageId, endpoint, DateTimeOffset.UtcNow));
+        db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, DateTimeOffset.UtcNow));
 
         // Ordering matters: the handler runs FIRST, and the inbox row is only
         // committed if it succeeded. Recording before would mark a message
         // handled that never was, losing it permanently on the next delivery.
         await next.Send(context);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(context.CancellationToken);
     }
+
+    // Required by IFilter and absent from the excerpt above until it was
+    // compiled: the scope name is what identifies this filter in a probe.
+    public void Probe(ProbeContext context) => context.CreateFilterScope("inbox");
 }
 ```
+
+That `DbContext` has to be **the service's own instance**, and each service
+registers the alias that makes it one:
+
+```csharp
+services.AddScoped<DbContext>(sp => sp.GetRequiredService<OrderingDbContext>());
+```
+
+> **The delegate is load-bearing and its absence is silent.**
+> `AddScoped<DbContext, OrderingDbContext>()` compiles, resolves, and builds a
+> **second** context in the same scope — so the inbox row commits in its own
+> transaction and the "Yes" row of the table below quietly becomes the "No" row.
+> Nothing fails; the guarantee just stops holding, which is why a test asserts
+> that both resolutions return one instance rather than leaving it to review.
 
 > **The inbox is duplicate *suppression*, and only sometimes an atomic
 > guarantee.** Whether the handler's work and the inbox record commit together
