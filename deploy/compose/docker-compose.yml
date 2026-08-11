@@ -55,6 +55,20 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # One issuer, whichever host asks. Without this Keycloak derives the
+      # issuer from each request's Host header, so a token minted through
+      # localhost:8080 carries iss=http://localhost:8080/... while the
+      # discovery document catalog-api reads over the compose network
+      # advertises http://keycloak:8080/... — and ValidateIssuer rejects every
+      # token the README tells a developer to obtain. The two names are the
+      # same server; only the route differs.
+      KC_HOSTNAME: http://localhost:8080
+      # ...which leaves the container-side route to be restored: with a fixed
+      # hostname Keycloak would otherwise advertise localhost:8080 for the
+      # backchannel too, and catalog-api cannot reach that. Dynamic backchannel
+      # resolves the endpoints from the request host while the issuer stays
+      # frontend, which is exactly the split this needs.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
 

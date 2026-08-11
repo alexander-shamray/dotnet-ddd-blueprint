@@ -275,10 +275,18 @@ by `AddJwtAuthentication`). The values differ from the container ones only in
 the host name, because the compose file publishes each port:
 
 ```bash
+export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Catalog="Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True"
 export ConnectionStrings__RabbitMq="amqp://guest:guest@localhost:5672"
 export Identity__Authority="http://localhost:8080/realms/commerce"
 ```
+
+**The environment is the first line and is not decoration.** No project ships a
+`launchSettings.json`, so `dotnet run` is Production unless told otherwise, and
+`RequireHttpsMetadata` is on in Production ([§11.3](11-identity-authorization.md)) — against a plain-HTTP local
+authority the host will not fetch the discovery document at all, and every
+bearer request fails before validation starts. The containers set the same
+variable, which is why only the host path shows this.
 
 The override excludes each service's **migrator** beside its API, so the schema
 is the host's job too — under §7.4's separate key
