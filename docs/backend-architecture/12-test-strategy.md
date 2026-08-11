@@ -1284,9 +1284,10 @@ deployment that caused it.
 **Two of the four carry an origin, and both state it rather than earning it.**
 The system case constructs `CommandOrigin.System` directly, which is the right
 way to test the *check* — and it leaves the only production code that assigns
-it, `CancelOrderMapper` (§9.4), unasserted. A mapper stamping `User` would pass every test above and
-reject every real compensation, which is the failure the pair was written to
-catch, arriving by the one route the pair cannot see. One line closes it:
+it, `CancelOrderMapper` (§9.4), unasserted. A mapper stamping `User` would pass
+every test above and reject every real compensation — the failure the pair was
+written to catch, arriving by the one route the pair cannot see. Two short
+tests close it — the stamp, and the parse that stands in front of it:
 
 ```csharp
 [Fact]
@@ -1296,6 +1297,19 @@ public void The_mapper_is_what_makes_a_message_system_initiated()
         new CancelOrder(Guid.CreateVersion7(), CancelReasons.OutOfStock));
 
     command.InitiatedBy.ShouldBe(CommandOrigin.System);
+}
+
+[Fact]
+public void An_unknown_reason_code_never_becomes_a_command()
+{
+    // §9.4's retry policy ignores ContractMappingException, so this is what
+    // sends a malformed message to the error queue on the first attempt
+    // rather than after a minute of backoff. A parse that quietly accepted
+    // the code would keep the test above green and lose that behaviour, and
+    // nothing else in the suite looks at this branch.
+    CancelOrder message = new(Guid.CreateVersion7(), "invented_last_release");
+
+    Should.Throw<ContractMappingException>(() => new CancelOrderMapper().Map(message));
 }
 ```
 
