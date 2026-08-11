@@ -451,7 +451,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 387 tests, so
+`Platform.slnx` holds nineteen projects and `dotnet test` runs 388 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -522,6 +522,48 @@ comes after:
   been unbuildable since it was written; the same collision bit a second time
   inside a nested probe handler, where `Scheme` silently bound to the base
   property instead of the enclosing constant.
+
+**Three more arrived from the review loops, and all three are about things no
+test in the repository was watching.**
+
+- **A `ProjectReference` is a `COPY` line in two Dockerfiles, and forgetting it
+  breaks the images silently for as long as nobody runs one.** `dotnet restore`
+  writes each project's own `obj/project.assets.json`, so a csproj absent when
+  it runs is not restored and the `--no-restore` publish fails four steps later
+  with `NETSDK1004` naming a project the Dockerfile never mentions. PR-14 drew
+  `Catalog.Infrastructure → Common.Contracts` and `→ Common.Infrastructure`
+  without the two lines, and **both images were unbuildable from PR-14 until
+  PR-16 found it by running the stack**. `dotnet build Platform.slnx` cannot
+  see this, and neither can CI: the compose smoke is the only job that builds
+  these images and it is path-filtered on `deploy/compose/**`, while a
+  reference lands under `src/`. Fixing the filter is a real option and a wider
+  change than this PR; the honest state is that the gap is named in both
+  Dockerfiles and in §15.2, and carried by whoever adds the next reference.
+- **Keycloak's issuer follows the request host unless `KC_HOSTNAME` says
+  otherwise, and both halves of the fix are load-bearing.** A token minted
+  through `localhost:8080` and a discovery document read through
+  `keycloak:8080` disagree about `iss`, so `ValidateIssuer` rejected the exact
+  token `deploy/compose/README.md` tells a developer to obtain — on a stack
+  where every container reported healthy. `KC_HOSTNAME` pins the frontend
+  issuer and `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` keeps the JWKS URI
+  container-reachable; **one without the other trades one broken flow for
+  another**, which is why they arrive together. Measured on the master realm
+  rather than argued.
+- **A host-run service is Production, and that is what breaks the inner
+  loop.** No project ships a `launchSettings.json`, so `dotnet run` selects
+  Production, where `RequireHttpsMetadata` is on — and against a plain-HTTP
+  local authority the host never fetches the discovery document at all.
+  `ASPNETCORE_ENVIRONMENT=Development` leads both host-run blocks. The
+  containers set it, which is precisely why the Compose path never showed it.
+- **`ICurrentUser`'s implementation reads one authenticated projection, not
+  `HttpContext.User`.** Claims and authentication are independent: a
+  `ClaimsIdentity` with no authentication type carries claims perfectly
+  happily and still reports `IsAuthenticated` false, so members reading the
+  principal directly answered a subject and granted a permission for a caller
+  the interface denies. Nothing reaches it today — `JwtBearerHandler` produces
+  an authenticated principal or an empty one — which is the argument for
+  fixing a fail-closed contract while it is still theoretical rather than the
+  argument against.
 
 **One finding against this file's own procedure**, worth keeping because it
 cost work: the scaffold cleanup CLAUDE.md prescribes ends with
@@ -1071,7 +1113,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 81 tests running in about a second. A shared xUnit collection was rejected
+is 82 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.
