@@ -57,8 +57,9 @@ public class JwtAuthenticationTests
         options.TokenValidationParameters.ValidateLifetime.ShouldBeTrue();
         options.TokenValidationParameters.ValidateIssuerSigningKey.ShouldBeTrue();
 
-        // The framework default is five minutes, which keeps a revoked or
-        // expired token working for five minutes longer than it should (§11.3).
+        // The framework default is five minutes, which keeps an expired token
+        // working for five minutes past its own exp (§11.3). Lifetime only:
+        // revocation is not a thing a clock skew can reach.
         options.TokenValidationParameters.ClockSkew.ShouldBe(TimeSpan.FromSeconds(30));
     }
 

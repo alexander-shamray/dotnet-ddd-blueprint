@@ -72,10 +72,13 @@ public static class AuthenticationExtensions
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
 
-                    // The default is five minutes, which keeps a revoked or
-                    // expired token working for five minutes longer than it
-                    // should. Thirty seconds absorbs real drift between
-                    // NTP-synced hosts and nothing else (§11.3).
+                    // The default is five minutes, which keeps an expired token
+                    // working for five minutes past its own exp. Thirty seconds
+                    // absorbs real drift between NTP-synced hosts and nothing
+                    // else (§11.3). It says nothing about revocation: nbf and
+                    // exp are all a lifetime check reads, so a token revoked at
+                    // the provider stays valid here until it expires whatever
+                    // this value is.
                     ClockSkew = TimeSpan.FromSeconds(30),
 
                     // A display name, for logs and audit lines. It does NOT
