@@ -312,11 +312,36 @@ public static IServiceCollection AddOrderingInfrastructure(
     // line leaves no way to. Adding to the source is not the same as replacing
     // the map: the production assemblies stay in the list, so a test still
     // cannot stage something the real host would reject.
-    services.AddSingleton<MessageTypeSource>(_ =>
+    //
+    // An instance, not a factory, and that is what makes the sentence above
+    // true — a test resolves the registered descriptor and calls Add on it.
+    // A factory would leave a test with nothing to reach, and re-registering
+    // a second source is the replacement this is written to avoid.
+    services.AddSingleton(
         new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly));
 
     services.AddSingleton(sp =>
         new MessageTypeMap(sp.GetRequiredService<MessageTypeSource>().Assemblies));
+
+    // The schema the dispatcher composes its three statements against (§9.4).
+    // A value, because Common.Infrastructure is every service's and cannot
+    // hold a literal.
+    services.AddSingleton(new OutboxTable("ordering"));
+
+    // The payload format, and the converters that put this service's value
+    // objects in it. Money has a private constructor, so without its converter
+    // it deserialises to a zero amount and a null currency and nothing says so
+    // (§9.4).
+    services.AddSingleton<JsonConverter, MoneyJsonConverter>();
+    services.AddSingleton<OutboxJson>();
+
+    services.AddSingleton<MessagingMetrics>();                            // §13.3
+
+    // AddHostedService<T>, not a factory over a registered singleton: the
+    // generic overload records an ImplementationType, and §12.4's fixture
+    // matches on it to remove *only* this hosted service. MassTransit's bus is
+    // one too, so a RemoveAll<IHostedService>() would stop the broker.
+    services.AddHostedService<OutboxDispatcher>();                        // §9.4
 
     // Plain ports — not open generics, so the §6.2 scan does not see them and
     // each needs a line here. Omitting one fails at DI resolution on the first

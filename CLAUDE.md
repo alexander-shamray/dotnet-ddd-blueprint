@@ -68,7 +68,7 @@ global.json                      SDK pin (§4.4)
                                  `dotnet tool restore` is the whole setup
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the seventeen projects below
+Platform.slnx                    the eighteen projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate and scaffold tests, then
                                  restore/build/test
@@ -100,13 +100,24 @@ src/BuildingBlocks/
                                  dispatcher and its three behaviours, plus
                                  RequestMetrics, PluggableInterfaces,
                                  InvariantViolationException, §6.5's
-                                 CursorPage<T> and Cursor codec, and three
-                                 ports: §6.3's IUnitOfWork, §6.5's
-                                 IDbConnectionFactory and §7.5's
-                                 IDomainEventDispatcher — the last an
-                                 interface only, everything behind it waits
-                                 for PR-14
-  Common.Infrastructure/         §8 as code, one Redis/ folder:
+                                 CursorPage<T> and Cursor codec, and §7.5's
+                                 whole flow since PR-14: IUnitOfWork (§6.3),
+                                 IDbConnectionFactory (§6.5),
+                                 IDomainEventCollector — the type that finally
+                                 drew the Common.Domain edge —
+                                 IIntegrationEventMapper,
+                                 IIntegrationEventPublisher, OutboxLane,
+                                 IProjectionHandler<T>, and the internal
+                                 DomainEventDispatcher and ProjectionRegistry
+                                 behind AddDomainEventDispatcher()
+  Common.Contracts/              PR-14's two files and §4.3's one assembly
+                                 that crosses a service boundary:
+                                 IIntegrationEvent (§9.1's envelope, the type
+                                 Stage reads) and Catalog/V1/ProductPublished.
+                                 No packages and no project references, and
+                                 both absences are the point — everything this
+                                 referenced would travel into every service
+  Common.Infrastructure/         §8 as code and §9.4's outbox, two folders:
                                  RedisConnections (keyed names, spelled like
                                  the configuration keys), AddRedisConnections
                                  (two keyed multiplexers read eagerly,
@@ -116,8 +127,16 @@ src/BuildingBlocks/
                                  instrumentation with both connections),
                                  RedisKeys, and IDistributedLockFactory —
                                  SET NX PX, mandatory TTL, token-checked
-                                 release. NO project references, deliberately:
-                                 PR-14's outbox is what draws edges here
+                                 release. Outbox/ is PR-14's: OutboxMessage
+                                 and OutboxClaim (§9.4's two types for one
+                                 table), MessageTypeMap over a mutable
+                                 MessageTypeSource, OutboxJson taking its
+                                 converters, OutboxTable, ProjectionInvoker
+                                 and the OutboxDispatcher itself, with
+                                 Messaging/MessagingMetrics beside them. The
+                                 project references it lacked until PR-14 are
+                                 all here now — Application, Domain, Contracts
+                                 — and MassTransit with them
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails
                                  (which also registers §10.5's
                                  ValidationExceptionHandler — the 400 row's
@@ -135,11 +154,15 @@ src/Services/Catalog/
                                  Add only, argued in the file. Product is the
                                  gates' typeof anchor; AssemblyMarker is gone
   Catalog.Application/           AddCatalogApplication: the §6.2 scan, the
-                                 dispatcher, the NullDomainEventDispatcher
-                                 PR-14 replaces (§4.2 registers the dispatcher
-                                 in Application), the clock, RequestMetrics,
-                                 the three behaviours in pipeline order, the
-                                 §4.2 validator scan; two slices —
+                                 dispatcher, AddDomainEventDispatcher() (§4.2
+                                 registers it in Application; PR-10's
+                                 NullDomainEventDispatcher is deleted, not
+                                 disabled), Integration/
+                                 CatalogIntegrationEventMapper — §9.3's
+                                 allow-list, one entry — the clock,
+                                 RequestMetrics, the three behaviours in
+                                 pipeline order, the §4.2 validator scan;
+                                 two slices —
                                  Products/PublishProduct (command, validator,
                                  handler) and Products/GetProducts (§6.5's
                                  Dapper keyset query over (PublishedAt, Id))
@@ -314,16 +337,68 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds seventeen projects and `dotnet test` runs 248 tests, so
+`Platform.slnx` holds eighteen projects and `dotnet test` runs 287 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`py -3.12 -m unittest` in `tools/new-service` runs 73, and CI has a `scaffold`
-job for them beside `licence-gate`. **PR-14 is next**
-(`feat(template): transactional outbox and allow-list event mapper`).
+`py -3.12 -m unittest` in `tools/new-service` runs 75, and CI has a `scaffold`
+job for them beside `licence-gate`. **PR-15 is next**
+(`feat(messaging): Contracts, inbox consumers, inbox + outbox retention purge`).
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-14 landed the outbox — §7.5's flow end to end, §9.4's dispatcher, §9.3's
+allow-list mapper — and six of its decisions bind what comes after:
+
+- **`Common.Contracts` exists, with two files.** Appendix C put the project at
+  PR-15 and it could not wait: `OutboxMessage.Stage` reads
+  `message is IIntegrationEvent`, `MessageTypeMap` selects on that interface,
+  and an allow-list mapper with an empty registry could not carry §12.4's
+  "the domain type never reaches the broker" — which is only checkable
+  because the contract and the domain event have different names. PR-15 adds
+  the remaining records to a project that exists rather than creating one.
+- **A value object on the `Local` lane needs a `JsonConverter`, and its
+  absence is silent.** §5.3's `Money` is a `readonly record struct` with a
+  private constructor and two get-only properties; `System.Text.Json` does not
+  refuse that shape, because a struct always has a parameterless constructor —
+  it builds the default, finds no setter, and returns `Amount = 0` with a null
+  `Currency`. Two fixes were tried and rejected: `[JsonConstructor]` puts
+  `System.Text.Json` in a domain assembly, which §4.2's allow-list gate names
+  as forbidden, and a public constructor does not even work, because for a
+  struct the implicit parameterless one still wins. The fix is
+  `MoneyJsonConverter` in `Catalog.Infrastructure`, beside the
+  `ComplexProperty` mapping that already persists the same type as two
+  columns. `OutboxJson` is therefore a **registered instance taking its
+  converters**, not a static field: the converters are half of what "both
+  sides must agree" means. Verified red by deleting the registration.
+- **`ProjectionRegistry`'s memo is a container-scoped singleton, not a static
+  field.** §7.5's argument — DI registrations do not change at runtime — holds
+  for one container and fails for a process holding several: two
+  `WebApplicationFactory` hosts in one test assembly would share whichever
+  answer was computed first, so the suite proving an event with no handler
+  stages no `Local` row would poison the suite proving that one with a handler
+  does.
+- **`OutboxDispatcher` is registered with `AddHostedService<T>`, and the
+  generic overload is load-bearing.** It records an `ImplementationType`,
+  which is what `CatalogApiFactory` matches on to remove *only* this hosted
+  service — MassTransit's bus is one too, so `RemoveAll<IHostedService>()`
+  would stop the broker. A factory registration leaves `ImplementationType`
+  null and that removal would match nothing, leaving the dispatcher draining
+  rows underneath the assertions about them.
+- **Catalog registers no projection handler and stages no `Local` row**, and
+  that is asserted rather than assumed — it is the `IProjectionRegistry`
+  contract observed from outside. §8.4's cache invalidator needs a cached
+  query to invalidate and there is not one yet, so the lane's behaviours are
+  proven by domain events and handlers in `Catalog.TestSupport`, admitted to
+  the map through `MessageTypeSource.Add` — the mechanism §9.4 designed that
+  type for.
+- **The outbox schema is a registered `OutboxTable`, not a SQL literal.** §9.4
+  writes `ordering.OutboxMessages` into code every service shares, which
+  cannot be right; a dispatcher per service would be §9.3's prohibition on a
+  second outbox table set arriving by the back door. The schema is
+  shape-checked, because it is the one identifier interpolated into a
+  statement rather than parameterised.
 
 PR-13 landed the bus — `AddMassTransitMessaging` in
 `Catalog.Infrastructure/Messaging`, the RabbitMQ registration of §9 with no
@@ -406,15 +481,32 @@ after:
   `tools/new-service`'s suite red, and reconciling the script belongs in the
   same change.
 - **The scaffold copies no domain.** The slice is excluded by name, so a new
-  service is PR-07's state with the wiring accumulated through PR-13 on it —
+  service is PR-07's state with the wiring accumulated through PR-14 on it —
   five service projects, three test projects and a `TestSupport` library
   (§4.1 calls that last one *not* a test project, and counting it as one is a
   drift a review has already caught here), both images, the Compose pair, the
-  `InitialCreate` migration, the bus registration with its harness smoke, and
-  thirty-one passing tests, and no aggregate.
-  Three things arrive with the first real slice, each noted at the line
+  `InitialCreate` migration and the `AddOutbox` one beside it, the bus
+  registration with its harness smoke, §9.4's outbox wired and empty, and
+  thirty-eight passing tests, and no aggregate.
+  Four things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
-  wiring and the two silent-scan registration tests.
+  wiring, the two silent-scan registration tests, and — with the first domain
+  event — §12.4's round-trip assertion and a `JsonConverter` for any value
+  object that event carries.
+- **The outbox ships with its table, and that is why `AddOutbox` is copied
+  rather than dropped with Catalog's other migrations.** A service carrying
+  the dispatcher without the table would log a failed claim twice a second
+  from its first boot. The snapshot is EF's own description of the model that
+  leaves — the outbox designer with the aggregate's `Entity(...)` block
+  removed, which is the one edit made to a machine-owned file here. Verified
+  rather than argued, the same way PR-11's empty snapshot was: a scaffolded
+  service was built, `migrations add` was run against it, the generated `Up`
+  came out empty and EF's rewritten snapshot was byte-identical to the emitted
+  one. Two details were found only by that diff — EF sorts `System` usings
+  **before** everything else, which a plain alphabetical sort got wrong the
+  moment a `System` using first appeared, and `System.Collections.Generic`
+  leaves with the aggregate, because EF emits it for the
+  `Dictionary<string, object>` a `ComplexProperty` is mapped as.
 - **`AssemblyMarker` runs the other way, and it is easy to state backwards.**
   The scaffold **emits** it — a service with no domain type has nothing for the
   two §4.2 gates to name — and the first aggregate is when it is **deleted**
@@ -477,9 +569,13 @@ comes after:
 PR-09 landed §6.3's `TransactionBehavior` and did **not** draw the
 `Common.Application → Common.Domain` edge — the behaviour reads
 `ModifiedAggregateCount` as an `int` and calls `DispatchAsync(CancellationToken)`,
-so neither signature names a domain type, and the edge still waits for §7.5's
-`IDomainEventCollector` (PR-14). It brought `IDomainEventDispatcher` forward as
-an interface only, over Catalog's `NullDomainEventDispatcher`.
+so neither signature names a domain type. PR-14 drew it, with §7.5's
+`IDomainEventCollector`, exactly as predicted — and the argument survives the
+edge: `TransactionBehavior` still reads an `int`, because counting behind the
+port is what keeps EF's change tracker on Infrastructure's side of §4.2. A
+reference existing is not permission to start using it. PR-09 brought
+`IDomainEventDispatcher` forward as an interface only, over Catalog's
+`NullDomainEventDispatcher`, which PR-14 deleted.
 
 PR-09 also shipped PR #15's retry fix — `db.ChangeTracker.Clear()` at the top
 of every `EfUnitOfWork.ExecuteAsync` attempt, so a transient fault cannot
@@ -498,12 +594,13 @@ edits `CatalogDbContext`.
 
 **Two standing facts, restated here rather than left in commit bodies:**
 
-- **Raised events are dropped until PR-14, and since PR-10 that is live, not
-  hypothetical.** Every `Product.Publish` raises a
-  `ProductPublishedDomainEvent` that `NullDomainEventDispatcher` swallows.
-  The aggregate raises anyway — the domain must not teach the defect of not
-  raising, the unit test pins the payload, and PR-14's outbox picks it up
-  without touching `Product`.
+- **Raised events are no longer dropped, and PR-14 picked them up without
+  touching `Product`** — which is what the aggregate raising anyway between
+  PR-10 and PR-14 bought. Every `Product.Publish` now reaches §9.3's
+  allow-list and commits a `Broker` row in the same transaction as the
+  product. What is still dropped is the *`Local`* lane: Catalog registers no
+  `IProjectionHandler`, so §7.5 stages no row for one, and that is asserted
+  rather than assumed.
 - **`IdempotencyBehavior`'s seat.** The pipeline registers three of four
   behaviours; the missing one slots in *between* Validation and Transaction,
   and the registration comment names the seat. `PublishProductCommand`
@@ -517,9 +614,13 @@ durable, and no in-process tidying can tell those two states apart. Closing it
 needs an idempotency marker written *inside* the transaction — §8.5's
 `IIdempotentCommand` already carries a usable `CommandId`, but
 `IIdempotencyStore` is Redis-backed and outside the transaction, so a Redis
-claim is not atomic with the SQL commit. That decision belongs with PR-14,
-where the outbox is what makes a double-apply externally visible and where a
-SQL-side marker would live.
+claim is not atomic with the SQL commit. **PR-14 did not close it, and changed
+what it costs rather than leaving it unexamined**: with the outbox in place a
+lost acknowledgement republishes the same fact, which is the at-least-once
+delivery §9.4 promises and §9.5's inbox is built to absorb — a duplicate
+rather than an invisible double-apply. The SQL-side marker is still the fix
+for the *command*, and it belongs with §8.5's `IdempotencyBehavior`, whose
+seat between Validation and Transaction is already reserved.
 
 PR-08 landed the persistence layer, and three of its decisions bind what comes
 after:
@@ -543,11 +644,12 @@ after:
   and therefore its own container set (§12.4's stated price). See the
   commands below.
 
-The building blocks are four of five. `Common.Contracts` does not exist, so a
-change that "obviously belongs" in it is a change that belongs in the PR that
-creates it (Appendix C, PR-15), not in a project invented early. The same rule
-applies inside the ones that do exist: `Common.Infrastructure` holds §8's
-Redis helpers and nothing else until PR-14's outbox joins it, and `Common.Web`
+The building blocks are all five since PR-14, and `Common.Contracts` holds two
+files: the §9.1 envelope and Catalog's one contract. That is not licence to
+fill it — a record belongs in the PR whose code publishes or consumes it, and
+PR-15 is where the rest arrive. The same rule applies inside the others:
+`Common.Infrastructure` holds §8's Redis helpers and §9.4's outbox, and
+`Common.Web`
 holds §10.4, §10.5, §13.2, §13.4 and §13.5, and nothing else until PR-16 adds
 JWT validation — which is also the one gap inside `AddCommonWebDefaults`,
 three of §13.2's five pieces today.
@@ -556,9 +658,9 @@ three of §13.2's five pieces today.
 behaviours of four: **`IdempotencyBehavior` (§8.5) does not exist**, and its
 seat is between Validation and Transaction. Built to be appended to in the
 same way is
-`PluggableInterfaces.All`, which lists two of its eventual five — the three
-missing entries name interfaces §7.5 and §9.4 have not defined yet, and the
-list is built to be appended to. Adding an interface there and nowhere else is
+`PluggableInterfaces.All`, which lists three of its eventual five —
+`IProjectionHandler<>` joined with PR-14's outbox, and the two still missing
+name interfaces §9.4's consumers have not defined yet. Adding an interface there and nowhere else is
 the design; adding one before its PR is inventing a project early by another
 route.
 
@@ -575,7 +677,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 73 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 75 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 

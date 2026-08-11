@@ -758,9 +758,17 @@ before the map is built — one line beside the `TestAuthHandler` replacement:
 // §9.4. Adding, not replacing: the production assemblies stay, so a test
 // cannot stage a type the real host would refuse. Without this, NameOf throws
 // on the first builder call and every outbox test fails before its assertion.
-services.AddSingleton(
-    new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
-        .Add(typeof(AlwaysThrows).Assembly));
+//
+// The registered instance is mutated, not re-registered. Constructing a second
+// source here would compile, pass, and quietly restate the production list —
+// so the day §4.2 gains an assembly, this line is a copy that no longer
+// matches and nothing points at it. MessageTypeSource is mutable for exactly
+// this, and the map is built from it on first resolve.
+services
+    .Single(d => d.ServiceType == typeof(MessageTypeSource))
+    .ImplementationInstance
+    .ShouldBeSource()
+    .Add(typeof(AlwaysThrows).Assembly);
 ```
 
 Two assertions belong beside these. The first is the cheapest guard on the

@@ -81,7 +81,8 @@ The distinction that finding this appendix's first defect depended on:
 | `OutboxClaim` | Dapper record, §9.4 | The eight the `OUTPUT` clause returns | — | `OutboxDispatcher.ProcessBatchAsync` |
 | `MessageTypeMap` | Singleton, §9.4 | Neither — it maps `MessageType` values to types | Built at startup from `MessageTypeSource` | `Stage` on the way in, `DeliverAsync` on the way out, [§12.4](12-test-strategy.md)'s round-trip |
 | `MessageTypeSource` | Singleton, §9.4 | The assembly list behind the map | §4.2's registration; §12.4's fixture `Add`s the test assembly | `MessageTypeMap`'s factory |
-| `OutboxJson` | Static, §9.4 | Neither — the one `JsonSerializerOptions` both ends of the lane use | — | `Stage` and `DeliverAsync`, and §12.4's round-trip test |
+| `OutboxJson` | Singleton, §9.4 | Neither — the one `JsonSerializerOptions` both ends of the lane use, converters included | Built at startup from the registered `JsonConverter`s | `Stage` and `DeliverAsync`, and §12.4's round-trip test |
+| `OutboxTable` | Singleton, §9.4 | Neither — the schema the dispatcher's three statements are composed against | §4.2's registration, one per service | `OutboxDispatcher`'s constructor |
 | `InboxMessage` | EF entity, §9.5 | `(MessageId, Endpoint)` composite key, `HandledAt` | `InboxFilter<T>` | duplicate suppression, retention purge |
 
 `OutboxClaim` has no `ProcessedAt`, `LastError` or `LockedUntil` — a claimed row
@@ -97,10 +98,12 @@ structurally always null on one path.
 | `EfUnitOfWork` | §6.3 | `IUnitOfWork` |
 | `EfDomainEventCollector` | §7.5 | `IDomainEventCollector` |
 | `DomainEventDispatcher`, `ProjectionRegistry` | §7.5 | Application ports |
+| `ProjectionRegistryCache` | §7.5 | The registry's memo. A **singleton, not a `static` field**: keyed to the container, because a process holding two hosts would otherwise share whichever answer was computed first |
 | `RedisIdempotencyStore` | §8.5 | `IIdempotencyStore` |
 | `OrderingIntegrationEventMapper` | §9.3 | `IIntegrationEventMapper` |
 | `OutboxDispatcher` | §9.4 | `BackgroundService`; `ProcessBatchAsync` is public for tests |
 | `ProjectionInvoker` | §9.4 | Cached-delegate handler resolution |
+| `MoneyJsonConverter` | §9.4 | `JsonConverter<Money>` for the Local lane. Per-service, beside the `ComplexProperty` mapping that persists the same value object as columns — a value object with a private constructor deserialises to its default in silence, and the domain may not carry a `[JsonConstructor]` (§4.2's gate) |
 | `IntegrationEventConsumer<T>` | §9.4 | `IConsumer<T>` for **events** → `IIntegrationEventHandler` |
 | `CommandConsumer<TMessage,TCommand>` | §9.4 | `IConsumer<T>` for **commands** → the application dispatcher |
 | `InboxFilter<T>` | §9.5 | `IFilter<ConsumeContext<T>>` |
@@ -109,7 +112,7 @@ structurally always null on one path.
 | `SensitiveDataRedactor` | §13.4 | `BaseProcessor<LogRecord>`; enforces the never-log list on the pipeline §13.2 builds |
 | `OutboxMetrics` | §13.6 | Observable gauges on the `Ordering.Outbox` meter; singleton, eagerly constructed |
 | `RequestMetrics` | §13.3 | `request.duration` on `Commerce.Requests`; injected by `LoggingBehavior` and still forced by `MetricsInitialiser` (§13.6) — a health probe never enters the pipeline |
-| `MessagingMetrics` | §13.3 | Three instruments on `Commerce.Messaging`: `messaging.delivery.lag` and `projection.lag` histograms, and the `command.domain_rejected` counter `Rejected` writes (§9.8). Injected by `IntegrationEventConsumer<T>` and `CommandConsumer<,>`; resolved from the provider by the static `ProjectionInvoker` |
+| `MessagingMetrics` | §13.3 | Three instruments on `Commerce.Messaging`: `messaging.delivery.lag` and `projection.lag` histograms, and the `command.domain_rejected` counter `Rejected` writes (§9.8). Injected by `IntegrationEventConsumer<T>` and `CommandConsumer<,>`; resolved from the provider by the static `ProjectionInvoker`. **The class grows in instalments** — `Projected` lands with the outbox, the other two with the consumers that record them, on `PluggableInterfaces.All`'s terms |
 | `IOutboxStats`, `OutboxStats` | §13.6 | Backlog age and abandoned count, read per-scope from a singleton |
 | `MetricsInitialiser` | §13.6 | `IHostedService` whose only job is forcing the metrics singletons to be constructed |
 | `OrderFulfilmentState` | §9.6 | `SagaStateMachineInstance`; persisted to `ordering.OrderFulfilmentStates` |
@@ -143,7 +146,7 @@ their declaration.
 |---|---|
 | `IDbConnectionFactory`, `SqlConnectionFactory` | Creates a `SqlConnection` for Dapper reads — closed; Dapper opens it, the caller disposes it |
 | `OrderingDbContext` | The service `DbContext`; configuration in §7.2 |
-| `OutboxPublisher` | `IIntegrationEventPublisher` writing `OutboxMessage` rows; resolves `MessageTypeMap` and hands it to `Stage` |
+| `OutboxPublisher` | `IIntegrationEventPublisher` writing `OutboxMessage` rows; resolves `MessageTypeMap` and `OutboxJson` and hands both to `Stage`. Mints one correlation id per scope, lazily — a scope is one command, so rows staged together correlate, and an integration event overrides it from its envelope (§9.1) |
 | `Result`, `Result<T>` | Non-generic `Result` is the void case — there is no `Unit` — and `Result<T>` derives from it, which is what lets `TransactionBehavior` test any command's outcome with one pattern (§6.3). `IsSuccess`/`IsFailure`, `Error`, and the `Success`/`Failure` factories |
 | `CursorPage<T>`, `Cursor` | The pagination envelope and the opaque cursor codec (§6.5) |
 | `AddRedisConnections`, `AddMassTransitMessaging` | Infrastructure registration helpers. The first is `Common.Infrastructure`'s one entry point, shown abbreviated in §8.2 — connections, cache stack, `RedisKeys`, the lock factory and the Redis tracing instrumentation in one call. The second is **per-service** (`{Service}.Infrastructure.Messaging`, the `Redis/DependencyInjection` shape one tree over): reads `ConnectionStrings:RabbitMq` eagerly and throws naming the key, disables MassTransit's usage telemetry, configures the RabbitMQ bus — and registers no health check, because `AddMassTransit` contributes `masstransit-bus` itself (§13.5). Per-service because it is where each service's consumers, sagas and receive endpoints are configured (§9.6, §9.8) |
@@ -152,7 +155,7 @@ their declaration.
 | `IDistributedLockFactory`, `IDistributedLock` | §8.1's lock and its held handle: `TryAcquireAsync(name, duration, ct)` returns null under contention, the TTL is mandatory, and disposal is the token-checked release |
 | `BuildInfo` | Assembly version stamped onto OTel resource attributes (§13.2) |
 | `OrderBuilder`, `AddressBuilder`, `CommandBuilder`, `SeedData` | Test data builders (§12.3) |
-| `Poison`, `Healthy`, `LocalRowFor<T>`, `TestClock` | Outbox test builders (§12.4) |
+| `Poison`, `Healthy`, `LocalRowFor<T>`, `TestClock` | Outbox test builders (§12.4). Each takes the **fixture**, not the map alone: a staged row needs both halves of the host's agreement about the format, and one written without the service's converters round-trips to a defaulted value object |
 | `Contracts`, `ContractSamples` | Test builders for `required`-member contract messages — one sample per contract type, and the reason the §12.6 suite cannot silently skip a new one |
 | `AlwaysThrows`, `NoOpEvent`, `UnhandledEvent` | Test event types with throwing / no-op / no handler |
 | `IntegrationCollection` (xUnit) | The `[CollectionDefinition]` sharing one `ServiceFixture` across test classes — declared once **per test assembly** (§12.4). Named for what it groups, and deliberately not `ServiceCollection`: that name is taken by `Microsoft.Extensions.DependencyInjection`, and the local type would win in every test file that also builds a provider |
@@ -163,7 +166,8 @@ their declaration.
 | `StartHarnessAsync` | Test helper returning a started MassTransit harness, and where a saga suite states both harness bounds — the inactivity timeout its negative assertions wait on, and the `TestTimeout` that would otherwise cap them (§12.5) |
 | `Realm`, `Catalog`, `Audiences()` | Fixture handles on the Keycloak and Catalog containers, and a `aud`-claim reader over the decoded token — the realm-configuration assertions in §11.5 |
 | `MessageTypes` | Fixture handle on the real `MessageTypeMap` (§12.4). **Not `Types`**: that name belongs to `NetArchTest.Rules.Types`, which §4.2's architecture tests call as `Types.InAssembly(...)`, and a fixture member would shadow it in any file holding both — the `ServiceCollection` collision again, two rows above |
-| `TestTypeMap` | A `MessageTypeMap` over the contract and test assemblies, built once as a static in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture |
+| `TestTypeMap`, `TestOutboxJson` | A `MessageTypeMap` over the contract and test assemblies and an `OutboxJson` with no converters, built once as statics in the unit tests (§12.4). Not the fixture's — the `Stage` test takes no fixture |
+| `OutboxJson` (fixture member) | Fixture handle on the registered `OutboxJson` (§12.4), so a staged row and a delivered one agree about converters as well as settings |
 | `DomainEventSamples` | One sample per stageable domain event, so a new event without one fails §12.4's round-trip rather than being skipped — `ContractSamples`' counterpart for the Local lane |
 | `ConcurrentRequestException` | Thrown when an idempotency key is claimed but unfinished (§8.5) |
 | `InProgressMarker` | The sentinel `TryClaimAsync` writes while a command is in flight; `GetAsync` reads it back as `InProgress` (§8.5) |
