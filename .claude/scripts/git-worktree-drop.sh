@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Remove the throwaway worktree /security-sweep created, without -f.
+# Remove the throwaway worktree a sweep created — /security-sweep or
+# /bug-sweep — without -f.
 #
 # The missing flag is half the point. That command's teardown leans on git
 # refusing to remove a checkout holding anything modified or untracked — "if

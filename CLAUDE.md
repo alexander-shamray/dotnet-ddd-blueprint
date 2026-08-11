@@ -1752,18 +1752,23 @@ it. The accepted path set is unchanged and `mktemp -d` names are unique, so
 nothing is less safe; what is lost is attribution, since a stray temp directory
 no longer says which sweep left it.
 
-**Both helpers' header comments still name `/security-sweep` as their only
-caller**, and that wording is now wrong in exactly the way the four prose sites
-above were: `git-worktree-detach.sh` opens "the detached, pinned worktree
-`/security-sweep` audits in, **and nothing else**", `git-worktree-drop.sh` opens
-"the throwaway worktree `/security-sweep` created", and the detach body argues
-its path check from "only **this command's** own `mktemp -d`". Two commands
-produce that shape now. The behaviour is right and only the prose is stale, but
-it is stale, and it is recorded here rather than left for a reader to hit —
-because the file that would say so is the file a command session may not touch.
-Retitling both headers for "a sweep" and generalising the prefix are the same
-human edit with the deny lifted, a line or two in each, and neither changes the
-accepted path set.
+**Both helpers' header comments were retitled for "a sweep" in the same PR**,
+because they had named `/security-sweep` as their only caller — "and nothing
+else", "the throwaway worktree `/security-sweep` created", and a path check
+argued from "only **this command's** own `mktemp -d`" — which is exactly the
+incomplete reconciliation the four prose sites above were fixed for. That edit
+needed `Edit(.claude/scripts/**)` lifted and put back afterwards, since a
+session that removes its own restriction makes the control a fiction; the
+lifting is the repo owner's call and was taken as one. Comments only: the
+`secsweep-??????` shape check, `--detach`, and the absent `-f` are byte
+identical, verified with `bash -n` and a non-comment diff that came back empty.
+
+**The prefix itself is still `secsweep-`, and that residual stands.** Renaming
+it is a wider change than a comment — it is the one literal both helpers match
+on, so it has to move in both files and in both callers' `mktemp -d` at once,
+and getting it half-done leaves a sweep unable to fork or unable to tear down.
+The detach helper now says in place that the prefix is historical and shared,
+which is the part a reader needs; the attribution cost is unchanged and small.
 
 **A PR gets its own worktree by default, and `/branch` is where it comes
 from.** From a clean `main` with a writable parent — the ordinary case — the

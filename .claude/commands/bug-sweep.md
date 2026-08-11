@@ -170,14 +170,15 @@ stray temp directory no longer says which of the two commands left it. Until
 that is fixed this is a residual named rather than hidden, and the run summary
 says which command owns the directory it reports.
 
-**Both helpers' header comments are stale for the same reason**, and reading
-them will tell you this command has no business calling them: they name
-`/security-sweep` as their only caller — "and nothing else", "the throwaway
-worktree `/security-sweep` created", "only **this command's** own `mktemp -d`".
-The behaviour is right and only the wording is singular. Fixing it properly
-means retitling both headers for "a sweep" and generalising the prefix in the
-same pass — a human's edit, made with the deny lifted, a line or two in each,
-and no change to the accepted path set.
+**Both helpers' header comments name "a sweep" rather than `/security-sweep`**,
+so reading one no longer suggests this command has no business calling it. They
+were retitled in the PR that added this command, with `Edit(.claude/scripts/**)`
+lifted for the edit and restored after it — comments only, the shape check and
+every flag untouched. What was **not** renamed is the prefix, which is the one
+literal both helpers match on: moving it means changing both files and both
+callers' `mktemp -d` together, and a half-done rename leaves a sweep able to
+fork but not tear down. The detach helper says in place that `secsweep-` is
+historical and shared, which is what a reader of it actually needs.
 
 **Pin the resolved commit, not `HEAD` a second time.** Reading `HEAD` once for a
 summary and again for `git worktree add` are two calls, and in a repo worked by

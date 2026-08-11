@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fork the detached, pinned worktree /security-sweep audits in, and nothing
-# else: `git worktree add --detach <path> <commit>`.
+# Fork the detached, pinned worktree a sweep audits in — /security-sweep or
+# /bug-sweep — and nothing else: `git worktree add --detach <path> <commit>`.
 #
 # A `Bash(git worktree add:*)` grant would also buy `-B`, which resets an
 # existing branch — the operation .claude/settings.json denies as
@@ -24,9 +24,10 @@ case "$path" in -*) echo "path may not start with '-'" >&2; exit 2 ;; esac
 # **Registration is not ownership, and neither is emptiness.** The audited tree
 # is prompt-injection input, so a path arriving here may be chosen by it — and
 # the residual this helper was written to close is precisely about *which* path,
-# not which flags. So the path must be one only this command's own `mktemp -d`
-# could have produced: `secsweep-` plus six characters, directly under the
-# canonical temp root. An unrelated empty directory elsewhere on the host, or a
+# not which flags. So the path must be one only a sweep's own `mktemp -d` could
+# have produced: `secsweep-` plus six characters — a prefix that is historical
+# and shared, /bug-sweep having borrowed it rather than widen this check —
+# directly under the canonical temp root. An unrelated empty directory elsewhere on the host, or a
 # sibling PR worktree that happens to be registered, is refused.
 tmproot=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
   { echo "cannot resolve the temp root" >&2; exit 4; }
