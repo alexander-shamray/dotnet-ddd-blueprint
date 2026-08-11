@@ -324,7 +324,9 @@ Each round is the review done once, end to end:
 1. **Fan out.** Spawn the audit subagents as the **`bug-auditor` agent type**
    (`.claude/agents/bug-auditor.md`), whose complete tool list is `Read`,
    `Grep`, `Glob` — no shell, no editing, no network, no sub-agents — over
-   disjoint areas so no two read the same tree. Read-only here is a property of
+   areas with **disjoint reporting ownership**, so no two are answerable for the
+   same defect. That is not a reading restriction, and the paragraph below the
+   table says why it must not become one. Read-only here is a property of
    the agent's tool grant, not a word in its prompt, and the profile is
    deliberately narrower than "excludes `Edit`/`Write`": a profile that still
    carried `Bash` or a network tool could be driven by a **prompt-injected**
