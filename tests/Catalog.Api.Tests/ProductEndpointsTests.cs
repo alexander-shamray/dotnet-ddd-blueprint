@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using Catalog.Api;
 using Catalog.TestSupport;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection;

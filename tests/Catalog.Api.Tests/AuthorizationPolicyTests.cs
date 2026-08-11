@@ -1,4 +1,3 @@
-using Catalog.Api;
 using Catalog.TestSupport;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
