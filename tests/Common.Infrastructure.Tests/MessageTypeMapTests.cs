@@ -76,6 +76,38 @@ public class MessageTypeMapTests
     }
 
     [Fact]
+    public void An_alias_resolves_to_the_type_that_replaced_it()
+    {
+        // §9.4's rename procedure in one line: both names resolve for one
+        // release, so a row staged by an instance that has not been replaced
+        // yet is still deliverable by one that has.
+        MessageTypeMap map = new(
+            [typeof(SampleDomainEvent).Assembly],
+            new Dictionary<string, Type> { ["Old.Namespace.SampleDomainEvent"] = typeof(SampleDomainEvent) });
+
+        map.Resolve("Old.Namespace.SampleDomainEvent").ShouldBe(typeof(SampleDomainEvent));
+
+        // Outward it is gone: NameOf keeps writing the current name, which is
+        // what lets the old one drain and makes the next release a deletion.
+        map.NameOf(typeof(SampleDomainEvent)).ShouldBe("Common.Infrastructure.Tests.SampleDomainEvent");
+    }
+
+    [Fact]
+    public void An_alias_that_shadows_a_live_name_fails_the_host()
+    {
+        // Two types would answer to one name and which resolves is not
+        // decidable — the duplicate-name argument, one indirection over.
+        Should
+            .Throw<InvalidOperationException>(() => new MessageTypeMap(
+                [typeof(SampleDomainEvent).Assembly],
+                new Dictionary<string, Type>
+                {
+                    ["Common.Infrastructure.Tests.SampleDomainEvent"] = typeof(SampleIntegrationEvent)
+                }))
+            .Message.ShouldContain("also a live type name");
+    }
+
+    [Fact]
     public void An_assembly_listed_twice_fails_the_host()
     {
         // The realistic way two entries collide, and the reason

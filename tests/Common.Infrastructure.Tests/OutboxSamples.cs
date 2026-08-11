@@ -39,5 +39,19 @@ public readonly record struct SampleValueTypeDomainEvent(DateTimeOffset Occurred
 /// </summary>
 public sealed record CommandeCréée(DateTimeOffset OccurredAt) : IDomainEvent;
 
+/// <summary>
+/// Both at once, which §5.5 calls the most consequential mistake in this
+/// architecture — and which C# is perfectly happy to compile, so `Stage` is
+/// what has to refuse it.
+/// </summary>
+public sealed record Conflated : IDomainEvent, IIntegrationEvent
+{
+    public required Guid MessageId { get; init; }
+
+    public required Guid CorrelationId { get; init; }
+
+    public required DateTimeOffset OccurredAt { get; init; }
+}
+
 /// <summary>Neither, so <c>NameOf</c> must refuse it.</summary>
 public sealed record NotAMessage(string Note);

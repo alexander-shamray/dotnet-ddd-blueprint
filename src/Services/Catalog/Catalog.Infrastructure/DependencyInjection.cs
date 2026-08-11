@@ -70,7 +70,10 @@ public static class DependencyInjection
         services.AddSingleton(
             new MessageTypeSource(typeof(ProductPublished).Assembly, typeof(Product).Assembly));
         services.AddSingleton(sp =>
-            new MessageTypeMap(sp.GetRequiredService<MessageTypeSource>().Assemblies));
+        {
+            MessageTypeSource source = sp.GetRequiredService<MessageTypeSource>();
+            return new MessageTypeMap(source.Assemblies, source.Aliases);
+        });
         services.AddHostedService<MessageTypeMapValidator>();
 
         // The payload format (§9.4), and the converters that make this

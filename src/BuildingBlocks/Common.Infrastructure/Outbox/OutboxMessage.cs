@@ -79,6 +79,20 @@ public sealed class OutboxMessage
                 $"{lane} is not a lane. A row carries Broker or Local (§9.4), and one that " +
                 "carries neither can only be discovered after it is committed.");
 
+        // Before either lane check, because a type that is both satisfies
+        // both of them. §5.5 calls conflating the two "one of the most
+        // consequential mistakes in this architecture", and this is what it
+        // costs here: such a payload passes the Broker guard, so a domain
+        // event reaches the bus, and it passes the Local guard while the
+        // identity arm below then reads its envelope instead of minting a row
+        // id. Neither lane is right for it, so neither is offered.
+        if (message is IDomainEvent and IIntegrationEvent)
+            throw new InvalidOperationException(
+                $"{message.GetType().Name} implements {nameof(IDomainEvent)} and " +
+                $"{nameof(IIntegrationEvent)}. They are different things (§5.5): one is internal " +
+                "and free to change, the other is a published contract. A type that is both can " +
+                "be staged on either lane and is correct on neither.");
+
         if (lane is OutboxLane.Broker && message is not IIntegrationEvent)
             throw new InvalidOperationException(
                 $"{message.GetType().Name} is not an {nameof(IIntegrationEvent)} and cannot be " +

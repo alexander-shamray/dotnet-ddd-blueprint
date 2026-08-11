@@ -17,6 +17,7 @@ namespace Common.Infrastructure.Outbox;
 public sealed class MessageTypeSource(params Assembly[] assemblies)
 {
     private readonly List<Assembly> _assemblies = [.. assemblies];
+    private readonly Dictionary<string, Type> _aliases = [];
 
     public IEnumerable<Assembly> Assemblies => _assemblies;
 
@@ -25,4 +26,31 @@ public sealed class MessageTypeSource(params Assembly[] assemblies)
         _assemblies.Add(assembly);
         return this;
     }
+
+    /// <summary>
+    /// A name a type answered to before it was renamed, so both resolve to it
+    /// for one release.
+    /// </summary>
+    /// <remarks>
+    /// <b>§9.4's rename procedure needs this and nothing else provided it.</b>
+    /// "Deploy the rename in one release with both names resolving to the same
+    /// type, drain, then remove the old name in the next" — and the map derives
+    /// only the current <c>FullName</c>, so without an alias that first release
+    /// is not expressible. During a rolling deploy the old instances go on
+    /// staging the old name while the new dispatcher resolves nothing, and the
+    /// rows abandon after ten attempts: the procedure the chapter documents as
+    /// the safe one is the one that loses messages.
+    /// <para>
+    /// Aliases resolve <em>inward</em> only. <c>NameOf</c> keeps writing the
+    /// current name, so the old one drains and never returns — which is what
+    /// makes the second release a deletion rather than a migration of its own.
+    /// </para>
+    /// </remarks>
+    public MessageTypeSource Alias(string persistedName, Type type)
+    {
+        _aliases.Add(persistedName, type);
+        return this;
+    }
+
+    public IReadOnlyDictionary<string, Type> Aliases => _aliases;
 }

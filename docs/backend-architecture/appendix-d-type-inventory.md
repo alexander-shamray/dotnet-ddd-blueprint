@@ -81,7 +81,7 @@ The distinction that finding this appendix's first defect depended on:
 | `OutboxMessage` | EF entity, §9.4 | All eleven | `IIntegrationEventPublisher` staging; test fixtures | `db.OutboxMessages`, alerts, purge |
 | `OutboxClaim` | Dapper record, §9.4 | The eight the `OUTPUT` clause returns | — | `OutboxDispatcher.ProcessBatchAsync` |
 | `MessageTypeMap` | Singleton, §9.4 | Neither — it maps `MessageType` values to types | Built at startup from `MessageTypeSource` | `Stage` on the way in, `DeliverAsync` on the way out, [§12.4](12-test-strategy.md)'s round-trip |
-| `MessageTypeSource` | Singleton, §9.4 | The assembly list behind the map | §4.2's registration; §12.4's fixture `Add`s the test assembly | `MessageTypeMap`'s factory |
+| `MessageTypeSource` | Singleton, §9.4 | The assembly list behind the map, and the persisted-name aliases beside it — `Alias` is what makes §9.4's two-release rename expressible, since the map derives only the current `FullName` | §4.2's registration; §12.4's fixture `Add`s the test assembly | `MessageTypeMap`'s factory |
 | `OutboxJson` | Singleton, §9.4 | Neither — the one `JsonSerializerOptions` both ends of the lane use, converters included | Built at startup from the registered `JsonConverter`s | `Stage` and `DeliverAsync`, and §12.4's round-trip test |
 | `OutboxTable` | Singleton, §9.4 | Neither — the schema the dispatcher's three statements are composed against | §4.2's registration, one per service | `OutboxDispatcher`'s constructor |
 | `InboxMessage` | EF entity, §9.5 | `(MessageId, Endpoint)` composite key, `HandledAt` | `InboxFilter<T>` | duplicate suppression, retention purge |

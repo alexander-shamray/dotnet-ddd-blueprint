@@ -594,6 +594,25 @@ that lands in the retry log with its own name in it.
 > deleted while unprocessed rows still name it. Deploy the rename in one release
 > with both names resolving to the same type, drain, then remove the old name in
 > the next — the same shape as every backward-compatible schema change (ADR-007).
+>
+> **`MessageTypeSource.Alias` is what makes that first release expressible**,
+> and without it the procedure above is a description of something the code
+> cannot do: the map derives only the current `FullName`, so during a rolling
+> deploy the instances that have not been replaced go on staging the old name
+> while the new dispatcher resolves nothing, and those rows abandon at the
+> attempt cap. The safe procedure would have been the lossy one.
+>
+> ```csharp
+> new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
+>     .Alias("Ordering.Domain.Orders.Events.OrderPlaced", typeof(OrderPlacedDomainEvent));
+> ```
+>
+> Aliases resolve **inward only**. `NameOf` goes on writing the current name,
+> so the old one drains and never comes back — which is what makes the second
+> release a deletion rather than a migration of its own. An alias that shadows
+> a live type name fails the host, on the duplicate-name argument one
+> indirection over: two types would answer to one name and which resolves is
+> not decidable.
 
 ### The payload is a persisted format too
 

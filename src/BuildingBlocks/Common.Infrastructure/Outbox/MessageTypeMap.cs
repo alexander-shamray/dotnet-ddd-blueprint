@@ -38,6 +38,11 @@ public sealed class MessageTypeMap
     private readonly FrozenDictionary<Type, string> _byType;
 
     public MessageTypeMap(IEnumerable<Assembly> assemblies)
+        : this(assemblies, new Dictionary<string, Type>())
+    {
+    }
+
+    public MessageTypeMap(IEnumerable<Assembly> assemblies, IReadOnlyDictionary<string, Type> aliases)
     {
         // FullName, not AssemblyQualifiedName: namespace and type name, no
         // version and no assembly. For contracts the namespace is already
@@ -68,6 +73,7 @@ public sealed class MessageTypeMap
         // truncation error — the command lost, the row never written, and the
         // cause named nowhere. `StageableDomainEvents` must not report a type
         // that cannot actually be persisted.
+        //
         // A loop, not FirstOrDefault: the sequence is of value tuples, so
         // "no match" comes back as (null, null) rather than as null, and a
         // nullable wrapper around it is never null. The guard then fired on
@@ -88,7 +94,21 @@ public sealed class MessageTypeMap
                 $"Two staged types share the name '{clash.Key}'. The outbox " +
                 "column cannot distinguish them.");
 
-        _byName = pairs.ToFrozenDictionary(p => p.Name, p => p.Type);
+        // Aliases resolve inward only: _byName carries them so a row written
+        // before a rename still resolves, and _byType does not, so NameOf goes
+        // on writing the current name and the old one drains away.
+        foreach ((string Name, Type Type) alias in aliases.Select(a => (a.Key, a.Value)))
+        {
+            if (pairs.Any(p => p.Name == alias.Name))
+                throw new InvalidOperationException(
+                    $"'{alias.Name}' is an alias and also a live type name. One of them resolves " +
+                    "and which is not decidable — rename the alias or drop it.");
+        }
+
+        _byName = pairs
+            .Select(p => (p.Name, p.Type))
+            .Concat(aliases.Select(a => (Name: a.Key, Type: a.Value)))
+            .ToFrozenDictionary(p => p.Name, p => p.Type);
         _byType = pairs.ToFrozenDictionary(p => p.Type, p => p.Name);
     }
 

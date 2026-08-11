@@ -128,6 +128,34 @@ public class OutboxMessageTests
     }
 
     [Fact]
+    public void A_type_that_is_both_kinds_of_event_is_refused_on_either_lane()
+    {
+        // §5.5 calls conflating the two the most consequential mistake in
+        // this architecture, and it defeats both lane guards at once: such a
+        // payload passes the Broker check, so a domain event reaches the bus,
+        // and it passes the Local check while Stage then reads its envelope
+        // instead of minting a row id. Neither lane is right, so neither is
+        // offered — asserted in both directions, because a guard placed after
+        // either check would still let the other through.
+        Conflated message = new()
+        {
+            MessageId = Guid.CreateVersion7(),
+            CorrelationId = Guid.CreateVersion7(),
+            OccurredAt = Now
+        };
+
+        OutboxLane[] lanes = [OutboxLane.Broker, OutboxLane.Local];
+
+        foreach (OutboxLane lane in lanes)
+        {
+            Should
+                .Throw<InvalidOperationException>(() => OutboxMessage.Stage(
+                    message, lane, Guid.CreateVersion7(), Types, Json))
+                .Message.ShouldContain("different things");
+        }
+    }
+
+    [Fact]
     public void A_lane_that_is_no_lane_is_refused()
     {
         // Both interface guards test for one lane and let everything else
