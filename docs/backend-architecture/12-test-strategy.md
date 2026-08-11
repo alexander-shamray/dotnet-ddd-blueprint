@@ -365,8 +365,7 @@ public sealed class ServiceFixture : IAsyncLifetime
                     // every HTTP path that needs the header principal.
                     services.RemoveAll<ICurrentUser>();
                     services.AddScoped<TestCurrentUser>();
-                    services.AddScoped<ICurrentUser>(
-                        sp => sp.GetRequiredService<TestCurrentUser>());
+                    services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<TestCurrentUser>());
                 }));
 
         // Tests deliberately collapse the two database identities of §7.1 —
@@ -1282,10 +1281,10 @@ the other direction, and the direction that fails silently — refusing
 compensations — surfaces as orders stuck in `AwaitingStock` long after the
 deployment that caused it.
 
-**All four state an origin, and none of them earns one.** They construct
-`CommandOrigin.System` directly, which is the right way to test the *check* —
-but it leaves the only production code that assigns it, `CancelOrderMapper`
-(§9.4), unasserted. A mapper stamping `User` would pass every test above and
+**Two of the four carry an origin, and both state it rather than earning it.**
+The system case constructs `CommandOrigin.System` directly, which is the right
+way to test the *check* — and it leaves the only production code that assigns
+it, `CancelOrderMapper` (§9.4), unasserted. A mapper stamping `User` would pass every test above and
 reject every real compensation, which is the failure the pair was written to
 catch, arriving by the one route the pair cannot see. One line closes it:
 
