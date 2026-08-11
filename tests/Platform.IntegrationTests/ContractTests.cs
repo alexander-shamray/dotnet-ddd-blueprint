@@ -172,21 +172,24 @@ public class ContractTests
         // member, which no serialisation test can see.
         //
         // The rule is really "there is no way to build one incompletely", and
-        // there are two shapes that satisfy it. A positional record takes its
-        // values in a primary constructor and needs no `required` at all —
-        // `PlacedLine`, `StockLine`, `ShippingAddressV1`. A property-based
-        // record can be built by `new()` and needs every property marked. So
-        // the assertion is on the shape that actually has the hole: a contract
-        // with a public parameterless constructor must mark every settable
-        // property `required`.
-        foreach (Type type in Contracts.Where(t => t.GetConstructor(Type.EmptyTypes) is not null))
+        // the shape of the contract does not settle it. A positional record
+        // takes its values in a primary constructor — and can still declare an
+        // extra init property beside them, which a caller may omit:
+        //
+        //     record C(Guid Id) { public string? Note { get; init; } }
+        //
+        // So the question is asked of every writable property rather than of
+        // the type: it must be `required`, or supplied by every public
+        // constructor. Judging by constructor shape skipped that case
+        // entirely — the same fail-open the discovery predicate above had
+        // twice, a check that judges less than it claims to.
+        foreach (Type type in Contracts)
         {
             string[] optional =
             [
                 .. type
                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(p => p.SetMethod is not null &&
-                        !p.IsDefined(typeof(RequiredMemberAttribute), inherit: false))
+                    .Where(p => p.SetMethod is not null && !IsAlwaysSupplied(p, type))
                     .Select(p => $"{type.Name}.{p.Name}")
             ];
 
@@ -194,6 +197,28 @@ public class ContractTests
                 $"{type.FullName} can be constructed without these, so a producer can omit them " +
                 "and every consumer reads a default (§12.6)");
         }
+    }
+
+    /// <summary>
+    /// Whether a property cannot be left unset: either it is <c>required</c>,
+    /// or every public constructor takes it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every</b> constructor, not any. One overload that omits the parameter
+    /// is one way to build the contract without the value, which is the whole
+    /// of what this rule forbids.
+    /// </remarks>
+    private static bool IsAlwaysSupplied(PropertyInfo property, Type type)
+    {
+        if (property.IsDefined(typeof(RequiredMemberAttribute), inherit: false))
+            return true;
+
+        ConstructorInfo[] constructors = type.GetConstructors();
+
+        return constructors.Length > 0 &&
+            constructors.All(c => c.GetParameters().Any(p =>
+                string.Equals(p.Name, property.Name, StringComparison.OrdinalIgnoreCase) &&
+                p.ParameterType == property.PropertyType));
     }
 
     [Fact]

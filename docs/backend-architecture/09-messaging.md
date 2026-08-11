@@ -1424,8 +1424,11 @@ cfg.ReceiveEndpoint(
 
             r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
         });
-        e.UseInMemoryOutbox();
+        // The inbox goes OUTSIDE the in-memory outbox — a correctness rule
+        // rather than a preference, and the callout below says what the other
+        // order costs.
         e.UseConsumeFilter(typeof(InboxFilter<>), context);
+        e.UseInMemoryOutbox();
 
         // One per command in §3.2's Accepts column. The saga sends four; a type
         // missing here is sent into a queue that ignores it.
@@ -2462,22 +2465,48 @@ cfg.ReceiveEndpoint(
                 maxInterval: TimeSpan.FromMinutes(1),
                 intervalDelta: TimeSpan.FromSeconds(2)));
 
-        // Defers any Publish/Send until the consumer completes, so a retry does
-        // not re-emit messages the failed attempt already sent.
-        e.UseInMemoryOutbox();
-
         // Duplicate suppression — §9.5. On this endpoint and on
         // ordering-commands, and on any endpoint added later: at-least-once
         // delivery is a property of the broker, not of the message type or of
         // what the consumer does with it. The saga endpoint below is the one
         // exception, and says why.
+        //
+        // BEFORE the in-memory outbox, so the inbox row is committed after the
+        // buffered sends have flushed rather than before. The callout under
+        // this block is the argument.
         e.UseConsumeFilter(typeof(InboxFilter<>), context);
+
+        // Defers any Publish/Send until the consumer completes, so a retry does
+        // not re-emit messages the failed attempt already sent.
+        e.UseInMemoryOutbox();
 
         e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
         e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
         e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
     });
 ```
+
+> **Trap — the inbox filter inside the in-memory outbox.** Filters added first
+> are outermost, so `UseInMemoryOutbox()` before `UseConsumeFilter(…)` puts the
+> outbox *outside* the inbox — and the in-memory outbox flushes its buffered
+> `Publish`/`Send` calls **after** the inner pipeline returns. The inbox row is
+> then committed first and the messages go out second, which is the wrong way
+> round in the one case that matters: if the flush fails, the broker redelivers,
+> the filter finds its own row and drops the message without rerunning the
+> consumer, and the buffered messages are never sent by anybody. A message
+> acknowledged, its effects lost, and nothing in either mechanism able to
+> notice.
+>
+> Ordering the inbox first fixes it by construction. A failed flush then throws
+> *through* the filter, which has not saved yet, so no row is written and the
+> redelivery does the work again — at-least-once, as designed. Both mechanisms
+> are correct on their own and only their nesting decides which of the two
+> stories you get, which is why the order is written out with a reason at every
+> endpoint rather than left to the order somebody typed the lines in.
+>
+> The same argument is why a consumer whose sends must survive its own commit
+> wants §9.4's transactional outbox rather than the in-memory one: the in-memory
+> outbox defers, it does not persist.
 
 And the **saga** endpoint, which receives the fulfilment events (§9.6):
 
