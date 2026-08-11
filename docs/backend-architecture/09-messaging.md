@@ -817,9 +817,11 @@ public sealed class OutboxDispatcher : BackgroundService
             {
                 await ProcessBatchAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 // The claim itself failed — database unreachable. Next tick.
+                // The token rather than the type, for the reason the per-row
+                // filter below gives.
                 ClaimFailed(_log, ex);
             }
         }
@@ -831,18 +833,26 @@ public sealed class OutboxDispatcher : BackgroundService
     /// </summary>
     public async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
-        await using AsyncServiceScope scope = _scopes.CreateAsyncScope();
-        IServiceProvider sp = scope.ServiceProvider;
+        // The claim's own scope, holding nothing but the connection — which
+        // deliberately outlives the per-row scopes below, because the claim,
+        // the completes and the fails are one conversation with the database
+        // rather than part of any delivery.
+        await using AsyncServiceScope claimScope = _scopes.CreateAsyncScope();
 
         // Disposed every pass — the loop runs twice a second, so a leaked
         // connection here exhausts the pool within a minute.
         using IDbConnection connection =
-            sp.GetRequiredService<IDbConnectionFactory>().Create();
+            claimScope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
         // OutboxClaim, not OutboxMessage — the claim projects only the columns
-        // the OUTPUT clause returns. See Appendix D.
+        // the OUTPUT clause returns. See Appendix D. CommandDefinition, so the
+        // token reaches the command: with the plain overload a shutdown cannot
+        // interrupt a blocked claim and the host waits out the SQL timeout.
         List<OutboxClaim> claimed =
-            [.. await connection.QueryAsync<OutboxClaim>(_claimSql, new { MaxAttempts })];
+        [
+            .. await connection.QueryAsync<OutboxClaim>(
+                new CommandDefinition(_claimSql, new { MaxAttempts }, cancellationToken: ct))
+        ];
 
         int completed = 0;
 
@@ -850,14 +860,30 @@ public sealed class OutboxDispatcher : BackgroundService
         {
             try
             {
-                await DeliverAsync(sp, message, ct);
-                await connection.ExecuteAsync(_completeSql, new { message.Id });
+                // A scope per row, and this is what makes per-row isolation
+                // true rather than intended: projection handlers are scoped
+                // and so is the DbContext behind them, so one scope for a
+                // hundred rows hands the next row a half-mutated tracker.
+                await using AsyncServiceScope delivery = _scopes.CreateAsyncScope();
+
+                await DeliverAsync(delivery.ServiceProvider, message, ct);
+
+                await connection.ExecuteAsync(
+                    new CommandDefinition(_completeSql, new { message.Id }, cancellationToken: ct));
                 completed++;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 // One bad message does not affect the other 99.
-                await connection.ExecuteAsync(_failSql, new { message.Id, Error = ex.ToString() });
+                //
+                // The filter asks the token, not the exception type. A handler
+                // enforcing its own deadline throws OperationCanceledException
+                // while ct is still live, and a type test would let that row
+                // escape with no attempt recorded and every row behind it left
+                // leased — a delivery failure disguised as a shutdown.
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        _failSql, new { message.Id, Error = ex.ToString() }, cancellationToken: ct));
 
                 DeliveryFailed(_log, message.MessageId, message.Lane, message.Attempts + 1, MaxAttempts, ex);
             }

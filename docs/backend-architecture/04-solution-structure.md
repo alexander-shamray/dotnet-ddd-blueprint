@@ -328,6 +328,14 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddSingleton(sp =>
         new MessageTypeMap(sp.GetRequiredService<MessageTypeSource>().Assemblies));
 
+    // The map's factory is lazy, and this is what makes "a duplicate name
+    // fails the host" true: ValidateOnBuild checks the call site and never
+    // invokes it, so without a hosted service resolving the map the
+    // constructor's throw lands on a background thread in a host that has
+    // been ready for hours. Registered before the dispatcher, because hosted
+    // services start in order.
+    services.AddHostedService<MessageTypeMapValidator>();                 // §9.4
+
     // The schema the dispatcher composes its three statements against (§9.4).
     // A value, because Common.Infrastructure is every service's and cannot
     // hold a literal.

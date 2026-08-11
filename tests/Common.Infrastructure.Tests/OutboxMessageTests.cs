@@ -110,6 +110,44 @@ public class OutboxMessageTests
     }
 
     [Fact]
+    public void A_domain_event_cannot_be_staged_on_the_broker_lane()
+    {
+        // §9.3's allow-list made structural. `Map` returns `object` and the
+        // type map admits domain events and contracts alike, so a mapper that
+        // returned the event it was handed would publish a domain type to the
+        // bus — the leak §5.5 forbids. Before this guard the only thing
+        // stopping it was the mapper being written correctly.
+        Should
+            .Throw<InvalidOperationException>(() => OutboxMessage.Stage(
+                new SampleDomainEvent(Now, "raised"),
+                OutboxLane.Broker,
+                Guid.CreateVersion7(),
+                Types,
+                Json))
+            .Message.ShouldContain("Broker lane");
+    }
+
+    [Fact]
+    public void A_contract_cannot_be_staged_on_the_local_lane()
+    {
+        // The mirror, and it costs one line: the Local lane hands its payload
+        // to this service's own IProjectionHandler<T>, which a published
+        // contract is not for.
+        SampleIntegrationEvent message = new()
+        {
+            MessageId = Guid.CreateVersion7(),
+            CorrelationId = Guid.CreateVersion7(),
+            OccurredAt = Now,
+            Note = "published"
+        };
+
+        Should
+            .Throw<InvalidOperationException>(() => OutboxMessage.Stage(
+                message, OutboxLane.Local, Guid.CreateVersion7(), Types, Json))
+            .Message.ShouldContain("Local lane");
+    }
+
+    [Fact]
     public void The_outbox_options_do_not_rescue_a_renamed_member()
     {
         // PropertyNameCaseInsensitive = false is a decision, not a default to

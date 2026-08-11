@@ -32,13 +32,22 @@ public sealed partial class OutboxTable
                 "into the dispatcher's statements rather than parameterised.",
                 nameof(schema));
 
-        QualifiedName = $"{schema}.OutboxMessages";
+        // Delimited, because the pattern above admits reserved words and the
+        // scaffold admits a service called `User`: `FROM user.OutboxMessages`
+        // is not a schema reference SQL Server can parse. Brackets rather than
+        // a keyword blacklist — the reserved list grows with each release, and
+        // a delimiter is right for every name at once.
+        //
+        // Nothing has to be escaped inside them. `]` is the only character
+        // that would need doubling, and the pattern has already refused
+        // everything but letters, digits and underscore.
+        QualifiedName = $"[{schema}].OutboxMessages";
         Schema = schema;
     }
 
     public string Schema { get; }
 
-    /// <summary>Schema-qualified, ready to interpolate.</summary>
+    /// <summary>Schema-qualified and delimited, ready to interpolate.</summary>
     public string QualifiedName { get; }
 
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]

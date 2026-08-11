@@ -22,5 +22,13 @@ public sealed record SampleIntegrationEvent : IIntegrationEvent
 
 public sealed record SampleDomainEvent(DateTimeOffset OccurredAt, string Note) : IDomainEvent;
 
+/// <summary>
+/// A domain event that is a value type. Neither event interface carries a
+/// class constraint, so this compiles, raises and dispatches like any other —
+/// and the map has to hold it, or staging fails inside the transaction for a
+/// type the rest of the API accepted.
+/// </summary>
+public readonly record struct SampleValueTypeDomainEvent(DateTimeOffset OccurredAt) : IDomainEvent;
+
 /// <summary>Neither, so <c>NameOf</c> must refuse it.</summary>
 public sealed record NotAMessage(string Note);

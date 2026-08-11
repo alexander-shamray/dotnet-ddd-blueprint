@@ -104,6 +104,7 @@ structurally always null on one path.
 | `OrderingIntegrationEventMapper` | §9.3 | `IIntegrationEventMapper` |
 | `OutboxDispatcher` | §9.4 | `BackgroundService`; `ProcessBatchAsync` is public for tests |
 | `ProjectionInvoker` | §9.4 | Cached-delegate handler resolution |
+| `MessageTypeMapValidator` | §9.4 | `IHostedService` that resolves `MessageTypeMap` once at startup. It exists because the map is registered through a factory and a factory is lazy — without it the duplicate-name throw lands on a background thread in a ready host, not at boot. Registered before `OutboxDispatcher`, since hosted services start in order |
 | `MoneyJsonConverter` | §9.4 | `JsonConverter<Money>` for the Local lane. Per-service, beside the `ComplexProperty` mapping that persists the same value object as columns — a value object with a private constructor deserialises to its default in silence, and the domain may not carry a `[JsonConstructor]` (§4.2's gate) |
 | `IntegrationEventConsumer<T>` | §9.4 | `IConsumer<T>` for **events** → `IIntegrationEventHandler` |
 | `CommandConsumer<TMessage,TCommand>` | §9.4 | `IConsumer<T>` for **commands** → the application dispatcher |

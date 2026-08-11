@@ -12,9 +12,19 @@ namespace Common.Infrastructure.Tests;
 public class OutboxTableTests
 {
     [Fact]
-    public void The_table_is_schema_qualified()
+    public void The_table_is_schema_qualified_and_delimited()
     {
-        new OutboxTable("catalog").QualifiedName.ShouldBe("catalog.OutboxMessages");
+        new OutboxTable("catalog").QualifiedName.ShouldBe("[catalog].OutboxMessages");
+    }
+
+    [Fact]
+    public void A_schema_that_is_a_reserved_word_still_parses()
+    {
+        // The scaffold accepts a service called `User`, and `user` is
+        // reserved — `FROM user.OutboxMessages` is not a schema reference SQL
+        // Server can read. Brackets rather than a keyword blacklist, which
+        // would need extending with every release.
+        new OutboxTable("user").QualifiedName.ShouldBe("[user].OutboxMessages");
     }
 
     [Theory]

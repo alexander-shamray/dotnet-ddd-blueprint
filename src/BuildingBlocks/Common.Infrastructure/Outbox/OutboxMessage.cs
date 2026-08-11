@@ -59,6 +59,27 @@ public sealed class OutboxMessage
         // A Local-lane row carries a domain event, which has no envelope and
         // never reaches a broker, so the row mints its own id and takes the
         // caller's correlation.
+        //
+        // The lane decides which interface the payload has to satisfy, and
+        // this is what makes §9.3's allow-list structural rather than a
+        // convention. `Map` returns `object`, and the type map admits domain
+        // events and contracts alike — so a mapper that returned the domain
+        // event it was handed would stage it on the Broker lane and the
+        // dispatcher would publish it. That is precisely the leak §5.5 forbids
+        // and §12.4 asserts against, and until this guard existed the only
+        // thing preventing it was the mapper being written correctly.
+        if (lane is OutboxLane.Broker && message is not IIntegrationEvent)
+            throw new InvalidOperationException(
+                $"{message.GetType().Name} is not an {nameof(IIntegrationEvent)} and cannot be " +
+                "staged on the Broker lane. A domain event reaching the broker is the leak the " +
+                "§9.3 allow-list exists to prevent — map it to a contract first.");
+
+        if (lane is OutboxLane.Local && message is not IDomainEvent)
+            throw new InvalidOperationException(
+                $"{message.GetType().Name} is not an {nameof(IDomainEvent)} and cannot be staged " +
+                "on the Local lane, which carries this service's own events to its projection " +
+                "handlers (§7.5).");
+
         return new OutboxMessage
         {
             MessageId = message is IIntegrationEvent e ? e.MessageId : Guid.CreateVersion7(),

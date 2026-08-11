@@ -55,6 +55,16 @@ public class MessageTypeMapTests
     }
 
     [Fact]
+    public void A_value_type_domain_event_is_in_the_map()
+    {
+        // The scan used to filter on IsClass, which dropped this in silence —
+        // a type the rest of the API accepts, absent from the one place that
+        // decides whether it can be staged.
+        Map().NameOf(typeof(SampleValueTypeDomainEvent))
+            .ShouldBe("Common.Infrastructure.Tests.SampleValueTypeDomainEvent");
+    }
+
+    [Fact]
     public void An_assembly_listed_twice_fails_the_host()
     {
         // The realistic way two entries collide, and the reason

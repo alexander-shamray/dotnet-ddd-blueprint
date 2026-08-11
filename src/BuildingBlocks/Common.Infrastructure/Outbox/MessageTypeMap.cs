@@ -39,7 +39,15 @@ public sealed class MessageTypeMap
         [
             .. assemblies
                 .SelectMany(a => a.GetTypes())
-                .Where(t => t is { IsClass: true, IsAbstract: false } &&
+                // Not `IsClass`: neither interface carries a class
+                // constraint, so a `readonly record struct` domain event
+                // compiles, raises and dispatches like any other — and an
+                // `IsClass` filter dropped it here in silence, leaving NameOf
+                // to throw inside the transaction that staged it. A map that
+                // excludes a type the rest of the API accepts is a trap, so
+                // this admits every concrete implementation and lets the
+                // duplicate-name check below judge them all alike.
+                .Where(t => t is { IsAbstract: false, IsInterface: false } &&
                     (t.IsAssignableTo(typeof(IIntegrationEvent)) ||
                         t.IsAssignableTo(typeof(IDomainEvent))))
                 .Select(t => (Name: t.FullName!, Type: t))
