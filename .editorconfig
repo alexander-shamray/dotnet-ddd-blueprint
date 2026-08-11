@@ -119,6 +119,17 @@ csharp_new_line_before_members_in_anonymous_types = true
 #     assumed: `dotnet format` neither introduces the ragged form nor undoes
 #     the corrected one, so nothing has to be pinned to keep a run idempotent.
 #   - A break goes at the outermost bracket, never a nested one.
+#   - A lambda in argument position is an element of the argument list, so its
+#     `=>` never trails the argument before it. `f(a, x => g(x))` either fits on
+#     one line or becomes `f(`/`a,`/`x => g(x))` — never `f(a, x =>` with the
+#     body hanging below, which is the ragged middle the list rule forbids.
+#     Checked against the tools rather than assumed, the way the bracket rule
+#     above was: a probe file carrying both forms was built with IDE0055 at
+#     warning and ADR-019's TreatWarningsAsErrors — 0 warnings, so the ragged
+#     form does NOT fail the build — and `dotnet format whitespace` over the
+#     same file rewrote nothing but the line endings. Roslyn has no setting to
+#     reach for, nothing has to be pinned to keep a run idempotent, and this
+#     one is carried by review and CLAUDE.md alone.
 #   - A wrapped condition takes braces on its body.
 #   - `[` opens a line of its own at its construct's column, as `{` does and
 #     `(` does not. The brace half is enforced (see
