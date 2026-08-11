@@ -314,6 +314,25 @@ the domain allow-list gate forces one. If `py -3.12 -m unittest` in
 the same change; that is the price of having one copy of the wiring instead of
 two.
 
+**One class of breakage is silent, and only compiling the output catches it.**
+The suite runs on stdlib Python with no SDK, so it renders a service and
+inspects the text — it never builds one. A Catalog test that uses a helper the
+scaffold *removes* therefore renders into a service that does not compile,
+with all 76 tests green: PR-14 wrote a dispatcher test over
+`OutboxRows.Broker`, which leaves with the first contract, and nothing said a
+word. **A change touching `tests/Catalog.*` is not verified until a scaffolded
+service has been built**, which is four commands and a cleanup:
+
+```bash
+python tools/new-service/new_service.py Ordering --port 5103
+dotnet build tests/Ordering.Api.Tests/Ordering.Api.Tests.csproj
+rm -rf src/Services/Ordering tests/Ordering.*
+git checkout -- Platform.slnx deploy/compose/
+```
+
+The scaffold edits five tracked files as well as creating its own, so the
+`git checkout` is part of the procedure rather than tidying after it.
+
 Planned, per §4.1 — do not invent a different shape for it. All five building
 blocks are shown above; the tree below is the target shape, and its
 annotations mark what has already landed:
@@ -351,7 +370,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds eighteen projects and `dotnet test` runs 308 tests, so
+`Platform.slnx` holds eighteen projects and `dotnet test` runs 312 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 76, and CI has a `scaffold`
@@ -501,7 +520,7 @@ after:
   drift a review has already caught here), both images, the Compose pair, the
   `InitialCreate` migration and the `AddOutbox` one beside it, the bus
   registration with its harness smoke, §9.4's outbox wired and empty, and
-  thirty-eight passing tests, and no aggregate.
+  forty-one passing tests, and no aggregate.
   Four things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
   wiring, the two silent-scan registration tests, and — with the first domain

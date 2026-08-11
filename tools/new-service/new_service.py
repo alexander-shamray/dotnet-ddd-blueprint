@@ -580,13 +580,38 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        row.LastError.ShouldBeNull();\n"
             "    }\n",
             "\n"
-            "    // The Broker lane's two tests return with this service's first\n"
-            "    // contract, beside the OutboxRows.Broker builder they need — this\n"
-            "    // one and OutboxTransportIdentityTests, which pins §9.1's single\n"
-            "    // identity onto the transport. Until then the allow-list is empty\n"
-            "    // and nothing stages that lane, so either would assert against a\n"
-            "    // row no code here can produce.\n",
+            "    // Three tests return with this service's first contract, beside the\n"
+            "    // OutboxRows.Broker builder they all need — this one, the Local\n"
+            "    // lane's guard below, and OutboxTransportIdentityTests, which pins\n"
+            "    // §9.1's single identity onto the transport. Until then the\n"
+            "    // allow-list is empty and nothing can build a contract instance, so\n"
+            "    // each would assert against a row no code here can produce.\n",
         ),
+        (
+            "\n"
+            "    [Fact]\n"
+            "    public async Task An_integration_event_on_the_local_lane_never_reaches_a_projection()\n"
+            "    {\n"
+            "        // The mirror, and the quieter of the two: ProjectionInvoker is\n"
+            "        // generic and unconstrained, so without the guard a contract would be\n"
+            "        // offered to any matching IProjectionHandler<T> and the row marked\n"
+            "        // processed — no publish, no handler, no trace.\n"
+            "        OutboxMessage row = OutboxRows.Broker(fixture, Guid.CreateVersion7());\n"
+            "        await fixture.StageOutboxAsync(row);\n"
+            "        await fixture.SetOutboxLaneAsync(row.MessageId, OutboxLane.Local);\n"
+            "\n"
+            "        await fixture.ProcessOutboxBatchAsync();\n"
+            "\n"
+            "        OutboxMessage failed = (await fixture.OutboxAsync()).ShouldHaveSingleItem();\n"
+            "        failed.ProcessedAt.ShouldBeNull();\n"
+            "        failed.LastError.ShouldNotBeNull().ShouldContain(nameof(IDomainEvent));\n"
+            "    }\n",
+            "",
+        ),
+        # The Broker-lane guard above keeps IIntegrationEvent in use; nothing
+        # left names IDomainEvent once the test that did leaves, and an unused
+        # using is a claim about a dependency that is not there.
+        ("using Common.Domain;\n", ""),
     ),
     "tests/Catalog.TestSupport/ServiceFixture.cs": (
         (

@@ -50,7 +50,7 @@ refuses to start without `ConnectionStrings:RabbitMq` — both Dockerfiles, the
 Compose pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
 
-The service builds and its thirty-eight tests pass before you have written a
+The service builds and its forty-one tests pass before you have written a
 line, and sixteen of them run against real SQL Server and RabbitMQ containers:
 the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
 only once the bus connects — `EfUnitOfWork`'s commit, rollback and retry
