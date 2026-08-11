@@ -425,8 +425,8 @@ The port and its one implementation:
 // Common.Application — a port, because handlers must not see HttpContext.
 public interface ICurrentUser
 {
-    bool IsAuthenticated { get; }
-    Guid Id { get; }                      // throws if not authenticated
+    bool IsAuthenticated { get; }         // an authenticated caller, not a principal
+    Guid Id { get; }                      // throws without one, or without a subject
     bool HasPermission(string permission);
 }
 ```
@@ -457,8 +457,10 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
     public Guid Id => Guid.Parse(
         Caller?.FindFirstValue(ClaimTypes.NameIdentifier) ??
             throw new InvalidOperationException(
-                "No authenticated caller. Guard with IsAuthenticated — a handler " +
-                "reached by a consumer (§9.4) has no HttpContext."));
+                $"No subject: either there is no authenticated caller — guard with " +
+                $"IsAuthenticated, since a handler reached by a consumer (§9.4) has no " +
+                $"HttpContext — or the principal carries no '{ClaimTypes.NameIdentifier}' " +
+                "claim, which means the identity provider is not issuing 'sub' (§11.5)."));
 
     // PermissionClaim.Type, not a literal — the same constant §11.4's policies
     // read, so an endpoint policy and a resource check can never disagree

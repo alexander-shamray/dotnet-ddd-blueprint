@@ -17,17 +17,21 @@ namespace Common.Application;
 public interface ICurrentUser
 {
     /// <summary>
-    /// Whether a principal is present at all. False on every path that has no
-    /// caller — a message-borne command (§9.4) is the one this exists for.
+    /// Whether an authenticated caller is behind this operation. Presence of a
+    /// principal is not the question and never was: an anonymous HTTP request
+    /// carries one, holding no authenticated identity, and this answers false
+    /// for it exactly as it does for a message-borne command (§9.4) that has no
+    /// principal at all. Both are "no caller", which is what a guard here needs
+    /// to mean if it is to be a security boundary rather than a null check.
     /// </summary>
     bool IsAuthenticated { get; }
 
     /// <summary>
     /// The subject identifier, and the only source of "whose record is this".
-    /// Throws when no principal is present rather than answering
-    /// <see cref="Guid.Empty"/>: a handler reached by a consumer has no caller,
-    /// and an empty subject silently compares unequal to every real one, which
-    /// turns a missing guard into a refusal nobody can explain. Guard with
+    /// Throws when there is no authenticated caller, or when one carries no
+    /// subject claim, rather than answering <see cref="Guid.Empty"/>: an empty
+    /// subject silently compares unequal to every real one, which turns a
+    /// missing guard into a refusal nobody can explain. Guard with
     /// <see cref="IsAuthenticated"/>, or state the origin on the command.
     /// </summary>
     Guid Id { get; }

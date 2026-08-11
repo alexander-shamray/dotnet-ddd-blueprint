@@ -62,8 +62,10 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICur
     public Guid Id => Guid.Parse(
         Caller?.FindFirstValue(ClaimTypes.NameIdentifier) ??
             throw new InvalidOperationException(
-                "No authenticated caller. Guard with IsAuthenticated — a handler " +
-                "reached by a consumer (§9.4) has no HttpContext."));
+                $"No subject: either there is no authenticated caller — guard with " +
+                $"IsAuthenticated, since a handler reached by a consumer (§9.4) has no " +
+                $"HttpContext — or the principal carries no '{ClaimTypes.NameIdentifier}' " +
+                "claim, which means the identity provider is not issuing 'sub' (§11.5)."));
 
     public bool HasPermission(string permission) =>
         Caller?.HasClaim(PermissionClaim.Type, permission) == true;
