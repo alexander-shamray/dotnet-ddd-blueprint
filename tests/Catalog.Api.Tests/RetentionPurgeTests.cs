@@ -49,8 +49,16 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
         await fixture.StageOutboxAsync(poison);
         await fixture.SetOutboxAttemptsAsync(poison.MessageId, 10);
 
-        // Aged past the window through the column the purge actually reads, so
-        // the row differs from the deleted one above in one respect only.
+        // OccurredAt, deliberately — and NOT the column the purge reads, which
+        // is the whole point. `ProcessedAt` is null on an abandoned row by
+        // definition, so the predicate can never match it and no ageing of that
+        // column is possible. What this line does is make the row old by the
+        // one measure a *wrong* purge would use: written `WHERE OccurredAt <
+        // @Before`, the age-alone form §9.4 warns about, this row is thirty days
+        // past the window and would be deleted. That is the mutation the
+        // assertion below has to be able to fail on, and without this line it
+        // could not — the row would be inside every window and survive a
+        // correct purge and an incorrect one alike.
         await fixture.ExecuteAsync(
             "UPDATE catalog.OutboxMessages SET OccurredAt = {0} WHERE MessageId = {1};",
             LongAgo,

@@ -338,21 +338,36 @@ public sealed class ServiceFixture : IAsyncLifetime
                         .AddAuthentication()
                         .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.Scheme, _ => { });
 
-                    // Remove ONLY the outbox dispatcher, not every hosted
-                    // service: MassTransit registers its bus as one, so
-                    // RemoveAll<IHostedService>() would stop the broker from
-                    // starting and silently disable every consumption test.
+                    // Remove ONLY the two background services this suite
+                    // drives, not every hosted service: MassTransit registers
+                    // its bus as one, so RemoveAll<IHostedService>() would stop
+                    // the broker from starting and silently disable every
+                    // consumption test.
                     //
                     // The dispatcher polls every 500 ms; left running it drains
                     // outbox rows underneath assertions about them. Tests that
                     // want it call fixture.ProcessOutboxBatchAsync() explicitly.
-                    ServiceDescriptor hosted = services.Single(
-                        d => d.ServiceType == typeof(IHostedService) &&
-                            d.ImplementationType == typeof(OutboxDispatcher));
-                    services.Remove(hosted);
+                    //
+                    // Both matches are on ImplementationType, which is why
+                    // §4.2 registers each with the generic AddHostedService<T>
+                    // rather than a factory: a factory registration leaves that
+                    // property null and these removals would match nothing.
+                    foreach (Type background in (Type[])[typeof(OutboxDispatcher), typeof(RetentionPurgeService)])
+                    {
+                        ServiceDescriptor hosted = services.Single(
+                            d => d.ServiceType == typeof(IHostedService) &&
+                                d.ImplementationType == background);
+                        services.Remove(hosted);
+                    }
 
-                    // Still resolvable directly, so tests can drive one pass.
+                    // Still resolvable directly, so tests can drive one pass of
+                    // each. The purge's timer is an hour rather than 500 ms, so
+                    // it would not race an assertion in a run this short — but a
+                    // test asserting that an abandoned row SURVIVES retention
+                    // cannot tell "the pass spared the row" from "the pass never
+                    // ran" unless it drives the pass itself.
                     services.AddSingleton<OutboxDispatcher>();
+                    services.AddSingleton<RetentionPurgeService>();
 
                     // ICurrentUser (§11.4) has two callers with incompatible
                     // needs, so the double DELEGATES rather than replacing.

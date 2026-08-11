@@ -438,7 +438,7 @@ two consumers and one retention purge over both tables — and six of its
 decisions bind what comes after:
 
 - **The contract assembly is complete, and §3.2 is what decided that.** Five
-  versioned namespaces, twenty-three records and two static vocabularies —
+  versioned namespaces, twenty-six records and two static vocabularies —
   every name in §3.2's Publishes and Accepts columns plus the payload types
   §9.1 and §9.6 give them. This suspends the usual rule that a record belongs
   in the PR whose code publishes it, and Appendix C is what suspends it: the

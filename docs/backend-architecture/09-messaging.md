@@ -1230,14 +1230,22 @@ public sealed class IntegrationEventConsumer<TEvent>(
         // (§9.5) commits its row once Consume returns, so redelivery is
         // suppressed and the message is gone for good. Throwing sends it to
         // retry and then the error queue, which §13.6 alerts on.
-        if (!handlers.Any())
+        //
+        // Materialised once, and asked once. `handlers` is a lazily resolved
+        // enumerable, so counting it and then iterating it asks the container
+        // for a SECOND set of scoped instances — the handlers that run are then
+        // not the handlers that were counted, and any state one of them held
+        // for the other is quietly gone.
+        IIntegrationEventHandler<TEvent>[] resolved = [.. handlers];
+
+        if (resolved.Length == 0)
             throw new InvalidOperationException(
                 $"No IIntegrationEventHandler<{typeof(TEvent).Name}> is registered, " +
                 $"but {typeof(TEvent).Name} is bound on this endpoint. Check the §6.2 scan.");
 
         // Duplicate suppression happens in the inbox filter (§9.5), which is
         // configured on the receive endpoint ahead of this consumer.
-        foreach (IIntegrationEventHandler<TEvent> handler in handlers)
+        foreach (IIntegrationEventHandler<TEvent> handler in resolved)
             await handler.HandleAsync(context.Message, context.CancellationToken);
     }
 }
