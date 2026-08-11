@@ -451,7 +451,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 400 tests, so
+`Platform.slnx` holds nineteen projects and `dotnet test` runs 401 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -499,8 +499,17 @@ comes after:
   which every test in the repository still passed. Keep the explicit calls —
   they are about **order**, they are required by any host that is not a
   `WebApplication`, and an implicit pipeline is unreviewable — but do not
-  believe a test is watching them. `Common.Web.Tests` carries the three claims
-  that are true instead, the last being a regression guard on the framework.
+  believe a test is watching them.
+
+  **The claim stops at deletion, and a review round found the table promising
+  more than that.** Auto-insertion is suppressed by the markers the explicit
+  calls set, so it repairs an *omission* and not an *ordering*: both calls
+  present in the wrong order means authorization evaluates against a `User`
+  nothing has populated, and every authenticated request 401s. Measured through
+  a real `WebApplication` over three pipelines — correct 200, **reversed 401**,
+  neither 200. So the framework protects a host from forgetting a line and not
+  from misplacing one. `Common.Web.Tests` carries all four claims, the third
+  being a regression guard on the framework and the fourth this one.
 - **The realm is a full Keycloak export and shrinking it is a silent
   catastrophe.** A hand-written import naming only the `commerce-api` client
   scope is the obvious first attempt; Keycloak treats `clientScopes` as the
@@ -1113,7 +1122,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 94 tests running in about a second. A shared xUnit collection was rejected
+is 95 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.

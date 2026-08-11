@@ -114,6 +114,40 @@ public class AuthenticationMiddlewareTests
             "service host is handing anonymous callers to its handlers and no other test can see it");
     }
 
+    [Fact]
+    public async Task But_it_does_not_repair_the_two_being_written_in_the_wrong_order()
+    {
+        // The limit of the finding above, and §4.2's ordering table promised
+        // the opposite until this test was written. Auto-insertion is
+        // suppressed by the markers the explicit calls set, and it repairs an
+        // OMISSION rather than an ordering: with both present and reversed,
+        // authorization evaluates against a User nothing has populated, and
+        // every authenticated request 401s.
+        //
+        // So the framework protects a host from forgetting a line and not from
+        // misplacing one — which is the arrangement a reader would not guess,
+        // and the reason the table now separates the two cases.
+        WebApplicationBuilder builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.ClearProviders();
+        Register(builder.Services);
+
+        await using WebApplication app = builder.Build();
+
+        app.UseAuthorization();
+        app.UseAuthentication();
+        MapProbe(app);
+
+        await app.StartAsync(TestContext.Current.CancellationToken);
+
+        Probe probe = await SendAsync(app.GetTestClient());
+
+        await app.StopAsync(TestContext.Current.CancellationToken);
+
+        probe.Status.ShouldBe(HttpStatusCode.Unauthorized);
+        probe.Authenticated.ShouldBeFalse("the handler is never reached");
+    }
+
     /// <summary>
     /// One request through a pipeline built by hand, with or without the
     /// authentication middleware. A <see cref="HostBuilder"/> rather than a

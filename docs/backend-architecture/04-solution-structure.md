@@ -501,7 +501,7 @@ that no test catches by accident:
 | Rule | What breaks otherwise |
 |---|---|
 | `UseCorrelationId` before everything that logs, `UseExceptionHandler` alone above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to be outermost to catch faults in the middleware below it, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)) |
-| `UseAuthentication` before `UseAuthorization` | Nothing, in a `WebApplication` — see the callout below. In any other host, `User` is unpopulated when policies evaluate and every authenticated request 401s |
+| `UseAuthentication` before `UseAuthorization` | **Every authenticated request 401s** — in a `WebApplication` too. Omitting a call is repaired by auto-insertion; writing both in the wrong order is not, because the markers they set suppress it. See the callout below |
 | `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket |
 | Both before endpoint mapping | `RequireAuthorization` has nothing to evaluate against |
 | Health endpoints mapped **anonymous** | Probes 401, Kubernetes reads that as unhealthy, and the pod is killed in a loop |
@@ -511,18 +511,26 @@ succeeds and does nothing if `UseRateLimiter` is absent — no error, no warning
 no failing test unless one specifically asserts on a limit.
 
 > **`AddAuthentication` is not in that class, and saying it was cost this table
-> a wrong row.** `WebApplication` adds the authentication and authorization
-> middleware itself whenever the matching services are registered, so deleting
-> `app.UseAuthentication()` from a service host changes nothing observable —
-> verified by deleting it from `Catalog.Api/Program.cs`, after which every test
-> in the repository still passed. The two lines above are about **order**: they
-> have to sit below `UseCorrelationId` and above anything that reads the
-> caller, and the framework's own insertion point is not where a composition
-> root wants them.
+> a wrong row — twice, in opposite directions.** `WebApplication` adds the
+> authentication and authorization middleware itself whenever the matching
+> services are registered, so **deleting** `app.UseAuthentication()` from a
+> service host changes nothing observable — verified by deleting it from
+> `Catalog.Api/Program.cs`, after which every test in the repository still
+> passed. That is the correction this callout was written for.
 >
-> So write them, and do not expect a test to miss them. The rate limiter is the
-> genuine case of the failure mode this paragraph describes, and it is the
-> gateway's alone (§10.1).
+> **Reversing the two is a different matter, and the row above used to promise
+> it was harmless.** Auto-insertion is suppressed by the markers the explicit
+> calls set, and it repairs an *omission* rather than an ordering: with both
+> calls present in the wrong order, authorization evaluates against a `User`
+> nothing has populated and challenges. Measured through a real
+> `WebApplication` over three pipelines — correct order 200, **reversed 401**,
+> neither call 200 — which is the only arrangement of those three that a reader
+> would not predict.
+>
+> So the honest summary is that the framework protects you from forgetting a
+> line and not from misplacing one. Write both, in this order, and let
+> `AuthenticationMiddlewareTests` hold the claim: it drives all three pipelines
+> and is the regression guard if a release ever stops auto-inserting.
 
 The **gateway** has its own pipeline and is the only place rate limiting is
 applied (§10.1); a service behind it does not call `UseRateLimiter`:
