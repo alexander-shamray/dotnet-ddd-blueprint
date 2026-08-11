@@ -353,6 +353,19 @@ public sealed class ServiceFixture : IAsyncLifetime
 
                     // Still resolvable directly, so tests can drive one pass.
                     services.AddSingleton<OutboxDispatcher>();
+
+                    // ICurrentUser (§11.4) has two callers with incompatible
+                    // needs, so the double DELEGATES rather than replacing.
+                    // Over HTTP the principal must keep coming from
+                    // TestAuthHandler through HttpContext, exactly as
+                    // production resolves it — a flat replacement would make
+                    // Hides_another_customers_order_behind_a_404 pass because
+                    // the default subject happens to differ from the owner,
+                    // which is passing for the wrong reason, and would break
+                    // every HTTP path that needs the header principal.
+                    services.RemoveAll<ICurrentUser>();
+                    services.AddScoped<TestCurrentUser>();
+                    services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<TestCurrentUser>());
                 }));
 
         // Tests deliberately collapse the two database identities of §7.1 —
@@ -385,6 +398,44 @@ public sealed class ServiceFixture : IAsyncLifetime
     public MessageTypeMap MessageTypes => Factory.Services.GetRequiredService<MessageTypeMap>();
 
     public OutboxJson OutboxJson => Factory.Services.GetRequiredService<OutboxJson>();
+
+    /// <summary>
+    /// Dispatches below HTTP with a stated principal (§11.4's subject rule).
+    /// The scope is what makes that safe: TestCurrentUser is scoped, so a
+    /// principal set here cannot leak into another test or into a concurrent
+    /// request.
+    /// </summary>
+    public async Task<TResult> DispatchAsync<TResult>(
+        ICommand<TResult> command,
+        ICurrentUser currentUser,
+        CancellationToken ct = default)
+    {
+        using IServiceScope scope = Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<TestCurrentUser>().Set(currentUser);
+
+        return await scope.ServiceProvider
+            .GetRequiredService<IDispatcher>()
+            .SendAsync(command, ct);
+    }
+
+    /// <summary>
+    /// The query half, which the read-side subject test needs. Written out
+    /// rather than described as "the same with IQuery": §6.2 gives IDispatcher
+    /// two methods, so swapping only the constraint leaves SendAsync refusing
+    /// an IQuery. The body differs too, and that is the whole of the difference.
+    /// </summary>
+    public async Task<TResult> DispatchAsync<TResult>(
+        IQuery<TResult> query,
+        ICurrentUser currentUser,
+        CancellationToken ct = default)
+    {
+        using IServiceScope scope = Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<TestCurrentUser>().Set(currentUser);
+
+        return await scope.ServiceProvider
+            .GetRequiredService<IDispatcher>()
+            .QueryAsync(query, ct);
+    }
 
     public IDbConnection CreateConnection() => new SqlConnection(_sql.GetConnectionString());
 
@@ -565,10 +616,14 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         OrderingDbContext db =
             scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
 
+        // No CustomerId on the command — the handler reads it from
+        // ICurrentUser (§11.4). This scope has no HttpContext, so the
+        // fixture's TestCurrentUser answers as Principals.Default: a test
+        // that does not care about the subject says nothing about it. The
+        // subject tests below state one per dispatch instead.
         Result<Guid> result = await dispatcher.SendAsync(
             new PlaceOrderCommand(
                 CommandId: Guid.CreateVersion7(),
-                CustomerId: Guid.CreateVersion7(),
                 Items: [ new PlaceOrderItem(SeedData.ProductId, 2) ],
                 ShippingAddress: AddressBuilder.ValidDto(),
                 Currency: "EUR"));
@@ -994,6 +1049,317 @@ status (404 becomes 403, leaking existence), and a reason parsed by
 `Enum.TryParse` instead of the wire vocabulary (400 becomes 200, and the enum's
 member names quietly become API surface). Each is a defect this document has
 argued about in prose and, until now, asserted nowhere.
+
+### The subject rule, enforced
+
+[§11.4](11-identity-authorization.md)'s subject rule is the kind of rule that
+holds by omission — a command with no `CustomerId` field cannot be pointed at
+another customer — and a rule that holds by omission is one a later refactor
+reinstates without noticing. These five are what make it fail loudly instead.
+
+```csharp
+using static Ordering.TestSupport.Principals;   // Authenticated, Anonymous
+
+[Collection(nameof(IntegrationCollection))]
+public class SubjectBindingTests(ServiceFixture fixture) : IAsyncLifetime
+{
+    public async ValueTask InitializeAsync()
+    {
+        await fixture.ResetAsync();
+
+        // Same reason PlaceOrderHandlerTests seeds here: the write path reads
+        // prices locally (§6.4), and an unseeded projection fails every
+        // PlaceOrder with ProductsUnavailable — which would read as the
+        // subject assertion failing rather than as missing fixture data.
+        await fixture.SeedPriceAsync(SeedData.ProductId, 12.50m);
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    [Fact]
+    public async Task An_order_is_attributed_to_the_caller()
+    {
+        var caller = Guid.CreateVersion7();
+
+        Result<Guid> result = await fixture.DispatchAsync(
+            CommandBuilder.PlaceOrder(),
+            currentUser: Authenticated(caller));
+
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        Order order = await db.Orders.SingleAsync(o => o.Id == new OrderId(result.Value));
+
+        // The row's owner came from the principal. Before the subject rule
+        // this assertion passed for the wrong reason — the command carried a
+        // CustomerId and the handler copied it — so what makes it meaningful
+        // now is the compile error a reinstated field would cause in
+        // CommandBuilder.
+        order.CustomerId.ShouldBe(new CustomerId(caller));
+    }
+
+    [Fact]
+    public async Task A_customer_reads_only_their_own_orders()
+    {
+        var owner = Guid.CreateVersion7();
+        var stranger = Guid.CreateVersion7();
+
+        // Seeded through the write path, not SeedOrderAsync. That helper
+        // persists an Order and its lines through EF and nothing else, which
+        // the level-1 query reads — but §6.6 rewrites this slice IN PLACE to
+        // read ordering.OrderSummaries, and an EF-seeded aggregate never
+        // reaches that table. A test seeded that way would pass today and
+        // start failing on the PR that escalates the read side, with the
+        // stranger's empty page still passing for the wrong reason.
+        // Dispatching and draining the outbox fills whatever the live handler
+        // reads: the aggregate at level 1, the projection at level 2.
+        await fixture.DispatchAsync(
+            CommandBuilder.PlaceOrder(),
+            currentUser: Authenticated(owner));
+        await fixture.ProcessOutboxBatchAsync();
+
+        CursorPage<OrderSummaryDto> seen = await fixture.DispatchAsync(
+            new GetOrderSummariesQuery(Cursor: null, Limit: 20),
+            currentUser: Authenticated(stranger));
+
+        // Empty, and provably not empty by accident: the same query as the
+        // owner returns the seeded row, so the filter is discriminating rather
+        // than broken. One assertion without the other passes against a
+        // handler that returns nothing to anybody.
+        seen.Items.ShouldBeEmpty();
+
+        CursorPage<OrderSummaryDto> own = await fixture.DispatchAsync(
+            new GetOrderSummariesQuery(Cursor: null, Limit: 20),
+            currentUser: Authenticated(owner));
+
+        own.Items.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task An_owner_cancels_their_own_order()
+    {
+        // The positive user-origin case, and the suite is unsound without it:
+        // every other CommandOrigin.User assertion here is a refusal, so a
+        // handler that rejected the user path outright would pass everything
+        // below while disabling customer cancellation completely. The status
+        // assertion is the half that matters — IsSuccess alone is satisfied by
+        // a handler that returns Success and writes nothing.
+        var owner = Guid.CreateVersion7();
+        Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
+
+        Result result = await fixture.DispatchAsync(
+            new CancelOrderCommand(orderId, CancellationReason.CustomerRequest, CommandOrigin.User),
+            currentUser: Authenticated(owner));
+
+        result.IsSuccess.ShouldBeTrue();
+
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        Order order = await db.Orders.SingleAsync(o => o.Id == new OrderId(orderId));
+
+        order.Status.ShouldBe(OrderStatus.Cancelled);
+    }
+
+    [Fact]
+    public async Task A_user_command_with_no_caller_is_refused()
+    {
+        // The one case HTTP cannot produce: §11.4's endpoint group carries
+        // RequireAuthorization, so an unauthenticated request never reaches
+        // the handler and a 401 would prove nothing about the check inside it.
+        // This is the fail-open the old IsAuthenticated guard admitted — a
+        // command on the user path with no principal behind it.
+        var owner = Guid.CreateVersion7();
+        Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
+
+        Result result = await fixture.DispatchAsync(
+            new CancelOrderCommand(orderId, CancellationReason.CustomerRequest, CommandOrigin.User),
+            currentUser: Anonymous);
+
+        result.Error.ShouldBe(OrderErrors.NotFound);
+    }
+
+    [Fact]
+    public async Task A_system_initiated_command_cancels_without_a_caller()
+    {
+        // The control, and the reason the origin exists at all. Without it
+        // the test above passes against a handler that refuses every
+        // compensation, which would break §9.6's saga in a way no ordering
+        // test would catch.
+        var owner = Guid.CreateVersion7();
+        Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
+
+        Result result = await fixture.DispatchAsync(
+            new CancelOrderCommand(orderId, CancellationReason.OutOfStock, CommandOrigin.System),
+            currentUser: Anonymous);
+
+        result.IsSuccess.ShouldBeTrue();
+
+        // The status, for the same reason the owner case asserts it: a handler
+        // that short-circuits system commands with Result.Success() and touches
+        // no aggregate satisfies IsSuccess while leaving every compensation
+        // ineffective — which is the failure this pair exists to catch, wearing
+        // a success code.
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        Order order = await db.Orders.SingleAsync(o => o.Id == new OrderId(orderId));
+
+        order.Status.ShouldBe(OrderStatus.Cancelled);
+    }
+}
+```
+
+`DispatchAsync` is the fixture helper above: it opens a scope, points that
+scope's `TestCurrentUser` at the principal named, and dispatches. The double
+itself is the part worth reading, because a simpler one breaks the HTTP suite:
+
+```csharp
+/// <summary>
+/// The scoped ICurrentUser every test runs on, in three states.
+/// </summary>
+public sealed class TestCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
+{
+    // Unset inside a request: the real seam — TestAuthHandler through
+    // HttpContext through HttpContextCurrentUser, resolved exactly as
+    // production resolves it, so §12.4's endpoint tests keep asserting on
+    // the principal their headers named.
+    //
+    // Unset below HTTP: an authenticated stand-in, so a handler test that
+    // says nothing about the caller still has one. Without this branch every
+    // pre-existing dispatcher test would throw on currentUser.Id the moment
+    // §6.4's handler started reading it.
+    //
+    // Set: whatever the test said. The only route to a handler with no
+    // caller at all, which is the state RequireAuthorization stops a request
+    // from ever producing (§11.4).
+    private ICurrentUser? _stated;
+
+    public void Set(ICurrentUser principal) => _stated = principal;
+
+    private ICurrentUser Effective =>
+        _stated ?? (accessor.HttpContext is not null
+            ? new HttpContextCurrentUser(accessor)
+            : Principals.Default);
+
+    public bool IsAuthenticated => Effective.IsAuthenticated;
+
+    public Guid Id => Effective.Id;
+
+    public bool HasPermission(string permission) => Effective.HasPermission(permission);
+}
+```
+
+`Principals` supplies the values that double answers from — two a test names
+explicitly, and the one it falls back to when a test names none:
+
+```csharp
+/// <summary>
+/// The principals a test can state, and the one it gets by stating none.
+/// </summary>
+public static class Principals
+{
+    // Fixed rather than a fresh subject per access: two dispatches in one test
+    // that both say nothing about the caller have to agree about who it was, or
+    // a read-after-write assertion fails for a reason the test never mentions.
+    public static ICurrentUser Default { get; } = Authenticated(SeedData.CustomerId);
+
+    // IsAuthenticated false and an Id that throws — the shape
+    // HttpContextCurrentUser takes off the consumer path (§11.4), so a handler
+    // reading Id without guarding fails here the way it fails in production.
+    public static ICurrentUser Anonymous { get; } = new Principal(null, []);
+
+    // params, so the subject tests name a caller and nothing else; the
+    // permissions are what §11.4's orders:admin branch reads.
+    public static ICurrentUser Authenticated(Guid subject, params string[] permissions) =>
+        new Principal(subject, permissions);
+
+    private sealed class Principal(Guid? subject, string[] permissions) : ICurrentUser
+    {
+        public bool IsAuthenticated => subject is not null;
+
+        public Guid Id => subject ?? throw new InvalidOperationException(
+            "No authenticated caller. Guard with IsAuthenticated.");
+
+        public bool HasPermission(string permission) => permissions.Contains(permission);
+    }
+}
+```
+
+**`Anonymous` is a property and `Authenticated` a method**, which is what makes
+`currentUser: Anonymous` and `currentUser: Authenticated(caller)` read as they
+do above. The subject is nullable in one place only — inside `Principal`,
+where the absence *is* the state being modelled.
+
+**Delegating rather than replacing is the whole design**, and the flat version
+is worth naming because it looks simpler and is wrong. A double that always
+answers from its own field would make
+`Hides_another_customers_order_behind_a_404` pass because the fixture's default
+subject happens not to be the seeded owner — the right status for the wrong
+reason, on the one test whose entire point is that the status is right — and
+would strand every HTTP path that needs the header principal.
+
+**A double is the right call here and §12.7's rule says so**, though it needs
+reading twice to see it: `ICurrentUser` is a port over `HttpContext`, so the
+thing being stood in for is infrastructure, exactly as `FakeTimeProvider` stands
+in for the clock. What "mock only what you do not own" forbids is doubling the
+repository underneath these tests, and none of them does — the orders are real
+rows in a real database, seeded through the aggregate.
+
+These five run at the dispatcher rather than over HTTP, and that is not a
+shortcut. Two of them describe states HTTP cannot produce against §11.4's
+endpoint group: `RequireAuthorization` turns a caller-less request into a 401
+before any handler runs, so the fail-open the old guard admitted is invisible
+from outside, and the compensation path has no HTTP surface at all. The
+API-contract tests above cover the boundary; these cover the check.
+
+**The last two tests are a pair and only mean something together.** One asserts
+the check refuses a caller-less user command; the other asserts it still lets
+the saga through. Either alone is satisfied by a handler that is simply wrong in
+the other direction, and the direction that fails silently — refusing
+compensations — surfaces as orders stuck in `AwaitingStock` long after the
+deployment that caused it.
+
+**Three of the five carry an origin, and each states it rather than earning
+it.** The system case constructs `CommandOrigin.System` directly, which is the
+right way to test the *check* — and it leaves the only production code that
+assigns it, `CancelOrderMapper` (§9.4), unasserted. A mapper stamping `User`
+would pass every test above and reject every real compensation — the failure
+the pair was written to catch, arriving by the one route the pair cannot see.
+Two short tests close it — the stamp, and the parse that stands in front of it:
+
+```csharp
+[Fact]
+public void The_mapper_is_what_makes_a_message_system_initiated()
+{
+    CancelOrderCommand command = new CancelOrderMapper().Map(
+        new CancelOrder(Guid.CreateVersion7(), CancelReasons.OutOfStock));
+
+    // Both halves of what the mapper does. The stamp is the new one, but the
+    // parse is the older claim and equally unasserted: every recognised code
+    // could map to the wrong domain reason and this test would still pass on
+    // the origin alone.
+    command.InitiatedBy.ShouldBe(CommandOrigin.System);
+    command.Reason.ShouldBe(CancellationReason.OutOfStock);
+}
+
+[Fact]
+public void An_unknown_reason_code_never_becomes_a_command()
+{
+    // §9.4's retry policy ignores ContractMappingException, so this is what
+    // sends a malformed message to the error queue on the first attempt
+    // rather than after a minute of backoff. A parse that quietly accepted
+    // the code would keep the test above green and lose that behaviour, and
+    // nothing else in the suite looks at this branch.
+    CancelOrder message = new(Guid.CreateVersion7(), "invented_last_release");
+
+    Should.Throw<ContractMappingException>(() => new CancelOrderMapper().Map(message));
+}
+```
+
+No `[Collection]` and no fixture: the mapper is a pure function, so this sits
+beside `Stage_takes_the_message_id_from_the_envelope` above — same project, same
+absence of infrastructure — rather than inside the container-backed class. It is
+the second half of a boundary whose first half is the endpoint's literal, and
+that half is already covered: the API-contract tests reach the handler through
+HTTP, so they fail if `User` stops being stamped.
 
 ## 12.5 Testing the saga
 

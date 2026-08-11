@@ -30,11 +30,13 @@ internal sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
 
         // Value object mapped as a complex type — columns on the same table,
         // no identity, exactly matching the domain semantics (§7.2).
-        builder.ComplexProperty(p => p.Price, price =>
-        {
-            price.Property(m => m.Amount).HasColumnName("PriceAmount").HasPrecision(19, 4);
-            price.Property(m => m.Currency).HasColumnName("PriceCurrency").HasMaxLength(3);
-        });
+        builder.ComplexProperty(
+            p => p.Price,
+            price =>
+            {
+                price.Property(m => m.Amount).HasColumnName("PriceAmount").HasPrecision(19, 4);
+                price.Property(m => m.Currency).HasColumnName("PriceCurrency").HasMaxLength(3);
+            });
 
         // Optimistic concurrency — SQL Server maintains this automatically.
         builder.Property(p => p.Version).IsRowVersion();

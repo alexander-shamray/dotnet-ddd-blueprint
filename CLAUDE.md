@@ -914,9 +914,18 @@ already written against it.
 
 - Four-space indent, spaces not tabs. CRLF line endings. Newline at end of file.
 - `using` directives **outside** the namespace; no blank lines between
-  consecutive usings. This one binds source only — the samples carry no `using`
-  directives at all, because they are excerpts rather than compilable units
-  (Appendix D). Do not "complete" a sample by adding them.
+  consecutive usings. This one binds source only — a sample is an excerpt
+  rather than a compilable unit (Appendix D), so **do not "complete" one by
+  adding the block it would need to build.**
+
+  It used to say the samples carry *no* `using` directives at all, and that was
+  already untrue when it was written. The blueprint carries exactly two, both
+  `using static`: §9.6's saga imports `Endpoints`, §12.4's subject suite
+  imports `Principals`. Neither is completeness, which is why both stand — an
+  unqualified `Authenticated(caller)` or a bare destination address reads as a
+  member of the type being shown unless something says otherwise, and the
+  directive is the only thing that can say so. A third is fine on those terms;
+  a plain `using` is not, and neither is a second line beside one of these.
 - **No unused `using` directives**, and a file that stops needing one drops it
   in the change that stopped needing it. A stale using is a claim that the file
   depends on something it does not, which is the same class of untruth as an
@@ -1142,29 +1151,84 @@ already written against it.
   than trading off, and the result is one line per argument with nothing
   wrapped inside either.
 
-  **The carve-out is a trailing lambda whose body is a braced block**, which
-  keeps the leading arguments on the call's line:
+  **There is no carve-out, and a braced body does not earn one.** An argument
+  list holding a lambda has exactly two legal shapes, tried in this order:
 
   ```csharp
-  cfg.ReceiveEndpoint("ordering-commands", e =>
-  {
-      e.UseInMemoryOutbox();
-  });
+  // 1. One line, if it fits inside 120. Always preferred.
+  Publish(payload, type, c => { … }, ct);
+
+  // 2. Otherwise one argument per line — the lambda included, braces and all.
+  Publish(
+      payload,
+      type,
+      c => { … },
+      ct);
+
+  // And if the lambda itself will not fit on its line, its braces open under
+  // the rule that governs braces, at the argument's own column.
+  Publish(
+      payload,
+      type,
+      c =>
+      {
+          c.MessageId = message.MessageId;
+          c.CorrelationId = message.CorrelationId;
+      },
+      ct);
   ```
 
-  A braced body is a container whose extent its own braces already show, and
-  `});` marks where the call ends — the two things one-argument-per-line would
-  otherwise be buying. This is the same distinction that makes `(` hug its call
-  while `{` and `[` take lines of their own, and it is what the corpus has
-  always done: **twelve** block-lambda sites — eleven across §7.2, §9.4, §9.6
-  and §9.8, plus `ProductConfiguration` — are written this way, and applying
-  the list rule through the carve-out would rewrite every builder DSL in the
-  blueprint into a shape no C# codebase uses. The **eighteen** sites that were
-  genuinely ragged were corrected in the same pass.
+  This replaced a carve-out that kept the leading arguments up on the call's
+  line whenever the trailing lambda had a braced body — `ReceiveEndpoint("q",
+  e => { … })` and the eleven other builder-DSL sites across §7.2, §9.4, §9.6
+  and §9.8, plus `ProductConfiguration`. The argument for it was that braces
+  already show the block's extent and `});` already marks the call's end, so
+  one-argument-per-line bought nothing; the argument against is that it made
+  the rule undecidable from the call site. Whether a leading argument may stay
+  up depended on the *last* argument's body kind and on whether anything
+  followed it — two lookaheads, and a reviewer who performed only the first got
+  `Publish(payload, type, c => { … }, ct)` wrong. That case cost this branch a
+  review round, and the count of ragged sites went "two, then fourteen, then
+  seventeen, then eighteen" while the carve-out stood.
 
-  **Nothing carves out an argument that follows the lambda.** `Publish(payload,
-  type, c => { … }, ct)` has a real element after the block, so the block stops
-  being trailing and the whole list breaks one per line.
+  **The cost is real and is accepted**: every builder DSL in the blueprint now
+  breaks across four or five lines where it used to open on one, and that is a
+  shape most C# codebases do not use. It buys a rule with no lookahead — does
+  it fit on one line, or does every argument get its own — which is the same
+  rule the rest of this section already applies to every other list.
+
+  A **single**-argument call is untouched by any of this, because there is no
+  leading argument to strand: `AddRateLimiter(options => { … })` and
+  `app.Use(async (context, next) => { … })` keep their shape.
+
+  Nor is a lambda the only thing that can hang:
+  `WriteAsJsonAsync(new ProblemDetails { … }, ct)` is the same shape with an
+  object initialiser in the lambda's place, and §10.3 had one.
+
+  **Two greps narrow this down and neither closes it.** The arrow —
+  `\(.+,\s*\w+\s*=>\s*$` — catches a lambda left hanging off a call that has a
+  leading argument, which is now wrong whatever its body looks like. The closer
+  — `^\s*[]})],\s*\S` — catches a bracket closing at the head of a line with an
+  element still after it, which is what `Publish(payload, type, c => { … }, ct)`
+  and `WriteAsJsonAsync(new ProblemDetails { … }, ct)` look like from below and
+  the arrow cannot see.
+
+  **What neither sees is the plain one**: a broken list whose continuation line
+  simply carries two ordinary arguments, `SendAsync(` / `new
+  CancelOrderCommand(…), ct);`. No arrow, no bracket at the head of the line —
+  nothing to anchor a pattern to, and it was found by a reviewer reading rather
+  than by either grep. Treat the two as a sieve that catches the disguised
+  cases, not as a proof the corpus is clean.
+
+  **Write the closer for the tool you are running it in**, because
+  `[}\])]` is not one pattern. Ripgrep reads `\]` as an escaped bracket and
+  builds the class `}` `]` `)`; POSIX `grep` treats a backslash inside a
+  bracket expression as literal, so the class closes at the first `]` and the
+  pattern becomes "`}` or `\`, then `)`, then `]`" — which matches nothing, ever.
+  It does not error; it reports zero and exits 1, which reads exactly like a
+  clean sweep. That is how the `src/` half of this rule's own sweep was
+  certified clean while `TransactionBehavior.cs` still held a violation. Put
+  the `]` first — `[]})]` — and it means the same thing in both.
 
   ```csharp
   actual.ShouldBe(
@@ -1302,17 +1366,26 @@ already written against it.
   The argument moves to the next line **whole**; break it further only if it
   still does not fit, and then one element per line as usual. This is the same
   principle as the lambda rule above — a nested construct starts its own line —
-  and it is why `.Send(queue, ctx => new CancelOrder(…))` breaks after `ctx =>`
-  rather than after `CancelOrder(`.
+  and the two compose rather than compete: a call whose last argument is a
+  lambda breaks at its **own** parenthesis, which puts the lambda on a line of
+  its own, and never after the `=>`.
+
+  This sentence used to say the opposite, naming
+  `.Send(queue, ctx => new CancelOrder(…))` as a break after `ctx =>`. It was
+  written before the lambda rule above and survived it, so for one branch the
+  file prescribed a form it also forbade — and §9.6, which the sentence
+  described, had ten instances of it. A rule added beside an older one has to
+  be read against it, not only against the code it was written for.
 - **A multi-line condition takes trailing operators, four-space continuations,
   and braces on its body.** The braces are what make four safe: without them the
   last `&&` line and the body sit in the same column and the reader cannot see
   where the condition stops.
 
   ```csharp
-  if (currentUser.IsAuthenticated &&
-      order.CustomerId.Value != currentUser.Id &&
-      !currentUser.HasPermission("orders:admin"))
+  if (!command.IsSystemInitiated &&
+      (!currentUser.IsAuthenticated ||
+          (order.CustomerId.Value != currentUser.Id &&
+              !currentUser.HasPermission("orders:admin"))))
   {
       return Result.Failure(OrderErrors.NotFound);
   }
@@ -1322,8 +1395,16 @@ already written against it.
   omit braces, unless the condition it hangs off is wrapped. Prefer not to wrap
   at all; joining is the better fix, and it has already been applied everywhere
   it fits. The block above is the corpus: one wrapped header, in §11.4, kept
-  because the three clauses of an ownership check do not join inside 120. A
+  because an ownership check that fails closed does not join inside 120. A
   second one appearing is a signal to join, not a precedent.
+
+  **A parenthesised group that breaks indents a further four**, so nesting depth
+  is visible — the same rule the SQL section states for a broken `OR` group, and
+  for the same reason. Never align under the opening bracket: continuations
+  indent four here as everywhere else. The check above gained its second level
+  when the guard was rewritten to fail closed; the earlier form led with
+  `currentUser.IsAuthenticated &&`, which read as a guard and behaved as an
+  exemption, admitting every caller that arrived with no principal at all.
 - **Operators go at the end of the line they continue from**, not the start of
   the next (`dotnet_style_operator_placement_when_wrapping = end_of_line`). Each
   line then ends by announcing that more is coming. This holds for `&&`, `||`,

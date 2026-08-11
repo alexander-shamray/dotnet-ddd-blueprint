@@ -1270,6 +1270,14 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         // Mapping is explicit: the wire type is a contract, the command is an
         // application type, and CancelOrder.Reason is a string that has to be
         // parsed back into CancellationReason (§9.6).
+        //
+        // The mapper is also where a command carrying a CommandOrigin (§11.4)
+        // gets CommandOrigin.System. That belongs here rather than on the
+        // message: the wire contract is written by a peer service, so an origin
+        // travelling on it would be an origin the sender chooses. Arrival here
+        // is what makes the command system-initiated, and the mapper is the one
+        // line that knows it — though arrival is a weaker boundary than it
+        // sounds, which the callout below the mapper spells out.
         TCommand command = mapper.Map(context.Message);
 
         Result result =
@@ -1298,34 +1306,80 @@ public sealed class CommandConsumer<TMessage, TCommand>(
 }
 ```
 
+One mapper per command contract. This is the whole of the `CancelOrder` one, and
+it does two things the consumer above deliberately does not: it parses the wire
+vocabulary, and it declares the origin.
+
+```csharp
+namespace Ordering.Infrastructure.Messaging;
+
+public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, CancelOrderCommand>
+{
+    public CancelOrderCommand Map(CancelOrder message)
+    {
+        // The same parse the endpoint uses (§11.4), failing differently: a
+        // sibling service sending a code we do not know is a deployment
+        // problem, so this throws and §9.4's retry policy ignores the type,
+        // sending the message straight to the error queue.
+        if (!CancellationReasons.TryParse(message.Reason, out CancellationReason reason))
+            throw new ContractMappingException(
+                $"Unknown cancellation reason '{message.Reason}' on {nameof(CancelOrder)}.");
+
+        // CommandOrigin.System, written here and nowhere else. The message
+        // carries no origin field, so nothing a peer sends can forge one —
+        // arriving on this service's command queue is what earns it (§11.4).
+        // How much that earns is the callout below.
+        return new CancelOrderCommand(message.OrderId, reason, CommandOrigin.System);
+    }
+}
+```
+
+> **Queue arrival is a weaker boundary than it reads as.** No part of the
+> payload can claim `System` — that is the whole reason the contract has no
+> origin field — but what *earns* the stamp is arrival on `ordering-commands`,
+> and that is only as restrictive as the broker's authorisation. Today there is
+> none to speak of: one shared principal, `guest/guest` locally ([§14.1](14-local-development.md)),
+> so any service that can reach the broker can publish onto that queue and be
+> mapped as system-initiated. `CommandOrigin` therefore **narrows** §11.4's
+> failure rather than closing it — it stops a caller-less command inheriting an
+> owner's privileges, and says nothing about who may publish. Per-service
+> broker identity is what closes it, and this chapter does not specify one.
+
+**A command reachable both ways has exactly two mappings of its origin**, and
+both are literals: `CommandOrigin.User` at the endpoint, `CommandOrigin.System`
+here. A third — an origin read from a message, a header or a request body —
+re-opens the failure §11.4 describes, because it moves the choice to the caller.
+
 ```csharp
 // Commands Ordering accepts — §3.2's "Accepts" column. The queue name must
 // match Endpoints.OrderingQueue in §9.6, or the saga sends into a void.
-cfg.ReceiveEndpoint("ordering-commands", e =>
-{
-    e.UseMessageRetry(r =>
+cfg.ReceiveEndpoint(
+    "ordering-commands",
+    e =>
     {
-        // A malformed contract does not parse itself on the fourth attempt.
-        // Retrying it burns a minute of backoff and delays every message
-        // behind it before reaching the same error queue.
-        //
-        // Domain rejections are not here because they never throw — the
-        // consumer acks them (§9.8). This list is for faults that are terminal
-        // rather than for outcomes that are not faults at all.
-        r.Ignore<ContractMappingException>();
+        e.UseMessageRetry(r =>
+        {
+            // A malformed contract does not parse itself on the fourth attempt.
+            // Retrying it burns a minute of backoff and delays every message
+            // behind it before reaching the same error queue.
+            //
+            // Domain rejections are not here because they never throw — the
+            // consumer acks them (§9.8). This list is for faults that are
+            // terminal rather than for outcomes that are not faults at all.
+            r.Ignore<ContractMappingException>();
 
-        r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
+            r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
+        });
+        e.UseInMemoryOutbox();
+        e.UseConsumeFilter(typeof(InboxFilter<>), context);
+
+        // One per command in §3.2's Accepts column. The saga sends four; a type
+        // missing here is sent into a queue that ignores it.
+        e.ConfigureConsumer<CommandConsumer<CancelOrder, CancelOrderCommand>>(context);
+        e.ConfigureConsumer<CommandConsumer<ConfirmOrder, ConfirmOrderCommand>>(context);
+        e.ConfigureConsumer<CommandConsumer<MarkOrderShipped, MarkOrderShippedCommand>>(context);
+        e.ConfigureConsumer<CommandConsumer<FlagOrderForReview, FlagOrderForReviewCommand>>(context);
     });
-    e.UseInMemoryOutbox();
-    e.UseConsumeFilter(typeof(InboxFilter<>), context);
-
-    // One per command in §3.2's Accepts column. The saga sends four; a type
-    // missing here is sent into a queue that ignores it.
-    e.ConfigureConsumer<CommandConsumer<CancelOrder, CancelOrderCommand>>(context);
-    e.ConfigureConsumer<CommandConsumer<ConfirmOrder, ConfirmOrderCommand>>(context);
-    e.ConfigureConsumer<CommandConsumer<MarkOrderShipped, MarkOrderShippedCommand>>(context);
-    e.ConfigureConsumer<CommandConsumer<FlagOrderForReview, FlagOrderForReviewCommand>>(context);
-});
 ```
 
 Inventory and Payments declare `inventory-commands` and `payments-commands` the
@@ -1337,16 +1391,18 @@ is not an error, it is silence.
 ```csharp
 // Consumer wiring only — the complete endpoint, with retry and the inbox
 // filter, is in §9.8.
-cfg.ReceiveEndpoint("ordering-catalog-events", e =>
-{
-    // One registration per event type this service subscribes to. The list
-    // must match Ordering's Consumes column in §3.2 — a handler with no
-    // registration here is never invoked, and looks correct while doing
-    // nothing.
-    e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
-    e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
-    e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
-});
+cfg.ReceiveEndpoint(
+    "ordering-catalog-events",
+    e =>
+    {
+        // One registration per event type this service subscribes to. The list
+        // must match Ordering's Consumes column in §3.2 — a handler with no
+        // registration here is never invoked, and looks correct while doing
+        // nothing.
+        e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
+        e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
+        e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
+    });
 ```
 
 The outbox guarantees **at-least-once** delivery, never exactly-once. A crash
@@ -1656,38 +1712,50 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
         // ... remaining correlations
 
-        Schedule(() => StockTimeout, x => x.StockTimeoutTokenId, s =>
-        {
-            s.Delay = TimeSpan.FromMinutes(5);
-            s.Received = e => e.CorrelateById(m => m.Message.OrderId);
-        });
+        Schedule(
+            () => StockTimeout,
+            x => x.StockTimeoutTokenId,
+            s =>
+            {
+                s.Delay = TimeSpan.FromMinutes(5);
+                s.Received = e => e.CorrelateById(m => m.Message.OrderId);
+            });
 
         // Payment authorisation involves a third party and is the wait most
         // likely to hang. Longer than stock because a PSP retry is normal.
-        Schedule(() => PaymentTimeout, x => x.PaymentTimeoutTokenId, s =>
-        {
-            s.Delay = TimeSpan.FromMinutes(15);
-            s.Received = e => e.CorrelateById(m => m.Message.OrderId);
-        });
+        Schedule(
+            () => PaymentTimeout,
+            x => x.PaymentTimeoutTokenId,
+            s =>
+            {
+                s.Delay = TimeSpan.FromMinutes(15);
+                s.Received = e => e.CorrelateById(m => m.Message.OrderId);
+            });
 
         // Despatch is measured in days, and unlike the other two it has no
         // automatic compensation — payment is taken and stock is gone. The
         // timeout escalates to a human instead. A wait with no compensating
         // action still needs a bound; "no timeout" is not the alternative.
-        Schedule(() => DespatchTimeout, x => x.DespatchTimeoutTokenId, s =>
-        {
-            s.Delay = TimeSpan.FromDays(3);
-            s.Received = e => e.CorrelateById(m => m.Message.OrderId);
-        });
+        Schedule(
+            () => DespatchTimeout,
+            x => x.DespatchTimeoutTokenId,
+            s =>
+            {
+                s.Delay = TimeSpan.FromDays(3);
+                s.Received = e => e.CorrelateById(m => m.Message.OrderId);
+            });
 
         // Compensation is a wait like any other. Stock that is never released
         // is stock nobody can sell, and a saga stuck mid-compensation is the
         // worst place to be stuck — the order is already failing.
-        Schedule(() => ReleaseTimeout, x => x.ReleaseTimeoutTokenId, s =>
-        {
-            s.Delay = TimeSpan.FromMinutes(10);
-            s.Received = e => e.CorrelateById(m => m.Message.OrderId);
-        });
+        Schedule(
+            () => ReleaseTimeout,
+            x => x.ReleaseTimeoutTokenId,
+            s =>
+            {
+                s.Delay = TimeSpan.FromMinutes(10);
+                s.Received = e => e.CorrelateById(m => m.Message.OrderId);
+            });
 
         Initially(
             When(OrderPlaced)
@@ -1881,7 +1949,8 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork)
                 INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)
                 VALUES (@OrderId, @Reason, SYSDATETIMEOFFSET());
             """,
-            new { command.OrderId, command.Reason }, ct);
+            new { command.OrderId, command.Reason },
+            ct);
 
         return Result.Success();
     }
@@ -2212,51 +2281,57 @@ three, each with a different policy. The **projection** endpoint from §9.4,
 carrying Catalog's events into local read models:
 
 ```csharp
-cfg.ReceiveEndpoint("ordering-catalog-events", e =>
-{
-    e.UseMessageRetry(r =>
-        r.Exponential(
-            retryLimit: 5,
-            minInterval: TimeSpan.FromSeconds(1),
-            maxInterval: TimeSpan.FromMinutes(1),
-            intervalDelta: TimeSpan.FromSeconds(2)));
+cfg.ReceiveEndpoint(
+    "ordering-catalog-events",
+    e =>
+    {
+        e.UseMessageRetry(r =>
+            r.Exponential(
+                retryLimit: 5,
+                minInterval: TimeSpan.FromSeconds(1),
+                maxInterval: TimeSpan.FromMinutes(1),
+                intervalDelta: TimeSpan.FromSeconds(2)));
 
-    // Defers any Publish/Send until the consumer completes, so a retry does
-    // not re-emit messages the failed attempt already sent.
-    e.UseInMemoryOutbox();
+        // Defers any Publish/Send until the consumer completes, so a retry does
+        // not re-emit messages the failed attempt already sent.
+        e.UseInMemoryOutbox();
 
-    // Duplicate suppression — §9.5. On this endpoint and on ordering-commands,
-    // and on any endpoint added later: at-least-once delivery is a property of
-    // the broker, not of the message type or of what the consumer does with it.
-    // The saga endpoint below is the one exception, and says why.
-    e.UseConsumeFilter(typeof(InboxFilter<>), context);
+        // Duplicate suppression — §9.5. On this endpoint and on
+        // ordering-commands, and on any endpoint added later: at-least-once
+        // delivery is a property of the broker, not of the message type or of
+        // what the consumer does with it. The saga endpoint below is the one
+        // exception, and says why.
+        e.UseConsumeFilter(typeof(InboxFilter<>), context);
 
-    e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
-    e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
-    e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
-});
+        e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
+        e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
+        e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
+    });
 ```
 
 And the **saga** endpoint, which receives the fulfilment events (§9.6):
 
 ```csharp
-cfg.ReceiveEndpoint("ordering-fulfilment-saga", e =>
-{
-    e.UseMessageRetry(r =>
-        r.Exponential(
-            retryLimit: 5,
-            minInterval: TimeSpan.FromSeconds(1),
-            maxInterval: TimeSpan.FromMinutes(1),
-            intervalDelta: TimeSpan.FromSeconds(2)));
+cfg.ReceiveEndpoint(
+    "ordering-fulfilment-saga",
+    e =>
+    {
+        e.UseMessageRetry(r =>
+            r.Exponential(
+                retryLimit: 5,
+                minInterval: TimeSpan.FromSeconds(1),
+                maxInterval: TimeSpan.FromMinutes(1),
+                intervalDelta: TimeSpan.FromSeconds(2)));
 
-    e.UseInMemoryOutbox();
+        e.UseInMemoryOutbox();
 
-    // No InboxFilter here. The saga is idempotent by construction: a redelivered
-    // StockReserved finds the instance already past AwaitingStock and the
-    // transition is simply not applicable. Adding an inbox row would suppress
-    // legitimate redelivery after a mid-transition crash.
-    e.ConfigureSaga<OrderFulfilmentState>(context);
-});
+        // No InboxFilter here. The saga is idempotent by construction: a
+        // redelivered StockReserved finds the instance already past
+        // AwaitingStock and the transition is simply not applicable. Adding an
+        // inbox row would suppress legitimate redelivery after a
+        // mid-transition crash.
+        e.ConfigureSaga<OrderFulfilmentState>(context);
+    });
 ```
 
 > **The inbox is the default; the saga is the documented exception.** Every

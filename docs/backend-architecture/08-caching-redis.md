@@ -301,7 +301,7 @@ the key is claimed atomically before any work happens.
 reason is the dependency rule rather than taste. `IdempotencyBehavior` runs in
 `Common.Application`, which knows nothing about HTTP ([§4.2](04-solution-structure.md)) — it cannot read a
 header, so the value has to be on the command by the time the pipeline sees
-it. `PlaceOrderCommand` ([§6.2](06-cqrs.md)) declares it as its first field for
+it. `PlaceOrderCommand` ([§6.4](06-cqrs.md)) declares it as its first field for
 that reason.
 
 A service that wants the REST convention can still have it: an endpoint may

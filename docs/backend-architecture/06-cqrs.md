@@ -497,36 +497,38 @@ public sealed class TransactionBehavior<TCommand, TResult>(IUnitOfWork unitOfWor
         if (unitOfWork.HasActiveTransaction)
             return await next();
 
-        return await unitOfWork.ExecuteAsync(async token =>
-        {
-            TResult result = await next();
+        return await unitOfWork.ExecuteAsync(
+            async token =>
+            {
+                TResult result = await next();
 
-            // A handler that returns a failed Result has rejected the command.
-            // Returning here skips both the staging and the save, so the
-            // transaction commits nothing and no outbox row announces a state
-            // change that did not happen. Result<T> derives from Result, so one
-            // pattern covers every command shape without reflection.
-            if (result is Result { IsFailure: true })
+                // A handler that returns a failed Result has rejected the command.
+                // Returning here skips both the staging and the save, so the
+                // transaction commits nothing and no outbox row announces a state
+                // change that did not happen. Result<T> derives from Result, so one
+                // pattern covers every command shape without reflection.
+                if (result is Result { IsFailure: true })
+                    return result;
+
+                // Stages outbox rows only — no handler runs here (§7.5).
+                // Reactions happen after commit, driven by the outbox.
+                await domainEvents.DispatchAsync(token);
+
+                // Principle 3 (§2.3), asserted rather than trusted — see below for
+                // why it is here and not in a code review checklist. After
+                // dispatch, so the staged rows of a legitimate single-root command
+                // are already in the tracker and not miscounted.
+                if (unitOfWork.ModifiedAggregateCount > 1)
+                    throw new InvariantViolationException(
+                        $"{typeof(TCommand).Name} modified {unitOfWork.ModifiedAggregateCount} " +
+                        "aggregate roots. One transaction, one aggregate (§2.3 principle 3) — " +
+                        "the second aggregate should react to a domain event after commit (§7.5).");
+
+                await unitOfWork.SaveChangesAsync(token);
+
                 return result;
-
-            // Stages outbox rows only — no handler runs here (§7.5).
-            // Reactions happen after commit, driven by the outbox.
-            await domainEvents.DispatchAsync(token);
-
-            // Principle 3 (§2.3), asserted rather than trusted — see below for
-            // why it is here and not in a code review checklist. After
-            // dispatch, so the staged rows of a legitimate single-root command
-            // are already in the tracker and not miscounted.
-            if (unitOfWork.ModifiedAggregateCount > 1)
-                throw new InvariantViolationException(
-                    $"{typeof(TCommand).Name} modified {unitOfWork.ModifiedAggregateCount} " +
-                    "aggregate roots. One transaction, one aggregate (§2.3 principle 3) — " +
-                    "the second aggregate should react to a domain event after commit (§7.5).");
-
-            await unitOfWork.SaveChangesAsync(token);
-
-            return result;
-        }, ct);
+            },
+            ct);
     }
 }
 ```
@@ -732,9 +734,14 @@ namespace Ordering.Application.Orders.PlaceOrder;
 // (§8.5). Carrying a CommandId is not enough — the behaviour is constrained on
 // the interface, so a command with the field and not the interface is
 // unprotected, and a retried POST creates a second order.
+//
+// There is no CustomerId here, and the omission is the control. The subject of
+// a write is bound from the principal and never from the request (§11.4) — a
+// field carrying it is one any authenticated caller sets to somebody else's
+// GUID, creating an order attributed to them, shipped where the caller chose.
+// A validator does not catch that: NotEmpty() is true of a stranger's subject.
 public sealed record PlaceOrderCommand(
     Guid CommandId,
-    Guid CustomerId,
     IReadOnlyList<PlaceOrderItem> Items,
     AddressDto ShippingAddress,
     string Currency) : ICommand<Result<Guid>>, IIdempotentCommand;
@@ -745,7 +752,6 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
 {
     public PlaceOrderValidator()
     {
-        RuleFor(x => x.CustomerId).NotEmpty();
         // NotEmpty first: Matches alone skips null, and a JSON "currency":
         // null would reach the domain as a 500 rather than this 400. Letters,
         // not just length — Money.Of refuses "1$?" as a bug; this refuses it
@@ -761,7 +767,15 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
     }
 }
 
-public sealed class PlaceOrderHandler(IOrderRepository orders, IProductPriceReader prices, TimeProvider clock)
+// ICurrentUser (§11.4) is the only source of the subject on this path. A
+// command that reaches here is HTTP-borne — nothing publishes PlaceOrder as a
+// message — so the principal is always present, and Id throwing on an
+// unauthenticated call is the right failure rather than a case to guard.
+public sealed class PlaceOrderHandler(
+    IOrderRepository orders,
+    IProductPriceReader prices,
+    ICurrentUser currentUser,
+    TimeProvider clock)
     : ICommandHandler<PlaceOrderCommand, Result<Guid>>
 {
     public async Task<Result<Guid>> HandleAsync(PlaceOrderCommand command, CancellationToken ct)
@@ -782,7 +796,7 @@ public sealed class PlaceOrderHandler(IOrderRepository orders, IProductPriceRead
             });
 
         var order = Order.Place(
-            new CustomerId(command.CustomerId),
+            new CustomerId(currentUser.Id),
             command.ShippingAddress.ToDomain(),
             items,
             command.Currency,
@@ -876,7 +890,13 @@ a list.
 ```csharp
 namespace Ordering.Application.Orders.GetOrderSummaries;
 
-public sealed record GetOrderSummariesQuery(Guid CustomerId, string? Cursor, int Limit)
+// Cursor and Limit are request-supplied; the customer is not, and that is the
+// point of the omission. §11.4's subject rule applies to the read path exactly
+// as it does to §6.4's write, and it matters more here: a subject a caller
+// could name returns a page of somebody else's history rather than a single
+// record. Customer IDs are GUIDs, but they appear in URLs, referrers, support
+// tooling and prior responses — they are identifiers, not secrets.
+public sealed record GetOrderSummariesQuery(string? Cursor, int Limit)
     : IQuery<CursorPage<OrderSummaryDto>>;
 
 // Level 1. §6.6 rewrites this pair in place when the projection arrives —
@@ -889,7 +909,7 @@ public sealed record OrderSummaryDto(
     int LineCount,
     DateTimeOffset PlacedAt);
 
-public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
+public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, ICurrentUser currentUser)
     : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
 {
     private const string Sql =
@@ -925,7 +945,8 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
                 Sql,
                 new
                 {
-                    query.CustomerId,
+                    // The one parameter that does not come from the query.
+                    CustomerId = currentUser.Id,
                     Take = limit + 1,
                     AfterPlacedAt = after?.PlacedAt,
                     AfterId = after?.Id
@@ -961,6 +982,10 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
 
 Rules for the read side:
 
+- **The subject is bound from the principal, never from the query.** A
+  `CustomerId` on a query record or a query string is an IDOR with a page of
+  results behind it; the rule and its two exceptions are stated once in
+  [§11.4](11-identity-authorization.md).
 - Dapper, not EF Core. No change tracking, no lazy loading, no accidental N+1.
 - The query returns exactly the shape the caller needs. No generic DTO reused
   across six endpoints.
@@ -1492,7 +1517,7 @@ public sealed record OrderSummaryDto(
 
 public sealed record SummaryProduct(Guid Id, string Name, string Thumb);
 
-public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
+public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, ICurrentUser currentUser)
     : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
 {
     // One table, no joins, no aggregation — the projection did that work once
@@ -1522,7 +1547,15 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections)
         List<SummaryRow> rows = (await connection.QueryAsync<SummaryRow>(
             new CommandDefinition(
                 Sql,
-                new { query.CustomerId, Take = limit + 1, AfterPlacedAt = after?.PlacedAt, AfterId = after?.Id },
+                new
+                {
+                    // Bound from the principal, not the query — §11.4, and the
+                    // same substitution as the level-1 handler in §6.5.
+                    CustomerId = currentUser.Id,
+                    Take = limit + 1,
+                    AfterPlacedAt = after?.PlacedAt,
+                    AfterId = after?.Id
+                },
                 cancellationToken: ct))).AsList();
 
         bool hasMore = rows.Count > limit;
