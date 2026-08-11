@@ -359,6 +359,18 @@ Each round is the review done once, end to end:
    verify step ran, because the audited repository is **untrusted input**. A
    tool the agent does not have cannot be turned against it.
 
+   **That property is real for the agent and not yet for the choice of agent.**
+   `allowed-tools` grants a bare `Agent`, which admits *any* registered subagent
+   type — including the general-purpose ones whose tool list is `*`. So "spawn
+   them as `bug-auditor`" is enforced by this sentence and nothing else, which
+   is precisely the shape the sentence above disparages. Picking the wrong type
+   would hand the fan-out the editing and shell tools the whole argument is
+   built on its not having. **Fix: narrow the grant to this agent type** — and
+   verify the syntax against the harness before writing it rather than
+   assuming, because a permission rule that does not match is inert and one
+   that is malformed refuses to start, both of which this repo has already paid
+   for once with `Write(...)` against `Edit(...)`.
+
    The natural cut is six areas, and the scope hint narrows it:
 
    | | |

@@ -148,7 +148,18 @@ Each round is the review done once, end to end:
    carried `Bash` or a network tool could be driven by a **prompt-injected**
    audit file into filing to another tracker or calling out before the parent's
    verify step ran, because the audited repository is **untrusted input**. A
-   tool the agent does not have cannot be turned against it. The
+   tool the agent does not have cannot be turned against it.
+
+   **That property is real for the agent and not yet for the choice of agent.**
+   `allowed-tools` grants a bare `Agent`, which admits *any* registered subagent
+   type, including the general-purpose ones whose tool list is `*`. So "spawn
+   them as `security-auditor`" is enforced by this sentence and nothing else —
+   the shape the sentence above disparages. Fix: narrow the grant to this agent
+   type, verifying the syntax against the harness before writing it rather than
+   assuming, since a permission rule that does not match is inert and a
+   malformed one refuses to start.
+
+   The
    natural cut is CI/tooling, the application source, and the
    deploy/infrastructure surface, but let the scope hint narrow it. Give each the
    same contract: **root every path under `$work`** (the pinned worktree, per the
