@@ -1270,6 +1270,13 @@ public sealed class CommandConsumer<TMessage, TCommand>(
         // Mapping is explicit: the wire type is a contract, the command is an
         // application type, and CancelOrder.Reason is a string that has to be
         // parsed back into CancellationReason (§9.6).
+        //
+        // The mapper is also where a command carrying a CommandOrigin (§11.4)
+        // gets CommandOrigin.System. That belongs here rather than on the
+        // message: the wire contract is written by a peer service, so an origin
+        // travelling on it would be an origin the sender chooses. This consumer
+        // is the trust boundary — reaching it is what makes the command
+        // system-initiated, and the mapper is the one line that knows it.
         TCommand command = mapper.Map(context.Message);
 
         Result result =
@@ -1297,6 +1304,38 @@ public sealed class CommandConsumer<TMessage, TCommand>(
     }
 }
 ```
+
+One mapper per command contract. This is the whole of the `CancelOrder` one, and
+it does two things the consumer above deliberately does not: it parses the wire
+vocabulary, and it declares the origin.
+
+```csharp
+namespace Ordering.Infrastructure.Messaging;
+
+public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, CancelOrderCommand>
+{
+    public CancelOrderCommand Map(CancelOrder message)
+    {
+        // The same parse the endpoint uses (§11.4), failing differently: a
+        // sibling service sending a code we do not know is a deployment
+        // problem, so this throws and §9.4's retry policy ignores the type,
+        // sending the message straight to the error queue.
+        if (!CancellationReasons.TryParse(message.Reason, out CancellationReason reason))
+            throw new ContractMappingException(
+                $"Unknown cancellation reason '{message.Reason}' on {nameof(CancelOrder)}.");
+
+        // CommandOrigin.System, written here and nowhere else. The message
+        // carries no origin field, so a peer cannot claim one — arriving on
+        // this service's command queue is what earns it (§11.4).
+        return new CancelOrderCommand(message.OrderId, reason, CommandOrigin.System);
+    }
+}
+```
+
+**A command reachable both ways has exactly two mappings of its origin**, and
+both are literals: `CommandOrigin.User` at the endpoint, `CommandOrigin.System`
+here. A third — an origin read from a message, a header or a request body —
+re-opens the failure §11.4 describes, because it moves the choice to the caller.
 
 ```csharp
 // Commands Ordering accepts — §3.2's "Accepts" column. The queue name must

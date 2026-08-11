@@ -146,7 +146,12 @@ public static class OrderEndpoints
                             ["reason"] = [$"Unknown cancellation reason '{request.Reason}'."]
                         });
 
-                    Result result = await dispatcher.SendAsync(new CancelOrderCommand(id, reason), ct);
+                    // CommandOrigin.User is a literal, not a bound value. The
+                    // origin says which path the command arrived on, so a
+                    // request that could set it would be the fail-open this
+                    // replaces, spelt as a field (see below).
+                    Result result = await dispatcher.SendAsync(
+                        new CancelOrderCommand(id, reason, CommandOrigin.User), ct);
 
                     return result.ToHttpResult();
                 })
@@ -169,12 +174,39 @@ namespace Ordering.Application.Orders.CancelOrder;
 
 public sealed record CancelOrderRequest(string Reason);
 
+/// <summary>
+/// Which path a command arrived on, stated rather than inferred. A handler
+/// reachable both by HTTP and by <c>CommandConsumer</c> (§9.4) must not read
+/// "no authenticated caller" as "the saga sent this" — those are different
+/// propositions, and treating them as one grants owner privileges to anything
+/// that reaches the handler without a principal.
+/// </summary>
+public enum CommandOrigin
+{
+    // User is the zero value so that an origin nobody set fails closed: it is
+    // the checked path, not the trusted one. A default-constructed command is
+    // then refused rather than admitted, which is the direction a mistake
+    // should go.
+    User,
+    System
+}
+
 // Non-generic Result, not Result<Unit>: CommandConsumer constrains TCommand to
 // ICommand<Result> (§9.4), and a command reachable by message must satisfy it.
 // Result IS the void payload — a Unit type alongside it would be a second way
 // to say the same thing, and only one of them would compile here.
-public sealed record CancelOrderCommand(Guid OrderId, CancellationReason Reason)
-    : ICommand<Result>;
+//
+// InitiatedBy is not bindable from the request: CancelOrderRequest above does
+// not carry it, and each entry point passes a literal — the endpoint User, the
+// mapper System (§9.4). A field a caller could set is the fail-open this
+// exists to close, wearing a different name.
+public sealed record CancelOrderCommand(
+    Guid OrderId,
+    CancellationReason Reason,
+    CommandOrigin InitiatedBy) : ICommand<Result>
+{
+    public bool IsSystemInitiated => InitiatedBy is CommandOrigin.System;
+}
 
 /// <summary>
 /// The one place a wire code becomes a domain enum. Both entry points call it:
@@ -229,10 +261,14 @@ internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser c
         if (order is null)
             return Result.Failure(OrderErrors.NotFound);
 
-        // Deliberately a 404, not a 403 — a 403 confirms the order exists.
-        if (currentUser.IsAuthenticated &&
-            order.CustomerId.Value != currentUser.Id &&
-            !currentUser.HasPermission("orders:admin"))
+        // Two propositions, and only one of them is about the caller. The
+        // system path says so on the command; every other path needs an
+        // authenticated owner, and gets a 404 rather than a 403, because a 403
+        // confirms the order exists.
+        if (!command.IsSystemInitiated &&
+            (!currentUser.IsAuthenticated ||
+                (order.CustomerId.Value != currentUser.Id &&
+                    !currentUser.HasPermission("orders:admin"))))
         {
             return Result.Failure(OrderErrors.NotFound);
         }
@@ -252,14 +288,31 @@ internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser c
 }
 ```
 
-The `IsAuthenticated` guard is not a loophole, and leaving it out is the bug.
-`CancelOrderCommand` is dispatched from two places — the endpoint above and a
-`CommandConsumer` (§9.4) when the saga compensates — and the second has no
+The requirement behind `InitiatedBy` is real. `CancelOrderCommand` is dispatched
+from two places — the endpoint above and a `CommandConsumer`
+([§9.4](09-messaging.md)) when the saga compensates — and the second has no
 caller. A message-borne cancellation is the system acting on its own decision,
 already authorised at the endpoint that started the saga; checking it against
 "the current user" would compare an order's owner to nobody and refuse every
 compensation. Handlers reachable both ways must say which check applies to
 which path.
+
+> **Guarding on `IsAuthenticated` was the bug, not the fix.** An earlier version
+> of this check opened with `currentUser.IsAuthenticated &&`, so the whole
+> condition was false whenever no principal was present and the handler went on
+> to cancel any `OrderId` the caller named. That reads as a guard and behaves as
+> an exemption: it uses an *ambient absence* — no `HttpContext` — as a proxy for
+> "this came from the saga", and those are not the same proposition. Anything
+> reaching the handler without a principal inherited owner privileges, which is
+> the condition an attacker arranges rather than avoids. The origin makes the
+> trusted path a statement the caller cannot make, and the check fails closed
+> when neither an owner nor a stated system origin is present.
+
+Where the second path is a *different operation* rather than the same one from
+elsewhere, prefer a second command type over a second origin — the trusted path
+is then the type system's problem rather than a field's. `InitiatedBy` is right
+here because compensation cancels an order in exactly the sense the customer
+does; §9.6's saga wants the same transition, not a parallel one.
 
 The port and its one implementation:
 
@@ -310,6 +363,37 @@ break the first time somebody changed their username.
 gate endpoints; a resource check asks a question the endpoint could not have
 answered before loading the data. The permission strings come from the same
 vocabulary either way.
+
+### The subject rule
+
+> **A subject identifier is bound from the principal, never from the request.**
+> `ICurrentUser.Id` is the only source of "whose order is this" on a command or
+> a query. A `CustomerId` sitting in a command record, a query record, a request
+> DTO or a query string is a field any authenticated caller sets to somebody
+> else's subject — and no validator catches it, because `NotEmpty()` is true of
+> another customer's GUID.
+
+This is one rule with three consequences, and the worked slices show all three:
+`PlaceOrderCommand` ([§6.4](06-cqrs.md)) carries no `CustomerId` and its handler
+reads `currentUser.Id`; `GetOrderSummariesQuery` (§6.5, rewritten in §6.6)
+carries none either, so the `WHERE` clause cannot be pointed at another
+customer; and `CancelOrderHandler` above resolves ownership against the loaded
+aggregate rather than against anything the caller sent.
+
+**The absence is the mechanism.** Keeping the field and checking it in the
+handler — `command.CustomerId != currentUser.Id → Result.Failure` — is sound
+where it is written and is one omission away from an IDOR in every slice copied
+from it. A field that does not exist cannot be forgotten, and the read path is
+where forgetting is most expensive: §6.5 returns a page of another customer's
+history rather than a single record.
+
+Two cases genuinely need a subject the caller names, and both are explicit
+rather than incidental. An administrator acting for a customer is a **separate
+command** carrying the target subject, gated by an `orders:admin` policy at the
+endpoint and by a permission check in the handler — it is a different operation
+and reads as one. And a handler reachable by message has no principal at all,
+which `InitiatedBy` above answers: the subject comes off the aggregate, and the
+origin says why no check applies.
 
 ## 11.5 Service-to-service authentication
 

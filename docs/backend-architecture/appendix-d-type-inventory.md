@@ -27,8 +27,9 @@ repeatable check; noticing by eye is not.
 | `IDomainEventDispatcher` | §7.5 | Stages outbox rows; runs no handlers |
 | `IProjectionRegistry` | §7.5 | Which event types have projection handlers |
 | `IProductPriceReader` | §6.4 | Prices from the **local** projection — never a remote call |
-| `ICurrentUser` | [§11.4](11-identity-authorization.md) | The caller, for resource-level checks. `IsAuthenticated` is false on the consumer path |
-| `CancelOrderCommand`, `CancelOrderRequest`, `CancelOrderHandler` | §11.4 | The slice both entry paths converge on — HTTP and `CommandConsumer` (§9.4) |
+| `ICurrentUser` | [§11.4](11-identity-authorization.md) | The caller, for resource-level checks, and the **only** source of a subject identifier on a command or query (§11.4's subject rule). `IsAuthenticated` is false on the consumer path |
+| `CommandOrigin` | §11.4 | `User` \| `System`, saying which path a command arrived on. `User` is the zero value, so an origin nobody set fails closed. Written as a literal at each entry point — never bound from a request or a message |
+| `CancelOrderCommand`, `CancelOrderRequest`, `CancelOrderHandler` | §11.4 | The slice both entry paths converge on — HTTP and `CommandConsumer` (§9.4). The command carries a `CommandOrigin`; the request does not |
 | `CancellationReasons` | §11.4 | Wire code → `CancellationReason`; the single parse both paths call |
 | `OrderMetrics` | [§13.3](13-observability.md) | Instruments on `Ordering.Orders`. **Application**, not `Common.*`: it takes `Money`. Recorded only from §6.6's projection, on the committed path |
 | `ICommandMessageMapper<,>` | §6.2 | Wire contract → application command |
@@ -132,6 +133,8 @@ structurally always null on one path.
 | `OrderFulfilmentSaga`, `Endpoints` | §9.6 | Saga and its command destinations |
 | `ServiceFixture` | §12.4 | Testcontainers `IAsyncLifetime` fixture; owns the `WebApplicationFactory`. One per service, in that service's `*.TestSupport` (§4.1) — Catalog's is the first built, and §12.4's worked example is Ordering's |
 | `TestAuthHandler` | §12.4 | `AuthenticationHandler<AuthenticationSchemeOptions>`; issues the principal a test names in headers. Also `Ordering.TestSupport` |
+| `TestCurrentUser`, `Authenticated`, `Anonymous` | §12.4 | The scoped `ICurrentUser` double and its two factories — one reporting a given subject, one with `IsAuthenticated` false and a throwing `Id`, which is the consumer path's shape. Registered for every test as an authenticated default, so a test silent about the caller still has one. `TestAuthHandler` is the boundary equivalent; these are for the states `RequireAuthorization` stops a request from reaching |
+| `ServiceFixture.DispatchAsync` | §12.4 | Opens a scope, points its `TestCurrentUser` at a named principal and dispatches. The seam the subject tests use to reach a handler with no caller — which HTTP cannot produce against an endpoint group carrying `RequireAuthorization` |
 
 ## D.5 Referenced but deliberately not shown
 
@@ -161,7 +164,7 @@ their declaration.
 | `Contracts`, `ContractSamples` | Test builders for `required`-member contract messages — one sample per contract type, and the reason the §12.6 suite cannot silently skip a new one |
 | `AlwaysThrows`, `NoOpEvent`, `UnhandledEvent` | Test event types with throwing / no-op / no handler |
 | `IntegrationCollection` (xUnit) | The `[CollectionDefinition]` sharing one `ServiceFixture` across test classes — declared once **per test assembly** (§12.4). Named for what it groups, and deliberately not `ServiceCollection`: that name is taken by `Microsoft.Extensions.DependencyInjection`, and the local type would win in every test file that also builds a provider |
-| `ICommandMessageMapper<TMessage,TCommand>` implementations | One per command contract — e.g. parsing `CancelOrder.Reason` back to `CancellationReason` (§9.4) |
+| `ICommandMessageMapper<TMessage,TCommand>` implementations | One per command contract — e.g. `CancelOrderMapper`, which parses `CancelOrder.Reason` back to `CancellationReason` and stamps `CommandOrigin.System` (§9.4). The stamp lives here rather than on the wire contract, so a peer service cannot claim it |
 | `ConfirmOrderCommand`, `MarkOrderShippedCommand`, `FlagOrderForReviewCommand` | The other three message-borne slices, same shape as `CancelOrderCommand` (§9.4, §9.6) |
 | `OrderRepository` | `IOrderRepository` over EF; also the Infrastructure assembly marker for the §6.2 scan |
 | `ContractMappingException` | Thrown by an `ICommandMessageMapper` on a value it cannot map; ignored by the retry policy so it reaches the error queue immediately (§9.4, §11.4) |
@@ -185,9 +188,9 @@ their declaration.
 | `GetConfiguredOptions` | Test helper returning the resilience options under assertion (§9.7) |
 | `BuildServices`, `BuildProvider` | Test helpers running **both** real registration helpers — `AddOrderingApplication` and `AddOrderingInfrastructure` (§6.2, §6.3, §13.6). `BuildServices` returns the populated `IServiceCollection`; `BuildProvider` is `BuildServices().BuildServiceProvider()`. Two helpers because registrations can only be enumerated before the build |
 | `OutboxBacklogHealthCheck` | Reports outbox depth as an `observe`-tagged check (§13.5) |
-| `PlaceOrderCommand`, `PlaceOrderItem`, `PlaceOrderValidator`, `PlaceOrderHandler` | The worked command slice (§6.4) |
+| `PlaceOrderCommand`, `PlaceOrderItem`, `PlaceOrderValidator`, `PlaceOrderHandler` | The worked command slice (§6.4). Carries **no** `CustomerId` — the handler takes the subject from `ICurrentUser` (§11.4's subject rule) |
 | `AddressDto`, its `ToDomain()` | The shipping address as `PlaceOrderCommand` carries it, and the map to the `Address` value object (§6.4). Built by `AddressBuilder.ValidDto()` in §12.4. An application DTO, unrelated to `ShippingAddressV1` below — a wire contract and a command payload version on different schedules (§4.3) |
-| `GetOrderSummariesQuery`, `GetOrderSummariesHandler`, `OrderSummaryDto`, `SummaryProduct` | The worked query slice — shown at level 1 (§6.5) and rewritten in place at level 2 (§6.6). The projection feeding it is `OrderSummaryProjection`, defined in D.4 |
+| `GetOrderSummariesQuery`, `GetOrderSummariesHandler`, `OrderSummaryDto`, `SummaryProduct` | The worked query slice — shown at level 1 (§6.5) and rewritten in place at level 2 (§6.6). Carries `Cursor` and `Limit` only: the `CustomerId` in the `WHERE` clause is bound from `ICurrentUser` at both levels (§11.4's subject rule). The projection feeding it is `OrderSummaryProjection`, defined in D.4 |
 | `GetProductDetailQuery`, `GetProductDetailHandler`, `ProductDetailDto`, `ProductSql` | Catalog's cached read slice — the `HybridCache` worked example (§8.2), and the one sample here belonging to a service other than Ordering |
 | `ShippingAddressV1` | The address `V1.OrderConfirmed` carries (§9.1) — primitives only, and versioned with the contract that owns it, exactly as `PlacedLine` and `ConfirmedLine` are |
 | `ProductPublished` | Catalog contract, envelope (§9.1) plus `ProductId`, `Name`, `ThumbnailUrl`, `Currency`, `Amount` — the last two so a projection has a price the moment the product exists, without waiting for a `PriceChanged` that may never come |
