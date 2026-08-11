@@ -85,16 +85,28 @@ issue tracker and never the tree's own build. So "confirmed" means: read the
 cited code, trace the values, find the caller, and reproduce the reasoning until
 the failure scenario holds — never "the agent said so".
 
-**The absence of a build grant is a decision, not an oversight, and it has two
-reasons.** The first is the teardown: `dotnet build` or `dotnet test` inside the
-pinned worktree writes `bin/` and `obj/` into it, which leaves the checkout
-holding untracked files — and this command's teardown deliberately leans on
-`git worktree remove` refusing exactly that as its guard. A sweep that built
-would trip its own guard on its own leavings every single run, and the guard
-would stop meaning anything. The second is that the suite needs a Docker daemon
-and runs three container-backed projects, so a build grant would buy an
-unreliable verification at a large cost. Reading is what this command has, so
-reading is what it is honest about.
+**The absence of a build grant is a decision, and the reason is the one that
+shapes the agent profile.** Building a tree *executes* it: MSBuild targets,
+source generators and analysers all run as part of a build, and `dotnet test`
+runs the tree's own test code. The audited repository is prompt-injection
+input — that is the premise the whole read-only fan-out rests on — and a build
+grant would hand exactly that input arbitrary code execution on the host, which
+no amount of care in the parent walks back. "A tool the agent does not have
+cannot be turned against it" has to hold for the parent too. Secondarily the
+suite needs a Docker daemon and runs three container-backed projects, so the
+grant would buy an unreliable verification at a large cost as well as a
+dangerous one. Reading is what this command has, so reading is what it is
+honest about.
+
+**It is worth recording what this argument is not, because a plausible version
+of it is false.** An earlier draft said a build would leave `bin/` and `obj/`
+in the pinned worktree and so trip the teardown's own guard. It would not:
+`.gitignore` carries `[Bb]in/` and `[Oo]bj/`, `git status --porcelain` comes
+back empty with them present, and `git worktree remove` takes such a worktree
+without complaint — checked by doing it, against a control file that was
+genuinely untracked and did produce *contains modified or untracked files*.
+The teardown guard is real and catches scratch written inside; it is simply
+not a reason to withhold a build, and four sites had repeated that it was.
 
 **The residual is the class of finding only execution catches**, and it cuts
 both ways: a defect that reads correctly and behaves wrongly is invisible here,
@@ -297,10 +309,10 @@ Each round is the review done once, end to end:
    | | |
    |---|---|
    | Building blocks | `src/BuildingBlocks/**` — the dispatcher and its behaviours, the outbox, the Redis helpers, the web middleware |
-   | The service | `src/Services/**` — domain invariants, EF mappings and migrations, endpoints, the migrator |
+   | Services and hosts | **all of `src/**` except `BuildingBlocks`** — today `src/Services/**`, and §4.1's gateway, BFF and AppHost as they land |
    | The suites | `tests/**` — where the cannot-fail class lives, and the only area whose defects are all of one kind |
    | Tooling | `tools/**`, `.github/**`, `.claude/**` — Python, shell, and the command and agent definitions, where this repo's bugs have historically been |
-   | Deployment and configuration | `deploy/**`, `.config/**`, and the root build files — `Directory.*.props`, `Platform.slnx`, `global.json`, `.editorconfig`, `.gitattributes` |
+   | Deployment and configuration | `deploy/**`, `.config/**`, and **every tracked file at the repository root** — the build files, the dotfiles, `CLAUDE.md` and `README.md` alike |
    | Samples | `docs/**` fenced code, audited as code but excerpt-aware |
 
    **The rows have to partition the repository, not merely sample it.** Each
@@ -308,10 +320,18 @@ Each round is the review done once, end to end:
    owns is not a path without defects — it is a path nobody looked at, reported
    as a clean sweep. That is this command's own fail-open, and it is the failure
    class the bar ranks critical when it finds it in someone else's code. Before
-   fanning out on a whole-repo run, check every top-level entry against the
-   table; if one has no owner, widen a row in the same run and say so in the
-   summary. A narrowing scope hint is the one case where coverage is
-   deliberately partial, and the summary says which rows it dropped.
+   fanning out on a whole-repo run, `Glob` the repository root and check every
+   entry against the table; if one has no owner, widen a row in the same run and
+   say so in the summary. A narrowing scope hint is the one case where coverage
+   is deliberately partial, and the summary says which rows it dropped.
+
+   **Two rows are written as a remainder rather than a list, and that is what
+   makes the partition survive the repo growing.** "All of `src/**` except
+   `BuildingBlocks`" and "every tracked file at the repository root" cannot be
+   quietly outgrown; `src/Services/**` and a named list of build files can, and
+   nearly were — a preflight that reads `src` as owned would never notice
+   §4.1's `src/Gateway` arriving unswept. Where a row can be phrased as
+   everything-not-already-taken, phrase it that way.
 
    **`.claude/**` includes this command and its agent**, which is intended
    rather than awkward: a sweep that cannot audit its own definition is one

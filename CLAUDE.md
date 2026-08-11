@@ -1729,20 +1729,32 @@ every subagent claim before filing, de-duplicate against the whole issue set,
 never fail open, and file without fixing. Three things genuinely differ: the
 threshold (critical-or-high against medium-or-above, because a latent
 vulnerability is a liability the moment it exists where a latent defect on an
-unreachable path is a note), the fan-out cut (five areas by tree, against
+unreachable path is a note), the fan-out cut (six areas by tree, partitioning
+the repository rather than sampling it, against
 security's three), and what confirmation can mean.
 
 **That last one is the interesting one: `/bug-sweep` runs none of the code it
 audits, and its grant withholds a build deliberately.** Its shell reaches
 `mktemp`, the two worktree helpers and `gh` — the worktree and the issue
-tracker, never the tree's own build. `dotnet build` or `dotnet test`
-inside the pinned worktree writes `bin/` and `obj/` into it, and the teardown
-both commands share leans on `git worktree remove` refusing a checkout holding
-untracked files as its guard — a sweep that built would trip that guard on its
-own leavings every run and the guard would stop meaning anything. The suite also
-needs Docker. So a defect claim there is confirmed by reading, the issue body
-says so, and the class of bug only execution catches is named as the residual
-rather than papered over.
+tracker, never the tree's own build. The reason is the one that shapes the
+agent profile: building a tree executes it — MSBuild targets, source
+generators, analysers, and under `dotnet test` the tree's own test code — and
+the audited repository is prompt-injection input, so a build grant hands that
+input arbitrary code execution on the host. The suite also needs Docker. So a
+defect claim there is confirmed by reading, the issue body says so, and the
+class of bug only execution catches is named as the residual rather than
+papered over.
+
+**The teardown argument that used to sit here was false, and the disproof is
+worth keeping.** It said a build would leave `bin/` and `obj/` behind and trip
+the shared teardown's own guard. `.gitignore` carries `[Bb]in/` and `[Oo]bj/`,
+so `git status --porcelain` is empty with them present and `git worktree
+remove` takes the worktree without complaint — verified by running it, against
+a control file that was genuinely untracked and did produce *contains modified
+or untracked files*. Copilot found it after four sites had repeated it. The
+guard is still real and still catches scratch written inside a sweep's
+worktree, which is the thing it was written for; it was never a reason to
+withhold a build.
 
 **Both sweeps' worktrees carry the `secsweep-` prefix, and the second one is
 borrowing.** `git-worktree-detach.sh` and `git-worktree-drop.sh` refuse any path
