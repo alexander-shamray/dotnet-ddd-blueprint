@@ -41,9 +41,17 @@ here can settle it.
   audit. Every path you `Read`, `Grep` and `Glob` stays under it. Do not read
   outside it: the parent forked that worktree precisely so the audit reads one
   stable commit, and reaching outside defeats it.
-- A **scope** — the area to audit, and the defects the parent has already told
-  you are **known** (tracked issues and documented open questions). Do not
-  re-report one the parent named.
+- A **scope** — the area you are answerable for, and the defects the parent has
+  already told you are **known** (tracked issues and documented open questions).
+  Do not re-report one the parent named.
+
+  **Your scope bounds what you report, not what you read.** Report only defects
+  located inside it — another auditor owns the rest — but read anywhere under
+  the root to do that properly. Establishing reachability usually means finding
+  a caller in someone else's area, and checking the test corpus always does.
+  An auditor that refuses to look outside its scope will fail to find the
+  caller, drop a real defect to low for want of reachability, and report a
+  clean scope; that is a worse failure than reading a file that was not yours.
 
 ## What a finding is
 
