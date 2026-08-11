@@ -1173,7 +1173,18 @@ already written against it.
 
   **Nothing carves out an argument that follows the lambda.** `Publish(payload,
   type, c => { … }, ct)` has a real element after the block, so the block stops
-  being trailing and the whole list breaks one per line.
+  being trailing and the whole list breaks one per line. Nor is a lambda the
+  only thing that can hang: `WriteAsJsonAsync(new ProblemDetails { … }, ct)` is
+  the same shape with an object initialiser in the lambda's place, and §10.3
+  had one.
+
+  **Grep for that case from the closer, not the arrow.** A sweep that looks for
+  a trailing `=>` and accepts any `{` beneath it walks straight past it, because
+  the next line genuinely is `{` — what disqualifies it is the argument after
+  the closing brace, which the arrow pattern never sees. `^\s*[}\])],\s*\S`
+  finds them: a bracket closing at the head of a line with an element still
+  after it. Run both patterns. Each misses what the other catches, and a count
+  taken from one of them reads as though the corpus had been swept.
 
   ```csharp
   actual.ShouldBe(
@@ -1293,64 +1304,6 @@ already written against it.
   the `=>` line's + 4: a signature that itself wraps puts its parameters at + 4
   already, and measuring from there would indent the body to match them. Join
   the signature where it fits inside 120 and the question does not arise.
-
-  **A lambda in argument position buys the list no exemption**, and this is the
-  half the rule above did not say. When the argument list breaks, the lambda is
-  an element like any other and starts its own line — its `=>` may never trail
-  the argument before it:
-
-  ```csharp
-  // Wrong — a ragged middle. Argument 1 and the head of argument 2 share the
-  // opening line, so the list is neither on one line nor one element per line.
-  Cache.GetOrAdd(domainEvent.GetType(), type =>
-      services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
-
-  // Right.
-  Cache.GetOrAdd(
-      domainEvent.GetType(),
-      type => services.GetServices(typeof(IProjectionHandler<>).MakeGenericType(type)).Any());
-  ```
-
-  Once the lambda has its own line, "inside 120 columns it stays on one" is
-  measured on **that** line, not on the statement: the body above is 100 columns
-  and stays put, and breaking it after the `=>` would add an indent level that
-  clarifies no nesting. A body that does not fit takes the next line at + 4 as
-  usual, and a block body opens its `{` under the rule that governs braces.
-
-  The **block**-bodied DSL forms are untouched by this, and the block is the
-  reason rather than the argument count — `ReceiveEndpoint("q", e => { … })`
-  has an earlier argument like any other, and so does
-  `ComplexProperty(o => o.ShippingAddress, address => { … })`. Both keep their
-  shape because the final argument's `{` owns every line after it, so nothing
-  wraps raggedly back into the opening line. An expression-bodied lambda has no
-  such anchor, which is precisely why §9.6's `.Send(queue, ctx => …)` family
-  could not stay as it was.
-
-  **Nothing enforces this either**, and that was measured rather than assumed:
-  a probe carrying both forms built clean under IDE0055 and
-  `TreatWarningsAsErrors`, and `dotnet format whitespace` over it rewrote
-  nothing but the line endings. So the rule joins the `[` placement rule and
-  the `new()` rule as review's. **Seventeen** sites in the corpus had the
-  ragged form, sixteen of them lambdas: §7.5, §13.6, ten `.Send` calls in
-  §9.6's saga, §10.3's two `AddPolicy` calls, §6.3's `unitOfWork.ExecuteAsync`
-  and §9.4's outbox `Publish`. The seventeenth is an object initialiser —
-  §10.3's `WriteAsJsonAsync(new ProblemDetails { … }, ct)` — which breaks the
-  older list rule in the same shape and was fixed with them.
-
-  This file said "two", then "fourteen", and each count was made by someone who
-  had stopped looking. The progression is the finding rather than the tally,
-  and the last step names the trap: **the block exemption is about being the
-  final argument, not about the next line being `{`.** A sweep that greps for a
-  trailing `=>` and accepts any `{` beneath it walks straight past
-  `Publish(payload, type, c => { … }, ct)`, where an argument follows the
-  closing brace and the block therefore owns nothing. The detector that catches
-  those is the closer rather than the arrow — `^\s*[}\])],\s*\S`, a bracket
-  closing at the head of a line with an argument still after it. Run both.
-
-  The fixes divide the way the rule predicts. Eight of §9.6's ten fitted inside
-  120 columns the moment the lambda stopped hanging, so joining them was the
-  whole fix; every other site breaks at its own parenthesis with one argument
-  per line, the trailing `ct` included.
 - **Break at the outermost bracket, never a nested one.** When a call's argument
   is itself a call, it is the outer parenthesis that opens the line — reaching
   past it to break the inner one leaves the outer call glued to its argument and

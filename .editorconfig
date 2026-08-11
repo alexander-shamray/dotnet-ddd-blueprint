@@ -115,27 +115,12 @@ csharp_new_line_before_members_in_anonymous_types = true
 #     lambda is an argument like any other — never some arguments up on the
 #     call's line with the last one hanging. The carve-out is a trailing
 #     lambda whose body is a BRACED BLOCK, which keeps the leading arguments
-#     where they are; CLAUDE.md argues both halves. Checked rather than
-#     assumed: `dotnet format` neither introduces the ragged form nor undoes
-#     the corrected one, so nothing has to be pinned to keep a run idempotent.
+#     where they are — TRAILING being the load-bearing word, since an argument
+#     after the block ends the carve-out and the list breaks like any other.
+#     CLAUDE.md argues both halves. Checked rather than assumed: `dotnet
+#     format` neither introduces the ragged form nor undoes the corrected one,
+#     so nothing has to be pinned to keep a run idempotent.
 #   - A break goes at the outermost bracket, never a nested one.
-#   - A lambda in argument position is an element of the argument list, so its
-#     `=>` never trails the argument before it. `f(a, x => g(x))` either fits on
-#     one line or becomes `f(`/`a,`/`x => g(x))` — never `f(a, x =>` with the
-#     body hanging below, which is the ragged middle the list rule forbids.
-#     That governs EXPRESSION bodies. A BLOCK-bodied lambda that is the FINAL
-#     argument keeps its shape — `ReceiveEndpoint("q", e => { … })` — because
-#     its `{` owns every line after it, so nothing wraps back into the opening
-#     line. Not final and the exemption lapses: `Publish(a, b, c => { … }, ct)`
-#     is ragged like any other list, an argument sitting after the closing
-#     brace. CLAUDE.md carries the worked cases and the two greps that find them.
-#     Checked against the tools rather than assumed, the way the bracket rule
-#     above was: a probe file carrying both forms was built with IDE0055 at
-#     warning and ADR-019's TreatWarningsAsErrors — 0 warnings, so the ragged
-#     form does NOT fail the build — and `dotnet format whitespace` over the
-#     same file rewrote nothing but the line endings. Roslyn has no setting to
-#     reach for, nothing has to be pinned to keep a run idempotent, and this
-#     one is carried by review and CLAUDE.md alone.
 #   - A wrapped condition takes braces on its body.
 #   - `[` opens a line of its own at its construct's column, as `{` does and
 #     `(` does not. The brace half is enforced (see
