@@ -41,15 +41,15 @@ show up as untracked in every `git status` the chain reads, and put
 `grok-review.sh`'s clean-tree refusal in its blast radius. Nothing has to be
 added to `.gitignore` for a sibling, because there is nothing to ignore.
 
-**`/security-sweep` takes the opposite path deliberately, and the difference is
-the worktree's job.** That command forks a *detached* worktree under `mktemp -d`
-and removes it at the end; it carries no branch and nothing returns to it, and
-it refuses a sibling *by name* — partly because a root-level or container
-layout has no writable parent to put one in, which is a layout it has to keep
-working under rather than one it requires. This one holds a branch that a PR,
-two review loops and a person all come back to, so it wants a stable named
-directory beside the checkout rather than a temp path. Neither is the other's
-precedent — do not reconcile them by making one match.
+**The sweeps take the opposite path deliberately, and the difference is the
+worktree's job.** `/security-sweep` and `/bug-sweep` each fork a *detached*
+worktree under `mktemp -d` and remove it at the end; it carries no branch and
+nothing returns to it, and they refuse a sibling *by name* — partly because a
+root-level or container layout has no writable parent to put one in, which is a
+layout they have to keep working under rather than one they require. This one
+holds a branch that a PR, two review loops and a person all come back to, so it
+wants a stable named directory beside the checkout rather than a temp path.
+None is another's precedent — do not reconcile them by making one match.
 
 **A writable parent is the precondition for the sibling worktree, not for this
 command**, and it is the constraint `/security-sweep` warns about: a root-level
