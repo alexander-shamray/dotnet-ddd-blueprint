@@ -914,9 +914,18 @@ already written against it.
 
 - Four-space indent, spaces not tabs. CRLF line endings. Newline at end of file.
 - `using` directives **outside** the namespace; no blank lines between
-  consecutive usings. This one binds source only — the samples carry no `using`
-  directives at all, because they are excerpts rather than compilable units
-  (Appendix D). Do not "complete" a sample by adding them.
+  consecutive usings. This one binds source only — a sample is an excerpt
+  rather than a compilable unit (Appendix D), so **do not "complete" one by
+  adding the block it would need to build.**
+
+  It used to say the samples carry *no* `using` directives at all, and that was
+  already untrue when it was written. The blueprint carries exactly two, both
+  `using static`: §9.6's saga imports `Endpoints`, §12.4's subject suite
+  imports `Principals`. Neither is completeness, which is why both stand — an
+  unqualified `Authenticated(caller)` or a bare destination address reads as a
+  member of the type being shown unless something says otherwise, and the
+  directive is the only thing that can say so. A third is fine on those terms;
+  a plain `using` is not, and neither is a second line beside one of these.
 - **No unused `using` directives**, and a file that stops needing one drops it
   in the change that stopped needing it. A stale using is a claim that the file
   depends on something it does not, which is the same class of untruth as an
