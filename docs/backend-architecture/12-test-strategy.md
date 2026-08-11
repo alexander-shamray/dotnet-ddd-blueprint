@@ -335,9 +335,12 @@ public sealed class ServiceFixture : IAsyncLifetime
                     // TestAuthHandler issues the principal each test asks for,
                     // including its permission claims, so the authorization
                     // policies are exercised for real.
-                    // Only authenticate and challenge move. Forbid is left on
-                    // the bearer default deliberately: JwtBearerHandler answers
-                    // it with a bare 403 and touches no metadata, so a
+                    // Only authenticate and challenge are set, and forbid
+                    // follows the challenge one — DefaultForbidScheme is unset,
+                    // and the scheme provider falls back to
+                    // DefaultChallengeScheme before DefaultScheme. So the 403
+                    // comes from TestAuthHandler's inherited forbid, which is a
+                    // bare status code touching no metadata, and the
                     // wrong-permission test needs no identity provider either.
                     services.Configure<AuthenticationOptions>(o =>
                     {

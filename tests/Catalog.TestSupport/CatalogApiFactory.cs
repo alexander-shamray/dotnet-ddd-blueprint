@@ -124,10 +124,15 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
     /// thing; a method says it at the site that makes the decision, which is
     /// where the argument for it belongs.
     ///
-    /// Only the authenticate and challenge schemes move. Forbid is left on the
-    /// bearer default deliberately: <c>JwtBearerHandler</c> answers it with a
-    /// bare 403 and touches no metadata, so the wrong-permission test needs no
-    /// identity provider either.
+    /// Only the authenticate and challenge schemes are set, and forbid follows
+    /// the challenge one: <c>DefaultForbidScheme</c> is unset, and
+    /// <c>AuthenticationSchemeProvider</c> falls back to
+    /// <c>DefaultChallengeScheme</c> before <c>DefaultScheme</c>. So the 403 is
+    /// answered by <see cref="TestAuthHandler"/>'s inherited forbid — a bare
+    /// status code, no metadata — and the wrong-permission test needs no
+    /// identity provider either. Measured by resolving the provider rather
+    /// than assumed: this comment previously credited the bearer handler,
+    /// which never sees a forbid here.
     /// </remarks>
     protected virtual void ConfigureAuthentication(IServiceCollection services)
     {

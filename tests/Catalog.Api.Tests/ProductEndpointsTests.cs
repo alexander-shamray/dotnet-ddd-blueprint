@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using Catalog.Api;
 using Catalog.TestSupport;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 
@@ -121,6 +123,19 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
 
         int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");
         rows.ShouldBe(0, "a refused request must not reach the handler");
+
+        // Which handler answered it, because CatalogApiFactory makes a claim
+        // about that and the status code cannot tell them apart — a bare 403 is
+        // what the bearer handler and the test one both produce.
+        // DefaultForbidScheme is unset and the provider falls back to
+        // DefaultChallengeScheme before DefaultScheme, so the test scheme
+        // answers, which is why this needs no reachable authority.
+        IAuthenticationSchemeProvider schemes =
+            fixture.Factory.Services.GetRequiredService<IAuthenticationSchemeProvider>();
+
+        AuthenticationScheme? forbid = await schemes.GetDefaultForbidSchemeAsync();
+
+        forbid?.Name.ShouldBe(TestAuthHandler.SchemeName);
     }
 
     [Fact]
