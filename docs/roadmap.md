@@ -275,10 +275,19 @@ of first-time cost, which assumes the agent can run containers at all. If it
 cannot, PR-08, PR-12, PR-14 and PR-25 each grow and the schedule acquires an
 infrastructure dependency it does not currently have.
 
-**The Keycloak realm import.** PR-16's four days assume the realm is imported
+**The Keycloak realm import.** PR-16's four days assumed the realm is imported
 from a checked-in file that works the first time. Realm imports are reliably
 worse than expected, and PR-16 sits one hop off the critical path — close
 enough that a bad week there reaches the end date through PR-17 and PR-18.
+
+The risk landed, and cheaply. A hand-written import cost one wrong turn:
+Keycloak treats a `clientScopes` array as the complete set, so the readable
+thirty-line file it started as silently dropped the built-in scopes and with
+them the `sub` claim. Found in an afternoon by importing it into a container
+and reading a token, which is the mitigation this entry should have named —
+build the realm through the admin API, export it, and re-import the export.
+The remaining exposure is the same shape one service further on: PR-19's
+client-credentials audience is the half no file test can reach.
 
 **The `Directory.Build.props` analyzer policy is settled, and it is a tax.**
 [ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)

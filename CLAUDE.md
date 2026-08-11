@@ -88,9 +88,9 @@ tools/new-service/               §4.5's scaffold, its tests and its README.
                                  PR-10's build: stanzas, an image build
 
 deploy/compose/                  §14.1's infrastructure — seven services,
-                                 .env.example, the placeholder realm PR-16
-                                 replaces, the collector config, a ports
-                                 README; PR-10 added the first application
+                                 .env.example, PR-16's realm export in place
+                                 of the placeholder, the collector config, a
+                                 ports README; PR-10 added the first application
                                  pair (catalog-migrator + catalog-api, port
                                  5102) and the infra-only override — later
                                  blocks arrive with their services
@@ -118,7 +118,10 @@ src/BuildingBlocks/
                                  ICommandMessageMapper<TMessage,TCommand> —
                                  with ContractMappingException beside the
                                  second, which completes PluggableInterfaces.All
-                                 at five
+                                 at five. PR-16 added §11.4's ICurrentUser,
+                                 which is a port like the rest and not a
+                                 pluggable one: it is registered by name, in
+                                 Common.Web, rather than scanned for
   Common.Contracts/              §4.3's one assembly that crosses a service
                                  boundary, and complete since PR-15:
                                  IIntegrationEvent (§9.1's envelope, the type
@@ -172,9 +175,17 @@ src/BuildingBlocks/
                                  BuildInfo and the AddCommonWebDefaults that
                                  composes them — the only building block with a
                                  FrameworkReference (Catalog.Api's rides in
-                                 with Sdk.Web). Its reference to
-                                 Common.Application was the only edge between
-                                 building blocks until PR-14 drew three more
+                                 with Sdk.Web). PR-16 added §11.3's
+                                 AddJwtAuthentication with the Audience and
+                                 AuthorityKey constants, the "authenticated"
+                                 policy, PermissionClaim, RequirePermission and
+                                 HttpContextCurrentUser — the last two here
+                                 rather than per-service, because the
+                                 FrameworkReference is what IHttpContextAccessor
+                                 needs and this is the block that has one. Its
+                                 reference to Common.Application was the only
+                                 edge between building blocks until PR-14 drew
+                                 three more
 src/Services/Catalog/
   Catalog.Domain/                the first aggregate: Product (Publish factory,
                                  ProductPublishedDomainEvent), ProductId,
@@ -218,12 +229,16 @@ src/Services/Catalog/
                                  Reads ConnectionStrings:CatalogMigrator and
                                  never the runtime key (§7.1). Has a
                                  Dockerfile since PR-10, as does Catalog.Api
-  Catalog.Api/                   the composition root of §4.2 minus PR-16:
-                                 health probes, OpenAPI, and
-                                 Endpoints/ProductEndpoints — POST and GET
-                                 /v1/catalog/products, deliberately
-                                 unauthenticated, stated in
-                                 deploy/compose/README.md
+  Catalog.Api/                   the composition root of §4.2, complete since
+                                 PR-16: health probes, OpenAPI,
+                                 UseAuthentication/UseAuthorization, the one
+                                 catalog:write policy over CatalogPermissions,
+                                 and Endpoints/ProductEndpoints — POST and GET
+                                 /v1/catalog/products, the group failing closed
+                                 with RequireAuthorization() and the GET saying
+                                 AllowAnonymous() out loud, because §10.2's
+                                 catalog-public route is GET-only and carries
+                                 no policy
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on;
@@ -245,13 +260,22 @@ tests/
                                  with RecordedMeasurements reading the
                                  instruments back off a MeterListener
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
-                                 starts the real middleware pipeline in memory
+                                 starts the real middleware pipeline in memory.
+                                 PR-16 added the JWT options pin, the
+                                 ICurrentUser suite, the three
+                                 UseAuthentication assertions and
+                                 RealmImportTests — which reads
+                                 deploy/compose/keycloak/realm-export.json by
+                                 walking up to Platform.slnx, the only test in
+                                 the repo that reads a repository file
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
                                  SQL and RabbitMQ containers, real migrator
-                                 run, Respawn reset — and CatalogApiFactory
-                                 (both connection strings), shared by the
-                                 two suites below, which cannot reference
-                                 each other
+                                 run, Respawn reset — CatalogApiFactory (both
+                                 connection strings, the unreachable authority,
+                                 and a virtual ConfigureAuthentication one
+                                 factory overrides off) and PR-16's
+                                 TestAuthHandler, shared by the two suites
+                                 below, which cannot reference each other
   Catalog.Domain.Tests/          §4.2's gates in §12.1's homes: domain isolation
   Catalog.Application.Tests/     (allow-list now includes System.Collections and System.Linq —
   Catalog.Api.Tests/             a record's generated equality); ↛ EF Core,
@@ -420,18 +444,84 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 354 tests, so
+`Platform.slnx` holds nineteen projects and `dotnet test` runs 387 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
-`py -3.12 -m unittest` in `tools/new-service` runs 80, and CI has a `scaffold`
-job for them beside `licence-gate`. **PR-16 is next**
-(`feat(security): JWT bearer with mandatory per-service re-validation`), which
-is also what closes the deliberately unauthenticated endpoints PR-10's README
-names.
+`py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
+job for them beside `licence-gate`. **PR-17 is next**
+(`feat(gateway): YARP routing, JWT, rate limiting, CORS`), which is the first
+consumer of the `authenticated` policy PR-16 registered and of §10.2's route
+file — the two config tests in its Appendix C row are its real deliverable.
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-16 landed security — §11.3's JWT validation in `Common.Web`, §11.4's
+policies and port, the realm import — and seven of its decisions bind what
+comes after:
+
+- **`ICurrentUser` and `HttpContextCurrentUser` are common, not per-service,
+  and §11.4 was amended.** The chapter wrote `Ordering.Application` and
+  `Ordering.Infrastructure` for the same reason §9.4 wrote
+  `ordering.OutboxMessages` — it is Ordering's viewpoint. Nothing in either
+  type names a service. The implementation could not go in
+  `Common.Infrastructure` in any case: that project takes no
+  `FrameworkReference` and `IHttpContextAccessor` arrives with one, so
+  `Common.Web` is the only building block that can hold it. Both are
+  registered by `AddCommonWebDefaults`, beside the `AddHttpContextAccessor()`
+  without which `ValidateOnBuild` fails instead of the first ownership check.
+- **`Identity:Authority` is an eager read that throws naming the key, not an
+  options type.** §15.4 says `ServiceIdentityOptions` is deliberately the
+  *only* options type in the solution and argues why; a second bag bound to a
+  section holding one value is the shape that rule forbids. §12.4's fixture
+  comment claimed `OptionsValidationException` here and was amended. The
+  audience is a **constant** for the neighbouring reason — §11.5 gives the
+  platform one audience, so the value never varies between environments, which
+  is §15.4's own test for what is not configuration.
+- **The GET stays anonymous, permanently, and says so.** PR-10's README named
+  the whole slice as a temporary gap; only the write path was one. §10.2's
+  `catalog-public` route matches GET alone and carries no `AuthorizationPolicy`,
+  so a product listing is public at the edge and public here. The group fails
+  closed with `RequireAuthorization()` and the GET adds `AllowAnonymous()`
+  explicitly — absence and decision must not look the same.
+- **`WebApplication` adds the authentication middleware itself, so no test can
+  catch `app.UseAuthentication()` being deleted.** §4.2's ordering table said
+  its absence 403s every authenticated request and §12.4 named a 401 test as
+  the thing that catches it; both were checked by deleting the line, after
+  which every test in the repository still passed. Keep the explicit calls —
+  they are about **order**, they are required by any host that is not a
+  `WebApplication`, and an implicit pipeline is unreviewable — but do not
+  believe a test is watching them. `Common.Web.Tests` carries the three claims
+  that are true instead, the last being a regression guard on the framework.
+- **The realm is a full Keycloak export and shrinking it is a silent
+  catastrophe.** A hand-written import naming only the `commerce-api` client
+  scope is the obvious first attempt; Keycloak treats `clientScopes` as the
+  **complete** set, so the built-ins are never created and the token loses
+  `sub`, `preferred_username`, `email` and `realm_access` at once. `sub` is the
+  one that matters — `ICurrentUser.Id` reads it. Found by importing exactly
+  that file into a container and reading a token, which is also how the shipped
+  realm was verified. **Build a realm through the admin API and export it; do
+  not write one.**
+- **Permissions are client roles on a `commerce-api` client, not realm roles.**
+  Measured, not assumed: a realm-role mapper also emits `offline_access`,
+  `uma_authorization` and `default-roles-commerce` into the `permission` claim,
+  which puts Keycloak's internals into the platform's vocabulary and makes it
+  open-ended. The negative half is what the verification turned on — an
+  ungranted user must carry **no** `permission` claim at all.
+- **`TestAuthHandler`'s constant is `SchemeName`.** `AuthenticationHandler<T>`
+  already declares a protected `Scheme`, so §12.4's printed `public const
+  string Scheme` hides it, and CS0108 is an error under ADR-019. The sample had
+  been unbuildable since it was written; the same collision bit a second time
+  inside a nested probe handler, where `Scheme` silently bound to the base
+  property instead of the enclosing constant.
+
+**One finding against this file's own procedure**, worth keeping because it
+cost work: the scaffold cleanup CLAUDE.md prescribes ends with
+`git checkout -- Platform.slnx deploy/compose/`, which is correct only while
+the PR does not itself change `deploy/compose/`. PR-16 changes all three files
+in that tree, and the cleanup reverted them. **Commit before dogfooding the
+scaffold**, or restore the tree's own changes afterwards.
 
 PR-15 landed the consume side — §9's remaining contracts, §9.5's inbox, §9.4's
 two consumers and one retention purge over both tables — and six of its
@@ -646,20 +736,28 @@ after:
   `tools/new-service`'s suite red, and reconciling the script belongs in the
   same change.
 - **The scaffold copies no domain.** The slice is excluded by name, so a new
-  service is PR-07's state with the wiring accumulated through PR-15 on it —
+  service is PR-07's state with the wiring accumulated through PR-16 on it —
   five service projects, three test projects and a `TestSupport` library
   (§4.1 calls that last one *not* a test project, and counting it as one is a
   drift a review has already caught here), both images, the Compose pair, the
   `InitialCreate` migration with `AddOutbox`, `AddInbox` and
   `AddOutboxRetentionIndex` beside it, the bus
   registration with its harness smoke, §9.4's outbox and §9.5's inbox wired and
-  empty, the retention purge over both tables, and
-  fifty-five passing tests, and no aggregate.
-  Four things arrive with the first real slice, each noted at the line
+  empty, the retention purge over both tables, PR-16's token validation and
+  `TestAuthHandler`, and no aggregate.
+  Five things arrive with the first real slice, each noted at the line
   concerned in the generated code: `Dapper`, the application-test container
-  wiring, the two silent-scan registration tests, and — with the first domain
-  event — §12.4's round-trip assertion and a `JsonConverter` for any value
-  object that event carries.
+  wiring, the two silent-scan registration tests, the permission constant with
+  the policy that names it and `AuthorizationPolicyTests` beside them, and —
+  with the first domain event — §12.4's round-trip assertion and a
+  `JsonConverter` for any value object that event carries.
+
+  **The middleware stays and the policies go, and the split is the point.**
+  `UseAuthentication`/`UseAuthorization` are copied because §11.2 says every
+  host validates its own tokens whether or not it has an endpoint; a
+  `{Service}Permissions` constant and the policy registered from it leave with
+  the slice, because a permission nothing requires is a name in the realm
+  nobody can act on.
 - **The outbox and the inbox ship with their tables, which is why `AddOutbox`
   and `AddInbox` are copied
   rather than dropped with Catalog's other migrations.** A service carrying
@@ -830,9 +928,11 @@ that constrains the whole assembly. A sixth service's contracts arrive with
 that service. The same rule applies inside the others:
 `Common.Infrastructure` holds §8's Redis helpers, §9.4's outbox, §9.5's inbox
 and the two consumers, and `Common.Web`
-holds §10.4, §10.5, §13.2, §13.4 and §13.5, and nothing else until PR-16 adds
-JWT validation — which is also the one gap inside `AddCommonWebDefaults`,
-three of §13.2's five pieces today.
+holds §10.4, §10.5, §11.3, §11.4, §13.2, §13.4 and §13.5, and nothing else.
+**`AddCommonWebDefaults` is complete at all five of §13.2's pieces since
+PR-16** — the gap that file used to name was JWT validation, and closing it
+brought §11.4's port with it for want of anywhere else a
+`FrameworkReference` lives.
 
 `Common.Application` is the same story one layer down, with one list finished
 and one still short. The pipeline is three
@@ -858,7 +958,7 @@ Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 80 tests, no Docker, no SDK
+cd tools/new-service && py -3.12 -m unittest    # 81 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
