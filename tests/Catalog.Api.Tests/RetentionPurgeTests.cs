@@ -116,6 +116,48 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Two_endpoints_differing_outside_the_code_page_are_two_rows()
+    {
+        // The other half of the same guarantee, and the half a binary collation
+        // cannot give: the collation decides how stored values compare, and this
+        // is about what gets stored at all. AMQP 0-9-1 allows 255 bytes of UTF-8
+        // in a queue name, so the column has to be nvarchar — under varchar,
+        // every character outside the code page becomes `?`, and two endpoints
+        // that differ only there arrive as the same key.
+        //
+        // Cyrillic, and the choice is not decoration — it is what makes this
+        // test fail for the right reason. The first draft used `ő` and `ū`,
+        // reasoning that anything outside the code page becomes `?`; SQL Server
+        // does not do that. It **best-fit folds** what it can, so those two
+        // arrived as `catalog-o` and `catalog-u`: two distinct rows, silently
+        // wrong, and the count assertion below stayed green over the defect it
+        // was written to catch. `ж` and `д` have no Latin form to fold to, so
+        // both become `catalog-?` and the second insert is a key violation.
+        //
+        // Both assertions are kept because the two failures are different.
+        // Folding corrupts the value without colliding; a character with no
+        // fallback collides. Either one loses a message, and only one of them
+        // moves the count.
+        var messageId = Guid.CreateVersion7();
+
+        await fixture.StageInboxAsync(new InboxMessage(messageId, "catalog-ж", Recently));
+        await fixture.StageInboxAsync(new InboxMessage(messageId, "catalog-д", Recently));
+
+        IReadOnlyList<InboxMessage> rows = await fixture.InboxAsync();
+
+        rows.Count.ShouldBe(
+            2,
+            "varchar folds both endpoints to 'catalog-?', so the second insert is a " +
+            "primary-key violation — and a message dropped by the mechanism that exists " +
+            "to drop only duplicates");
+
+        // What the column owes the filter is the endpoint it was handed,
+        // unchanged. This is the assertion that catches the folding case, which
+        // the count cannot see.
+        rows.Select(r => r.Endpoint).ShouldBe(["catalog-ж", "catalog-д"], ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task An_inbox_row_is_purged_on_age_alone()
     {
         // The asymmetry with the outbox, and it is deliberate: an inbox row

@@ -28,6 +28,14 @@ namespace Catalog.Infrastructure.Persistence.Migrations;
 /// <c>BIN2</c> rather than <c>CS_AS</c>: an endpoint address is an identifier
 /// matched exactly, and linguistic comparison has no meaning over it.
 /// </para>
+/// <para>
+/// <b>And <c>nvarchar</c>, because the collation only governs what was already
+/// stored.</b> This column was <c>varchar</c> for one revision on the claim that
+/// queue names are ASCII; AMQP 0-9-1 allows 255 bytes of UTF-8, so two legal
+/// endpoints differing outside the code page both land as the same run of
+/// <c>?</c> and collide in the key — the second endpoint's message suppressed as
+/// a duplicate it never was.
+/// </para>
 /// </remarks>
 public partial class AddInbox : Migration
 {
@@ -40,8 +48,7 @@ public partial class AddInbox : Migration
             {
                 MessageId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 Endpoint = table.Column<string>(
-                    type: "varchar(300)",
-                    unicode: false,
+                    type: "nvarchar(300)",
                     maxLength: 300,
                     nullable: false,
                     collation: "Latin1_General_BIN2"),

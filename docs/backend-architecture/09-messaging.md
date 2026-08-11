@@ -1514,7 +1514,13 @@ CREATE TABLE ordering.InboxMessages
     -- arrived on the second would be suppressed as a duplicate of a delivery
     -- it never received. BIN2 rather than CS_AS: an endpoint address is
     -- matched exactly, and linguistic comparison has no meaning over it.
-    Endpoint    VARCHAR(300) COLLATE Latin1_General_BIN2 NOT NULL,
+    --
+    -- NVARCHAR for the same reason one rule earlier. AMQP 0-9-1 gives a queue
+    -- name up to 255 bytes of UTF-8, so under VARCHAR two legal endpoints
+    -- differing outside the code page both store as the same run of `?` and
+    -- collide in the key below — the collation compares faithfully what the
+    -- column already lost.
+    Endpoint    NVARCHAR(300) COLLATE Latin1_General_BIN2 NOT NULL,
     HandledAt   DATETIMEOFFSET   NOT NULL,
     CONSTRAINT PK_InboxMessages PRIMARY KEY (MessageId, Endpoint)
 );

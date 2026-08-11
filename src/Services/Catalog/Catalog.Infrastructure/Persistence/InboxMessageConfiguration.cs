@@ -23,21 +23,31 @@ internal sealed class InboxMessageConfiguration : IEntityTypeConfiguration<Inbox
         // suppress the other.
         builder.HasKey(m => new { m.MessageId, m.Endpoint });
 
-        // varchar, not nvarchar, and this is the opposite call to the outbox's
-        // MessageType column one file over — deliberately. That column holds a
-        // type's FullName, which C# permits to be Unicode, so narrowing it
-        // would let the domain's language decide whether a message could be
-        // delivered. This one holds a queue address: MassTransit composes it
-        // from the endpoint name, and a RabbitMQ queue name is ASCII by the
-        // transport's own rules rather than by assumption.
+        // nvarchar, like the outbox's MessageType column one file over, and the
+        // reason is the same one stated there: narrowing a column that is half
+        // a key lets an encoding decide whether a message is delivered.
+        //
+        // This was varchar for one revision, on the claim that "a RabbitMQ queue
+        // name is ASCII by the transport's own rules" — which is simply untrue.
+        // AMQP 0-9-1 gives a queue name up to 255 bytes of UTF-8, so two legal
+        // endpoint names differing only outside the code page both arrive here
+        // as the same run of `?` characters. They then collide in the composite
+        // key below, and the second endpoint's first message is suppressed as
+        // already handled — a message dropped by the mechanism whose entire
+        // purpose is dropping only true duplicates, and dropped silently,
+        // because a suppressed message looks exactly like a suppressed
+        // duplicate. The collation cannot help: it compares what was stored,
+        // and the loss happens on the way in.
         //
         // 300 is §9.5's width, and it is generous on purpose — the value is a
         // path, so a virtual host prefixes the queue name on any broker
-        // configured with one.
+        // configured with one. Unicode doubles the bytes rather than the
+        // characters; the composite key is then 616 bytes against SQL Server's
+        // 900-byte clustered-index limit, which is why the width did not have
+        // to move with the type.
         builder
             .Property(m => m.Endpoint)
             .HasMaxLength(300)
-            .IsUnicode(false)
 
             // Binary collation, because this column is half a key rather than
             // text. SQL Server's default is case-insensitive, and a broker's

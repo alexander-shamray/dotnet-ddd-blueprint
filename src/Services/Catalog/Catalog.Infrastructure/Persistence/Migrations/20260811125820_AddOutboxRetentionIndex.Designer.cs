@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Catalog.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CatalogDbContext))]
-    [Migration("20260811103503_AddOutboxRetentionIndex")]
+    [Migration("20260811125820_AddOutboxRetentionIndex")]
     partial class AddOutboxRetentionIndex
     {
         /// <inheritdoc />
@@ -80,8 +80,7 @@ namespace Catalog.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Endpoint")
                         .HasMaxLength(300)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(300)")
+                        .HasColumnType("nvarchar(300)")
                         .UseCollation("Latin1_General_BIN2");
 
                     b.Property<DateTimeOffset>("HandledAt")
