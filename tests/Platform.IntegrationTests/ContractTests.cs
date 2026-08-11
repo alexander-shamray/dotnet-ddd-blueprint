@@ -52,11 +52,23 @@ public class ContractTests
     private const string VersionedNamespace = @"^Common\.Contracts\.[A-Za-z]+\.V\d+$";
 
     /// <summary>
-    /// A concrete, public type anywhere under <c>Common.Contracts</c> — the
-    /// root included, which is the half a trailing dot silently dropped.
+    /// A concrete type visible outside the assembly, anywhere under
+    /// <c>Common.Contracts</c> — the root included, which is the half a
+    /// trailing dot silently dropped.
     /// </summary>
+    /// <remarks>
+    /// <b><c>IsVisible</c>, not <c>IsPublic</c>, and the difference is a second
+    /// hole of the same kind.</b> <c>IsPublic</c> is false for every nested
+    /// type, <em>including</em> one declared <c>public</c> inside a public
+    /// class — those report <c>IsNestedPublic</c> instead. A contract nested in
+    /// a public type is as reachable by a consumer as any other and would have
+    /// fallen out of discovery entirely, bypassing the namespace, sample,
+    /// required-member and round-trip checks alike. <c>IsVisible</c> is the
+    /// question actually being asked: can something outside this assembly name
+    /// it.
+    /// </remarks>
     internal static bool IsContract(Type type) =>
-        type.IsPublic &&
+        type.IsVisible &&
         type is { IsInterface: false, IsAbstract: false } &&
         type.Namespace is string ns &&
         (ns == "Common.Contracts" || ns.StartsWith("Common.Contracts.", StringComparison.Ordinal));
@@ -95,6 +107,25 @@ public class ContractTests
 
         Regex.IsMatch(typeof(Common.Contracts.UnversionedProbe).Namespace!, VersionedNamespace)
             .ShouldBeFalse("and it must then fail the rule it breaks");
+    }
+
+    [Fact]
+    public void Discovery_sees_a_contract_nested_inside_a_public_type()
+    {
+        // The second positive control, for the second hole of the same kind.
+        // `Type.IsPublic` is false for every nested type — including one
+        // declared `public` inside a public class, which reports
+        // `IsNestedPublic` instead — so a contract in that position bypassed
+        // the namespace, sample, required-member and round-trip checks alike
+        // while being as reachable by a consumer as any other.
+        //
+        // `IsVisible` asks the question that was meant: can something outside
+        // this assembly name it.
+        IsContract(typeof(Common.Contracts.NestingProbe.NestedProbe)).ShouldBeTrue(
+            "a nested public contract is visible to every consumer, so discovery must see it too");
+
+        typeof(Common.Contracts.NestingProbe.NestedProbe).IsPublic.ShouldBeFalse(
+            "and IsPublic is the property that says otherwise — which is why it was the wrong one");
     }
 
     [Fact]

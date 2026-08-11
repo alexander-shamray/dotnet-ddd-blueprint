@@ -26,8 +26,13 @@ public sealed class RetentionPurgeService : BackgroundService
 {
     // Compiled once rather than parsed per call — CA1848 (ADR-019), and the
     // same shape §9.4's dispatcher takes for the same reason.
-    private static readonly Action<ILogger, string, int, Exception?> Purged =
-        LoggerMessage.Define<string, int>(
+    // The generic arguments bind to the placeholders BY POSITION, not by the
+    // delegate's parameter names — so `Define<string, int>` against
+    // "{Rows} … {Table}" logged Rows="outbox" and Table=5, rendering "deleted
+    // outbox row(s) from 5". Nothing fails, the structured fields are simply
+    // transposed, and only reading the output shows it.
+    private static readonly Action<ILogger, int, string, Exception?> Purged =
+        LoggerMessage.Define<int, string>(
             LogLevel.Information,
             new EventId(1, nameof(Purged)),
             "Retention purge deleted {Rows} row(s) from {Table}.");
@@ -132,10 +137,10 @@ public sealed class RetentionPurgeService : BackgroundService
         DateTimeOffset now = scope.ServiceProvider.GetRequiredService<TimeProvider>().GetUtcNow();
 
         int outbox = await DeleteAsync(connection, _outboxSql, now - _policy.OutboxWindow, ct);
-        Purged(_log, "outbox", outbox, null);
+        Purged(_log, outbox, "outbox", null);
 
         int inbox = await DeleteAsync(connection, _inboxSql, now - _policy.InboxWindow, ct);
-        Purged(_log, "inbox", inbox, null);
+        Purged(_log, inbox, "inbox", null);
 
         return (outbox, inbox);
     }

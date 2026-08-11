@@ -21,3 +21,18 @@ namespace Common.Contracts;
 /// </para>
 /// </remarks>
 public sealed record UnversionedProbe(Guid Id);
+
+/// <summary>
+/// A public holder for the nested probe below, so discovery can be asked the
+/// other question <c>IsPublic</c> answered wrongly.
+/// </summary>
+public static class NestingProbe
+{
+    /// <summary>
+    /// A contract nested inside a public type. <c>Type.IsPublic</c> is false
+    /// for every nested type — even one declared <c>public</c> — so a contract
+    /// in this position fell out of discovery entirely while being as reachable
+    /// by a consumer as any other.
+    /// </summary>
+    public sealed record NestedProbe(Guid Id);
+}
