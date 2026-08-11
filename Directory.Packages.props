@@ -63,9 +63,11 @@
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.1" />
     <!-- Exact major. v9 is commercially licensed — see ADR-003. The core
          package is a transitive of the transport one, pinned separately
-         because the harness smoke references it directly — the in-memory
-         harness is core API, not transport, and a test project that uses no
-         transport must not claim one. Same version: they ship as one
+         because two things reference it directly: the harness smoke, since
+         the in-memory harness is core API and a test project that uses no
+         transport must not claim one, and Common.Infrastructure since PR-14,
+         for the IPublishEndpoint the outbox dispatcher publishes the Broker
+         lane through (§9.4). Same version as the transport: they ship as one
          release. -->
     <PackageVersion Include="MassTransit" Version="8.5.3" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
