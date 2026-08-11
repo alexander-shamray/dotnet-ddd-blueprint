@@ -1102,12 +1102,15 @@ document has argued about in prose and, until now, asserted nowhere.
 > Keep the explicit calls: they are §4.2's specified shape, they are required
 > by any host that is not a `WebApplication`, and a pipeline whose order is
 > implicit is one nobody can review. What changed is the claim about what would
-> notice their absence. `Common.Web.Tests` carries the three assertions that
+> notice their absence. `Common.Web.Tests` carries the four assertions that
 > are actually true — that the middleware is what populates `HttpContext.User`,
-> that the authorization middleware does not authenticate on its own, and that
-> a `WebApplication` auto-adds it. The last is a regression guard on the
-> framework: were a release to stop doing it, every service would hand
-> anonymous callers to its handlers while its authorization kept passing.
+> that the authorization middleware does not authenticate on its own, that a
+> `WebApplication` auto-adds it, and that auto-insertion does **not** repair
+> the two calls being written in the wrong order. The third is a regression
+> guard on the framework: were a release to stop doing it, every service would
+> hand anonymous callers to its handlers while its authorization kept passing.
+> The fourth is what [§4.2](04-solution-structure.md)'s ordering row rests on,
+> and it is the reason that row no longer says reversal is harmless.
 
 ### The subject rule, enforced
 

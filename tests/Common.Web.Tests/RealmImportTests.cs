@@ -32,8 +32,10 @@ public class RealmImportTests
 
     /// <summary>
     /// The client the compose README's login names, and the only one in the
-    /// realm that mints a token a person uses — the other seven are Keycloak's
-    /// own. Assertions about "a usable token" are about this client's.
+    /// realm that mints a token a person uses. The realm holds eight: this one,
+    /// the <c>commerce-api</c> resource client that owns the permission roles,
+    /// and Keycloak's own six. Assertions about "a usable token" are about
+    /// this client's.
     /// </summary>
     private const string TokenClient = "web-app";
 

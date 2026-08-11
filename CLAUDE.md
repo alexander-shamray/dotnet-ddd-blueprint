@@ -264,8 +264,11 @@ tests/
   Common.Web.Tests/              + Microsoft.AspNetCore.TestHost; TestPipeline.cs
                                  starts the real middleware pipeline in memory.
                                  PR-16 added the JWT options pin, the
-                                 ICurrentUser suite, the three
-                                 UseAuthentication assertions and
+                                 ICurrentUser suite, the four
+                                 UseAuthentication assertions (the fourth being
+                                 that reversal is not what deletion is), the
+                                 permission-policy suite, the inbound
+                                 claim-mapping pair and
                                  RealmImportTests — which reads
                                  deploy/compose/keycloak/realm-export.json by
                                  walking up to Platform.slnx, the only test in
@@ -451,7 +454,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 404 tests, so
+`Platform.slnx` holds nineteen projects and `dotnet test` runs 408 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -1122,7 +1125,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 98 tests running in about a second. A shared xUnit collection was rejected
+is 102 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.
