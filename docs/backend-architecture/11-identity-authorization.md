@@ -368,11 +368,23 @@ vocabulary either way.
 ### The subject rule
 
 > **A subject identifier is bound from the principal, never from the request.**
-> `ICurrentUser.Id` is the only source of "whose order is this" on a command or
-> a query. A `CustomerId` sitting in a command record, a query record, a request
-> DTO or a query string is a field any authenticated caller sets to somebody
-> else's subject — and no validator catches it, because `NotEmpty()` is true of
-> another customer's GUID.
+> On any operation that arrives with a principal behind it — every HTTP command
+> and query in this blueprint — `ICurrentUser.Id` is the only source of "whose
+> order is this". A `CustomerId` sitting in a command record, a query record, a
+> request DTO or a query string is a field any authenticated caller sets to
+> somebody else's subject, and no validator catches it, because `NotEmpty()` is
+> true of another customer's GUID.
+
+> **The message path is not covered by that rule, and is not yet settled.** A
+> command arriving over the broker has no principal at all — the sending
+> service is the caller — so there is nothing for `ICurrentUser` to answer
+> with, and §9.6's `AuthorisePayment` accordingly carries a `CustomerId` as a
+> message field. That is the honest state rather than an oversight: the
+> subject on a message is only as trustworthy as the broker's authorisation,
+> which today is one shared principal (§9.4's callout). Stating the rule
+> without this exclusion would put it in contradiction with the saga two
+> chapters over. What the message side should do instead is an open question,
+> not a decision this chapter has taken.
 
 This is one rule with three consequences, and the worked slices show all three:
 `PlaceOrderCommand` ([§6.4](06-cqrs.md)) carries no `CustomerId` and its handler

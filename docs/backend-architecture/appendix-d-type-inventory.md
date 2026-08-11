@@ -27,7 +27,7 @@ repeatable check; noticing by eye is not.
 | `IDomainEventDispatcher` | §7.5 | Stages outbox rows; runs no handlers |
 | `IProjectionRegistry` | §7.5 | Which event types have projection handlers |
 | `IProductPriceReader` | §6.4 | Prices from the **local** projection — never a remote call |
-| `ICurrentUser` | [§11.4](11-identity-authorization.md) | The caller, for resource-level checks, and the **only** source of a subject identifier on a command or query (§11.4's subject rule). `IsAuthenticated` is false on the consumer path |
+| `ICurrentUser` | [§11.4](11-identity-authorization.md) | The caller, for resource-level checks, and the **only** source of a subject identifier on a principal-bearing command or query — every HTTP one (§11.4's subject rule). `IsAuthenticated` is false on the consumer path, where there is no principal to bind from and §9.6's `AuthorisePayment` still carries a `CustomerId` field |
 | `CommandOrigin` | §11.4 | `User` \| `System`, saying which path a command arrived on. `User` is the zero value, so an origin nobody set fails closed. Written as a literal at each entry point — never bound from a request or a message |
 | `CancelOrderCommand`, `CancelOrderRequest`, `CancelOrderHandler` | §11.4 | The slice both entry paths converge on — HTTP and `CommandConsumer` (§9.4). The command carries a `CommandOrigin`; the request does not |
 | `CancellationReasons` | §11.4 | Wire code → `CancellationReason`; the single parse both paths call |

@@ -1055,7 +1055,7 @@ argued about in prose and, until now, asserted nowhere.
 [§11.4](11-identity-authorization.md)'s subject rule is the kind of rule that
 holds by omission — a command with no `CustomerId` field cannot be pointed at
 another customer — and a rule that holds by omission is one a later refactor
-reinstates without noticing. These four are what make it fail loudly instead.
+reinstates without noticing. These five are what make it fail loudly instead.
 
 ```csharp
 using static Ordering.TestSupport.Principals;   // Authenticated, Anonymous
@@ -1132,6 +1132,31 @@ public class SubjectBindingTests(ServiceFixture fixture) : IAsyncLifetime
             currentUser: Authenticated(owner));
 
         own.Items.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task An_owner_cancels_their_own_order()
+    {
+        // The positive user-origin case, and the suite is unsound without it:
+        // every other CommandOrigin.User assertion here is a refusal, so a
+        // handler that rejected the user path outright would pass everything
+        // below while disabling customer cancellation completely. The status
+        // assertion is the half that matters — IsSuccess alone is satisfied by
+        // a handler that returns Success and writes nothing.
+        var owner = Guid.CreateVersion7();
+        Guid orderId = await fixture.SeedOrderAsync(customerId: owner);
+
+        Result result = await fixture.DispatchAsync(
+            new CancelOrderCommand(orderId, CancellationReason.CustomerRequest, CommandOrigin.User),
+            currentUser: Authenticated(owner));
+
+        result.IsSuccess.ShouldBeTrue();
+
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        Order order = await db.Orders.SingleAsync(o => o.Id == new OrderId(orderId));
+
+        order.Status.ShouldBe(OrderStatus.Cancelled);
     }
 
     [Fact]
@@ -1267,7 +1292,7 @@ in for the clock. What "mock only what you do not own" forbids is doubling the
 repository underneath these tests, and none of them does — the orders are real
 rows in a real database, seeded through the aggregate.
 
-These four run at the dispatcher rather than over HTTP, and that is not a
+These five run at the dispatcher rather than over HTTP, and that is not a
 shortcut. Two of them describe states HTTP cannot produce against §11.4's
 endpoint group: `RequireAuthorization` turns a caller-less request into a 401
 before any handler runs, so the fail-open the old guard admitted is invisible
@@ -1281,13 +1306,13 @@ the other direction, and the direction that fails silently — refusing
 compensations — surfaces as orders stuck in `AwaitingStock` long after the
 deployment that caused it.
 
-**Two of the four carry an origin, and both state it rather than earning it.**
-The system case constructs `CommandOrigin.System` directly, which is the right
-way to test the *check* — and it leaves the only production code that assigns
-it, `CancelOrderMapper` (§9.4), unasserted. A mapper stamping `User` would pass
-every test above and reject every real compensation — the failure the pair was
-written to catch, arriving by the one route the pair cannot see. Two short
-tests close it — the stamp, and the parse that stands in front of it:
+**Three of the five carry an origin, and each states it rather than earning
+it.** The system case constructs `CommandOrigin.System` directly, which is the
+right way to test the *check* — and it leaves the only production code that
+assigns it, `CancelOrderMapper` (§9.4), unasserted. A mapper stamping `User`
+would pass every test above and reject every real compensation — the failure
+the pair was written to catch, arriving by the one route the pair cannot see.
+Two short tests close it — the stamp, and the parse that stands in front of it:
 
 ```csharp
 [Fact]
