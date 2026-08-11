@@ -280,8 +280,16 @@ grants now go through fixed helpers — `git-worktree-detach.sh` and
 defeats the refusal this command's own teardown relies on as its guard. The
 helpers bind the path as well as the flags, and the path half is the one that
 matters here: **both refuse anything that is not `secsweep-` plus six
-characters directly under the canonical temp root**, which is the only shape
-this command's own `mktemp -d` produces. Registration was not enough on its
+characters under the canonical temp root**, which is the shape
+this command's own `mktemp -d` produces. **Not *directly* under it, though the
+comments long said so:** a bash `case` pattern does no pathname expansion, so
+`?` matches `/` too, and `"$tmproot"/secsweep-??????` accepts
+`$tmproot/secsweep-a/bbbb` as well as `$tmproot/secsweep-abc123` — checked by
+running both through a `case`, against controls of the wrong length, the wrong
+prefix and the wrong root, all correctly refused. Prefix and length are
+enforced; direct-childness is not. The fix is to compare `dirname "$resolved"`
+against `$tmproot` and match the basename alone, in both helpers.
+Registration was not enough on its
 own — every sibling PR worktree is registered too, and a poisoned finding
 naming one would otherwise have been able to delete it. What each refuses
 beyond that differs and is worth naming rather than averaging:

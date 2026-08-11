@@ -1758,13 +1758,25 @@ withhold a build.
 
 **Both sweeps' worktrees carry the `secsweep-` prefix, and the second one is
 borrowing.** `git-worktree-detach.sh` and `git-worktree-drop.sh` refuse any path
-that is not `secsweep-` plus six characters directly under the canonical temp
+that is not `secsweep-` plus six characters under the canonical temp
 root — the shape check that stops a poisoned finding from naming a sibling PR
 worktree and having it deleted. Those helpers are `Edit`-denied to a command
 session, so `/bug-sweep` satisfies the shape that exists rather than widening
 it. The accepted path set is unchanged and `mktemp -d` names are unique, so
 nothing is less safe; what is lost is attribution, since a stray temp directory
 no longer says which sweep left it.
+
+**Not *directly* under the root, which both helpers' comments claimed for
+longer than it was true.** A bash `case` pattern does no pathname expansion, so
+`?` matches `/` as happily as any other character, and
+`"$tmproot"/secsweep-??????` accepts `$tmproot/secsweep-a/bbbb` as well as
+`$tmproot/secsweep-abc123` — run through a `case` rather than reasoned about,
+with the wrong length, the wrong prefix and the wrong root all correctly
+refused. Prefix and length hold; direct-childness does not. It predates
+`/bug-sweep`, so nothing about a second caller made it worse, and the fix is
+one line in each helper: compare `dirname "$resolved"` against `$tmproot` and
+match the basename alone. It is owed together with the `mktemp` narrowing
+below, both needing the same deny lifted.
 
 **Both helpers' header comments were retitled for "a sweep" in the same PR**,
 because they had named `/security-sweep` as their only caller — "and nothing

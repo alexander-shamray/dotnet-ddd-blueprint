@@ -167,13 +167,27 @@ bash .claude/scripts/git-worktree-detach.sh "$work" "$pinned"   # pin that exact
 **The `secsweep-` prefix is not a copy-paste slip, and it is this command's one
 piece of borrowed clothing.** `git-worktree-detach.sh` and
 `git-worktree-drop.sh` both refuse any path that is not `secsweep-` plus six
-characters directly under the canonical temp root — a shape check written so
+characters under the canonical temp root — a shape check written so
 that only a sweep's own `mktemp -d` can produce an accepted path, since the
 audited tree is prompt-injection input and a poisoned finding naming a sibling
 PR worktree would otherwise be able to delete it. Those helpers live under
 `.claude/scripts/`, which is `Edit`-denied to a command session by design, so
 this command cannot widen the shape to `bugsweep-` and must satisfy the one
 that exists.
+
+**That check is weaker than "directly under the temp root", and the reason is
+a shell subtlety worth carrying.** In a bash `case` pattern there is no
+pathname expansion, so `?` matches **any** character including `/` — the
+pattern `"$tmproot"/secsweep-??????` therefore accepts
+`$tmproot/secsweep-a/bbbb` as readily as `$tmproot/secsweep-abc123`. Verified
+by running both through a `case`, with `secsweep-abc12`, `secsweep-abc1234`,
+`other-abc123` and a path under another root all correctly refused. So the
+prefix and the length are enforced; the *direct child* part is not, and this
+file claimed it was. Predates this command — the pattern arrived with
+`/security-sweep` — so nothing here made it worse, but the fix belongs with
+the `mktemp` one above: compare `dirname "$resolved"` against `$tmproot` and
+match the basename alone, in both helpers, which is the same edit with the
+same deny lifted.
 
 **What it costs is attribution, not safety.** The accepted path set is
 unchanged, `mktemp -d` names are unique so two sweeps cannot collide, and the
