@@ -182,6 +182,26 @@ public class RealmImportTests
 
         browser.TryGetProperty("clientRoles", out JsonElement granted)
             .ShouldBeFalse("'browser' exists to prove a refusal, so it must hold no client role at all");
+
+        // And that both can log in at all. A user disabled, or carrying a
+        // credential Keycloak marks temporary — which forces a password reset
+        // the README's non-interactive grant cannot perform — fails the
+        // documented commands with a 401 while every role assertion above
+        // stays green.
+        foreach (string username in (string[])["demo", "browser"])
+        {
+            JsonElement user = users.EnumerateArray()
+                .Single(u => u.GetProperty("username").GetString() == username);
+
+            user.GetProperty("enabled").GetBoolean()
+                .ShouldBeTrue($"'{username}' is one of §11.5's two documented logins");
+
+            JsonElement password = user.GetProperty("credentials").EnumerateArray()
+                .Single(c => c.GetProperty("type").GetString() == "password");
+
+            password.GetProperty("temporary").GetBoolean()
+                .ShouldBeFalse($"a temporary credential makes '{username}' unusable by the README's password grant");
+        }
     }
 
     [Fact]
@@ -197,7 +217,13 @@ public class RealmImportTests
                 .OfType<string>()
         ];
 
-        roles.ShouldContain("catalog:write");
+        // The whole set, not a containment check — the test is named for a
+        // closed vocabulary and ShouldContain would permit any number of
+        // undeclared permissions to be grantable in Keycloak. A service's
+        // permissions join this list in the PR that registers the policy
+        // requiring them, which is the same rule §11.4 states for the
+        // constants.
+        roles.ShouldBe(["catalog:write"]);
     }
 
     [Fact]
@@ -217,10 +243,27 @@ public class RealmImportTests
         // Verified by importing exactly that trimmed file into a fresh
         // Keycloak 26.0 and reading the resulting token, which is the only way
         // this is observable at all.
+        string[] builtins = ["basic", "profile", "email", "roles", "web-origins", "acr"];
         string[] names = [.. ClientScopes.Select(s => s.GetProperty("name").GetString()).OfType<string>()];
 
-        foreach (string builtin in (string[])["basic", "profile", "email", "roles", "web-origins", "acr"])
+        foreach (string builtin in builtins)
             names.ShouldContain(builtin, $"'{builtin}' is a Keycloak built-in; a realm that declares clientScopes and omits it never creates it");
+
+        // Declared is not assigned, and the gap between them is the same defect
+        // by a shorter route: dropping `basic` from web-app's defaultClientScopes
+        // takes `sub` out of the README's token while the scope itself still
+        // exists in the realm and every assertion above stays green.
+        string[] assigned =
+        [
+            .. Root.GetProperty("clients").EnumerateArray()
+                .Single(c => c.GetProperty("clientId").GetString() == TokenClient)
+                .GetProperty("defaultClientScopes").EnumerateArray()
+                .Select(s => s.GetString())
+                .OfType<string>()
+        ];
+
+        foreach (string builtin in builtins)
+            assigned.ShouldContain(builtin, $"'{TokenClient}' does not receive '{builtin}', so its tokens are missing what that scope carries");
     }
 
     [Fact]
