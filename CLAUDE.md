@@ -314,12 +314,12 @@ the domain allow-list gate forces one. If `py -3.12 -m unittest` in
 the same change; that is the price of having one copy of the wiring instead of
 two.
 
-Planned, per §4.1 — do not invent a different shape for it. The three building
-blocks built so far are shown above; the tree below is the target shape, and
-its annotations mark what has already landed:
+Planned, per §4.1 — do not invent a different shape for it. All five building
+blocks are shown above; the tree below is the target shape, and its
+annotations mark what has already landed:
 
 ```
-src/BuildingBlocks/   .Contracts (the other four exist)
+src/BuildingBlocks/   all five exist — .Contracts since PR-14
 src/Gateway/          Gateway.Api (YARP)
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
@@ -446,7 +446,7 @@ consumer on it yet — and five of its decisions bind what comes after:
   delivers — and deliberately not the `UsingRabbitMq` half, which the swap
   removes and `DatabaseSmokeTests` asserts against a real broker. A
   test-local record carries the smoke: no contract invented before
-  `Common.Contracts` (PR-15), no retry policy before the receive endpoints
+  `Common.Contracts` existed, no retry policy before the receive endpoints
   it attaches to (§9.8).
 
 PR-12 landed §8 as code — `Common.Infrastructure`, the fourth building block,

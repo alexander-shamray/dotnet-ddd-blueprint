@@ -377,6 +377,12 @@ public sealed class RequestMetrics
 ```csharp
 // Common.Infrastructure — registered by AddOrderingInfrastructure, because
 // all three call sites are Infrastructure types (§9.4).
+//
+// The finished class. It grows in instalments, on PluggableInterfaces.All's
+// terms: Projected lands with the outbox, because ProjectionInvoker is its
+// only call site, and the other two with the consumers that record them. Two
+// instruments nothing writes to would be an empty series on a dashboard
+// rather than a signal — see Appendix D, which records where the code is.
 public sealed class MessagingMetrics
 {
     private readonly Histogram<double> _deliveryLag;

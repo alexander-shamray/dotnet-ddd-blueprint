@@ -125,7 +125,7 @@ COPIED = frozenset(
 )
 
 # PR-10's slice, and nothing else. A scaffolded service is PR-07's state with
-# the wiring accumulated through PR-13 on it — not PR-10's state with the
+# the wiring accumulated through PR-14 on it — not PR-10's state with the
 # nouns changed. Renaming Product to Order would hand the next service a
 # deletion job and a vocabulary it did not choose.
 OMITTED = frozenset(
