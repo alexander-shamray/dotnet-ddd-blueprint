@@ -36,6 +36,8 @@ MIGRATION_ID = "20260809120000"
 # it out here rather than calling next_migration_id keeps the assertion
 # independent of the arithmetic it is checking.
 OUTBOX_MIGRATION_ID = "20260809120100"
+# And the inbox migration's, one minute on again, spelt out for the same reason.
+INBOX_MIGRATION_ID = "20260809120200"
 PORT = 5101
 
 
@@ -396,30 +398,54 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         # schema that does not exist yet.
         self.assertLess(MIGRATION_ID, OUTBOX_MIGRATION_ID)
 
+    def test_it_copies_the_inbox_migration_under_the_id_after_that(self):
+        # §9.5's table travels for the mirror of the outbox's reason: the
+        # retention purge deletes from both tables from first boot, so a
+        # service carrying the purge without this table logs a failed delete
+        # every pass. Consuming nothing does not exempt it — the template
+        # itself consumes nothing and has the table for exactly this.
+        migration = f"{self.prefix}/{INBOX_MIGRATION_ID}_AddInbox.cs"
+        self.assertIn(migration, self.rendered.created)
+        self.assertIn('name: "InboxMessages"', self.rendered.created[migration])
+        self.assertLess(OUTBOX_MIGRATION_ID, INBOX_MIGRATION_ID)
+
+    def test_the_inbox_migration_keeps_no_claim_about_the_templates_own_row(self):
+        # The template carries this table while binding no receive endpoint,
+        # and *why* is a fact about its row in §3.2 rather than about the
+        # service being scaffolded. The rule survives the copy; the reason does
+        # not travel with it.
+        migration = self.rendered.created[f"{self.prefix}/{INBOX_MIGRATION_ID}_AddInbox.cs"]
+        self.assertIn("runs from first boot and purges both tables", migration)
+        self.assertNotIn("Consumes cell", migration)
+
     def test_it_leaves_no_later_catalog_migration_behind(self):
-        # Five files: two migrations, their two designers, and the snapshot.
-        # Catalog's own AddProducts is what must not be here.
+        # Seven files: three migrations, their three designers, and the
+        # snapshot. Catalog's own AddProducts is what must not be here.
         migrations = [path for path in self.rendered.created if path.startswith(self.prefix)]
-        self.assertEqual(5, len(migrations), migrations)
+        self.assertEqual(7, len(migrations), migrations)
         self.assertFalse([path for path in migrations if "AddProducts" in path])
 
-    def test_the_snapshot_describes_the_outbox_and_nothing_else(self):
+    def test_the_snapshot_describes_both_messaging_tables_and_nothing_else(self):
         # Catalog's snapshot cannot be copied — it describes Product, and the
         # next `migrations add` here would generate a drop for a table that
         # never existed. This one is EF's own description of the model a
-        # scaffolded service actually has: the outbox entity, no aggregate.
+        # scaffolded service actually has: the outbox and inbox entities, no
+        # aggregate.
         #
-        # Both halves matter. Without the outbox entity the first
-        # `migrations add` would emit a second CreateTable for a table
-        # InitialCreate's neighbour has already created; with Product in it,
-        # a drop.
+        # Both halves matter, and the inbox is the half that was easy to miss.
+        # Deriving the snapshot from the outbox migration's designer — the last
+        # one until PR-15 — would omit an entity the DbContext maps, so the
+        # first `migrations add` would emit a second CreateTable for a table
+        # the scaffolded migrations had already created. With Product in it, a
+        # drop.
         snapshot = self.rendered.created[f"{self.prefix}/ZuluDbContextModelSnapshot.cs"]
         self.assertIn("partial class ZuluDbContextModelSnapshot : ModelSnapshot", snapshot)
         self.assertIn("protected override void BuildModel(ModelBuilder modelBuilder)", snapshot)
         self.assertIn('.HasDefaultSchema("zulu")', snapshot)
         self.assertNotIn("[Migration(", snapshot)
         self.assertIn('modelBuilder.Entity("Common.Infrastructure.Outbox.OutboxMessage"', snapshot)
-        self.assertEqual(1, snapshot.count("modelBuilder.Entity("))
+        self.assertIn('modelBuilder.Entity("Common.Infrastructure.Inbox.InboxMessage"', snapshot)
+        self.assertEqual(2, snapshot.count("modelBuilder.Entity("))
         self.assertNotIn("Product", snapshot.replace("ProductVersion", ""))
 
     def test_the_machine_owned_files_keep_the_sorted_using_block_ef_writes(self):
@@ -990,7 +1016,7 @@ class TheCommandLine(unittest.TestCase):
 
             self.assertEqual(0, code)
             self.assertEqual("", err)
-            self.assertIn("46 files created, 5 updated", out)
+            self.assertIn("51 files created, 5 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

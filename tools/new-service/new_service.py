@@ -98,6 +98,7 @@ COPIED = frozenset(
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/OutboxPublisher.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/EfUnitOfWork.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/OutboxMessageConfiguration.cs",
+        "src/Services/Catalog/Catalog.Infrastructure/Persistence/InboxMessageConfiguration.cs",
         "src/Services/Catalog/Catalog.Migrator/Catalog.Migrator.csproj",
         "src/Services/Catalog/Catalog.Migrator/Dockerfile",
         "src/Services/Catalog/Catalog.Migrator/MigrationRunner.cs",
@@ -115,7 +116,9 @@ COPIED = frozenset(
         "tests/Catalog.Api.Tests/IntegrationCollection.cs",
         "tests/Catalog.Api.Tests/MessageTypeMapValidatorTests.cs",
         "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs",
+        "tests/Catalog.Api.Tests/InboxFilterTests.cs",
         "tests/Catalog.Api.Tests/OutboxDispatcherTests.cs",
+        "tests/Catalog.Api.Tests/RetentionPurgeTests.cs",
         "tests/Catalog.Api.Tests/TransientFaultInjection.cs",
         "tests/Catalog.TestSupport/Catalog.TestSupport.csproj",
         "tests/Catalog.TestSupport/CatalogApiFactory.cs",
@@ -677,6 +680,52 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "    for this project to exist.\n",
         ),
     ),
+    # Both of the entries below carry the same argument out of a copied file:
+    # *why* Catalog binds no receive endpoint is a fact about Catalog's row in
+    # §3.2, and a scaffolded service inherits the state without inheriting the
+    # reason. The generic replacement says the rule the reason produced.
+    "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs": (
+        (
+            "        // Asserted rather than assumed, which is PR-14's shape one lane over:\n"
+            "        // that PR asserted Catalog stages no Local row rather than leaving the\n"
+            "        // absence to be inferred.\n"
+            "        //\n"
+            "        // §3.2 gives Catalog exactly one Consumes cell — StockLevelChanged,\n"
+            "        // owned by Inventory, which does not exist. Even with the contract now\n"
+            "        // present (PR-15), binding it would create an endpoint whose every\n"
+            "        // message reaches §9.4's throw: \"the endpoint binds this type, so\n"
+            "        // something should handle it\" is one of the two sites where an empty\n"
+            "        // handler list must fail, and §8.4's cache invalidator — the handler\n"
+            "        // that eventually arrives — needs a cached query to invalidate.\n",
+            "        // Asserted rather than assumed: an absence nobody states is an absence\n"
+            "        // nobody notices changing.\n"
+            "        //\n"
+            "        // A consumer belongs here once §3.2 gives this service something to\n"
+            "        // consume and an IIntegrationEventHandler exists for it. Binding a\n"
+            "        // type with no handler registered creates an endpoint whose every\n"
+            "        // message reaches §9.4's throw: \"the endpoint binds this type, so\n"
+            "        // something should handle it\" is one of the two sites where an empty\n"
+            "        // handler list must fail rather than proceed.\n",
+        ),
+        (
+            "            \"a consumer here is a subscription §3.2 does not give Catalog — and one bound with no \" +\n",
+            "            \"a consumer here is a subscription §3.2 does not give this service — and one bound with no \" +\n",
+        ),
+    ),
+    "tests/Catalog.Api.Tests/InboxFilterTests.cs": (
+        (
+            "/// Catalog binds no receive endpoint of its own (§3.2 gives it one Consumes\n"
+            "/// cell, owned by a service that does not exist), so this suite declares the\n"
+            "/// endpoints it needs. That is the same reason PR-14's <c>Local</c> lane was\n"
+            "/// proven by handlers in <c>Catalog.TestSupport</c>: the mechanism lands before\n"
+            "/// the first service that uses it, and inventing a consumer for Catalog would\n"
+            "/// be inventing a subscription §3.2 does not give it.\n",
+            "/// This service binds no receive endpoint of its own yet, so this suite\n"
+            "/// declares the endpoints it needs. The mechanism lands before the first\n"
+            "/// consumer that uses it, and binding one here to make a test easier would be\n"
+            "/// inventing a subscription §3.2 does not give this service.\n",
+        ),
+    ),
     "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs": (
         (
             "/// PR-08's deliverables against a real engine: the migrator applies the schema\n",
@@ -694,21 +743,24 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // two of three applied twice.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(3);\n"
+            "        applied.Length.ShouldBe(4);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddProducts\");\n"
-            "        applied[2].ShouldEndWith(\"_AddOutbox\");\n",
+            "        applied[2].ShouldEndWith(\"_AddOutbox\");\n"
+            "        applied[3].ShouldEndWith(\"_AddInbox\");\n",
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
             "        // apply every migration in sequence, and a count alone would pass on\n"
-            "        // one of two applied twice. Two is what a scaffolded service starts\n"
-            "        // with — the schema, then §9.4's outbox table, which is wiring every\n"
-            "        // service has rather than anything this one chose.\n"
+            "        // one of three applied twice. Three is what a scaffolded service\n"
+            "        // starts with — the schema, then §9.4's outbox table and §9.5's\n"
+            "        // inbox, which are wiring every service has rather than anything\n"
+            "        // this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(2);\n"
+            "        applied.Length.ShouldBe(3);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
-            "        applied[1].ShouldEndWith(\"_AddOutbox\");\n",
+            "        applied[1].ShouldEndWith(\"_AddOutbox\");\n"
+            "        applied[2].ShouldEndWith(\"_AddInbox\");\n",
         ),
     ),
 }
@@ -749,6 +801,40 @@ OUTBOX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
         "/// hand-authored (file-scoped namespace, this comment, the field CA1861 asks\n"
         "/// for). The <c>.Designer.cs</c> and the snapshot beside it are machine-owned\n"
         "/// and untouched.\n",
+    ),
+)
+
+# And the inbox migration's, for the same reason again. Its remark argues why
+# Catalog carries a table it never writes to, which is a fact about Catalog;
+# the scaffolded service's copy states the general rule the argument produced.
+INBOX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
+    (
+        "/// §9.5's inbox table, generated from <see cref=\"InboxMessageConfiguration\"/>\n"
+        "/// on <c>AddOutbox</c>'s terms — the configuration is the source of truth and\n"
+        "/// only this file's dress is hand-authored (file-scoped namespace, this\n"
+        "/// comment). The <c>.Designer.cs</c> and the snapshot beside it are\n"
+        "/// machine-owned and untouched.\n",
+        "/// §9.5's inbox table, generated from <see cref=\"InboxMessageConfiguration\"/>\n"
+        "/// — the configuration is the source of truth and only this file's dress is\n"
+        "/// hand-authored (file-scoped namespace, this comment). The\n"
+        "/// <c>.Designer.cs</c> and the snapshot beside it are machine-owned and\n"
+        "/// untouched.\n",
+    ),
+    (
+        "/// <b>The table ships to every service, including the ones that consume\n"
+        "/// nothing.</b> Catalog binds no receive endpoint yet (§3.2 gives it one\n"
+        "/// Consumes cell, owned by a service that does not exist), so nothing writes a\n"
+        "/// row here — but <c>RetentionPurgeService</c> runs from first boot and purges\n"
+        "/// both tables, and a purge against a table that is not there logs a failure\n"
+        "/// every pass. That is the same argument that keeps <c>AddOutbox</c> in the\n"
+        "/// scaffold's output, inverted: the dispatcher would fail a claim, this would\n"
+        "/// fail a delete.\n",
+        "/// <b>The table arrives before the first consumer, deliberately.</b> A service\n"
+        "/// that binds no receive endpoint writes no row here — but\n"
+        "/// <c>RetentionPurgeService</c> runs from first boot and purges both tables,\n"
+        "/// and a purge against a table that is not there logs a failure every pass.\n"
+        "/// That is the same argument that keeps the outbox migration here, inverted:\n"
+        "/// the dispatcher would fail a claim, this would fail a delete.\n",
     ),
 )
 
@@ -838,7 +924,20 @@ INITIAL_CREATE = re.compile(r"^\d{14}_InitialCreate(\.Designer)?\.cs$")
 # failed claim twice a second from its first boot. So this migration is copied
 # with InitialCreate rather than dropped with Catalog's model changes.
 OUTBOX_MIGRATION = re.compile(r"^\d{14}_AddOutbox(\.Designer)?\.cs$")
+# The inbox table travels for the mirror of the outbox's reason: §9.5 gives
+# every service one, the retention purge runs from first boot and deletes from
+# both, and a service that carried the purge without the table would log a
+# failed delete every pass. Consuming nothing does not exempt it — Catalog
+# itself consumes nothing and has the table for exactly this.
+INBOX_MIGRATION = re.compile(r"^\d{14}_AddInbox(\.Designer)?\.cs$")
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
+
+# The migrations a scaffolded service starts with, in the order they are
+# applied — which is the order their ids have to be generated in. A list rather
+# than three named constants, because every place below that cares needs the
+# position rather than the name: the id is the base plus the index in minutes,
+# and the snapshot is derived from the last one's designer.
+TEMPLATE_MIGRATIONS = (INITIAL_CREATE, OUTBOX_MIGRATION, INBOX_MIGRATION)
 
 # The two files that accumulate a block per service, and the markers that bound
 # one block. Both were sliced to the end of the file once, which is the same
@@ -966,7 +1065,7 @@ def classify(repo_root: Path) -> list[str]:
             # the guard below ever seeing it — the one directory where the
             # scaffold's "it will not guess" promise silently did not hold.
             name = PurePosixPath(relative).name
-            if INITIAL_CREATE.fullmatch(name) or OUTBOX_MIGRATION.fullmatch(name):
+            if any(shape.fullmatch(name) for shape in TEMPLATE_MIGRATIONS):
                 copied.append(relative)
             elif LATER_MIGRATION.fullmatch(name) or name == f"{TEMPLATE}DbContextModelSnapshot.cs":
                 pass
@@ -985,10 +1084,10 @@ def classify(repo_root: Path) -> list[str]:
                 f"the scaffold will not guess."
             )
 
-    # Two pairs, counted separately. One number for both would be satisfied by
-    # four InitialCreate files and no outbox — which is precisely the state
+    # Each pair counted separately. One number for all three would be satisfied
+    # by six InitialCreate files and no outbox — which is precisely the state
     # that ships a dispatcher with no table behind it.
-    for shape, label in ((INITIAL_CREATE, "InitialCreate"), (OUTBOX_MIGRATION, "AddOutbox")):
+    for shape, label in zip(TEMPLATE_MIGRATIONS, ("InitialCreate", "AddOutbox", "AddInbox"), strict=True):
         pair = [p for p in copied if shape.fullmatch(PurePosixPath(p).name)]
         if len(pair) != 2:
             raise ScaffoldError(
@@ -1090,11 +1189,17 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
     Catalog's snapshot cannot be copied — it describes `Product`, and the next
     `migrations add` in a service that has no such entity would generate a
     drop. Writing one by hand would break the rule that machine-owned files are
-    left exactly as the tool wrote them. The outbox migration's designer
-    resolves both: it already holds EF's description of a model with the outbox
-    entity in it, which is what a scaffolded service has once
+    left exactly as the tool wrote them. The *last* template migration's
+    designer resolves both: it already holds EF's description of a model with
+    both messaging entities in it, which is what a scaffolded service has once
     `without_slice_entity` has taken the aggregate out, so the class wrapper is
     rewritten and the model body is never retyped.
+
+    The last one, and taking an earlier one would be wrong in a way with no
+    symptom until the service's first `migrations add`: the outbox designer
+    knows nothing of the inbox, so the snapshot would omit a table the
+    `DbContext` maps and EF would generate a second `CreateTable` for one the
+    scaffolded migrations had already created.
 
     The designer reaching here has already had the aggregate removed — the
     render loop does that before its slice check, so that a failed removal
@@ -1104,9 +1209,9 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
     text = designer
     for needle, replacement in (
         ("using Microsoft.EntityFrameworkCore.Migrations;\n", ""),
-        (f'    [Migration("{migration_id}_AddOutbox")]\n', ""),
+        (f'    [Migration("{migration_id}_AddInbox")]\n', ""),
         (
-            "    partial class AddOutbox\n",
+            "    partial class AddInbox\n",
             "    partial class CatalogDbContextModelSnapshot : ModelSnapshot\n",
         ),
         ("        /// <inheritdoc />\n", ""),
@@ -1115,7 +1220,7 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
             "        protected override void BuildModel(ModelBuilder modelBuilder)\n",
         ),
     ):
-        require_once(text, needle, "AddOutbox.Designer.cs")
+        require_once(text, needle, "AddInbox.Designer.cs")
         text = text.replace(needle, replacement)
     return text
 
@@ -1159,8 +1264,8 @@ def sort_usings(text: str) -> str:
     return "".join(lines)
 
 
-def next_migration_id(migration_id: str) -> str:
-    """The id one minute after the given one, keeping EF's 14-digit shape.
+def next_migration_id(migration_id: str, minutes: int = 1) -> str:
+    """The id `minutes` after the given one, keeping EF's 14-digit shape.
 
     A plain `int(...) + 1` is wrong on every boundary the format has: second 59
     rolls into 60, and so do minute, hour and month. Parsed and re-formatted
@@ -1174,7 +1279,7 @@ def next_migration_id(migration_id: str) -> str:
     adding a minute leaves what `datetime` can represent.
     """
     try:
-        stamp = datetime.strptime(migration_id, "%Y%m%d%H%M%S") + timedelta(minutes=1)
+        stamp = datetime.strptime(migration_id, "%Y%m%d%H%M%S") + timedelta(minutes=minutes)
     except (ValueError, OverflowError) as error:
         raise ScaffoldError(
             f"--migration-id {migration_id} is fourteen digits but not a timestamp: {error}"
@@ -1198,6 +1303,8 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
             patches = (*patches, *INITIAL_CREATE_PATCHES)
         elif PurePosixPath(relative).name.endswith("_AddOutbox.cs"):
             patches = (*patches, *OUTBOX_MIGRATION_PATCHES)
+        elif PurePosixPath(relative).name.endswith("_AddInbox.cs"):
+            patches = (*patches, *INBOX_MIGRATION_PATCHES)
         for needle, replacement in patches:
             require_once(text, needle, relative)
             text = text.replace(needle, replacement)
@@ -1207,7 +1314,12 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
         # check immediately below is exactly the check that should see the
         # result — a Product block surviving the removal must stop the run, not
         # reach the file the service ships.
-        if PurePosixPath(relative).name.endswith("_AddOutbox.Designer.cs"):
+        # Both designers, not only the last one. Each describes the model as of
+        # its own migration and each therefore carries Catalog's aggregate, so
+        # leaving the earlier one alone would ship a service a designer that
+        # claims a table it never creates — and would trip the slice check
+        # below, which is the guard that made this obvious.
+        if PurePosixPath(relative).name.endswith(("_AddOutbox.Designer.cs", "_AddInbox.Designer.cs")):
             text = without_slice_entity(text)
 
         # Before the rename, where a slice token means only itself. Doing this
@@ -1233,13 +1345,22 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
             # order they are applied in. The outbox one takes the second, a
             # minute later: EF sorts by this prefix, and a service whose outbox
             # table were ordered before its schema would fail on the first run.
-            new_id = migration_id if INITIAL_CREATE.fullmatch(name) else next_migration_id(migration_id)
+            # Three migrations, so three ids, and the order between them is the
+            # order they are applied in — EF sorts by this prefix, so a service
+            # whose outbox table were ordered before its schema would fail on
+            # the first run. One minute apart, by position in the list rather
+            # than by name: a fourth template migration is then an entry there
+            # and no arithmetic here.
+            offset = next(
+                index for index, shape in enumerate(TEMPLATE_MIGRATIONS) if shape.fullmatch(name)
+            )
+            new_id = next_migration_id(migration_id, offset) if offset else migration_id
             target = f"{MIGRATIONS}/{name.replace(template_id, new_id, 1)}"
             text = text.replace(template_id, new_id)
             rendered = names.rename(text)
             if name.endswith(".Designer.cs"):
                 rendered = sort_usings(rendered)
-                if OUTBOX_MIGRATION.fullmatch(name):
+                if offset == len(TEMPLATE_MIGRATIONS) - 1:
                     # Only the last migration's designer describes the model
                     # the service ends up with, and the snapshot is a
                     # description of exactly that.
