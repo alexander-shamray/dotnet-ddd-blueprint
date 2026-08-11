@@ -27,6 +27,18 @@ public class OutboxTableTests
         new OutboxTable("user").QualifiedName.ShouldBe("[user].OutboxMessages");
     }
 
+    [Fact]
+    public void A_schema_longer_than_sysname_is_refused()
+    {
+        // 128 characters is what SQL Server's `sysname` holds. Past it the
+        // type would construct, and every statement composed from it would
+        // fail at runtime instead — a registration-time refusal is the whole
+        // point of validating here. The scaffold already stops a service name
+        // this long, and a value it lets through must not fail deeper in.
+        Should.NotThrow(() => new OutboxTable(new string('c', 128)));
+        Should.Throw<ArgumentException>(() => new OutboxTable(new string('c', 129)));
+    }
+
     [Theory]
     [InlineData("catalog; DROP TABLE catalog.Products --")]
     [InlineData("catalog.OutboxMessages")]

@@ -50,6 +50,11 @@ public sealed partial class OutboxTable
     /// <summary>Schema-qualified and delimited, ready to interpolate.</summary>
     public string QualifiedName { get; }
 
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]
+    // Bounded at 128, which is what `sysname` holds: a longer schema
+    // constructs happily here and then fails every statement composed
+    // from it at runtime. One leading character plus 127 more. The
+    // scaffold already refuses a service name past this limit, and a
+    // value it lets through must not fail deeper in.
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial Regex Identifier();
 }

@@ -740,7 +740,9 @@ public sealed partial class OutboxTable
 
     public string QualifiedName { get; }
 
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$")]
+    // Bounded at 128, which is what `sysname` holds: a longer schema
+    // constructs happily and then fails every statement composed from it.
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial Regex Identifier();
 }
 ```
