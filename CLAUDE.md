@@ -144,10 +144,11 @@ src/BuildingBlocks/
                                  executor), ToHttpResult, AddObservability,
                                  MapCommonHealthEndpoints, SensitiveDataRedactor,
                                  BuildInfo and the AddCommonWebDefaults that
-                                 composes them — the only building block
-                                 referencing another, and the only one with a
+                                 composes them — the only building block with a
                                  FrameworkReference (Catalog.Api's rides in
-                                 with Sdk.Web)
+                                 with Sdk.Web). Its reference to
+                                 Common.Application was the only edge between
+                                 building blocks until PR-14 drew three more
 src/Services/Catalog/
   Catalog.Domain/                the first aggregate: Product (Publish factory,
                                  ProductPublishedDomainEvent), ProductId,
@@ -232,22 +233,34 @@ tests/
 The second block is PR-01's, the third PR-02's through PR-05's, the
 compose tree PR-06's, the Catalog trees PR-07's, their persistence
 PR-08's, the third behaviour with its two ports PR-09's, the slices,
-endpoints, TestSupport and container half PR-10's, and
-`Common.Infrastructure` with its tests PR-12's.
-`Common.Application` does **not** reference `Common.Domain` yet — §4.2
-permits it, but an unused project reference is a claim about the dependency
-graph that nothing yet makes true. PR-08's `IUnitOfWork` did not change that
-and could not: no member of it names a domain type, which is the whole reason
-`ExecuteRawAsync` takes `string` and `object`. **The edge is not PR-09's**,
-though this file and two comments beside it said so until a review checked the
-claim — §6.3's behaviour reads `ModifiedAggregateCount` as an `int`, and the
-`is IAggregateRoot` test it is derived from lives in `EfUnitOfWork`, on
-Infrastructure's side of §4.2. Counting behind the port is precisely what
-keeps it there. The edge belongs to the first Application type that really
-names a domain type, which on the plan is §7.5's `IDomainEventCollector` and
-its `IReadOnlyList<IDomainEvent>` — so it arrives with the outbox.
-`Common.Web → Common.Application` is the one edge that has been drawn, because
-`ToHttpResult` maps an `Error` and cannot be written without one.
+endpoints, TestSupport and container half PR-10's,
+`Common.Infrastructure` with its tests PR-12's, the bus registration PR-13's,
+and the outbox with `Common.Contracts` beside it PR-14's.
+
+Three edges exist between building blocks, and every one of them waited for a
+type that could not be written without it:
+
+- `Common.Application → Common.Domain`, drawn by PR-14. §4.2 permitted it from
+  the start; what it lacked was a member naming a domain type, and an unused
+  project reference is a claim about the dependency graph that nothing makes
+  true. §7.5's `IDomainEventCollector` returns `IReadOnlyList<IDomainEvent>`
+  and settled it.
+- `Common.Infrastructure → Common.Application`, `Common.Domain` and
+  `Common.Contracts`, all three drawn by PR-14's outbox. `MessageTypeMap`
+  selects on `IDomainEvent` **or** `IIntegrationEvent`, which is why the last
+  two arrive together.
+- `Common.Web → Common.Application`, the oldest, because `ToHttpResult` maps
+  an `Error` and cannot be written without one.
+
+**Which PRs did *not* draw the first edge is worth keeping, because the
+argument still binds the two files concerned.** PR-08's `IUnitOfWork` could not:
+no member of it names a domain type, which is the whole reason `ExecuteRawAsync`
+takes `string` and `object`. **Nor was it PR-09's**, though this file and two
+comments beside it said so until a review checked the claim — §6.3's behaviour
+reads `ModifiedAggregateCount` as an `int`, and the `is IAggregateRoot` test it
+is derived from lives in `EfUnitOfWork`, on Infrastructure's side of §4.2.
+Counting behind the port is precisely what keeps it there, and **the reference
+now existing is not permission for either of them to stop**.
 
 The licence gate lives under `.github/` rather than a `build/` directory
 because it is CI-only and §4.1 draws no such tree. It is stdlib Python, reads
@@ -658,12 +671,11 @@ three of §13.2's five pieces today.
 `Common.Application` is the same story one layer down. The pipeline is three
 behaviours of four: **`IdempotencyBehavior` (§8.5) does not exist**, and its
 seat is between Validation and Transaction. Built to be appended to in the
-same way is
-`PluggableInterfaces.All`, which lists three of its eventual five —
-`IProjectionHandler<>` joined with PR-14's outbox, and the two still missing
-name interfaces §9.4's consumers have not defined yet. Adding an interface there and nowhere else is
-the design; adding one before its PR is inventing a project early by another
-route.
+same way is `PluggableInterfaces.All`, which lists three of its eventual
+five — `IProjectionHandler<>` joined with PR-14's outbox, and the two still
+missing name interfaces §9.4's consumers have not defined yet. Adding an
+interface there and nowhere else is the design; adding one before its PR is
+inventing a project early by another route.
 
 The commands are the ones the target solution uses:
 
