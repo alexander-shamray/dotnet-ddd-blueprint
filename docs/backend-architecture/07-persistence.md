@@ -114,32 +114,38 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         // Value object mapped as a complex type — columns on the same table,
         // no identity, exactly matching the domain semantics.
-        builder.ComplexProperty(o => o.ShippingAddress, address =>
-        {
-            address.Property(a => a.Line1).HasColumnName("ShipLine1").HasMaxLength(200);
-            address.Property(a => a.City).HasColumnName("ShipCity").HasMaxLength(100);
-            address.Property(a => a.PostCode).HasColumnName("ShipPostCode").HasMaxLength(20);
-            address.Property(a => a.Country).HasColumnName("ShipCountry").HasMaxLength(2);
-        });
+        builder.ComplexProperty(
+            o => o.ShippingAddress,
+            address =>
+            {
+                address.Property(a => a.Line1).HasColumnName("ShipLine1").HasMaxLength(200);
+                address.Property(a => a.City).HasColumnName("ShipCity").HasMaxLength(100);
+                address.Property(a => a.PostCode).HasColumnName("ShipPostCode").HasMaxLength(20);
+                address.Property(a => a.Country).HasColumnName("ShipCountry").HasMaxLength(2);
+            });
 
         // Backing field, not the public read-only property.
         builder.Metadata
             .FindNavigation(nameof(Order.Lines))!
             .SetPropertyAccessMode(PropertyAccessMode.Field);
 
-        builder.OwnsMany<OrderLine>("_lines", line =>
-        {
-            line.ToTable("OrderLines", "ordering");
-            line.WithOwner().HasForeignKey("OrderId");
-            line.Property<Guid>("Id");
-            line.HasKey("Id");
-
-            line.ComplexProperty(l => l.UnitPrice, money =>
+        builder.OwnsMany<OrderLine>(
+            "_lines",
+            line =>
             {
-                money.Property(m => m.Amount).HasColumnName("UnitAmount").HasPrecision(19, 4);
-                money.Property(m => m.Currency).HasColumnName("Currency").HasMaxLength(3);
+                line.ToTable("OrderLines", "ordering");
+                line.WithOwner().HasForeignKey("OrderId");
+                line.Property<Guid>("Id");
+                line.HasKey("Id");
+
+                line.ComplexProperty(
+                    l => l.UnitPrice,
+                    money =>
+                    {
+                        money.Property(m => m.Amount).HasColumnName("UnitAmount").HasPrecision(19, 4);
+                        money.Property(m => m.Currency).HasColumnName("Currency").HasMaxLength(3);
+                    });
             });
-        });
 
         // Optimistic concurrency — SQL Server maintains this automatically.
         builder.Property(o => o.Version).IsRowVersion();

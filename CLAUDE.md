@@ -1151,40 +1151,70 @@ already written against it.
   than trading off, and the result is one line per argument with nothing
   wrapped inside either.
 
-  **The carve-out is a trailing lambda whose body is a braced block**, which
-  keeps the leading arguments on the call's line:
+  **There is no carve-out, and a braced body does not earn one.** An argument
+  list holding a lambda has exactly two legal shapes, tried in this order:
 
   ```csharp
-  cfg.ReceiveEndpoint("ordering-commands", e =>
-  {
-      e.UseInMemoryOutbox();
-  });
+  // 1. One line, if it fits inside 120. Always preferred.
+  Publish(payload, type, c => { … }, ct);
+
+  // 2. Otherwise one argument per line — the lambda included, braces and all.
+  Publish(
+      payload,
+      type,
+      c => { … },
+      ct);
+
+  // And if the lambda itself will not fit on its line, its braces open under
+  // the rule that governs braces, at the argument's own column.
+  Publish(
+      payload,
+      type,
+      c =>
+      {
+          c.MessageId = message.MessageId;
+          c.CorrelationId = message.CorrelationId;
+      },
+      ct);
   ```
 
-  A braced body is a container whose extent its own braces already show, and
-  `});` marks where the call ends — the two things one-argument-per-line would
-  otherwise be buying. This is the same distinction that makes `(` hug its call
-  while `{` and `[` take lines of their own, and it is what the corpus has
-  always done: **twelve** block-lambda sites — eleven across §7.2, §9.4, §9.6
-  and §9.8, plus `ProductConfiguration` — are written this way, and applying
-  the list rule through the carve-out would rewrite every builder DSL in the
-  blueprint into a shape no C# codebase uses. The **eighteen** sites that were
-  genuinely ragged were corrected in the same pass.
+  This replaced a carve-out that kept the leading arguments up on the call's
+  line whenever the trailing lambda had a braced body — `ReceiveEndpoint("q",
+  e => { … })` and the eleven other builder-DSL sites across §7.2, §9.4, §9.6
+  and §9.8, plus `ProductConfiguration`. The argument for it was that braces
+  already show the block's extent and `});` already marks the call's end, so
+  one-argument-per-line bought nothing; the argument against is that it made
+  the rule undecidable from the call site. Whether a leading argument may stay
+  up depended on the *last* argument's body kind and on whether anything
+  followed it — two lookaheads, and a reviewer who performed only the first got
+  `Publish(payload, type, c => { … }, ct)` wrong. That case cost this branch a
+  review round, and the count of ragged sites went "two, then fourteen, then
+  seventeen, then eighteen" while the carve-out stood.
 
-  **Nothing carves out an argument that follows the lambda.** `Publish(payload,
-  type, c => { … }, ct)` has a real element after the block, so the block stops
-  being trailing and the whole list breaks one per line. Nor is a lambda the
-  only thing that can hang: `WriteAsJsonAsync(new ProblemDetails { … }, ct)` is
-  the same shape with an object initialiser in the lambda's place, and §10.3
-  had one.
+  **The cost is real and is accepted**: every builder DSL in the blueprint now
+  breaks across four or five lines where it used to open on one, and that is a
+  shape most C# codebases do not use. It buys a rule with no lookahead — does
+  it fit on one line, or does every argument get its own — which is the same
+  rule the rest of this section already applies to every other list.
 
-  **Grep for that case from the closer, not the arrow.** A sweep that looks for
-  a trailing `=>` and accepts any `{` beneath it walks straight past it, because
-  the next line genuinely is `{` — what disqualifies it is the argument after
-  the closing brace, which the arrow pattern never sees. `^\s*[}\])],\s*\S`
-  finds them: a bracket closing at the head of a line with an element still
-  after it. Run both patterns. Each misses what the other catches, and a count
-  taken from one of them reads as though the corpus had been swept.
+  A **single**-argument call is untouched by any of this, because there is no
+  leading argument to strand: `AddRateLimiter(options => { … })` and
+  `app.Use(async (context, next) => { … })` keep their shape.
+
+  Nor is a lambda the only thing that can hang:
+  `WriteAsJsonAsync(new ProblemDetails { … }, ct)` is the same shape with an
+  object initialiser in the lambda's place, and §10.3 had one.
+
+  **Two greps find every shape of this, and both are needed.** The arrow —
+  `\(.+,\s*\w+\s*=>\s*$` — catches a lambda left hanging off a call that has a
+  leading argument, which is now wrong whatever its body looks like. The closer
+  — `^\s*[}\])],\s*\S` — catches the other half: a bracket closing at the head
+  of a line with an element still after it, which is what
+  `Publish(payload, type, c => { … }, ct)` and
+  `WriteAsJsonAsync(new ProblemDetails { … }, ct)` look like from below, and
+  which the arrow pattern cannot see. Run both. Under the old carve-out the
+  arrow pattern also needed a body-kind exemption applied by hand, and every
+  count taken while that was true came out short.
 
   ```csharp
   actual.ShouldBe(

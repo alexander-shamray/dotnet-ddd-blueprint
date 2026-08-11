@@ -1063,7 +1063,8 @@ internal sealed class OutboxStats(IServiceScopeFactory scopes) : IOutboxStats
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
 
     public double OldestAgeSeconds(OutboxLane lane) => _cache.GetOrCreate(
-        $"oldest:{lane}", e =>
+        $"oldest:{lane}",
+        e =>
         {
             e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5);
             using IServiceScope scope = scopes.CreateScope();
