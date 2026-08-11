@@ -1,5 +1,6 @@
 using Catalog.TestSupport.Outbox;
 using Common.Application;
+using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -50,6 +51,20 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
 
                 // Still resolvable directly, so tests can drive one pass.
                 services.AddSingleton<OutboxDispatcher>();
+
+                // §9.5's purge, removed and re-registered for the same two
+                // reasons and by the same match. Its timer is an hour rather
+                // than 500 ms, so it would not race an assertion in a run this
+                // short — but a test asserting that an abandoned row survives
+                // retention cannot be sure of that from a service it does not
+                // drive, and "the pass never happened" and "the pass spared the
+                // row" are the same green.
+                ServiceDescriptor purge = services.Single(d =>
+                    d.ServiceType == typeof(IHostedService) &&
+                    d.ImplementationType == typeof(RetentionPurgeService));
+                services.Remove(purge);
+
+                services.AddSingleton<RetentionPurgeService>();
 
                 // §9.4. Adding, not replacing: the production assemblies stay,
                 // so a test cannot stage a type the real host would refuse.

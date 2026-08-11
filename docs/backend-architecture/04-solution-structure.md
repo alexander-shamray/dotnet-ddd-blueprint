@@ -672,6 +672,12 @@ EF Core minor versions and behave differently under identical code.
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup Label="Runtime">
+    <!-- The base package, referenced only by Common.Infrastructure: §9.5's
+         InboxFilter writes through the service's DbContext because sharing
+         the handler's transaction is the point of it, and common code may
+         name the base type but never a provider. Every service's own
+         Infrastructure takes the provider below instead. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
     <!-- Design-time only, referenced by each *.Migrator with PrivateAssets.
          `dotnet ef migrations add` (§7.4) needs it in the startup project and
