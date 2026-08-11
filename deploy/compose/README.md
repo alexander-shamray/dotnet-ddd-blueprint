@@ -77,3 +77,25 @@ apply the override (§14.1):
 ```bash
 docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.infra-only.yml up -d --wait
 ```
+
+The host process reads none of the `environment:` blocks above, so the three
+keys a service refuses to start without have to reach it another way — the
+runtime connection string, the bus, and the authority `AddJwtAuthentication`
+reads eagerly (§11.3). Same values, host names in place of service names:
+
+```bash
+export ConnectionStrings__Catalog="Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True"
+export ConnectionStrings__RabbitMq="amqp://guest:guest@localhost:5672"
+export Identity__Authority="http://localhost:8080/realms/commerce"
+dotnet run --project src/Services/Catalog/Catalog.Api
+```
+
+The override excludes `catalog-migrator` as well as `catalog-api`, so the
+schema is nobody's job until it is run — on the host, under the *other*
+connection string, because §7.1 keeps the two identities apart even where the
+local login is one:
+
+```bash
+export ConnectionStrings__CatalogMigrator="Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True"
+dotnet run --project src/Services/Catalog/Catalog.Migrator
+```

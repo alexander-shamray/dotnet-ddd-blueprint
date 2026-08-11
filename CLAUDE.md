@@ -5,7 +5,7 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-15 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-16 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
 CI and the licence gate — all five building blocks: `Common.Domain`,
@@ -18,7 +18,9 @@ live, PR-08's persistence, PR-09's transaction behaviour, and PR-10's
 vertical slice with its containers — PR-11's scaffold under
 `tools/new-service/` — PR-12's Redis helpers, §8 as code — PR-13's bus
 registration, PR-14's outbox and PR-15's inbox, consumers and retention purge,
-all three of §9's instalments. The phase
+all three of §9's instalments — and PR-16's security: §11.3's token
+validation, §11.4's policies and port, and the Keycloak realm they validate
+against. The phase
 section below carries the current state; this sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
@@ -307,7 +309,12 @@ endpoints, TestSupport and container half PR-10's,
 `Common.Infrastructure` with its tests PR-12's, the bus registration PR-13's,
 the outbox with `Common.Contracts` beside it PR-14's, and the rest of the
 contracts, the inbox, the two consumers, the retention purge and
-`Platform.IntegrationTests` PR-15's.
+`Platform.IntegrationTests` PR-15's. PR-16's is the security half spread
+across three of those trees rather than a block of its own: §11.3's
+`AddJwtAuthentication` with §11.4's `RequirePermission`, `ICurrentUser` and
+`HttpContextCurrentUser` in the building blocks, Catalog's one policy and its
+two endpoint decisions, `TestAuthHandler` in `Catalog.TestSupport`, and the
+realm export the whole of it validates against.
 
 Three edges exist between building blocks, and every one of them waited for a
 type that could not be written without it:
@@ -1064,7 +1071,7 @@ correlation-ID fallback test sets `Activity.Current` to null to rule out, and
 a host still alive from another class handed it one anyway, failing the test
 about half the time. Serialising the assembly makes the ordering
 deterministic, and the parallelism given up is worth very little: the suite
-is 59 tests running in about a second. A shared xUnit collection was rejected
+is 81 tests running in about a second. A shared xUnit collection was rejected
 for failing open: the next class that builds an observability host and
 forgets to join the collection would silently reintroduce the flake, where
 the assembly-wide attribute leaves nothing to forget.

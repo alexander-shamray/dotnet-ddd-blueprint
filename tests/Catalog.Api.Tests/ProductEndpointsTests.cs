@@ -89,7 +89,8 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
         // context.AuthenticateAsync() whenever the policy names no schemes —
         // so authorization keeps working on its own, and what a missing
         // UseAuthentication actually costs is HttpContext.User for everything
-        // downstream that reads it. CommonWebDefaultsTests asserts that half.
+        // downstream that reads it. AuthenticationMiddlewareTests asserts that
+        // half.
         //
         // What this one does catch is the policy being dropped from the
         // endpoint, which is the commoner edit and the one a reviewer skims

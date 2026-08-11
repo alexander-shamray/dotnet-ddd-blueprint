@@ -266,6 +266,31 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 dotnet run --project src/Services/Ordering/Ordering.Api
 ```
 
+**A host process reads none of the container `environment:` blocks, so every
+key a service throws without has to be supplied to it.** Three do that today,
+each named by the registration that reads it — `ConnectionStrings__<Service>`
+(§7.1's runtime key, `AddSqlServer`), `ConnectionStrings__RabbitMq` (§9's bus)
+and `Identity__Authority` ([§11.3](11-identity-authorization.md), read eagerly
+by `AddJwtAuthentication`). The values differ from the container ones only in
+the host name, because the compose file publishes each port:
+
+```bash
+export ConnectionStrings__Catalog="Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True"
+export ConnectionStrings__RabbitMq="amqp://guest:guest@localhost:5672"
+export Identity__Authority="http://localhost:8080/realms/commerce"
+```
+
+The override excludes each service's **migrator** beside its API, so the schema
+is the host's job too — under §7.4's separate key
+(`ConnectionStrings__<Service>Migrator`), which is the one place the two
+identities stay apart locally even though the login does not (§7.1).
+
+No `appsettings.Development.json` carries these instead, and that is the same
+decision §15.4 makes everywhere else: a file in the repository holding a
+connection string is a credential in the repository, and a default authority
+baked into configuration is one a deployed host inherits when its own key is
+missing — the failure the eager throw exists to make loud.
+
 The override's whole content is a profile per application service. An override
 cannot delete a service, but profiles gate activation and nothing activates
 this one, so the default `up` skips every service it names — declaratively,
