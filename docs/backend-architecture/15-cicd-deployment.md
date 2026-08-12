@@ -237,6 +237,13 @@ at the first query rather than at build. Every service here talks to SQL
 Server, so every image takes the variant. What `-extra` adds is ICU and
 tzdata, nothing else; the shell and the package manager stay gone.
 
+**The gateway takes it too, and it opens no connection at all** ([§10.1](10-api-gateway.md)) — so the
+sentence above is the reason for six images and not for the seventh. The
+seventh's reason is uniformity: one base across the platform means what a host
+does with a culture-sensitive comparison never depends on which suffix somebody
+picked for its image, and the saving from dropping ICU on one deployable does
+not pay for a second answer to that question.
+
 ### Every service builds two images
 
 The migration job (§7.4) is a Helm `pre-upgrade` hook, so its image must exist

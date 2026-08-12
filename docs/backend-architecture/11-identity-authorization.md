@@ -230,9 +230,15 @@ handler checks, not a policy an endpoint names.
 > register the policy in a helper the host never calls, and there is no
 > compiler error, no `ValidateOnBuild` failure and no startup warning — the
 > endpoint throws `InvalidOperationException` the first time somebody cancels
-> an order, which is to say in production, on the path that matters. The
-> gateway's version of the same mistake is quieter still ([§10.2](10-api-gateway.md)): YARP drops
-> the route instead of throwing.
+> an order, which is to say in production, on the path that matters.
+>
+> **The gateway is the one place this fails better, and this callout said the
+> reverse.** It claimed YARP dropped the route rather than throwing, which
+> would have made the edge the quietest site of all; measured, YARP validates
+> both registries when it loads §10.2's file and refuses to start, naming the
+> policy and the route. So the deployment fails, and nothing serves a request
+> under a policy that does not exist. A service still has the failure described
+> above, which is what the rest of this callout is for.
 >
 > This is the `GetServices<T>()` problem in a different costume — a lookup by
 > name that returns nothing and is only observed at the call site. Assert it

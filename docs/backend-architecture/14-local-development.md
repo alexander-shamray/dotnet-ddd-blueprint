@@ -239,9 +239,17 @@ environment replaces with real users out of a directory.
 
 `deploy/compose/README.md` is the keyboard inventory of what runs today —
 every port and credential of the seven infrastructure services, beside the
-file it describes. The table above is the finished platform's surface: its
-Gateway row arrives with the gateway's image
-([Appendix C](appendix-c-delivery-plan.md)).
+file it describes. The table above is the finished platform's surface, and its
+Gateway row arrived with the gateway's image
+([Appendix C](appendix-c-delivery-plan.md), PR-17); the Keycloak, RabbitMQ and
+Grafana rows have been true since PR-06.
+
+The gateway's own block takes no `depends_on` on a service it routes to except
+the ones that exist — Compose rejects a dependency it cannot see, and one
+undefined name fails the whole `up` rather than one service. Its *routes* are
+under no such constraint and [§10.2](10-api-gateway.md) ships all four, so
+three paths answer 502 until their services land. A route is configuration the
+gateway reads; a `depends_on` is a name Compose has to resolve.
 
 The collector's mounted configuration is the smallest correct pipeline —
 OTLP in on both protocols, a batch processor, OTLP out to the LGTM

@@ -58,6 +58,12 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │                                   Common.Web is a library with no entry
 │   │                                   point, so its suite drives a TestServer
 │   │                                   rather than a WebApplicationFactory
+│   ├── Gateway.Api.Tests/              The route file of §10.2, over the real
+│   │                                   host: policy resolution, prefix strips,
+│   │                                   the limiter of §10.3 driven until it
+│   │                                   rejects. No TestSupport beside it —
+│   │                                   that library exists where two suites
+│   │                                   share a fixture, and the gateway has one
 │   ├── Catalog.Domain.Tests/
 │   ├── Catalog.Application.Tests/
 │   ├── Catalog.Api.Tests/
@@ -553,9 +559,9 @@ builder.Services.AddRateLimiter(/* §10.3 */);
 // Every policy §10.2's routes name that Common.Web does not already register.
 // "authenticated" comes from AddCommonWebDefaults; this one is the gateway's
 // own, and it is a permission check rather than a role check for the reason
-// §11.4 gives. A route naming a policy nobody registered does not fail closed:
-// YARP rejects the route at config load and drops it, so that path 404s while
-// every other route keeps serving.
+// §11.4 gives. A route naming a policy nobody registered fails CLOSED and
+// loudly: the config load throws out of MapReverseProxy() below, naming the
+// policy and the route, so the process does not start (§10.2).
 builder.Services
     .AddAuthorizationBuilder()
     .AddPolicy(GatewayPermissions.InventoryAdmin, p => p.RequirePermission(GatewayPermissions.InventoryAdmin));
@@ -573,6 +579,13 @@ if (behindProxy)
     // the rate limiter partitions all anonymous traffic into ONE bucket and
     // its per-client limit becomes a global cap — configured, running, and a
     // denial of service against legitimate users rather than a defence.
+    //
+    // Read HERE and not inside the callback: an options callback runs when the
+    // options are first resolved, so a missing section read from inside one
+    // throws on a request rather than at startup — the deferral this pair of
+    // flags exists to avoid.
+    string[] trusted = builder.Configuration.GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!;
+
     builder.Services.Configure<ForwardedHeadersOptions>(o =>
     {
         o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
@@ -580,10 +593,17 @@ if (behindProxy)
         // Trust only the ingress. Left empty, ASP.NET Core trusts nothing
         // beyond loopback and silently keeps the proxy's address; opened to
         // all, any client can spoof its partition key and bypass the limit.
-        o.KnownNetworks.Clear();
+        //
+        // KnownIPNetworks and System.Net.IPNetwork, both spelled deliberately:
+        // KnownNetworks carries ASPDEPR005 at .NET 10 — an error under
+        // ADR-019 — and the IPNetwork it held is the one
+        // Microsoft.AspNetCore.HttpOverrides declares, which the using above
+        // brings into scope in place of the framework type the new property
+        // takes. This sample said both the other way and did not compile.
+        o.KnownIPNetworks.Clear();
         o.KnownProxies.Clear();
-        foreach (string cidr in builder.Configuration.GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!)
-            o.KnownNetworks.Add(IPNetwork.Parse(cidr));
+        foreach (string cidr in trusted)
+            o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
     });
 }
 
@@ -591,12 +611,16 @@ if (behindProxy)
 // same-origin edge (§10.2). Enabled but unset would yield WithOrigins([]),
 // which rejects every browser request while starting cleanly — surfacing as a
 // CORS error in a console rather than as the missing setting it is (§15.4).
+// Hoisted out of the callback for the reason given above: the CORS options are
+// built on the first request that needs them.
 if (corsEnabled)
 {
+    string[] origins = builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!;
+
     builder.Services
         .AddCors(o =>
             o.AddDefaultPolicy(p => p
-                .WithOrigins(builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!)
+                .WithOrigins(origins)
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()));

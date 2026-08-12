@@ -19,6 +19,7 @@
 | Application | One handler end to end | Real DB and Redis (containers), fakes for other services | < 500 ms | Tens | `*.Application.Tests` |
 | API contract | HTTP in, HTTP out | `WebApplicationFactory` + containers | < 1 s | Tens | `*.Api.Tests` |
 | Host building block | One middleware or host extension | `TestServer` — no containers, no entry point | < 50 ms | Tens | `Common.Web.Tests` |
+| Edge configuration | The route file of §10.2, against the host that loaded it | `WebApplicationFactory` + a stub destination on loopback — no containers | < 1 s | One suite | `Gateway.Api.Tests` |
 | Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
 | Contract | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
@@ -1422,6 +1423,62 @@ absence of infrastructure — rather than inside the container-backed class. It 
 the second half of a boundary whose first half is the endpoint's literal, and
 that half is already covered: the API-contract tests reach the handler through
 HTTP, so they fail if `User` stops being stamped.
+
+### Gateway configuration tests
+
+The gateway's suite sits here rather than beside `Common.Web.Tests`, and the
+distinction is the entry point: `Common.Web` is a library with none, so its
+tests build a pipeline by hand, while the gateway is a host and the thing under
+test is the configuration *that host* loaded. It is the one suite in this
+section that starts no container — the edge owns no database
+([§10.1](10-api-gateway.md)) — and the one that reads a shipped configuration
+file as a subject rather than as setup.
+
+Two of its assertions have no other home. The first is that the host accepted
+every route in the file: policy names are resolved when
+[§10.2](10-api-gateway.md)'s configuration loads, and a route whose id went in
+and did not come out is a path that stopped existing.
+
+```csharp
+[Fact]
+public void Every_route_in_the_file_is_a_route_the_proxy_accepted()
+{
+    IReadOnlyList<RouteConfiguration> configured = ReadRoutes();
+    IProxyStateLookup lookup = factory.Services.GetRequiredService<IProxyStateLookup>();
+
+    string[] accepted = [.. lookup.GetRoutes().Select(r => r.Config.RouteId).Order(StringComparer.Ordinal)];
+
+    accepted.ShouldBe([.. configured.Select(r => r.Id).Order(StringComparer.Ordinal)]);
+}
+```
+
+The second is the prefix strip, and it is asserted against a request rather
+than against the file that asks for it — a stub server on an ephemeral
+loopback port, standing in for the service and recording the path it was
+given:
+
+```csharp
+[Fact]
+public async Task The_service_receives_the_path_with_the_namespace_prefix_removed()
+{
+    using StubbedGatewayFactory factory = new(stub.Address);
+    using HttpClient client = factory.CreateClient();
+
+    HttpResponseMessage response =
+        await client.GetAsync("/api/v1/catalog/products", TestContext.Current.CancellationToken);
+
+    response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+    stub.ReceivedPaths.ShouldContain("/v1/catalog/products");
+}
+```
+
+> **A listener, not an address that refuses.** The first version pointed the
+> clusters at `127.0.0.1:1`, on the reasoning that a refused connection is free.
+> Measured, it cost about two seconds a request — so exhausting §10.3's
+> hundred-request window took three and a half minutes, the window replenished
+> before the last request arrived, and the rate-limit test failed while the
+> limiter was working perfectly. A stub that answers is faster *and* is the
+> only thing that can observe the forwarded path.
 
 ## 12.5 Testing the saga
 
