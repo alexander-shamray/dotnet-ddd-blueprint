@@ -5,7 +5,7 @@ Guidance for Claude Code when working in this repository.
 ## What this repo is
 
 `dotnet-ddd-blueprint` is a monorepo for an ASP.NET Core microservices platform
-built with DDD, CQRS and TDD. **PR-01 through PR-16 have landed**, so the repo
+built with DDD, CQRS and TDD. **PR-01 through PR-17 have landed**, so the repo
 is the blueprint under `docs/backend-architecture/`, the foundation that
 blueprint specifies — SDK pin, central package management, the solution file,
 CI and the licence gate — all five building blocks: `Common.Domain`,
@@ -18,9 +18,11 @@ live, PR-08's persistence, PR-09's transaction behaviour, and PR-10's
 vertical slice with its containers — PR-11's scaffold under
 `tools/new-service/` — PR-12's Redis helpers, §8 as code — PR-13's bus
 registration, PR-14's outbox and PR-15's inbox, consumers and retention purge,
-all three of §9's instalments — and PR-16's security: §11.3's token
+all three of §9's instalments — PR-16's security: §11.3's token
 validation, §11.4's policies and port, and the Keycloak realm they validate
-against. The phase
+against — and PR-17's gateway, the second host in the solution and the first
+project outside `src/Services`: §10.2's whole route file, §10.3's limiter,
+§4.2's edge pipeline. The phase
 section below carries the current state; this sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
@@ -73,7 +75,7 @@ global.json                      SDK pin (§4.4)
                                  `dotnet tool restore` is the whole setup
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the nineteen projects below
+Platform.slnx                    the twenty-one projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate and scaffold tests, then
                                  restore/build/test
@@ -94,7 +96,9 @@ deploy/compose/                  §14.1's infrastructure — seven services,
                                  of the placeholder, the collector config, a
                                  ports README; PR-10 added the first application
                                  pair (catalog-migrator + catalog-api, port
-                                 5102) and the infra-only override — later
+                                 5102) and the infra-only override, PR-17 the
+                                 gateway on 5000 — no migrator beside it, the
+                                 edge owning no database — later
                                  blocks arrive with their services
 
 src/BuildingBlocks/
@@ -188,6 +192,20 @@ src/BuildingBlocks/
                                  reference to Common.Application was the only
                                  edge between building blocks until PR-14 drew
                                  three more
+src/Gateway/
+  Gateway.Api/                   PR-17's edge, and the second host in the
+                                 solution: one project, one ProjectReference
+                                 (Common.Web), no Application and no
+                                 Infrastructure — §10.1 gives it no domain and
+                                 no database, so there is nothing for either
+                                 layer to hold. appsettings.json is the
+                                 deliverable as much as Program.cs is: §10.2's
+                                 four routes and four clusters, the first
+                                 configuration file in the repo that is itself
+                                 under test. GatewayPermissions
+                                 (inventory:admin, the one permission a ROUTE
+                                 names rather than an endpoint) and
+                                 GatewayRateLimiterPolicies beside it
 src/Services/Catalog/
   Catalog.Domain/                the first aggregate: Product (Publish factory,
                                  ProductPublishedDomainEvent), ProductId,
@@ -273,6 +291,22 @@ tests/
                                  deploy/compose/keycloak/realm-export.json by
                                  walking up to Platform.slnx, the only test in
                                  the repo that reads a repository file
+  Gateway.Api.Tests/             PR-17's, and a new row in §12.1's pyramid —
+                                 edge configuration, no containers. Reads the
+                                 shipped appsettings.json through the host's
+                                 own IConfiguration rather than off disk, and
+                                 asks the built host what it accepted
+                                 (IProxyStateLookup). StubDestination is a real
+                                 Kestrel server on an ephemeral loopback port,
+                                 which is what makes the prefix strip and the
+                                 100-request rate-limit window observable at
+                                 all. No TestSupport beside it: §4.1 gives one
+                                 to a service because two suites share a
+                                 fixture, and the gateway has one suite. Its
+                                 TestAuthHandler is therefore a second copy of
+                                 Catalog's, deliberately — §4.3 permits one
+                                 assembly to cross a boundary and it is not a
+                                 test library
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
                                  SQL and RabbitMQ containers, real migrator
                                  run, Respawn reset — CatalogApiFactory (both
@@ -421,7 +455,7 @@ annotations mark what has already landed:
 
 ```
 src/BuildingBlocks/   all five exist — .Contracts since PR-14, complete at PR-15
-src/Gateway/          Gateway.Api (YARP)
+src/Gateway/          Gateway.Api (YARP) — landed with PR-17
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
                         Domain, Application, Infrastructure, Migrator, Api
@@ -436,6 +470,11 @@ tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                         above, which cannot reference each other";
                         Platform.IntegrationTests with PR-15, when §12.6's
                         rules arrived with the assembly they constrain)
+                      Gateway.Api.Tests is outside that pattern and landed
+                        with PR-17 — the gateway is a host and not a
+                        <Service>, so it has an .Api.Tests and none of the
+                        other three; §4.1's tree and §12.1's pyramid each
+                        gained a row for it
 deploy/               helm/, k8s/ — compose/ landed with PR-06
 Directory.Build.props, Directory.Packages.props, Platform.slnx — landed with PR-01
 ```
@@ -454,18 +493,76 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds nineteen projects and `dotnet test` runs 410 tests, so
+`Platform.slnx` holds twenty-one projects and `dotnet test` runs 438 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
-job for them beside `licence-gate`. **PR-17 is next**
-(`feat(gateway): YARP routing, JWT, rate limiting, CORS`), which is the first
-consumer of the `authenticated` policy PR-16 registered and of §10.2's route
-file — the two config tests in its Appendix C row are its real deliverable.
+job for them beside `licence-gate`. **PR-18 is next**
+(`feat(ordering): second service from the scaffold`), which is what dogfoods
+PR-11's scaffold and carries PR-16's deferred security test — user A reading
+user B's order → 404, §11.4's ownership check, which needs the first resource
+in the platform that has an owner.
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
+pipeline — and six of its decisions bind what comes after:
+
+- **An unresolvable policy name stops the gateway; it does not silently drop
+  the route, and four sites said it did.** §10.2, §4.2's sample, §11.4's
+  callout and Appendix C's PR-17 row all described a per-route drop that leaves
+  the host "up healthy serving whichever routes happened to validate".
+  Measured: `ProxyConfigManager.InitialLoadAsync` throws out of
+  `MapReverseProxy()` with an `InvalidOperationException` naming the policy and
+  the route, for **both** registries — the authorization one and the rate
+  limiter's. All four were amended. The correction runs the reassuring way, and
+  the consequence worth carrying is that **the gateway is the one host where an
+  unregistered policy name fails better than in a service**, where §11.4's
+  endpoint still throws on the first request that reaches it.
+- **The whole route file ships, three of its four services ahead of
+  themselves.** This is the opposite of the Compose rule and the asymmetry is
+  in what each costs: a Compose block naming an absent image fails `up`, a
+  route to an absent destination 502s one path. What buys it is that PR-17's
+  two config tests say nothing over a single route — §11.4 names a vacuously
+  passing policy test as its own defect — and that delivering the file a route
+  at a time makes each later PR re-decide the policies, which is §10.2's
+  dual-version trap. **It is not licence to invent routes**: a `/api/v2/orders`
+  route would fail the forwarded-path assertion, correctly, and the
+  dual-version pair stays an example in the chapter.
+- **The forwarded path is a prefix of the service's group, not an equality**,
+  and Catalog is the counterexample that settled it: `/api/v1/catalog/{**}`
+  strips to `/v1/catalog` while `ProductEndpoints` maps
+  `/v1/catalog/products`. Appendix C said "equals" and was amended. The
+  registry the assertion reads is hand-written, one entry per cluster, both
+  directions asserted — `ContractSamples`' shape — because reading it from the
+  services would mean the gateway's suite referencing every service, which is
+  the coupling §10.1 exists to prevent.
+- **A stub destination that answers beats an address that refuses, and the
+  measurement is the argument.** Pointing the clusters at `127.0.0.1:1` cost
+  ~2 s a request on this host, so exhausting §10.3's 100-request window took
+  three and a half minutes, the window replenished, and the rate-limit test
+  failed while the limiter worked. A Kestrel server on an ephemeral loopback
+  port is faster *and* is the only thing that can observe the forwarded path,
+  which is the assertion §10.2 says nothing else in the solution can make.
+- **Both conditional reads are hoisted out of their options callbacks.**
+  §4.2 printed `GetRequiredSection("Cors:Origins")` inside `AddCors`'s lambda,
+  which runs when the CORS options are first resolved — on a request. "Enabled
+  but unconfigured" then throws at a request rather than at a deployment, which
+  is the exact deferral the flag pair exists to avoid. Both reads moved above
+  their registrations and `ConditionalBlockTests` holds all four states.
+- **§4.2's forwarded-headers block did not compile at this pin.**
+  `KnownNetworks` carries `ASPDEPR005` in .NET 10 — an error under ADR-019, not
+  a warning — and its replacement `KnownIPNetworks` takes `System.Net.IPNetwork`
+  while the bare name binds to `Microsoft.AspNetCore.HttpOverrides.IPNetwork`,
+  brought into scope by the `using` the `ForwardedHeaders` flags need. Two
+  wrong spellings on one line, found by compiling it.
+- **The 429 is written through `IProblemDetailsService`.** §10.3 printed
+  `WriteAsJsonAsync`, which emits `application/json` and runs none of §10.5's
+  customisation — so the one response a client is most likely to handle
+  programmatically would carry neither the right media type nor
+  `correlationId`, on a platform whose stated promise is one error shape.
 
 PR-16 landed security — §11.3's JWT validation in `Common.Web`, §11.4's
 policies and port, the realm import — and seven of its decisions bind what
