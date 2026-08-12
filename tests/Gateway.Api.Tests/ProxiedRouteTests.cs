@@ -93,21 +93,47 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
 
     /// <summary>
     /// The public route matches GET alone (§10.2), so the POST Catalog exposes
-    /// behind <c>catalog:write</c> is not reachable through the gateway. 404
-    /// rather than 405: no route matched at all, which is what "GET-only"
-    /// means at the edge.
+    /// behind <c>catalog:write</c> is not reachable through the gateway.
     /// </summary>
+    /// <remarks>
+    /// <b>405, and this comment claimed 404 until the assertion was tightened
+    /// enough to check.</b> The reasoning behind 404 was that a method-limited
+    /// route means no route matched — which is not how ASP.NET Core routing
+    /// works: the path pattern matches, the method constraint rejects, and the
+    /// result is <c>MethodNotAllowed</c>. Nothing in the blueprint claimed
+    /// otherwise, so the defect was one comment and the weak assertion that
+    /// let it stand — <c>ShouldNotBe(NoContent)</c>, which passes for 401,
+    /// 403, 429 and 500 alike.
+    /// <para>
+    /// 405 leaks nothing here: the path is public by design, so confirming it
+    /// exists tells a caller only what §10.2 already publishes. The write path
+    /// stays unreachable at the edge either way.
+    /// </para>
+    /// </remarks>
     [Fact]
     public async Task The_public_route_matches_no_method_but_get()
     {
         using StubbedGatewayFactory factory = new(stub.Address);
         using HttpClient client = factory.CreateClient();
 
+        // Counted before, not asserted against the path afterwards: the stub is
+        // a class fixture and the tests above it have already sent that exact
+        // path, so a ShouldNotContain here would pass or fail on test order.
+        int before = stub.ReceivedPaths.Count;
+
         HttpResponseMessage response = await client.PostAsync(
             "/api/v1/catalog/products",
             content: null,
             TestContext.Current.CancellationToken);
 
-        response.StatusCode.ShouldNotBe(HttpStatusCode.NoContent);
+        // The status, not merely "not the one the stub answers": the weaker
+        // form went on passing whatever the reason, which is how it kept a
+        // wrong comment above it alive.
+        response.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+
+        // And nothing reached a destination, which is the half a status code
+        // cannot show — a 405 minted by the service would read identically
+        // from here.
+        stub.ReceivedPaths.Count.ShouldBe(before);
     }
 }

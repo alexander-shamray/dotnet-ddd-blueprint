@@ -67,8 +67,10 @@ make a monorepo practical at this size:
       # elision here is a formatting choice and never a missing filter.
       # The gateway is a deployable like any other — its own image (§15.2),
       # its own chart (§15.3), its own Program.cs and route file. Left out of
-      # this list it is the one component whose route configuration can drop a
-      # route silently (§10.2) and never be rebuilt to find out.
+      # this list, a change to that route file is never rebuilt — and the route
+      # file is the one place in the platform where a policy name is resolved
+      # at startup rather than at a call site (§10.2), so a bad one is a host
+      # that refuses to boot on the first deploy that does build it.
       gateway:
         - *shared
         - 'src/Gateway/**'
