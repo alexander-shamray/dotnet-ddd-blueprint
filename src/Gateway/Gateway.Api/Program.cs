@@ -187,6 +187,20 @@ if (corsEnabled)
             "matching nothing, so every browser request fails while the host reports healthy (§15.4).");
     }
 
+    // And "*" separately, because it fails for the opposite reason: the policy
+    // below calls AllowCredentials(), and ASP.NET Core refuses that pairing
+    // when it BUILDS the options — which is the first request needing a CORS
+    // policy, not startup. A wildcard is also the one value a reader would
+    // assume is the permissive fallback, so it has to be refused where the
+    // refusal is legible rather than in a stack trace on somebody's preflight.
+    if (origins.Any(o => o == "*"))
+    {
+        throw new InvalidOperationException(
+            "'Cors:Origins' contains '*', which cannot be combined with AllowCredentials — ASP.NET Core " +
+            "throws when the policy is built, on the first preflight rather than at startup. Name the " +
+            "origins, or drop credentials as a deliberate separate decision (§10.2).");
+    }
+
     builder.Services
         .AddCors(o =>
             o.AddDefaultPolicy(p => p
@@ -198,21 +212,27 @@ if (corsEnabled)
 
 WebApplication app = builder.Build();
 
-// First when present: everything below reads the client address, and until
-// this runs it is the proxy's. Skipped when the gateway IS the edge (Compose),
-// where RemoteIpAddress is already the client and trusting a forwarded header
-// would let any caller choose its own rate-limit bucket.
-//
-// ForwardedHeadersTests holds this position: moved below UseRateLimiter, two
-// forwarded addresses collapse onto the one connection the gateway can see and
-// the second client is metered as the first client's hundred-and-second
-// request. Observed red there, unlike the limiter's own ordering row.
-if (behindProxy)
-    app.UseForwardedHeaders();
-
 // Middleware order is behaviour, not formatting (§4.2).
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — assigns the ID if the client sent none
+
+// Before everything that reads the client address, and after the two that do
+// not. §4.2's sample put this line first and PR-17 followed it; the chapter
+// was amended in this change, because "first" cost both of the rules above it
+// and bought nothing. A fault thrown parsing a forwarded header skipped the
+// problem-details handler entirely, and anything this middleware logged ran
+// outside the correlation scope — the one request a reader would then be
+// unable to follow. Neither of those two reads RemoteIpAddress, so nothing
+// about the rewrite is lost by letting them wrap it.
+//
+// Skipped when the gateway IS the edge (Compose), where RemoteIpAddress is
+// already the client and trusting a forwarded header would let any caller
+// choose its own rate-limit bucket. ForwardedHeadersTests holds the half that
+// still matters: moved below UseRateLimiter, two forwarded addresses collapse
+// onto the one connection the gateway can see and the second client is metered
+// as the first client's hundred-and-second request. Observed red there.
+if (behindProxy)
+    app.UseForwardedHeaders();
 
 if (corsEnabled)
     app.UseCors();

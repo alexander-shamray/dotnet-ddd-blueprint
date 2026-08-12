@@ -210,7 +210,13 @@ public sealed class RouteConfigurationTests(GatewayFactory factory) : IClassFixt
     [Fact]
     public void Every_service_group_entry_names_a_cluster_a_route_uses()
     {
-        string[] routed = [.. ReadRoutes().Select(r => r.ClusterId).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        string[] routed =
+        [
+            .. ReadRoutes()
+                .Select(r => r.ClusterId)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+        ];
 
         routed.ShouldBe([.. ServiceGroups.Keys.Order(StringComparer.Ordinal)]);
     }

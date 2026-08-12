@@ -84,7 +84,8 @@ public sealed class ConditionalBlockTests
         response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
         response.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(CorsFactory.Origin);
-        response.Headers.GetValues("Access-Control-Allow-Methods").ShouldContain(m => m.Contains("GET", StringComparison.Ordinal));
+        response.Headers.GetValues("Access-Control-Allow-Methods").ShouldContain(
+            m => m.Contains("GET", StringComparison.Ordinal));
         response.Headers.GetValues("Access-Control-Allow-Headers").ShouldContain(
             h => h.Contains("authorization", StringComparison.OrdinalIgnoreCase));
     }

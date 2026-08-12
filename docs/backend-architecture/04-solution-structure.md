@@ -509,6 +509,7 @@ that no test catches by accident:
 | `UseCorrelationId` before everything that logs, `UseExceptionHandler` alone above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to be outermost to catch faults in the middleware below it, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)) |
 | `UseAuthentication` before `UseAuthorization` | **Every authenticated request 401s** — in a `WebApplication` too. Omitting a call is repaired by auto-insertion; writing both in the wrong order is not, because the markers they set suppress it. See the callout below |
 | `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket. **Silent is the measured half**: reversing the two leaves every test in `Gateway.Api.Tests` green, the authenticated-partition test included, so nothing in the repository is watching this line (see below) |
+| `UseForwardedHeaders` above the limiter, and **below** the handler and the correlation ID (gateway only) | Two rules meeting, and this sample had them the wrong way round until PR-17: putting it first means a fault parsing a forwarded header unwinds past no exception handler, and anything the middleware logs runs outside the correlation scope. Neither of those two reads the address, so nothing is lost by letting them wrap it — while the limiter, which does read it, stays below. `ForwardedHeadersTests` covers the lower half: below `UseRateLimiter`, two forwarded addresses collapse onto the one connection the gateway can see |
 | Both before endpoint mapping | `RequireAuthorization` has nothing to evaluate against |
 | Health endpoints mapped **anonymous** | Probes 401, Kubernetes reads that as unhealthy, and the pod is killed in a loop |
 
@@ -615,7 +616,17 @@ if (behindProxy)
 // built on the first request that needs them.
 if (corsEnabled)
 {
-    string[] origins = builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!;
+    string[] origins = builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>() ?? [];
+
+    // GetRequiredSection proves the section exists and nothing more.
+    // `Cors__Origins__0=` binds to an array holding one empty string, which
+    // WithOrigins accepts — the host starts and every browser request is
+    // refused by a policy matching no origin. "Blank counts as missing", the
+    // same rule §11.3 applies to Identity:Authority. And "*" separately,
+    // because AllowCredentials below makes it invalid when the policy is
+    // BUILT — on a preflight, not at startup.
+    if (origins.Length == 0 || origins.Any(string.IsNullOrWhiteSpace) || origins.Any(o => o == "*"))
+        throw new InvalidOperationException("'Cors:Origins' is enabled but holds no usable origin.");
 
     builder.Services
         .AddCors(o =>
@@ -628,15 +639,16 @@ if (corsEnabled)
 
 WebApplication app = builder.Build();
 
-// First when present: everything below reads the client address, and until
-// this runs it is the proxy's. Skipped when the gateway IS the edge (Compose),
-// where RemoteIpAddress is already the client and trusting a forwarded header
-// would let any caller choose its own rate-limit bucket.
+app.UseExceptionHandler();
+app.UseCorrelationId();           // assigns the ID if the client sent none
+
+// Above everything that reads the client address, and below the two that do
+// not. Until this runs the address is the proxy's; skipped when the gateway IS
+// the edge (Compose), where it is already the client and trusting a forwarded
+// header would let any caller choose its own rate-limit bucket.
 if (behindProxy)
     app.UseForwardedHeaders();
 
-app.UseExceptionHandler();
-app.UseCorrelationId();           // assigns the ID if the client sent none
 if (corsEnabled)
     app.UseCors();
 
