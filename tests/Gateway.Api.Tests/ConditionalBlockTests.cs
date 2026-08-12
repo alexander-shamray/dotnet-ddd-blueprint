@@ -1,3 +1,4 @@
+using System.Net;
 using Shouldly;
 using Xunit;
 
@@ -45,6 +46,45 @@ public sealed class ConditionalBlockTests
         HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(CorsFactory.Origin);
+    }
+
+    /// <summary>
+    /// The browser flow that actually breaks: an <c>OPTIONS</c> preflight to a
+    /// proxied route, asking to send an <c>Authorization</c> header.
+    /// </summary>
+    /// <remarks>
+    /// A simple GET to a health probe — which is all the test above does —
+    /// exercises none of what makes CORS fragile here. The preflight carries
+    /// **no token by construction**, and the route it names carries §10.2's
+    /// <c>authenticated</c> policy, so anything that let authorization see this
+    /// request would answer 401 and the browser would report a CORS failure for
+    /// a request the server never intended to refuse. It also crosses YARP's
+    /// method constraint, the one the public route uses to stay GET-only.
+    /// Raised by Copilot as a gap, and it is: the flag tests prove the policy
+    /// is configured, not that a browser can use it.
+    /// </remarks>
+    [Fact]
+    public async Task Cors_answers_a_preflight_for_a_proxied_route_that_requires_a_token()
+    {
+        using CorsFactory factory = new();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage preflight = new(HttpMethod.Options, "/api/v1/orders/018f4c2e");
+        preflight.Headers.Add("Origin", CorsFactory.Origin);
+        preflight.Headers.Add("Access-Control-Request-Method", "GET");
+        preflight.Headers.Add("Access-Control-Request-Headers", "authorization");
+
+        HttpResponseMessage response = await client.SendAsync(preflight, TestContext.Current.CancellationToken);
+
+        // Not 401, and the assertion says so first: a preflight refused by
+        // authorization is the failure this test exists for, and it would
+        // otherwise show up only as an unexplained CORS error in a console.
+        response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized);
+
+        response.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(CorsFactory.Origin);
+        response.Headers.GetValues("Access-Control-Allow-Methods").ShouldContain(m => m.Contains("GET", StringComparison.Ordinal));
+        response.Headers.GetValues("Access-Control-Allow-Headers").ShouldContain(
+            h => h.Contains("authorization", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

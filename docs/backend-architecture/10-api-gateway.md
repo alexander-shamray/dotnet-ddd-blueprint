@@ -341,10 +341,11 @@ builder.Services.AddRateLimiter(options =>
     // Through IProblemDetailsService, not WriteAsJsonAsync — see below.
     options.OnRejected = async (context, _) =>
     {
-        // Ceiling, not a cast — see below.
+        // RetryAfterHeader.Seconds, not a cast and not an inline ceiling —
+        // see below.
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
             context.HttpContext.Response.Headers.RetryAfter =
-                ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+                RetryAfterHeader.Seconds(retryAfter).ToString(CultureInfo.InvariantCulture);
 
         // Before the write: the customisation reads the response status, and
         // the service refuses to write once the response has started.
@@ -382,15 +383,26 @@ builder.Services.AddRateLimiter(options =>
 > whatever the server's culture, and CA1305 makes the bare `ToString()` a
 > failed build under ADR-019.
 >
-> **`Math.Ceiling` before that cast, and the cast alone was a defect this
-> sample shipped.** `Retry-After` is whole seconds (RFC 9110) and the window
-> remaining is fractional far more often than not, so `(int)0.8` emits
-> `Retry-After: 0` — which does not merely lose precision, it reads as
-> permission and sends a well-behaved client straight back into a limiter that
-> is still refusing. Rounding up is the only direction that cannot advertise a
-> time at which the request still fails. `RateLimitedRouteTests` asserts the
-> header is present and at least one second, because the truncating form
-> satisfied every other assertion about a 429.
+> **`RetryAfterHeader.Seconds` rather than an expression, and the expression
+> alone was a defect this sample shipped.** `Retry-After` is whole seconds
+> (RFC 9110) and the window remaining is fractional far more often than not,
+> so `(int)0.8` emits `Retry-After: 0` — which does not merely lose precision,
+> it reads as permission and sends a well-behaved client straight back into a
+> limiter that is still refusing. Rounding up is the only direction that
+> cannot advertise a time at which the request still fails, and the helper
+> also clamps an already-expired lease to zero rather than emitting a negative
+> a client cannot parse.
+>
+> **It is a type rather than a line because the rule is otherwise close to
+> untestable.** This window is a minute long, so a rejection carries tens of
+> seconds and the truncating form rounds identically — the suite's own 429
+> assertions passed with the bug in place, and a comment here claimed they
+> caught it until that was measured. Reaching the truncating case through HTTP
+> means holding a window open for fifty-nine seconds; against the helper it is
+> three rows of a theory. **Call it from the sample rather than restating the
+> arithmetic**: an inline ceiling here and a clamp there is the same one-form-
+> two-places drift the rule at the top of `CLAUDE.md` exists for, and it had
+> already reappeared once in this chapter.
 
 The `authenticated` policy is only correct if `UseAuthentication` has already
 run when the limiter middleware executes — see the pipeline in §4.2. The

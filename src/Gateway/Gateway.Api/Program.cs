@@ -184,6 +184,11 @@ WebApplication app = builder.Build();
 // this runs it is the proxy's. Skipped when the gateway IS the edge (Compose),
 // where RemoteIpAddress is already the client and trusting a forwarded header
 // would let any caller choose its own rate-limit bucket.
+//
+// ForwardedHeadersTests holds this position: moved below UseRateLimiter, two
+// forwarded addresses collapse onto the one connection the gateway can see and
+// the second client is metered as the first client's hundred-and-second
+// request. Observed red there, unlike the limiter's own ordering row.
 if (behindProxy)
     app.UseForwardedHeaders();
 

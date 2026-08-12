@@ -11,8 +11,14 @@ namespace Gateway.Api.Tests;
 /// request would be rejected before the forwarder ran: a different status, for
 /// a different reason, arriving on a timer.
 /// </remarks>
-public sealed class StubbedGatewayFactory(string destination) : GatewayFactory
+public class StubbedGatewayFactory(string destination) : GatewayFactory
 {
+    /// <summary>
+    /// Unsealed so <c>ForwardedHeadersTests</c>' factory can layer §4.2's
+    /// ingress settings on top of these: a test that needs both a reachable
+    /// destination and a trusted proxy would otherwise restate the cluster
+    /// overrides, which is four literals waiting to disagree with these four.
+    /// </summary>
     protected override IEnumerable<KeyValuePair<string, string>> AdditionalSettings =>
     [
         new("ReverseProxy:Clusters:catalog:Destinations:d1:Address", destination),

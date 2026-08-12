@@ -498,7 +498,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds twenty-one projects and `dotnet test` runs 447 tests, so
+`Platform.slnx` holds twenty-one projects and `dotnet test` runs 449 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -513,7 +513,7 @@ forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
-pipeline — and ten of its decisions bind what comes after:
+pipeline — and eleven of its decisions bind what comes after:
 
 - **An unresolvable policy name stops the gateway; it does not silently drop
   the route, and four sites said it did.** §10.2, §4.2's sample, §11.4's
@@ -589,6 +589,19 @@ pipeline — and ten of its decisions bind what comes after:
   to per-IP" mechanism is reasoned and unobserved while the "silently" half is
   measured. §4.2 now says which is which. **PR-16's lesson repeated exactly**:
   keep the line, and do not believe a test is watching it.
+- **The forwarded-headers block had no positive test, and the limiter's
+  ordering row still has none — the contrast is the point.** Both are "this
+  middleware must run before that one" claims about the same pipeline, and
+  only one of them turned out to be observable. `ForwardedHeadersTests` spends
+  one forwarded address's window, proves it is refused, and shows a second
+  address still served; moved below `UseRateLimiter`, the two collapse onto the
+  one connection the gateway can see and it goes red. The limiter-vs-
+  authentication row reversed the same way and **nothing failed**. So a
+  middleware-order rule is testable or it is not, case by case, and which is
+  which has to be measured rather than assumed from the shape of the claim.
+  Under `TestServer` the peer address is null, so the test installs an
+  `IStartupFilter` to give the request one — the only seam that gets in front
+  of a `Program.cs` a test may not edit.
 - **A permission a *route* requires obeys §11.4's rule exactly as an
   endpoint's does, and the realm role arrives in the same change as the
   constant.** PR-17 registered `inventory:admin` and named it on a route

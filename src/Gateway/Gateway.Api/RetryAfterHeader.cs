@@ -7,11 +7,19 @@ namespace Gateway.Api;
 /// <remarks>
 /// <para>
 /// <b>A type for one expression, and the expression is why.</b> The obvious
-/// spelling is <c>(int)Math.Ceiling(remaining.TotalSeconds)</c>, which truncates: a lease
+/// spelling is <c>(int)remaining.TotalSeconds</c>, which truncates: a lease
 /// with 0.8 s left advertises <c>Retry-After: 0</c>, and zero is not a lost
 /// fraction but an instruction — it sends a well-behaved client straight back
 /// into a limiter that is still refusing. Rounding up is the only direction
 /// that cannot name a time at which the request still fails.
+///
+/// <para>
+/// That sentence named the *corrected* form as the buggy one for one commit,
+/// and the cause is worth more than the typo: the red-first check that proved
+/// this type has teeth reverted it with a blind text replace, which rewrote
+/// the prose describing the defect along with the code implementing it. A
+/// mechanical revert edits comments too.
+/// </para>
 /// </para>
 /// <para>
 /// <b>Inline, that rule is close to untestable, which is the whole argument
