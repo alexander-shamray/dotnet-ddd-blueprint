@@ -618,14 +618,35 @@ if (corsEnabled)
 {
     string[] origins = builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>() ?? [];
 
-    // GetRequiredSection proves the section exists and nothing more.
-    // `Cors__Origins__0=` binds to an array holding one empty string, which
-    // WithOrigins accepts — the host starts and every browser request is
-    // refused by a policy matching no origin. "Blank counts as missing", the
-    // same rule §11.3 applies to Identity:Authority. And "*" separately,
-    // because AllowCredentials below makes it invalid when the policy is
-    // BUILT — on a preflight, not at startup.
-    if (origins.Length == 0 || origins.Any(string.IsNullOrWhiteSpace) || origins.Any(o => o == "*"))
+    // GetRequiredSection proves the section EXISTS and nothing more, and four
+    // review rounds each found a value the previous check admitted:
+    //
+    //   ""                       binds from `Cors__Origins__0=`; WithOrigins
+    //                            takes it and matches no browser. "Blank
+    //                            counts as missing", §11.3's rule for
+    //                            Identity:Authority
+    //   "*"                      invalid beside AllowCredentials below, and
+    //                            ASP.NET Core only says so when the policy is
+    //                            BUILT — on a preflight, not at startup
+    //   "https//spa.example"     one missing colon, compared literally
+    //   "https://spa.example/"   every parsed property agrees it is fine;
+    //                            the browser's Origin header carries no
+    //                            trailing slash, so it matches nothing
+    //
+    // The last is why the final clause reads the RAW string: AbsolutePath is
+    // "/" with the slash and without it.
+    string[] malformed =
+    [
+        .. origins.Where(o =>
+            !Uri.TryCreate(o, UriKind.Absolute, out Uri? parsed) ||
+            (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
+            parsed.AbsolutePath != "/" ||
+            parsed.Query.Length > 0 ||
+            parsed.Fragment.Length > 0 ||
+            o.EndsWith('/'))
+    ];
+
+    if (origins.Length == 0 || origins.Any(o => o == "*") || malformed.Length > 0)
         throw new InvalidOperationException("'Cors:Origins' is enabled but holds no usable origin.");
 
     builder.Services

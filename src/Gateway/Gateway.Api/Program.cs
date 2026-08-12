@@ -209,6 +209,13 @@ if (corsEnabled)
     // origin is scheme, host and optional port and nothing else, so a trailing
     // path is rejected too; a browser sends none, and one configured here
     // would silently match nothing.
+    // The trailing-slash clause is on the RAW string and cannot be expressed
+    // through the parsed Uri: AbsolutePath is "/" for `https://spa.example` and
+    // for `https://spa.example/` alike, so every parsed property agrees while
+    // the two differ in the only way that matters. WithOrigins compares the
+    // configured text against the browser's Origin header, which never carries
+    // a trailing slash — so the slashed form matches nothing, and the check
+    // has to read what was configured rather than what it parsed to.
     string[] malformed =
     [
         .. origins.Where(o =>
@@ -216,7 +223,8 @@ if (corsEnabled)
             (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
             parsed.AbsolutePath != "/" ||
             parsed.Query.Length > 0 ||
-            parsed.Fragment.Length > 0)
+            parsed.Fragment.Length > 0 ||
+            o.EndsWith('/'))
     ];
 
     if (malformed.Length > 0)

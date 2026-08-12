@@ -178,15 +178,24 @@ public sealed class ConditionalBlockTests
     /// grew in three rounds — empty, then <c>*</c>, then this — and each was a
     /// value the one before it admitted.
     /// </remarks>
-    [Fact]
-    public void Cors_enabled_with_a_malformed_origin_refuses_to_start()
+    [Theory]
+    // A missing colon. Present, non-blank, and taken literally by WithOrigins.
+    [InlineData("https//spa.example")]
+    // A trailing slash, which every parsed property agrees is harmless —
+    // `AbsolutePath` is "/" with it and without — while the browser's Origin
+    // header never carries one, so the configured value matches nothing. The
+    // one case the guard could not see through the Uri it parsed.
+    [InlineData("https://spa.example/")]
+    // Not an origin at all: an origin is scheme, host and optional port.
+    [InlineData("https://spa.example/app")]
+    public void Cors_enabled_with_a_value_that_is_not_an_origin_refuses_to_start(string configured)
     {
-        using CorsWithMalformedOriginFactory factory = new();
+        using CorsWithOriginFactory factory = new(configured);
 
         InvalidOperationException thrown =
             Should.Throw<InvalidOperationException>(() => _ = factory.Services);
 
-        thrown.Message.ShouldContain("https//spa.example");
+        thrown.Message.ShouldContain(configured);
     }
 
     [Fact]
@@ -245,12 +254,21 @@ public sealed class ConditionalBlockTests
         ];
     }
 
-    private sealed class CorsWithMalformedOriginFactory : GatewayFactory
+    /// <summary>
+    /// CORS on, with whatever single origin the case under test configures.
+    /// </summary>
+    /// <remarks>
+    /// Parameterised rather than one factory per bad value: the guard has now
+    /// grown four times — empty, <c>*</c>, unparseable, trailing slash — and
+    /// each round's value was one the previous guard admitted. A theory row is
+    /// what the fifth costs.
+    /// </remarks>
+    private sealed class CorsWithOriginFactory(string origin) : GatewayFactory
     {
         protected override IEnumerable<KeyValuePair<string, string>> AdditionalSettings =>
         [
             new("Cors:Enabled", "true"),
-            new("Cors:Origins:0", "https//spa.example")
+            new("Cors:Origins:0", origin)
         ];
     }
 
