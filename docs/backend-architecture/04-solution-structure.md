@@ -638,17 +638,25 @@ if (corsEnabled)
     // IS the canonical origin — scheme, host, and a port only when it is not
     // the default — so demanding the configured text equal it accepts exactly
     // what a browser sends and rejects every variant at once.
-    string[] malformed =
+    int[] malformed =
     [
-        .. origins.Where(o =>
-            !Uri.TryCreate(o, UriKind.Absolute, out Uri? parsed) ||
-            (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
-            parsed.UserInfo.Length > 0 ||
-            !string.Equals(o, parsed.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
+        .. origins
+            .Select((origin, index) => (origin, index))
+            .Where(entry =>
+                !Uri.TryCreate(entry.origin, UriKind.Absolute, out Uri? parsed) ||
+                (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
+                parsed.UserInfo.Length > 0 ||
+                !string.Equals(entry.origin, parsed.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
+            .Select(entry => entry.index)
     ];
 
+    // Indexes, never the values: credentials in the authority are one of the
+    // rejected shapes, and an exception message reaches the logs — where
+    // §13.4's redactor scrubs keyed attributes and cannot see a secret
+    // interpolated into a string. The guard that rejects a password must not
+    // be the thing that publishes one.
     if (origins.Length == 0 || origins.Any(o => o == "*") || malformed.Length > 0)
-        throw new InvalidOperationException("'Cors:Origins' is enabled but holds no usable origin.");
+        throw new InvalidOperationException($"'Cors:Origins' is unusable at index {string.Join(", ", malformed)}.");
 
     builder.Services
         .AddCors(o =>

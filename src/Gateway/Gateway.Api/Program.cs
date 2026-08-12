@@ -222,21 +222,33 @@ if (corsEnabled)
     // text to equal it accepts exactly what a browser will send and rejects
     // every variant at once, including the five clauses this replaces.
     // UserInfo stays a separate test because the authority form keeps it.
-    string[] malformed =
+    int[] malformed =
     [
-        .. origins.Where(o =>
-            !Uri.TryCreate(o, UriKind.Absolute, out Uri? parsed) ||
-            (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
-            parsed.UserInfo.Length > 0 ||
-            !string.Equals(o, parsed.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
+        .. origins
+            .Select((origin, index) => (origin, index))
+            .Where(entry =>
+                !Uri.TryCreate(entry.origin, UriKind.Absolute, out Uri? parsed) ||
+                (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
+                parsed.UserInfo.Length > 0 ||
+                !string.Equals(entry.origin, parsed.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
+            .Select(entry => entry.index)
     ];
 
+    // Indexes, never the values. Credentials in the authority are one of the
+    // shapes rejected above, so echoing the offending string would copy a
+    // password into a startup exception — and an exception message reaches the
+    // logs, where §13.4's redactor cannot help: it scrubs keyed attributes and
+    // says in its own file that it cannot see a secret interpolated into a
+    // message. The guard that rejects credentials must not be the thing that
+    // publishes them. An operator holds the configuration and an index is
+    // enough to find the entry.
     if (malformed.Length > 0)
     {
         throw new InvalidOperationException(
-            $"'Cors:Origins' holds {string.Join(", ", malformed.Select(o => $"'{o}'"))}, which is not a browser " +
-            "origin — scheme, host and optional port, with no path. WithOrigins compares such a value " +
-            "literally and never matches it, so the host would start and refuse every browser (§15.4).");
+            $"'Cors:Origins' is not a browser origin at index {string.Join(", ", malformed)}. One is a scheme, " +
+            "a host and a port only when it is not the scheme's default, exactly as a browser serialises it — " +
+            "WithOrigins compares the configured text, so anything else matches nothing and the host would " +
+            "start and refuse every browser (§15.4). The value is deliberately not echoed (§13.4).");
     }
 
     builder.Services

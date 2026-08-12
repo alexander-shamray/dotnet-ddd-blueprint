@@ -200,12 +200,6 @@ public sealed class ConditionalBlockTests
     // A host that differs only in case, which the same equality now catches:
     // the canonical form is lowercase and WithOrigins compares ordinally.
     [InlineData("https://SPA.example")]
-    // The wildcard, which fails for the opposite reason and had no test at all:
-    // deleting its eager guard left the whole suite green and deferred the
-    // AllowCredentials failure to the first preflight, which is precisely what
-    // the guard exists to prevent. An untested guard is a guard somebody
-    // deletes.
-    [InlineData("*")]
     public void Cors_enabled_with_a_value_that_is_not_an_origin_refuses_to_start(string configured)
     {
         using CorsWithOriginFactory factory = new(configured);
@@ -213,7 +207,37 @@ public sealed class ConditionalBlockTests
         InvalidOperationException thrown =
             Should.Throw<InvalidOperationException>(() => _ = factory.Services);
 
-        thrown.Message.ShouldContain(configured);
+        thrown.Message.ShouldContain("index 0");
+
+        // And the offending value is NOT in the message. One of the rejected
+        // shapes is credentials in the authority, and an exception message
+        // reaches the logs — where §13.4's redactor scrubs keyed attributes and
+        // cannot see a secret interpolated into a string. This assertion is the
+        // whole reason the message reports an index: without it, the guard that
+        // rejects a password would be the thing that published one.
+        thrown.Message.ShouldNotContain(configured);
+    }
+
+    /// <summary>
+    /// The wildcard, which fails for the opposite reason: it is a legal CORS
+    /// value that <c>AllowCredentials</c> makes invalid.
+    /// </summary>
+    /// <remarks>
+    /// Its own case rather than a row above, because its message names the
+    /// value — <c>*</c> carries no secret, and naming it is what makes the
+    /// error actionable. The eager guard had no test at all until Copilot said
+    /// so: deleting it left the whole suite green and deferred the failure to
+    /// the first preflight, which is precisely what it exists to prevent.
+    /// </remarks>
+    [Fact]
+    public void Cors_enabled_with_a_wildcard_origin_refuses_to_start()
+    {
+        using CorsWithOriginFactory factory = new("*");
+
+        InvalidOperationException thrown =
+            Should.Throw<InvalidOperationException>(() => _ = factory.Services);
+
+        thrown.Message.ShouldContain("AllowCredentials");
     }
 
     [Fact]
