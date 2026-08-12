@@ -172,17 +172,19 @@ is exactly why the hook has to be idempotent rather than merely correct once.
 
 ```dockerfile
 # syntax=docker/dockerfile:1
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+
+# The tag names the exact patch global.json pins (§4.4), so a bump there is a
+# bump here, in the same change.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.302-noble AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Project files first, so the restore layer really does survive source-only
 # changes — a COPY of the whole trees before restore re-keys its layer on
 # every .cs edit and the cache claim becomes fiction. global.json first among
-# equals: sdk:10.0-noble is a floating tag, so without it this build — the
-# only one whose output ships — compiles under whatever SDK the base image
-# carries that week, while developers and CI are pinned (§4.4). Copied in, a
-# mismatch is a restore error rather than different analysers.
+# equals: with it copied in, a tag that has drifted off the pin is a restore
+# error here rather than a silently different set of analysers in the one
+# build whose output ships.
 #
 # **Every project in the transitive closure gets a line, and a missing one
 # fails four steps later rather than here.** dotnet restore writes each
@@ -243,7 +245,9 @@ fails at the first step of every release, pulling a tag CI never pushed.
 
 ```dockerfile
 # src/Services/Ordering/Ordering.Migrator/Dockerfile
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+
+# Pinned to the patch global.json names (§4.4), same as the API image.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.302-noble AS build
 WORKDIR /src
 # Project files first, same as the API image and for the same reason: restore
 # in a layer that survives source-only changes, which is most changes. No

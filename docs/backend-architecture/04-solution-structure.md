@@ -711,6 +711,16 @@ rather than `latestPatch`: only one of the two makes that first sentence true.
 > this exact patch, not merely one in the band, so a bump is a deliberate edit
 > here that everyone installs before they can build. That is the same trade as
 > the exact package pins below, applied to the compiler that reads them.
+>
+> **One "machine" cannot install anything, and that makes the pin a two-file
+> edit.** The build stage of each service image ([§15.2](15-cicd-deployment.md))
+> runs whatever SDK its base tag carries, so those `FROM` lines name this exact
+> patch too and a bump here is a bump there in the same change. They floated on
+> `10.0-noble` once, on the argument that copying this file in would make any
+> mismatch loud. It did: the tag moved a feature band, `disable` refused it, and
+> every image stopped building on a restore that exited 155. Loud is the right
+> behaviour for a drift nobody chose and the wrong one for the artefact that
+> ships.
 
 `Directory.Packages.props` pins every package version once for the whole
 repository. This prevents the situation where two services depend on different

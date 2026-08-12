@@ -1,5 +1,10 @@
 # src/Services/Catalog/Catalog.Migrator/Dockerfile
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+
+# Pinned to the patch global.json names, same as the API image and for the
+# reason it states at length: a floating 10.0-noble drifted onto 10.0.400,
+# `rollForward: disable` refused it (§4.4), and the restore below exited 155.
+# A bump in global.json is a bump in both files.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.302-noble AS build
 WORKDIR /src
 
 # Project files first, same as the API image and for the same reason: restore
