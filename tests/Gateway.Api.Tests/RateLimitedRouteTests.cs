@@ -106,8 +106,8 @@ public sealed class RateLimitedRouteTests(StubDestination stub) : IClassFixture<
     /// <b>It does not catch §4.2's ordering rule, and that was measured rather
     /// than assumed.</b> Moving <c>UseRateLimiter</c> above
     /// <c>UseAuthentication</c> — which §4.2 says degrades the subject key to
-    /// the shared address fallback — leaves this test green, and leaves all
-    /// thirty-seven in this project green. The anonymous window still rejects
+    /// the shared address fallback — leaves this test green, and every other
+    /// test in this project with it. The anonymous window still rejects
     /// under the reversed pipeline, so the limiter is demonstrably live; why
     /// the authenticated bucket is not shared under it is unexplained here,
     /// and an unexplained pass is not a guard. This is the same shape as

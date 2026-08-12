@@ -498,7 +498,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds twenty-one projects and `dotnet test` runs 449 tests, so
+`Platform.slnx` holds twenty-one projects and `dotnet test` runs 450 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -513,7 +513,7 @@ forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
-pipeline — and eleven of its decisions bind what comes after:
+pipeline — and twelve of its decisions bind what comes after:
 
 - **An unresolvable policy name stops the gateway; it does not silently drop
   the route, and four sites said it did.** §10.2, §4.2's sample, §11.4's
@@ -584,7 +584,8 @@ pipeline — and eleven of its decisions bind what comes after:
   to rejection, so the subject partition — the thing making a per-user quota
   per-user — rested on nothing. The new test proves two subjects hold
   independent buckets; run against a pipeline with `UseRateLimiter` moved above
-  `UseAuthentication` it still passes, as do all thirty-seven. The limiter is
+  `UseAuthentication` it still passes, as does every other test in that
+  project. The limiter is
   live under the reversal (the anonymous window still rejects), so the "degrades
   to per-IP" mechanism is reasoned and unobserved while the "silently" half is
   measured. §4.2 now says which is which. **PR-16's lesson repeated exactly**:
@@ -602,6 +603,16 @@ pipeline — and eleven of its decisions bind what comes after:
   Under `TestServer` the peer address is null, so the test installs an
   `IStartupFilter` to give the request one — the only seam that gets in front
   of a `Program.cs` a test may not edit.
+- **"Blank counts as missing" had to be learned twice, and the second time
+  was a review finding.** PR-16 wrote it into `AddJwtAuthentication` for
+  `Identity:Authority` and this file records the argument — an environment
+  variable set to the empty string reaches `Configuration` as `""`, not null.
+  The gateway's `Cors:Origins` then shipped guarded by `GetRequiredSection`
+  alone, which proves a section *exists*: `Cors__Origins__0=` binds to an array
+  holding one empty string, `WithOrigins` accepts it, the host starts, and
+  every browser request is refused by a policy matching no origin. **A lesson
+  recorded in prose is not a lesson applied**; the guard is now a check on the
+  bound values with a test behind it, which is the form that travels.
 - **A permission a *route* requires obeys §11.4's rule exactly as an
   endpoint's does, and the realm role arrives in the same change as the
   constant.** PR-17 registered `inventory:admin` and named it on a route

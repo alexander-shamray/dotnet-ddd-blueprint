@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Shouldly;
 using Xunit;
@@ -57,10 +58,23 @@ public sealed class GrantablePermissionTests
                 .OfType<string>()
         ];
 
-        // From the constants, not from a second literal. A literal here would
-        // be the same defect one file over: two lists that agree until somebody
-        // edits one.
-        string[] required = [GatewayPermissions.InventoryAdmin];
+        // Read off the type, not listed by hand. Naming `InventoryAdmin`
+        // explicitly made this a second manual registry — a permission added to
+        // GatewayPermissions and required by a route would not enter this
+        // assertion, which is the exact defect the test exists to prevent,
+        // one level up. Reflection over the constants is what makes a new one
+        // arrive here without anybody remembering to bring it.
+        string[] required =
+        [
+            .. typeof(GatewayPermissions)
+                .GetFields(BindingFlags.Public | BindingFlags.Static)
+                .Where(f => f is { IsLiteral: true, IsInitOnly: false } && f.FieldType == typeof(string))
+                .Select(f => (string)f.GetRawConstantValue()!)
+        ];
+
+        // The guard against the whole thing passing vacuously: a vocabulary
+        // that emptied would satisfy every assertion below.
+        required.ShouldNotBeEmpty();
 
         foreach (string permission in required)
         {

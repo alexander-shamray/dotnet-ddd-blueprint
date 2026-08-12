@@ -76,10 +76,12 @@ public sealed class ConditionalBlockTests
 
         HttpResponseMessage response = await client.SendAsync(preflight, TestContext.Current.CancellationToken);
 
-        // Not 401, and the assertion says so first: a preflight refused by
-        // authorization is the failure this test exists for, and it would
-        // otherwise show up only as an unexplained CORS error in a console.
-        response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized);
+        // The status, not "not 401". A browser rejects a preflight on any
+        // non-success status whatever headers came with it, so 403, 429 and
+        // 500 all leave the flow just as unusable as the 401 this test was
+        // written for — and the weaker assertion passed for every one of them.
+        // The CORS middleware short-circuits a valid preflight with 204.
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
         response.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(CorsFactory.Origin);
         response.Headers.GetValues("Access-Control-Allow-Methods").ShouldContain(m => m.Contains("GET", StringComparison.Ordinal));
@@ -103,6 +105,30 @@ public sealed class ConditionalBlockTests
         HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.Headers.Contains("Access-Control-Allow-Origin").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A section that exists and holds nothing usable, which is the shape
+    /// <c>GetRequiredSection</c> cannot see.
+    /// </summary>
+    /// <remarks>
+    /// <c>Cors__Origins__0=</c> is the commonest way a deployment gets this
+    /// wrong, and it binds to an array holding one empty string:
+    /// <c>WithOrigins</c> accepts it, the host starts, and every browser
+    /// request is rejected by a policy matching no origin at all. The same
+    /// finding <c>AddJwtAuthentication</c> already carried for
+    /// <c>Identity:Authority</c> (§11.3) — blank counts as missing — learned
+    /// once there and not applied here until Copilot said so.
+    /// </remarks>
+    [Fact]
+    public void Cors_enabled_with_a_blank_origin_refuses_to_start()
+    {
+        using CorsWithBlankOriginFactory factory = new();
+
+        InvalidOperationException thrown =
+            Should.Throw<InvalidOperationException>(() => _ = factory.Services);
+
+        thrown.Message.ShouldContain("Cors:Origins");
     }
 
     [Fact]
@@ -150,6 +176,15 @@ public sealed class ConditionalBlockTests
     {
         protected override IEnumerable<KeyValuePair<string, string>> AdditionalSettings =>
             [new("Cors:Enabled", "true")];
+    }
+
+    private sealed class CorsWithBlankOriginFactory : GatewayFactory
+    {
+        protected override IEnumerable<KeyValuePair<string, string>> AdditionalSettings =>
+        [
+            new("Cors:Enabled", "true"),
+            new("Cors:Origins:0", string.Empty)
+        ];
     }
 
     private sealed class IngressWithoutNetworksFactory : GatewayFactory

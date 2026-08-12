@@ -657,7 +657,7 @@ app.Run();
 > PR-17 added a test proving two authenticated subjects hold independent
 > buckets — the property the subject partition key exists for — and then ran it
 > against a pipeline with `UseRateLimiter` moved above `UseAuthentication`. It
-> passed, and so did the other thirty-six. The limiter is demonstrably still
+> passed, and so did every other test in that project. The limiter is still
 > live under the reversal, because the anonymous window still rejects at its
 > hundredth request; why the authenticated bucket does not collapse onto the
 > shared fallback there is unexplained, and an unexplained pass is not a guard.

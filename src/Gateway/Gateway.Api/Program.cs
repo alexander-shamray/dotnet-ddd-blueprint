@@ -167,7 +167,25 @@ if (behindProxy)
 // otherwise arrive far from the deployment that caused it.
 if (corsEnabled)
 {
-    string[] origins = builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!;
+    string[] origins = builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>() ?? [];
+
+    // GetRequiredSection proves the section exists and nothing more, which is
+    // half a guard. `Cors__Origins__0=` — the commonest way a deployment gets
+    // this wrong — binds to an array holding one empty string: WithOrigins
+    // accepts it, the host starts, and every browser request is rejected by a
+    // policy that matches no origin at all. That is precisely the state this
+    // flag pair exists to refuse, arriving through the one shape the section
+    // check cannot see.
+    //
+    // The same finding AddJwtAuthentication already carries for
+    // Identity:Authority (§11.3): blank counts as missing. It was learned once
+    // there and not applied here until Copilot said so.
+    if (origins.Length == 0 || origins.Any(string.IsNullOrWhiteSpace))
+    {
+        throw new InvalidOperationException(
+            "'Cors:Origins' is enabled but holds no usable origin. An empty or blank entry yields a policy " +
+            "matching nothing, so every browser request fails while the host reports healthy (§15.4).");
+    }
 
     builder.Services
         .AddCors(o =>
