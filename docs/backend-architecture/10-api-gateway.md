@@ -9,6 +9,26 @@ genuinely cross-cutting at the edge, and nothing else.
 CORS · request/response logging with correlation IDs · response compression ·
 request size limits.
 
+> **Two of those seven are not configured yet, and the list keeps them
+> anyway.** PR-17 delivered the first five; the shipped host calls no
+> `UseResponseCompression` and sets no body-size limit, which
+> [Appendix C](appendix-c-delivery-plan.md) schedules as PR-27. The entries
+> stay because this is a statement of what the gateway is responsible for, and
+> deleting a responsibility because it is not built yet turns a specification
+> into a changelog — the same reason §4.1 draws six services and annotates
+> which exist.
+>
+> **Both were deferred for the same reason and it is not effort.** Each needs a
+> decision the blueprint has never taken and neither is a line of code. A size
+> limit needs a **number**: Kestrel's 30 MB is a framework default rather than
+> anything chosen here, and a chapter saying "request size limits" while no
+> chapter states one is the gap. Compression needs the **HTTPS** question
+> answered: ASP.NET Core ships `EnableForHttps = false` deliberately, because
+> compressing responses that mix attacker-influenced and secret content over
+> TLS is the BREACH/CRIME shape — and the edge, where every service's
+> responses pass, is the worst place to switch that on without an argument an
+> ADR can hold.
+
 **It is not the outermost edge.** TLS terminates at the cloud load balancer or
 Kubernetes Ingress, which then forwards plain HTTP inside the cluster. That
 matters beyond TLS: everything the gateway does per-client — rate limiting

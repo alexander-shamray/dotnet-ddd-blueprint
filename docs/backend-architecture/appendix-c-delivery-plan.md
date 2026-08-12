@@ -94,6 +94,8 @@ Phase names map to the `phase` column. Dependencies are PR numbers.
 | **24** | `docs(ops): runbooks, secrets, dashboards-as-code, the SLO run` | 15, 20, 21 | The twelve runbooks from [§13.9](13-observability.md) — one per alert, checked both ways — per-lane outbox alerts (§13.6), `docs/secrets.md`, Grafana JSON in `deploy/observability/`, and the k6 **SLO run** against staging (§13.7, §15.1) — named for what it asserts, because §15.1 deliberately has no smoke stage |
 | **25** | `ci: integration categories, canary deploy, quality gates` | 20, 22, 17 | Path-filtered per-service builds, containerised integration tests in CI, canary with automated rollback on error rate or p99 |
 
+| **27** | `feat(gateway): response compression and request size limits` | 17 | The two entries of [§10.1](10-api-gateway.md)'s "It does" list PR-17 did not deliver, and the last outstanding piece of the gateway. **Neither is deferred for effort** — together they are perhaps five lines — but each needs a decision no chapter has taken. A body-size limit needs a **number**, and Kestrel's 30 MB is a framework default rather than a platform choice. Compression needs the **HTTPS** question settled, because `EnableForHttps` defaults to false against BREACH/CRIME and the edge is where every service's responses pass — so this PR carries an ADR for it. Numbered last and depending on PR-17 alone, so it may land at any point after it |
+
 ### Optional
 
 | PR | Title | Depends | Delivers |
@@ -161,6 +163,7 @@ flowchart TD
     P20 --> P25[25 CI + canary]
     P22 --> P25
     P17 --> P25
+    P17 --> P27[27 Gateway compression + size limits]
     P25 --> P26[26 Optional: Pact]
 ```
 

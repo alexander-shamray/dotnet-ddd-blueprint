@@ -26,7 +26,7 @@ project outside `src/Services`: §10.2's whole route file, §10.3's limiter,
 section below carries the current state; this sentence only names the shape.
 
 **The C# solution will land in this repo.** The blueprint is the specification
-for it, and Appendix C sequences that code into 26 pull requests starting with
+for it, and Appendix C sequences that code into 27 pull requests starting with
 `chore: solution structure, SDK pin, central package management, CI skeleton`.
 Treat every chapter as a commitment the implementation will have to honour.
 
@@ -387,7 +387,7 @@ build before anything compiles.
 
 `docs/roadmap.md` sits outside the blueprint tree deliberately — it is a
 schedule, not a specification, and it goes stale on a different clock. Nothing
-in it states a requirement: it prices Appendix C's 26 PRs in ideal
+in it states a requirement: it prices Appendix C's 27 PRs in ideal
 engineer-days and derives a calendar from one stated ratio. **Where the two
 disagree, Appendix C wins**, always. Because it is outside the tree, no nav
 footer or index row will catch its drift — `/validate-blueprint` check 10 is
@@ -2105,7 +2105,7 @@ Once code is present, additionally:
 - **TDD is the stated method** (§12), not a preference. Tests ship in the same
   PR as the code they cover — the convention starts at PR-02 and there is no
   PR in the plan that adds tests afterwards.
-- **Follow the delivery plan's order.** Appendix C sequences 26 PRs with
+- **Follow the delivery plan's order.** Appendix C sequences 27 PRs with
   explicit dependencies, and the service order (Catalog → Ordering →
   Inventory and Payments → Shipping → Notifications) is deliberate. Building
   out of

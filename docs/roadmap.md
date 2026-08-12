@@ -3,7 +3,7 @@
 **How long the blueprint takes to build, and what the schedule rests on.**
 
 [Appendix C](backend-architecture/appendix-c-delivery-plan.md) sequences the
-work into 26 pull requests and fixes their dependencies. It says what to build
+work into 27 pull requests and fixes their dependencies. It says what to build
 and in what order; it does not say how long. This roadmap attaches a number to
 each of those pull requests and derives a calendar from them.
 
@@ -13,9 +13,9 @@ right — this file is an estimate laid over a plan, not a second plan.
 
 | | |
 |---|---|
-| **Scope** | PR-01 … PR-25. PR-26 is optional and conditional, and is priced separately below rather than counted |
-| **Total** | **98 ideal engineer-days** |
-| **Calendar** | **28 weeks** — roughly six and a half months |
+| **Scope** | PR-01 … PR-25 and PR-27. PR-26 is optional and conditional, and is priced separately below rather than counted |
+| **Total** | **99 ideal engineer-days** |
+| **Calendar** | **29 weeks** — roughly six and a half months |
 | **Critical path** | 54 ideal days, so no amount of staffing beats about 1.8× |
 
 ## What these numbers are
@@ -62,7 +62,7 @@ genuinely independent — and none of that parallelism is used here. The
 ratio is everything standing between the day totals and the calendar. It is the
 number to change first if the schedule looks wrong, because changing it
 re-derives every date without re-estimating a single pull request. At 3.5,
-98 ideal days is 28 weeks; at 3.0 it is 33; at 4.0 it is 25.
+99 ideal days is 29 weeks; at 3.0 it is 33; at 4.0 it is 25.
 
 ## Estimate per pull request
 
@@ -163,12 +163,25 @@ is a defect report against the scaffold.
 | **23** | `feat(deploy): Helm charts, migration hooks, probes` | 5d | 87 | 25 |
 | **24** | `docs(ops): runbooks, secrets, dashboards-as-code, the SLO run` | 6d | 93 | 27 |
 | **25** | `ci: integration categories, canary deploy, quality gates` | 5d | 98 | 28 |
+| **27** | `feat(gateway): response compression and request size limits` | 1d | 99 | 29 |
 
 This phase is a third of the total, which surprises people who read a plan as a
 list of features. PR-21's saga carries a timeout on every wait state and a
 compensation path per failure, and each of those is a harness test. PR-24 is
 six days of writing: twelve runbooks, one per alert, each checked from the
 alert to the procedure and from the procedure back to the alert.
+
+**PR-27 is last in the table and does not belong to this phase**, which is why
+it is worth a line rather than a shrug. It depends on PR-17 alone, so it could
+land in week 18 as easily as week 29; it sits here because the table is
+cumulative and a number has to go somewhere, not because anything after PR-17
+waits for it. It is also the one row in this file whose day is mostly not
+code — the two capabilities are about five lines together, and the day prices
+the decisions in front of them: a body-size limit needs a number nobody has
+chosen, and turning compression on at the edge needs the `EnableForHttps`
+argument made where an ADR can hold it. **A day is what an argument costs when
+the code is already obvious**, and pricing it at zero because the diff is small
+is how design decisions end up taken by whoever types first.
 
 ### Optional
 
@@ -194,6 +207,13 @@ tells nobody outside the branch anything.
 | **M4** | Authenticated traffic reaches two services through the gateway | PR-18 | 65d | 19 |
 | **M5** | The full async path: projection and saga | PR-21 | 79d | 23 |
 | **M6** | Deployable, observable and gated | PR-25 | 98d | 28 |
+
+**M6 completes at 98 days and the total is 99, and that is not an arithmetic
+slip.** PR-27 hangs off PR-17 and no milestone waits for it, so it is counted
+in the total and belongs to none of the six — the one row where the cumulative
+column and the milestone chain part company. If it lands early, as its single
+dependency allows, every figure below M4 shifts by a day and the milestones do
+not move at all.
 
 **M2 is the one to watch.** It is the first point at which the platform does
 something a person outside the team can see, and it arrives at week 11 — nearly
@@ -225,7 +245,7 @@ The longest chain through Appendix C's graph is 54 ideal days:
  3    3    2    3    4    5    3    4    6    5    4    6    6
 ```
 
-Against a 98-day total, that is a **ceiling of about 1.8×** on any team of any
+Against a 99-day total, that is a **ceiling of about 1.8×** on any team of any
 size. An infinite number of engineers finishes in 54 days, and the second
 engineer captures most of the available gain; the fourth captures almost none,
 because by then the schedule is the chain above and the chain is serial by
@@ -251,7 +271,7 @@ READMEs call the e-commerce domain "illustrative only", while
 services concretely. PR-10 has since landed on the illustrative domain, so for
 it substitution now means reworking shipped code; PR-18, PR-20 and PR-21 are
 still re-specified rather than re-estimated. Together that is 17 of the
-98 days, and the four that carry the most design argument. Nothing else on this
+99 days, and the four that carry the most design argument. Nothing else on this
 list is close.
 
 **This item said "settle it before M2", and M2 has now been reached with it
@@ -266,7 +286,7 @@ domain changes, and both were built that way deliberately: the scaffold
 copies the service template and excludes Catalog's slice, so it names no
 aggregate, no command and no endpoint (§4.5) — and the Redis helpers are
 shared mechanism in `Common.Infrastructure`, wired to no service at all
-(§8). That is seven of the 98 days taken off this risk rather than added to
+(§8). That is seven of the 99 days taken off this risk rather than added to
 it — small, and worth stating, because these are the only places where a
 landed PR has narrowed the largest item on this page.
 
