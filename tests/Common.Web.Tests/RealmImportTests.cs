@@ -248,8 +248,14 @@ public class RealmImportTests
     public void The_permission_vocabulary_is_a_closed_set_of_client_roles()
     {
         // The permissions a policy can require have to exist somewhere a person
-        // can grant them. catalog:write is Catalog's one policy (§11.4); a
-        // service's permissions join this list with the service.
+        // can grant them. catalog:write is Catalog's one policy (§11.4);
+        // inventory:admin is the gateway's, and it is here for a reason worth
+        // knowing: the permission a ROUTE requires (§10.2) obeys the same rule
+        // as one an endpoint requires, and PR-17 registered the policy without
+        // the role — so /api/v1/inventory was 403 for every principal this
+        // realm can issue, permanently. Grantable is the bar, not granted:
+        // neither development login holds it, because the route it guards has
+        // no service behind it yet.
         string[] roles =
         [
             .. Root.GetProperty("roles").GetProperty("client").GetProperty(Audience).EnumerateArray()
@@ -263,7 +269,7 @@ public class RealmImportTests
         // permissions join this list in the PR that registers the policy
         // requiring them, which is the same rule §11.4 states for the
         // constants.
-        roles.ShouldBe(["catalog:write"]);
+        roles.ShouldBe(["catalog:write", "inventory:admin"]);
     }
 
     [Fact]

@@ -493,7 +493,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds twenty-one projects and `dotnet test` runs 438 tests, so
+`Platform.slnx` holds twenty-one projects and `dotnet test` runs 439 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -563,6 +563,25 @@ pipeline — and six of its decisions bind what comes after:
   customisation — so the one response a client is most likely to handle
   programmatically would carry neither the right media type nor
   `correlationId`, on a platform whose stated promise is one error shape.
+- **A permission a *route* requires obeys §11.4's rule exactly as an
+  endpoint's does, and the realm role arrives in the same change as the
+  constant.** PR-17 registered `inventory:admin` and named it on a route
+  without adding the role to the realm's `commerce-api` client, so
+  `/api/v1/inventory` was 403 for every principal Keycloak could issue — not
+  a wrong answer a test would catch, a path nobody could reach. **Neither
+  existing guard could see it**: §11.4's constant makes a *misspelling* a
+  compile error and says nothing about a name the provider has never heard of,
+  and `RealmImportTests`' closed-set assertion compares against a literal
+  because `Common.Web.Tests` is a building block's suite and may not reference
+  a host to read its constants. So the check lives with the constant —
+  `GrantablePermissionTests` in `Gateway.Api.Tests`, observed red against a
+  renamed role — and **Catalog owes the same test**: `catalog:write` is
+  grantable today because PR-16 happened to add both halves at once, not
+  because anything checks that it did. Verified in a live Keycloak rather than
+  by reading the export: both roles present, `demo` still carrying exactly
+  `catalog:write`, `browser` still carrying no `permission` claim at all, and
+  `sub`, `email` and `realm_access` all intact — the negative half being the
+  one §11.5 says matters most.
 
 PR-16 landed security — §11.3's JWT validation in `Common.Web`, §11.4's
 policies and port, the realm import — and seven of its decisions bind what
