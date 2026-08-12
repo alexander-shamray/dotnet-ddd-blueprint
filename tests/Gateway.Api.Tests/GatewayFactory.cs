@@ -14,15 +14,24 @@ namespace Gateway.Api.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>No test here reaches a destination, and that is a property of the
+/// <b>This factory reaches no destination, and that is a property of the
 /// gateway rather than a shortcut.</b> §10.1's gateway owns nothing: every
 /// route ends at a service, and the only one of those that exists is reachable
-/// only over a Compose network. So the negative paths are driven live —
+/// only over a Compose network, so a request driven at
+/// <c>http://ordering-api:8080</c> from a test host would assert a DNS
+/// failure. Over this factory the negative paths are therefore driven live —
 /// authentication and authorization both answer above the proxy — and the
 /// positive ones are asserted against the built host's own routing state and
-/// endpoint metadata, which is what YARP actually decided. Driving a request
-/// at <c>http://ordering-api:8080</c> from a test host would assert a DNS
-/// failure.
+/// endpoint metadata, which is what YARP actually decided.
+/// </para>
+/// <para>
+/// <b>The tests that must cross the proxy take
+/// <see cref="StubbedGatewayFactory"/> instead</b>, which derives from this
+/// one and points every cluster at a <see cref="StubDestination"/> on
+/// loopback — the prefix strip and the rate-limit window are only observable
+/// there. This paragraph is the correction to a sentence that read "no test
+/// here reaches a destination": true of this type, and false of the suite the
+/// moment the stub arrived.
 /// </para>
 /// <para>
 /// The authority is fake and unreachable for <c>CatalogApiFactory</c>'s

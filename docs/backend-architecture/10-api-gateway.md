@@ -341,9 +341,10 @@ builder.Services.AddRateLimiter(options =>
     // Through IProblemDetailsService, not WriteAsJsonAsync — see below.
     options.OnRejected = async (context, _) =>
     {
+        // Ceiling, not a cast — see below.
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
             context.HttpContext.Response.Headers.RetryAfter =
-                ((int)retryAfter.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+                ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
 
         // Before the write: the customisation reads the response status, and
         // the service refuses to write once the response has started.
@@ -380,6 +381,16 @@ builder.Services.AddRateLimiter(options =>
 > smaller reason with the same shape: a header value has one correct spelling
 > whatever the server's culture, and CA1305 makes the bare `ToString()` a
 > failed build under ADR-019.
+>
+> **`Math.Ceiling` before that cast, and the cast alone was a defect this
+> sample shipped.** `Retry-After` is whole seconds (RFC 9110) and the window
+> remaining is fractional far more often than not, so `(int)0.8` emits
+> `Retry-After: 0` — which does not merely lose precision, it reads as
+> permission and sends a well-behaved client straight back into a limiter that
+> is still refusing. Rounding up is the only direction that cannot advertise a
+> time at which the request still fails. `RateLimitedRouteTests` asserts the
+> header is present and at least one second, because the truncating form
+> satisfied every other assertion about a 429.
 
 The `authenticated` policy is only correct if `UseAuthentication` has already
 run when the limiter middleware executes — see the pipeline in §4.2. The

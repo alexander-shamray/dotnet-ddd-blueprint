@@ -498,7 +498,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds twenty-one projects and `dotnet test` runs 439 tests, so
+`Platform.slnx` holds twenty-one projects and `dotnet test` runs 447 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -513,7 +513,7 @@ forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
-pipeline — and eight of its decisions bind what comes after:
+pipeline — and ten of its decisions bind what comes after:
 
 - **An unresolvable policy name stops the gateway; it does not silently drop
   the route, and four sites said it did.** §10.2, §4.2's sample, §11.4's
@@ -568,6 +568,27 @@ pipeline — and eight of its decisions bind what comes after:
   customisation — so the one response a client is most likely to handle
   programmatically would carry neither the right media type nor
   `correlationId`, on a platform whose stated promise is one error shape.
+- **`Retry-After` rounds up, and the rule needed a type to be testable at
+  all.** The obvious `(int)remaining.TotalSeconds` truncates, so a lease with
+  0.8 s left advertises `Retry-After: 0` — not a lost fraction but an
+  instruction, sending a well-behaved client back into a limiter still
+  refusing. What makes it interesting is the second half: the 429 test asserted
+  a floor on the header and **passed with the truncating cast**, because the
+  window is a minute long and a rejection carries tens of seconds. Reaching the
+  defect through HTTP means holding a window open for fifty-nine seconds.
+  `RetryAfterHeader` exists so three rows of a theory can do it instead — and a
+  comment claiming the HTTP test caught it was written, and was wrong, before
+  this was measured.
+- **The authenticated rate-limit policy had no test, and the one added does
+  not catch §4.2's ordering rule.** Only the anonymous window was ever driven
+  to rejection, so the subject partition — the thing making a per-user quota
+  per-user — rested on nothing. The new test proves two subjects hold
+  independent buckets; run against a pipeline with `UseRateLimiter` moved above
+  `UseAuthentication` it still passes, as do all thirty-seven. The limiter is
+  live under the reversal (the anonymous window still rejects), so the "degrades
+  to per-IP" mechanism is reasoned and unobserved while the "silently" half is
+  measured. §4.2 now says which is which. **PR-16's lesson repeated exactly**:
+  keep the line, and do not believe a test is watching it.
 - **A permission a *route* requires obeys §11.4's rule exactly as an
   endpoint's does, and the realm role arrives in the same change as the
   constant.** PR-17 registered `inventory:admin` and named it on a route

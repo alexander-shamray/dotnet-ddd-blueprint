@@ -72,9 +72,12 @@ builder.Services.AddRateLimiter(options =>
     // programmatically would be the one that did not match the contract.
     options.OnRejected = async (context, _) =>
     {
+        // RetryAfterHeader.Seconds, not a cast — it rounds up, and that file
+        // argues why the rule earns a type of its own rather than living here
+        // where nothing can reach the case it exists for.
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
             context.HttpContext.Response.Headers.RetryAfter =
-                ((int)retryAfter.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+                RetryAfterHeader.Seconds(retryAfter).ToString(CultureInfo.InvariantCulture);
 
         // Set before writing: the customisation reads the response status to
         // fill in the RFC 9457 title and type when they are absent, and the

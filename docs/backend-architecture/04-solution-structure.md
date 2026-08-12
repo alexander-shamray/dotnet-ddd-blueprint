@@ -508,7 +508,7 @@ that no test catches by accident:
 |---|---|
 | `UseCorrelationId` before everything that logs, `UseExceptionHandler` alone above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to be outermost to catch faults in the middleware below it, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)) |
 | `UseAuthentication` before `UseAuthorization` | **Every authenticated request 401s** — in a `WebApplication` too. Omitting a call is repaired by auto-insertion; writing both in the wrong order is not, because the markers they set suppress it. See the callout below |
-| `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket |
+| `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket. **Silent is the measured half**: reversing the two leaves every test in `Gateway.Api.Tests` green, the authenticated-partition test included, so nothing in the repository is watching this line (see below) |
 | Both before endpoint mapping | `RequireAuthorization` has nothing to evaluate against |
 | Health endpoints mapped **anonymous** | Probes 401, Kubernetes reads that as unhealthy, and the pod is killed in a loop |
 
@@ -652,6 +652,21 @@ app.MapCommonHealthEndpoints();   // §13.5 — same anonymous probes as every s
 
 app.Run();
 ```
+
+> **Nothing tests this ordering, and the attempt to test it is the evidence.**
+> PR-17 added a test proving two authenticated subjects hold independent
+> buckets — the property the subject partition key exists for — and then ran it
+> against a pipeline with `UseRateLimiter` moved above `UseAuthentication`. It
+> passed, and so did the other thirty-six. The limiter is demonstrably still
+> live under the reversal, because the anonymous window still rejects at its
+> hundredth request; why the authenticated bucket does not collapse onto the
+> shared fallback there is unexplained, and an unexplained pass is not a guard.
+>
+> So the row above is two claims of different standing. That the failure is
+> **silent** is measured. That the partition **degrades to per-IP** is
+> reasoned from the code and is not observed by anything. Keep the order, and
+> do not believe a test is holding it — the same posture the callout below
+> takes for `app.UseAuthentication()` itself.
 
 Rate limiting sits **between** authentication and authorization, and both halves
 of that are load-bearing.
