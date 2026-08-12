@@ -1,0 +1,98 @@
+using System.Net;
+using Shouldly;
+using Xunit;
+
+namespace Gateway.Api.Tests;
+
+/// <summary>
+/// The gateway's own pipeline (§4.2), driven through the real host: the
+/// probes, the correlation ID of §10.4, and the two refusals §10.2's route
+/// policies exist to produce.
+/// </summary>
+/// <remarks>
+/// Every refusal here is answered above the proxy — authentication and
+/// authorization both run before <c>MapReverseProxy</c>'s endpoint — so no
+/// destination is dialled and no name is resolved. The tests whose request has
+/// to reach the proxy live in <see cref="ProxiedRouteTests"/>, over a stub
+/// server on loopback.
+/// </remarks>
+public sealed class GatewayPipelineTests(GatewayFactory factory) : IClassFixture<GatewayFactory>
+{
+    [Theory]
+    [InlineData("/health/live")]
+    [InlineData("/health/ready")]
+    [InlineData("/health/startup")]
+    public async Task Health_probes_answer_without_a_token(string path)
+    {
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync(path, TestContext.Current.CancellationToken);
+
+        // Ready and startup are healthy with an empty check set, which is
+        // correct for a host that owns no dependency (§13.5) — and the reason
+        // the probes must stay anonymous is that the kubelet carries no token,
+        // so the gateway would otherwise be the one component its own auth
+        // pipeline could kill.
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task A_request_arriving_without_a_correlation_id_is_given_one()
+    {
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response =
+            await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
+
+        response.Headers.TryGetValues("X-Correlation-Id", out IEnumerable<string>? values).ShouldBeTrue();
+        values!.Single().ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task A_correlation_id_the_client_supplied_is_the_one_that_comes_back()
+    {
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/health/live");
+        request.Headers.Add("X-Correlation-Id", "018f4c2e-supplied");
+
+        HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.Headers.GetValues("X-Correlation-Id").Single().ShouldBe("018f4c2e-supplied");
+    }
+
+    /// <summary>
+    /// The <c>authenticated</c> authorization policy of §10.2, on the route
+    /// rather than at the service. Nothing is proxied: the challenge is
+    /// answered by the gateway, which is the whole point of putting the policy
+    /// on the route.
+    /// </summary>
+    [Fact]
+    public async Task An_authenticated_route_challenges_a_caller_carrying_no_token()
+    {
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response =
+            await client.GetAsync("/api/v1/orders/018f4c2e", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>
+    /// The gateway's own permission policy, refusing a caller who
+    /// authenticated and does not hold <c>inventory:admin</c>. 403 rather than
+    /// 401, which is the distinction §10.5's table draws.
+    /// </summary>
+    [Fact]
+    public async Task The_admin_route_refuses_an_authenticated_caller_without_the_permission()
+    {
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/inventory/stock");
+        request.Headers.Add(TestAuthHandler.UserHeader, "018f4c2e");
+
+        HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+}

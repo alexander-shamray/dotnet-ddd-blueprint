@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit v3 test projects are self-executing: the runner is compiled in
+         rather than loaded by a host, so the assembly has to be an Exe. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+    <!-- WebApplicationFactory over the real Program (§12.4). The gateway has
+         no TestSupport library: §4.1 gives one to a service because two suites
+         share it and cannot reference each other, and there is one suite
+         here. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- IProxyStateLookup — the built host's own answer to "which routes did
+         you accept", which is what makes §10.2's silent drop observable.
+         Carried transitively by Gateway.Api; named directly because these
+         tests name the type, on the register's honesty rule. -->
+    <PackageReference Include="Yarp.ReverseProxy" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Gateway\Gateway.Api\Gateway.Api.csproj" />
+  </ItemGroup>
+
+</Project>
