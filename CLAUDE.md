@@ -513,7 +513,7 @@ forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
-pipeline — and twelve of its decisions bind what comes after:
+pipeline — and thirteen of its decisions bind what comes after:
 
 - **An unresolvable policy name stops the gateway; it does not silently drop
   the route, and four sites said it did.** §10.2, §4.2's sample, §11.4's
@@ -613,6 +613,19 @@ pipeline — and twelve of its decisions bind what comes after:
   every browser request is refused by a policy matching no origin. **A lesson
   recorded in prose is not a lesson applied**; the guard is now a check on the
   bound values with a test behind it, which is the form that travels.
+- **The fix that lands in code and not in the sample is this repository's
+  most reliable defect, and PR-17 produced five of them.** The rule at the top
+  of this file already says a code change contradicting a chapter is not done
+  until the chapter moves with it; what PR-17 adds is the direction it actually
+  fails in. Not code drifting from a written spec — a *correction* landing in
+  `Program.cs` or a test and never reaching the sample it was copied from. The
+  CORS guard grew four clauses over four review rounds and §4.2's sample
+  tracked it a round late every time; the stub-path assertion was tightened in
+  `ProxiedRouteTests` and left weak in §12.4. **Each one re-arms the defect for
+  whoever builds the next host from the chapter**, which is precisely who the
+  chapter is for. The habit that catches it is mechanical: after fixing a line
+  that came from a sample, grep the blueprint for the line you replaced, not
+  for the topic.
 - **A permission a *route* requires obeys §11.4's rule exactly as an
   endpoint's does, and the realm role arrives in the same change as the
   constant.** PR-17 registered `inventory:admin` and named it on a route

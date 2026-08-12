@@ -239,14 +239,15 @@ at the first query rather than at build. Every service here talks to SQL
 Server, so every image takes the variant. What `-extra` adds is ICU and
 tzdata, nothing else; the shell and the package manager stay gone.
 
-**The gateway takes it too, and it opens no connection at all** ([§10.1](10-api-gateway.md)) — so the
-sentence above is the reason for twelve images and not for the thirteenth.
-Twelve because each of the six services builds **two**, a host and a migrator
-(§4.1), and both talk to SQL Server. The thirteenth's reason is uniformity: one
-base across the platform means what a host does with a culture-sensitive
-comparison never depends on which suffix somebody picked for its image, and the
-saving from dropping ICU on one deployable does not pay for a second answer to
-that question.
+**Two of the fourteen open no connection at all** — the gateway ([§10.1](10-api-gateway.md)) and the
+BFF, whose one synchronous hop is gRPC rather than SQL ([§9.7](09-messaging.md)) — so the sentence
+above is the reason for twelve images and not for those two. Twelve because
+each of the six services builds **two**, a host and a migrator (§4.1), and both
+talk to SQL Server. The other two take the variant for uniformity: one base
+across the platform means what a host does with a culture-sensitive comparison
+never depends on which suffix somebody picked for its image, and the saving
+from dropping ICU on two deployables does not pay for a second answer to that
+question.
 
 ### Every service builds two images
 

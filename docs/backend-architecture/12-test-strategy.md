@@ -1468,7 +1468,10 @@ public async Task The_service_receives_the_path_with_the_namespace_prefix_remove
         await client.GetAsync("/api/v1/catalog/products", TestContext.Current.CancellationToken);
 
     response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-    stub.ReceivedPaths.ShouldContain("/v1/catalog/products");
+    // The LAST path, not any path: the stub is a class fixture and a
+    // neighbouring test sends this same path, so ShouldContain could pass on
+    // that test's entry while this request was forwarded wrongly.
+    stub.ReceivedPaths.Last().ShouldBe("/v1/catalog/products");
 }
 ```
 

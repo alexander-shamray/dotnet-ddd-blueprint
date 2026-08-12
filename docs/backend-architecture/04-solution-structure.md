@@ -643,6 +643,7 @@ if (corsEnabled)
             parsed.AbsolutePath != "/" ||
             parsed.Query.Length > 0 ||
             parsed.Fragment.Length > 0 ||
+            parsed.UserInfo.Length > 0 ||
             o.EndsWith('/'))
     ];
 
