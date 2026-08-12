@@ -188,9 +188,18 @@ public sealed class ConditionalBlockTests
     [InlineData("https://spa.example/")]
     // Not an origin at all: an origin is scheme, host and optional port.
     [InlineData("https://spa.example/app")]
-    // Credentials in the authority — parses cleanly, and every other predicate
-    // is false, but a browser never sends one and the value matches nothing.
+    // Credentials in the authority — parses cleanly, and a browser never sends
+    // one, so the value matches nothing.
     [InlineData("https://user:password@spa.example")]
+    // An explicit default port. A browser serialises the origin without it, so
+    // these match nothing either — the seventh value class, and the one that
+    // turned the guard from a list of prohibitions into a single equality
+    // against the canonical authority form.
+    [InlineData("https://spa.example:443")]
+    [InlineData("http://spa.example:80")]
+    // A host that differs only in case, which the same equality now catches:
+    // the canonical form is lowercase and WithOrigins compares ordinally.
+    [InlineData("https://SPA.example")]
     // The wildcard, which fails for the opposite reason and had no test at all:
     // deleting its eager guard left the whole suite green and deferred the
     // AllowCredentials failure to the first preflight, which is precisely what

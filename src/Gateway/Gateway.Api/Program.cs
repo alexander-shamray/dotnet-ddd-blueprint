@@ -209,23 +209,26 @@ if (corsEnabled)
     // origin is scheme, host and optional port and nothing else, so a trailing
     // path is rejected too; a browser sends none, and one configured here
     // would silently match nothing.
-    // The trailing-slash clause is on the RAW string and cannot be expressed
-    // through the parsed Uri: AbsolutePath is "/" for `https://spa.example` and
-    // for `https://spa.example/` alike, so every parsed property agrees while
-    // the two differ in the only way that matters. WithOrigins compares the
-    // configured text against the browser's Origin header, which never carries
-    // a trailing slash — so the slashed form matches nothing, and the check
-    // has to read what was configured rather than what it parsed to.
+    // One equality rather than a list of prohibitions, and the list is why.
+    // Six review rounds added six clauses — blank, "*", unparseable, trailing
+    // slash, path, credentials — and the seventh value found was
+    // `https://spa.example:443`, which every one of them permits: a browser
+    // serialises an origin without the scheme's default port, so WithOrigins
+    // compares the configured text and never matches. Enumerating the ways a
+    // string can fail to be an origin was losing to the ways a string can be.
+    //
+    // GetLeftPart(UriPartial.Authority) is the canonical origin — scheme, host
+    // and a port only when it is not the default — so requiring the configured
+    // text to equal it accepts exactly what a browser will send and rejects
+    // every variant at once, including the five clauses this replaces.
+    // UserInfo stays a separate test because the authority form keeps it.
     string[] malformed =
     [
         .. origins.Where(o =>
             !Uri.TryCreate(o, UriKind.Absolute, out Uri? parsed) ||
             (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
-            parsed.AbsolutePath != "/" ||
-            parsed.Query.Length > 0 ||
-            parsed.Fragment.Length > 0 ||
             parsed.UserInfo.Length > 0 ||
-            o.EndsWith('/'))
+            !string.Equals(o, parsed.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
     ];
 
     if (malformed.Length > 0)

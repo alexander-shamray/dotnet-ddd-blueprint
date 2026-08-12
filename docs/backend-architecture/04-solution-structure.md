@@ -630,21 +630,21 @@ if (corsEnabled)
     //                            BUILT — on a preflight, not at startup
     //   "https//spa.example"     one missing colon, compared literally
     //   "https://spa.example/"   every parsed property agrees it is fine;
-    //                            the browser's Origin header carries no
-    //                            trailing slash, so it matches nothing
+    //                            the browser sends no trailing slash
+    //   "https://spa.example:443" a browser omits the scheme's default port
     //
-    // The last is why the final clause reads the RAW string: AbsolutePath is
-    // "/" with the slash and without it.
+    // Seven rounds of that produced six clauses and a seventh value, so the
+    // check stopped enumerating prohibitions. GetLeftPart(UriPartial.Authority)
+    // IS the canonical origin — scheme, host, and a port only when it is not
+    // the default — so demanding the configured text equal it accepts exactly
+    // what a browser sends and rejects every variant at once.
     string[] malformed =
     [
         .. origins.Where(o =>
             !Uri.TryCreate(o, UriKind.Absolute, out Uri? parsed) ||
             (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
-            parsed.AbsolutePath != "/" ||
-            parsed.Query.Length > 0 ||
-            parsed.Fragment.Length > 0 ||
             parsed.UserInfo.Length > 0 ||
-            o.EndsWith('/'))
+            !string.Equals(o, parsed.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
     ];
 
     if (origins.Length == 0 || origins.Any(o => o == "*") || malformed.Length > 0)
