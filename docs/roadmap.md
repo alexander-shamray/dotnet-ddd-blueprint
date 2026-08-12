@@ -146,11 +146,14 @@ it is priced at three days *because* PR-11 exists, and if it turns out to cost
 more, the finding is about the scaffold rather than about Ordering. With PR-11
 landed, that test is now sharp: the scaffold's output is a service that builds
 and passes its tests with no domain in it, so the three days buy Ordering's
-aggregate, its first command, its endpoint and the gateway route Appendix C's
-row also lists — the route belongs to the gateway's configuration rather than
-the service's tree, which is why the scaffold does not write it and M4 depends
-on it. What the three days do **not** buy is project wiring: a day spent there
-is a defect report against the scaffold.
+aggregate, its first command and its endpoint. They no longer buy a gateway
+route: PR-17 shipped §10.2's file whole, `ordering` included, so what PR-18
+adds at the edge is the Compose pair that makes an existing route stop
+answering 502. The route was always gateway configuration rather than
+something in the service's tree — which is why the scaffold does not write
+one — and after PR-17 it is not work at all. What the three days do **not**
+buy is project wiring: a day spent there is a defect report against the
+scaffold.
 
 ### Integration and operations
 

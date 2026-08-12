@@ -251,6 +251,13 @@ under no such constraint and [§10.2](10-api-gateway.md) ships all four, so
 three paths answer 502 until their services land. A route is configuration the
 gateway reads; a `depends_on` is a name Compose has to resolve.
 
+**Which is why the fence above gates on `ordering-api` and the shipped file
+gates on `catalog-api`**, and the difference is delivery order rather than a
+discrepancy. The sample is the finished platform's, with Ordering as its
+worked pair and Catalog among the five elided as "the same shape"; the file on
+disk is the reverse, Catalog being the service that exists. Read the fence for
+the shape of a block, never for today's dependency list.
+
 The collector's mounted configuration is the smallest correct pipeline —
 OTLP in on both protocols, a batch processor, OTLP out to the LGTM
 container, which ingests OTLP directly:
