@@ -58,10 +58,17 @@ public sealed class ConditionalBlockTests
     /// **no token by construction**, and the route it names carries §10.2's
     /// <c>authenticated</c> policy, so anything that let authorization see this
     /// request would answer 401 and the browser would report a CORS failure for
-    /// a request the server never intended to refuse. It also crosses YARP's
-    /// method constraint, the one the public route uses to stay GET-only.
+    /// a request the server never intended to refuse.
     /// Raised by Copilot as a gap, and it is: the flag tests prove the policy
     /// is configured, not that a browser can use it.
+    ///
+    /// <para>
+    /// This route carries **no** method constraint — a claim that it did stood
+    /// here for one round and was wrong, since <c>catalog-public</c> is the
+    /// only route in §10.2 that limits methods. That case is the one below,
+    /// because a preflight crossing a <c>Match:Methods</c> asks a different
+    /// question from one crossing an authorization policy.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task Cors_answers_a_preflight_for_a_proxied_route_that_requires_a_token()
@@ -88,6 +95,34 @@ public sealed class ConditionalBlockTests
             m => m.Contains("GET", StringComparison.Ordinal));
         response.Headers.GetValues("Access-Control-Allow-Headers").ShouldContain(
             h => h.Contains("authorization", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The same preflight against the one route that limits methods, which is
+    /// the shipped platform's only public path.
+    /// </summary>
+    /// <remarks>
+    /// A preflight is an <c>OPTIONS</c>, and <c>catalog-public</c> matches
+    /// <c>GET</c> alone (§10.2) — so this is the case where the CORS
+    /// middleware must answer before YARP's method constraint refuses, and the
+    /// browser flow that a real SPA actually makes. Nothing covered it until
+    /// Copilot pointed out that the route named in the case above carries no
+    /// <c>Match:Methods</c> at all.
+    /// </remarks>
+    [Fact]
+    public async Task Cors_answers_a_preflight_for_the_method_limited_public_route()
+    {
+        using CorsFactory factory = new();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage preflight = new(HttpMethod.Options, "/api/v1/catalog/products");
+        preflight.Headers.Add("Origin", CorsFactory.Origin);
+        preflight.Headers.Add("Access-Control-Request-Method", "GET");
+
+        HttpResponseMessage response = await client.SendAsync(preflight, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        response.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(CorsFactory.Origin);
     }
 
     /// <summary>
@@ -130,6 +165,28 @@ public sealed class ConditionalBlockTests
             Should.Throw<InvalidOperationException>(() => _ = factory.Services);
 
         thrown.Message.ShouldContain("Cors:Origins");
+    }
+
+    /// <summary>
+    /// A value that is present, non-blank, and still not an origin.
+    /// </summary>
+    /// <remarks>
+    /// <c>https//spa.example</c> — one missing colon — is what a typo produces,
+    /// and <c>WithOrigins</c> takes it as a literal to compare against rather
+    /// than rejecting it. The host starts healthy and matches no browser ever,
+    /// which is the blank entry's outcome reached by another route. The guard
+    /// grew in three rounds — empty, then <c>*</c>, then this — and each was a
+    /// value the one before it admitted.
+    /// </remarks>
+    [Fact]
+    public void Cors_enabled_with_a_malformed_origin_refuses_to_start()
+    {
+        using CorsWithMalformedOriginFactory factory = new();
+
+        InvalidOperationException thrown =
+            Should.Throw<InvalidOperationException>(() => _ = factory.Services);
+
+        thrown.Message.ShouldContain("https//spa.example");
     }
 
     [Fact]
@@ -185,6 +242,15 @@ public sealed class ConditionalBlockTests
         [
             new("Cors:Enabled", "true"),
             new("Cors:Origins:0", string.Empty)
+        ];
+    }
+
+    private sealed class CorsWithMalformedOriginFactory : GatewayFactory
+    {
+        protected override IEnumerable<KeyValuePair<string, string>> AdditionalSettings =>
+        [
+            new("Cors:Enabled", "true"),
+            new("Cors:Origins:0", "https//spa.example")
         ];
     }
 

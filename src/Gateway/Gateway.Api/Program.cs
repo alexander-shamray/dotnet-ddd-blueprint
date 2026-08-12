@@ -201,6 +201,32 @@ if (corsEnabled)
             "origins, or drop credentials as a deliberate separate decision (§10.2).");
     }
 
+    // And each value has to be a browser origin, not merely a non-empty
+    // string. `https//spa.example` — one missing colon — is accepted by
+    // WithOrigins as a literal it will compare against and never match, so the
+    // host starts healthy and every browser is refused: the same outcome as a
+    // blank entry, reached through a typo rather than an absent variable. An
+    // origin is scheme, host and optional port and nothing else, so a trailing
+    // path is rejected too; a browser sends none, and one configured here
+    // would silently match nothing.
+    string[] malformed =
+    [
+        .. origins.Where(o =>
+            !Uri.TryCreate(o, UriKind.Absolute, out Uri? parsed) ||
+            (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
+            parsed.AbsolutePath != "/" ||
+            parsed.Query.Length > 0 ||
+            parsed.Fragment.Length > 0)
+    ];
+
+    if (malformed.Length > 0)
+    {
+        throw new InvalidOperationException(
+            $"'Cors:Origins' holds {string.Join(", ", malformed.Select(o => $"'{o}'"))}, which is not a browser " +
+            "origin — scheme, host and optional port, with no path. WithOrigins compares such a value " +
+            "literally and never matches it, so the host would start and refuse every browser (§15.4).");
+    }
+
     builder.Services
         .AddCors(o =>
             o.AddDefaultPolicy(p => p
