@@ -485,6 +485,11 @@ WebApplication app = builder.Build();
 // the ones above it, and getting it wrong fails silently rather than loudly.
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — above everything else that logs
+// §10.5's promise applied to the statuses no handler produces: a challenge
+// and a forbid are written by the middleware below and carry NO BODY, so the
+// platform's one error shape had two holes in it until PR-17 measured a 401.
+// Since .NET 8 this middleware writes them through IProblemDetailsService.
+app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
 app.UseAuthentication();          // §11.3 — populates HttpContext.User
 app.UseAuthorization();           // §11.4 — evaluates the permission policies
 
@@ -671,6 +676,7 @@ WebApplication app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseCorrelationId();           // assigns the ID if the client sent none
+app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
 
 // Above everything that reads the client address, and below the two that do
 // not. Until this runs the address is the proxy's; skipped when the gateway IS

@@ -266,6 +266,16 @@ WebApplication app = builder.Build();
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — assigns the ID if the client sent none
 
+// §10.5's promise applied to the statuses no handler produces. A challenge and
+// a forbid are written by the middleware below before any endpoint runs, and
+// they carry NO BODY — so the platform's "one error shape regardless of which
+// service produced it" had two holes in it, on the two statuses a client meets
+// first. AddProblemDetails registers a writer and nothing was calling it for
+// these; since .NET 8 this middleware does, which is why it is one line rather
+// than a handler. Above the auth middleware, because it converts what they
+// write on the way back out.
+app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
+
 // Before everything that reads the client address, and after the two that do
 // not. §4.2's sample put this line first and PR-17 followed it; the chapter
 // was amended in this change, because "first" cost both of the rules above it

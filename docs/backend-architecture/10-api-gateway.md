@@ -676,7 +676,7 @@ Each belongs to a mechanism that runs before or beside a handler, and giving
 | Status | Produced by | Why not `Error` |
 |---|---|---|
 | 400 | `ValidationBehavior` throwing `ValidationException` ([§6.3](06-cqrs.md)) | The `errors` extension is field-keyed, and `Error` has no field. A malformed request is rejected before any handler runs, so no handler can return one |
-| 401 / 403 | The authentication and authorization middleware (§11.4) | Decided before the endpoint's delegate is entered |
+| 401 / 403 | The authentication and authorization middleware (§11.4) | Decided before the endpoint's delegate is entered — and written with **no body at all** unless something converts them, which is what `app.UseStatusCodePages()` is for (§4.2). Registering `AddProblemDetails` is not enough: it supplies a writer that nothing on this path was calling, so the two statuses a client meets first were the two that broke the promise this section opens with. Measured on a gateway 401 in PR-17, true of every host since PR-16, fixed in all of them |
 | 409 / 412 | `DbUpdateConcurrencyException` and the precondition filter | A different conversation with the client — retry with a fresh ETag, rather than the request was understood and refused |
 
 That asymmetry is why `Rule` maps to 422 rather than 409: 409 is already spoken

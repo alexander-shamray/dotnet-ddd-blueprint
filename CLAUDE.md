@@ -513,7 +513,7 @@ forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
-pipeline — and thirteen of its decisions bind what comes after:
+pipeline — and fourteen of its decisions bind what comes after:
 
 - **An unresolvable policy name stops the gateway; it does not silently drop
   the route, and four sites said it did.** §10.2, §4.2's sample, §11.4's
@@ -626,6 +626,19 @@ pipeline — and thirteen of its decisions bind what comes after:
   chapter is for. The habit that catches it is mechanical: after fixing a line
   that came from a sample, grep the blueprint for the line you replaced, not
   for the topic.
+- **401 and 403 carried no body at all, in every host, since PR-16.** §10.5
+  opens by promising one error shape "regardless of which service produced
+  it", and its own table lists both statuses — but a challenge and a forbid are
+  written by the middleware before any endpoint runs, and
+  `AddCommonProblemDetails` only supplies a writer that nothing on that path
+  was calling. So the two statuses a client meets first were the two that broke
+  the promise. **`app.UseStatusCodePages()` is the whole fix** — since .NET 8
+  it writes through `IProblemDetailsService` — and it is one explicit line per
+  host rather than something `AddCommonWebDefaults` can add, because it is
+  middleware and §4.2 keeps middleware order visible at the composition root.
+  Found by asserting the media type on a gateway 401, which is the assertion
+  nobody had written: `ShouldBe(HttpStatusCode.Unauthorized)` passes just as
+  happily on an empty response.
 - **A permission a *route* requires obeys §11.4's rule exactly as an
   endpoint's does, and the realm role arrives in the same change as the
   constant.** PR-17 registered `inventory:admin` and named it on a route

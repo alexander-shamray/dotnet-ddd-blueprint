@@ -106,6 +106,13 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
 
+        // And in the platform's one error shape (§10.5). A challenge is written
+        // by the middleware before any endpoint runs and carried no body at all
+        // until PR-17 measured one at the gateway and added UseStatusCodePages
+        // to every host — the promise §10.5 opens with had a hole in it on the
+        // status a client meets first.
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
+
         int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");
         rows.ShouldBe(0, "a refused request must not reach the handler");
     }
@@ -123,6 +130,7 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
             permissions: "catalog:read");
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
 
         int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");
         rows.ShouldBe(0, "a refused request must not reach the handler");

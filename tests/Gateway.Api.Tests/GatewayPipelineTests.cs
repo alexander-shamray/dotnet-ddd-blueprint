@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Shouldly;
 using Xunit;
 
@@ -76,6 +77,33 @@ public sealed class GatewayPipelineTests(GatewayFactory factory) : IClassFixture
             await client.GetAsync("/api/v1/orders/018f4c2e", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        await ShouldBeProblemJson(response);
+    }
+
+    /// <summary>
+    /// §10.5's opening promise, applied to the two statuses §10.5 itself says
+    /// no handler produces: "every service returns RFC 9457
+    /// <c>application/problem+json</c>, so clients handle one error shape
+    /// regardless of which service produced it".
+    /// </summary>
+    /// <remarks>
+    /// <c>AddProblemDetails</c> registers a writer and nothing calls it for an
+    /// authentication challenge or an authorization forbid — those are written
+    /// by the middleware before any endpoint runs, and they carry no body at
+    /// all. So the one error shape had two holes in it, on the two statuses a
+    /// browser client meets first. Raised by Copilot against the route
+    /// policies this PR introduced; it was true of every service host since
+    /// PR-16, which is why the fix is in <c>Common.Web</c>.
+    /// </remarks>
+    private static async Task ShouldBeProblemJson(HttpResponseMessage response)
+    {
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
+
+        using JsonDocument body =
+            JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        body.RootElement.GetProperty("status").GetInt32().ShouldBe((int)response.StatusCode);
+        body.RootElement.GetProperty("correlationId").GetString().ShouldNotBeNullOrWhiteSpace();
     }
 
     /// <summary>
@@ -94,5 +122,6 @@ public sealed class GatewayPipelineTests(GatewayFactory factory) : IClassFixture
         HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        await ShouldBeProblemJson(response);
     }
 }
