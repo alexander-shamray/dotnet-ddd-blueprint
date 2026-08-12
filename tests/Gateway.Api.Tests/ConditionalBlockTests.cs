@@ -188,6 +188,15 @@ public sealed class ConditionalBlockTests
     [InlineData("https://spa.example/")]
     // Not an origin at all: an origin is scheme, host and optional port.
     [InlineData("https://spa.example/app")]
+    // Credentials in the authority — parses cleanly, and every other predicate
+    // is false, but a browser never sends one and the value matches nothing.
+    [InlineData("https://user:password@spa.example")]
+    // The wildcard, which fails for the opposite reason and had no test at all:
+    // deleting its eager guard left the whole suite green and deferred the
+    // AllowCredentials failure to the first preflight, which is precisely what
+    // the guard exists to prevent. An untested guard is a guard somebody
+    // deletes.
+    [InlineData("*")]
     public void Cors_enabled_with_a_value_that_is_not_an_origin_refuses_to_start(string configured)
     {
         using CorsWithOriginFactory factory = new(configured);

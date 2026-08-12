@@ -140,6 +140,22 @@ of that again.
 | **16** | `feat(security): JWT bearer with mandatory per-service re-validation` | 4d | 58 | 17 |
 | **17** | `feat(gateway): YARP routing, JWT, rate limiting, CORS` | 4d | 62 | 18 |
 | **18** | `feat(ordering): second service from the scaffold` | 3d | 65 | 19 |
+| **27** | `feat(gateway): response compression and request size limits` | 1d | 66 | 19 |
+
+**PR-27 sits in this phase because Appendix C puts it here**, and for one
+round it did not: the row was filed under *Integration and operations* while
+this file said in prose that it belonged to no phase at all. Appendix C is
+where a phase is decided and this file restates it, so a disagreement between
+them is this file's defect however reasonable the prose sounded. It is gateway
+work depending on PR-17 alone, which is what *Edge and security* means.
+
+Its day is the one on this page that is mostly not code. The two capabilities
+are about five lines together, and the day prices the decisions in front of
+them: a body-size limit needs a number nobody has chosen, and turning
+compression on at the edge needs the `EnableForHttps` argument made where an
+ADR can hold it. **A day is what an argument costs when the code is already
+obvious**, and pricing it at zero because the diff is small is how design
+decisions end up taken by whoever types first.
 
 PR-18 is the cheapest service in the plan and that is the whole point of it —
 it is priced at three days *because* PR-11 exists, and if it turns out to cost
@@ -159,32 +175,19 @@ scaffold.
 
 | PR | Title | Est. | Cum. | Week |
 |---|---|---|---|---|
-| **19** | `feat(bff): the BFF host, its gRPC client and the one permitted sync hop` | 4d | 69 | 20 |
-| **20** | `feat(ordering): consume Catalog events into a local projection` | 4d | 73 | 21 |
-| **21** | `feat(ordering): order fulfilment saga` | 6d | 79 | 23 |
-| **22** | `test: expand architecture rules and document the test strategy` | 3d | 82 | 24 |
-| **23** | `feat(deploy): Helm charts, migration hooks, probes` | 5d | 87 | 25 |
-| **24** | `docs(ops): runbooks, secrets, dashboards-as-code, the SLO run` | 6d | 93 | 27 |
-| **25** | `ci: integration categories, canary deploy, quality gates` | 5d | 98 | 28 |
-| **27** | `feat(gateway): response compression and request size limits` | 1d | 99 | 29 |
+| **19** | `feat(bff): the BFF host, its gRPC client and the one permitted sync hop` | 4d | 70 | 20 |
+| **20** | `feat(ordering): consume Catalog events into a local projection` | 4d | 74 | 22 |
+| **21** | `feat(ordering): order fulfilment saga` | 6d | 80 | 23 |
+| **22** | `test: expand architecture rules and document the test strategy` | 3d | 83 | 24 |
+| **23** | `feat(deploy): Helm charts, migration hooks, probes` | 5d | 88 | 26 |
+| **24** | `docs(ops): runbooks, secrets, dashboards-as-code, the SLO run` | 6d | 94 | 27 |
+| **25** | `ci: integration categories, canary deploy, quality gates` | 5d | 99 | 29 |
 
 This phase is a third of the total, which surprises people who read a plan as a
 list of features. PR-21's saga carries a timeout on every wait state and a
 compensation path per failure, and each of those is a harness test. PR-24 is
 six days of writing: twelve runbooks, one per alert, each checked from the
 alert to the procedure and from the procedure back to the alert.
-
-**PR-27 is last in the table and does not belong to this phase**, which is why
-it is worth a line rather than a shrug. It depends on PR-17 alone, so it could
-land in week 18 as easily as week 29; it sits here because the table is
-cumulative and a number has to go somewhere, not because anything after PR-17
-waits for it. It is also the one row in this file whose day is mostly not
-code — the two capabilities are about five lines together, and the day prices
-the decisions in front of them: a body-size limit needs a number nobody has
-chosen, and turning compression on at the edge needs the `EnableForHttps`
-argument made where an ADR can hold it. **A day is what an argument costs when
-the code is already obvious**, and pricing it at zero because the diff is small
-is how design decisions end up taken by whoever types first.
 
 ### Optional
 
@@ -208,15 +211,8 @@ tells nobody outside the branch anything.
 | **M2** | One service serves one request, end to end | PR-11 | 37d | 11 |
 | **M3** | Events cross a service boundary transactionally | PR-15 | 54d | 16 |
 | **M4** | Authenticated traffic reaches two services through the gateway | PR-18 | 65d | 19 |
-| **M5** | The full async path: projection and saga | PR-21 | 79d | 23 |
-| **M6** | Deployable, observable and gated | PR-25 | 98d | 28 |
-
-**M6 completes at 98 days and the total is 99, and that is not an arithmetic
-slip.** PR-27 hangs off PR-17 and no milestone waits for it, so it is counted
-in the total and belongs to none of the six — the one row where the cumulative
-column and the milestone chain part company. If it lands early, as its single
-dependency allows, every figure below M4 shifts by a day and the milestones do
-not move at all.
+| **M5** | The full async path: projection and saga | PR-21 | 80d | 23 |
+| **M6** | Deployable, observable and gated | PR-25 | 99d | 29 |
 
 **M2 is the one to watch.** It is the first point at which the platform does
 something a person outside the team can see, and it arrives at week 11 — nearly

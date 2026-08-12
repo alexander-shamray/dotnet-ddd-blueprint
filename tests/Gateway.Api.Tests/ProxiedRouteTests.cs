@@ -32,7 +32,14 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
             await client.GetAsync("/api/v1/catalog/products", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-        stub.ReceivedPaths.ShouldContain("/v1/catalog/products");
+
+        // The LAST path, not any path. The stub is a class fixture and
+        // The_public_route_forwards_a_caller_carrying_no_token sends this exact
+        // path too, so ShouldContain could be satisfied by that test's entry
+        // while this request was forwarded wrongly — an assertion passing on
+        // somebody else's evidence. The same hazard the POST case avoids by
+        // counting before and after.
+        stub.ReceivedPaths.Last().ShouldBe("/v1/catalog/products");
     }
 
     /// <summary>
@@ -51,7 +58,7 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
         HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-        stub.ReceivedPaths.ShouldContain("/dashboard");
+        stub.ReceivedPaths.Last().ShouldBe("/dashboard");
     }
 
     /// <summary>
