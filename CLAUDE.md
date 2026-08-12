@@ -681,7 +681,12 @@ test in the repository was watching.**
   loop.** No project ships a `launchSettings.json`, so `dotnet run` selects
   Production, where `RequireHttpsMetadata` is on — and against a plain-HTTP
   local authority the host never fetches the discovery document at all.
-  `ASPNETCORE_ENVIRONMENT=Development` leads both host-run blocks. The
+  `ASPNETCORE_ENVIRONMENT=Development` leads **every host-run block that names
+  an authority** — Catalog's and, since PR-17, the gateway's, but not the
+  migrator's, whose job never sees a token. This line said "both host-run
+  blocks" and PR-17 made it false by adding a third: the gateway snippet went
+  out without the export and did not start when pasted into a clean shell,
+  which is what a rule stated as a count rather than as a reason costs. The
   containers set it, which is precisely why the Compose path never showed it.
 - **`ICurrentUser`'s implementation reads one authenticated projection, not
   `HttpContext.User`.** Claims and authentication are independent: a

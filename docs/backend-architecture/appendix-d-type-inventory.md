@@ -175,7 +175,7 @@ their declaration.
 | `OutboxRows` | Outbox test builders (§12.4) — `Poison`, `Healthy`, `Unhandled` and `Verbose`, one class rather than one per case. Each takes the **fixture**, not the map alone: a staged row needs both halves of the host's agreement about the format, and one written without the service's converters round-trips to a defaulted value object. `Raised` is a fixed instant, because `OccurredAt` is what §13.7's lag is measured from |
 | `Contracts`, `ContractSamples` | Test builders for `required`-member contract messages — one sample per contract type, and the reason the §12.6 suite cannot silently skip a new one. `Sampled` exposes the registry's keys, so the suite can also fail a sample whose contract has gone |
 | `RecordedMeasurements`, `TestMeterFactory` | A `MeterListener` scoped to one meter, and the ten-line `IMeterFactory` behind a metrics class under test. What §9.8 and §13.3 constrain is the instrument's **name and tags**, which a substituted metrics type could not assert |
-| `RouteConfiguration`, `ReadRoutes` | One route of `ReverseProxy:Routes` and the reader that returns them all (§12.4). Read through the host's own `IConfiguration` rather than off disk: that is the exact text YARP binds, where a second parser would assert against itself — and the file legally carries comments, which only the configuration provider's `JsonCommentHandling.Skip` is guaranteed to agree with. Carries the two derived values the assertions need: the forwarded path prefix, and the namespace the match sits under |
+| `RouteConfiguration.ReadAll`, `RouteConfigurationTests.ReadRoutes` | One route of `ReverseProxy:Routes` and the two readers §12.4's samples call. **`ReadAll` is the type's static reader; `ReadRoutes` is the suite's private wrapper and not an alias for it** — it adds the non-empty assertion every other test in the class rests on, since each of them is a `foreach` and a `foreach` over nothing passes. Both are read through the host's own `IConfiguration` rather than off disk: that is the exact text YARP binds, where a second parser would assert against itself, and the file legally carries comments that only the configuration provider's `JsonCommentHandling.Skip` is guaranteed to agree with. `RouteConfiguration` carries the two derived values the assertions need — the forwarded path prefix, and the namespace the match sits under |
 | `AlwaysThrows`, `NoOpEvent`, `UnhandledEvent` | Test event types with throwing / no-op / no handler |
 | `IntegrationCollection` (xUnit) | The `[CollectionDefinition]` sharing one `ServiceFixture` across test classes — declared once **per test assembly** (§12.4). Named for what it groups, and deliberately not `ServiceCollection`: that name is taken by `Microsoft.Extensions.DependencyInjection`, and the local type would win in every test file that also builds a provider |
 | `ICommandMessageMapper<TMessage,TCommand>` implementations | One per command contract — e.g. `CancelOrderMapper`, which parses `CancelOrder.Reason` back to `CancellationReason` and stamps `CommandOrigin.System` (§9.4). The stamp lives here rather than on the wire contract, so nothing a peer *sends* can claim it — what earns it is arrival on the queue, which is only as strong as broker authorisation (§9.4's callout) |
@@ -219,12 +219,13 @@ their declaration.
 
 ## D.6 Framework types
 
-Not listed individually: ASP.NET Core, EF Core, MassTransit, StackExchange.Redis,
-Dapper, Polly, OpenTelemetry, YARP, xUnit, Shouldly, NSubstitute, Testcontainers,
-Respawn, Scrutor, FluentValidation, NetArchTest and Aspire types are assumed —
-including the ones the samples name outright, such as `TestResult` (§4.2),
-`IProxyStateLookup` ([§12.4](12-test-strategy.md)) and
-`IResourceBuilder<ProjectResource>` (§14.2). Licences in [Appendix B](appendix-b-licences.md).
+Not listed individually: ASP.NET Core, EF Core, MassTransit,
+StackExchange.Redis, Dapper, Polly, OpenTelemetry, YARP, xUnit, Shouldly,
+NSubstitute, Testcontainers, Respawn, Scrutor, FluentValidation, NetArchTest
+and Aspire types are assumed — including the ones the samples name outright,
+such as `TestResult` (§4.2), `IProxyStateLookup` ([§12.4](12-test-strategy.md))
+and `IResourceBuilder<ProjectResource>` (§14.2). Licences in
+[Appendix B](appendix-b-licences.md).
 
 One of those names collides: xunit.v3 declares its own `Xunit.TestResult`, so
 a test file holding §4.2's gates aliases the one it means —

@@ -124,10 +124,19 @@ the Compose network and nowhere else, so a host-run gateway has to be told
 where the service actually is.
 
 ```bash
+export ASPNETCORE_ENVIRONMENT=Development
 export Identity__Authority='http://localhost:8080/realms/commerce'
 export ReverseProxy__Clusters__catalog__Destinations__d1__Address='http://localhost:5102/'
 dotnet run --project src/Gateway/Gateway.Api
 ```
+
+`ASPNETCORE_ENVIRONMENT` leads this block for the same reason it leads the one
+above, and the block is written to stand alone rather than as a delta on that
+shell: without it the authority on the next line is plain HTTP outside
+Development, `AddJwtAuthentication` refuses it at startup, and the gateway does
+not run at all. Every host here validates tokens (§11.2), so every host-run
+block that names an authority needs this line — which is both of them, and not
+the migrator below, whose job never sees a token.
 
 `Cors__Enabled` and `Ingress__Enabled` are both absent above and both default
 to off, which is the shape the flags are written for — off is a valid
