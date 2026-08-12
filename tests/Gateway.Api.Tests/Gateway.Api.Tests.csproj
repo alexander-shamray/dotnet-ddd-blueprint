@@ -22,7 +22,7 @@
          here. -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <!-- IProxyStateLookup — the built host's own answer to "which routes did
-         you accept", which is what makes §10.2's silent drop observable.
+         you accept", asserted against the ids in the shipped route file.
          Carried transitively by Gateway.Api; named directly because these
          tests name the type, on the register's honesty rule. -->
     <PackageReference Include="Yarp.ReverseProxy" />

@@ -289,8 +289,13 @@ tests/
                                  claim-mapping pair and
                                  RealmImportTests — which reads
                                  deploy/compose/keycloak/realm-export.json by
-                                 walking up to Platform.slnx, the only test in
-                                 the repo that reads a repository file
+                                 walking up to Platform.slnx. It was the only
+                                 test in the repo that read a repository file
+                                 until PR-17's GrantablePermissionTests made
+                                 the same walk to the same file, from the side
+                                 that owns the constant — so the walk is a
+                                 shape two suites share rather than one suite's
+                                 peculiarity
   Gateway.Api.Tests/             PR-17's, and a new row in §12.1's pyramid —
                                  edge configuration, no containers. Reads the
                                  shipped appsettings.json through the host's
