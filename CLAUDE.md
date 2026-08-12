@@ -1016,8 +1016,13 @@ comes after:
   `xunit.v3.extensibility.core` — `xunit.v3` itself refuses non-Exe output.
 - **The compose smoke now builds images.** The application blocks carry
   `build:` stanzas, so the path-filtered workflow compiles the solution inside
-  Docker; its timeout rose to 25 minutes and its header says why. A change
-  under `src/` alone does not re-run it — per-service CI builds are PR-25's.
+  Docker; PR-10 raised its timeout to 25 minutes and **PR-17 raised it again
+  to 30** for the gateway's image, the workflow header carrying the reason
+  each time. The number lives in `.github/workflows/compose.yml` and is
+  restated here, which is what makes it a claim to reconcile rather than a
+  fact to read: it went stale the moment a third image joined, and stayed
+  stale for four review rounds. A change under `src/` alone does not re-run
+  the workflow — per-service CI builds are PR-25's.
 - **Chiselled images take the `-extra` tag, and the suffix is load-bearing.**
   Plain chiselled runs globalization-invariant and `Microsoft.Data.SqlClient`
   refuses to open a connection under it — found when the containerised
