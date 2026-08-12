@@ -1,13 +1,23 @@
 # src/Services/Catalog/Catalog.Migrator/Dockerfile
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+
+# Pinned to the patch global.json names, same as the API image and for the
+# reason it states at length: a floating 10.0-noble drifted onto 10.0.400,
+# `rollForward: disable` refused it (§4.4), and the restore below exited 155.
+# A bump in global.json is a bump in both files.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.302-noble AS build
 WORKDIR /src
 
 # Project files first, same as the API image and for the same reason: restore
 # in a layer that survives source-only changes, which is most changes. No
-# Common.Web — the migrator's reference chain stops at Infrastructure.
+# Common.Web — the migrator's reference chain stops at Infrastructure. Every
+# other project in that chain takes a line, for the reason the API image
+# states at length: a csproj absent at restore is not restored, and the
+# --no-restore publish below fails with NETSDK1004 four steps later.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
 COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/
+COPY src/BuildingBlocks/Common.Contracts/Common.Contracts.csproj src/BuildingBlocks/Common.Contracts/
+COPY src/BuildingBlocks/Common.Infrastructure/Common.Infrastructure.csproj src/BuildingBlocks/Common.Infrastructure/
 COPY src/Services/Catalog/Catalog.Domain/Catalog.Domain.csproj src/Services/Catalog/Catalog.Domain/
 COPY src/Services/Catalog/Catalog.Application/Catalog.Application.csproj src/Services/Catalog/Catalog.Application/
 COPY src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj src/Services/Catalog/Catalog.Infrastructure/

@@ -40,7 +40,22 @@ public class HostSmokeTests(HostSmokeTests.UnreachableInfrastructureFactory fact
     public sealed class UnreachableInfrastructureFactory() : CatalogApiFactory(
         "Server=catalog-sql.invalid,1433;Database=Catalog;User Id=sa;" +
         "Password=not-a-real-password;Encrypt=False;Connect Timeout=1",
-        "amqp://guest:guest@catalog-rabbit.invalid:5672");
+        "amqp://guest:guest@catalog-rabbit.invalid:5672")
+    {
+        /// <summary>
+        /// The one host in the repository that keeps the production JWT scheme.
+        /// Every other factory swaps in <c>TestAuthHandler</c>, which is what
+        /// lets those suites authenticate at all — and precisely why none of
+        /// them can say whether its headers mean anything to a real
+        /// deployment. A test scheme cannot prove its own absence.
+        /// </summary>
+        protected override void ConfigureAuthentication(IServiceCollection services)
+        {
+            // Deliberately empty. Not "not yet" — restoring the base call here
+            // would silently delete EndpointSecurityTests, which is the only
+            // suite that reads this host as a deployment rather than a fixture.
+        }
+    }
 
     [Fact]
     public async Task Live_probe_returns_200()

@@ -306,13 +306,19 @@ public sealed class ServiceFixture : IAsyncLifetime
                 .UseSetting("ConnectionStrings:RedisCache", _cache.GetConnectionString())
                 .UseSetting("ConnectionStrings:RedisCoordination", _coordination.GetConnectionString())
                 .UseSetting("ConnectionStrings:RabbitMq", _rabbit.GetConnectionString())
-                // The host is the real one, so ValidateOnStart runs here too
-                // (§15.4). Without this the fixture throws
-                // OptionsValidationException out of InitializeAsync and every
-                // test in the suite fails before it starts. Deliberately fake
-                // and deliberately unreachable — .invalid never resolves, so a
+                // AddJwtAuthentication reads this key eagerly and throws
+                // naming it (§11.3), so the fixture supplies it for the same
+                // reason it supplies the connection strings: without it the
+                // host does not start, InitializeAsync throws, and every test
+                // in the suite fails before it runs. Deliberately fake and
+                // deliberately unreachable — .invalid never resolves, so a
                 // test that accidentally dials the authority fails loudly
                 // rather than reaching a real identity provider.
+                //
+                // Not ValidateOnStart and not OptionsValidationException,
+                // which is what this comment said until PR-16 wrote the code:
+                // §15.4 keeps ServiceIdentityOptions as the solution's only
+                // options type, so there is no options class here to validate.
                 //
                 // No Identity:Client here. Ordering does not call a peer, so it
                 // never binds ServiceIdentityOptions (§9.7) and supplying one
@@ -329,14 +335,23 @@ public sealed class ServiceFixture : IAsyncLifetime
                     // TestAuthHandler issues the principal each test asks for,
                     // including its permission claims, so the authorization
                     // policies are exercised for real.
+                    // Only authenticate and challenge are set, and forbid
+                    // follows the challenge one — DefaultForbidScheme is unset,
+                    // and the scheme provider falls back to
+                    // DefaultChallengeScheme before DefaultScheme. So the 403
+                    // comes from TestAuthHandler's inherited forbid, which is a
+                    // bare status code touching no metadata, and the
+                    // wrong-permission test needs no identity provider either.
                     services.Configure<AuthenticationOptions>(o =>
                     {
-                        o.DefaultAuthenticateScheme = TestAuthHandler.Scheme;
-                        o.DefaultChallengeScheme = TestAuthHandler.Scheme;
+                        o.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
+                        o.DefaultChallengeScheme = TestAuthHandler.SchemeName;
                     });
                     services
                         .AddAuthentication()
-                        .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.Scheme, _ => { });
+                        .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
+                            TestAuthHandler.SchemeName,
+                            _ => { });
 
                     // Remove ONLY the two background services this suite
                     // drives, not every hosted service: MassTransit registers
@@ -569,7 +584,12 @@ public sealed class TestAuthHandler(
     UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
-    public const string Scheme = "Test";
+    // SchemeName, not Scheme. AuthenticationHandler<T> already declares a
+    // protected Scheme — the AuthenticationScheme this handler was resolved
+    // for — so a constant of that name hides it, and CS0108 is an error under
+    // ADR-019's TreatWarningsAsErrors. This sample said Scheme until PR-16
+    // compiled it.
+    public const string SchemeName = "Test";
     public const string UserHeader = "X-Test-User";
     public const string PermissionsHeader = "X-Test-Permissions";
 
@@ -589,11 +609,11 @@ public sealed class TestAuthHandler(
                 granted
                     .ToString()
                     .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(p => new Claim("permission", p)));
+                    .Select(p => new Claim(PermissionClaim.Type, p)));
 
-        ClaimsPrincipal principal = new(new ClaimsIdentity(claims, Scheme));
+        ClaimsPrincipal principal = new(new ClaimsIdentity(claims, SchemeName));
         return Task.FromResult(
-            AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme)));
+            AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName)));
     }
 }
 ```
@@ -990,8 +1010,10 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     public async Task Rejects_a_request_with_no_token()
     {
         // No X-Test-User header, so TestAuthHandler returns NoResult and the
-        // challenge stands. This is the test that catches UseAuthentication
-        // being dropped from the pipeline (§4.2).
+        // challenge stands. What this catches is the POLICY being dropped from
+        // the endpoint — not UseAuthentication being dropped from the pipeline,
+        // which is what this comment claimed until PR-16 tried it. See the
+        // callout below the four tests.
         HttpResponseMessage response = await _client.PostAsJsonAsync(
             $"/v1/orders/{Guid.CreateVersion7()}/cancel",
             new CancelOrderRequest(CancelReasons.CustomerRequest));
@@ -1004,6 +1026,9 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     {
         // Authenticated, but with orders:read where the endpoint wants
         // orders:cancel — the case a fixture that grants everything hides.
+        // A literal, not OrderingPermissions.Read — the point is a permission
+        // this endpoint's policy does not accept, and naming it from the
+        // vocabulary would read as though one existed for it.
         HttpResponseMessage response = await SendAsAsync(Guid.CreateVersion7(), "orders:read", Guid.CreateVersion7());
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -1017,7 +1042,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
 
         HttpResponseMessage response = await SendAsAsync(
             Guid.CreateVersion7(),   // a different customer
-            "orders:cancel",
+            OrderingPermissions.Cancel,
             orderId);
 
         // 404, not 403 — §11.4. A 403 here would confirm the order exists,
@@ -1036,7 +1061,7 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
             Content = JsonContent.Create(new CancelOrderRequest("CustomerRequest"))
         };
         request.Headers.Add(TestAuthHandler.UserHeader, Guid.CreateVersion7().ToString());
-        request.Headers.Add(TestAuthHandler.PermissionsHeader, "orders:cancel");
+        request.Headers.Add(TestAuthHandler.PermissionsHeader, OrderingPermissions.Cancel);
 
         HttpResponseMessage response = await _client.SendAsync(request);
 
@@ -1058,12 +1083,34 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
 ```
 
 Four tests, four distinct failures, none reachable from below the HTTP
-boundary: a missing `UseAuthentication` (401 becomes 500 or 200), a policy name
-that resolves to nothing (403 becomes 200), a resource check returning the wrong
-status (404 becomes 403, leaking existence), and a reason parsed by
-`Enum.TryParse` instead of the wire vocabulary (400 becomes 200, and the enum's
-member names quietly become API surface). Each is a defect this document has
-argued about in prose and, until now, asserted nowhere.
+boundary: an endpoint that lost its `RequireAuthorization` (401 becomes 200), a
+policy name that resolves to nothing (403 becomes 200), a resource check
+returning the wrong status (404 becomes 403, leaking existence), and a reason
+parsed by `Enum.TryParse` instead of the wire vocabulary (400 becomes 200, and
+the enum's member names quietly become API surface). Each is a defect this
+document has argued about in prose and, until now, asserted nowhere.
+
+> **None of them catches a missing `UseAuthentication`, and nothing in a
+> `WebApplication` host can.** The first row read that way until PR-16 deleted
+> the line from `Catalog.Api/Program.cs` and every test in the repository
+> stayed green. `WebApplication` adds the authentication and authorization
+> middleware **itself** whenever the matching services are registered; an
+> explicit call moves them earlier in the pipeline, which is what a composition
+> root wants — they have to sit above anything that logs the caller — but it is
+> not what puts them there.
+>
+> Keep the explicit calls: they are §4.2's specified shape, they are required
+> by any host that is not a `WebApplication`, and a pipeline whose order is
+> implicit is one nobody can review. What changed is the claim about what would
+> notice their absence. `Common.Web.Tests` carries the four assertions that
+> are actually true — that the middleware is what populates `HttpContext.User`,
+> that the authorization middleware does not authenticate on its own, that a
+> `WebApplication` auto-adds it, and that auto-insertion does **not** repair
+> the two calls being written in the wrong order. The third is a regression
+> guard on the framework: were a release to stop doing it, every service would
+> hand anonymous callers to its handlers while its authorization kept passing.
+> The fourth is what [§4.2](04-solution-structure.md)'s ordering row rests on,
+> and it is the reason that row no longer says reversal is harmless.
 
 ### The subject rule, enforced
 

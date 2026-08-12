@@ -1,18 +1,36 @@
 # syntax=docker/dockerfile:1
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+
+# The tag names the exact patch global.json pins (§4.4), so a bump there is a
+# bump here, in the same change. It floated on 10.0-noble until the copied-in
+# global.json proved the point it was there to prove: the tag moved to
+# 10.0.400, `rollForward: disable` refused it, and every restore below exited
+# 155. Loud is right for a drift nobody chose and wrong for the image itself,
+# which has to build — so the tag obeys the pin and global.json stays as the
+# belt on those braces.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.302-noble AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Project files first, so the restore layer really does survive source-only
 # changes — a COPY of the whole trees before restore re-keys its layer on
 # every .cs edit and the cache claim becomes fiction. global.json first among
-# equals: sdk:10.0-noble is a floating tag, so without it this build — the
-# only one whose output ships — compiles under whatever SDK the base image
-# carries that week, while developers and CI are pinned (§4.4). Copied in, a
-# mismatch is a restore error rather than different analysers.
+# equals: with it copied in, a tag that has drifted off the pin is a restore
+# error here rather than a silently different set of analysers in the one
+# build whose output ships.
+#
+# **Every project in the transitive closure gets a line, and a missing one
+# fails four steps later rather than here.** dotnet restore walks the graph and
+# writes each project's own obj/project.assets.json; a csproj that is not
+# present when it runs is simply not restored, and the --no-restore publish
+# below then fails with NETSDK1004 naming a project this file never mentions.
+# So a new ProjectReference anywhere in the chain is a line here too — and
+# nothing in CI will say so, because the compose smoke that builds these images
+# is path-filtered on deploy/compose/** and a reference lands under src/.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
 COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/
+COPY src/BuildingBlocks/Common.Contracts/Common.Contracts.csproj src/BuildingBlocks/Common.Contracts/
+COPY src/BuildingBlocks/Common.Infrastructure/Common.Infrastructure.csproj src/BuildingBlocks/Common.Infrastructure/
 COPY src/BuildingBlocks/Common.Web/Common.Web.csproj src/BuildingBlocks/Common.Web/
 COPY src/Services/Catalog/Catalog.Domain/Catalog.Domain.csproj src/Services/Catalog/Catalog.Domain/
 COPY src/Services/Catalog/Catalog.Application/Catalog.Application.csproj src/Services/Catalog/Catalog.Application/

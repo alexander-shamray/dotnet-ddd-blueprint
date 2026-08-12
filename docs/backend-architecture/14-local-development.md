@@ -60,8 +60,32 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # One issuer, whichever host asks. Without it Keycloak derives the issuer
+      # from each request's Host header, so a token minted through
+      # localhost:8080 and a discovery document read through keycloak:8080
+      # disagree — and ValidateIssuer (§11.3) rejects every token obtained the
+      # way this chapter documents. The second variable puts the backchannel
+      # back on the container route, which is the half the services need.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
+    # The image has a shell but no HTTP client, so this is a bash TCP
+    # redirection against the management port — the form Keycloak's own
+    # documentation gives. Without a healthcheck `up --wait` returns when the
+    # process launches rather than when the realm is importable, and the first
+    # token request races the import.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/localhost/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
@@ -144,7 +168,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     ports: [ "5000:8080" ]
     depends_on:
-      keycloak: { condition: service_started }
+      keycloak: { condition: service_healthy }
       ordering-api: { condition: service_started }
 
   # The one host with client credentials, because it is the one host that calls
@@ -170,7 +194,7 @@ services:
       # Keycloak only. catalog-api is elided from this file (see the comment
       # above the gateway), and Compose rejects a dependency on a service it
       # cannot see — one undefined name fails the whole `up`, not one service.
-      keycloak: { condition: service_started }
+      keycloak: { condition: service_healthy }
 
 volumes:
   sql-data:
@@ -183,10 +207,18 @@ rather than at once. PR-06 ships the seven infrastructure services above;
 each application block lands with the PR that builds its image — the
 scaffold of [§4.5](04-solution-structure.md) writes the pair per service,
 along with both `infra-only` exclusions below, its `.env.example` variables
-and its row in `deploy/compose/README.md` — and the realm file ships as a
-placeholder, realm name and `enabled` only, until PR-16's import replaces
-it. The `docker-compose.infra-only.yml` override below arrives with the
-first containerised service, there being nothing to exclude before it.
+and its row in `deploy/compose/README.md`. The
+`docker-compose.infra-only.yml` override below arrives with the first
+containerised service, there being nothing to exclude before it.
+
+The realm file shipped as a placeholder — realm name and `enabled` only —
+from PR-06 until PR-16 replaced it with a full Keycloak export: the
+`commerce-api` client scope with its audience and permission mappers, the
+`commerce-api` client holding the permission vocabulary as client roles, a
+browser client, and two development logins. **A full export rather than a
+readable summary, and [§11.5](11-identity-authorization.md) argues why** —
+Keycloak treats a `clientScopes` array as the complete set, so a trimmed file
+silently drops the built-in scopes and with them `sub`.
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up -d --wait
@@ -198,6 +230,12 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 | Keycloak | http://localhost:8080 (admin/admin) |
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
+
+The realm's own logins are `demo/demo`, which holds `catalog:write`, and
+`browser/browser`, which holds nothing and is the account a refusal is proved
+against. Both are development defaults on the same terms as the three above —
+the deliberate local-development exception to §11.6, which every deployed
+environment replaces with real users out of a directory.
 
 `deploy/compose/README.md` is the keyboard inventory of what runs today —
 every port and credential of the seven infrastructure services, beside the
@@ -251,6 +289,40 @@ host with a debugger attached — the usual inner-loop compromise:
 docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.infra-only.yml up -d
 dotnet run --project src/Services/Ordering/Ordering.Api
 ```
+
+**A host process reads none of the container `environment:` blocks, so every
+key a service throws without has to be supplied to it.** Three do that today,
+each named by the registration that reads it — `ConnectionStrings__<Service>`
+(§7.1's runtime key, `AddSqlServer`), `ConnectionStrings__RabbitMq` (§9's bus)
+and `Identity__Authority` ([§11.3](11-identity-authorization.md), read eagerly
+by `AddJwtAuthentication`). The values differ from the container ones only in
+the host name, because the compose file publishes each port:
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Development
+export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
+export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
+export Identity__Authority='http://localhost:8080/realms/commerce'
+```
+
+**The environment is the first line and is not decoration.** No project ships a
+`launchSettings.json`, so `dotnet run` is Production unless told otherwise, and
+`RequireHttpsMetadata` is on in Production
+([§11.3](11-identity-authorization.md)) — against a plain-HTTP local authority
+the host will not fetch the discovery document at all, and every bearer request
+fails before validation starts. The containers set the same variable, which is
+why only the host path shows this.
+
+The override excludes each service's **migrator** beside its API, so the schema
+is the host's job too — under §7.4's separate key
+(`ConnectionStrings__<Service>Migrator`), which is the one place the two
+identities stay apart locally even though the login does not (§7.1).
+
+No `appsettings.Development.json` carries these instead, and that is the same
+decision §15.4 makes everywhere else: a file in the repository holding a
+connection string is a credential in the repository, and a default authority
+baked into configuration is one a deployed host inherits when its own key is
+missing — the failure the eager throw exists to make loud.
 
 The override's whole content is a profile per application service. An override
 cannot delete a service, but profiles gate activation and nothing activates

@@ -62,7 +62,7 @@ Phase names map to the `phase` column. Dependencies are PR numbers.
 | **07** | `feat(template): service skeleton and architecture test gate` | 02–06 | Compilable empty service across five projects ([§4.1](04-solution-structure.md)), Minimal API host, health endpoints, OpenAPI. **NetArchTest gate from this PR**: domain isolation, Application ↛ EF Core, endpoints ↛ Infrastructure, Application and Domain ↛ MassTransit (§4.2, [§9.3](09-messaging.md)) |
 | **08** | `feat(template): EF Core, repositories, IUnitOfWork, migrator host` | 07, 06 | `DbContext` sealed in Infrastructure, `IUnitOfWork` port, `*.Migrator` project, **dual connection strings** ([§7.1](07-persistence.md)), Testcontainers smoke test |
 | **09** | `feat(common): TransactionBehavior over IUnitOfWork` | 04, 08 | §6.3 behaviour. Tests proving `SaveChanges` is called once on success and never on failure, that a handler which writes through `ExecuteRawAsync` and then returns `Result.Failure` leaves no row, and that queries never open a transaction |
-| **10** | `feat(catalog): first vertical slice — command, query, cursor pagination` | 07–09 | One aggregate, one command, one cursor-paginated query, the service's Dockerfile and Compose block, and the `docker-compose.infra-only.yml` override ([§14.1](14-local-development.md)) — the first containerised service, and the template PR-11's scaffold copies. **Endpoints are deliberately unauthenticated and this is stated in the README** — closed by PR-16 |
+| **10** | `feat(catalog): first vertical slice — command, query, cursor pagination` | 07–09 | One aggregate, one command, one cursor-paginated query, the service's Dockerfile and Compose block, and the `docker-compose.infra-only.yml` override ([§14.1](14-local-development.md)) — the first containerised service, and the template PR-11's scaffold copies. **The write endpoint is deliberately unauthenticated and this is stated in the README** — closed by PR-16. The listing is not a gap and was never one: [§10.2](10-api-gateway.md)'s `catalog-public` route is GET-only and carries no policy, so a product listing is public at the edge and stays public here |
 | **11** | `feat(tooling): new-service scaffold script` | 07, 10 | Copies and renames the template ([§4.5](04-solution-structure.md)): ports, database name, solution entries, Compose block. **The template is Catalog itself, read at run time** — one copy of the wiring, not two that drift — and the slice is excluded, so a new service inherits the wiring and none of the domain. Dogfooded by PR-18 |
 
 ### Data, cache, messaging
@@ -78,9 +78,9 @@ Phase names map to the `phase` column. Dependencies are PR numbers.
 
 | PR | Title | Depends | Delivers |
 |---|---|---|---|
-| **16** | `feat(security): JWT bearer with mandatory per-service re-validation` | 03, 10 | Keycloak realm import, JWT validation in `Common.Web`, permission policies, test auth handler. **Security tests: forged header without a token → 401; user A reading user B's resource → 404** |
+| **16** | `feat(security): JWT bearer with mandatory per-service re-validation` | 03, 10 | Keycloak realm import, JWT validation in `Common.Web`, permission policies, test auth handler, and §11.4's `ICurrentUser` — common rather than per-service, the chapter amended to match. Closes PR-10's deliberately unauthenticated write path; the listing stays anonymous, because [§10.2](10-api-gateway.md)'s `catalog-public` route is GET-only and carries no policy. **Security tests: forged header without a token → 401, and a caller holding the wrong permission → 403.** The **404 half moves to PR-18**: hiding user B's resource from user A needs a resource with an owner, and Catalog has none — every product is public to every caller by design. Ordering's `CancelOrderHandler` is the first aggregate the check applies to |
 | **17** | `feat(gateway): YARP routing, JWT, rate limiting, CORS` | 06, 16, 10 | The gateway from §10, dual-version route example with matched prefix strips, rate-limit policies, the gateway's own `inventory:admin` authorization policy, correlation ID assignment. **Two config tests, both on `ReverseProxy:Routes`: every `AuthorizationPolicy` and `RateLimiterPolicy` named resolves — an unresolvable one drops the route silently — and every route's match minus its `PathRemovePrefix` equals the group its service maps (§10.2), which the in-process API tests cannot see** |
-| **18** | `feat(ordering): second service from the scaffold` | 11, 08, 16 | Proves the scaffold. Own database, own migrator, gateway route |
+| **18** | `feat(ordering): second service from the scaffold` | 11, 08, 16 | Proves the scaffold. Own database, own migrator, gateway route. **Carries PR-16's deferred security test: user A reading user B's order → 404**, which is §11.4's ownership check and needs the first resource in the platform that has an owner — `CancelOrderHandler` is where the rule finally has something to apply to |
 
 ### Integration and operations
 
@@ -183,6 +183,13 @@ PR-16. Naming a temporary gap in the README and scheduling its closure is
 honest; discovering it in a pen test six months later is not. The alternative —
 blocking the first vertical slice on the full auth stack — delays the feedback
 that the slice exists to provide.
+
+PR-16 closed it, and closing it settled a question the note could not: **only
+the write path was a gap.** The listing is anonymous permanently, because
+[§10.2](10-api-gateway.md)'s `catalog-public` route matches GET alone and
+carries no authorization policy. A scheduled closure is worth having partly for
+this — the PR that pays the debt is the one that reads the whole design and
+finds out how much of it was ever owed.
 
 **PR-11 is dogfooded by PR-18.** The scaffold script is proven by the next real
 service, not by intent. If the script cannot produce Ordering, it is not

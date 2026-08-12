@@ -55,8 +55,42 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # One issuer, whichever host asks. Without this Keycloak derives the
+      # issuer from each request's Host header, so a token minted through
+      # localhost:8080 carries iss=http://localhost:8080/... while the
+      # discovery document catalog-api reads over the compose network
+      # advertises http://keycloak:8080/... — and ValidateIssuer rejects every
+      # token the README tells a developer to obtain. The two names are the
+      # same server; only the route differs.
+      KC_HOSTNAME: http://localhost:8080
+      # ...which leaves the container-side route to be restored: with a fixed
+      # hostname Keycloak would otherwise advertise localhost:8080 for the
+      # backchannel too, and catalog-api cannot reach that. Dynamic backchannel
+      # resolves the endpoints from the request host while the issuer stays
+      # frontend, which is exactly the split this needs.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # Turns on /health/ready, on the management port, which is what the
+      # healthcheck below reads. Off by default.
+      KC_HEALTH_ENABLED: "true"
     ports: [ "8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
+    # The image has a shell — CMD-SHELL below needs one — but no HTTP client:
+    # no curl, no wget. So the check is a bash TCP redirection against the
+    # management port, which is the form Keycloak's own documentation gives for
+    # exactly that reason. Without it `up --wait` returns as soon as the process
+    # launches, and the README's token command can reach a realm that has not
+    # finished importing: a 404 on the token endpoint, on a stack that has just
+    # reported healthy.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/localhost/9000; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   # §14.1's pair rule: a {service}-migrator one-shot plus the service itself,
   # gated on `condition: service_completed_successfully` — every service owns
@@ -90,16 +124,28 @@ services:
       # endpoint table), not a secret with a production shape, and
       # .env.example's contract covers variables, not constants.
       ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
+      # The authority, to validate inbound tokens (§11.2). Read eagerly by
+      # AddJwtAuthentication, which throws naming the key — so this line is
+      # what lets the host start, exactly like the bus one above. No
+      # Identity__Client__*: Catalog calls no peer synchronously, and outbound
+      # identity belongs to the BFF alone (§9.7, §11.5).
+      Identity__Authority: "http://keycloak:8080/realms/commerce"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-      # No Redis or Identity__Authority keys: Catalog reads neither yet — the
-      # Redis keys join when Catalog first consumes a cache, the outbox with
-      # PR-14, JWT validation with PR-16. An env var nothing reads is the
-      # container form of an unused registration: each joins with the PR
-      # whose code reads it.
+      # Still no Redis keys: Catalog reads none yet, and they join when it
+      # first consumes a cache. An env var nothing reads is the container form
+      # of an unused registration — each joins with the PR whose code reads it,
+      # which is what brought the line above with PR-16.
     ports: [ "5102:8080" ]
     depends_on:
       catalog-migrator: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
+      # service_healthy since the block above declares a healthcheck. The API
+      # itself does not need it — JwtBearer fetches the discovery document
+      # lazily, on the first request that carries a token — but `up --wait`
+      # gates on every service's health, and the value is for whoever types the
+      # README's token command the moment it returns. Under service_started
+      # that command races the realm import and can be handed a 404.
+      keycloak: { condition: service_healthy }
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

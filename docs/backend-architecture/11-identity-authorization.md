@@ -53,31 +53,122 @@ Validation is cheap; assume the network is hostile.
 
 ## 11.3 Service configuration
 
-```csharp
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.Authority = builder.Configuration["Identity:Authority"];
-        options.Audience = "commerce-api";
-        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+`AddJwtAuthentication` lives in `Common.Web` and is composed by
+`AddCommonWebDefaults` ([§13.2](13-observability.md)), never called directly by
+a host. Every service registers it, because every service re-validates (§11.2).
 
-        options.TokenValidationParameters = new TokenValidationParameters
+```csharp
+public const string Audience = "commerce-api";
+public const string AuthorityKey = "Identity:Authority";
+
+public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplicationBuilder builder)
+{
+    // Blank counts as missing: an environment variable set to the empty string
+    // reaches Configuration as "" rather than null, so `??` alone admits
+    // Identity__Authority= and the host starts having promised it would not.
+    string? configured = builder.Configuration[AuthorityKey];
+
+    if (string.IsNullOrWhiteSpace(configured))
+    {
+        throw new InvalidOperationException(
+            $"'{AuthorityKey}' is not configured. Every host re-validates inbound tokens (§11.2), " +
+            "so one that cannot name its identity provider must refuse to start rather than " +
+            "answer the first request without a principal.");
+    }
+
+    // Nor is blank the only malformed value. `keycloak:8080/realms/commerce` —
+    // a dropped scheme — is non-blank and still not an address, and https is
+    // required everywhere but Development, which is the same rule
+    // RequireHttpsMetadata applies below, moved to startup.
+    if (!Uri.TryCreate(configured, UriKind.Absolute, out Uri? parsed) ||
+        (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
+    {
+        throw new InvalidOperationException(
+            $"'{AuthorityKey}' is '{configured}', which is not an absolute http or https URL. ...");
+    }
+
+    // A query or fragment is absolute, http, and still not a base address:
+    // JwtBearer appends `/.well-known/openid-configuration` to this string, and
+    // appending to `…/commerce#x` puts the suffix inside the fragment.
+    if (parsed.Query.Length > 0 || parsed.Fragment.Length > 0)
+    {
+        throw new InvalidOperationException(
+            $"'{AuthorityKey}' is '{configured}', which carries a query or fragment. ...");
+    }
+
+    if (!builder.Environment.IsDevelopment() && parsed.Scheme != Uri.UriSchemeHttps)
+    {
+        throw new InvalidOperationException(
+            $"'{AuthorityKey}' is '{configured}', which is plain HTTP outside Development. ...");
+    }
+
+    string authority = configured;
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
         {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ClockSkew = TimeSpan.FromSeconds(30),
-            NameClaimType = "preferred_username",
-            RoleClaimType = "roles"
-        };
-    });
+            options.Authority = authority;
+            options.Audience = Audience;
+            options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+
+            // The framework default, written out because §11.4's subject rule
+            // rests on it: Keycloak issues `sub`, ICurrentUser.Id reads
+            // ClaimTypes.NameIdentifier, and this is the only thing that turns
+            // one into the other.
+            options.MapInboundClaims = true;
+
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                ClockSkew = TimeSpan.FromSeconds(30),
+                NameClaimType = "preferred_username",
+                RoleClaimType = "roles"
+            };
+        });
+
+    return builder;
+}
 ```
 
-The default `ClockSkew` is five minutes, which means a revoked or expired token
-keeps working for five minutes longer than it should. Thirty seconds is enough
-to absorb real clock drift between NTP-synced hosts.
+The default `ClockSkew` is five minutes, which means an expired token keeps
+working for five minutes past its own `exp`. Thirty seconds is enough to absorb
+real clock drift between NTP-synced hosts.
+
+**It buys nothing against revocation, and reading it as though it did is the
+mistake worth naming.** A lifetime check reads `nbf` and `exp` and nothing
+else, so a token the provider revoked a second ago is accepted here until it
+expires on its own — at any skew. Observing revocation needs introspection or a
+deny list, neither of which this platform has; what bounds the exposure is
+token lifetime, which is the realm's setting rather than this one.
+
+**The authority is read eagerly and the throw names the key**, which is the
+posture `AddSqlServer` and `AddMassTransitMessaging` already take: a host that
+cannot name its identity provider does not start. It is deliberately **not** an
+options type with `ValidateOnStart` — [§15.4](15-cicd-deployment.md) makes
+`ServiceIdentityOptions` the only options type in the solution and argues why,
+and a second bag bound to a section holding one value is the shape that rule
+forbids. §12.4's fixture comment attributed this failure to
+`OptionsValidationException` until PR-16 wrote the code and found otherwise.
+
+**The audience is a constant, not configuration.** §11.5 settles on one
+audience for the whole platform — per-service audiences are a later split — so
+the value is identical in Compose, in the test fixture and in production, which
+is exactly what §15.4 says disqualifies something from being configuration.
+Being a constant is also what makes the realm checkable: the suite that reads
+the shipped realm compares its audience mapper against this field rather than
+restating the string.
+
+> **`RequireHttpsMetadata` is the line the rest of this block rests on.** The
+> four `Validate*` flags check a signature against keys fetched from the
+> authority's discovery document — over plain HTTP, an attacker who can rewrite
+> that response supplies their own keys and every check below passes on a token
+> they minted. §14.1's Keycloak is `http://keycloak:8080`, so Development has to
+> allow it; anything that is not Development must not, and the test asserts both
+> directions rather than only the one somebody remembered to name.
 
 ## 11.4 Permission-based authorization
 
@@ -92,10 +183,47 @@ roles to permissions in one place.
 // ASP.NET Core checks them.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy("orders:read", p => p.RequireClaim("permission", "orders:read"))
-    .AddPolicy("orders:write", p => p.RequireClaim("permission", "orders:write"))
-    .AddPolicy("orders:cancel", p => p.RequireClaim("permission", "orders:cancel"));
+    .AddPolicy(OrderingPermissions.Read, p => p.RequirePermission(OrderingPermissions.Read))
+    .AddPolicy(OrderingPermissions.Write, p => p.RequirePermission(OrderingPermissions.Write))
+    .AddPolicy(OrderingPermissions.Cancel, p => p.RequirePermission(OrderingPermissions.Cancel));
 ```
+
+`RequirePermission` is a one-line extension in `Common.Web` over
+`RequireClaim(PermissionClaim.Type, permission)`. It exists so that **no host
+ever spells the claim type**: four things have to agree on `"permission"` and
+only three of them are code — the policies here, `ICurrentUser.HasPermission`
+below, the test authentication scheme ([§12.4](12-test-strategy.md)), and the
+realm's protocol mapper, which is configuration and cannot reference a
+constant. The fourth is asserted against the other three instead (§11.5).
+
+The permission strings are a per-service constant class rather than literals,
+for the reason the next callout gives: a name written twice is a name that can
+be misspelt once. It lives at the composition root, beside the policies —
+`Ordering.Api`, and `Gateway.Api` for the gateway's own `inventory:admin`
+(§10.2):
+
+```csharp
+namespace Ordering.Api;
+
+/// <summary>
+/// Ordering's permission vocabulary. The strings are the contract with the
+/// realm's claim mapper (§11.5); the policies registered from them are how
+/// ASP.NET Core checks them.
+/// </summary>
+public static class OrderingPermissions
+{
+    public const string Read = "orders:read";
+    public const string Write = "orders:write";
+    public const string Cancel = "orders:cancel";
+}
+```
+
+**A service's vocabulary holds what its endpoints require, and nothing else.**
+Catalog's is one entry — `catalog:write` — because its listing is anonymous
+([§10.2](10-api-gateway.md)); there is no `catalog:read`, because a permission
+nothing requires is a name in the realm nobody can act on. `orders:admin` is
+not here either, and for a different reason given below: it is a **claim** a
+handler checks, not a policy an endpoint names.
 
 > **A policy name is a reference, and nothing checks it.**
 > `RequireAuthorization("orders:cancel")` takes a string. Misspell it, or
@@ -111,6 +239,14 @@ builder.Services
 > the same way: enumerate the endpoint policy names from
 > `EndpointDataSource` in a test and require each to resolve through
 > `IAuthorizationPolicyProvider`.
+>
+> **A constant closes half of this and the test closes the other half**, which
+> is why both are wanted. Naming the policy from a per-service `Permissions`
+> class makes a misspelling a compile error; it says nothing about a policy
+> that was never registered, because the constant is equally happy on both
+> sides of a registration that does not run. The enumeration is what catches
+> that, and it needs its own guard against passing vacuously — over a service
+> with no endpoints, "every name resolves" is true and worthless.
 
 > **Decision — Minimal APIs, not MVC controllers.** See
 > [ADR-015](appendix-a-adrs.md#adr-015--minimal-apis-not-mvc-controllers). The endpoint layer in this
@@ -156,7 +292,7 @@ public static class OrderEndpoints
 
                     return result.ToHttpResult();
                 })
-            .RequireAuthorization("orders:cancel")
+            .RequireAuthorization(OrderingPermissions.Cancel)
             .WithName("CancelOrder");
     }
 }
@@ -318,41 +454,105 @@ does; §9.6's saga wants the same transition, not a parallel one.
 The port and its one implementation:
 
 ```csharp
-// Ordering.Application — a port, because handlers must not see HttpContext.
+// Common.Application — a port, because handlers must not see HttpContext.
 public interface ICurrentUser
 {
-    bool IsAuthenticated { get; }
-    Guid Id { get; }                      // throws if not authenticated
+    bool IsAuthenticated { get; }         // an authenticated caller, not a principal
+    Guid Id { get; }                      // throws without one, or without a subject
     bool HasPermission(string permission);
 }
 ```
 
 ```csharp
-// Ordering.Infrastructure — registered by AddOrderingInfrastructure (§4.2),
-// which also calls AddHttpContextAccessor(). Scoped: it is per request.
+// Common.Web — registered by AddCommonWebDefaults (§13.2), which also calls
+// AddHttpContextAccessor(). Scoped: it is per request.
 public sealed class HttpContextCurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 {
-    private ClaimsPrincipal? User => accessor.HttpContext?.User;
+    // The authenticated identities and nothing else — every member below reads
+    // this rather than HttpContext.User, so no claim can be answered from an
+    // identity IsAuthenticated denies. Filtered rather than tested, because
+    // ClaimsPrincipal.Identity is the *primary* identity while FindFirst and
+    // HasClaim search every one of them.
+    private ClaimsPrincipal? Caller
+    {
+        get
+        {
+            ClaimsIdentity[] authenticated =
+                [.. accessor.HttpContext?.User.Identities.Where(i => i.IsAuthenticated) ?? []];
 
-    public bool IsAuthenticated => User?.Identity?.IsAuthenticated == true;
+            return authenticated.Length == 0 ? null : new ClaimsPrincipal(authenticated);
+        }
+    }
+
+    public bool IsAuthenticated => Caller is not null;
 
     public Guid Id => Guid.Parse(
-        User?.FindFirstValue(ClaimTypes.NameIdentifier) ??
+        Caller?.FindFirstValue(ClaimTypes.NameIdentifier) ??
             throw new InvalidOperationException(
-                "No authenticated caller. Guard with IsAuthenticated — a handler " +
-                "reached by a consumer (§9.4) has no HttpContext."));
+                "No subject. Either there is no authenticated caller — guard with " +
+                "IsAuthenticated, since a handler reached by a consumer (§9.4) has no " +
+                $"HttpContext — or the principal carries no '{ClaimTypes.NameIdentifier}'. " +
+                "That second case has two causes and they are in different components: " +
+                "the identity provider is not issuing 'sub' (§11.5), or MapInboundClaims " +
+                "is off and the raw 'sub' was never translated (§11.3)."));
 
-    // The same claim type §11.4's policies require, so an endpoint policy and
-    // a resource check can never disagree about what a permission is.
+    // PermissionClaim.Type, not a literal — the same constant §11.4's policies
+    // read, so an endpoint policy and a resource check can never disagree
+    // about what a permission is. Four things must agree on this string and
+    // three of them are code; spelling it here would make it four places to
+    // change and one to forget.
     public bool HasPermission(string permission) =>
-        User?.HasClaim("permission", permission) == true;
+        Caller?.HasClaim(PermissionClaim.Type, permission) == true;
 }
 ```
 
+> **Claims and authentication are independent, so the gate belongs in one
+> place rather than in each member.** A `ClaimsIdentity` built with no
+> authentication type carries whatever claims it was given and still reports
+> `IsAuthenticated` false; a member reading `HttpContext.User` directly would
+> therefore answer a subject and grant a permission for a principal this
+> interface says is not a caller. Routing all three through one authenticated
+> projection is what makes the contract above true rather than merely
+> documented.
+>
+> **Filtering the identities is not the same as testing the principal, and the
+> difference is a hole.** `ClaimsPrincipal.Identity` returns the **primary**
+> identity, while `FindFirst` and `HasClaim` search **every** identity the
+> principal holds — so `User is { Identity.IsAuthenticated: true }` passes on
+> an authenticated first identity and then reads claims from an unauthenticated
+> second one. Any host authenticating over two schemes can produce that
+> principal, and `AddIdentity` produces it in one line. The projection above
+> keeps only the identities that answer for themselves.
+
+> **Both types are common, not per-service, and the namespaces above say so.**
+> They read `Ordering.Application` and `Ordering.Infrastructure` until PR-16,
+> and that was this chapter's viewpoint rather than a placement — the same
+> thing §9.4 did when it wrote `ordering.OutboxMessages` into code every
+> service shares. Nothing in either type names a service: the port has three
+> members about a principal, and the implementation reads `HttpContext`.
+>
+> The implementation could not go in `Common.Infrastructure` even if one wanted
+> it there. That project takes no `FrameworkReference`, and
+> `IHttpContextAccessor` arrives with one — `Common.Web` is the only building
+> block that has it, which is the same argument that keeps §13.2's middleware
+> there. Registering the pair in `AddCommonWebDefaults` then follows from what
+> that helper is for: every host that authenticates has a current user, and the
+> accessor must be registered beside it or `ValidateOnBuild` fails rather than
+> the first ownership check.
+
 **Three places have to agree on which claim identifies a user**, and they do:
 `ClaimTypes.NameIdentifier` here, in §10.3's rate-limit partition key, and in
-the `TestAuthHandler` of [§12.4](12-test-strategy.md). Keycloak's `sub` maps to it under the default
-inbound claim mapping.
+the `TestAuthHandler` of [§12.4](12-test-strategy.md).
+
+> **A fourth thing has to agree, and it is a setting rather than a place.**
+> Keycloak issues `sub`; everything above reads `NameIdentifier`, and
+> `MapInboundClaims` is the only thing that turns one into the other. §11.3
+> writes it out rather than inheriting the framework default, because nothing
+> else in the platform would notice it changing: a realm test proves the token
+> carries `sub`, and a unit test over an injected principal starts from a
+> `NameIdentifier` that is already there. Both stay green while every
+> authenticated request throws on a perfectly valid token. The end-to-end
+> assertion belongs in the one suite that starts from a signed token.
 
 `NameClaimType = "preferred_username"` in §11.3 does **not** compete with this.
 It sets what `ClaimsPrincipal.Identity.Name` returns — a display name, for logs
@@ -485,20 +685,43 @@ service-account client needs that scope assigned as default:
 | Realm object | Setting | Why |
 |---|---|---|
 | Client scope `commerce-api` | Mapper of type *Audience*, included audience `commerce-api`, added to the access token | Puts the value in `aud` that every API validates |
-| Client `web-bff` | Service accounts enabled, `commerce-api` a **default** client scope | Client-credentials tokens request no scope explicitly; a client scope left optional is silently absent |
+| Client scope `commerce-api` | Mapper of type *User Client Role*, claim name `permission`, multivalued, restricted to the `commerce-api` client | The claim §11.4's policies read. Client roles rather than realm roles, measured rather than assumed: a realm-role mapper also emits `offline_access`, `uma_authorization` and `default-roles-commerce`, which puts Keycloak's own internals into the permission vocabulary |
+| Client `commerce-api` | No flow enabled, holds the permission roles | The API as an object in the realm, so permissions are a closed set somebody can grant. Nothing can obtain a token *as* it |
+| Client `web-bff` | Service accounts enabled, `commerce-api` a **default** client scope | Client-credentials tokens request no scope explicitly; a client scope left optional is silently absent. **Arrives with the BFF** (PR-19) — the scope and its mappers ship now, the client with the host that uses it |
 | Clients for browser flows | Same scope, so a user's token validates at the same services | One audience for the whole platform (§11.3) — per-service audiences are a later split, not a v1 one |
 
 This is realm configuration, not code, which is exactly why it earns a test
 rather than a paragraph — nothing in the solution compiles differently when the
-audience mapper is missing.
+audience mapper is missing. The shipped realm is read by a suite in
+`Common.Web.Tests`, which is the assembly holding both constants a token has to
+satisfy.
 
-It is also the **one** suite that runs a real Keycloak. §12.4's fixture
-deliberately does the opposite: it points at an unreachable authority and swaps
-the JWT scheme for `TestAuthHandler`, because the several hundred tests that
-merely need *a* principal should not pay for an identity provider or fail when
-one is slow. That fixture therefore cannot see this defect at all — it never
-validates a token Keycloak issued. So this suite gets its own fixture, starting
-the Keycloak container with the realm import from §14.1 and the real JWT scheme:
+> **The realm file is a full Keycloak export, and shrinking it breaks the
+> platform silently.** A hand-written import naming only the `commerce-api`
+> client scope is the obvious first attempt — it is thirty readable lines
+> against two and a half thousand — and Keycloak treats a `clientScopes` array
+> as the **complete** set: supply one and the built-ins are never created. The
+> realm imports, the login succeeds, and the access token loses `sub`,
+> `preferred_username`, `email` and `realm_access` at once. `sub` is the one
+> that matters, because `ICurrentUser.Id` reads it and would throw on every
+> authenticated request in every service.
+>
+> Nothing reports this. It was found by importing exactly that file into a
+> fresh Keycloak and reading a token out of it, which is also how the shipped
+> realm was verified — audience present, `permission` exactly the granted role,
+> and an ungranted user carrying no `permission` claim at all. The negative
+> half matters more than the positive: a mapper that emitted every role would
+> pass every other check and hand the platform to any user the realm holds.
+
+It is also the **one** suite that runs a real Keycloak, and it arrives with the
+BFF (PR-19) because client credentials are the BFF's mechanism and no other
+host has them. §12.4's fixture deliberately does the opposite: it points at an
+unreachable authority and swaps the JWT scheme for `TestAuthHandler`, because
+the several hundred tests that merely need *a* principal should not pay for an
+identity provider or fail when one is slow. That fixture therefore cannot see
+this defect at all — it never validates a token Keycloak issued. So this suite
+gets its own fixture, starting the Keycloak container with the realm import
+from [§14.1](14-local-development.md) and the real JWT scheme:
 
 ```csharp
 [Fact]

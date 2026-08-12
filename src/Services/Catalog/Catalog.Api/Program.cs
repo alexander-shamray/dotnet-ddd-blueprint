@@ -1,3 +1,4 @@
+using Catalog.Api;
 using Catalog.Api.Endpoints;
 using Catalog.Application;
 using Catalog.Infrastructure;
@@ -21,16 +22,33 @@ builder.Services.AddCatalogInfrastructure(builder.Configuration);   // §4.2, §
 // PR-07's OpenAPI deliverable (Appendix C): document only, no UI.
 builder.Services.AddOpenApi();
 
+// Catalog's permission policies (§11.4). Deliberately not inside either helper
+// above: Application knows nothing about HTTP, and Common.Web must not know
+// Catalog's names. One policy, because one endpoint names one — the write
+// path. A policy nothing references would be an unused registration, and
+// §11.4's callout is about the opposite mistake: a name an endpoint uses and
+// nobody registered throws InvalidOperationException on the first request that
+// reaches it, never at startup. AuthorizationPolicyTests asserts both
+// directions, from the endpoint metadata rather than from this list.
+//
+// RequirePermission rather than RequireClaim("permission", …): the claim type
+// is Common.Web's (§11.4), so a policy here and the resource-level check
+// behind ICurrentUser cannot drift apart.
+builder.Services
+    .AddAuthorizationBuilder()
+    .AddPolicy(CatalogPermissions.Write, p => p.RequirePermission(CatalogPermissions.Write));
+
 WebApplication app = builder.Build();
 
-// Middleware order is behaviour, not formatting (§4.2). Authentication and
-// authorization join this pipeline at PR-16.
+// Middleware order is behaviour, not formatting (§4.2).
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — above everything else that logs
+app.UseAuthentication();          // §11.3 — populates HttpContext.User
+app.UseAuthorization();           // §11.4 — evaluates the permission policies
 
 app.MapCommonHealthEndpoints();   // §13.5 — anonymous; kubelet carries no token
 app.MapOpenApi();
-app.MapProductEndpoints();        // deliberately unauthenticated until PR-16 (Appendix C)
+app.MapProductEndpoints();        // §11.4
 
 app.Run();
 

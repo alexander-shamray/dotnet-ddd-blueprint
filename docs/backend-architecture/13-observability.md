@@ -22,14 +22,15 @@ single call every `Program.cs` makes (§4.2):
 ```csharp
 public static IHostApplicationBuilder AddCommonWebDefaults(this IHostApplicationBuilder builder)
 {
-    builder.AddObservability();                            // this section
+    builder.AddObservability();                           // this section
 
-    builder.Services
-        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(o => { /* §11.3 */ });
+    builder.AddJwtAuthentication();                       // §11.3
 
-    // The one policy every host shares, and the only one Common.Web may know:
-    // "is there a valid token". Permission policies are per-service and are
+    // The scheme and the policy arrive together because neither works alone: a
+    // policy requiring an authenticated user, with no scheme registered to
+    // authenticate one, rejects every request that reaches it. This is the one
+    // policy every host shares and the only one Common.Web may know — "is
+    // there a valid token". Permission policies are per-service and are
     // registered by the service (§11.4) or, for the gateway, by the gateway.
     //
     // This is deliberately identical to ASP.NET Core's default policy, which
@@ -40,7 +41,16 @@ public static IHostApplicationBuilder AddCommonWebDefaults(this IHostApplication
         .AddAuthorizationBuilder()
         .AddPolicy("authenticated", p => p.RequireAuthenticatedUser());
 
-    builder.Services.AddCommonProblemDetails();                    // §10.5
+    // §11.4's port, paired with the accessor it depends on: ASP.NET Core
+    // registers no IHttpContextAccessor by default, so omitting the first line
+    // fails ValidateOnBuild rather than the first ownership check. Here rather
+    // than in each service's Add*Infrastructure, where §4.2 had it until
+    // PR-16 — every host that authenticates has a current user, and neither
+    // type names a service.
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
+
+    builder.Services.AddCommonProblemDetails();           // §10.5
 
     // Liveness only — it must not touch dependencies (§13.5), and Common.Web
     // has no connection strings anyway. Readiness checks are registered by
@@ -132,9 +142,9 @@ so: §8.1's connections are keyed services, the parameterless overload
 discovers only an unkeyed `IConnectionMultiplexer`, so registered in this
 block it would silently instrument nothing — and it would hand
 `StackExchange.Redis` transitively to every host, including the ones with no
-Redis. The authentication block — which is in `AddCommonWebDefaults` rather
-than in the block above — lands at **PR-16**, with the scheme that makes its
-policy mean anything.
+Redis. The authentication block above is in `AddCommonWebDefaults` rather than
+in `AddObservability`, and it landed at PR-16 with the scheme that makes its
+policy mean anything — the two arrive together because neither works alone.
 
 > **The EF Core call takes no options, and the option this block used to pass
 > is gone.** It configured `SetDbStatementForText = true` until PR-08 tried to

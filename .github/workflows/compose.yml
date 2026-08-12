@@ -46,9 +46,11 @@ jobs:
         run: docker compose -f deploy/compose/docker-compose.yml config -q
 
       # --wait exits non-zero if a healthcheck never passes, or a container
-      # exits before the wait completes — the four healthchecks are asserted
-      # directly; services without one (Keycloak among them) are only
-      # asserted to start. One-shots are the carve-out, verified empirically
+      # exits before the wait completes — the five healthchecks are asserted
+      # directly, Keycloak's among them since PR-16, so realm readiness is part
+      # of what `up --wait` proves rather than something the first token
+      # request discovers. A service without one is only asserted to start.
+      # One-shots are the carve-out, verified empirically
       # on PR-10: a service another gates on with
       # `service_completed_successfully` satisfies --wait by exiting 0, and
       # fails it by exiting non-zero — so the migrator's exit code is part of

@@ -13,9 +13,9 @@ namespace Catalog.Api.Endpoints;
 /// test will assert this group against the route's stripped path.
 /// </summary>
 /// <remarks>
-/// No <c>RequireAuthorization</c>: the endpoints are deliberately
-/// unauthenticated, stated in <c>deploy/compose/README.md</c>, and closed by
-/// PR-16 (Appendix C).
+/// PR-16 closed the deliberately unauthenticated gap PR-10 shipped and
+/// <c>deploy/compose/README.md</c> named. It did not close it uniformly, and
+/// the asymmetry below is the point rather than an omission.
 /// </remarks>
 public static class ProductEndpoints
 {
@@ -23,7 +23,12 @@ public static class ProductEndpoints
     {
         RouteGroupBuilder group = app
             .MapGroup("/v1/catalog/products")
-            .WithTags("Products");
+            .WithTags("Products")
+            // Fail closed at the group (§11.4's shape): an endpoint added here
+            // later inherits authentication rather than arriving open, so
+            // forgetting a line makes a new endpoint unreachable instead of
+            // public. The one exception states itself, one method down.
+            .RequireAuthorization();
 
         // The command binds straight from the body — a separate request
         // record earns its place when the wire shape and the command diverge
@@ -37,6 +42,7 @@ public static class ProductEndpoints
 
                     return result.ToHttpResult();
                 })
+            .RequireAuthorization(CatalogPermissions.Write)
             .WithName("PublishProduct");
 
         // The query's own result type — CursorPage, not Result (§6.2) — so
@@ -51,6 +57,17 @@ public static class ProductEndpoints
 
                     return Results.Ok(page);
                 })
+            // Anonymous, deliberately and permanently — this is not the gap
+            // PR-16 closed but the shape §10.2 already specifies. The gateway's
+            // `catalog-public` route matches GET alone, carries no
+            // AuthorizationPolicy and rate-limits as `anonymous`; a product
+            // listing is public, and requiring a token here would make the
+            // route unusable at the edge that publishes it.
+            //
+            // Stated rather than inherited by omission. The group above fails
+            // closed, so an anonymous endpoint has to say so out loud, and the
+            // reader can tell a decision from a forgotten line.
+            .AllowAnonymous()
             .WithName("GetProducts");
     }
 }

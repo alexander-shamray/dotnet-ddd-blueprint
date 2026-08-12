@@ -2,6 +2,8 @@ using Catalog.TestSupport.Outbox;
 using Common.Application;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Common.Web;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +21,24 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
     : WebApplicationFactory<Program>
 {
     /// <summary>
+    /// The authority every host over this <c>Program</c> must name (§11.3).
+    /// Deliberately fake and deliberately unreachable — <c>.invalid</c> is
+    /// reserved and never resolves, so a test that accidentally dials the
+    /// authority fails loudly rather than reaching a real identity provider.
+    /// </summary>
+    /// <remarks>
+    /// Required rather than optional for the same reason both connection
+    /// strings are: <c>AddJwtAuthentication</c> reads this key eagerly and
+    /// throws naming it, so a service host that cannot name its identity
+    /// provider does not start. §12.4 attributed that failure to
+    /// <c>ValidateOnStart</c> and <c>OptionsValidationException</c>, and the
+    /// chapter was amended — §15.4 keeps <c>ServiceIdentityOptions</c> as the
+    /// solution's only options type, so there is nothing here for
+    /// <c>ValidateDataAnnotations</c> to check.
+    /// </remarks>
+    public const string UnreachableAuthority = "https://identity.invalid/realms/test";
+
+    /// <summary>
     /// The RUNTIME connection of §7.1, and only that one. The host has no
     /// business reading <c>CatalogMigrator</c>, and a fixture that supplied
     /// both would hide it if it started. The bus key is required because
@@ -29,8 +49,11 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
         builder
             .UseSetting("ConnectionStrings:Catalog", connectionString)
             .UseSetting("ConnectionStrings:RabbitMq", rabbitConnectionString)
+            .UseSetting(AuthenticationExtensions.AuthorityKey, UnreachableAuthority)
             .ConfigureServices(services =>
             {
+                ConfigureAuthentication(services);
+
                 // Remove ONLY the outbox dispatcher, not every hosted service:
                 // MassTransit registers its bus as one, so a
                 // RemoveAll<IHostedService>() would stop the broker from
@@ -85,6 +108,44 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
                 // production registration has no reason to know about.
                 services.AddPluggableFrom(typeof(AlwaysThrows).Assembly);
             });
+
+    /// <summary>
+    /// Replaces the JWT scheme with <see cref="TestAuthHandler"/> (§12.4).
+    /// Replacing rather than configuring: the endpoints under test are behind
+    /// <c>RequireAuthorization</c> (§11.4), and the alternative is either a 401
+    /// on every call or a fixture that fetches OIDC metadata over the network
+    /// from an authority that is unreachable on purpose.
+    /// </summary>
+    /// <remarks>
+    /// Virtual, and the one override matters. A host that keeps the production
+    /// scheme is the only thing that can prove <see cref="TestAuthHandler"/>'s
+    /// headers mean nothing to a real deployment, which is what
+    /// <c>EndpointSecurityTests</c> reads it for. A flag would say the same
+    /// thing; a method says it at the site that makes the decision, which is
+    /// where the argument for it belongs.
+    ///
+    /// Only the authenticate and challenge schemes are set, and forbid follows
+    /// the challenge one: <c>DefaultForbidScheme</c> is unset, and
+    /// <c>AuthenticationSchemeProvider</c> falls back to
+    /// <c>DefaultChallengeScheme</c> before <c>DefaultScheme</c>. So the 403 is
+    /// answered by <see cref="TestAuthHandler"/>'s inherited forbid — a bare
+    /// status code, no metadata — and the wrong-permission test needs no
+    /// identity provider either. Measured by resolving the provider rather
+    /// than assumed: this comment previously credited the bearer handler,
+    /// which never sees a forbid here.
+    /// </remarks>
+    protected virtual void ConfigureAuthentication(IServiceCollection services)
+    {
+        services.Configure<AuthenticationOptions>(o =>
+        {
+            o.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
+            o.DefaultChallengeScheme = TestAuthHandler.SchemeName;
+        });
+
+        services
+            .AddAuthentication()
+            .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
+    }
 }
 
 file static class ServiceDescriptorExtensions
