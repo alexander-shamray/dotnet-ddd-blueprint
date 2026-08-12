@@ -655,13 +655,24 @@ if (corsEnabled)
             .Select(entry => entry.index)
     ];
 
+    // Three guards, not one condition. They fail for different reasons and a
+    // reader needs to be told which: an empty list has no index to report, and
+    // the wildcard's whole diagnostic is the word AllowCredentials — collapsing
+    // them into one `||` produces "unusable at index " with nothing after it,
+    // and loses the only sentence that makes the wildcard case actionable.
+    if (origins.Length == 0 || origins.Any(string.IsNullOrWhiteSpace))
+        throw new InvalidOperationException("'Cors:Origins' is enabled but holds no usable origin.");
+
+    if (origins.Any(o => o == "*"))
+        throw new InvalidOperationException("'Cors:Origins' contains '*', which AllowCredentials below forbids.");
+
     // Indexes, never the values: credentials in the authority are one of the
     // rejected shapes, and an exception message reaches the logs — where
     // §13.4's redactor scrubs keyed attributes and cannot see a secret
     // interpolated into a string. The guard that rejects a password must not
     // be the thing that publishes one.
-    if (origins.Length == 0 || origins.Any(o => o == "*") || malformed.Length > 0)
-        throw new InvalidOperationException($"'Cors:Origins' is unusable at index {string.Join(", ", malformed)}.");
+    if (malformed.Length > 0)
+        throw new InvalidOperationException($"'Cors:Origins' is not an origin at index {string.Join(", ", malformed)}.");
 
     builder.Services
         .AddCors(o =>
