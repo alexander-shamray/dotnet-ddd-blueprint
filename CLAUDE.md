@@ -508,7 +508,7 @@ forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
-pipeline — and six of its decisions bind what comes after:
+pipeline — and eight of its decisions bind what comes after:
 
 - **An unresolvable policy name stops the gateway; it does not silently drop
   the route, and four sites said it did.** §10.2, §4.2's sample, §11.4's
@@ -701,7 +701,7 @@ in that tree, and the cleanup reverted them. **Commit before dogfooding the
 scaffold**, or restore the tree's own changes afterwards.
 
 PR-15 landed the consume side — §9's remaining contracts, §9.5's inbox, §9.4's
-two consumers and one retention purge over both tables — and six of its
+two consumers and one retention purge over both tables — and eight of its
 decisions bind what comes after:
 
 - **The contract assembly is complete, and §3.2 is what decided that.** Five
@@ -903,7 +903,7 @@ one `Redis/` folder — and five of its decisions bind what comes after:
   `ServiceProvider` runs no hosted services.
 
 PR-11 landed the scaffold of §4.5 — `tools/new-service/new_service.py`, stdlib
-Python, one command per service — and five of its decisions bind what comes
+Python, one command per service — and six of its decisions bind what comes
 after:
 
 - **Catalog is the template, read at run time.** There is no template
