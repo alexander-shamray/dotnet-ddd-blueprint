@@ -33,6 +33,25 @@ and exits, then `catalog-api` starts (§14.1's pair rule).
 | Service | Host port(s) | Notes |
 |---|---|---|
 | Catalog API | http://localhost:5102 | `/health/live`, `/health/ready`, `/openapi/v1.json`, `/v1/catalog/products` |
+| Gateway | http://localhost:5000 | `/health/live`, `/health/ready`, and [§10.2](../../docs/backend-architecture/10-api-gateway.md)'s four routes |
+
+The gateway is the single entry point for external clients
+([§10.1](../../docs/backend-architecture/10-api-gateway.md)), so the same
+listing is reachable two ways — and the two are not equivalent:
+
+```bash
+curl http://localhost:5102/v1/catalog/products     # the service, directly
+curl http://localhost:5000/api/v1/catalog/products # through the gateway
+```
+
+The edge adds `/api`, which the gateway strips before forwarding, and applies
+what the service does not: the rate limit, the CORS policy, and a correlation
+ID on every request that arrives without one. **Three of the four routes have
+no service behind them yet** — `/api/v1/orders`, `/api/v1/inventory` and
+`/bff` answer 502 until Ordering, Inventory and the BFF land — and they are in
+the file deliberately, because the two configuration tests over it are what
+PR-17 exists to deliver. `/api/v1/catalog` is GET-only at the edge, so
+publishing a product is a call to port 5102 and not to port 5000.
 
 ## Getting a token
 
@@ -98,6 +117,31 @@ authority above is plain HTTP, so the host refuses to fetch the discovery
 document at all and every bearer request fails before validation begins. The
 container sets the same variable, which is why the Compose path never shows
 this.
+
+The override excludes the `gateway` too, and running that one on the host takes
+a fourth variable: §10.2's destinations are container names, which resolve on
+the Compose network and nowhere else, so a host-run gateway has to be told
+where the service actually is.
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Development
+export Identity__Authority='http://localhost:8080/realms/commerce'
+export ReverseProxy__Clusters__catalog__Destinations__d1__Address='http://localhost:5102/'
+dotnet run --project src/Gateway/Gateway.Api
+```
+
+`ASPNETCORE_ENVIRONMENT` leads this block for the same reason it leads the one
+above, and the block is written to stand alone rather than as a delta on that
+shell: without it the authority on the next line is plain HTTP outside
+Development, `AddJwtAuthentication` refuses it at startup, and the gateway does
+not run at all. Every host here validates tokens (§11.2), so every host-run
+block that names an authority needs this line — which is both of them, and not
+the migrator below, whose job never sees a token.
+
+`Cors__Enabled` and `Ingress__Enabled` are both absent above and both default
+to off, which is the shape the flags are written for — off is a valid
+topology, on-but-unconfigured is not, and the host refuses to start in the
+second state rather than starting into it.
 
 The override excludes `catalog-migrator` as well as `catalog-api`, so the
 schema is nobody's job until it is run — on the host, under the *other*

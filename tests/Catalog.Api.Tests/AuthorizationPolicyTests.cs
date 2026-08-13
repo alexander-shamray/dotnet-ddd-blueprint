@@ -69,11 +69,18 @@ public class AuthorizationPolicyTests(HostSmokeTests.UnreachableInfrastructureFa
     {
         // Not named by any Catalog endpoint — the group uses the default policy
         // — so the test above cannot see it. It exists for the gateway's route
-        // file (§10.2), which resolves it through this same provider and
-        // silently DROPS the route when it cannot: not a 500 and not a 403,
-        // the path simply stops existing while the gateway reports healthy.
-        // PR-17 binds it; asserting it here is what makes that binding safe to
-        // write.
+        // file (§10.2), which resolves it through this same provider when YARP
+        // loads the configuration, and refuses to start when it cannot: the
+        // load throws out of MapReverseProxy() naming the policy and the route,
+        // so the process does not come up at all.
+        //
+        // This comment said the opposite until PR-17 measured it — a silent
+        // per-route drop leaving the gateway healthy — which is what four
+        // blueprint sites also said. The correction runs the reassuring way and
+        // does not weaken the reason for this test: the gateway fails at
+        // deployment rather than in production, and a name it cannot resolve
+        // still costs a deployment. PR-17 binds it; asserting it here is what
+        // makes that binding safe to write.
         IAuthorizationPolicyProvider policies =
             factory.Services.GetRequiredService<IAuthorizationPolicyProvider>();
 

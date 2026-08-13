@@ -147,6 +147,40 @@ services:
       # that command races the realm import and can be handed a 404.
       keycloak: { condition: service_healthy }
 
+  # The single entry point for external clients (§10.1). No migrator beside it
+  # and no pair rule: the gateway owns no database, so there is nothing to
+  # migrate and nothing to gate a start on.
+  gateway:
+    build:
+      context: ../..
+      dockerfile: src/Gateway/Gateway.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # The authority, because the gateway validates JWTs like every other host
+      # (§11.2). NOT Identity__Client__* — those are for calling other services
+      # (§11.5), and the gateway calls nobody: YARP forwards the caller's token.
+      Identity__Authority: "http://keycloak:8080/realms/commerce"
+      # Locally the gateway IS the edge: nothing forwards, RemoteIpAddress is
+      # already the client, and trusting X-Forwarded-For would let any caller
+      # pick its own rate-limit bucket. In Kubernetes this is true (§15.3), and
+      # Ingress__TrustedNetworks__0…n becomes required with it.
+      Ingress__Enabled: "false"
+      # Browsers hit the gateway directly in dev. The SPA's dev origin is
+      # 5173 (Vite's default): 3000 belongs to Grafana in this same file.
+      # Required once enabled — the host refuses to start without it.
+      Cors__Enabled: "true"
+      Cors__Origins__0: "http://localhost:5173"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+    ports: [ "5000:8080" ]
+    depends_on:
+      keycloak: { condition: service_healthy }
+      # The one destination in §10.2's route file that exists today. The other
+      # three routes 502 until their services land, which is a true statement
+      # about the platform rather than a defect in this file — a route costs
+      # nothing at startup, where a Compose dependency on a service Compose
+      # cannot see fails the whole `up`.
+      catalog-api: { condition: service_started }
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     command: [ "--config=/etc/otel/config.yaml" ]

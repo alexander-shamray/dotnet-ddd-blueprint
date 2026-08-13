@@ -15,3 +15,5 @@ services:
     profiles: [ "excluded" ]
   catalog-api:
     profiles: [ "excluded" ]
+  gateway:
+    profiles: [ "excluded" ]

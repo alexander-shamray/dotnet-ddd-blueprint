@@ -225,14 +225,36 @@ nothing requires is a name in the realm nobody can act on. `orders:admin` is
 not here either, and for a different reason given below: it is a **claim** a
 handler checks, not a policy an endpoint names.
 
+**The rule runs both ways, and the second direction is the one that gets
+missed.** A permission nothing requires is a dead name in the realm; a
+permission something requires and the realm cannot grant is a **path nobody
+can reach** — 403 for every principal Keycloak can issue, at every attempt,
+for ever. So the role in §11.5's `commerce-api` client and the constant here
+arrive in the same change, whichever of the two is written first. **A route's
+permission is under the same rule as an endpoint's**, which is how it was
+missed: PR-17 registered the gateway's `inventory:admin` policy and named it
+on a route without adding the role, and neither the constant nor the closed-set
+realm test could see it — the constant makes a *misspelling* a compile error
+and says nothing about a name the identity provider has never heard of, and
+the realm test compares against a literal because `Common.Web.Tests` is a
+building block's suite and cannot reference a host to read its constants. The
+check belongs to whichever suite owns the constant, and
+`GrantablePermissionTests` in `Gateway.Api.Tests` is the first of them.
+
 > **A policy name is a reference, and nothing checks it.**
 > `RequireAuthorization("orders:cancel")` takes a string. Misspell it, or
 > register the policy in a helper the host never calls, and there is no
 > compiler error, no `ValidateOnBuild` failure and no startup warning — the
 > endpoint throws `InvalidOperationException` the first time somebody cancels
-> an order, which is to say in production, on the path that matters. The
-> gateway's version of the same mistake is quieter still ([§10.2](10-api-gateway.md)): YARP drops
-> the route instead of throwing.
+> an order, which is to say in production, on the path that matters.
+>
+> **The gateway is the one place this fails better, and this callout said the
+> reverse.** It claimed YARP dropped the route rather than throwing, which
+> would have made the edge the quietest site of all; measured, YARP validates
+> both registries when it loads §10.2's file and refuses to start, naming the
+> policy and the route. So the deployment fails, and nothing serves a request
+> under a policy that does not exist. A service still has the failure described
+> above, which is what the rest of this callout is for.
 >
 > This is the `GetServices<T>()` problem in a different costume — a lookup by
 > name that returns nothing and is only observed at the call site. Assert it

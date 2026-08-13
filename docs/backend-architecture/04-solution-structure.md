@@ -58,6 +58,12 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │                                   Common.Web is a library with no entry
 │   │                                   point, so its suite drives a TestServer
 │   │                                   rather than a WebApplicationFactory
+│   ├── Gateway.Api.Tests/              The route file of §10.2, over the real
+│   │                                   host: policy resolution, prefix strips,
+│   │                                   the limiter of §10.3 driven until it
+│   │                                   rejects. No TestSupport beside it —
+│   │                                   that library exists where two suites
+│   │                                   share a fixture, and the gateway has one
 │   ├── Catalog.Domain.Tests/
 │   ├── Catalog.Application.Tests/
 │   ├── Catalog.Api.Tests/
@@ -479,6 +485,11 @@ WebApplication app = builder.Build();
 // the ones above it, and getting it wrong fails silently rather than loudly.
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — above everything else that logs
+// §10.5's promise applied to the statuses no handler produces: a challenge
+// and a forbid are written by the middleware below and carry NO BODY, so the
+// platform's one error shape had two holes in it until PR-17 measured a 401.
+// Since .NET 8 this middleware writes them through IProblemDetailsService.
+app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
 app.UseAuthentication();          // §11.3 — populates HttpContext.User
 app.UseAuthorization();           // §11.4 — evaluates the permission policies
 
@@ -502,7 +513,8 @@ that no test catches by accident:
 |---|---|
 | `UseCorrelationId` before everything that logs, `UseExceptionHandler` alone above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to be outermost to catch faults in the middleware below it, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)) |
 | `UseAuthentication` before `UseAuthorization` | **Every authenticated request 401s** — in a `WebApplication` too. Omitting a call is repaired by auto-insertion; writing both in the wrong order is not, because the markers they set suppress it. See the callout below |
-| `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket |
+| `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket. **Silent is the measured half**: reversing the two leaves every test in `Gateway.Api.Tests` green, the authenticated-partition test included, so nothing in the repository is watching this line (see below) |
+| `UseForwardedHeaders` above the limiter, and **below** the handler and the correlation ID (gateway only) | Two rules meeting, and this sample had them the wrong way round until PR-17: putting it first means a fault parsing a forwarded header unwinds past no exception handler, and anything the middleware logs runs outside the correlation scope. Neither of those two reads the address, so nothing is lost by letting them wrap it — while the limiter, which does read it, stays below. `ForwardedHeadersTests` covers the lower half: below `UseRateLimiter`, two forwarded addresses collapse onto the one connection the gateway can see |
 | Both before endpoint mapping | `RequireAuthorization` has nothing to evaluate against |
 | Health endpoints mapped **anonymous** | Probes 401, Kubernetes reads that as unhealthy, and the pod is killed in a loop |
 
@@ -553,9 +565,9 @@ builder.Services.AddRateLimiter(/* §10.3 */);
 // Every policy §10.2's routes name that Common.Web does not already register.
 // "authenticated" comes from AddCommonWebDefaults; this one is the gateway's
 // own, and it is a permission check rather than a role check for the reason
-// §11.4 gives. A route naming a policy nobody registered does not fail closed:
-// YARP rejects the route at config load and drops it, so that path 404s while
-// every other route keeps serving.
+// §11.4 gives. A route naming a policy nobody registered fails CLOSED and
+// loudly: the config load throws out of MapReverseProxy() below, naming the
+// policy and the route, so the process does not start (§10.2).
 builder.Services
     .AddAuthorizationBuilder()
     .AddPolicy(GatewayPermissions.InventoryAdmin, p => p.RequirePermission(GatewayPermissions.InventoryAdmin));
@@ -573,6 +585,13 @@ if (behindProxy)
     // the rate limiter partitions all anonymous traffic into ONE bucket and
     // its per-client limit becomes a global cap — configured, running, and a
     // denial of service against legitimate users rather than a defence.
+    //
+    // Read HERE and not inside the callback: an options callback runs when the
+    // options are first resolved, so a missing section read from inside one
+    // throws on a request rather than at startup — the deferral this pair of
+    // flags exists to avoid.
+    string[] trusted = builder.Configuration.GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!;
+
     builder.Services.Configure<ForwardedHeadersOptions>(o =>
     {
         o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
@@ -580,10 +599,17 @@ if (behindProxy)
         // Trust only the ingress. Left empty, ASP.NET Core trusts nothing
         // beyond loopback and silently keeps the proxy's address; opened to
         // all, any client can spoof its partition key and bypass the limit.
-        o.KnownNetworks.Clear();
+        //
+        // KnownIPNetworks and System.Net.IPNetwork, both spelled deliberately:
+        // KnownNetworks carries ASPDEPR005 at .NET 10 — an error under
+        // ADR-019 — and the IPNetwork it held is the one
+        // Microsoft.AspNetCore.HttpOverrides declares, which the using above
+        // brings into scope in place of the framework type the new property
+        // takes. This sample said both the other way and did not compile.
+        o.KnownIPNetworks.Clear();
         o.KnownProxies.Clear();
-        foreach (string cidr in builder.Configuration.GetRequiredSection("Ingress:TrustedNetworks").Get<string[]>()!)
-            o.KnownNetworks.Add(IPNetwork.Parse(cidr));
+        foreach (string cidr in trusted)
+            o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
     });
 }
 
@@ -591,12 +617,67 @@ if (behindProxy)
 // same-origin edge (§10.2). Enabled but unset would yield WithOrigins([]),
 // which rejects every browser request while starting cleanly — surfacing as a
 // CORS error in a console rather than as the missing setting it is (§15.4).
+// Hoisted out of the callback for the reason given above: the CORS options are
+// built on the first request that needs them.
 if (corsEnabled)
 {
+    string[] origins = builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>() ?? [];
+
+    // GetRequiredSection proves the section EXISTS and nothing more, and four
+    // review rounds each found a value the previous check admitted:
+    //
+    //   ""                       binds from `Cors__Origins__0=`; WithOrigins
+    //                            takes it and matches no browser. "Blank
+    //                            counts as missing", §11.3's rule for
+    //                            Identity:Authority
+    //   "*"                      invalid beside AllowCredentials below, and
+    //                            ASP.NET Core only says so when the policy is
+    //                            BUILT — on a preflight, not at startup
+    //   "https//spa.example"     one missing colon, compared literally
+    //   "https://spa.example/"   every parsed property agrees it is fine;
+    //                            the browser sends no trailing slash
+    //   "https://spa.example:443" a browser omits the scheme's default port
+    //
+    // Seven rounds of that produced six clauses and a seventh value, so the
+    // check stopped enumerating prohibitions. GetLeftPart(UriPartial.Authority)
+    // IS the canonical origin — scheme, host, and a port only when it is not
+    // the default — so demanding the configured text equal it accepts exactly
+    // what a browser sends and rejects every variant at once.
+    int[] malformed =
+    [
+        .. origins
+            .Select((origin, index) => (origin, index))
+            .Where(entry =>
+                !Uri.TryCreate(entry.origin, UriKind.Absolute, out Uri? parsed) ||
+                (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
+                parsed.UserInfo.Length > 0 ||
+                !string.Equals(entry.origin, parsed.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
+            .Select(entry => entry.index)
+    ];
+
+    // Three guards, not one condition. They fail for different reasons and a
+    // reader needs to be told which: an empty list has no index to report, and
+    // the wildcard's whole diagnostic is the word AllowCredentials — collapsing
+    // them into one `||` produces "unusable at index " with nothing after it,
+    // and loses the only sentence that makes the wildcard case actionable.
+    if (origins.Length == 0 || origins.Any(string.IsNullOrWhiteSpace))
+        throw new InvalidOperationException("'Cors:Origins' is enabled but holds no usable origin.");
+
+    if (origins.Any(o => o == "*"))
+        throw new InvalidOperationException("'Cors:Origins' contains '*', which AllowCredentials below forbids.");
+
+    // Indexes, never the values: credentials in the authority are one of the
+    // rejected shapes, and an exception message reaches the logs — where
+    // §13.4's redactor scrubs keyed attributes and cannot see a secret
+    // interpolated into a string. The guard that rejects a password must not
+    // be the thing that publishes one.
+    if (malformed.Length > 0)
+        throw new InvalidOperationException($"'Cors:Origins' is not an origin at index {string.Join(", ", malformed)}.");
+
     builder.Services
         .AddCors(o =>
             o.AddDefaultPolicy(p => p
-                .WithOrigins(builder.Configuration.GetRequiredSection("Cors:Origins").Get<string[]>()!)
+                .WithOrigins(origins)
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()));
@@ -604,15 +685,17 @@ if (corsEnabled)
 
 WebApplication app = builder.Build();
 
-// First when present: everything below reads the client address, and until
-// this runs it is the proxy's. Skipped when the gateway IS the edge (Compose),
-// where RemoteIpAddress is already the client and trusting a forwarded header
-// would let any caller choose its own rate-limit bucket.
+app.UseExceptionHandler();
+app.UseCorrelationId();           // assigns the ID if the client sent none
+app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
+
+// Above everything that reads the client address, and below the two that do
+// not. Until this runs the address is the proxy's; skipped when the gateway IS
+// the edge (Compose), where it is already the client and trusting a forwarded
+// header would let any caller choose its own rate-limit bucket.
 if (behindProxy)
     app.UseForwardedHeaders();
 
-app.UseExceptionHandler();
-app.UseCorrelationId();           // assigns the ID if the client sent none
 if (corsEnabled)
     app.UseCors();
 
@@ -628,6 +711,21 @@ app.MapCommonHealthEndpoints();   // §13.5 — same anonymous probes as every s
 
 app.Run();
 ```
+
+> **Nothing tests this ordering, and the attempt to test it is the evidence.**
+> PR-17 added a test proving two authenticated subjects hold independent
+> buckets — the property the subject partition key exists for — and then ran it
+> against a pipeline with `UseRateLimiter` moved above `UseAuthentication`. It
+> passed, and so did every other test in that project. The limiter is still
+> live under the reversal, because the anonymous window still rejects at its
+> hundredth request; why the authenticated bucket does not collapse onto the
+> shared fallback there is unexplained, and an unexplained pass is not a guard.
+>
+> So the row above is two claims of different standing. That the failure is
+> **silent** is measured. That the partition **degrades to per-IP** is
+> reasoned from the code and is not observed by anything. Keep the order, and
+> do not believe a test is holding it — the same posture the callout below
+> takes for `app.UseAuthentication()` itself.
 
 Rate limiting sits **between** authentication and authorization, and both halves
 of that are load-bearing.

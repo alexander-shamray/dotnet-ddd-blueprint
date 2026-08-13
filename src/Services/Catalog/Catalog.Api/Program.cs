@@ -43,6 +43,11 @@ WebApplication app = builder.Build();
 // Middleware order is behaviour, not formatting (§4.2).
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — above everything else that logs
+
+// §10.5's promise applied to the statuses no handler produces: a challenge and
+// a forbid are written by the middleware below and carry no body, so the
+// platform's one error shape had two holes in it until PR-17 measured a 401.
+app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
 app.UseAuthentication();          // §11.3 — populates HttpContext.User
 app.UseAuthorization();           // §11.4 — evaluates the permission policies
 

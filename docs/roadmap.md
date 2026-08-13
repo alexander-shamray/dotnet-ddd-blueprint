@@ -3,7 +3,7 @@
 **How long the blueprint takes to build, and what the schedule rests on.**
 
 [Appendix C](backend-architecture/appendix-c-delivery-plan.md) sequences the
-work into 26 pull requests and fixes their dependencies. It says what to build
+work into 27 pull requests and fixes their dependencies. It says what to build
 and in what order; it does not say how long. This roadmap attaches a number to
 each of those pull requests and derives a calendar from them.
 
@@ -13,9 +13,9 @@ right — this file is an estimate laid over a plan, not a second plan.
 
 | | |
 |---|---|
-| **Scope** | PR-01 … PR-25. PR-26 is optional and conditional, and is priced separately below rather than counted |
-| **Total** | **98 ideal engineer-days** |
-| **Calendar** | **28 weeks** — roughly six and a half months |
+| **Scope** | PR-01 … PR-25 and PR-27. PR-26 is optional and conditional, and is priced separately below rather than counted |
+| **Total** | **99 ideal engineer-days** |
+| **Calendar** | **29 weeks** — roughly six and a half months |
 | **Critical path** | 54 ideal days, so no amount of staffing beats about 1.8× |
 
 ## What these numbers are
@@ -62,7 +62,7 @@ genuinely independent — and none of that parallelism is used here. The
 ratio is everything standing between the day totals and the calendar. It is the
 number to change first if the schedule looks wrong, because changing it
 re-derives every date without re-estimating a single pull request. At 3.5,
-98 ideal days is 28 weeks; at 3.0 it is 33; at 4.0 it is 25.
+99 ideal days is 29 weeks; at 3.0 it is 33; at 4.0 it is 25.
 
 ## Estimate per pull request
 
@@ -140,29 +140,48 @@ of that again.
 | **16** | `feat(security): JWT bearer with mandatory per-service re-validation` | 4d | 58 | 17 |
 | **17** | `feat(gateway): YARP routing, JWT, rate limiting, CORS` | 4d | 62 | 18 |
 | **18** | `feat(ordering): second service from the scaffold` | 3d | 65 | 19 |
+| **27** | `feat(gateway): response compression and request size limits` | 1d | 66 | 19 |
+
+**PR-27 sits in this phase because Appendix C puts it here**, and for one
+round it did not: the row was filed under *Integration and operations* while
+this file said in prose that it belonged to no phase at all. Appendix C is
+where a phase is decided and this file restates it, so a disagreement between
+them is this file's defect however reasonable the prose sounded. It is gateway
+work depending on PR-17 alone, which is what *Edge and security* means.
+
+Its day is the one on this page that is mostly not code. The two capabilities
+are about five lines together, and the day prices the decisions in front of
+them: a body-size limit needs a number nobody has chosen, and turning
+compression on at the edge needs the `EnableForHttps` argument made where an
+ADR can hold it. **A day is what an argument costs when the code is already
+obvious**, and pricing it at zero because the diff is small is how design
+decisions end up taken by whoever types first.
 
 PR-18 is the cheapest service in the plan and that is the whole point of it —
 it is priced at three days *because* PR-11 exists, and if it turns out to cost
 more, the finding is about the scaffold rather than about Ordering. With PR-11
 landed, that test is now sharp: the scaffold's output is a service that builds
 and passes its tests with no domain in it, so the three days buy Ordering's
-aggregate, its first command, its endpoint and the gateway route Appendix C's
-row also lists — the route belongs to the gateway's configuration rather than
-the service's tree, which is why the scaffold does not write it and M4 depends
-on it. What the three days do **not** buy is project wiring: a day spent there
-is a defect report against the scaffold.
+aggregate, its first command and its endpoint. They no longer buy a gateway
+route: PR-17 shipped §10.2's file whole, `ordering` included, so what PR-18
+adds at the edge is the Compose pair that makes an existing route stop
+answering 502. The route was always gateway configuration rather than
+something in the service's tree — which is why the scaffold does not write
+one — and after PR-17 it is not work at all. What the three days do **not**
+buy is project wiring: a day spent there is a defect report against the
+scaffold.
 
 ### Integration and operations
 
 | PR | Title | Est. | Cum. | Week |
 |---|---|---|---|---|
-| **19** | `feat(bff): the BFF host, its gRPC client and the one permitted sync hop` | 4d | 69 | 20 |
-| **20** | `feat(ordering): consume Catalog events into a local projection` | 4d | 73 | 21 |
-| **21** | `feat(ordering): order fulfilment saga` | 6d | 79 | 23 |
-| **22** | `test: expand architecture rules and document the test strategy` | 3d | 82 | 24 |
-| **23** | `feat(deploy): Helm charts, migration hooks, probes` | 5d | 87 | 25 |
-| **24** | `docs(ops): runbooks, secrets, dashboards-as-code, the SLO run` | 6d | 93 | 27 |
-| **25** | `ci: integration categories, canary deploy, quality gates` | 5d | 98 | 28 |
+| **19** | `feat(bff): the BFF host, its gRPC client and the one permitted sync hop` | 4d | 70 | 20 |
+| **20** | `feat(ordering): consume Catalog events into a local projection` | 4d | 74 | 22 |
+| **21** | `feat(ordering): order fulfilment saga` | 6d | 80 | 23 |
+| **22** | `test: expand architecture rules and document the test strategy` | 3d | 83 | 24 |
+| **23** | `feat(deploy): Helm charts, migration hooks, probes` | 5d | 88 | 26 |
+| **24** | `docs(ops): runbooks, secrets, dashboards-as-code, the SLO run` | 6d | 94 | 27 |
+| **25** | `ci: integration categories, canary deploy, quality gates` | 5d | 99 | 29 |
 
 This phase is a third of the total, which surprises people who read a plan as a
 list of features. PR-21's saga carries a timeout on every wait state and a
@@ -192,8 +211,8 @@ tells nobody outside the branch anything.
 | **M2** | One service serves one request, end to end | PR-11 | 37d | 11 |
 | **M3** | Events cross a service boundary transactionally | PR-15 | 54d | 16 |
 | **M4** | Authenticated traffic reaches two services through the gateway | PR-18 | 65d | 19 |
-| **M5** | The full async path: projection and saga | PR-21 | 79d | 23 |
-| **M6** | Deployable, observable and gated | PR-25 | 98d | 28 |
+| **M5** | The full async path: projection and saga | PR-21 | 80d | 23 |
+| **M6** | Deployable, observable and gated | PR-25 | 99d | 29 |
 
 **M2 is the one to watch.** It is the first point at which the platform does
 something a person outside the team can see, and it arrives at week 11 — nearly
@@ -225,7 +244,7 @@ The longest chain through Appendix C's graph is 54 ideal days:
  3    3    2    3    4    5    3    4    6    5    4    6    6
 ```
 
-Against a 98-day total, that is a **ceiling of about 1.8×** on any team of any
+Against a 99-day total, that is a **ceiling of about 1.8×** on any team of any
 size. An infinite number of engineers finishes in 54 days, and the second
 engineer captures most of the available gain; the fourth captures almost none,
 because by then the schedule is the chain above and the chain is serial by
@@ -251,7 +270,7 @@ READMEs call the e-commerce domain "illustrative only", while
 services concretely. PR-10 has since landed on the illustrative domain, so for
 it substitution now means reworking shipped code; PR-18, PR-20 and PR-21 are
 still re-specified rather than re-estimated. Together that is 17 of the
-98 days, and the four that carry the most design argument. Nothing else on this
+99 days, and the four that carry the most design argument. Nothing else on this
 list is close.
 
 **This item said "settle it before M2", and M2 has now been reached with it
@@ -266,7 +285,7 @@ domain changes, and both were built that way deliberately: the scaffold
 copies the service template and excludes Catalog's slice, so it names no
 aggregate, no command and no endpoint (§4.5) — and the Redis helpers are
 shared mechanism in `Common.Infrastructure`, wired to no service at all
-(§8). That is seven of the 98 days taken off this risk rather than added to
+(§8). That is seven of the 99 days taken off this risk rather than added to
 it — small, and worth stating, because these are the only places where a
 landed PR has narrowed the largest item on this page.
 

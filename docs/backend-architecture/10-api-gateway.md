@@ -9,6 +9,26 @@ genuinely cross-cutting at the edge, and nothing else.
 CORS · request/response logging with correlation IDs · response compression ·
 request size limits.
 
+> **Two of those seven are not configured yet, and the list keeps them
+> anyway.** PR-17 delivered the first five; the shipped host calls no
+> `UseResponseCompression` and sets no body-size limit, which
+> [Appendix C](appendix-c-delivery-plan.md) schedules as PR-27. The entries
+> stay because this is a statement of what the gateway is responsible for, and
+> deleting a responsibility because it is not built yet turns a specification
+> into a changelog — the same reason §4.1 draws six services and annotates
+> which exist.
+>
+> **Both were deferred for the same reason and it is not effort.** Each needs a
+> decision the blueprint has never taken and neither is a line of code. A size
+> limit needs a **number**: Kestrel's 30 MB is a framework default rather than
+> anything chosen here, and a chapter saying "request size limits" while no
+> chapter states one is the gap. Compression needs the **HTTPS** question
+> answered: ASP.NET Core ships `EnableForHttps = false` deliberately, because
+> compressing responses that mix attacker-influenced and secret content over
+> TLS is the BREACH/CRIME shape — and the edge, where every service's
+> responses pass, is the worst place to switch that on without an argument an
+> ADR can hold.
+
 **It is not the outermost edge.** TLS terminates at the cloud load balancer or
 Kubernetes Ingress, which then forwards plain HTTP inside the cluster. That
 matters beyond TLS: everything the gateway does per-client — rate limiting
@@ -121,15 +141,31 @@ and `RateLimiterPolicy` through the rate limiter's own registry (§10.3); they
 share a name here because both mean "a signed-in caller", and each has to be
 registered separately.
 
-**Both must be registered somewhere in the gateway's own container.**
-`AuthorizationPolicy` is resolved through
-`IAuthorizationPolicyProvider` when YARP loads this configuration; a name it
-cannot resolve invalidates the route, which YARP then **drops**. The failure is
-not a 500 and not a 403 — the path simply stops existing, and the gateway comes
-up healthy serving whichever routes happened to validate. `authenticated` comes
-from `AddCommonWebDefaults` ([§13.2](13-observability.md)) and `inventory:admin` from the gateway's own
+**Both must be registered somewhere in the gateway's own container**, and both
+are checked when YARP loads this configuration — `AuthorizationPolicy` through
+`IAuthorizationPolicyProvider`, `RateLimiterPolicy` through the limiter's
+options. `authenticated` comes from `AddCommonWebDefaults`
+([§13.2](13-observability.md)) and `inventory:admin` from the gateway's own
 `Program.cs` (§4.2); `catalog-public` names none, which is the only correct way
 to declare a route public.
+
+> **A name it cannot resolve stops the gateway, and this passage said the
+> opposite for a long time.** It described a silent per-route drop — "the path
+> simply stops existing, and the gateway comes up healthy serving whichever
+> routes happened to validate" — and §4.2, §11.4 and Appendix C all repeated
+> it. Measured against the pinned YARP instead of argued:
+> `ProxyConfigManager.InitialLoadAsync` throws out of `MapReverseProxy()` with
+> an `InvalidOperationException` naming the policy and the route, so the
+> process does not start. The correction runs the reassuring way — a
+> misconfigured edge fails at deployment rather than in production, and this is
+> the one place in the platform where an unregistered policy name fails
+> *better* than it does in a service, where §11.4's endpoint throws on the
+> first request that reaches it.
+>
+> Nothing about the rest of the passage changes. A route naming no policy is
+> still public, and naming none is still the only way to say so; what changes
+> is that the mistake is loud. `UnresolvablePolicyTests` in `Gateway.Api.Tests`
+> is where both registries were measured, one test each.
 
 The `web-bff` route is what makes the BFF reachable, and it is easy to skip:
 the BFF has an image, a chart, a Keycloak client and a CI filter without one,
@@ -138,6 +174,18 @@ external clients — so a service behind it with no route is not deployed
 privately, it is deployed unreachably. `/bff` rather than `/api`, because a
 client picks one or the other: aggregated responses shaped for a screen, or the
 service APIs shaped for a resource.
+
+**This file ships whole, ahead of three of the four services it routes to**,
+which is the opposite of the rule [§14.1](14-local-development.md)'s Compose
+file follows — and the asymmetry is in what each costs. A Compose block naming
+an image that does not exist fails `up`; a route whose destination is not
+running 502s one path and costs nothing at startup, nothing in CI and nothing
+in any other route. What buys the difference is the pair of tests over the
+file: "every policy resolves" and "every strip matches" say nothing over a
+single route, and §11.4 names a vacuously passing policy test as its own
+defect. Delivering it a route at a time would also make each later PR
+re-decide the policies, which is precisely the mistake the dual-version trap
+below describes.
 
 Note the shape of the policy name. `inventory:admin` is a **permission**, not a
 role, for the reason [§11.4](11-identity-authorization.md) gives — and the gateway is where role-shaped names
@@ -223,9 +271,19 @@ is a public, unlimited copy of an authenticated, limited endpoint:
 > **The in-process API tests do not catch this.** They call the service
 > directly, on `/v1/orders/...` ([§12.4](12-test-strategy.md)), so they exercise everything after the
 > strip and nothing before it. Path composition is gateway configuration, and
-> PR-17's config test ([Appendix C](appendix-c-delivery-plan.md)) — every route's policies resolve — is the only
-> place it is checked; it also asserts each route's stripped path against the
-> group its service maps.
+> `Gateway.Api.Tests` ([Appendix C](appendix-c-delivery-plan.md), PR-17) is
+> the only place it is checked. Three assertions carry it: every route strips
+> exactly the namespace it matches — one strip per namespace, so a route under
+> `/api` cannot remove `/api/v1` — every route's forwarded path is one the
+> service behind it serves, and, over a stub destination on loopback, the path
+> a service actually received is the path with the prefix gone. The last is
+> the only one made against a request rather than against configuration.
+>
+> **The pair above is an example, and the shipped route file does not carry
+> it.** A `/api/v2/orders` route would forward to a service that maps `/v1`
+> alone, so it would fail the second assertion — correctly, since it is a
+> route to nowhere until a v2 exists. What ships instead is the invariant that
+> makes the pair safe the day somebody adds it.
 
 Deprecation is signalled with standard headers rather than a changelog nobody
 reads (RFC 8594 / RFC 9745):
@@ -280,23 +338,71 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true
             }));
 
-    options.OnRejected = async (context, ct) =>
+    // Through IProblemDetailsService, not WriteAsJsonAsync — see below.
+    options.OnRejected = async (context, _) =>
     {
+        // RetryAfterHeader.Seconds, not a cast and not an inline ceiling —
+        // see below.
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
             context.HttpContext.Response.Headers.RetryAfter =
-                ((int)retryAfter.TotalSeconds).ToString();
+                RetryAfterHeader.Seconds(retryAfter).ToString(CultureInfo.InvariantCulture);
 
-        await context.HttpContext.Response.WriteAsJsonAsync(
-            new ProblemDetails
+        // Before the write: the customisation reads the response status, and
+        // the service refuses to write once the response has started.
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+
+        IProblemDetailsService problems = context.HttpContext.RequestServices
+            .GetRequiredService<IProblemDetailsService>();
+
+        await problems.WriteAsync(new ProblemDetailsContext
+        {
+            HttpContext = context.HttpContext,
+            ProblemDetails =
             {
                 Status = StatusCodes.Status429TooManyRequests,
                 Title = "Too many requests",
                 Type = "https://tools.ietf.org/html/rfc6585#section-4"
-            },
-            ct);
+            }
+        });
     };
 });
 ```
+
+> **The rejection goes through `IProblemDetailsService`, and writing the body
+> directly is a contract violation nothing would report.** This block used to
+> call `WriteAsJsonAsync`, which serialises a `ProblemDetails` as
+> `application/json` and runs none of §10.5's customisation — so the one
+> response a client is most likely to handle programmatically would be the one
+> carrying neither the right media type nor `correlationId`, on a platform
+> whose stated promise is a single error shape. The write above takes the same
+> path `Results.Problem` and `UseExceptionHandler` take, which is why a 429, a
+> returned 422 and an unhandled 500 all carry the same three members.
+>
+> `ToString(CultureInfo.InvariantCulture)` on the `Retry-After` seconds for a
+> smaller reason with the same shape: a header value has one correct spelling
+> whatever the server's culture, and CA1305 makes the bare `ToString()` a
+> failed build under ADR-019.
+>
+> **`RetryAfterHeader.Seconds` rather than an expression, and the expression
+> alone was a defect this sample shipped.** `Retry-After` is whole seconds
+> (RFC 9110) and the window remaining is fractional far more often than not,
+> so `(int)0.8` emits `Retry-After: 0` — which does not merely lose precision,
+> it reads as permission and sends a well-behaved client straight back into a
+> limiter that is still refusing. Rounding up is the only direction that
+> cannot advertise a time at which the request still fails, and the helper
+> also clamps an already-expired lease to zero rather than emitting a negative
+> a client cannot parse.
+>
+> **It is a type rather than a line because the rule is otherwise close to
+> untestable.** This window is a minute long, so a rejection carries tens of
+> seconds and the truncating form rounds identically — the suite's own 429
+> assertions passed with the bug in place, and a comment here claimed they
+> caught it until that was measured. Reaching the truncating case through HTTP
+> means holding a window open for fifty-nine seconds; against the helper it is
+> three rows of a theory. **Call it from the sample rather than restating the
+> arithmetic**: an inline ceiling here and a clamp there is the same one-form-
+> two-places drift the rule at the top of `CLAUDE.md` exists for, and it had
+> already reappeared once in this chapter.
 
 The `authenticated` policy is only correct if `UseAuthentication` has already
 run when the limiter middleware executes — see the pipeline in §4.2. The
@@ -570,7 +676,7 @@ Each belongs to a mechanism that runs before or beside a handler, and giving
 | Status | Produced by | Why not `Error` |
 |---|---|---|
 | 400 | `ValidationBehavior` throwing `ValidationException` ([§6.3](06-cqrs.md)) | The `errors` extension is field-keyed, and `Error` has no field. A malformed request is rejected before any handler runs, so no handler can return one |
-| 401 / 403 | The authentication and authorization middleware (§11.4) | Decided before the endpoint's delegate is entered |
+| 401 / 403 | The authentication and authorization middleware (§11.4) | Decided before the endpoint's delegate is entered — and written with **no body at all** unless something converts them, which is what `app.UseStatusCodePages()` is for (§4.2). Registering `AddProblemDetails` is not enough: it supplies a writer that nothing on this path was calling, so the two statuses a client meets first were the two that broke the promise this section opens with. Measured on a gateway 401 in PR-17, true of every host since PR-16, fixed in all of them |
 | 409 / 412 | `DbUpdateConcurrencyException` and the precondition filter | A different conversation with the client — retry with a fresh ETag, rather than the request was understood and refused |
 
 That asymmetry is why `Rule` maps to 422 rather than 409: 409 is already spoken

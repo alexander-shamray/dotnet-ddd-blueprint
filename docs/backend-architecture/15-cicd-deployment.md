@@ -67,8 +67,10 @@ make a monorepo practical at this size:
       # elision here is a formatting choice and never a missing filter.
       # The gateway is a deployable like any other — its own image (§15.2),
       # its own chart (§15.3), its own Program.cs and route file. Left out of
-      # this list it is the one component whose route configuration can drop a
-      # route silently (§10.2) and never be rebuilt to find out.
+      # this list, a change to that route file is never rebuilt — and the route
+      # file is the one place in the platform where a policy name is resolved
+      # at startup rather than at a call site (§10.2), so a bad one is a host
+      # that refuses to boot on the first deploy that does build it.
       gateway:
         - *shared
         - 'src/Gateway/**'
@@ -236,6 +238,16 @@ open a connection under it — `Globalization Invariant Mode is not supported`,
 at the first query rather than at build. Every service here talks to SQL
 Server, so every image takes the variant. What `-extra` adds is ICU and
 tzdata, nothing else; the shell and the package manager stay gone.
+
+**Two of the fourteen open no connection at all** — the gateway ([§10.1](10-api-gateway.md)) and the
+BFF, whose one synchronous hop is gRPC rather than SQL ([§9.7](09-messaging.md)) — so the sentence
+above is the reason for twelve images and not for those two. Twelve because
+each of the six services builds **two**, a host and a migrator (§4.1), and both
+talk to SQL Server. The other two take the variant for uniformity: one base
+across the platform means what a host does with a culture-sensitive comparison
+never depends on which suffix somebody picked for its image, and the saving
+from dropping ICU on two deployables does not pay for a second answer to that
+question.
 
 ### Every service builds two images
 
