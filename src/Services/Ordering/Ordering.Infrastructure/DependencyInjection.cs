@@ -1,4 +1,4 @@
-using Ordering.Domain;
+using Ordering.Domain.Orders;
 using Ordering.Infrastructure.Messaging;
 using Ordering.Infrastructure.Persistence;
 using Common.Application;
@@ -88,13 +88,13 @@ public static class DependencyInjection
         // a row, so without that hosted service the constructor's throw would
         // land on a background thread in a host that had been ready for hours.
         // It is registered first, because hosted services start in order.
-        // IIntegrationEvent and AssemblyMarker stand in for the two anchors
-        // §9.4 names — this service's contracts and its domain — because it
-        // has neither yet. Both point at the right assemblies regardless, so
-        // the first contract and the first aggregate change what these lines
-        // say and not what they resolve to.
+        // IIntegrationEvent still stands in for this service's contracts,
+        // which it has none of yet; Order is the domain anchor §9.4 names,
+        // and it replaced the marker with the first aggregate exactly as the
+        // scaffold predicted — the line resolves to the same assembly it
+        // always did, and now says so by naming a type the model owns.
         services.AddSingleton(
-            new MessageTypeSource(typeof(IIntegrationEvent).Assembly, typeof(AssemblyMarker).Assembly));
+            new MessageTypeSource(typeof(IIntegrationEvent).Assembly, typeof(Order).Assembly));
         services.AddSingleton(sp =>
         {
             MessageTypeSource source = sp.GetRequiredService<MessageTypeSource>();
