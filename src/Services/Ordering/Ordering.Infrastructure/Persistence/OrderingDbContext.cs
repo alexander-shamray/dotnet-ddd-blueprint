@@ -1,6 +1,7 @@
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
+using Ordering.Domain.Orders;
 
 namespace Ordering.Infrastructure.Persistence;
 
@@ -21,6 +22,13 @@ namespace Ordering.Infrastructure.Persistence;
 /// </remarks>
 public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> options) : DbContext(options)
 {
+    /// <summary>
+    /// The aggregate root (§5.4). One <c>DbSet</c> per root and no set for
+    /// <c>OrderLine</c>, which is owned — reaching a line without its order is
+    /// exactly the aggregate-boundary breach the model exists to prevent.
+    /// </summary>
+    public DbSet<Order> Orders => Set<Order>();
+
     /// <summary>
     /// §9.4's outbox. The one <c>DbSet</c> here that is not an aggregate root,
     /// and deliberately so: the row has to be written by the same context as

@@ -41,16 +41,18 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
 
         // Named and ordered, not merely counted: the migrator's job is to
         // apply every migration in sequence, and a count alone would pass on
-        // a shorter prefix of them applied twice. What a scaffolded service
-        // starts with is the schema, then §9.4's outbox table, §9.5's inbox
-        // and the index the retention purge deletes through — all of them
-        // wiring every service has rather than anything this one chose.
+        // a shorter prefix of them applied twice. The first four are what a
+        // scaffolded service starts with — the schema, then §9.4's outbox
+        // table, §9.5's inbox and the index the retention purge deletes
+        // through — all of them wiring every service has rather than anything
+        // this one chose. AddOrders is the first that is Ordering's own.
         string[] applied = await fixture.AppliedMigrationsAsync();
-        applied.Length.ShouldBe(4);
+        applied.Length.ShouldBe(5);
         applied[0].ShouldEndWith("_InitialCreate");
         applied[1].ShouldEndWith("_AddOutbox");
         applied[2].ShouldEndWith("_AddInbox");
         applied[3].ShouldEndWith("_AddOutboxRetentionIndex");
+        applied[4].ShouldEndWith("_AddOrders");
     }
 
     [Fact]

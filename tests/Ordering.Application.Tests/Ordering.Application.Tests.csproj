@@ -19,15 +19,25 @@
          abstractions package Ordering.Application compiles against has no
          container in it to build. -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <!-- ConfigurationBuilder and AddInMemoryCollection: AddOrderingInfrastructure
+         takes an IConfiguration, and the registration tests build a real one
+         rather than substitute the contract. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <!-- The handler tests seed and assert through the real OrderingDbContext
+         (§12.4's seeding rule — a raw INSERT drifts from the aggregate the
+         first time it gains a column). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Services\Ordering\Ordering.Application\Ordering.Application.csproj" />
-    <!-- No Ordering.TestSupport and no Ordering.Infrastructure yet, and no
-         Docker with them: §12.1 homes the handler tests here against real
-         containers, and this project has no handler to test. The fixture
-         reference, the DbContext reference and the provider package all
-         return with the first one. -->
+    <!-- §12.1 homes the handler tests here, with real containers — the
+         fixture lives in TestSupport, shared with Ordering.Api.Tests, which
+         this project cannot reference. -->
+    <ProjectReference Include="..\..\tests\Ordering.TestSupport\Ordering.TestSupport.csproj" />
+    <!-- OrderingDbContext by name, for seeding and read-back. The test
+         project may: §4.2's gate binds Ordering.Application, not its tests. -->
+    <ProjectReference Include="..\..\src\Services\Ordering\Ordering.Infrastructure\Ordering.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

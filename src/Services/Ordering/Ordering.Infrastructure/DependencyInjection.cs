@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Ordering.Domain.Orders;
 using Ordering.Infrastructure.Messaging;
 using Ordering.Infrastructure.Persistence;
@@ -53,8 +54,7 @@ public static class DependencyInjection
         services.AddPluggableFrom(typeof(DependencyInjection).Assembly);
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3
-
-        // §5.6's repository registrations join with the first aggregate.
+        services.AddScoped<IOrderRepository, OrderRepository>();             // §5.6
 
         // §7.5's two Infrastructure halves: the collector reads EF's change
         // tracker, the publisher writes the row on the same context. Both
@@ -102,12 +102,24 @@ public static class DependencyInjection
         });
         services.AddHostedService<MessageTypeMapValidator>();
 
-        // The payload format (§9.4). No converters yet, and the first value
-        // object this service puts on a domain event needs one registered
-        // here — a type with a private constructor and get-only properties
-        // does not fail loudly on the Local lane, it deserialises to its
-        // default. §12.4's round-trip assertion is what catches that, and it
-        // arrives with the first domain event for the same reason.
+        // The payload format (§9.4), and one converter per value object this
+        // service's domain events carry. Every one of the four has a private
+        // constructor and get-only properties, which is the shape that does
+        // not fail loudly on the Local lane — three of them deserialise to
+        // their default and only Address throws, because it is a class and so
+        // has no parameterless constructor to fall back to. §12.4's round-trip
+        // assertion resolves these through this registration rather than
+        // building its own options, so deleting a line here fails a test
+        // instead of writing zeroes into production rows.
+        //
+        // The typed identifiers need none: OrderId and its siblings are record
+        // structs whose primary constructor is public, which System.Text.Json
+        // can call. The round-trip assertion is what establishes that rather
+        // than this comment.
+        services.AddSingleton<JsonConverter, MoneyJsonConverter>();
+        services.AddSingleton<JsonConverter, AddressJsonConverter>();
+        services.AddSingleton<JsonConverter, PaymentReferenceJsonConverter>();
+        services.AddSingleton<JsonConverter, TrackingNumberJsonConverter>();
         services.AddSingleton<OutboxJson>();
 
         // §13.3's projection lag, on the Commerce.Messaging meter
