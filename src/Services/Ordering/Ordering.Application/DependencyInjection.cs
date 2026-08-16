@@ -1,4 +1,5 @@
 using Ordering.Application.Integration;
+using Ordering.Application.Orders.PlaceOrder;
 using Common.Application;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,15 +50,14 @@ public static class DependencyInjection
         // because it is FluentValidation's contract, not one of ours — its own
         // scanner knows its own conventions (Include* filters, internal
         // validators) and a second scan would drift from it.
-        // §4.2's line spelt over the assembly rather than over a type in
-        // it, because there is no validator yet to name — and this class,
-        // the obvious anchor, is static and cannot be a type argument.
-        // Move to AddValidatorsFromAssemblyContaining<TFirstValidator>()
-        // with the first one, and add the registration test that guards
-        // it: ValidationBehavior takes IEnumerable<IValidator<T>>, so a
-        // lost scan is a pipeline that validates nothing and says so to
-        // nobody.
-        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+        // Anchored on the first validator rather than on the assembly, which
+        // is the move the scaffold's comment asked for the moment one
+        // existed. The difference is what happens when the last validator
+        // leaves: over an assembly the scan keeps succeeding and validates
+        // nothing, while over a type the file stops compiling. A lost scan is
+        // otherwise silent — ValidationBehavior takes IEnumerable<IValidator<T>>,
+        // and an empty enumerable is a valid answer.
+        services.AddValidatorsFromAssemblyContaining<PlaceOrderValidator>();
         return services;
     }
 }

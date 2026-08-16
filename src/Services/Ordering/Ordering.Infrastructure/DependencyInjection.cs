@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Ordering.Application.Orders;
 using Ordering.Domain.Orders;
 using Ordering.Infrastructure.Messaging;
 using Ordering.Infrastructure.Persistence;
@@ -55,6 +56,12 @@ public static class DependencyInjection
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3
         services.AddScoped<IOrderRepository, OrderRepository>();             // §5.6
+
+        // §6.4's price port, over the local projection rather than a gRPC call
+        // to Catalog — the whole point of the port is that the write
+        // transaction never waits on another service. Scoped, because the
+        // connection factory it wraps hands out a connection per use.
+        services.AddScoped<IProductPriceReader, ProjectedPriceReader>();
 
         // §7.5's two Infrastructure halves: the collector reads EF's change
         // tracker, the publisher writes the row on the same context. Both

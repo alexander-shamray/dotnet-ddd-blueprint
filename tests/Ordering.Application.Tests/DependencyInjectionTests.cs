@@ -1,5 +1,8 @@
 using Common.Application;
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
+using Ordering.Application.Orders.CancelOrder;
+using Ordering.Application.Orders.PlaceOrder;
 using Shouldly;
 using Xunit;
 
@@ -134,10 +137,48 @@ public class DependencyInjectionTests
             "three of four — IdempotencyBehavior joins with its PR, between Validation and Transaction (§6.3)");
     }
 
-    // Two tests are missing here, and they come back separately rather
-    // than together. The first handler of either kind earns the one that
-    // asserts the §6.2 scan produced a registration; the first validator
-    // earns the one that asserts the validator scan found it. Both scans
-    // fail silently when lost, which is why neither is left implicit —
-    // and a query-only slice needs the first and not the second.
+    [Fact]
+    public void The_handler_scan_registered_both_command_handlers()
+    {
+        // §6.2's scan fails silently when it stops finding things: nothing
+        // resolves an open generic at build time, so ValidateOnBuild says
+        // nothing and the dispatcher throws on the first request that needs
+        // the handler — in production, on the path that matters.
+        //
+        // This is not hypothetical here. Both handlers were written
+        // `internal sealed`, copying §11.4's printed sample, and Scrutor's
+        // AddClasses registers public classes only — so both were skipped in
+        // silence and every cancellation answered 500. This test is what makes
+        // that a build failure next time.
+        ServiceCollection services = new();
+        services.AddOrderingApplication();
+
+        Type[] handlers =
+        [
+            .. services
+                .Where(d => d.ServiceType.IsGenericType &&
+                    d.ServiceType.GetGenericTypeDefinition() == typeof(ICommandHandler<,>))
+                .Select(d => d.ImplementationType!)
+        ];
+
+        handlers.ShouldContain(typeof(PlaceOrderHandler));
+        handlers.ShouldContain(typeof(CancelOrderHandler));
+    }
+
+    [Fact]
+    public void The_validator_scan_found_the_place_order_validator()
+    {
+        // The other silent scan. ValidationBehavior takes
+        // IEnumerable<IValidator<T>>, so a lost scan is a pipeline that
+        // validates nothing and reports success — an empty enumerable is a
+        // valid answer to "which validators apply", and it is the same answer
+        // a correctly configured query gives.
+        ServiceCollection services = new();
+        services.AddOrderingApplication();
+
+        services
+            .Where(d => d.ServiceType == typeof(IValidator<PlaceOrderCommand>))
+            .Select(d => d.ImplementationType)
+            .ShouldContain(typeof(PlaceOrderValidator));
+    }
 }

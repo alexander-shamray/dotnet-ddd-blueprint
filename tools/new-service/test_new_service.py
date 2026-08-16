@@ -40,7 +40,14 @@ OUTBOX_MIGRATION_ID = "20260809120100"
 INBOX_MIGRATION_ID = "20260809120200"
 # And the retention index's, one minute on again.
 RETENTION_MIGRATION_ID = "20260809120300"
-PORT = 5101
+# A port no service publishes, and it has to stay that way — the scaffold
+# refuses a port already in `deploy/compose/docker-compose.yml`, and these
+# tests render against the real repository. It was 5101 until PR-18 allocated
+# that to Ordering, at which point every render in this file raised
+# ScaffoldError and 50 tests went red at once. 5199 is chosen to sit outside
+# the 51xx block §14.1 hands out sequentially, so the next real service does
+# not collide with it the way Ordering did.
+PORT = 5199
 
 
 # Zulu and Yankee, and neither will ever be a service. The probes used to be
@@ -715,9 +722,13 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         root = template_copy(Path(self.directory.name))
-        apply(root, plan(root, PROBE, 5101, MIGRATION_ID))
+        apply(root, plan(root, PROBE, PORT, MIGRATION_ID))
         self.root = root
-        self.second = plan(root, SECOND_PROBE, 5103, "20260810120000")
+        # A second free port, for the second render. Spelt relative to the
+        # first so the pair moves together the next time a real service takes
+        # one of them — which is how the literal 5101 here survived until
+        # PR-18 allocated it.
+        self.second = plan(root, SECOND_PROBE, PORT + 1, "20260810120000")
 
     def tearDown(self):
         self.directory.cleanup()
@@ -761,7 +772,16 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
     def test_the_solution_still_sorts_with_two_services_in_it(self):
         solution = self.second.updated["Platform.slnx"]
         services = re.findall(r'<Folder Name="/src/Services/([^/]+)/">', solution)
-        self.assertEqual(["Catalog", "Yankee", "Zulu"], services)
+
+        # Sortedness is the property, and the two probes being present is what
+        # keeps the assertion from being vacuous. This listed the whole set
+        # literally — `["Catalog", "Yankee", "Zulu"]` — which encoded "Catalog
+        # is the only real service" into a test about ordering, and went red
+        # the day PR-18 added Ordering. Every later service would have broken
+        # it again for the same non-reason.
+        self.assertEqual(sorted(services), services)
+        self.assertIn("Yankee", services)
+        self.assertIn("Zulu", services)
 
 
 class RefusesToRun(unittest.TestCase):
