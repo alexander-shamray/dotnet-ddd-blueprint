@@ -34,6 +34,7 @@ and exits, then `catalog-api` starts (§14.1's pair rule).
 |---|---|---|
 | Catalog API | http://localhost:5102 | `/health/live`, `/health/ready`, `/openapi/v1.json`, `/v1/catalog/products` |
 | Gateway | http://localhost:5000 | `/health/live`, `/health/ready`, and [§10.2](../../docs/backend-architecture/10-api-gateway.md)'s four routes |
+| Ordering API | http://localhost:5101 | `/health/live`, `/health/ready`, `/openapi/v1.json` |
 
 The gateway is the single entry point for external clients
 ([§10.1](../../docs/backend-architecture/10-api-gateway.md)), so the same

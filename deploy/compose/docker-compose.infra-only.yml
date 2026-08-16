@@ -17,3 +17,7 @@ services:
     profiles: [ "excluded" ]
   gateway:
     profiles: [ "excluded" ]
+  ordering-migrator:
+    profiles: [ "excluded" ]
+  ordering-api:
+    profiles: [ "excluded" ]
