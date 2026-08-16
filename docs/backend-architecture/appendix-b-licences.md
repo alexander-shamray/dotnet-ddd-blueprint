@@ -50,6 +50,7 @@ Adding a dependency means adding its identity here, not just its name.
 | `NSubstitute` | BSD-3 | Mocking |
 | `Shouldly` *or* `AwesomeAssertions` | BSD-3 / Apache 2.0 | Assertions. An either/or row: only the chosen library is pinned in §4.4, and the licence gate excludes the other rather than reporting it as a dropped pin |
 | Testcontainers for .NET (`Testcontainers.MsSql`, `Testcontainers.Redis`, `Testcontainers.RabbitMq`) | MIT | Integration test infrastructure |
+| `SSH.NET` | MIT | The SSH transport behind Testcontainers' port forwarding — a transitive dependency pinned explicitly, on the same terms as `Microsoft.OpenApi` above: the floor the row above declares resolves to a version carrying GHSA-q939-rpr3-3284 and NU1903 fails the restore. Registered because a pinned transitive is still a pin, not because anything here opens an SSH connection |
 | `Respawn` | MIT | Test database reset |
 | `WireMock.Net` | Apache 2.0 | HTTP stubbing |
 | `Microsoft.NET.Test.Sdk` | MIT | The test host every test project needs; pinned because a major bump changes discovery |
