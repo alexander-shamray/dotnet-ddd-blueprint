@@ -36,21 +36,29 @@ public sealed record CancelOrderCommand(
 }
 
 /// <summary>
-/// Who asked. Two members and no default — a command must say which path it
-/// arrived on, and <c>default(CommandOrigin)</c> resolving to one of them
-/// would make the safe answer depend on which was declared first.
+/// Who asked. Written as a literal at each entry point — never bound from a
+/// request or a message, because a value a caller could set is a value that
+/// skips the ownership check.
 /// </summary>
 public enum CommandOrigin
 {
     /// <summary>
-    /// An HTTP request with a principal behind it. The ownership check applies.
+    /// An HTTP request with a principal behind it. The ownership check
+    /// applies.
     /// </summary>
-    Customer = 1,
+    /// <remarks>
+    /// <b>The zero value, deliberately (Appendix D).</b> An origin nobody set
+    /// therefore fails closed: it means "check the owner", which is the
+    /// answer that refuses rather than the one that admits. Declaring
+    /// <c>System</c> first, or starting the members at 1, would both make the
+    /// safe default an accident of declaration order.
+    /// </remarks>
+    User,
 
     /// <summary>
     /// §9.6's saga compensating, over the broker, with no principal at all.
     /// The check is skipped because the decision was already authorised at the
     /// endpoint that started the saga — not because no caller could be found.
     /// </summary>
-    System = 2
+    System
 }

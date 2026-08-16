@@ -124,8 +124,6 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       # Runtime identity (DML only) — never the migrator connection.
       ConnectionStrings__Ordering: "${ORDERING_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
-      ConnectionStrings__RedisCache: "redis-cache:6379"
-      ConnectionStrings__RedisCoordination: "redis-coordination:6379"
       ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
       # The authority, to validate inbound tokens (§11.2). No Identity__Client__*:
       # Ordering calls no peer synchronously — prices come from a local
@@ -133,12 +131,21 @@ services:
       # client credentials (§9.7, §11.5).
       Identity__Authority: "http://keycloak:8080/realms/commerce"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      # No Redis keys, and no redis-* in depends_on below: Ordering reads
+      # neither connection yet. An environment variable nothing reads is the
+      # container form of an unused registration, and each joins with the PR
+      # whose code first reads it — the rule PR-12 set when it wired no
+      # service at all. §8.4's cache invalidation is what brings them.
     ports: [ "5101:8080" ]
     depends_on:
-      ordering-migrator:  { condition: service_completed_successfully }
-      redis-cache:        { condition: service_healthy }
-      redis-coordination: { condition: service_healthy }
-      rabbitmq:           { condition: service_healthy }
+      ordering-migrator: { condition: service_completed_successfully }
+      rabbitmq:          { condition: service_healthy }
+      # service_healthy rather than service_started, though the API does not
+      # need Keycloak to boot — JwtBearer fetches the discovery document
+      # lazily. `up --wait` gates on every service's health, and the value is
+      # for whoever types the README's token command the moment it returns:
+      # under service_started that command races the realm import.
+      keycloak:          { condition: service_healthy }
 
   # catalog-api, inventory-api, payments-api, shipping-worker and
   # notifications-worker follow the same shape — and "the same shape" is a

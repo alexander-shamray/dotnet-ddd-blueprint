@@ -411,7 +411,7 @@ this the customer's own order?" — belong in the handler**, where the data is
 available:
 
 ```csharp
-internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser currentUser, TimeProvider clock)
+public sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser currentUser, TimeProvider clock)
     : ICommandHandler<CancelOrderCommand, Result>
 {
     public async Task<Result> HandleAsync(CancelOrderCommand command, CancellationToken ct)
@@ -446,6 +446,16 @@ internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser c
     }
 }
 ```
+
+> **`public`, and it is the §6.2 scan that decides this rather than taste.**
+> The sample read `internal sealed` until PR-18 implemented it, and the handler
+> was then never registered: `AddClasses` scans public classes only, so the
+> scan skipped it in silence. Nothing resolves an open generic at build time,
+> so `ValidateOnBuild` passes and the dispatcher throws on the first request
+> that needs the handler — every cancellation answered 500. Catalog's two
+> handlers have always been public, which is why the same scan works there.
+> A handler is a registration target, and its accessibility is part of the
+> contract with the scanner.
 
 The requirement behind `InitiatedBy` is real. `CancelOrderCommand` is dispatched
 from two places — the endpoint above and a `CommandConsumer`

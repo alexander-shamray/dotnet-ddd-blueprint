@@ -71,7 +71,7 @@ public static class OrderEndpoints
                             });
 
                     Result result = await dispatcher.SendAsync(
-                        new CancelOrderCommand(id, reason, CommandOrigin.Customer),
+                        new CancelOrderCommand(id, reason, CommandOrigin.User),
                         ct);
 
                     return result.ToHttpResult();

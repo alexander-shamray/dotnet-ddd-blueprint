@@ -59,7 +59,8 @@ project is permitted to carry.
 | `Entity<TId>`, `AggregateRoot<TId>` | [§5.5](05-tactical-ddd.md) | Base types in `Common.Domain`; `Entity` carries identity equality, `AggregateRoot` adds `DomainEvents` and `Version` |
 | `IDomainEvent`, `IHasDomainEvents`, `IAggregateRoot` | §5.5 | Domain event contracts and the two non-generic markers, also `Common.Domain` |
 | `Order`, `OrderLine` | §5.4 | The aggregate and its child entity |
-| `OrderId`, `CustomerId`, `ProductId` | §5.2 | Strongly typed identifiers |
+| `OrderId`, `CustomerId`, `ProductId` | §5.2 | Strongly typed identifiers. `CustomerId` has no `New()`: Ordering never mints a customer, and a factory would be a way to invent a subject (§11.4's rule) |
+| `OrderLineId` | §5.2 | A line's own identity, distinct from `OrderId` — `Entity<TId>` compares the type as well as the identifier precisely because a shared key type would otherwise make a line equal to the order holding it (§5.5) |
 | `Money`, `Address` | §5.3 | Value objects |
 | `OrderStatus`, `CancellationReason` | §5.4 | Enumerations |
 | `PaymentReference`, `TrackingNumber` | §5.4 | Value objects referenced by aggregate methods |
