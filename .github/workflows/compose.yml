@@ -34,10 +34,16 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    # 15 covered pulls alone; three image builds ride on top — Catalog's two
-    # and PR-17's gateway, each a restore plus a publish with no layer cache on
-    # a fresh runner. The base images are shared, the restores are not.
-    timeout-minutes: 30
+    # 15 covered pulls alone; five image builds ride on top — Catalog's two,
+    # PR-17's gateway and PR-18's ordering pair, each a restore plus a publish
+    # with no layer cache on a fresh runner. The base images are shared, the
+    # restores are not.
+    #
+    # 35, up from 30. PR-17 raised 25 → 30 for one extra image, so two more
+    # take the same five minutes each; the count in the comment above is what
+    # is supposed to force this recount, and it sat wrong for four review
+    # rounds the last time an image joined without it.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Common.Contracts.Ordering.V1;
 using Microsoft.Extensions.DependencyInjection;
 using Ordering.Api.Endpoints;
 using Ordering.Application.Orders;

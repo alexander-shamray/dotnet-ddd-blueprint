@@ -175,7 +175,9 @@ privately, it is deployed unreachably. `/bff` rather than `/api`, because a
 client picks one or the other: aggregated responses shaped for a screen, or the
 service APIs shaped for a resource.
 
-**This file ships whole, ahead of three of the four services it routes to**,
+**This file shipped whole, ahead of three of the four services it routes to,
+and two of them are still missing** — Ordering arrived behind its route with
+PR-18, leaving Inventory and the BFF answering 502 —
 which is the opposite of the rule [§14.1](14-local-development.md)'s Compose
 file follows — and the asymmetry is in what each costs. A Compose block naming
 an image that does not exist fails `up`; a route whose destination is not

@@ -210,7 +210,14 @@ public class RealmImportTests
                 .OfType<string>()
         ];
 
-        Permissions("demo").ShouldBe(["catalog:write"]);
+        // demo gains Ordering's two endpoint permissions with PR-18, so the
+        // inner loop the compose README documents actually works — the
+        // catalog:write parallel, one service over. It does NOT gain
+        // orders:admin: that role is grantable and held by nobody, so the
+        // ownership 404 stays demonstrable with the logins this realm ships.
+        Permissions("demo").ShouldBe(
+            ["catalog:write", "orders:write", "orders:cancel"],
+            ignoreOrder: true);
 
         JsonElement browser = users.EnumerateArray()
             .Single(u => u.GetProperty("username").GetString() == "browser");
@@ -269,7 +276,21 @@ public class RealmImportTests
         // permissions join this list in the PR that registers the policy
         // requiring them, which is the same rule §11.4 states for the
         // constants.
-        roles.ShouldBe(["catalog:write", "inventory:admin"]);
+        // Ordering's three joined with PR-18. Two are policies its endpoints
+        // require; orders:admin is a claim CancelOrderHandler reads and no
+        // endpoint names, and it is here on inventory:admin's terms — without
+        // the role, no token this realm can issue could carry the claim, and
+        // the handler's admin branch would be unreachable code rather than an
+        // override somebody can be granted.
+        roles.ShouldBe(
+            [
+                "catalog:write",
+                "inventory:admin",
+                "orders:write",
+                "orders:cancel",
+                "orders:admin"
+            ],
+            ignoreOrder: true);
     }
 
     [Fact]

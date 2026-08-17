@@ -75,7 +75,7 @@ global.json                      SDK pin (§4.4)
                                  `dotnet tool restore` is the whole setup
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the twenty-one projects below
+Platform.slnx                    the thirty projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate and scaffold tests, then
                                  restore/build/test
@@ -445,14 +445,22 @@ word. **A change touching `tests/Catalog.*` is not verified until a scaffolded
 service has been built**, which is four commands and a cleanup:
 
 ```bash
-python tools/new-service/new_service.py Ordering --port 5103
-dotnet build tests/Ordering.Api.Tests/Ordering.Api.Tests.csproj
-rm -rf src/Services/Ordering tests/Ordering.*
+python tools/new-service/new_service.py Yankee --port 5199
+dotnet build tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj
+rm -rf src/Services/Yankee tests/Yankee.*
 git checkout -- Platform.slnx deploy/compose/
 ```
 
 The scaffold edits five tracked files as well as creating its own, so the
 `git checkout` is part of the procedure rather than tidying after it.
+
+**The probe used to be `Ordering` at 5103, and PR-18 is why it is not.**
+Ordering is a real service now, so the create refuses a name and a port that
+are taken, and the `rm -rf` — followed literally by anyone reading this block
+after the merge — deletes it. `Yankee` at 5199 is one of the probes the
+scaffold's own suite uses, chosen because a probe cannot quietly become a
+service later. The same trap caught `tools/new-service/README.md`, which named
+the same command.
 
 Planned, per §4.1 — do not invent a different shape for it. All five building
 blocks are shown above; the tree below is the target shape, and its
@@ -498,15 +506,17 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds twenty-one projects and `dotnet test` runs 459 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 580 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
-job for them beside `licence-gate`. **PR-18 is next**
-(`feat(ordering): second service from the scaffold`), which is what dogfoods
-PR-11's scaffold and carries PR-16's deferred security test — user A reading
-user B's order → 404, §11.4's ownership check, which needs the first resource
-in the platform that has an owner.
+job for them beside `licence-gate`. **PR-18 has landed** — Ordering is the
+second service, rendered by the scaffold with no reconciliation owed to it,
+and it carries PR-16's deferred security test: user A *cancelling* user B's
+order → 404, §11.4's ownership check, which needed the first resource in the
+platform that has an owner. **PR-19 (the BFF) and PR-20 (Ordering's Catalog
+projection) are next**, and PR-20 is what fills the `ordering.ProductPrices`
+table PR-18 shipped with its reader and no producer.
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate

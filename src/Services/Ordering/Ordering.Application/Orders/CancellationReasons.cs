@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Common.Contracts.Ordering.V1;
 using Ordering.Domain.Orders;
 
 namespace Ordering.Application.Orders;
@@ -9,12 +10,20 @@ namespace Ordering.Application.Orders;
 /// means.
 /// </summary>
 /// <remarks>
+/// <b>The codes come from <see cref="CancelReasons"/> in
+/// <c>Common.Contracts.Ordering.V1</c>, not from a copy here.</b> They are a
+/// contract vocabulary (§9.6) — §9.6's saga sends them and this endpoint
+/// parses them — so the two sides must agree, and a second table is a second
+/// thing to forget when a reason is added, which is exactly what the map
+/// below is built by inverting to avoid.
+/// <para>
 /// <b>It refuses a code it does not know rather than defaulting.</b> A sibling
 /// service sending a code we do not recognise is a deployment problem, and no
 /// amount of backoff resolves it — a default would turn it into an order
 /// cancelled for the wrong recorded reason, which is worse than a rejection
 /// because nothing later can tell the two apart. §13.3 tags a metric with the
 /// reason, so the set has to be closed for that as well.
+/// </para>
 /// </remarks>
 public static class CancellationReasons
 {
@@ -39,18 +48,4 @@ public static class CancellationReasons
         ByCode.ToFrozenDictionary(p => p.Value, p => p.Key);
 
     public static string ToCode(CancellationReason reason) => ToCodeMap[reason];
-}
-
-/// <summary>
-/// The codes themselves. Constants rather than literals, because the endpoint
-/// parses them and §9.6's saga will send them — two places that must agree,
-/// and a misspelling in either is a rejected cancellation at runtime.
-/// </summary>
-public static class CancelReasons
-{
-    public const string OutOfStock = "out_of_stock";
-    public const string StockTimeout = "stock_timeout";
-    public const string PaymentDeclined = "payment_declined";
-    public const string PaymentTimeout = "payment_timeout";
-    public const string CustomerRequest = "customer_request";
 }

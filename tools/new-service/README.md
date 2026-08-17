@@ -5,7 +5,7 @@ specification for this directory; this file records what a developer needs at
 the keyboard. One command creates a service:
 
 ```bash
-python tools/new-service/new_service.py Ordering --port 5101
+python tools/new-service/new_service.py Yankee --port 5199
 ```
 
 | | |
@@ -24,12 +24,17 @@ generated tree is untracked and the five edits are tracked, so neither one
 alone is enough:
 
 ```bash
-rm -rf src/Services/Ordering tests/Ordering.*
+rm -rf src/Services/Yankee tests/Yankee.*
 git restore Platform.slnx deploy/compose
 ```
 
-(`Ordering` rather than a `<Name>` placeholder because this is a `bash` fence
-and the shell reads `<Name>` as a redirection, not as something to fill in.)
+(`Yankee` rather than a `<Name>` placeholder because this is a `bash` fence and
+the shell reads `<Name>` as a redirection, not as something to fill in. It
+named `Ordering` at port 5101 until PR-18 made that a real service — at which
+point the create raised `ScaffoldError` on a published port, and the undo,
+followed literally, deleted the service that had just landed. A probe the
+suite already uses cannot become a service later, which is the property the
+example wanted all along.)
 
 `git checkout .` is **not** the undo and this file used to say it was: it
 leaves every generated file in place, because they are untracked, and it

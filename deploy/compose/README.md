@@ -70,8 +70,12 @@ already uses for `admin/admin` and `guest/guest`:
 
 | User | Password | Holds |
 |---|---|---|
-| `demo` | `demo` | `catalog:write` |
+| `demo` | `demo` | `catalog:write`, `orders:write`, `orders:cancel` |
 | `browser` | `browser` | nothing — the account that proves a refusal |
+
+`orders:admin` is grantable and held by **nobody**, deliberately: it overrides
+§11.4's ownership check, and the 404 that hides another customer's order stays
+demonstrable only while no shipped login can bypass it.
 
 ```bash
 TOKEN=$(curl -s http://localhost:8080/realms/commerce/protocol/openid-connect/token \
@@ -87,6 +91,30 @@ curl -X POST http://localhost:5102/v1/catalog/products \
 The same call as `browser` is a 403 and the same call with no header is a 401.
 Both are worth running once: they are the difference between a token being
 *checked* and a token being *carried*.
+
+Ordering takes the same token, and **every** one of its routes needs one —
+there is no anonymous half, because an order belongs to somebody where a
+product listing does not:
+
+```bash
+ORDER=$(curl -s -X POST http://localhost:5101/v1/orders \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"items":[{"productId":"00000000-0000-0000-0000-000000000001","quantity":1}],
+         "shippingAddress":{"line1":"1 Test Street","city":"Almaty","postalCode":"050000","country":"KZ"},
+         "currency":"EUR"}')
+
+curl -X POST "http://localhost:5101/v1/orders/$ORDER/cancel" \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"reason":"customer_request"}'
+```
+
+**The first call answers 422 `order.products_unavailable` until PR-20 lands**,
+and that is the honest state rather than a broken example: prices come from a
+local projection of Catalog's events (§6.4), and the projection that fills
+`ordering.ProductPrices` is PR-20's. The table ships with its reader because
+`PlaceOrderHandler` is the consumer and PR-20 depends on this PR, not the
+other way round. Until then the reachable proofs are the 401, the 403 as
+`browser`, and the 404 an order you do not own returns.
 
 Override connection strings with `CATALOG_CONNECTION` and
 `CATALOG_MIGRATOR_CONNECTION`; both default to the `sa` login above, and only
