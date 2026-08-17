@@ -12,8 +12,8 @@ namespace Gateway.Api.Tests;
 /// <summary>
 /// A real HTTP server on an ephemeral loopback port, standing in for whichever
 /// service a route points at. It records the path it was given, and answers
-/// 204 unless the caller asks through the query string for a body — optionally
-/// one the stub has gzipped for itself.
+/// 204 unless the caller asks through the query string for a body —
+/// optionally under a <c>Content-Encoding</c> the stub declares for itself.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,10 +41,17 @@ public sealed class StubDestination : IAsyncLifetime
     public const string BodySizeQuery = "body";
 
     /// <summary>
-    /// Ask for that body gzip-encoded, with the <c>Content-Encoding</c> a
-    /// destination that compressed for itself would send.
+    /// Ask for a declared <c>Content-Encoding</c> on that body: <c>gzip</c>
+    /// gzips it as a destination that compressed for itself would, and
+    /// <c>identity</c> declares it unencoded and sends it plain.
     /// </summary>
-    public const string PreEncodedQuery = "encoded";
+    /// <remarks>
+    /// One switch for two cases because the middleware treats them the same
+    /// way — it declines any response that already carries the header — and
+    /// keeping them apart in the stub would hide that the two tests are
+    /// exercising one rule (ADR-020).
+    /// </remarks>
+    public const string ContentEncodingQuery = "encoding";
 
     private readonly ConcurrentQueue<string> _paths = new();
     private WebApplication? _app;
@@ -83,15 +90,19 @@ public sealed class StubDestination : IAsyncLifetime
             if (!int.TryParse(context.Request.Query[BodySizeQuery], out int size))
                 return Results.NoContent();
 
-            // A destination that has compressed for itself. The gateway must
-            // pass this through rather than encode it a second time, which is
-            // also the only way a response that must not be compressed can say
-            // so (ADR-020).
-            if (context.Request.Query.ContainsKey(PreEncodedQuery))
-            {
-                context.Response.Headers.ContentEncoding = "gzip";
+            // A destination that has spoken for its own encoding — either
+            // because it compressed the body itself, or because it is refusing
+            // compression by declaring the body unencoded. The gateway must
+            // leave both alone, and ADR-020 rests on the second.
+            string? declared = context.Request.Query[ContentEncodingQuery];
 
-                return Results.Bytes(GzipOf(new string('a', size)), "application/json");
+            if (!string.IsNullOrEmpty(declared))
+            {
+                context.Response.Headers.ContentEncoding = declared;
+
+                return declared == "gzip"
+                    ? Results.Bytes(GzipOf(new string('a', size)), "application/json")
+                    : Results.Text(new string('a', size), "application/json");
             }
 
             // One repeated character, so the body is at the compressible end of
@@ -120,6 +131,10 @@ public sealed class StubDestination : IAsyncLifetime
         using (GZipStream compressor = new(buffer, CompressionLevel.Fastest, leaveOpen: true))
             compressor.Write(Encoding.UTF8.GetBytes(body));
 
+        // Not `[.. buffer]`: CLAUDE.md's spread rule governs materialising a
+        // SEQUENCE, and a MemoryStream is not one — the spread fails to
+        // compile on it (CS9212). Noted here because a review has already
+        // read the rule the other way.
         return buffer.ToArray();
     }
 }

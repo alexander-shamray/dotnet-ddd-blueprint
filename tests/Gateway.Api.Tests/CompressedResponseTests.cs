@@ -166,30 +166,16 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
     /// a second time.
     /// </summary>
     /// <remarks>
-    /// This is the double-compression guard and ADR-020's opt-out at once:
-    /// the middleware declines any response that already carries a
-    /// <c>Content-Encoding</c>, so a downstream whose body must not be
-    /// compressed at the edge — the BFF's, when PR-19 gives it a response
-    /// worth protecting — says so by encoding it itself. Asserted rather than
-    /// derived from the documentation, because it is the only escape hatch
-    /// ADR-020 offers and a decision resting on an unverified mechanism is a
-    /// decision resting on nothing.
+    /// The middleware declines any response that already carries a
+    /// <c>Content-Encoding</c>. Here that is the double-compression guard; the
+    /// test below is the same rule used as an opt-out.
     /// </remarks>
     [Fact]
     public async Task An_already_encoded_response_is_passed_through_once()
     {
         CancellationToken ct = TestContext.Current.CancellationToken;
 
-        using StubbedGatewayFactory factory = new(stub.Address);
-        using HttpClient client = factory.CreateClient();
-
-        using HttpRequestMessage request = new(
-            HttpMethod.Get,
-            $"{CompressibleRoute}&{StubDestination.PreEncodedQuery}=1");
-
-        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
-
-        HttpResponseMessage response = await client.SendAsync(request, ct);
+        HttpResponseMessage response = await Get(Declaring("gzip"), ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Content.Headers.ContentEncoding.ShouldBe(
@@ -199,6 +185,58 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
         // One decompression yields the body. Two encodings would leave this
         // holding compressed bytes rather than the text.
         Decompress(await response.Content.ReadAsByteArrayAsync(ct)).ShouldBe(new string('a', BodyBytes));
+    }
+
+    /// <summary>
+    /// A destination declaring its body unencoded is left uncompressed —
+    /// ADR-020's opt-out, and the only one there is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The first version of this ADR named the wrong mechanism, and Copilot
+    /// caught it.</b> It told PR-19's BFF to protect a secret-bearing response
+    /// by encoding it itself, which mitigates nothing: gzip opens the same
+    /// length side channel wherever it is applied, and the pass-through test
+    /// above only proves the gateway declines to encode a second time. What is
+    /// needed is a body that is never compressed at all, and the middleware's
+    /// header check supplies one — <c>Content-Encoding: identity</c> means
+    /// "no transformation applied", so a response carrying it is skipped and
+    /// reaches the client in the clear.
+    /// </para>
+    /// <para>
+    /// Asserted rather than derived from the documentation, because it is now
+    /// the whole of what ADR-020 offers a downstream and a decision resting on
+    /// an unverified mechanism rests on nothing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_response_declaring_identity_is_not_compressed()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        HttpResponseMessage response = await Get(Declaring("identity"), ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Content.Headers.ContentEncoding.ShouldBe(
+            ["identity"],
+            "the declaration survives the hop — a gzip here would mean the opt-out is not one");
+
+        // Readable without decompressing, which is the property the BFF needs.
+        (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
+    }
+
+    private static string Declaring(string encoding) =>
+        $"{CompressibleRoute}&{StubDestination.ContentEncodingQuery}={encoding}";
+
+    private async Task<HttpResponseMessage> Get(string route, CancellationToken ct)
+    {
+        using StubbedGatewayFactory factory = new(stub.Address);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, route);
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
+
+        return await client.SendAsync(request, ct);
     }
 
     private static string Decompress(byte[] encoded)

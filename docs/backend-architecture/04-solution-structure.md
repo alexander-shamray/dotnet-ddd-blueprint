@@ -566,9 +566,10 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimit
 // are the framework's defaults, deliberately — that list omits
 // application/problem+json, which is what keeps §10.5's error bodies (the one
 // place a client-supplied value is reflected back) out of the compressed set.
-// EnableForHttps is the whole of ADR-020: false would be a mitigation this
-// topology cannot deliver, because TLS terminates upstream and the flag would
-// never fire.
+// EnableForHttps is the whole of ADR-020, and it is what makes compression
+// happen at all: the block below rewrites Request.Scheme from the ingress's
+// X-Forwarded-Proto, and this middleware decides at the first WRITE, so the
+// scheme it reads is https even though the hop was plain.
 builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
 
 // YARP is registered here and configured from the "ReverseProxy" section

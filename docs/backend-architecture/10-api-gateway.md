@@ -49,6 +49,16 @@ above all — reads `RemoteIpAddress`, which is the *ingress* address until
 `UseForwardedHeaders` runs ([§4.2](04-solution-structure.md)). A gateway that assumes it is the edge
 rate-limits the whole world as one client.
 
+**The scheme travels the same way, and one middleware reads it after the
+fact.** `X-Forwarded-Proto` makes `Request.IsHttps` true on a connection that
+carried no TLS, and response compression takes its decision at the first
+*write* rather than where its `Use` call sits — so it reads the rewritten
+scheme although it is registered above the middleware that rewrote it
+([ADR-020](appendix-a-adrs.md#adr-020--the-edge-compresses-over-tls-and-says-so)).
+Reasoning about what a response-side middleware "sees" from its position in
+the pipeline is reasoning about the wrong moment, and ADR-020's first argument
+did exactly that.
+
 **It does not:** contain business logic · aggregate responses from several
 services · transform payloads · access any database · know about domain
 concepts.

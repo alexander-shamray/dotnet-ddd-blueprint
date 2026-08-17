@@ -159,9 +159,12 @@ costs when the code is already obvious**, and pricing it at zero because the
 diff is small is how design decisions end up taken by whoever types first.
 
 What the day did not price, and what a later small-diff PR should, is the
-**tests**: the three lines needed seven, one of which cannot run on `TestServer`
+**tests**: the three lines needed nine, one of which cannot run on `TestServer`
 at all, and finding that out is most of what the day actually bought. An
-estimate derived from the diff is wrong in the same direction each time.
+estimate derived from the diff is wrong in the same direction each time — and
+two of those nine exist only because a review found the *argument* inverted
+while the code was right, which is the half of a small PR an estimate is least
+equipped to see.
 
 PR-18 is the cheapest service in the plan and that is the whole point of it —
 it is priced at three days *because* PR-11 exists, and if it turns out to cost

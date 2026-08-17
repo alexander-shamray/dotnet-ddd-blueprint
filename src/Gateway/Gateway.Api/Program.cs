@@ -42,13 +42,19 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimit
 // §10.1's response compression, and the whole of ADR-020 is in the argument
 // for that one property.
 //
-// EnableForHttps is false by default, against BREACH/CRIME, and leaving it
-// there would be a mitigation this topology cannot deliver: TLS terminates at
-// the ingress (§10.1), so every request the gateway sees is plain http and the
-// flag never fires — compression would be on regardless while the code read as
-// though it were guarded. Setting it true says out loud that this edge
-// compresses whatever it is asked to, and moves the argument onto content,
-// where ADR-020 makes it.
+// EnableForHttps is false by default, against BREACH/CRIME, and here it is
+// what makes compression happen at all. TLS terminates at the ingress (§10.1)
+// so the hop this host serves is plain http — but the block above enables
+// XForwardedProto, UseForwardedHeaders rewrites Request.Scheme from the
+// ingress's header, and this middleware takes its decision at the first WRITE,
+// below the whole pipeline, so the scheme it reads is the rewritten one. Left
+// at the default, a gateway behind an HTTPS ingress compresses nothing and
+// says nothing about it. Measured: ForwardedSchemeCompressionTests goes red
+// against the property removed.
+//
+// So the flag cannot be argued from the scheme in either direction, and
+// ADR-020 argues it from content instead — no body crossing this edge pairs a
+// secret with reflected input.
 //
 // The providers and the compressible MIME types are the framework's defaults,
 // deliberately. Brotli and Gzip at CompressionLevel.Fastest is the right trade

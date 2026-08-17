@@ -378,7 +378,13 @@ tests/
                                  StubDestination answers 204 until a query
                                  string asks it for a body — a request-scoped
                                  switch rather than a mutable fixture, so the
-                                 classes sharing it stay independent
+                                 classes sharing it stay independent.
+                                 ForwardedSchemeCompressionTests is the only
+                                 test anywhere that drives the forwarded scheme
+                                 into a response-side decision, and it exists
+                                 because a review found ADR-020 arguing from
+                                 the hop's scheme rather than the one the
+                                 middleware reads
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
                                  SQL and RabbitMQ containers, real migrator
                                  run, Respawn reset — CatalogApiFactory (both
@@ -594,7 +600,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty projects and `dotnet test` runs 618 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 620 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -617,19 +623,32 @@ PR-27 landed the last two entries of §10.1's "It does" list — the body ceilin
 and ADR-020's response compression — and five of its decisions bind what comes
 after:
 
-- **`EnableForHttps = false` is a mitigation this topology cannot deliver, and
-  that is the whole of ADR-020.** The framework's default guards BREACH by
-  declining to compress an HTTPS *request's* response; TLS terminates at the
-  ingress (§10.1) and plain HTTP is forwarded inside the cluster, so the
-  gateway sees `http` on every request in the deployed shape and the flag never
-  fires — the edge would compress everything regardless while the code read as
-  though something were guarding it. That is the guard-that-checks-nothing
-  shape this repository keeps finding, so the flag is set **true** and the
-  argument moved onto content, where it belongs: no body crossing this edge
-  pairs a secret with reflected input. **The exposure is not reduced by the
-  false setting** — the response still reaches the browser over TLS either way
-  — which is why picking the reassuring default would have been the unsafe
-  choice as well as the dishonest one.
+- **`EnableForHttps = true` is what makes the edge compress at all, and this
+  file argued the exact opposite first.** The claim was that TLS terminates at
+  the ingress (§10.1), so the gateway is served plain `http`, so the flag never
+  fires and setting it true merely says out loud what happens anyway. Every
+  clause true, conclusion inverted: §4.2's forwarded-headers block enables
+  `XForwardedProto`, `UseForwardedHeaders` rewrites `Request.Scheme` from the
+  ingress's header, and the compression middleware decides at the first
+  **write** — below the whole pipeline — so the scheme it reads is the
+  rewritten one. At the default, a gateway behind an HTTPS ingress compresses
+  **nothing** and no response says why. Copilot round 1 found it;
+  `ForwardedSchemeCompressionTests` is the measurement, red against the
+  property removed.
+
+  **The lesson is not about compression.** A middleware that acts on the
+  response decides *after* everything below it has run, so reasoning about
+  what it "sees" from the position of its `Use` call is reasoning about the
+  wrong moment. `UseResponseCompression` sits above `UseForwardedHeaders` and
+  still reads the header `UseForwardedHeaders` wrote. Any claim of the form
+  "this middleware runs before that one, so it cannot see X" is worth
+  measuring rather than reading off the pipeline order.
+
+  What survives the correction is the *decision* and the shape of its
+  argument: the flag cannot be argued from the scheme in either direction —
+  the response reaches the browser over TLS whatever the inner hop was — so
+  ADR-020 argues it from content. No body crossing this edge pairs a secret
+  with reflected input.
 - **The one body that reflects a client-supplied value is the one the default
   MIME list omits, and that is luck rather than design — so a test pins it.**
   §10.5's problem+json carries the `X-Correlation-Id` the caller may have
@@ -672,6 +691,19 @@ stream's length and sends the header anyway. It passed, for the wrong reason,
 and only `ContentLength.ShouldBeNull()` told the difference. **A test named for
 a case is not a test of it** — the streaming path is the one an attacker
 chooses, since omitting a header costs the sender nothing.
+
+**ADR-020's escape hatch was named wrong too, and PR-19 is who it costs.** The
+first version told the BFF to protect a secret-bearing response by *encoding*
+it itself, on the ground that the middleware skips a response already carrying
+a `Content-Encoding`. The mechanism is right and the instruction is useless:
+gzip opens the same length side channel wherever it is applied, so a
+BFF-compressed secret leaks exactly as a gateway-compressed one does. The
+opt-out is `Content-Encoding: identity` — "no transformation applied", skipped
+by the same header check and readable on the wire. Copilot round 1 again, and
+it is worth noticing that both of its findings were **the argument being
+wrong while the code was right**: the flag and the header check were correct
+in `Program.cs` throughout. A review that only diffs code would have found
+neither.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
 pipeline — and fourteen of its decisions bind what comes after:
@@ -2107,8 +2139,9 @@ already written against it.
 - **Materialise with a spread, not a terminal `.ToArray()` or `.ToList()`.**
   A sequence being fixed into an array or list target is written
   `[.. sequence]` — one space after the `..`, as `[.. record.Attributes]` and
-  `[.. assemblies]` already had it. There are no `.ToArray()` or `.ToList()`
-  calls left in the corpus, and a new one is a site this rule missed:
+  `[.. assemblies]` already had it. There are no LINQ `.ToArray()` or
+  `.ToList()` calls left in the corpus, and a new one is a site this rule
+  missed:
 
   ```csharp
   ProductId[] missing = [.. productIds.Where(id => !priceList.ContainsKey(id))];
@@ -2126,6 +2159,21 @@ already written against it.
   e.Lines` over two lines). And a spread frequently brings the whole statement
   back under 120, in which case the one-line rule applies and the `[` does not
   get its own line after all.
+
+  **A `ToArray` that is not a sequence materialisation is outside this rule**,
+  and stating that is cheaper than defending it again. `MemoryStream.ToArray()`
+  is a stream accessor — the type implements no `IEnumerable`, so `[.. buffer]`
+  does not compile at all (CS9212, checked by compiling it). The rule is about
+  the *terminal LINQ operator*, where the spread and the call are two spellings
+  of one thing and only one of them leads with the target. Where they are not
+  two spellings of one thing there is nothing to prefer.
+
+  This was found by a Copilot review reading "there are no `.ToArray()` calls
+  left in the corpus" as the test it literally is — a grep — rather than as the
+  rule it means. That reading is fair, which is why the sentence was narrowed
+  rather than the finding merely rejected: **a rule whose stated test is a
+  string match will be enforced as one**, by a reviewer or by whoever greps
+  next.
 - **One space before `=`, `=>` and `{` — never a column of them.** Padding a
   token out to line up with the one above it fails the build: IDE0055 reports
   it as a formatting violation and ADR-019 makes that an error. This was found

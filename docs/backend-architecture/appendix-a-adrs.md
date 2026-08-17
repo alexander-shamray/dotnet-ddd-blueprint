@@ -260,20 +260,28 @@ It takes the framework's default providers — Brotli and Gzip at
 compresses anything.
 **Why.** The framework ships `EnableForHttps = false` because compressing a
 response that mixes attacker-influenced input with a secret leaks the secret's
-length, which is BREACH and CRIME. Leaving it false here would be a mitigation
-this topology cannot deliver: TLS terminates at the load balancer or Ingress
+length, which is BREACH and CRIME. **Here that flag is what makes compression
+happen at all**, and the first version of this ADR argued the exact opposite.
+It reasoned that TLS terminates at the load balancer or Ingress
 ([§10.1](10-api-gateway.md)) and plain HTTP is forwarded inside the cluster, so
-the gateway sees `http` on every request and the flag never fires — the edge
-would compress everything regardless while the code read as though something
-were guarding it. That is the same class of defect as a guard claiming a closed
-set it never checks, and the *response* still reaches the browser over TLS
-either way, so the exposure is not removed by the flag and cannot be argued
-from the scheme. It has to be argued from content, and the content is what
-makes it safe: the bodies crossing this edge are proxied API JSON, and the
-platform puts no secret in one. Tokens are issued by Keycloak and reach the
-gateway on an `Authorization` header rather than in a body
-([§11.2](11-identity-authorization.md)), no
-response sets a session cookie, and no endpoint returns an anti-forgery token.
+the gateway is served `http` and the flag never fires. Every clause of that is
+true except the conclusion. §4.2's forwarded-headers block enables
+`XForwardedProto`, `UseForwardedHeaders` rewrites `Request.Scheme` from the
+ingress's header, and the compression middleware takes its decision at the
+first **write** — below the whole pipeline — so the scheme it reads is the
+rewritten one. Left at its default, a gateway behind an HTTPS ingress
+compresses **nothing**, and no response says why.
+`ForwardedSchemeCompressionTests` is the measurement; it goes red against the
+property removed.
+
+So the flag cannot be argued from the scheme in either direction: the
+*response* reaches the browser over TLS whatever the inner hop was, and the
+inner hop is not what the middleware reads anyway. It has to be argued from
+content, and the content is what makes it safe: the bodies crossing this edge
+are proxied API JSON, and the platform puts no secret in one. Tokens are
+issued by Keycloak and reach the gateway on an `Authorization` header rather
+than in a body ([§11.2](11-identity-authorization.md)), no response sets a
+session cookie, and no endpoint returns an anti-forgery token.
 The one body that *does* reflect a client-supplied value back — §10.5's
 problem+json, carrying the `X-Correlation-Id` the caller may have chosen
 (§10.4) — is the one the default type list omits, so the input half and the
@@ -291,11 +299,21 @@ directions — adding the type to
 `CompressibleContentTypes` would be re-taking this decision, and the test is
 what makes that visible. **The rule is inherited rather than re-decided by
 every host behind the edge**: PR-19's BFF is the first that could hold a
-session and its responses pass through this middleware, so a BFF response
-carrying a secret must not merely avoid compressing itself — it has to encode
-itself, because the middleware declines any response that already carries a
-`Content-Encoding` and that is the only opt-out there is. Verified, not read
-off the documentation, in the same suite. And a service that one day needs to
+session, and its responses pass through this middleware. A BFF response
+carrying a secret therefore has to say *not compressed at all* —
+`Content-Encoding: identity`, which means "no transformation applied" and which
+the middleware skips, because it declines any response already carrying that
+header. That is the only opt-out there is, and it is verified rather than read
+off the documentation.
+
+**This too was written the wrong way round first**, and the correction is worth
+keeping because the wrong version looked like a mitigation. It told the BFF to
+*encode* the response itself. That protects nothing: gzip opens the same length
+side channel wherever it is applied, so a BFF-compressed secret leaks exactly
+as a gateway-compressed one does, and the pass-through test proves only that
+the gateway declines to encode a second time. The header check is the same
+mechanism either way; what changed is which value a downstream must send to be
+safe. And a service that one day needs to
 accept an upload meets §10.1's body ceiling first, which is a number in
 `GatewayLimits` rather than a per-route setting: raising it is a platform
 decision made once, in the open.
