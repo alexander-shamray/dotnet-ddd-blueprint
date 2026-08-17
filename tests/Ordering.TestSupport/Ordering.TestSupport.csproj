@@ -34,6 +34,11 @@
     <!-- The open connection Respawn inspects. Already pinned for
          Ordering.Infrastructure's factory. -->
     <PackageReference Include="Microsoft.Data.SqlClient" />
+    <!-- MigrateAsync and ExecuteSqlRawAsync, both used directly by
+         ServiceFixture. Carried transitively by the project references below;
+         named here because this assembly uses the types itself, which is the
+         register's honesty rule rather than a restore requirement. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
   </ItemGroup>
 
   <ItemGroup>

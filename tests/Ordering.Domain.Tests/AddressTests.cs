@@ -67,6 +67,21 @@ public class AddressTests
             Address.Of("1 Test Street", null, "Almaty", "050000", country));
     }
 
+    [Theory]
+    [InlineData("ZZ")]
+    [InlineData("QQ")]
+    public void An_unassigned_two_letter_code_is_accepted_and_that_is_the_contract(string country)
+    {
+        // Deliberate, and pinned here so the boundary is read rather than
+        // rediscovered: the guard checks the code's shape and not its
+        // membership of the assigned set. Membership is data that changes
+        // without this code changing, and RegionInfo would answer from the
+        // container's ICU data — the same string constructing on one image and
+        // throwing on another is not an invariant. If this test ever fails,
+        // the guard grew a claim the type cannot keep.
+        Address.Of("1 Test Street", null, "Almaty", "050000", country).Country.ShouldBe(country);
+    }
+
     [Fact]
     public void Two_addresses_with_the_same_parts_are_equal()
     {

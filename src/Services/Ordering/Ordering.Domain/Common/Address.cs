@@ -12,9 +12,22 @@ namespace Ordering.Domain.Common;
 /// subdivisions differ by jurisdiction, and a guard that encodes one country's
 /// format refuses valid addresses in every other — the always-valid principle
 /// says an invalid instance must be unconstructible, not that this type should
-/// hold an address database. <c>Country</c> is the exception, because ISO 3166-1
-/// alpha-2 is a closed two-letter set and a three-letter code here is a caller
-/// using the wrong standard rather than an unusual address.
+/// hold an address database. <c>Country</c> is the partial exception: the check
+/// is on the code's <em>shape</em>, and two letters is what separates an
+/// ISO 3166-1 alpha-2 code from a caller reaching for alpha-3 or writing the
+/// country's name.
+/// </remarks>
+/// <remarks>
+/// <b>Shape, not membership — <c>ZZ</c> constructs.</b> The guard does not
+/// check the code against the assigned set, and saying it did would be the
+/// claim this type is least able to keep: the assigned set is data, it changes
+/// without this code changing, and holding it here is the address database the
+/// remark above refuses. <c>System.Globalization</c> is not the way out
+/// either — <c>RegionInfo</c> answers from the container's ICU data, so the
+/// same string would construct on one image and throw on another, and an
+/// invariant that depends on which base image a service was built from is not
+/// an invariant. A wrong-but-well-formed code is caught downstream by whoever
+/// ships the parcel, which is the layer that knows.
 /// </remarks>
 public sealed record Address
 {
@@ -39,8 +52,11 @@ public sealed record Address
         EnsurePresent(city, nameof(city));
         EnsurePresent(postalCode, nameof(postalCode));
 
+        // Shape only — see the second remark. The message says what to send
+        // rather than what was checked, because "two letters" is the fix a
+        // caller sending "KAZ" or "Kazakhstan" needs to read.
         if (country is not { Length: 2 } || !country.All(char.IsAsciiLetter))
-            throw new DomainException("Country must be a 2-letter ISO 3166-1 code.");
+            throw new DomainException("Country must be a two-letter code (ISO 3166-1 alpha-2).");
 
         // Line2 is optional, and an empty string is not a second line — it is
         // the absence of one arriving through a JSON body that spelt it "".
