@@ -29,8 +29,13 @@ builder.AddCommonWebDefaults();                 // §13.2
 // forwarder: an oversized request that fails authorization is answered 401 or
 // 403 without its size ever being considered, because neither of those
 // middlewares touches the body. Measured, not assumed. That ordering is the
-// right way round — the cheaper refusal wins — but it does mean this limit is
-// a memory bound on requests the gateway was going to proxy, not a doorman.
+// right way round — the cheaper refusal wins — but it does mean the ceiling
+// only ever applies to requests the gateway was going to proxy anyway.
+//
+// And it bounds BYTES READ, not memory. Kestrel and YARP stream the body with
+// backpressure, so an oversized request is never resident here; what the
+// number caps is the bandwidth and forwarding work one caller can spend, which
+// is the figure to reason about rather than a per-request allocation.
 //
 // Kestrel throws BadHttpRequestException(413) past it, which
 // ExceptionHandlerMiddleware turns into §10.5's problem+json on its own: the

@@ -29,9 +29,15 @@ request size limits.
 > **It is enforced where the body is read, which is inside the forwarder.**
 > Neither authentication nor authorization touches the body, so an oversized
 > request that fails either is answered 401 or 403 and its size is never
-> considered — the cheaper refusal, and the right way round, but it means this
-> is a memory bound on requests the gateway was going to proxy rather than a
-> doorman. Kestrel throws past the ceiling and
+> considered — the cheaper refusal, and the right way round, but it means the
+> ceiling only ever applies to requests the gateway was going to proxy anyway.
+>
+> **And it bounds bytes read, not memory.** Kestrel and YARP stream the body
+> with backpressure, so an oversized request is never resident at the edge;
+> what the number caps is the bandwidth and forwarding work a single caller can
+> spend. Capacity planning that reads it as a per-request allocation — and
+> multiplies by concurrency — is planning against a figure the gateway does not
+> have. Kestrel throws past the ceiling and
 > `ExceptionHandlerMiddleware` takes the status off that exception, so a 413
 > arrives in §10.5's shape with no handler written for it — unlike the 400 and
 > 409 rows, which each needed one.
