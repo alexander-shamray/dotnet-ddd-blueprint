@@ -255,9 +255,9 @@ The gateway's own block takes no `depends_on` on a service it routes to except
 the ones that exist — Compose rejects a dependency it cannot see, and one
 undefined name fails the whole `up` rather than one service. Its *routes* are
 under no such constraint and [§10.2](10-api-gateway.md) ships all four, so
-three paths answer 502 until their services land. A route is configuration the
-gateway reads; a `depends_on` is a name Compose has to resolve. Two paths
-answer 502 today — inventory and the BFF.
+a path answers 502 until its service lands. A route is configuration the
+gateway reads; a `depends_on` is a name Compose has to resolve. Two answer 502
+today — inventory and the BFF.
 
 **The fence above and the shipped file now gate on the same two services**,
 `catalog-api` and `ordering-api`, because both exist: PR-10 built the first and
