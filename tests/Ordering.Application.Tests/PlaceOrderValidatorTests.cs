@@ -58,6 +58,22 @@ public class PlaceOrderValidatorTests
     }
 
     [Fact]
+    public void A_null_item_list_is_a_400_and_not_a_500()
+    {
+        // An explicit JSON "items": null binds as null. FluentValidation runs
+        // every validator in a rule by default, so without Cascade(Stop) the
+        // size predicate dereferences it after NotEmpty has already recorded
+        // the failure — and a malformed request arrives as a 500. The
+        // assertion is that Validate returns rather than throws; IsValid
+        // being false is the easy half.
+        PlaceOrderCommand command = new(null!, AnAddress(), "EUR");
+
+        ValidationResult result = Should.NotThrow(() => Validator.Validate(command));
+
+        result.IsValid.ShouldBeFalse();
+    }
+
+    [Fact]
     public void An_empty_order_is_refused_at_the_edge_as_well_as_in_the_domain()
     {
         // Order.Place also refuses this, and both are wanted: the domain rule

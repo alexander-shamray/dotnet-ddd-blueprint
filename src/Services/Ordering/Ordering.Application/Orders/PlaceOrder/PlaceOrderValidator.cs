@@ -33,7 +33,16 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         // well inside that — an order with more lines than this is a data
         // import, not a checkout — and it fails as validation, which is where
         // a request the caller phrased wrongly belongs (§5.7).
-        RuleFor(x => x.Items).NotEmpty().Must(items => items.Count <= MaxItems)
+        // Cascade(Stop) is load-bearing, not tidiness. FluentValidation runs
+        // every validator in a rule by default, so on an explicit JSON
+        // "items": null the NotEmpty below records its failure and then the
+        // size predicate dereferences null — turning a malformed request into
+        // a 500 rather than the 400 this rule exists to produce. Stopping at
+        // the first failure means the predicate only ever sees a list.
+        RuleFor(x => x.Items)
+            .Cascade(CascadeMode.Stop)
+            .NotEmpty()
+            .Must(items => items.Count <= MaxItems)
             .WithMessage($"An order cannot contain more than {MaxItems} items.");
         RuleForEach(x => x.Items).ChildRules(item =>
         {

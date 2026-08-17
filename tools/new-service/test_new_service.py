@@ -281,7 +281,11 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
     """
 
     def setUp(self):
-        self.rendered = render(name=SECOND_PROBE, port=5103)
+        # PORT + 1, not a service-range literal: §14.1 hands out 51xx
+        # sequentially, so a successful render pinned to 5103 fails the day
+        # Inventory takes it — the exact collision moving PORT off 5101 was
+        # meant to remove, left behind in the same change.
+        self.rendered = render(name=SECOND_PROBE, port=PORT + 1)
 
     def claim(self, path: str) -> str:
         # Normalised, because these assertions are about wording and a
@@ -765,9 +769,13 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
         # case: after Zulu exists, `ZULU` is a distinct directory on a
         # case-sensitive filesystem and renders the same lower-cased Compose
         # keys and connection variables.
+        # PORT + 2 rather than 5105: the raise this asserts is about the name,
+        # and a service-range literal would let the test keep passing for the
+        # port instead — green for the wrong reason, which is the failure mode
+        # a red check that goes red wrongly already taught this file.
         for alias in ("ZULU", "zulu", "ZuLu"):
             with self.assertRaises(ScaffoldError):
-                plan(self.root, alias, 5105, "20260810120000")
+                plan(self.root, alias, PORT + 2, "20260810120000")
 
     def test_the_solution_still_sorts_with_two_services_in_it(self):
         solution = self.second.updated["Platform.slnx"]
