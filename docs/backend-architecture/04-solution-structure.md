@@ -61,7 +61,11 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   ├── Gateway.Api.Tests/              The route file of §10.2, over the real
 │   │                                   host: policy resolution, prefix strips,
 │   │                                   the limiter of §10.3 driven until it
-│   │                                   rejects. No TestSupport beside it —
+│   │                                   rejects — and §10.1's two edge
+│   │                                   behaviours, compression and the body
+│   │                                   ceiling, the second over a real Kestrel
+│   │                                   because TestServer serves no such
+│   │                                   property. No TestSupport beside it —
 │   │                                   that library exists where two suites
 │   │                                   share a fixture, and the gateway has one
 │   ├── Catalog.Domain.Tests/

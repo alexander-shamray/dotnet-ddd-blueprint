@@ -11,8 +11,9 @@ namespace Gateway.Api.Tests;
 
 /// <summary>
 /// A real HTTP server on an ephemeral loopback port, standing in for whichever
-/// service a route points at. It answers 204 to everything and records the
-/// path it was given.
+/// service a route points at. It records the path it was given, and answers
+/// 204 unless the caller asks through the query string for a body — optionally
+/// one the stub has gzipped for itself.
 /// </summary>
 /// <remarks>
 /// <para>

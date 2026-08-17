@@ -374,7 +374,11 @@ tests/
                                  factory over UseKestrel(0), because
                                  ConfigureKestrel is a silent no-op under
                                  TestServer and every assertion about the limit
-                                 would pass against a gateway that has none
+                                 would pass against a gateway that has none.
+                                 StubDestination answers 204 until a query
+                                 string asks it for a body — a request-scoped
+                                 switch rather than a mutable fixture, so the
+                                 classes sharing it stay independent
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
                                  SQL and RabbitMQ containers, real migrator
                                  run, Respawn reset — CatalogApiFactory (both
