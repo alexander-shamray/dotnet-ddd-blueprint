@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit v3 test projects are self-executing: the runner is compiled in
+         rather than loaded by a host, so the assembly has to be an Exe. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- Grpc.Core's StatusCode, which the tests queue on the stub to drive the
+         retry and the failure mappings. Carried transitively; named here
+         because these tests name the type, on the register's honesty rule. -->
+    <PackageReference Include="Grpc.Net.ClientFactory" />
+    <!-- HttpStandardResilienceOptions, read back off the built host to assert
+         §9.7's hierarchy. Carried transitively by Web.Bff; named here for the
+         same reason. -->
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <!-- FakeTimeProvider. CachingTokenClient's expiry guard is thirty seconds
+         and its whole point is a token handed back too close to expiry; a test
+         that waited for that would be a thirty-second test. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <!-- §11.5's suite, and the only one in the solution that runs a real
+         Keycloak. The audience mapper it proves is realm configuration, so
+         nothing in the solution compiles differently when it is missing. -->
+    <PackageReference Include="Testcontainers.Keycloak" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BFF\Web.Bff\Web.Bff.csproj" />
+    <!-- StubCatalog, and the generated SERVER half of pricing.proto with it.
+         In its own library rather than here, because Web.Bff already exports
+         the CLIENT half's message types: generated into this compilation as
+         well, every one of them would be a CS0436 — an error under ADR-019 —
+         and that project's own file argues it at length.
+
+         The consequence for anyone adding a test here: this suite must not
+         name a generated type. It never does today, and the moment one is
+         named the two copies become ambiguous. Drive the stub through its own
+         surface instead, which is what it is shaped for. -->
+    <ProjectReference Include="..\Web.Bff.TestSupport\Web.Bff.TestSupport.csproj" />
+  </ItemGroup>
+
+</Project>

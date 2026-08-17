@@ -21,3 +21,5 @@ services:
     profiles: [ "excluded" ]
   ordering-api:
     profiles: [ "excluded" ]
+  web-bff:
+    profiles: [ "excluded" ]

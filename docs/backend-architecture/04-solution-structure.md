@@ -68,6 +68,24 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │                                   property. No TestSupport beside it —
 │   │                                   that library exists where two suites
 │   │                                   share a fixture, and the gateway has one
+│   ├── Web.Bff.Tests/                  §9.7's hop and §11.5's credentials: the
+│   │                                   resilience hierarchy read off the built
+│   │                                   host, the quote endpoint over a real
+│   │                                   gRPC server on loopback, and the ONE
+│   │                                   suite in the solution that runs a real
+│   │                                   Keycloak — the audience mapper it proves
+│   │                                   is realm configuration, so nothing
+│   │                                   compiles differently when it is missing
+│   ├── Web.Bff.TestSupport/            The stub Catalog, and the SERVER half of
+│   │                                   pricing.proto with it. Not a test
+│   │                                   project — and NOT here for §4.1's usual
+│   │                                   reason: there is one BFF suite. Web.Bff
+│   │                                   compiles the client half of the same
+│   │                                   file, so generating the server half into
+│   │                                   a suite that references it would put
+│   │                                   every message type in a compilation
+│   │                                   twice, and CS0436 is an error under
+│   │                                   ADR-019
 │   ├── Catalog.Domain.Tests/
 │   ├── Catalog.Application.Tests/
 │   ├── Catalog.Api.Tests/
@@ -952,7 +970,13 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Grpc.Net.ClientFactory" Version="2.71.0" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
-    <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- 3.30.2, not 3.29.3, and the number could only be found by compiling
+         it: Grpc.AspNetCore 2.71.0 floors this package at 3.30.2, and with
+         CentralPackageTransitivePinningEnabled a lower pin is a package
+         DOWNGRADE rather than a floor NuGet quietly raises — NU1109 fails the
+         restore and the three rows above are unbuildable. This blueprint
+         carried the lower number from the outside for four PRs. -->
+    <PackageVersion Include="Google.Protobuf" Version="3.30.2" />
     <!-- §11.3's JWT bearer handler, referenced by Common.Web. Not carried by
          Microsoft.AspNetCore.App — the shared framework has the authentication
          abstractions and the cookie handler, and the JWT one has been a package
@@ -1012,6 +1036,11 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Testcontainers.MsSql" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.Redis" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.6.0" />
+    <!-- §11.5's suite, and the ONE place in the solution that runs a real
+         Keycloak. The audience mapper it proves is realm configuration, so
+         nothing compiles differently when it is missing. Same version line as
+         the three above: the Testcontainers modules ship as one release. -->
+    <PackageVersion Include="Testcontainers.Keycloak" Version="4.6.0" />
     <!-- Transitive of the three rows above, pinned deliberately, and the third
          instance of the shape Microsoft.OpenApi and System.Security.Cryptography.Xml
          already carry. Testcontainers 4.6.0 floors this at 2024.2.0 for its SSH

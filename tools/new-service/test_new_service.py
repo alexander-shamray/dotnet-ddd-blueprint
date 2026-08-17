@@ -47,7 +47,20 @@ RETENTION_MIGRATION_ID = "20260809120300"
 # ScaffoldError and 50 tests went red at once. 5199 is chosen to sit outside
 # the 51xx block §14.1 hands out sequentially, so the next real service does
 # not collide with it the way Ordering did.
+#
+# The second probe below takes PORT - 1 rather than PORT + 1, and PR-19 is
+# why. 5200 was the BFF's the whole time — §14.1's fence has shown it beside
+# `web-bff` since PR-06 — so the paragraph above reasoned carefully about the
+# 51xx block while the adjacent port it silently also consumed was already
+# spoken for, and every render here started refusing the day that block
+# landed. **A port chosen for one constant is not a port reserved for two.**
 PORT = 5199
+
+# The second probe's port. Named rather than spelt as arithmetic at the two
+# call sites, because the arithmetic is what hid the collision: `PORT + 1`
+# reads as "one more than a port we checked" and is in fact a second
+# allocation nobody checked.
+SECOND_PORT = PORT - 1
 
 
 # Zulu and Yankee, and neither will ever be a service. The probes used to be
@@ -281,11 +294,13 @@ class GeneratedGuidanceIsTrue(unittest.TestCase):
     """
 
     def setUp(self):
-        # PORT + 1, not a service-range literal: §14.1 hands out 51xx
+        # SECOND_PORT, not a service-range literal: §14.1 hands out 51xx
         # sequentially, so a successful render pinned to 5103 fails the day
         # Inventory takes it — the exact collision moving PORT off 5101 was
-        # meant to remove, left behind in the same change.
-        self.rendered = render(name=SECOND_PROBE, port=PORT + 1)
+        # meant to remove, left behind in the same change. It was PORT + 1
+        # until PR-19, which is when 5200 stopped being free; see the
+        # constant's own note.
+        self.rendered = render(name=SECOND_PROBE, port=SECOND_PORT)
 
     def claim(self, path: str) -> str:
         # Normalised, because these assertions are about wording and a
@@ -732,7 +747,7 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
         # first so the pair moves together the next time a real service takes
         # one of them — which is how the literal 5101 here survived until
         # PR-18 allocated it.
-        self.second = plan(root, SECOND_PROBE, PORT + 1, "20260810120000")
+        self.second = plan(root, SECOND_PROBE, SECOND_PORT, "20260810120000")
 
     def tearDown(self):
         self.directory.cleanup()

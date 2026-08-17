@@ -86,7 +86,14 @@
     <PackageVersion Include="Grpc.Net.ClientFactory" Version="2.71.0" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
-    <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- 3.30.2, not §4.4's printed 3.29.3, and the chapter was amended in this
+         change. Grpc.AspNetCore 2.71.0 floors this at 3.30.2; with
+         CentralPackageTransitivePinningEnabled the lower pin is a package
+         DOWNGRADE rather than a floor NuGet quietly raises, so NU1109 fails
+         the restore and the three rows above are unbuildable without it. The
+         blueprint's number was written from the outside and is the one thing
+         here that could only be found by compiling it. -->
+    <PackageVersion Include="Google.Protobuf" Version="3.30.2" />
     <!-- §11.3's JWT bearer handler, referenced by Common.Web. Not carried by
          Microsoft.AspNetCore.App — the shared framework has the authentication
          abstractions and the cookie handler, and the JWT one has been a
@@ -146,6 +153,14 @@
     <PackageVersion Include="Testcontainers.MsSql" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.Redis" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.6.0" />
+    <!-- §11.5's suite, and the ONE place in the solution that runs a real
+         Keycloak. The audience mapper it proves is realm configuration, so
+         nothing compiles differently when it is missing and no other test can
+         see it — §12.4's fixture points at an unreachable authority on
+         purpose, and therefore never validates a token Keycloak issued. Same
+         version line as the three above: the Testcontainers modules ship as
+         one release. -->
+    <PackageVersion Include="Testcontainers.Keycloak" Version="4.6.0" />
     <!-- Transitive of the three rows above, pinned deliberately, and the third
          instance of the shape Microsoft.OpenApi and System.Security.Cryptography.Xml
          already carry. Testcontainers 4.6.0 floors this at 2024.2.0 for its SSH
