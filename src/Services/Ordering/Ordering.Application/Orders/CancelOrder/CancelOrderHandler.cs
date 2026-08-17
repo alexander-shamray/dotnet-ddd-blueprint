@@ -31,10 +31,18 @@ public sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser cur
         // system path says so on the command; every other path needs an
         // authenticated owner, and gets a 404 rather than a 403, because a 403
         // confirms the order exists.
+        //
+        // "orders:admin" is a literal and not a constant from
+        // OrderingPermissions, which §11.4 is explicit about: that class holds
+        // the policies endpoints name, and this is a claim checked against a
+        // loaded aggregate. Naming it from the same vocabulary would make it
+        // read as a third policy, and a policy nobody registered resolves to
+        // nothing. The class also lives in Ordering.Api, which this layer
+        // cannot reference — the placement and the distinction agree.
         if (!command.IsSystemInitiated &&
             (!currentUser.IsAuthenticated ||
                 (order.CustomerId.Value != currentUser.Id &&
-                    !currentUser.HasPermission(OrderingPermissions.OrdersAdmin))))
+                    !currentUser.HasPermission("orders:admin"))))
         {
             return Result.Failure(OrderErrors.NotFound);
         }

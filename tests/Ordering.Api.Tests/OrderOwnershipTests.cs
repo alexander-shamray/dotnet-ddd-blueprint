@@ -97,7 +97,7 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
         HttpResponseMessage response = await CancelAsync(
             order,
             asUser: Alice,
-            permissions: $"{OrderingPermissions.Cancel} {OrderingPermissions.OrdersAdmin}");
+            permissions: $"{OrderingPermissions.Cancel} orders:admin");
 
         response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         (await StatusOfAsync(order)).ShouldBe(nameof(OrderStatus.Cancelled));
@@ -136,33 +136,11 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     /// <summary>
-    /// Seeds through the aggregate and the real context (§12.4's seeding
-    /// rule): a raw INSERT drifts from the model the first time it gains a
-    /// column, and this one would have to know the address columns and the
-    /// enum's string form.
+    /// §12.4's shared seeding helper, on the fixture rather than here so both
+    /// suites reach one implementation of "an order that exists".
     /// </summary>
-    private async Task<OrderId> SeedOrderAsync(Guid customer)
-    {
-        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
-        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
-
-        Order order = Order.Place(
-            new CustomerId(customer),
-            Ordering.Domain.Common.Address.Of("1 Test Street", null, "Almaty", "050000", "KZ"),
-            [(ProductId.New(), 1, Ordering.Domain.Common.Money.Of(19.99m, "EUR"))],
-            "EUR",
-            DateTimeOffset.UtcNow);
-
-        // The events are cleared before saving: this order is a fixture, not
-        // an event that happened, and leaving them staged would put outbox
-        // rows under assertions that are not about the outbox.
-        order.ClearDomainEvents();
-
-        db.Add(order);
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        return order.Id;
-    }
+    private async Task<OrderId> SeedOrderAsync(Guid customer) =>
+        new(await fixture.SeedOrderAsync(customer));
 
     private Task<HttpResponseMessage> CancelAsync(
         OrderId order,
@@ -179,9 +157,33 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
         }
 
         return client.PostAsJsonAsync(
-            $"/v1/orders/{order.Value}/cancellation",
+            $"/v1/orders/{order.Value}/cancel",
             new CancelOrderRequest(CancelReasons.CustomerRequest),
             TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_reason_outside_the_wire_vocabulary_is_rejected()
+    {
+        // §12.4's fourth security test. The enum's member name is the
+        // interesting input: Enum.TryParse would accept "CustomerRequest",
+        // and CancellationReasons deliberately does not — it maps the wire
+        // vocabulary and refuses anything else rather than defaulting, so a
+        // sibling service sending an unknown code is a loud deployment
+        // problem instead of an order cancelled for the wrong recorded
+        // reason.
+        OrderId order = await SeedOrderAsync(Bob);
+        HttpClient client = fixture.Factory.CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserHeader, Bob.ToString());
+        client.DefaultRequestHeaders.Add(TestAuthHandler.PermissionsHeader, OrderingPermissions.Cancel);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            $"/v1/orders/{order.Value}/cancel",
+            new CancelOrderRequest("CustomerRequest"),
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await StatusOfAsync(order)).ShouldBe(nameof(OrderStatus.AwaitingStock));
     }
 
     private Task<string> StatusOfAsync(OrderId order) =>

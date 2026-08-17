@@ -1,6 +1,6 @@
+using Ordering.Api;
 using Ordering.Api.Endpoints;
 using Ordering.Application;
-using Ordering.Application.Orders;
 using Ordering.Infrastructure;
 using Common.Web;
 

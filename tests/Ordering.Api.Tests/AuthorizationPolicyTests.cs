@@ -73,18 +73,23 @@ public class AuthorizationPolicyTests(HostSmokeTests.UnreachableInfrastructureFa
         // aggregate — a question no endpoint policy could answer, because the
         // order is not loaded when the policy runs.
         //
+        // A literal here for the same reason CancelOrderHandler spells one:
+        // naming it from OrderingPermissions would put it in the vocabulary
+        // this test exists to keep it out of, and §11.4 says that class holds
+        // policies alone.
+        //
         // Asserted rather than left to the comment above: this fails the day
         // somebody adds the policy, which is the moment to reread §11.4 and
         // decide deliberately rather than by symmetry.
         IAuthorizationPolicyProvider policies =
             factory.Services.GetRequiredService<IAuthorizationPolicyProvider>();
 
-        (await policies.GetPolicyAsync(OrderingPermissions.OrdersAdmin)).ShouldBeNull();
+        (await policies.GetPolicyAsync("orders:admin")).ShouldBeNull();
 
         Endpoints
             .SelectMany(e => e.Metadata.GetOrderedMetadata<IAuthorizeData>())
             .Select(a => a.Policy)
-            .ShouldNotContain(OrderingPermissions.OrdersAdmin);
+            .ShouldNotContain("orders:admin");
     }
 
     [Fact]

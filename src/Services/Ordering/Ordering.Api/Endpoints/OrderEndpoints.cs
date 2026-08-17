@@ -56,7 +56,7 @@ public static class OrderEndpoints
         // the ownership check.
         group
             .MapPost(
-                "/{id:guid}/cancellation",
+                "/{id:guid}/cancel",
                 async (
                     Guid id,
                     CancelOrderRequest request,

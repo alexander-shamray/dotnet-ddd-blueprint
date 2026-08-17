@@ -1,4 +1,6 @@
 using System.Data.Common;
+using Ordering.Domain.Common;
+using Ordering.Domain.Orders;
 using Ordering.Infrastructure.Persistence;
 using Ordering.Migrator;
 using Common.Application;
@@ -211,6 +213,36 @@ public sealed class ServiceFixture : IAsyncLifetime
         Factory.Services
             .GetRequiredService<OutboxDispatcher>()
             .ProcessBatchAsync(TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// Persists a real aggregate through the DbContext, so the row satisfies
+    /// every invariant §5 enforces. A raw INSERT drifts from the aggregate the
+    /// first time it gains a column, and drifts silently.
+    /// </summary>
+    /// <remarks>
+    /// The events are cleared before saving: a seeded order is a fixture
+    /// rather than a thing that happened, and leaving them staged would put
+    /// outbox rows under assertions that are not about the outbox. A test
+    /// that wants the events seeds through the write path instead.
+    /// </remarks>
+    public async Task<Guid> SeedOrderAsync(Guid customerId)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        Order order = Order.Place(
+            new CustomerId(customerId),
+            Address.Of("1 Test Street", null, "Almaty", "050000", "KZ"),
+            [(ProductId.New(), 1, Money.Of(19.99m, "EUR"))],
+            "EUR",
+            DateTimeOffset.UtcNow);
+        order.ClearDomainEvents();
+
+        db.Orders.Add(order);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        return order.Id.Value;
+    }
 
     /// <summary>Every outbox row, untracked, for asserting over.</summary>
     public async Task<IReadOnlyList<OutboxMessage>> OutboxAsync()
