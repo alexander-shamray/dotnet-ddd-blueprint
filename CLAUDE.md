@@ -75,7 +75,7 @@ global.json                      SDK pin (§4.4)
                                  `dotnet tool restore` is the whole setup
 Directory.Build.props            shared MSBuild settings, ADR-019's policy
 Directory.Packages.props         central package management, exact pins
-Platform.slnx                    the twenty-one projects below
+Platform.slnx                    the thirty projects below
 .editorconfig                    house style; a build input, not a hint
 .github/workflows/ci.yml         licence gate and scaffold tests, then
                                  restore/build/test
@@ -176,7 +176,12 @@ src/BuildingBlocks/
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails
                                  (which also registers §10.5's
                                  ValidationExceptionHandler — the 400 row's
-                                 executor), ToHttpResult, AddObservability,
+                                 executor — and PR-18's
+                                 ConcurrencyExceptionHandler, the 409's, which
+                                 is why this block takes the EF Core base
+                                 package and the gateway restores it for an
+                                 exception it cannot raise),
+                                 ToHttpResult, AddObservability,
                                  MapCommonHealthEndpoints, SensitiveDataRedactor,
                                  BuildInfo and the AddCommonWebDefaults that
                                  composes them — the only building block with a
@@ -259,6 +264,52 @@ src/Services/Catalog/
                                  AllowAnonymous() out loud, because §10.2's
                                  catalog-public route is GET-only and carries
                                  no policy
+src/Services/Ordering/           PR-18's, and the scaffold's own output plus
+                                 one domain. Same five projects as Catalog,
+                                 rendered by tools/new-service and then given
+                                 an aggregate — nothing about the wiring was
+                                 hand-written or reconciled
+  Ordering.Domain/               §5's Order whole: Place, ConfirmStock,
+                                 ConfirmPayment, MarkShipped, Cancel, five
+                                 domain events, OrderLine and its own
+                                 OrderLineId (Entity<TId> compares the type,
+                                 so a shared key type would make a line equal
+                                 to its order), Ordering's own Money and
+                                 Address, CustomerId with deliberately no
+                                 New(), IOrderRepository — GetAsync and Add.
+                                 AssemblyMarker is gone; Order is the gates'
+                                 anchor, and the domain allow-list is four
+                                 entries because the first event earned
+                                 System.Collections and Money.Of earned
+                                 System.Linq
+  Ordering.Application/          AddOrderingApplication, and two slices:
+                                 Orders/PlaceOrder (§6.4 — no CustomerId on
+                                 the command, the handler reads
+                                 ICurrentUser.Id) and Orders/CancelOrder
+                                 (§11.4's fail-closed ownership check, with
+                                 CommandOrigin.User the zero value so an
+                                 unset origin checks the owner). OrderErrors,
+                                 CancellationReasons over Common.Contracts'
+                                 CancelReasons, IProductPriceReader. Handlers
+                                 are public — §6.2's scan is public-only, and
+                                 internal ones registered silently as nothing
+  Ordering.Infrastructure/       AddOrderingInfrastructure: OrderConfiguration
+                                 and OrderLineConfiguration (a related entity,
+                                 not an owned collection, because an owned
+                                 builder has no ComplexProperty), the
+                                 repository, ProjectedPriceReader over
+                                 ordering.ProductPrices, four JsonConverters
+                                 for the value objects the events carry, and
+                                 six migrations — the scaffold's four plus
+                                 AddOrders and AddProductPrices
+  Ordering.Migrator/             §7.4's job host, as rendered
+  Ordering.Api/                  OrderingPermissions (§11.4: policies only —
+                                 orders:admin is a claim the handler reads),
+                                 the two registered policies, and
+                                 Endpoints/OrderEndpoints — POST /v1/orders
+                                 and POST /v1/orders/{id}/cancel, the group
+                                 failing closed and nothing anonymous, because
+                                 an order belongs to somebody
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on;
@@ -336,6 +387,21 @@ tests/
                                  tables — with
                                  Common.Infrastructure.Tests above, three
                                  projects need Docker, one collection each
+  Ordering.TestSupport/          NOT a test project (§4.1), same as Catalog's:
+                                 ServiceFixture with §12.4's SeedOrderAsync,
+                                 OrderingApiFactory and TestAuthHandler
+  Ordering.Domain.Tests/         the §4.2 gates re-anchored on Order, plus
+  Ordering.Application.Tests/    the aggregate's 39 tests; the registration
+  Ordering.Api.Tests/            surface and §12.4's Local-lane round trip —
+                                 which could not be copied from Catalog
+                                 unchanged, because a record's equality
+                                 compares an IReadOnlyList by reference and
+                                 three of these events carry one; then
+                                 GrantablePermissionTests, the authorization
+                                 policy suite, PlaceOrderTests and
+                                 OrderOwnershipTests, which is PR-16's
+                                 deferred 404 over HTTP. Ordering.Api.Tests
+                                 needs Docker too, so four projects do
   Platform.IntegrationTests/     §12.6, and nothing else (§4.1). References
                                  Common.Contracts alone today — "the only
                                  suite that references every service" grows a
@@ -445,14 +511,22 @@ word. **A change touching `tests/Catalog.*` is not verified until a scaffolded
 service has been built**, which is four commands and a cleanup:
 
 ```bash
-python tools/new-service/new_service.py Ordering --port 5103
-dotnet build tests/Ordering.Api.Tests/Ordering.Api.Tests.csproj
-rm -rf src/Services/Ordering tests/Ordering.*
+python tools/new-service/new_service.py Yankee --port 5199
+dotnet build tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj
+rm -rf src/Services/Yankee tests/Yankee.*
 git checkout -- Platform.slnx deploy/compose/
 ```
 
 The scaffold edits five tracked files as well as creating its own, so the
 `git checkout` is part of the procedure rather than tidying after it.
+
+**The probe used to be `Ordering` at 5103, and PR-18 is why it is not.**
+Ordering is a real service now, so the create refuses a name and a port that
+are taken, and the `rm -rf` — followed literally by anyone reading this block
+after the merge — deletes it. `Yankee` at 5199 is one of the probes the
+scaffold's own suite uses, chosen because a probe cannot quietly become a
+service later. The same trap caught `tools/new-service/README.md`, which named
+the same command.
 
 Planned, per §4.1 — do not invent a different shape for it. All five building
 blocks are shown above; the tree below is the target shape, and its
@@ -464,7 +538,9 @@ src/Gateway/          Gateway.Api (YARP) — landed with PR-17
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
                         Domain, Application, Infrastructure, Migrator, Api
-                        (Catalog's five landed with PR-07, as shells)
+                        (Catalog's five landed with PR-07, as shells;
+                        Ordering's five with PR-18, rendered rather than
+                        written — the scaffold's dogfood)
                       Shipping — the same five, but Worker in place of Api
                       Notifications — four: no Domain, and a Worker
 tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
@@ -474,7 +550,11 @@ tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                         became §4.1's second consumer — "referenced by the two
                         above, which cannot reference each other";
                         Platform.IntegrationTests with PR-15, when §12.6's
-                        rules arrived with the assembly they constrain)
+                        rules arrived with the assembly they constrain;
+                        Ordering's four with PR-18, all of them scaffolded —
+                        TestSupport included, which arrives with the service
+                        rather than waiting for a second consumer the way
+                        Catalog's did)
                       Gateway.Api.Tests is outside that pattern and landed
                         with PR-17 — the gateway is a host and not a
                         <Service>, so it has an .Api.Tests and none of the
@@ -498,15 +578,17 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds twenty-one projects and `dotnet test` runs 459 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 611 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
-job for them beside `licence-gate`. **PR-18 is next**
-(`feat(ordering): second service from the scaffold`), which is what dogfoods
-PR-11's scaffold and carries PR-16's deferred security test — user A reading
-user B's order → 404, §11.4's ownership check, which needs the first resource
-in the platform that has an owner.
+job for them beside `licence-gate`. **PR-18 has landed** — Ordering is the
+second service, rendered by the scaffold with no reconciliation owed to it,
+and it carries PR-16's deferred security test: user A *cancelling* user B's
+order → 404, §11.4's ownership check, which needed the first resource in the
+platform that has an owner. **PR-19 (the BFF) and PR-20 (Ordering's Catalog
+projection) are next**, and PR-20 is what fills the `ordering.ProductPrices`
+table PR-18 shipped with its reader and no producer.
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
@@ -1087,13 +1169,24 @@ comes after:
   `xunit.v3.extensibility.core` — `xunit.v3` itself refuses non-Exe output.
 - **The compose smoke now builds images.** The application blocks carry
   `build:` stanzas, so the path-filtered workflow compiles the solution inside
-  Docker; PR-10 raised its timeout to 25 minutes and **PR-17 raised it again
-  to 30** for the gateway's image, the workflow header carrying the reason
-  each time. The number lives in `.github/workflows/compose.yml` and is
-  restated here, which is what makes it a claim to reconcile rather than a
-  fact to read: it went stale the moment a third image joined, and stayed
-  stale for four review rounds. A change under `src/` alone does not re-run
-  the workflow — per-service CI builds are PR-25's.
+  Docker; PR-10 raised its timeout to 25 minutes, **PR-17 raised it again to
+  30** for the gateway's image, and **PR-18 raised it to 40** for Ordering's
+  pair — five images, five minutes each on top of the 15 that pulls alone
+  cost, the workflow header carrying the reason every time. The number lives
+  in `.github/workflows/compose.yml` and is restated here, which is what makes
+  it a claim to reconcile rather than a fact to read: it went stale the moment
+  a third image joined, stayed stale for four review rounds, and went stale
+  again in the very branch that raised it — this sentence was still saying 30
+  while the workflow said 35, found by Grok round 4.
+
+  **Then the raise itself was wrong, which is the more useful failure.** 35
+  came from adding PR-17's +5 again, where PR-18 adds *two* images and owed
+  +10; both stated rules — `30 + 2 × 5` and `15 + 5 × 5` — give 40, and the
+  header said "two more take the same five minutes each" directly above the
+  35. Copilot round 9 found it. **A count in a comment guards nothing until
+  somebody multiplies by it**, and a sentence explaining the guard is the
+  easiest thing in the file to read as already-checked. A change under `src/`
+  alone does not re-run the workflow — per-service CI builds are PR-25's.
 - **Chiselled images take the `-extra` tag, and the suffix is load-bearing.**
   Plain chiselled runs globalization-invariant and `Microsoft.Data.SqlClient`
   refuses to open a connection under it — found when the containerised
@@ -1175,11 +1268,14 @@ after:
   `auto-generated` header that exempts them from the analysers and are left
   **exactly** as the tool wrote them: the snapshot is the input to the next
   `migrations add`, and an edited one produces a wrong migration a PR later.
-- **`dotnet test` needs Docker** — since PR-12 for three projects,
-  `Catalog.Api.Tests`, `Catalog.Application.Tests` and
-  `Common.Infrastructure.Tests`, each with its own `IntegrationCollection`
-  and therefore its own container set (§12.4's stated price). See the
-  commands below.
+- **`dotnet test` needs Docker** — since PR-12, and for four projects since
+  PR-18: `Catalog.Api.Tests`, `Catalog.Application.Tests`,
+  `Common.Infrastructure.Tests` and `Ordering.Api.Tests`, each with its own
+  `IntegrationCollection` and therefore its own container set (§12.4's stated
+  price). `Ordering.Application.Tests` is deliberately not among them — its
+  handler tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
+  `HttpContextCurrentUser` and a handler resolved in a bare scope has no
+  principal to bind a subject from. See the commands below.
 
 The building blocks are all five since PR-14, and `Common.Contracts` is
 complete since PR-15: the §9.1 envelope over five versioned namespaces holding

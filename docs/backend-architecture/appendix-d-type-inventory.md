@@ -29,7 +29,7 @@ repeatable check; noticing by eye is not.
 | `IProductPriceReader` | §6.4 | Prices from the **local** projection — never a remote call |
 | `ICurrentUser` | [§11.4](11-identity-authorization.md) | The caller, for resource-level checks, and the **only** source of a subject identifier on a principal-bearing command or query — every HTTP one (§11.4's subject rule). `Common.Application`, not per-service: nothing in its three members names one. `IsAuthenticated` is false on the consumer path, where there is no principal to bind from and §9.6's `AuthorisePayment` still carries a `CustomerId` field |
 | `CommandOrigin` | §11.4 | `User` \| `System`, saying which path a command arrived on. `User` is the zero value, so an origin nobody set fails closed. Written as a literal at each entry point — never bound from a request or a message |
-| `CancelOrderCommand`, `CancelOrderRequest`, `CancelOrderHandler` | §11.4 | The slice both entry paths converge on — HTTP and `CommandConsumer` (§9.4). The command carries a `CommandOrigin`; the request does not |
+| `CancelOrderCommand`, `CancelOrderHandler` | §11.4 | The slice both entry paths converge on — HTTP and `CommandConsumer` (§9.4). The command carries a `CommandOrigin`; neither wire shape does. `CancelOrderRequest` is **not** here: it is the HTTP path's wire type and lives in `Ordering.Api.Endpoints` beside the endpoint binding it, the message path's being `CancelOrder` in `Common.Contracts` |
 | `CancellationReasons` | §11.4 | Wire code → `CancellationReason`; the single parse both paths call |
 | `OrderMetrics` | [§13.3](13-observability.md) | Instruments on `Ordering.Orders`. **Application**, not `Common.*`: it takes `Money`. Recorded only from §6.6's projection, on the committed path |
 | `ICommandMessageMapper<,>` | §6.2 | Wire contract → application command |
@@ -59,7 +59,8 @@ project is permitted to carry.
 | `Entity<TId>`, `AggregateRoot<TId>` | [§5.5](05-tactical-ddd.md) | Base types in `Common.Domain`; `Entity` carries identity equality, `AggregateRoot` adds `DomainEvents` and `Version` |
 | `IDomainEvent`, `IHasDomainEvents`, `IAggregateRoot` | §5.5 | Domain event contracts and the two non-generic markers, also `Common.Domain` |
 | `Order`, `OrderLine` | §5.4 | The aggregate and its child entity |
-| `OrderId`, `CustomerId`, `ProductId` | §5.2 | Strongly typed identifiers |
+| `OrderId`, `CustomerId`, `ProductId` | §5.2 | Strongly typed identifiers. `CustomerId` has no `New()`: Ordering never mints a customer, and a factory would be a way to invent a subject (§11.4's rule) |
+| `OrderLineId` | §5.2 | A line's own identity, distinct from `OrderId` — `Entity<TId>` compares the type as well as the identifier precisely because a shared key type would otherwise make a line equal to the order holding it (§5.5) |
 | `Money`, `Address` | §5.3 | Value objects |
 | `OrderStatus`, `CancellationReason` | §5.4 | Enumerations |
 | `PaymentReference`, `TrackingNumber` | §5.4 | Value objects referenced by aggregate methods |
@@ -139,8 +140,9 @@ structurally always null on one path.
 | `LoggingBehavior<,>` | §13.3 | `IPipelineBehavior<,>`; outermost — pushes the request scope, logs the outcome and records `request.duration` |
 | `IdempotencyBehavior<,>` | §8.5 | `IPipelineBehavior<,>` over `IIdempotencyStore` |
 | `UseCorrelationId`, `MapCommonHealthEndpoints`, `AddObservability`, `AddCommonWebDefaults` | §10.4, §13.5, §13.2 | `Common.Web` host extensions |
-| `AddCommonProblemDetails` | §10.5 | `Common.Web`; the RFC 9457 customisation `AddCommonWebDefaults` composes — and the registration of `ValidationExceptionHandler`, so no host takes one half without the other |
+| `AddCommonProblemDetails` | §10.5 | `Common.Web`; the RFC 9457 customisation `AddCommonWebDefaults` composes — and the registration of both exception handlers below, so no host takes one half without the other |
 | `ValidationExceptionHandler` | §10.5 | `Common.Web`; the `IExceptionHandler` executing the table's 400 row — `ValidationBehavior`'s thrown `ValidationException` into field-keyed `errors`, registered by `AddCommonProblemDetails` |
+| `ConcurrencyExceptionHandler` | §10.5 | `Common.Web`; the `IExceptionHandler` executing the table's 409 row — `DbUpdateConcurrencyException` into a problem response naming neither entity nor row version. Matches the derived type, not `DbUpdateException`, which also covers a constraint violation and is not a race |
 | `ToHttpResult` | §10.5 | `Common.Web`; extension on `Result` and `Result<T>` — 204 or the value, and `ErrorType` to a status otherwise |
 | `OrderFulfilmentSaga`, `Endpoints` | §9.6 | Saga and its command destinations |
 | `ServiceFixture` | §12.4 | Testcontainers `IAsyncLifetime` fixture; owns the `WebApplicationFactory`. One per service, in that service's `*.TestSupport` (§4.1) — Catalog's is the first built, and §12.4's worked example is Ordering's |

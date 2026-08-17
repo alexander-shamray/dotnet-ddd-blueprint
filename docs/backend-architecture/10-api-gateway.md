@@ -175,7 +175,9 @@ privately, it is deployed unreachably. `/bff` rather than `/api`, because a
 client picks one or the other: aggregated responses shaped for a screen, or the
 service APIs shaped for a resource.
 
-**This file ships whole, ahead of three of the four services it routes to**,
+**This file shipped whole, ahead of three of the four services it routes to,
+and two of them are still missing** — Ordering arrived behind its route with
+PR-18, leaving Inventory and the BFF answering 502 —
 which is the opposite of the rule [§14.1](14-local-development.md)'s Compose
 file follows — and the asymmetry is in what each costs. A Compose block naming
 an image that does not exist fails `up`; a route whose destination is not
@@ -506,6 +508,10 @@ public static IServiceCollection AddCommonProblemDetails(this IServiceCollection
     // into the field-keyed problem response. Registered here so no host can
     // take the customisation without it (see below).
     services.AddExceptionHandler<ValidationExceptionHandler>();
+    // The 409 row's, on the same terms. Both statuses are produced beside a
+    // handler rather than returned by one, so neither is reachable through
+    // Error and each needs its own executor.
+    services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 
     return services.AddProblemDetails(options =>
         options.CustomizeProblemDetails = context =>
@@ -692,6 +698,27 @@ dictionary, writes through `IProblemDetailsService` so the 400 carries the same
 `instance`, `correlationId` and `traceId` members as every other problem
 response, and declines everything that is not a `ValidationException` — a 400
 for a genuine fault would blame the client for the service's bug.
+
+**The 409 row needs one for the same reason, and did without it until PR-18.**
+`ConcurrencyExceptionHandler` sits beside the 400's, registered by the same
+call, and translates `DbUpdateConcurrencyException` alone. It matches the
+derived type rather than `DbUpdateException`: the base also covers a violated
+constraint, which is not a race, and telling that client to retry invites a
+second identical failure. Its `detail` names neither the entity nor the row
+version, both of which are storage details ([§7.3](07-persistence.md)) — the
+whole content of this status is *re-read and retry*.
+
+> **The gap was unreachable for as long as it was, which is why nothing caught
+> it.** A conflict needs a mapped `rowversion` on an aggregate a request can
+> mutate, and Ordering's `Order` is the first in the solution; Catalog maps
+> none. So §7.3 promised a translation from the start, no code performed it,
+> and no test could have failed — the promise became false only when the
+> mechanism it described became reachable.
+
+The 412 half of that row is still unimplemented, deliberately: it needs a
+precondition filter reading `If-Match`, and nothing here sends or reads an
+ETag. What separates the two is whether the client sent a precondition, so
+until it can, every conflict is the no-precondition case the 409 answers.
 
 ---
 

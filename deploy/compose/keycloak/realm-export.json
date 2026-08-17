@@ -422,6 +422,33 @@
           "clientRole": true,
           "containerId": "e55a8854-8088-495c-8db4-331d4b5eb68e",
           "attributes": {}
+        },
+        {
+          "id": "3f9c2e81-7d64-4a05-b1e8-5c0a9f27d4b6",
+          "name": "orders:write",
+          "description": "Place an order (§11.4). Required by POST /v1/orders and granted to demo, so the inner loop the compose README documents actually works.",
+          "composite": false,
+          "clientRole": true,
+          "containerId": "e55a8854-8088-495c-8db4-331d4b5eb68e",
+          "attributes": {}
+        },
+        {
+          "id": "8a1e4d67-0b93-4c72-9f5a-6d2b8e30c1f4",
+          "name": "orders:cancel",
+          "description": "Cancel one's own order (§11.4). Required by POST /v1/orders/{id}/cancel, granted to demo. Separate from orders:write: a caller holding only write gets 403.",
+          "composite": false,
+          "clientRole": true,
+          "containerId": "e55a8854-8088-495c-8db4-331d4b5eb68e",
+          "attributes": {}
+        },
+        {
+          "id": "c47b0f52-6e18-4d39-a806-91f3c5a7e2d8",
+          "name": "orders:admin",
+          "description": "Act on an order the caller does not own (§11.4). A claim CancelOrderHandler reads, never an endpoint policy. Grantable and granted to nobody: without the role the handler's admin branch is unreachable.",
+          "composite": false,
+          "clientRole": true,
+          "containerId": "e55a8854-8088-495c-8db4-331d4b5eb68e",
+          "attributes": {}
         }
       ]
     }
@@ -2528,7 +2555,9 @@
       ],
       "clientRoles": {
         "commerce-api": [
-          "catalog:write"
+          "catalog:write",
+          "orders:write",
+          "orders:cancel"
         ]
       },
       "realmRoles": [

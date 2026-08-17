@@ -36,6 +36,20 @@
          Common.Web adds, and the reason is §11.2's — every service
          re-validates, so the registration cannot live in the gateway. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <!-- DbUpdateConcurrencyException, caught by ConcurrencyExceptionHandler —
+         §10.5's 409 row, which names that exact type as the thing the API
+         translates. The base package only, on Common.Infrastructure's terms:
+         common code may name a DbContext or its exceptions, never a provider.
+
+         The cost is real and is accepted rather than hidden: Gateway.Api
+         references this project and has no database (§10.1), so it now
+         restores EF Core to catch an exception it cannot raise. The
+         alternative was a transport-neutral exception in Common.Application
+         with every EfUnitOfWork wrapping into it — which keeps EF out of the
+         edge, and buys that by putting a translation step in each service
+         that §7.3 and §10.5 do not describe. One shared handler naming the
+         framework's own exception is the shape both chapters state. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
   </ItemGroup>
 
   <ItemGroup>

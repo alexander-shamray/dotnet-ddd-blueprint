@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    Domain, Common.Application and Common.Contracts — the §4.2 dependency
+    table's second row.
+
+    This comment said "minus Common.Contracts", on the reasoning that §9.3's
+    mapper is the only type that would name a contract and its allow-list is
+    empty until this service publishes something. The reasoning was sound and
+    the conclusion stopped being true the moment the cancellation endpoint
+    needed to parse a wire reason code: CancelReasons is a contract vocabulary
+    (§9.6), it lives in Common.Contracts.Ordering.V1, and PR-18 first copied
+    the five constants into Application to avoid taking the reference. That is
+    the second table CancellationReasons' own remark warns about — a second
+    thing to forget when a reason is added — traded for an unused-reference
+    argument that does not survive a type which IS used. §4.3's one assembly
+    that crosses a service boundary crosses here, at the vocabulary, ahead of
+    the mapper rather than at it.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ordering.Domain\Ordering.Domain.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\Common.Application\Common.Application.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\Common.Contracts\Common.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Dapper is not here yet: §6.5's read side uses it directly, and this
+         project has no query handler to use it. It joins with the first
+         one — an unused package reference is a claim this project would
+         not be making. -->
+    <!-- AbstractValidator for the command validators, and the assembly-scan
+         registration §4.2's sample uses. Both used directly, both referenced
+         directly — a transitive compile against Common.Application's copy
+         would be a claim this project never states. -->
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+  </ItemGroup>
+
+</Project>

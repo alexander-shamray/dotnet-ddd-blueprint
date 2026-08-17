@@ -174,12 +174,67 @@ services:
     ports: [ "5000:8080" ]
     depends_on:
       keycloak: { condition: service_healthy }
-      # The one destination in §10.2's route file that exists today. The other
-      # three routes 502 until their services land, which is a true statement
-      # about the platform rather than a defect in this file — a route costs
-      # nothing at startup, where a Compose dependency on a service Compose
-      # cannot see fails the whole `up`.
+      # The two destinations in §10.2's route file that exist today. The other
+      # two routes — inventory and the BFF — 502 until their services land,
+      # which is a true statement about the platform rather than a defect in
+      # this file: a route costs nothing at startup, where a Compose dependency
+      # on a service Compose cannot see fails the whole `up`. So a destination
+      # joins this list with the PR that builds it, and ordering-api joined
+      # with PR-18.
       catalog-api: { condition: service_started }
+      ordering-api: { condition: service_started }
+
+  ordering-migrator:
+    build:
+      context: ../..
+      dockerfile: src/Services/Ordering/Ordering.Migrator/Dockerfile
+    environment:
+      # Migrator identity (DDL) — §7.1. Locally both keys resolve to the one
+      # sa login (§14.2's stated simplification); the KEY still differs, so
+      # the migrator reads the name it will read in production. The default is
+      # inline because .env.example promises every variable one — §14.1's bare
+      # `${…}` would break `docker compose up` on a clean checkout.
+      ConnectionStrings__OrderingMigrator: "${ORDERING_MIGRATOR_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
+    depends_on:
+      sql: { condition: service_healthy }
+    restart: "no"
+
+  ordering-api:
+    build:
+      context: ../..
+      dockerfile: src/Services/Ordering/Ordering.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Runtime identity (DML only) — never the migrator connection.
+      ConnectionStrings__Ordering: "${ORDERING_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
+      # The bus (§9), read by AddMassTransitMessaging — which throws without
+      # it, so this line is what lets the host start. A plain value, no ${…}
+      # variable: guest/guest is RabbitMQ's documented local default (§14.1's
+      # endpoint table), not a secret with a production shape, and
+      # .env.example's contract covers variables, not constants.
+      ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
+      # The authority, to validate inbound tokens (§11.2). Read eagerly by
+      # AddJwtAuthentication, which throws naming the key — so this line is
+      # what lets the host start, exactly like the bus one above. No
+      # Identity__Client__*: Ordering calls no peer synchronously, and outbound
+      # identity belongs to the BFF alone (§9.7, §11.5).
+      Identity__Authority: "http://keycloak:8080/realms/commerce"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      # Still no Redis keys: Ordering reads none yet, and they join when it
+      # first consumes a cache. An env var nothing reads is the container form
+      # of an unused registration — each joins with the PR whose code reads it,
+      # which is what brought the line above with PR-16.
+    ports: [ "5101:8080" ]
+    depends_on:
+      ordering-migrator: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+      # service_healthy since the block above declares a healthcheck. The API
+      # itself does not need it — JwtBearer fetches the discovery document
+      # lazily, on the first request that carries a token — but `up --wait`
+      # gates on every service's health, and the value is for whoever types the
+      # README's token command the moment it returns. Under service_started
+      # that command races the realm import and can be handed a 404.
+      keycloak: { condition: service_healthy }
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

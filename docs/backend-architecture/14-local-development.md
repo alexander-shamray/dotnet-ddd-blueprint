@@ -124,8 +124,6 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       # Runtime identity (DML only) — never the migrator connection.
       ConnectionStrings__Ordering: "${ORDERING_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
-      ConnectionStrings__RedisCache: "redis-cache:6379"
-      ConnectionStrings__RedisCoordination: "redis-coordination:6379"
       ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
       # The authority, to validate inbound tokens (§11.2). No Identity__Client__*:
       # Ordering calls no peer synchronously — prices come from a local
@@ -133,12 +131,21 @@ services:
       # client credentials (§9.7, §11.5).
       Identity__Authority: "http://keycloak:8080/realms/commerce"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      # No Redis keys, and no redis-* in depends_on below: Ordering reads
+      # neither connection yet. An environment variable nothing reads is the
+      # container form of an unused registration, and each joins with the PR
+      # whose code first reads it — the rule PR-12 set when it wired no
+      # service at all. §8.4's cache invalidation is what brings them.
     ports: [ "5101:8080" ]
     depends_on:
-      ordering-migrator:  { condition: service_completed_successfully }
-      redis-cache:        { condition: service_healthy }
-      redis-coordination: { condition: service_healthy }
-      rabbitmq:           { condition: service_healthy }
+      ordering-migrator: { condition: service_completed_successfully }
+      rabbitmq:          { condition: service_healthy }
+      # service_healthy rather than service_started, though the API does not
+      # need Keycloak to boot — JwtBearer fetches the discovery document
+      # lazily. `up --wait` gates on every service's health, and the value is
+      # for whoever types the README's token command the moment it returns:
+      # under service_started that command races the realm import.
+      keycloak:          { condition: service_healthy }
 
   # catalog-api, inventory-api, payments-api, shipping-worker and
   # notifications-worker follow the same shape — and "the same shape" is a
@@ -169,6 +176,11 @@ services:
     ports: [ "5000:8080" ]
     depends_on:
       keycloak: { condition: service_healthy }
+      # Every destination that exists, and only those — a Compose dependency
+      # on a service Compose cannot see fails the whole `up`, where a route to
+      # one costs nothing at startup. So a name joins this list with the PR
+      # that builds its service.
+      catalog-api: { condition: service_started }
       ordering-api: { condition: service_started }
 
   # The one host with client credentials, because it is the one host that calls
@@ -231,9 +243,13 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
 
-The realm's own logins are `demo/demo`, which holds `catalog:write`, and
-`browser/browser`, which holds nothing and is the account a refusal is proved
-against. Both are development defaults on the same terms as the three above —
+The realm's own logins are `demo/demo`, which holds every permission a shipped
+endpoint requires — `deploy/compose/README.md` carries the current list rather
+than this sentence, because a subset named here goes stale with each service
+and did exactly that when Ordering landed — and `browser/browser`, which holds
+nothing and is the account a refusal is proved against. `orders:admin` is
+grantable and held by neither, deliberately: it overrides §11.4's ownership
+check, which stays demonstrable only while no shipped login can bypass it. Both are development defaults on the same terms as the three above —
 the deliberate local-development exception to §11.6, which every deployed
 environment replaces with real users out of a directory.
 
@@ -248,15 +264,17 @@ The gateway's own block takes no `depends_on` on a service it routes to except
 the ones that exist — Compose rejects a dependency it cannot see, and one
 undefined name fails the whole `up` rather than one service. Its *routes* are
 under no such constraint and [§10.2](10-api-gateway.md) ships all four, so
-three paths answer 502 until their services land. A route is configuration the
-gateway reads; a `depends_on` is a name Compose has to resolve.
+a path answers 502 until its service lands. A route is configuration the
+gateway reads; a `depends_on` is a name Compose has to resolve. Two answer 502
+today — inventory and the BFF.
 
-**Which is why the fence above gates on `ordering-api` and the shipped file
-gates on `catalog-api`**, and the difference is delivery order rather than a
-discrepancy. The sample is the finished platform's, with Ordering as its
-worked pair and Catalog among the five elided as "the same shape"; the file on
-disk is the reverse, Catalog being the service that exists. Read the fence for
-the shape of a block, never for today's dependency list.
+**The fence above and the shipped file now gate on the same two services**,
+`catalog-api` and `ordering-api`, because both exist: PR-10 built the first and
+PR-18 the second. This paragraph used to explain a discrepancy — the sample was
+the finished platform's, with Ordering as its worked pair, while the file on
+disk had only Catalog — and the explanation expired when Ordering landed. Read
+the fence for the shape of a block; a destination still joins the dependency
+list with the PR that builds it, so the two will diverge again at Inventory.
 
 The collector's mounted configuration is the smallest correct pipeline —
 OTLP in on both protocols, a batch processor, OTLP out to the LGTM
@@ -315,10 +333,18 @@ the host name, because the compose file publishes each port:
 
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
-export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
+export ConnectionStrings__Ordering='Server=localhost;Database=Ordering;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
 export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
 ```
+
+**The key is the service's own**, and the block above is `Ordering.Api`'s
+because that is the host the fence names. `AddOrderingInfrastructure` reads
+`ConnectionStrings:Ordering` and `AddSqlServer` throws without it, so
+exporting Catalog's key here — which this sample did until PR-18 — is a set of
+instructions that cannot start the process it precedes. Running the migrator
+instead takes `ConnectionStrings__OrderingMigrator`, which is §7.1's whole
+point: two keys, one of which may issue DDL.
 
 **The environment is the first line and is not decoration.** No project ships a
 `launchSettings.json`, so `dotnet run` is Production unless told otherwise, and

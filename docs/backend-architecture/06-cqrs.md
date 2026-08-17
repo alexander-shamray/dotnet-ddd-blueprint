@@ -768,6 +768,10 @@ public sealed record PlaceOrderItem(Guid ProductId, int Quantity);
 
 public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
 {
+    // A business-shaped bound well inside SQL Server's 2,100 parameters — an
+    // order with more lines than this is a data import, not a checkout.
+    public const int MaxItems = 100;
+
     public PlaceOrderValidator()
     {
         // NotEmpty first: Matches alone skips null, and a JSON "currency":
@@ -776,7 +780,19 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         // as input (§5.7's division). \z, not $: .NET's $ matches before a
         // trailing newline, and "EUR\n" must fail here, not in the domain.
         RuleFor(x => x.Currency).NotEmpty().Matches(@"^[A-Za-z]{3}\z");
-        RuleFor(x => x.Items).NotEmpty();
+        // A maximum as well as a minimum. The reader expands the product ids
+        // into one SQL parameter each and adds @Currency beside them; SQL
+        // Server's limit is 2,100, so an unbounded list turns a well-formed
+        // request into a 500 rather than a 400. Cascade(Stop) is load-bearing
+        // rather than tidiness: FluentValidation runs every validator in a
+        // rule by default, so on an explicit "items": null the NotEmpty
+        // records its failure and the size predicate then dereferences the
+        // null it just rejected.
+        RuleFor(x => x.Items)
+            .Cascade(CascadeMode.Stop)
+            .NotEmpty()
+            .Must(items => items.Count <= MaxItems)
+            .WithMessage($"An order cannot contain more than {MaxItems} items.");
         RuleForEach(x => x.Items).ChildRules(item =>
         {
             item.RuleFor(i => i.ProductId).NotEmpty();
@@ -798,7 +814,11 @@ public sealed class PlaceOrderHandler(
 {
     public async Task<Result<Guid>> HandleAsync(PlaceOrderCommand command, CancellationToken ct)
     {
-        ProductId[] productIds = [.. command.Items.Select(i => new ProductId(i.ProductId))];
+        // Distinct: two lines naming the same product are a legitimate basket,
+        // and without it each repetition costs another SQL parameter against
+        // the same 2,100 ceiling the validator's MaxItems is measured against.
+        ProductId[] productIds =
+            [.. command.Items.Select(i => new ProductId(i.ProductId)).Distinct()];
         IReadOnlyDictionary<ProductId, Money> priceList =
             await prices.GetAsync(productIds, command.Currency, ct);
 
@@ -887,7 +907,10 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
 Three consequences, and the middle one is the point:
 
 - **No network call inside the transaction.** The read is local, and a missing
-  product is a plain validation failure rather than a timeout.
+  product is a domain rule rather than a timeout — `Error.Rule`, 422,
+  `order.products_unavailable` (§10.5). Not a *validation* failure: the
+  request was well-formed and the validator passed it, and §5.7 reserves that
+  word for the 400 `ValidationBehavior` produces.
 - **Catalog can be down and orders still get placed.** Availability stops
   multiplying, which is the whole argument of §2.3 principle 4 and ADR-002.
 - **Prices can be stale by the projection's lag** — typically milliseconds.
@@ -1181,8 +1204,10 @@ published — which is what the customer experiences either way.
 
 > **A projection with no publisher is worse than a remote call.** If Catalog has
 > never emitted `ProductPublished` for a product, this table has no row for it
-> and every order containing it fails — silently, with a plain validation
-> message and no error in any log. Two mitigations, both worth having: Catalog
+> and every order containing it fails — silently, with a 422
+> `order.products_unavailable` and no error in any log. Silently is the word
+> that matters: a rule rejection is a *correct* answer from a service with no
+> prices, so nothing about it looks like a fault. Two mitigations, both worth having: Catalog
 > republishes its full catalogue on demand (an operational task, not a code
 > path), and the [§13.6](13-observability.md) alert on business volume catches the case where orders
 > stop for a reason no technical metric shows.

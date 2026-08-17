@@ -475,7 +475,6 @@ builder.Services.AddOrderingInfrastructure(builder.Configuration);  // above
 // at the endpoint — so the compiler should be the thing comparing them.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy(OrderingPermissions.Read, p => p.RequirePermission(OrderingPermissions.Read))
     .AddPolicy(OrderingPermissions.Write, p => p.RequirePermission(OrderingPermissions.Write))
     .AddPolicy(OrderingPermissions.Cancel, p => p.RequirePermission(OrderingPermissions.Cancel));
 
@@ -1087,8 +1086,15 @@ Inventory and Payments — and writing the fourth by hand is how it ends up
 subtly different from the first three. One command renders it instead:
 
 ```bash
-python tools/new-service/new_service.py Ordering --port 5101
+python tools/new-service/new_service.py Yankee --port 5199
 ```
+
+The name and the port are a probe rather than a real service, and that is
+deliberate: this sample said `Ordering --port 5101` until PR-18 made both of
+those taken, at which point the command a reader copies from the chapter
+raised `ScaffoldError` — and the paragraph below, which says the run refuses a
+port another service already publishes, made the chapter contradict its own
+sample. A probe cannot quietly become a service later.
 
 It writes §4.1's five service projects, its three test projects and its
 `TestSupport` library — nine in all, and §4.1 is explicit that the last is not
@@ -1104,12 +1110,19 @@ start without `ConnectionStrings:RabbitMq`, the migration job host
 schema and the `AddOutbox` one beside it — §9.4's table is wiring every
 service has, and a service carrying the dispatcher without it would log a
 failed claim twice a second from its first boot — the outbox itself with its
-empty allow-list mapper, both images ([§15.2](15-cicd-deployment.md)) and
-§4.2's architecture gates. It then edits five shared files: `Platform.slnx`, the Compose pair and
+empty allow-list mapper, §9.5's inbox filter and retention purge, §11.3's JWT
+validation, both images ([§15.2](15-cicd-deployment.md)) and
+§4.2's architecture gates. The migrations it copies are `InitialCreate`,
+`AddOutbox`, `AddInbox` and `AddOutboxRetentionIndex` — the messaging tables
+ship with the dispatcher that reads them, because a service carrying the
+dispatcher without its table logs a failed claim twice a second from its first
+boot. It then edits five shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, and the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
-builds and its tests pass before a line of it is written, sixteen of them
-against real SQL Server and RabbitMQ containers.
+builds and its **fifty-six** tests pass before a line of it is written,
+**thirty** of them against real SQL Server and RabbitMQ containers — counts
+measured against a rendered service by PR-18, which found them reading
+forty-one and sixteen three PRs after they stopped being true.
 
 **There is no template directory, and that is the design.** The script reads
 `src/Services/Catalog` at run time, so there is exactly one copy of the

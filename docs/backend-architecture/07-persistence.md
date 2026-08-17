@@ -107,10 +107,23 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .Property(o => o.CustomerId)
             .HasConversion(id => id.Value, value => new CustomerId(value));
 
+        // By name, never by number: an enum stored as an int makes the member
+        // order a storage contract, so inserting a status in the middle
+        // silently reinterprets every existing row. 20 is the longest member
+        // plus room — AwaitingPayment is 15.
         builder
             .Property(o => o.Status)
             .HasConversion<string>()
-            .HasMaxLength(32);
+            .HasMaxLength(20);
+
+        // The order's currency is a private field rather than a property, so
+        // EF has to be told it exists at all. Every line is validated against
+        // it and Total sums in it, so an order that persists without it
+        // materialises unable to compute its own total.
+        builder
+            .Property<string>("_currency")
+            .HasColumnName("Currency")
+            .HasMaxLength(3);
 
         // Value object mapped as a complex type — columns on the same table,
         // no identity, exactly matching the domain semantics.
@@ -118,43 +131,79 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             o => o.ShippingAddress,
             address =>
             {
-                address.Property(a => a.Line1).HasColumnName("ShipLine1").HasMaxLength(200);
-                address.Property(a => a.City).HasColumnName("ShipCity").HasMaxLength(100);
-                address.Property(a => a.PostCode).HasColumnName("ShipPostCode").HasMaxLength(20);
-                address.Property(a => a.Country).HasColumnName("ShipCountry").HasMaxLength(2);
+                address.Property(a => a.Line1).HasColumnName("ShipToLine1").HasMaxLength(200);
+                address.Property(a => a.Line2).HasColumnName("ShipToLine2").HasMaxLength(200);
+                address.Property(a => a.City).HasColumnName("ShipToCity").HasMaxLength(100);
+                address.Property(a => a.PostalCode).HasColumnName("ShipToPostalCode").HasMaxLength(20);
+                address.Property(a => a.Country).HasColumnName("ShipToCountry").HasMaxLength(2);
             });
+
+        // A related entity rather than an owned collection, and the reason is
+        // ComplexProperty: an owned-collection builder does not offer it, so
+        // Money on a line would have to be mapped a second way — two spellings
+        // of one value object in one file, which is the drift this chapter's
+        // convention block exists to prevent. The aggregate boundary is kept by
+        // what is absent instead: no DbSet<OrderLine> on the context, and
+        // OrderLine's factory internal to the domain assembly, so a line cannot
+        // be reached or made except through Order. Reachability is the rule; the
+        // mapping construct is one implementation of it.
+        builder
+            .HasMany(o => o.Lines)
+            .WithOne()
+            .HasForeignKey("OrderId")
+            .IsRequired()
+            .OnDelete(DeleteBehavior.Cascade);
 
         // Backing field, not the public read-only property.
-        builder.Metadata
-            .FindNavigation(nameof(Order.Lines))!
-            .SetPropertyAccessMode(PropertyAccessMode.Field);
-
-        builder.OwnsMany<OrderLine>(
-            "_lines",
-            line =>
-            {
-                line.ToTable("OrderLines", "ordering");
-                line.WithOwner().HasForeignKey("OrderId");
-                line.Property<Guid>("Id");
-                line.HasKey("Id");
-
-                line.ComplexProperty(
-                    l => l.UnitPrice,
-                    money =>
-                    {
-                        money.Property(m => m.Amount).HasColumnName("UnitAmount").HasPrecision(19, 4);
-                        money.Property(m => m.Currency).HasColumnName("Currency").HasMaxLength(3);
-                    });
-            });
+        builder
+            .Navigation(o => o.Lines)
+            .HasField("_lines")
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
 
         // Optimistic concurrency — SQL Server maintains this automatically.
         builder.Property(o => o.Version).IsRowVersion();
 
+        // The column §11.4's ownership check reads on every cancellation, and
+        // the one §6.5's history query filters by — both equality on a single
+        // customer, so a plain index over it is the whole requirement. An
+        // index is added by the query that needs it and not in anticipation:
+        // this sample carried a (Status, PlacedAt) composite that no query in
+        // the blueprint seeks on, and the shipped configuration does not.
         builder.HasIndex(o => o.CustomerId);
-        builder.HasIndex(o => new { o.Status, o.PlacedAt });
 
         builder.Ignore(o => o.DomainEvents);
         builder.Ignore(o => o.Total);       // Computed, not stored.
+    }
+}
+```
+
+The line's own mapping is a second `IEntityTypeConfiguration`, which is what
+the related-entity decision above costs — an owned collection would have been
+configured inline:
+
+```csharp
+internal sealed class OrderLineConfiguration : IEntityTypeConfiguration<OrderLine>
+{
+    public void Configure(EntityTypeBuilder<OrderLine> builder)
+    {
+        builder.ToTable("OrderLines", "ordering");
+        builder.HasKey(l => l.Id);
+
+        builder
+            .Property(l => l.Id)
+            .HasConversion(id => id.Value, value => new OrderLineId(value))
+            .ValueGeneratedNever();
+
+        builder.ComplexProperty(
+            l => l.UnitPrice,
+            money =>
+            {
+                money.Property(m => m.Amount).HasColumnName("UnitPriceAmount").HasPrecision(19, 4);
+                money.Property(m => m.Currency).HasColumnName("UnitPriceCurrency").HasMaxLength(3);
+            });
+
+        builder.Ignore(l => l.LineTotal);   // UnitPrice * Quantity, derived on read.
+        builder.HasIndex("OrderId");
     }
 }
 ```
@@ -183,7 +232,11 @@ turns "someone forgot" into a compile-time-visible override.
 
 Optimistic concurrency is the default and is enough for most aggregates. The
 `rowversion` column means a stale write throws `DbUpdateConcurrencyException`,
-which the API translates to `409 Conflict`.
+which the API translates to `409 Conflict` — `ConcurrencyExceptionHandler` in
+`Common.Web`, registered for every host by `AddCommonProblemDetails`
+([§10.5](10-api-gateway.md)). The response names neither the entity nor the
+version it disagreed about: both are storage details, and what the client
+needs from this status is only that its copy was stale.
 
 Inventory is the exception. Stock reservation is genuinely contended — the same
 SKU may be reserved by many concurrent orders — and optimistic retry loops
@@ -211,7 +264,7 @@ differently:
 | Kind | Examples | Authored by |
 |---|---|---|
 | **Write model** | `Orders`, `OrderLines` | The EF model. `IEntityTypeConfiguration<T>` (§7.2) is the source of truth; `dotnet ef migrations add` produces the DDL |
-| **Read models and technical tables** | `OrderSummaries`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects |
+| **Read models and technical tables** | `OrderSummaries`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects. **`ProductPrices` is the exception and states the terms**: PR-18 maps it through an `IEntityTypeConfiguration` so `migrations add` emits it beside the aggregate's tables, and the configuration is then written to produce §6.6's printed types — `char(3)`, `DEFAULT 1` — rather than EF's defaults for the CLR ones. The rule is that the shape is the chapter's; which tool writes it is negotiable, and a generated table that drifts from the DDL a later PR copies is not |
 
 That is why [§6.6](06-cqrs.md) and [§9.4](09-messaging.md) show `CREATE TABLE` and §7.2 does not — the write
 model's schema is a projection of the aggregate, and duplicating it as SQL would

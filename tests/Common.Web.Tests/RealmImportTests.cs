@@ -210,7 +210,14 @@ public class RealmImportTests
                 .OfType<string>()
         ];
 
-        Permissions("demo").ShouldBe(["catalog:write"]);
+        // demo gains Ordering's two endpoint permissions with PR-18, so the
+        // inner loop the compose README documents actually works — the
+        // catalog:write parallel, one service over. It does NOT gain
+        // orders:admin: that role is grantable and held by nobody, so the
+        // ownership 404 stays demonstrable with the logins this realm ships.
+        Permissions("demo").ShouldBe(
+            ["catalog:write", "orders:write", "orders:cancel"],
+            ignoreOrder: true);
 
         JsonElement browser = users.EnumerateArray()
             .Single(u => u.GetProperty("username").GetString() == "browser");
@@ -245,6 +252,41 @@ public class RealmImportTests
     }
 
     [Fact]
+    public void No_role_description_exceeds_what_keycloak_can_store()
+    {
+        // Keycloak's ROLE.DESCRIPTION is VARCHAR(255), and an over-long value
+        // does not truncate — the import throws, the container exits 1, and
+        // `up --wait` fails with "dependency failed to start" naming Keycloak
+        // and nothing about the column. PR-18 shipped a 380-character
+        // description and the compose smoke was the only thing that noticed,
+        // three review rounds after the realm was edited.
+        //
+        // This file is prose-heavy by house style, which is exactly why the
+        // limit needs a test rather than a habit: the reasoning belongs in the
+        // configuration and the tests that read it, and the realm gets the
+        // sentence that fits.
+        const int keycloakDescriptionLimit = 255;
+
+        (string Name, string Description)[] roles =
+        [
+            .. Root.GetProperty("roles").GetProperty("client").GetProperty(Audience).EnumerateArray()
+                .Select(r => (
+                    Name: r.GetProperty("name").GetString()!,
+                    Description: r.TryGetProperty("description", out JsonElement d) ? d.GetString()! : ""))
+        ];
+
+        roles.ShouldNotBeEmpty();
+
+        foreach ((string name, string description) in roles)
+        {
+            description.Length.ShouldBeLessThanOrEqualTo(
+                keycloakDescriptionLimit,
+                $"'{name}' has a {description.Length}-character description; Keycloak stores 255 and " +
+                "the import fails the whole realm rather than truncating");
+        }
+    }
+
+    [Fact]
     public void The_permission_vocabulary_is_a_closed_set_of_client_roles()
     {
         // The permissions a policy can require have to exist somewhere a person
@@ -269,7 +311,21 @@ public class RealmImportTests
         // permissions join this list in the PR that registers the policy
         // requiring them, which is the same rule §11.4 states for the
         // constants.
-        roles.ShouldBe(["catalog:write", "inventory:admin"]);
+        // Ordering's three joined with PR-18. Two are policies its endpoints
+        // require; orders:admin is a claim CancelOrderHandler reads and no
+        // endpoint names, and it is here on inventory:admin's terms — without
+        // the role, no token this realm can issue could carry the claim, and
+        // the handler's admin branch would be unreachable code rather than an
+        // override somebody can be granted.
+        roles.ShouldBe(
+            [
+                "catalog:write",
+                "inventory:admin",
+                "orders:write",
+                "orders:cancel",
+                "orders:admin"
+            ],
+            ignoreOrder: true);
     }
 
     [Fact]

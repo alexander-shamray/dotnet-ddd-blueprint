@@ -1,0 +1,150 @@
+using Common.Domain;
+using Ordering.Domain.Common;
+using Ordering.Domain.Orders.Events;
+
+namespace Ordering.Domain.Orders;
+
+/// <summary>
+/// §5.4's aggregate, and the core of this service. Note what it does not have:
+/// public setters, a parameterless public constructor, references to other
+/// aggregates by object, or any knowledge of persistence.
+/// </summary>
+public sealed class Order : AggregateRoot<OrderId>
+{
+    private readonly List<OrderLine> _lines = [];
+
+    public CustomerId CustomerId { get; private set; }
+    public OrderStatus Status { get; private set; }
+    public Address ShippingAddress { get; private set; } = null!;
+    public DateTimeOffset PlacedAt { get; private set; }
+    public IReadOnlyList<OrderLine> Lines => _lines.AsReadOnly();
+
+    public Money Total => _lines.Aggregate(Money.Zero(_currency), (sum, line) => sum + line.LineTotal);
+
+    /// <summary>
+    /// An immutable copy of the lines, for events. <see cref="Lines"/> returns
+    /// a read-only <em>view</em> over the live list, so an event holding it
+    /// would keep changing after the fact — a record of what happened must not
+    /// track what happens next.
+    /// </summary>
+    private IReadOnlyList<OrderLineSnapshot> SnapshotLines() =>
+        [.. _lines.Select(l => new OrderLineSnapshot(l.ProductId, l.Quantity, l.UnitPrice))];
+
+    private readonly string _currency = null!;
+
+    // EF Core materialisation only.
+    private Order() { }
+
+    private Order(OrderId id, CustomerId customerId, Address shippingAddress, string currency, DateTimeOffset placedAt)
+    {
+        Id = id;
+        CustomerId = customerId;
+        ShippingAddress = shippingAddress;
+        _currency = currency;
+        PlacedAt = placedAt;
+        Status = OrderStatus.Draft;
+    }
+
+    public static Order Place(
+        CustomerId customerId,
+        Address shippingAddress,
+        IEnumerable<(ProductId Product, int Quantity, Money UnitPrice)> items,
+        string currency,
+        DateTimeOffset now)
+    {
+        // Of rather than a bare assignment: the order's currency is what every
+        // line is checked against, so an unvalidated one would make AddLine's
+        // comparison meaningless and Money.Zero(_currency) throw later, far
+        // from the call that caused it.
+        string normalised = Money.Zero(currency).Currency;
+
+        var order = new Order(OrderId.New(), customerId, shippingAddress, normalised, now);
+
+        foreach (var (product, quantity, unitPrice) in items)
+            order.AddLine(product, quantity, unitPrice);
+
+        if (order._lines.Count == 0)
+            throw new DomainException("An order must contain at least one line.");
+
+        order.Status = OrderStatus.AwaitingStock;
+        // Lines travel with the event: the integration contract needs them so
+        // Inventory can reserve stock (§9.6), and a handler must not have to
+        // reload the aggregate to find out what was ordered.
+        order.Raise(
+            new OrderPlacedDomainEvent(order.Id, customerId, order.Total, order.SnapshotLines(), now));
+
+        return order;
+    }
+
+    private void AddLine(ProductId product, int quantity, Money unitPrice)
+    {
+        if (quantity <= 0)
+            throw new DomainException("Quantity must be positive.");
+        if (unitPrice.Currency != _currency)
+            throw new DomainException("All lines must share the order currency.");
+
+        OrderLine? existing = _lines.SingleOrDefault(l => l.ProductId == product);
+        if (existing is not null)
+        {
+            // The merge keeps the price it already has, so a second line at a
+            // different price would silently reprice the first one's quantity
+            // too — an order whose Total no consumer could derive from the
+            // request that produced it. Nothing reaches this today, because
+            // the handler reads one price per product id from the projection
+            // and hands the same Money to both lines; that is a property of
+            // one caller, and an aggregate that is only valid while its
+            // callers behave is the thing §5.3 says it must not be.
+            if (existing.UnitPrice != unitPrice)
+                throw new DomainException("A product cannot appear twice at different prices.");
+
+            existing.IncreaseQuantity(quantity);
+        }
+        else
+        {
+            _lines.Add(OrderLine.For(product, quantity, unitPrice));
+        }
+    }
+
+    public void ConfirmStock(DateTimeOffset now)
+    {
+        EnsureStatus(OrderStatus.AwaitingStock);
+        Status = OrderStatus.AwaitingPayment;
+        Raise(new OrderStockConfirmedDomainEvent(Id, Total, now));
+    }
+
+    public void ConfirmPayment(PaymentReference reference, DateTimeOffset now)
+    {
+        EnsureStatus(OrderStatus.AwaitingPayment);
+        Status = OrderStatus.Confirmed;
+        // Total and Lines are required by the V1.OrderConfirmed contract (§9.1);
+        // the mapper has only the event to work from.
+        Raise(
+            new OrderConfirmedDomainEvent(Id, CustomerId, reference, ShippingAddress, Total, SnapshotLines(), now));
+    }
+
+    public void MarkShipped(TrackingNumber tracking, DateTimeOffset now)
+    {
+        EnsureStatus(OrderStatus.Confirmed);
+        Status = OrderStatus.Shipped;
+        Raise(new OrderShippedDomainEvent(Id, CustomerId, tracking, now));
+    }
+
+    public void Cancel(CancellationReason reason, DateTimeOffset now)
+    {
+        if (Status is OrderStatus.Shipped or OrderStatus.Delivered)
+            throw new DomainException(
+                $"A {Status} order cannot be cancelled; raise a return instead.");
+        if (Status is OrderStatus.Cancelled)
+            return;   // Idempotent — cancelling twice is not an error.
+
+        Status = OrderStatus.Cancelled;
+        Raise(new OrderCancelledDomainEvent(Id, CustomerId, reason, now));
+    }
+
+    private void EnsureStatus(OrderStatus expected)
+    {
+        if (Status != expected)
+            throw new DomainException(
+                $"Expected order to be {expected} but it is {Status}.");
+    }
+}

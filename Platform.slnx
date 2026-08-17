@@ -18,6 +18,13 @@
     <Project Path="src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj" />
     <Project Path="src/Services/Catalog/Catalog.Migrator/Catalog.Migrator.csproj" />
   </Folder>
+  <Folder Name="/src/Services/Ordering/">
+    <Project Path="src/Services/Ordering/Ordering.Api/Ordering.Api.csproj" />
+    <Project Path="src/Services/Ordering/Ordering.Application/Ordering.Application.csproj" />
+    <Project Path="src/Services/Ordering/Ordering.Domain/Ordering.Domain.csproj" />
+    <Project Path="src/Services/Ordering/Ordering.Infrastructure/Ordering.Infrastructure.csproj" />
+    <Project Path="src/Services/Ordering/Ordering.Migrator/Ordering.Migrator.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj" />
     <Project Path="tests/Catalog.Application.Tests/Catalog.Application.Tests.csproj" />
@@ -28,6 +35,10 @@
     <Project Path="tests/Common.Infrastructure.Tests/Common.Infrastructure.Tests.csproj" />
     <Project Path="tests/Common.Web.Tests/Common.Web.Tests.csproj" />
     <Project Path="tests/Gateway.Api.Tests/Gateway.Api.Tests.csproj" />
+    <Project Path="tests/Ordering.Api.Tests/Ordering.Api.Tests.csproj" />
+    <Project Path="tests/Ordering.Application.Tests/Ordering.Application.Tests.csproj" />
+    <Project Path="tests/Ordering.Domain.Tests/Ordering.Domain.Tests.csproj" />
+    <Project Path="tests/Ordering.TestSupport/Ordering.TestSupport.csproj" />
     <Project Path="tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj" />
   </Folder>
 </Solution>

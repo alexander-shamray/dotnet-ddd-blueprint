@@ -30,6 +30,12 @@
          below; named here because this assembly uses the types directly, on
          the register's honesty rule. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <!-- DbUpdateConcurrencyException and DbUpdateException, thrown at
+         ConcurrencyExceptionHandler to prove it separates the race from the
+         constraint violation. Same rule as the line above: carried
+         transitively by the project reference below, named here because this
+         assembly uses the types directly. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
   </ItemGroup>
 
   <ItemGroup>

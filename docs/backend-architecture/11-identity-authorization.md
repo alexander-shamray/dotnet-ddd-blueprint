@@ -183,10 +183,16 @@ roles to permissions in one place.
 // ASP.NET Core checks them.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy(OrderingPermissions.Read, p => p.RequirePermission(OrderingPermissions.Read))
     .AddPolicy(OrderingPermissions.Write, p => p.RequirePermission(OrderingPermissions.Write))
     .AddPolicy(OrderingPermissions.Cancel, p => p.RequirePermission(OrderingPermissions.Cancel));
 ```
+
+One policy per constant and no more: a policy registered before an endpoint
+names it is an unused registration, which is the mirror of the unregistered
+name the callout below is about. This block registered a third over
+`OrderingPermissions.Read` until PR-18 shipped the service without a read
+endpoint — the class sample and the registration have to lose an entry
+together, and they did not.
 
 `RequirePermission` is a one-line extension in `Common.Web` over
 `RequireClaim(PermissionClaim.Type, permission)`. It exists so that **no host
@@ -212,14 +218,17 @@ namespace Ordering.Api;
 /// </summary>
 public static class OrderingPermissions
 {
-    public const string Read = "orders:read";
     public const string Write = "orders:write";
     public const string Cancel = "orders:cancel";
 }
 ```
 
 **A service's vocabulary holds what its endpoints require, and nothing else.**
-Catalog's is one entry — `catalog:write` — because its listing is anonymous
+This sample carried a third entry, `orders:read`, until PR-18 shipped the
+service and had no read endpoint to require it — §6.5's query slice is PR-20's,
+so the constant arrives then. A permission printed here ahead of the endpoint
+that names it is the first half of the rule below, demonstrated by the sample
+that states it. Catalog's is one entry — `catalog:write` — because its listing is anonymous
 ([§10.2](10-api-gateway.md)); there is no `catalog:read`, because a permission
 nothing requires is a name in the realm nobody can act on. `orders:admin` is
 not here either, and for a different reason given below: it is a **claim** a
@@ -328,8 +337,16 @@ The request type carries the **wire code**, not the enum, for the reason [§9.4]
 gives about `CancelOrder.Reason` — and the parse is the same one, because two
 parses drift and the drift only shows on whichever path is less tested:
 
+It lives beside the endpoint that binds it, not in the slice, and the reason is
+that this handler has **two** entry paths with two wire shapes. The message
+path's shape is `CancelOrder` in `Common.Contracts` (§9.4); if the HTTP path's
+shape sat in `Ordering.Application`, the slice would own one transport's
+request type while the other's lived in a different assembly, for no reason
+either side could state. Each transport owns its own wire type, and the slice
+owns only the `CancelOrderCommand` both converge on:
+
 ```csharp
-namespace Ordering.Application.Orders.CancelOrder;
+namespace Ordering.Api.Endpoints;
 
 public sealed record CancelOrderRequest(string Reason);
 
@@ -411,7 +428,7 @@ this the customer's own order?" — belong in the handler**, where the data is
 available:
 
 ```csharp
-internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser currentUser, TimeProvider clock)
+public sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser currentUser, TimeProvider clock)
     : ICommandHandler<CancelOrderCommand, Result>
 {
     public async Task<Result> HandleAsync(CancelOrderCommand command, CancellationToken ct)
@@ -434,7 +451,17 @@ internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser c
 
         // The aggregate still owns the transition — this handler decides who
         // may ask, not whether the order is in a state that permits it (§5.4).
-        order.Cancel(command.Reason, clock.GetUtcNow());
+        // The catch translates the refusal rather than the rule: a shipped
+        // order throws, and without this the caller gets a 500 for asking a
+        // question the model answers. §10.5 already carries the error.
+        try
+        {
+            order.Cancel(command.Reason, clock.GetUtcNow());
+        }
+        catch (DomainException)
+        {
+            return Result.Failure(OrderErrors.AlreadyShipped);
+        }
 
         // No metric here, for the reason §6.4 gives: this runs inside the
         // transaction, and a cancellation counted before the commit is counted
@@ -446,6 +473,16 @@ internal sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser c
     }
 }
 ```
+
+> **`public`, and it is the §6.2 scan that decides this rather than taste.**
+> The sample read `internal sealed` until PR-18 implemented it, and the handler
+> was then never registered: `AddClasses` scans public classes only, so the
+> scan skipped it in silence. Nothing resolves an open generic at build time,
+> so `ValidateOnBuild` passes and the dispatcher throws on the first request
+> that needs the handler — every cancellation answered 500. Catalog's two
+> handlers have always been public, which is why the same scan works there.
+> A handler is a registration target, and its accessibility is part of the
+> contract with the scanner.
 
 The requirement behind `InitiatedBy` is real. `CancelOrderCommand` is dispatched
 from two places — the endpoint above and a `CommandConsumer`

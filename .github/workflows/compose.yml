@@ -34,10 +34,23 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    # 15 covered pulls alone; three image builds ride on top — Catalog's two
-    # and PR-17's gateway, each a restore plus a publish with no layer cache on
-    # a fresh runner. The base images are shared, the restores are not.
-    timeout-minutes: 30
+    # 15 covered pulls alone; five image builds ride on top — Catalog's two,
+    # PR-17's gateway and PR-18's ordering pair, each a restore plus a publish
+    # with no layer cache on a fresh runner. The base images are shared, the
+    # restores are not.
+    #
+    # 40, up from 30: PR-17 raised 25 → 30 for one extra image, and PR-18 adds
+    # two, so it is +10 rather than the +5 one image bought. 15 + 5 × 5 gives
+    # the same 40 from the other direction.
+    #
+    # It went out at 35 — the recount was performed against the *previous*
+    # raise instead of against the number of images, which is the arithmetic
+    # the comment above states and the count it names exists to force. So the
+    # mechanism meant to catch a stale timeout produced a wrong one, and the
+    # sentence describing that mechanism was itself the thing that read as
+    # already-checked. A count in a comment is only a guard while somebody
+    # multiplies by it.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 

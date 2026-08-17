@@ -5,7 +5,7 @@ specification for this directory; this file records what a developer needs at
 the keyboard. One command creates a service:
 
 ```bash
-python tools/new-service/new_service.py Ordering --port 5101
+python tools/new-service/new_service.py Yankee --port 5199
 ```
 
 | | |
@@ -15,7 +15,7 @@ python tools/new-service/new_service.py Ordering --port 5101
 | `--migration-id` | The `InitialCreate` id, and the base for the outbox migration one minute after it. Defaults to the current UTC timestamp; the tests pass a fixed one |
 | `--repo-root` | Defaults to this script's repository |
 
-It writes forty-six files and edits five. The five are `Platform.slnx`,
+It writes fifty-four files and edits five. The five are `Platform.slnx`,
 `deploy/compose/docker-compose.yml`, `docker-compose.infra-only.yml`,
 `.env.example` and `deploy/compose/README.md`.
 
@@ -24,12 +24,17 @@ generated tree is untracked and the five edits are tracked, so neither one
 alone is enough:
 
 ```bash
-rm -rf src/Services/Ordering tests/Ordering.*
+rm -rf src/Services/Yankee tests/Yankee.*
 git restore Platform.slnx deploy/compose
 ```
 
-(`Ordering` rather than a `<Name>` placeholder because this is a `bash` fence
-and the shell reads `<Name>` as a redirection, not as something to fill in.)
+(`Yankee` rather than a `<Name>` placeholder because this is a `bash` fence and
+the shell reads `<Name>` as a redirection, not as something to fill in. It
+named `Ordering` at port 5101 until PR-18 made that a real service — at which
+point the create raised `ScaffoldError` on a published port, and the undo,
+followed literally, deleted the service that had just landed. A probe the
+suite already uses cannot become a service later, which is the property the
+example wanted all along.)
 
 `git checkout .` is **not** the undo and this file used to say it was: it
 leaves every generated file in place, because they are untracked, and it
@@ -41,21 +46,29 @@ run shows exactly the five and the new directories.
 [§4.1](../../docs/backend-architecture/04-solution-structure.md)'s five
 service projects, three test projects and the `TestSupport` library — nine in
 all, and §4.1 is explicit that the last is not a test project — with
-everything the delivery plan has built into the template through PR-14:
+everything the delivery plan has built into the template through PR-16:
 `DbContext` and conventions, `EfUnitOfWork`, the connection factory, the
 readiness checks, the §7.4 migrator host, the `InitialCreate` migration that
-creates the schema and the `AddOutbox` one beside it, §9.4's outbox with its
-dispatcher and allow-list mapper, the §9 bus registration — a scaffolded host
-refuses to start without `ConnectionStrings:RabbitMq` — both Dockerfiles, the
-Compose pair, and the architecture gates of
+creates the schema and the `AddOutbox`, `AddInbox` and
+`AddOutboxRetentionIndex` ones beside it, §9.4's outbox with its dispatcher
+and allow-list mapper, §9.5's inbox filter and the retention purge, the §9 bus
+registration — a scaffolded host refuses to start without
+`ConnectionStrings:RabbitMq` — §11.3's JWT validation and the test auth
+scheme, both Dockerfiles, the Compose pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
 
-The service builds and its forty-one tests pass before you have written a
-line, and sixteen of them run against real SQL Server and RabbitMQ containers:
+The service builds and its fifty-six tests pass before you have written a
+line, and thirty of them run against real SQL Server and RabbitMQ containers:
 the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
 only once the bus connects — `EfUnitOfWork`'s commit, rollback and retry
-semantics, and the outbox dispatcher's per-row isolation, attempt cap and
-loud failure on a `Local` row with no registered handler.
+semantics, the inbox filter's once-per-endpoint guarantee, the retention
+purge over both tables, and the outbox dispatcher's per-row isolation, attempt
+cap and loud failure on a `Local` row with no registered handler.
+
+Those two counts are measured rather than estimated, and they move whenever a
+PR adds to the template — they read forty-one and sixteen until PR-18
+recounted them against a rendered service, three PRs after they stopped being
+true.
 
 **The outbox arrives wired and empty**, which is the state to expect: the
 allow-list mapper has no entries, so every domain event this service raises is
