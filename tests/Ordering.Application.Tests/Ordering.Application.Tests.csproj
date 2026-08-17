@@ -34,12 +34,19 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Services\Ordering\Ordering.Application\Ordering.Application.csproj" />
-    <!-- §12.1 homes the handler tests here, with real containers — the
-         fixture lives in TestSupport, shared with Ordering.Api.Tests, which
-         this project cannot reference. -->
-    <ProjectReference Include="..\..\tests\Ordering.TestSupport\Ordering.TestSupport.csproj" />
-    <!-- OrderingDbContext by name, for seeding and read-back. The test
-         project may: §4.2's gate binds Ordering.Application, not its tests. -->
+    <!-- Ordering.Infrastructure for AddOrderingInfrastructure, which the
+         round-trip test resolves OutboxJson and MessageTypeMap out of. The
+         test project may name it: §4.2's gate binds Ordering.Application,
+         not its tests.
+
+         No Ordering.TestSupport, and its absence is the scaffold's default
+         rather than an omission — §12.1 homes handler tests at this level and
+         Ordering's are in Ordering.Api.Tests instead, because ICurrentUser is
+         HttpContextCurrentUser and a handler in a bare scope has no principal.
+         Nothing here names ServiceFixture, so the reference would drag the
+         API, the migrator and Testcontainers into this project's restore
+         graph for a claim it does not make. It arrived with the handler tests
+         and left with them, one round later than it should have. -->
     <ProjectReference Include="..\..\src\Services\Ordering\Ordering.Infrastructure\Ordering.Infrastructure.csproj" />
   </ItemGroup>
 
