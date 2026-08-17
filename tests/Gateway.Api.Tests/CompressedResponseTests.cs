@@ -275,6 +275,47 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
         (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
     }
 
+    /// <summary>
+    /// A <b>client</b> asking for no transformation is believed, even though
+    /// the destination said nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two directions are not the same kind of rule and the code honours
+    /// both anyway. RFC 9111 §5.2.2.6 makes the *response* directive binding on
+    /// an intermediary — "MUST NOT transform the content" — while §5.2.1.6 says
+    /// of the request form only that "the client is asking for intermediaries
+    /// to avoid transforming the content". An ask, not an obligation.
+    /// </para>
+    /// <para>
+    /// It is still honoured, because a caller who says so explicitly should be
+    /// believed and the check is one header read. What earns the separate test
+    /// is that nothing else here would catch its absence: the stub's response
+    /// carries no directive, so this is the only path where the request header
+    /// is the whole reason the body arrives uncompressed.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_client_asking_for_no_transformation_is_not_sent_a_compressed_body()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        using StubbedGatewayFactory factory = new(stub.Address);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, CompressibleRoute);
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoTransform = true };
+
+        HttpResponseMessage response = await client.SendAsync(request, ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Content.Headers.ContentEncoding.ShouldBeEmpty(
+            "the caller asked not to have its content transformed, and the destination said nothing either way");
+
+        (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
+    }
+
     private static string Declaring(string encoding) =>
         $"{CompressibleRoute}&{StubDestination.ContentEncodingQuery}={encoding}";
 

@@ -610,7 +610,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty projects and `dotnet test` runs 621 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 622 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -754,6 +754,16 @@ measurement as though it settled the question — pinning the violation in a tes
 and telling PR-19 to use `Content-Encoding: identity` instead. A measurement
 says what the code *does*; it never says what it *may* do. The specification
 was one fetch away and nothing had read it.
+
+**The request form is honoured too, and quoting it is what kept the claim
+honest.** Round 8 asked for it and framed it as the same obligation; §5.2.1.6
+says only that "the client is asking for intermediaries to avoid transforming
+the content", where §5.2.2.6's response form is a MUST NOT. Both are refused —
+a caller who says so explicitly should be believed, and it is one header read —
+but the asymmetry is recorded rather than flattened into "the RFC requires it",
+which is false of half of it. Three rounds in a row turned on the difference
+between what a specification says and what everyone assumes it says, this one
+included: **fetch the section and paste the sentence.**
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
 pipeline — and fourteen of its decisions bind what comes after:

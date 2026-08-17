@@ -317,6 +317,13 @@ Core's middleware does not implement the rule — measured, before the provider
 existed: a body sent under the directive came back gzipped with the directive
 intact — so the edge was violating it on every such response.
 
+**The request form is honoured too, and it is a weaker thing.** §5.2.1.6 says
+only that "the client is asking for intermediaries to avoid transforming the
+content" — an ask, where the response form is an obligation. The provider
+refuses either, because a caller who says so explicitly should be believed and
+the check is one header read. The asymmetry is written down rather than
+flattened into "the RFC requires it", which would be false of half of it.
+
 `Content-Encoding: identity` also stops the middleware, and is **not** the
 contract offered here. It works only as a side effect of the
 double-compression guard — a refusal reached by looking like an already-encoded
