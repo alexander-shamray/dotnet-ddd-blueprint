@@ -19,7 +19,7 @@
 | Application | One handler end to end | Real DB and Redis (containers), fakes for other services | < 500 ms | Tens | `*.Application.Tests` |
 | API contract | HTTP in, HTTP out | `WebApplicationFactory` + containers | < 1 s | Tens | `*.Api.Tests` |
 | Host building block | One middleware or host extension | `TestServer` — no containers, no entry point | < 50 ms | Tens | `Common.Web.Tests` |
-| Edge configuration | The route file of §10.2, against the host that loaded it | `WebApplicationFactory` + a stub destination on loopback — no containers | < 1 s | One suite | `Gateway.Api.Tests` |
+| Edge configuration | The route file of §10.2 against the host that loaded it, and §10.1's edge behaviours — compression and the body ceiling | `WebApplicationFactory` + a stub destination on loopback — no containers, and `UseKestrel` where the property under test is the server's own | < 1 s | One suite | `Gateway.Api.Tests` |
 | Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
 | Contract | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
@@ -1484,6 +1484,28 @@ public async Task The_service_receives_the_path_with_the_namespace_prefix_remove
 > before the last request arrived, and the rate-limit test failed while the
 > limiter was working perfectly. A stub that answers is faster *and* is the
 > only thing that can observe the forwarded path.
+
+> **One property in this suite cannot be asserted over `TestServer` at all**,
+> and it is the case that says where the seam is. §10.1's body ceiling is a
+> Kestrel option, and `TestServer` is not Kestrel — it implements none of the
+> body-size features, so `ConfigureKestrel` is a no-op under it and the ceiling
+> does not exist. `WebApplicationFactory.UseKestrel(0)` takes an ephemeral
+> loopback port for the stub's reason, and the order is load-bearing: it throws
+> once the host is initialised, and `CreateClient` is what initialises one, so
+> a factory whose client is taken first is silently a `TestServer` again.
+>
+> **The failure is loud or silent depending on what the suite asserts, and only
+> one of those is a trap.** Run over `TestServer`, the size-limit suite goes
+> red: the oversized bodies reach the destination and answer 204 where 413 was
+> expected. What passes is the one test asserting that a body *at* the ceiling
+> is forwarded — so a suite written from the acceptance side alone would be
+> green against a gateway with no limit whatsoever. That is the shape to guard
+> against, and asserting the boundary from both sides is the guard.
+>
+> The rule this leaves is worth carrying past the gateway: drive `TestServer`
+> for anything the *application* decides, and a real server for anything the
+> *server* decides. The configuration is the part that fails silently — it
+> binds, it reports nothing, and it governs nothing.
 
 ## 12.5 Testing the saga
 

@@ -61,7 +61,7 @@ Present:
 docs/backend-architecture/
   README.md                      index and chapter table
   01-purpose.md .. 15-cicd-deployment.md
-  appendix-a-adrs.md             ADR-001 .. ADR-019
+  appendix-a-adrs.md             ADR-001 .. ADR-020
   appendix-b-licences.md         dependency licence register
   appendix-c-delivery-plan.md    PR sequencing plan
   appendix-d-type-inventory.md   type inventory
@@ -210,7 +210,15 @@ src/Gateway/
                                  under test. GatewayPermissions
                                  (inventory:admin, the one permission a ROUTE
                                  names rather than an endpoint) and
-                                 GatewayRateLimiterPolicies beside it
+                                 GatewayRateLimiterPolicies beside it, plus
+                                 PR-27's GatewayLimits — the platform's one
+                                 body ceiling, and the last two entries of
+                                 §10.1's "It does" list: the Kestrel limit and
+                                 ADR-020's response compression, four
+                                 statements in Program.cs — the fourth being
+                                 NoTransformResponseCompressionProvider, which
+                                 is RFC 9111 conformance rather than a choice —
+                                 and a PR's worth of argument in front of them
 src/Services/Catalog/
   Catalog.Domain/                the first aggregate: Product (Publish factory,
                                  ProductPublishedDomainEvent), ProductId,
@@ -362,7 +370,31 @@ tests/
                                  TestAuthHandler is therefore a second copy of
                                  Catalog's, deliberately — §4.3 permits one
                                  assembly to cross a boundary and it is not a
-                                 test library
+                                 test library. PR-27 added the first tests in
+                                 the repo that need a REAL SERVER rather than
+                                 TestServer: RequestSizeLimitTests drives the
+                                 factory over UseKestrel(0), because
+                                 ConfigureKestrel binds under TestServer and
+                                 governs nothing. Run there the suite goes RED
+                                 — two 413s arrive as the stub's 204 — and the
+                                 one test that passes is the acceptance one, so
+                                 a suite asserting only that side would be
+                                 green against no limit at all.
+                                 StubDestination answers 204 until a query
+                                 string asks it for a body — per-request rather
+                                 than a settable property, so nothing has to be
+                                 reset between tests in a class and no test
+                                 depends on its order. NOT for independence
+                                 between classes: IClassFixture already gives
+                                 each class its own instance, which is what
+                                 this line claimed until a review checked the
+                                 lifetime.
+                                 ForwardedSchemeCompressionTests is the only
+                                 test anywhere that drives the forwarded scheme
+                                 into a response-side decision, and it exists
+                                 because a review found ADR-020 arguing from
+                                 the hop's scheme rather than the one the
+                                 middleware reads
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
                                  SQL and RabbitMQ containers, real migrator
                                  run, Respawn reset — CatalogApiFactory (both
@@ -578,7 +610,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty projects and `dotnet test` runs 611 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 624 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -586,13 +618,162 @@ job for them beside `licence-gate`. **PR-18 has landed** — Ordering is the
 second service, rendered by the scaffold with no reconciliation owed to it,
 and it carries PR-16's deferred security test: user A *cancelling* user B's
 order → 404, §11.4's ownership check, which needed the first resource in the
-platform that has an owner. **PR-19 (the BFF) and PR-20 (Ordering's Catalog
-projection) are next**, and PR-20 is what fills the `ordering.ProductPrices`
-table PR-18 shipped with its reader and no producer.
+platform that has an owner. **PR-27 has landed too** — out of numerical order
+and in sequence, because Appendix C numbers it last and makes it depend on
+PR-17 alone, so it may land at any point after the gateway; it closes §10.1's
+"It does" list and the gateway is finished. **PR-19 (the BFF) and PR-20
+(Ordering's Catalog projection) are next**, and PR-20 is what fills the
+`ordering.ProductPrices` table PR-18 shipped with its reader and no producer.
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-27 landed the last two entries of §10.1's "It does" list — the body ceiling
+and ADR-020's response compression — and five of its decisions bind what comes
+after:
+
+- **`EnableForHttps = true` is what makes the edge compress at all, and this
+  file argued the exact opposite first.** The claim was that TLS terminates at
+  the ingress (§10.1), so the gateway is served plain `http`, so the flag never
+  fires and setting it true merely says out loud what happens anyway. Every
+  clause true, conclusion inverted: §4.2's forwarded-headers block enables
+  `XForwardedProto`, `UseForwardedHeaders` rewrites `Request.Scheme` from the
+  ingress's header, and the compression middleware decides at the first
+  **write** — below the whole pipeline — so the scheme it reads is the
+  rewritten one. At the default, a gateway behind an HTTPS ingress compresses
+  **nothing** and no response says why. Copilot round 1 found it;
+  `ForwardedSchemeCompressionTests` is the measurement, red against the
+  property removed.
+
+  **The lesson is not about compression.** A middleware that acts on the
+  response decides *after* everything below it has run, so reasoning about
+  what it "sees" from the position of its `Use` call is reasoning about the
+  wrong moment. `UseResponseCompression` sits above `UseForwardedHeaders` and
+  still reads the header `UseForwardedHeaders` wrote. Any claim of the form
+  "this middleware runs before that one, so it cannot see X" is worth
+  measuring rather than reading off the pipeline order.
+
+  What survives the correction is the *decision* and the shape of its
+  argument: the flag cannot be argued from the scheme in either direction —
+  the response reaches the browser over TLS whatever the inner hop was — so
+  ADR-020 argues it from content. No body crossing this edge pairs a secret
+  with reflected input.
+- **The one body that reflects a client-supplied value is the one the default
+  MIME list omits, and that is luck rather than design — so a test pins it.**
+  §10.5's problem+json carries the `X-Correlation-Id` the caller may have
+  chosen (§10.4), which is the input half of BREACH; `application/problem+json`
+  is absent from `ResponseCompressionDefaults.MimeTypes` and therefore travels
+  plain. Nothing in this solution decided that, so `CompressedResponseTests`
+  asserts both directions from the wire. **Adding a type to
+  `CompressibleContentTypes` is re-taking ADR-020**, not a tuning change.
+- **The 413 needed no exception handler, and the 400 and 409 rows each did.**
+  Kestrel throws `BadHttpRequestException` carrying the status and
+  `ExceptionHandlerMiddleware` reads it off the exception instead of defaulting
+  to 500, so §10.5's shape arrives with `correlationId` and `traceId` for free.
+  Measured over both framings — a declared `Content-Length` and a chunked body
+  with none — because the plausible failure was the opposite one: YARP's
+  forwarder absorbs client-body faults into its own 400, and it does not absorb
+  this.
+- **`ConfigureKestrel` is a silent no-op under `TestServer`, so the limit is
+  the first property in the solution that a real server has to serve.**
+  `WebApplicationFactory.UseKestrel(0)` is the seam, and its ordering is
+  load-bearing: it throws once the host is initialised and `CreateClient` is
+  what initialises one, so a factory whose client is taken first is a
+  `TestServer` again with no failure to say so. The general rule is worth
+  carrying past the gateway — drive `TestServer` for what the *application*
+  decides, a real server for what the *server* decides, and the two are
+  indistinguishable from the test.
+- **The compression middleware has no ordering rule a test can catch, and
+  saying so is the point.** Moved below the auth pair and the limiter, every
+  test in `Gateway.Api.Tests` stays green — because the only bodies those
+  middlewares produce are problem+json, which is not compressed. Its *absence*
+  is caught immediately, which is the failure mode that matters:
+  `AddResponseCompression` succeeds and compresses nothing without
+  `UseResponseCompression`, exactly the shape §10.3's registration has. Both
+  halves measured, in the habit PR-16 and PR-17 established — do not write down
+  an ordering claim a test is not making.
+
+**One test claim was found false by asserting it**, and it is the sharper
+finding of the two: the chunked-body case was a second copy of the
+`Content-Length` case, because `StreamContent` over a `MemoryStream` reads the
+stream's length and sends the header anyway. It passed, for the wrong reason,
+and only `ContentLength.ShouldBeNull()` told the difference. **A test named for
+a case is not a test of it** — the streaming path is the one an attacker
+chooses, since omitting a header costs the sender nothing.
+
+**"A test that would pass" is this PR's most repeated error, and it was written
+four times before anything checked it.** Copilot round 2's suppressed block —
+which carried five findings under a heading saying no new comments were
+generated — caught the same inversion at four sites: that the size-limit suite
+"would pass" over `TestServer`, that a decompressing client would "leave every
+assertion passing", and that a test carrying its own copy of the ceiling "would
+pass" against a differently configured gateway. **All three are the opposite of
+what happens.** Measured for the first: over `TestServer` the suite goes red,
+two of three, because the oversized bodies reach the destination and answer 204
+where 413 was expected.
+
+The useful half is what the measurement added. Exactly **one** test passes
+there — the one asserting a body *at* the ceiling is forwarded — so the silent
+outcome is real but belongs to a suite written from the acceptance side alone.
+Asserting the boundary from both sides is what converts it into a loud failure,
+which the suite already did and the prose had not noticed. **A hazard framed as
+"this would pass" is a claim about a run nobody performed**; this repository
+already says not to write down an ordering claim a test is not making, and this
+is the same rule for a counterfactual.
+
+**ADR-020's escape hatch was named wrong too, and PR-19 is who it costs.** The
+first version told the BFF to protect a secret-bearing response by *encoding*
+it itself, on the ground that the middleware skips a response already carrying
+a `Content-Encoding`. The mechanism is right and the instruction is useless:
+gzip opens the same length side channel wherever it is applied, so a
+BFF-compressed secret leaks exactly as a gateway-compressed one does. The
+answer taken at the time was `Content-Encoding: identity`, skipped by the same
+header check and readable on the wire — **which stood for two rounds and is
+also wrong**; the paragraph below is where it lands. Copilot round 1 again,
+and it is worth noticing that both of its findings were **the argument being
+wrong while the code was right**: the flag and the header check were correct
+in `Program.cs` throughout. A review that only diffs code would have found
+neither.
+
+**`Cache-Control: no-transform` was the opt-out all along, and the gateway was
+violating RFC 9111 by ignoring it.** Round 3 proposed the directive and was
+half right; round 5 pressed the other half and was fully right. The framework
+does **not** implement it — measured twice, an 8 KiB body coming back gzipped
+with the directive intact — but §5.2.2.6 says an intermediary "regardless of
+whether it implements a cache" MUST NOT transform the content, a content coding
+is such a transformation (RFC 9110 §7.7), and a YARP gateway is an
+intermediary. So the gateway now carries
+`NoTransformResponseCompressionProvider`, a subclass of the framework's own
+with one case in front of `ShouldCompressResponse`, registered by `Replace`
+rather than by sitting above `AddResponseCompression`'s `TryAddSingleton`.
+
+**The intermediate state is the lesson, and it lasted two rounds.** Having
+measured that the framework ignores the directive, this file recorded the
+measurement as though it settled the question — pinning the violation in a test
+and telling PR-19 to use `Content-Encoding: identity` instead. A measurement
+says what the code *does*; it never says what it *may* do. The specification
+was one fetch away and nothing had read it.
+
+**The request form is honoured too, and quoting it is what kept the claim
+honest.** Round 8 asked for it and framed it as the same obligation; §5.2.1.6
+says only that "the client is asking for intermediaries to avoid transforming
+the content", where §5.2.2.6's response form is a MUST NOT. Both are refused —
+a caller who says so explicitly should be believed, and it is one header read —
+but the asymmetry is recorded rather than flattened into "the RFC requires it",
+which is false of half of it. Three rounds in a row turned on the difference
+between what a specification says and what everyone assumes it says, this one
+included: **fetch the section and paste the sentence.**
+
+**Reading a request header in a response decision costs a `Vary` entry**, and
+the fix for round 8 introduced that debt in the same commit that paid off the
+last one. The representation now depends on `Cache-Control`, so a shared cache
+with no `Vary: Cache-Control` may serve a stored gzipped variant to the one
+caller who asked for none — the policy undone from outside the process, by
+something the gateway does not control. Advertised on **every** decision,
+compressed ones included, because absence is a value. Round 9 found it, which
+makes it the second time in this branch that fixing one thing quietly broke a
+neighbouring one; the first was a wrap regression a script caught.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
 pipeline — and fourteen of its decisions bind what comes after:
@@ -2028,8 +2209,9 @@ already written against it.
 - **Materialise with a spread, not a terminal `.ToArray()` or `.ToList()`.**
   A sequence being fixed into an array or list target is written
   `[.. sequence]` — one space after the `..`, as `[.. record.Attributes]` and
-  `[.. assemblies]` already had it. There are no `.ToArray()` or `.ToList()`
-  calls left in the corpus, and a new one is a site this rule missed:
+  `[.. assemblies]` already had it. There are no LINQ `.ToArray()` or
+  `.ToList()` calls left in the corpus, and a new one is a site this rule
+  missed:
 
   ```csharp
   ProductId[] missing = [.. productIds.Where(id => !priceList.ContainsKey(id))];
@@ -2047,6 +2229,21 @@ already written against it.
   e.Lines` over two lines). And a spread frequently brings the whole statement
   back under 120, in which case the one-line rule applies and the `[` does not
   get its own line after all.
+
+  **A `ToArray` that is not a sequence materialisation is outside this rule**,
+  and stating that is cheaper than defending it again. `MemoryStream.ToArray()`
+  is a stream accessor — the type implements no `IEnumerable`, so `[.. buffer]`
+  does not compile at all (CS9212, checked by compiling it). The rule is about
+  the *terminal LINQ operator*, where the spread and the call are two spellings
+  of one thing and only one of them leads with the target. Where they are not
+  two spellings of one thing there is nothing to prefer.
+
+  This was found by a Copilot review reading "there are no `.ToArray()` calls
+  left in the corpus" as the test it literally is — a grep — rather than as the
+  rule it means. That reading is fair, which is why the sentence was narrowed
+  rather than the finding merely rejected: **a rule whose stated test is a
+  string match will be enforced as one**, by a reviewer or by whoever greps
+  next.
 - **One space before `=`, `=>` and `{` — never a column of them.** Padding a
   token out to line up with the one above it fails the build: IDE0055 reports
   it as a formatting violation and ADR-019 makes that an error. This was found
@@ -2256,7 +2453,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-020) and keep the
+  (currently ADR-021) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

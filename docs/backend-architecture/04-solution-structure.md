@@ -61,7 +61,11 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   ├── Gateway.Api.Tests/              The route file of §10.2, over the real
 │   │                                   host: policy resolution, prefix strips,
 │   │                                   the limiter of §10.3 driven until it
-│   │                                   rejects. No TestSupport beside it —
+│   │                                   rejects — and §10.1's two edge
+│   │                                   behaviours, compression and the body
+│   │                                   ceiling, the second over a real Kestrel
+│   │                                   because TestServer serves no such
+│   │                                   property. No TestSupport beside it —
 │   │                                   that library exists where two suites
 │   │                                   share a fixture, and the gateway has one
 │   ├── Catalog.Domain.Tests/
@@ -552,6 +556,29 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.AddCommonWebDefaults();                                  // §13.2
 
+// §10.1's body ceiling, and the only one in the platform. Kestrel's 30 MB is a
+// web server's default rather than a choice; GatewayLimits argues the number.
+// Enforced where the body is READ, which is inside the forwarder — so a request
+// that fails authorization is refused without its size being considered.
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimits.MaxRequestBodyBytes);
+
+// §10.1's response compression. The providers and the compressible MIME types
+// are the framework's defaults, deliberately — that list omits
+// application/problem+json, which is what keeps §10.5's error bodies (the one
+// place a client-supplied value is reflected back) out of the compressed set.
+// EnableForHttps is the whole of ADR-020, and it is what makes compression
+// happen at all: the block below rewrites Request.Scheme from the ingress's
+// X-Forwarded-Proto, and this middleware decides at the first WRITE, so the
+// scheme it reads is https even though the hop was plain.
+builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
+
+// RFC 9111's no-transform, which ASP.NET Core does not implement and which an
+// intermediary may not ignore (ADR-020). Replace rather than a registration
+// placed above AddResponseCompression, whose TryAddSingleton would otherwise
+// make ordering decide it silently.
+builder.Services.Replace(
+    ServiceDescriptor.Singleton<IResponseCompressionProvider, NoTransformResponseCompressionProvider>());
+
 // YARP is registered here and configured from the "ReverseProxy" section
 // shown in §10.2. Without this, MapReverseProxy() throws at startup and the
 // entire routing configuration is inert.
@@ -686,6 +713,14 @@ WebApplication app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseCorrelationId();           // assigns the ID if the client sent none
+
+// High enough to wrap every writer below it, because this middleware acts by
+// replacing the response body feature. Nothing here is an ordering rule a test
+// can catch — moving it below the auth pair changes no observable response,
+// measured — but its ABSENCE is: AddResponseCompression succeeds and compresses
+// nothing without it, the same quiet shape the limiter's registration has.
+app.UseResponseCompression();     // §10.1, ADR-020
+
 app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
 
 // Above everything that reads the client address, and below the two that do

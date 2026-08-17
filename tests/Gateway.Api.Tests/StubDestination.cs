@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -9,8 +11,9 @@ namespace Gateway.Api.Tests;
 
 /// <summary>
 /// A real HTTP server on an ephemeral loopback port, standing in for whichever
-/// service a route points at. It answers 204 to everything and records the
-/// path it was given.
+/// service a route points at. It records the path it was given, and answers
+/// 204 unless the caller asks through the query string for a body —
+/// optionally under a <c>Content-Encoding</c> the stub declares for itself.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -30,6 +33,39 @@ namespace Gateway.Api.Tests;
 /// </remarks>
 public sealed class StubDestination : IAsyncLifetime
 {
+    /// <summary>
+    /// Ask for a body of this many bytes instead of the default 204. Named
+    /// here and read here, so a caller cannot spell it differently and get a
+    /// 204 that looks like a compression failure.
+    /// </summary>
+    public const string BodySizeQuery = "body";
+
+    /// <summary>
+    /// Ask for a declared <c>Content-Encoding</c> on that body: <c>gzip</c>
+    /// gzips it as a destination that compressed for itself would, and
+    /// <c>identity</c> declares it unencoded and sends it plain.
+    /// </summary>
+    /// <remarks>
+    /// One switch for two cases because the middleware treats them the same
+    /// way — it declines any response that already carries the header — and
+    /// keeping them apart in the stub would hide that the two tests are
+    /// exercising one rule (ADR-020).
+    /// </remarks>
+    public const string ContentEncodingQuery = "encoding";
+
+    /// <summary>
+    /// Ask for that body under <c>Cache-Control: no-transform</c>, which is
+    /// what a representation that must not be rewritten says to every
+    /// intermediary on the path.
+    /// </summary>
+    public const string NoTransformQuery = "notransform";
+
+    /// <summary>
+    /// Ask for a <c>Vary</c> header of this value on the response — the
+    /// wildcard above all, which an intermediary must leave alone.
+    /// </summary>
+    public const string VaryQuery = "vary";
+
     private readonly ConcurrentQueue<string> _paths = new();
     private WebApplication? _app;
 
@@ -57,7 +93,61 @@ public sealed class StubDestination : IAsyncLifetime
             await next();
         });
 
-        app.MapFallback(() => Results.NoContent());
+        // 204 unless the caller asks for a body, which is what keeps every test
+        // written before this one unchanged. A query string rather than a
+        // settable property because it is the one way to vary the response that
+        // YARP forwards untouched, and because per-request beats per-fixture
+        // setup inside a class: nothing has to be reset between tests and no
+        // test depends on the order it runs in.
+        //
+        // NOT for independence between classes — every consumer declares
+        // IClassFixture<StubDestination>, so xUnit already builds one instance
+        // each and no class holds another's. A comment here claimed otherwise
+        // until a review checked the lifetime.
+        app.MapFallback((HttpContext context) =>
+        {
+            if (!int.TryParse(context.Request.Query[BodySizeQuery], out int size))
+                return Results.NoContent();
+
+            string? vary = context.Request.Query[VaryQuery];
+
+            if (!string.IsNullOrEmpty(vary))
+                context.Response.Headers.Vary = vary;
+
+            // The RFC 9111 directive telling intermediaries not to transform
+            // the representation. It reaches every cache and proxy on the path
+            // and stops none of them here, which is the point of the test that
+            // asks for it (ADR-020).
+            if (context.Request.Query.ContainsKey(NoTransformQuery))
+            {
+                context.Response.Headers.CacheControl = "no-transform";
+
+                return Results.Text(new string('a', size), "application/json");
+            }
+
+            // A destination that has spoken for its own encoding, whether by
+            // compressing the body itself or by declaring it unencoded. The
+            // middleware's existing-encoding guard skips both alike, because it
+            // reads whether the header is present and never what it says — the
+            // property the two tests over this branch exist to show. ADR-020's
+            // opt-out is the no-transform case above, not this one.
+            string? declared = context.Request.Query[ContentEncodingQuery];
+
+            if (!string.IsNullOrEmpty(declared))
+            {
+                context.Response.Headers.ContentEncoding = declared;
+
+                return declared == "gzip"
+                    ? Results.Bytes(GzipOf(new string('a', size)), "application/json")
+                    : Results.Text(new string('a', size), "application/json");
+            }
+
+            // One repeated character, so the body is at the compressible end of
+            // what a real JSON response looks like. A compression assertion
+            // wants the encoded form to be unmistakably smaller than the plain
+            // one, and incompressible bytes would leave it measuring noise.
+            return Results.Text(new string('a', size), "application/json");
+        });
 
         await app.StartAsync();
 
@@ -69,5 +159,19 @@ public sealed class StubDestination : IAsyncLifetime
     {
         if (_app is not null)
             await _app.DisposeAsync();
+    }
+
+    private static byte[] GzipOf(string body)
+    {
+        using MemoryStream buffer = new();
+
+        using (GZipStream compressor = new(buffer, CompressionLevel.Fastest, leaveOpen: true))
+            compressor.Write(Encoding.UTF8.GetBytes(body));
+
+        // Not `[.. buffer]`: CLAUDE.md's spread rule governs materialising a
+        // SEQUENCE, and a MemoryStream is not one — the spread fails to
+        // compile on it (CS9212). Noted here because a review has already
+        // read the rule the other way.
+        return buffer.ToArray();
     }
 }
