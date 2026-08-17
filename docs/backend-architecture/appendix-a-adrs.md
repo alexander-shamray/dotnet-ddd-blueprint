@@ -336,6 +336,16 @@ refused one does. The price is cache efficiency, since callers send assorted
 `Cache-Control` values; the alternative is a shared cache serving a stored
 gzipped variant to the one caller who asked for none.
 
+**A destination's `Vary: *` is left alone, and the framework's own entry is
+not.** The wildcard covers every dimension, so adding a field name beside it
+narrows nothing; the provider checks before appending, which is the idiom the
+middleware already uses for `Accept-Encoding`. What the middleware does *not*
+do is check for the wildcard — it appends `Accept-Encoding` regardless,
+after the provider has answered and through no seam the provider can reach, so
+a destination's `*` reaches the client as `*, Accept-Encoding`. Measured and
+recorded rather than asserted as correct: it is the framework's behaviour, not
+this platform's decision, and the test says which is which.
+
 `Content-Encoding: identity` also stops the middleware, and is **not** the
 contract offered here. It works only as a side effect of the
 double-compression guard — a refusal reached by looking like an already-encoded

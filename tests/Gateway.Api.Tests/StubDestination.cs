@@ -60,6 +60,12 @@ public sealed class StubDestination : IAsyncLifetime
     /// </summary>
     public const string NoTransformQuery = "notransform";
 
+    /// <summary>
+    /// Ask for a <c>Vary</c> header of this value on the response — the
+    /// wildcard above all, which an intermediary must leave alone.
+    /// </summary>
+    public const string VaryQuery = "vary";
+
     private readonly ConcurrentQueue<string> _paths = new();
     private WebApplication? _app;
 
@@ -102,6 +108,11 @@ public sealed class StubDestination : IAsyncLifetime
         {
             if (!int.TryParse(context.Request.Query[BodySizeQuery], out int size))
                 return Results.NoContent();
+
+            string? vary = context.Request.Query[VaryQuery];
+
+            if (!string.IsNullOrEmpty(vary))
+                context.Response.Headers.Vary = vary;
 
             // The RFC 9111 directive telling intermediaries not to transform
             // the representation. It reaches every cache and proxy on the path

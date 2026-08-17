@@ -69,9 +69,13 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Content.Headers.ContentEncoding.ShouldBe(["gzip"]);
 
-        // Without this a shared cache in front of the gateway may serve the
-        // encoded body to a client that never asked for one.
+        // Without these a shared cache in front of the gateway may serve the
+        // encoded body to a client that never asked for one — Accept-Encoding
+        // because the base provider varies on it, Cache-Control because this
+        // gateway reads that header too and a compressed response varies on it
+        // exactly as a refused one does.
         response.Headers.Vary.ShouldContain("Accept-Encoding");
+        response.Headers.Vary.ShouldContain("Cache-Control");
 
         byte[] encoded = await response.Content.ReadAsByteArrayAsync(ct);
 
@@ -321,6 +325,64 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
             "the representation depends on the request header, so it is a cache-selection dimension");
 
         (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
+    }
+
+    /// <summary>
+    /// A destination's <c>Vary: *</c> gets no <c>Cache-Control</c> beside it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wildcard says the representation depends on something no field name
+    /// captures, so no later request matches it. Appending to that yields
+    /// <c>*, Cache-Control</c>, which narrows nothing and reads as though a
+    /// field list were meant — and it is what this provider did until a review
+    /// asked what happens when the destination has already said <c>*</c>.
+    /// </para>
+    /// <para>
+    /// <b>The framework appends <c>Accept-Encoding</c> beside the wildcard
+    /// anyway, and this test records that rather than hiding it.</b> The
+    /// middleware adds that entry itself, after the provider has answered and
+    /// through no seam the provider can reach; its presence check looks for
+    /// <c>Accept-Encoding</c> and not for <c>*</c>. So the assertion is scoped
+    /// to what this type contributes — a wildcard it leaves alone — and the
+    /// framework's own <c>*, Accept-Encoding</c> is named as out of reach here
+    /// rather than asserted as correct.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_wildcard_vary_from_the_destination_gains_no_cache_control()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        HttpResponseMessage response = await Get($"{CompressibleRoute}&{StubDestination.VaryQuery}=*", ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.Vary.ShouldContain("*", "the destination's wildcard survives the hop");
+        response.Headers.Vary.ShouldNotContain(
+            "Cache-Control",
+            "a wildcard already covers every dimension, so narrowing it with a field name says nothing");
+    }
+
+    /// <summary>
+    /// A destination already varying by <c>Cache-Control</c> is not given it a
+    /// second time.
+    /// </summary>
+    /// <remarks>
+    /// The presence check is the framework's own idiom — the base provider
+    /// reads the comma-separated values before adding <c>Accept-Encoding</c> —
+    /// and this provider appended blind until a review pointed at the case.
+    /// </remarks>
+    [Fact]
+    public async Task An_existing_cache_control_vary_is_not_duplicated()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        HttpResponseMessage response =
+            await Get($"{CompressibleRoute}&{StubDestination.VaryQuery}=Cache-Control", ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.Vary.Count(v => string.Equals(v, "Cache-Control", StringComparison.OrdinalIgnoreCase))
+            .ShouldBe(1);
     }
 
     private static string Declaring(string encoding) =>

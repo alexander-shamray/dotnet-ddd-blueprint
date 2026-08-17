@@ -70,7 +70,7 @@ internal sealed class NoTransformResponseCompressionProvider(
         // Set here rather than at a purer seam because the interface has none:
         // ShouldCompressResponse is the one member the middleware calls, once,
         // before acting on the answer.
-        context.Response.Headers.Append(HeaderNames.Vary, HeaderNames.CacheControl);
+        AdvertiseVaryByCacheControl(context.Response);
 
         // Both directions, and they are not the same kind of rule. Checked
         // before the base call either way, so the directive wins outright
@@ -82,6 +82,37 @@ internal sealed class NoTransformResponseCompressionProvider(
         }
 
         return base.ShouldCompressResponse(context);
+    }
+
+    /// <summary>
+    /// Adds <c>Cache-Control</c> to <c>Vary</c>, unless it is there already or
+    /// the response has declared the wildcard.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A <c>Vary: *</c> from the destination is left exactly as it is.</b>
+    /// The wildcard says the representation depends on something no field name
+    /// captures, so no later request matches it; appending to that produces
+    /// <c>*, Cache-Control</c>, which narrows nothing and reads as though a
+    /// field list were meant.
+    /// </para>
+    /// <para>
+    /// The presence check is the framework's own idiom — <c>ResponseCompressionBody</c>
+    /// reads the comma-separated values before adding <c>Accept-Encoding</c>
+    /// rather than appending blind — and the first version of this method did
+    /// append blind, so a destination that already varied by
+    /// <c>Cache-Control</c> got it twice.
+    /// </para>
+    /// </remarks>
+    private static void AdvertiseVaryByCacheControl(HttpResponse response)
+    {
+        foreach (string? value in response.Headers.GetCommaSeparatedValues(HeaderNames.Vary))
+        {
+            if (value == "*" || string.Equals(value, HeaderNames.CacheControl, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        response.Headers.Append(HeaderNames.Vary, HeaderNames.CacheControl);
     }
 
     /// <summary>
