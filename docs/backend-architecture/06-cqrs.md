@@ -768,6 +768,10 @@ public sealed record PlaceOrderItem(Guid ProductId, int Quantity);
 
 public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
 {
+    // A business-shaped bound well inside SQL Server's 2,100 parameters — an
+    // order with more lines than this is a data import, not a checkout.
+    public const int MaxItems = 100;
+
     public PlaceOrderValidator()
     {
         // NotEmpty first: Matches alone skips null, and a JSON "currency":
@@ -776,7 +780,19 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         // as input (§5.7's division). \z, not $: .NET's $ matches before a
         // trailing newline, and "EUR\n" must fail here, not in the domain.
         RuleFor(x => x.Currency).NotEmpty().Matches(@"^[A-Za-z]{3}\z");
-        RuleFor(x => x.Items).NotEmpty();
+        // A maximum as well as a minimum. The reader expands the product ids
+        // into one SQL parameter each and adds @Currency beside them; SQL
+        // Server's limit is 2,100, so an unbounded list turns a well-formed
+        // request into a 500 rather than a 400. Cascade(Stop) is load-bearing
+        // rather than tidiness: FluentValidation runs every validator in a
+        // rule by default, so on an explicit "items": null the NotEmpty
+        // records its failure and the size predicate then dereferences the
+        // null it just rejected.
+        RuleFor(x => x.Items)
+            .Cascade(CascadeMode.Stop)
+            .NotEmpty()
+            .Must(items => items.Count <= MaxItems)
+            .WithMessage($"An order cannot contain more than {MaxItems} items.");
         RuleForEach(x => x.Items).ChildRules(item =>
         {
             item.RuleFor(i => i.ProductId).NotEmpty();
@@ -798,7 +814,11 @@ public sealed class PlaceOrderHandler(
 {
     public async Task<Result<Guid>> HandleAsync(PlaceOrderCommand command, CancellationToken ct)
     {
-        ProductId[] productIds = [.. command.Items.Select(i => new ProductId(i.ProductId))];
+        // Distinct: two lines naming the same product are a legitimate basket,
+        // and without it each repetition costs another SQL parameter against
+        // the same 2,100 ceiling the validator's MaxItems is measured against.
+        ProductId[] productIds =
+            [.. command.Items.Select(i => new ProductId(i.ProductId)).Distinct()];
         IReadOnlyDictionary<ProductId, Money> priceList =
             await prices.GetAsync(productIds, command.Currency, ct);
 

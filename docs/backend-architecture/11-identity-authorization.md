@@ -337,8 +337,16 @@ The request type carries the **wire code**, not the enum, for the reason [§9.4]
 gives about `CancelOrder.Reason` — and the parse is the same one, because two
 parses drift and the drift only shows on whichever path is less tested:
 
+It lives beside the endpoint that binds it, not in the slice, and the reason is
+that this handler has **two** entry paths with two wire shapes. The message
+path's shape is `CancelOrder` in `Common.Contracts` (§9.4); if the HTTP path's
+shape sat in `Ordering.Application`, the slice would own one transport's
+request type while the other's lived in a different assembly, for no reason
+either side could state. Each transport owns its own wire type, and the slice
+owns only the `CancelOrderCommand` both converge on:
+
 ```csharp
-namespace Ordering.Application.Orders.CancelOrder;
+namespace Ordering.Api.Endpoints;
 
 public sealed record CancelOrderRequest(string Reason);
 

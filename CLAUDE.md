@@ -176,7 +176,12 @@ src/BuildingBlocks/
   Common.Web/                    UseCorrelationId, AddCommonProblemDetails
                                  (which also registers §10.5's
                                  ValidationExceptionHandler — the 400 row's
-                                 executor), ToHttpResult, AddObservability,
+                                 executor — and PR-18's
+                                 ConcurrencyExceptionHandler, the 409's, which
+                                 is why this block takes the EF Core base
+                                 package and the gateway restores it for an
+                                 exception it cannot raise),
+                                 ToHttpResult, AddObservability,
                                  MapCommonHealthEndpoints, SensitiveDataRedactor,
                                  BuildInfo and the AddCommonWebDefaults that
                                  composes them — the only building block with a
@@ -573,7 +578,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty projects and `dotnet test` runs 599 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 605 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`

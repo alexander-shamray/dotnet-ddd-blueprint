@@ -21,6 +21,14 @@ public static class ProblemDetailsExtensions
     {
         services.AddExceptionHandler<ValidationExceptionHandler>();
 
+        // §10.5's 409 row, registered beside the 400 for the same reason: both
+        // are statuses a mechanism beside the handler produces, so neither is
+        // reachable through Error and both need an executor. Order between the
+        // two does not matter — each declines every exception but its own —
+        // but registration order is the pipeline's, so they are kept adjacent
+        // rather than left to be rediscovered separately.
+        services.AddExceptionHandler<ConcurrencyExceptionHandler>();
+
         return services.AddProblemDetails(options =>
             options.CustomizeProblemDetails = context =>
             {

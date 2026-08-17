@@ -232,7 +232,11 @@ turns "someone forgot" into a compile-time-visible override.
 
 Optimistic concurrency is the default and is enough for most aggregates. The
 `rowversion` column means a stale write throws `DbUpdateConcurrencyException`,
-which the API translates to `409 Conflict`.
+which the API translates to `409 Conflict` — `ConcurrencyExceptionHandler` in
+`Common.Web`, registered for every host by `AddCommonProblemDetails`
+([§10.5](10-api-gateway.md)). The response names neither the entity nor the
+version it disagreed about: both are storage details, and what the client
+needs from this status is only that its copy was stale.
 
 Inventory is the exception. Stock reservation is genuinely contended — the same
 SKU may be reserved by many concurrent orders — and optimistic retry loops
