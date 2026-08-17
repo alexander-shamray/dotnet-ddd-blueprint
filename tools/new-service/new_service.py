@@ -900,6 +900,21 @@ INITIAL_CREATE_PATCHES: tuple[tuple[str, str], ...] = (
         "/// table, and creating it here means the first <c>CREATE TABLE</c> lands in a\n"
         "/// schema that is already there rather than being ordered against it.\n",
     ),
+    (
+        # The second PR-10 in this file, and it went out unpatched: a
+        # scaffolded service inherited "the input to PR-10's migrations add",
+        # which is Catalog's history and false everywhere else. Found by a
+        # reviewer reading Ordering's rendered copy, one patch below the one
+        # that had already neutralised the *first* PR-10 three lines up —
+        # a reminder that a file with a patch table is not therefore a file
+        # whose references have all been checked.
+        "/// the analysers, and are left exactly as the tool wrote them: the snapshot is\n"
+        "/// the input to PR-10's <c>migrations add</c>, and an edited one produces a\n"
+        "/// wrong migration two PRs later.\n",
+        "/// the analysers, and are left exactly as the tool wrote them: the snapshot is\n"
+        "/// the input to the next <c>migrations add</c>, and an edited one produces a\n"
+        "/// wrong migration the moment one is run.\n",
+    ),
 )
 
 # The outbox migration's twin, shape-keyed for the same reason: its path carries

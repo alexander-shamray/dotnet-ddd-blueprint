@@ -19,8 +19,11 @@ namespace Ordering.Infrastructure.Persistence.Migrations;
 /// ADR-019. The <c>.Designer.cs</c> beside it and the model snapshot are
 /// machine-owned, carry an <c>auto-generated</c> header that exempts them from
 /// the analysers, and are left exactly as the tool wrote them: the snapshot is
-/// the input to PR-10's <c>migrations add</c>, and an edited one produces a
-/// wrong migration two PRs later.
+/// the input to the next <c>migrations add</c>, and an edited one produces a
+/// wrong migration the moment one is run. In this service that next one was
+/// <c>AddOrders</c>, later in PR-18 — the sentence named PR-10 until a review
+/// caught it, which is Catalog's history rather than Ordering's and rode in
+/// with the scaffold.
 /// </para>
 /// </remarks>
 public partial class InitialCreate : Migration

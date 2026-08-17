@@ -19,10 +19,13 @@ public static class DependencyInjection
         services.AddDispatcher();
 
         // Explicit rather than scanned, beside the dispatcher it serves —
-        // §4.2's registration sample is the shape. It stages nothing until
-        // this service has an aggregate raising domain events, and needs no
-        // null object to say so: a collector over an empty change tracker
-        // returns nothing and the dispatcher exits early (§7.5).
+        // §4.2's registration sample is the shape. Order raises five domain
+        // events, so the collector no longer comes back empty — and this still
+        // stages no rows, for a different reason worth keeping straight: the
+        // Broker lane is empty because the mapper's allow-list is (§9.3), and
+        // the Local lane because no IProjectionHandler is registered (§7.5).
+        // Both are decisions about what this service publishes, not a
+        // consequence of having nothing to publish.
         services.AddDomainEventDispatcher();
 
         // The allow-list of §9.3, and the one registration that decides what

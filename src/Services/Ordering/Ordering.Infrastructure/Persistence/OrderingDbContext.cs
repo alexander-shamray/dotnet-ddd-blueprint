@@ -59,11 +59,14 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
     }
 
     /// <summary>
-    /// §7.2's global conventions. They cover a model with no properties today,
-    /// which is the argument for landing them now: an unbounded
-    /// <c>NVARCHAR(MAX)</c> is cheap to prevent and expensive to migrate, and a
-    /// convention introduced after the first entity silently changes a column
-    /// that already exists.
+    /// §7.2's global conventions. They landed with the scaffold, over a model
+    /// that then had no properties at all, and that was the argument for
+    /// landing them early: an unbounded <c>NVARCHAR(MAX)</c> is cheap to
+    /// prevent and expensive to migrate, and a convention introduced after the
+    /// first entity silently changes a column that already exists. They now
+    /// govern the orders, lines, product prices, inbox and outbox rows this
+    /// context maps — which is the outcome the timing bought, not a change of
+    /// purpose.
     /// </summary>
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
