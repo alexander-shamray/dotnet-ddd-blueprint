@@ -1170,15 +1170,23 @@ comes after:
 - **The compose smoke now builds images.** The application blocks carry
   `build:` stanzas, so the path-filtered workflow compiles the solution inside
   Docker; PR-10 raised its timeout to 25 minutes, **PR-17 raised it again to
-  30** for the gateway's image, and **PR-18 raised it to 35** for Ordering's
-  pair — five images, the same five-minutes-each arithmetic, the workflow
-  header carrying the reason every time. The number lives in
-  `.github/workflows/compose.yml` and is restated here, which is what makes it
-  a claim to reconcile rather than a fact to read: it went stale the moment a
-  third image joined, stayed stale for four review rounds, and went stale
+  30** for the gateway's image, and **PR-18 raised it to 40** for Ordering's
+  pair — five images, five minutes each on top of the 15 that pulls alone
+  cost, the workflow header carrying the reason every time. The number lives
+  in `.github/workflows/compose.yml` and is restated here, which is what makes
+  it a claim to reconcile rather than a fact to read: it went stale the moment
+  a third image joined, stayed stale for four review rounds, and went stale
   again in the very branch that raised it — this sentence was still saying 30
-  while the workflow said 35, found by Grok round 4. A change under `src/` alone does not re-run
-  the workflow — per-service CI builds are PR-25's.
+  while the workflow said 35, found by Grok round 4.
+
+  **Then the raise itself was wrong, which is the more useful failure.** 35
+  came from adding PR-17's +5 again, where PR-18 adds *two* images and owed
+  +10; both stated rules — `30 + 2 × 5` and `15 + 5 × 5` — give 40, and the
+  header said "two more take the same five minutes each" directly above the
+  35. Copilot round 9 found it. **A count in a comment guards nothing until
+  somebody multiplies by it**, and a sentence explaining the guard is the
+  easiest thing in the file to read as already-checked. A change under `src/`
+  alone does not re-run the workflow — per-service CI builds are PR-25's.
 - **Chiselled images take the `-extra` tag, and the suffix is load-bearing.**
   Plain chiselled runs globalization-invariant and `Microsoft.Data.SqlClient`
   refuses to open a connection under it — found when the containerised
