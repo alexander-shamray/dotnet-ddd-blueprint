@@ -27,7 +27,12 @@ public sealed class PlaceOrderHandler(
 {
     public async Task<Result<Guid>> HandleAsync(PlaceOrderCommand command, CancellationToken ct)
     {
-        ProductId[] productIds = [.. command.Items.Select(i => new ProductId(i.ProductId))];
+        // Distinct, because the reader turns each id into a SQL parameter and
+        // a caller may legitimately send the same product twice — Order.AddLine
+        // merges those into one line, so asking the projection for the price
+        // twice buys nothing and spends a parameter. The validator's ceiling
+        // bounds the count; this stops duplicates eating into it.
+        ProductId[] productIds = [.. command.Items.Select(i => new ProductId(i.ProductId)).Distinct()];
         IReadOnlyDictionary<ProductId, Money> priceList =
             await prices.GetAsync(productIds, command.Currency, ct);
 

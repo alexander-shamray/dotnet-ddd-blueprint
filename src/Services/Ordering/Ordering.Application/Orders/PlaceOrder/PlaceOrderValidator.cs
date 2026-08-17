@@ -10,6 +10,13 @@ namespace Ordering.Application.Orders.PlaceOrder;
 /// </summary>
 public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
 {
+    /// <summary>
+    /// The most lines one order may carry. Public because the test that pins
+    /// the boundary reads it rather than repeating the number — a literal in
+    /// both places is the second table this repository keeps removing.
+    /// </summary>
+    public const int MaxItems = 100;
+
     public PlaceOrderValidator()
     {
         // NotEmpty first: Matches alone skips null, and a JSON "currency":
@@ -18,7 +25,16 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         // as input (§5.7's division). \z, not $: .NET's $ matches before a
         // trailing newline, and "EUR\n" must fail here, not in the domain.
         RuleFor(x => x.Currency).NotEmpty().Matches(@"^[A-Za-z]{3}\z");
-        RuleFor(x => x.Items).NotEmpty();
+        // A maximum as well as a minimum, and the ceiling is not cosmetic.
+        // ProjectedPriceReader expands the product ids into one SQL parameter
+        // each and adds @Currency beside them; SQL Server's limit is 2,100, so
+        // an authenticated caller sending 2,100 items turned a well-formed
+        // request into a 500 rather than a 400. 100 is a business-shaped bound
+        // well inside that — an order with more lines than this is a data
+        // import, not a checkout — and it fails as validation, which is where
+        // a request the caller phrased wrongly belongs (§5.7).
+        RuleFor(x => x.Items).NotEmpty().Must(items => items.Count <= MaxItems)
+            .WithMessage($"An order cannot contain more than {MaxItems} items.");
         RuleForEach(x => x.Items).ChildRules(item =>
         {
             item.RuleFor(i => i.ProductId).NotEmpty();

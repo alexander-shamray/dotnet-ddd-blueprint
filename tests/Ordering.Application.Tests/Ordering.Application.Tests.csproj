@@ -23,10 +23,13 @@
          takes an IConfiguration, and the registration tests build a real one
          rather than substitute the contract. -->
     <PackageReference Include="Microsoft.Extensions.Configuration" />
-    <!-- The handler tests seed and assert through the real OrderingDbContext
-         (§12.4's seeding rule — a raw INSERT drifts from the aggregate the
-         first time it gains a column). -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <!-- No EF Core provider package: nothing here names an EF type. The
+         handler tests that would have — the ones §12.1 homes at this level —
+         live in Ordering.Api.Tests instead, because ICurrentUser is
+         HttpContextCurrentUser and a handler resolved in a bare scope has no
+         principal to bind a subject from. This reference arrived with those
+         tests and should have left with them; an unused package reference is
+         a dependency claim the project does not make. -->
   </ItemGroup>
 
   <ItemGroup>
