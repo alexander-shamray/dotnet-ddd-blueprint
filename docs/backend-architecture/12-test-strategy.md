@@ -1488,17 +1488,24 @@ public async Task The_service_receives_the_path_with_the_namespace_prefix_remove
 > **One property in this suite cannot be asserted over `TestServer` at all**,
 > and it is the case that says where the seam is. §10.1's body ceiling is a
 > Kestrel option, and `TestServer` is not Kestrel — it implements none of the
-> body-size features, so `ConfigureKestrel` is a no-op under it and every
-> assertion about the limit would pass against a gateway that has none.
-> `WebApplicationFactory.UseKestrel(0)` takes an ephemeral loopback port for
-> the stub's reason, and the order is load-bearing: it throws once the host is
-> initialised, and `CreateClient` is what initialises one, so a factory whose
-> client is taken first is silently a `TestServer` again.
+> body-size features, so `ConfigureKestrel` is a no-op under it and the ceiling
+> does not exist. `WebApplicationFactory.UseKestrel(0)` takes an ephemeral
+> loopback port for the stub's reason, and the order is load-bearing: it throws
+> once the host is initialised, and `CreateClient` is what initialises one, so
+> a factory whose client is taken first is silently a `TestServer` again.
 >
-> The rule this leaves is worth carrying past the gateway. A test may drive
-> `TestServer` for anything the *application* decides and must drive a real
-> server for anything the *server* decides — and the two look identical from
-> the test, because the no-op is silent rather than an error.
+> **The failure is loud or silent depending on what the suite asserts, and only
+> one of those is a trap.** Run over `TestServer`, the size-limit suite goes
+> red: the oversized bodies reach the destination and answer 204 where 413 was
+> expected. What passes is the one test asserting that a body *at* the ceiling
+> is forwarded — so a suite written from the acceptance side alone would be
+> green against a gateway with no limit whatsoever. That is the shape to guard
+> against, and asserting the boundary from both sides is the guard.
+>
+> The rule this leaves is worth carrying past the gateway: drive `TestServer`
+> for anything the *application* decides, and a real server for anything the
+> *server* decides. The configuration is the part that fails silently — it
+> binds, it reports nothing, and it governs nothing.
 
 ## 12.5 Testing the saga
 

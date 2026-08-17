@@ -23,8 +23,12 @@ public static class GatewayLimits
     /// between environments, so binding it would be a settings bag holding one
     /// value that is the same everywhere. A named constant rather than a
     /// literal in <c>Program.cs</c> because the tests spend it from both sides
-    /// of the boundary — a suite asserting a number of its own would pass
-    /// against a gateway configured with a different one.
+    /// of the boundary, and reading it here is what lets them assert the
+    /// boundary's <i>semantics</i> — at the ceiling forwarded, one byte past
+    /// refused — rather than a value. A suite carrying its own copy of the
+    /// number would go red the day the decision changed, reporting a
+    /// disagreement between two literals as though it were a defect in the
+    /// gateway.
     /// </para>
     /// </remarks>
     public const long MaxRequestBodyBytes = 1L * 1024 * 1024;

@@ -22,11 +22,13 @@ namespace Gateway.Api.Tests;
 /// asserted below.
 /// </para>
 /// <para>
-/// The client does not decompress. <c>WebApplicationFactory</c>'s handler
-/// performs no automatic decompression, so <c>Content-Encoding</c> survives to
-/// be read and the encoded bytes are the ones counted — an
-/// <c>AutomaticDecompression</c> handler would silently strip both and leave
-/// every assertion here passing against an uncompressed response.
+/// The client does not decompress, and that is what makes any of this
+/// observable. <c>WebApplicationFactory</c>'s handler performs no automatic
+/// decompression, so <c>Content-Encoding</c> survives to be read and the bytes
+/// counted are the encoded ones. A handler that decompressed would strip the
+/// header and expand the payload, which does not weaken these assertions — it
+/// makes them unwritable, and a suite over such a client could say nothing
+/// stronger than "a body arrived".
 /// </para>
 /// </remarks>
 public sealed class CompressedResponseTests(StubDestination stub) : IClassFixture<StubDestination>

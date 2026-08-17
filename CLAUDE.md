@@ -372,9 +372,12 @@ tests/
                                  the repo that need a REAL SERVER rather than
                                  TestServer: RequestSizeLimitTests drives the
                                  factory over UseKestrel(0), because
-                                 ConfigureKestrel is a silent no-op under
-                                 TestServer and every assertion about the limit
-                                 would pass against a gateway that has none.
+                                 ConfigureKestrel binds under TestServer and
+                                 governs nothing. Run there the suite goes RED
+                                 — two 413s arrive as the stub's 204 — and the
+                                 one test that passes is the acceptance one, so
+                                 a suite asserting only that side would be
+                                 green against no limit at all.
                                  StubDestination answers 204 until a query
                                  string asks it for a body — a request-scoped
                                  switch rather than a mutable fixture, so the
@@ -691,6 +694,26 @@ stream's length and sends the header anyway. It passed, for the wrong reason,
 and only `ContentLength.ShouldBeNull()` told the difference. **A test named for
 a case is not a test of it** — the streaming path is the one an attacker
 chooses, since omitting a header costs the sender nothing.
+
+**"A test that would pass" is this PR's most repeated error, and it was written
+four times before anything checked it.** Copilot round 2's suppressed block —
+which carried five findings under a heading saying no new comments were
+generated — caught the same inversion at four sites: that the size-limit suite
+"would pass" over `TestServer`, that a decompressing client would "leave every
+assertion passing", and that a test carrying its own copy of the ceiling "would
+pass" against a differently configured gateway. **All three are the opposite of
+what happens.** Measured for the first: over `TestServer` the suite goes red,
+two of three, because the oversized bodies reach the destination and answer 204
+where 413 was expected.
+
+The useful half is what the measurement added. Exactly **one** test passes
+there — the one asserting a body *at* the ceiling is forwarded — so the silent
+outcome is real but belongs to a suite written from the acceptance side alone.
+Asserting the boundary from both sides is what converts it into a loud failure,
+which the suite already did and the prose had not noticed. **A hazard framed as
+"this would pass" is a claim about a run nobody performed**; this repository
+already says not to write down an ordering claim a test is not making, and this
+is the same rule for a counterfactual.
 
 **ADR-020's escape hatch was named wrong too, and PR-19 is who it costs.** The
 first version told the BFF to protect a secret-bearing response by *encoding*

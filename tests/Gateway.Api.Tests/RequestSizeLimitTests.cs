@@ -15,10 +15,20 @@ namespace Gateway.Api.Tests;
 /// <c>TestServer</c>, and the reason is the thing being tested.</b> The limit
 /// is a Kestrel option, and <c>TestServer</c> is not Kestrel — it implements
 /// none of the body-size features, so <c>ConfigureKestrel</c> is a no-op under
-/// it and every assertion below would pass against a gateway that has no limit
-/// at all. <c>UseKestrel(0)</c> takes an ephemeral loopback port for the same
-/// reason <see cref="StubDestination"/> does, so parallel classes never
-/// collide.
+/// it and the ceiling simply does not exist. <c>UseKestrel(0)</c> takes an
+/// ephemeral loopback port for the same reason <see cref="StubDestination"/>
+/// does, so parallel classes never collide.
+/// </para>
+/// <para>
+/// <b>Run over <c>TestServer</c> this suite goes red, not green, and the
+/// difference is the both-sides assertion.</b> Measured after a Copilot review
+/// said so: two of the three fail — the oversized bodies reach the stub and
+/// come back 204 where 413 was expected — and exactly one passes, the one
+/// asserting that a body <i>at</i> the ceiling is forwarded. So the silent
+/// outcome the seam is worth guarding against is a suite that tests only the
+/// acceptance: that suite passes on a gateway with no limit at all and proves
+/// nothing. Asserting the refusal is what turns a silent no-op into a loud
+/// one.
 /// </para>
 /// <para>
 /// Both cases carry a token. The ceiling is enforced where the body is read,
