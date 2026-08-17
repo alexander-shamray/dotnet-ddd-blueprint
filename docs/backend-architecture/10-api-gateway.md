@@ -9,25 +9,38 @@ genuinely cross-cutting at the edge, and nothing else.
 CORS · request/response logging with correlation IDs · response compression ·
 request size limits.
 
-> **Two of those seven are not configured yet, and the list keeps them
-> anyway.** PR-17 delivered the first five; the shipped host calls no
-> `UseResponseCompression` and sets no body-size limit, which
-> [Appendix C](appendix-c-delivery-plan.md) schedules as PR-27. The entries
-> stay because this is a statement of what the gateway is responsible for, and
-> deleting a responsibility because it is not built yet turns a specification
-> into a changelog — the same reason §4.1 draws six services and annotates
-> which exist.
+> **All seven are configured, and the last two took a PR of their own because
+> each needed a decision rather than a line.** PR-17 delivered the first five
+> and PR-27 the remaining pair, which between them are three statements in
+> `Program.cs` — the delay was never effort. A size limit needs a **number**,
+> and Kestrel's 30 MB is a framework default rather than anything this platform
+> chose; compression needs the **HTTPS** question answered, and answering it
+> took [ADR-020](appendix-a-adrs.md#adr-020--the-edge-compresses-over-tls-and-says-so).
 >
-> **Both were deferred for the same reason and it is not effort.** Each needs a
-> decision the blueprint has never taken and neither is a line of code. A size
-> limit needs a **number**: Kestrel's 30 MB is a framework default rather than
-> anything chosen here, and a chapter saying "request size limits" while no
-> chapter states one is the gap. Compression needs the **HTTPS** question
-> answered: ASP.NET Core ships `EnableForHttps = false` deliberately, because
-> compressing responses that mix attacker-influenced and secret content over
-> TLS is the BREACH/CRIME shape — and the edge, where every service's
-> responses pass, is the worst place to switch that on without an argument an
-> ADR can hold.
+> **The number is one mebibyte**, in `GatewayLimits.MaxRequestBodyBytes`, and
+> it is a constant rather than configuration for §15.4's reason — it does not
+> vary between environments. Every request this platform accepts is a JSON
+> command, and the largest one it can construct is an order at
+> `PlaceOrderValidator.MaxItems` — a hundred lines, so tens of kilobytes
+> ([§6.4](06-cqrs.md)). A mebibyte is two orders of magnitude above that
+> and two below what an upload endpoint would want, which is the shape of a
+> limit chosen for a platform that has none.
+>
+> **It is enforced where the body is read, which is inside the forwarder.**
+> Neither authentication nor authorization touches the body, so an oversized
+> request that fails either is answered 401 or 403 and its size is never
+> considered — the cheaper refusal, and the right way round, but it means this
+> is a memory bound on requests the gateway was going to proxy rather than a
+> doorman. Kestrel throws past the ceiling and
+> `ExceptionHandlerMiddleware` takes the status off that exception, so a 413
+> arrives in §10.5's shape with no handler written for it — unlike the 400 and
+> 409 rows, which each needed one.
+>
+> **The limit is the edge's, and it is the only one.** A service reached
+> directly inside the cluster still carries Kestrel's own default, because
+> §4.2 gives the gateway no way to impose anything on a host it merely
+> forwards to. That is a statement about the trust boundary rather than a gap:
+> everything outside arrives here first.
 
 **It is not the outermost edge.** TLS terminates at the cloud load balancer or
 Kubernetes Ingress, which then forwards plain HTTP inside the cluster. That
@@ -539,6 +552,7 @@ public static IServiceCollection AddCommonProblemDetails(this IServiceCollection
 | Aggregate not found | 404 | |
 | Concurrency conflict, no precondition sent | 409 | From `DbUpdateConcurrencyException` |
 | `If-Match` / `If-Unmodified-Since` failed | **412** | The client *did* send a precondition and it did not hold. Distinguishing this from 409 tells the client whether retrying with a fresh ETag is the fix |
+| Request body past the edge's ceiling | **413** | The gateway only (§10.1). Kestrel throws `BadHttpRequestException` carrying this status and `ExceptionHandlerMiddleware` reads it off the exception rather than defaulting to 500, so unlike the 400 and 409 rows this one needs no handler of its own |
 | Domain rule violated | 422 | The request was well-formed but not allowed |
 | Downstream dependency unavailable | 503 | With `Retry-After` where known. Never 500 — the fault is not in this service |
 | Rate limited | 429 | With `Retry-After` |

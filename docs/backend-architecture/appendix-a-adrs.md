@@ -249,6 +249,50 @@ Roslyn cannot express stay at `suggestion` and remain a review matter: the four
 cases that keep `var` are the live example, and a rule whose carve-out lives in
 prose must not fail a build that cannot read the prose.
 
+## ADR-020 — The edge compresses over TLS, and says so
+
+**Decision.** `Gateway.Api` calls `UseResponseCompression` with
+`EnableForHttps = true`, taking the framework's default providers — Brotli and
+Gzip at `CompressionLevel.Fastest` — and its default compressible type list,
+which does **not** include `application/problem+json`. No other host in the
+platform compresses anything.
+**Why.** The framework ships `EnableForHttps = false` because compressing a
+response that mixes attacker-influenced input with a secret leaks the secret's
+length, which is BREACH and CRIME. Leaving it false here would be a mitigation
+this topology cannot deliver: TLS terminates at the load balancer or Ingress
+([§10.1](10-api-gateway.md)) and plain HTTP is forwarded inside the cluster, so
+the gateway sees `http` on every request and the flag never fires — the edge
+would compress everything regardless while the code read as though something
+were guarding it. That is the same class of defect as a guard claiming a closed
+set it never checks, and the *response* still reaches the browser over TLS
+either way, so the exposure is not removed by the flag and cannot be argued
+from the scheme. It has to be argued from content, and the content is what
+makes it safe: the bodies crossing this edge are proxied API JSON, and the
+platform puts no secret in one. Tokens are issued by Keycloak and never
+traverse the gateway in a body ([§11.5](11-identity-authorization.md)), no
+response sets a session cookie, and no endpoint returns an anti-forgery token.
+The one body that *does* reflect a client-supplied value back — §10.5's
+problem+json, carrying the `X-Correlation-Id` the caller may have chosen
+(§10.4) — is the one the default type list omits, so the input half and the
+compression never meet.
+**Consequences.** The gateway now spends CPU per response, which is the
+resource §15.3 says to bound rather than the memory it says a leak will kill a
+node with; a compression provider is the first thing to look at if edge latency
+regresses. The omission of `application/problem+json` is a framework default
+this platform relies on and does not state, so `CompressedResponseTests` pins
+it from the wire in both directions — adding the type to
+`CompressibleContentTypes` would be re-taking this decision, and the test is
+what makes that visible. **The rule is inherited rather than re-decided by
+every host behind the edge**: PR-19's BFF is the first that could hold a
+session and its responses pass through this middleware, so a BFF response
+carrying a secret must not merely avoid compressing itself — it has to encode
+itself, because the middleware declines any response that already carries a
+`Content-Encoding` and that is the only opt-out there is. Verified, not read
+off the documentation, in the same suite. And a service that one day needs to
+accept an upload meets §10.1's body ceiling first, which is a number in
+`GatewayLimits` rather than a per-route setting: raising it is a platform
+decision made once, in the open.
+
 ---
 
 [← §15 CI/CD](15-cicd-deployment.md) · [Index](README.md) · [Appendix B →](appendix-b-licences.md)

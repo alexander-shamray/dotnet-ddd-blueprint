@@ -61,7 +61,7 @@ Present:
 docs/backend-architecture/
   README.md                      index and chapter table
   01-purpose.md .. 15-cicd-deployment.md
-  appendix-a-adrs.md             ADR-001 .. ADR-019
+  appendix-a-adrs.md             ADR-001 .. ADR-020
   appendix-b-licences.md         dependency licence register
   appendix-c-delivery-plan.md    PR sequencing plan
   appendix-d-type-inventory.md   type inventory
@@ -210,7 +210,13 @@ src/Gateway/
                                  under test. GatewayPermissions
                                  (inventory:admin, the one permission a ROUTE
                                  names rather than an endpoint) and
-                                 GatewayRateLimiterPolicies beside it
+                                 GatewayRateLimiterPolicies beside it, plus
+                                 PR-27's GatewayLimits — the platform's one
+                                 body ceiling, and the last two entries of
+                                 §10.1's "It does" list: the Kestrel limit and
+                                 ADR-020's response compression, three
+                                 statements in Program.cs and a PR's worth of
+                                 argument in front of them
 src/Services/Catalog/
   Catalog.Domain/                the first aggregate: Product (Publish factory,
                                  ProductPublishedDomainEvent), ProductId,
@@ -362,7 +368,13 @@ tests/
                                  TestAuthHandler is therefore a second copy of
                                  Catalog's, deliberately — §4.3 permits one
                                  assembly to cross a boundary and it is not a
-                                 test library
+                                 test library. PR-27 added the first tests in
+                                 the repo that need a REAL SERVER rather than
+                                 TestServer: RequestSizeLimitTests drives the
+                                 factory over UseKestrel(0), because
+                                 ConfigureKestrel is a silent no-op under
+                                 TestServer and every assertion about the limit
+                                 would pass against a gateway that has none
   Catalog.TestSupport/           NOT a test project (§4.1): ServiceFixture —
                                  SQL and RabbitMQ containers, real migrator
                                  run, Respawn reset — CatalogApiFactory (both
@@ -578,7 +590,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty projects and `dotnet test` runs 611 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 618 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -586,13 +598,76 @@ job for them beside `licence-gate`. **PR-18 has landed** — Ordering is the
 second service, rendered by the scaffold with no reconciliation owed to it,
 and it carries PR-16's deferred security test: user A *cancelling* user B's
 order → 404, §11.4's ownership check, which needed the first resource in the
-platform that has an owner. **PR-19 (the BFF) and PR-20 (Ordering's Catalog
-projection) are next**, and PR-20 is what fills the `ordering.ProductPrices`
-table PR-18 shipped with its reader and no producer.
+platform that has an owner. **PR-27 has landed too** — out of numerical order
+and in sequence, because Appendix C numbers it last and makes it depend on
+PR-17 alone, so it may land at any point after the gateway; it closes §10.1's
+"It does" list and the gateway is finished. **PR-19 (the BFF) and PR-20
+(Ordering's Catalog projection) are next**, and PR-20 is what fills the
+`ordering.ProductPrices` table PR-18 shipped with its reader and no producer.
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
 judges a real type (`ProductEndpoints`) rather than passing vacuously.
+
+PR-27 landed the last two entries of §10.1's "It does" list — the body ceiling
+and ADR-020's response compression — and five of its decisions bind what comes
+after:
+
+- **`EnableForHttps = false` is a mitigation this topology cannot deliver, and
+  that is the whole of ADR-020.** The framework's default guards BREACH by
+  declining to compress an HTTPS *request's* response; TLS terminates at the
+  ingress (§10.1) and plain HTTP is forwarded inside the cluster, so the
+  gateway sees `http` on every request in the deployed shape and the flag never
+  fires — the edge would compress everything regardless while the code read as
+  though something were guarding it. That is the guard-that-checks-nothing
+  shape this repository keeps finding, so the flag is set **true** and the
+  argument moved onto content, where it belongs: no body crossing this edge
+  pairs a secret with reflected input. **The exposure is not reduced by the
+  false setting** — the response still reaches the browser over TLS either way
+  — which is why picking the reassuring default would have been the unsafe
+  choice as well as the dishonest one.
+- **The one body that reflects a client-supplied value is the one the default
+  MIME list omits, and that is luck rather than design — so a test pins it.**
+  §10.5's problem+json carries the `X-Correlation-Id` the caller may have
+  chosen (§10.4), which is the input half of BREACH; `application/problem+json`
+  is absent from `ResponseCompressionDefaults.MimeTypes` and therefore travels
+  plain. Nothing in this solution decided that, so `CompressedResponseTests`
+  asserts both directions from the wire. **Adding a type to
+  `CompressibleContentTypes` is re-taking ADR-020**, not a tuning change.
+- **The 413 needed no exception handler, and the 400 and 409 rows each did.**
+  Kestrel throws `BadHttpRequestException` carrying the status and
+  `ExceptionHandlerMiddleware` reads it off the exception instead of defaulting
+  to 500, so §10.5's shape arrives with `correlationId` and `traceId` for free.
+  Measured over both framings — a declared `Content-Length` and a chunked body
+  with none — because the plausible failure was the opposite one: YARP's
+  forwarder absorbs client-body faults into its own 400, and it does not absorb
+  this.
+- **`ConfigureKestrel` is a silent no-op under `TestServer`, so the limit is
+  the first property in the solution that a real server has to serve.**
+  `WebApplicationFactory.UseKestrel(0)` is the seam, and its ordering is
+  load-bearing: it throws once the host is initialised and `CreateClient` is
+  what initialises one, so a factory whose client is taken first is a
+  `TestServer` again with no failure to say so. The general rule is worth
+  carrying past the gateway — drive `TestServer` for what the *application*
+  decides, a real server for what the *server* decides, and the two are
+  indistinguishable from the test.
+- **The compression middleware has no ordering rule a test can catch, and
+  saying so is the point.** Moved below the auth pair and the limiter, every
+  test in `Gateway.Api.Tests` stays green — because the only bodies those
+  middlewares produce are problem+json, which is not compressed. Its *absence*
+  is caught immediately, which is the failure mode that matters:
+  `AddResponseCompression` succeeds and compresses nothing without
+  `UseResponseCompression`, exactly the shape §10.3's registration has. Both
+  halves measured, in the habit PR-16 and PR-17 established — do not write down
+  an ordering claim a test is not making.
+
+**One test claim was found false by asserting it**, and it is the sharper
+finding of the two: the chunked-body case was a second copy of the
+`Content-Length` case, because `StreamContent` over a `MemoryStream` reads the
+stream's length and sends the header anyway. It passed, for the wrong reason,
+and only `ContentLength.ShouldBeNull()` told the difference. **A test named for
+a case is not a test of it** — the streaming path is the one an attacker
+chooses, since omitting a header costs the sender nothing.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
 pipeline — and fourteen of its decisions bind what comes after:
@@ -2256,7 +2331,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-020) and keep the
+  (currently ADR-021) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

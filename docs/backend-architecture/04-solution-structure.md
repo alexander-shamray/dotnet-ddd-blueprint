@@ -552,6 +552,21 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.AddCommonWebDefaults();                                  // §13.2
 
+// §10.1's body ceiling, and the only one in the platform. Kestrel's 30 MB is a
+// web server's default rather than a choice; GatewayLimits argues the number.
+// Enforced where the body is READ, which is inside the forwarder — so a request
+// that fails authorization is refused without its size being considered.
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimits.MaxRequestBodyBytes);
+
+// §10.1's response compression. The providers and the compressible MIME types
+// are the framework's defaults, deliberately — that list omits
+// application/problem+json, which is what keeps §10.5's error bodies (the one
+// place a client-supplied value is reflected back) out of the compressed set.
+// EnableForHttps is the whole of ADR-020: false would be a mitigation this
+// topology cannot deliver, because TLS terminates upstream and the flag would
+// never fire.
+builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
+
 // YARP is registered here and configured from the "ReverseProxy" section
 // shown in §10.2. Without this, MapReverseProxy() throws at startup and the
 // entire routing configuration is inert.
@@ -686,6 +701,14 @@ WebApplication app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseCorrelationId();           // assigns the ID if the client sent none
+
+// High enough to wrap every writer below it, because this middleware acts by
+// replacing the response body feature. Nothing here is an ordering rule a test
+// can catch — moving it below the auth pair changes no observable response,
+// measured — but its ABSENCE is: AddResponseCompression succeeds and compresses
+// nothing without it, the same quiet shape the limiter's registration has.
+app.UseResponseCompression();     // §10.1, ADR-020
+
 app.UseStatusCodePages();         // §10.5 — 401 and 403 as problem+json
 
 // Above everything that reads the client address, and below the two that do
