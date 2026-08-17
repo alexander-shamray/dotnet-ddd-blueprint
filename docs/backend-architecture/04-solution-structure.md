@@ -475,7 +475,6 @@ builder.Services.AddOrderingInfrastructure(builder.Configuration);  // above
 // at the endpoint — so the compiler should be the thing comparing them.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy(OrderingPermissions.Read, p => p.RequirePermission(OrderingPermissions.Read))
     .AddPolicy(OrderingPermissions.Write, p => p.RequirePermission(OrderingPermissions.Write))
     .AddPolicy(OrderingPermissions.Cancel, p => p.RequirePermission(OrderingPermissions.Cancel));
 

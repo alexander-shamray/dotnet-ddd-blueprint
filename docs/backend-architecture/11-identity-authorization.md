@@ -183,10 +183,16 @@ roles to permissions in one place.
 // ASP.NET Core checks them.
 builder.Services
     .AddAuthorizationBuilder()
-    .AddPolicy(OrderingPermissions.Read, p => p.RequirePermission(OrderingPermissions.Read))
     .AddPolicy(OrderingPermissions.Write, p => p.RequirePermission(OrderingPermissions.Write))
     .AddPolicy(OrderingPermissions.Cancel, p => p.RequirePermission(OrderingPermissions.Cancel));
 ```
+
+One policy per constant and no more: a policy registered before an endpoint
+names it is an unused registration, which is the mirror of the unregistered
+name the callout below is about. This block registered a third over
+`OrderingPermissions.Read` until PR-18 shipped the service without a read
+endpoint — the class sample and the registration have to lose an entry
+together, and they did not.
 
 `RequirePermission` is a one-line extension in `Common.Web` over
 `RequireClaim(PermissionClaim.Type, permission)`. It exists so that **no host

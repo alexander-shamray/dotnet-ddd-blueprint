@@ -13,8 +13,8 @@ namespace Ordering.Api;
 /// not-registered-at-all half needs <c>AuthorizationPolicyTests</c>, which is
 /// why both exist.
 /// <para>
-/// <b>Two entries, for two endpoints.</b> §11.4 prints a third, <c>Read</c>,
-/// and it is deliberately absent until there is a read endpoint to require it:
+/// <b>Two entries, for two endpoints.</b> A third, <c>orders:read</c>, is
+/// deliberately absent until there is a read endpoint to require it:
 /// a service's vocabulary holds what its endpoints require and nothing else,
 /// and a permission nothing requires is a dead name in the realm. §6.5's
 /// query slice is PR-20's, and <c>orders:read</c> arrives with it.

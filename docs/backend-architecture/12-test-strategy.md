@@ -1027,7 +1027,9 @@ public class CancelOrderEndpointTests(ServiceFixture fixture) : IAsyncLifetime
     {
         // Authenticated, but with orders:read where the endpoint wants
         // orders:cancel — the case a fixture that grants everything hides.
-        // A literal, not OrderingPermissions.Read — the point is a permission
+        // A literal, and there is no constant to reach for anyway: the
+        // vocabulary holds what endpoints require, and nothing reads. The
+        // point is a permission
         // this endpoint's policy does not accept, and naming it from the
         // vocabulary would read as though one existed for it.
         HttpResponseMessage response = await SendAsAsync(Guid.CreateVersion7(), "orders:read", Guid.CreateVersion7());
