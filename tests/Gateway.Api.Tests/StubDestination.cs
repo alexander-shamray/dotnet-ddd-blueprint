@@ -114,10 +114,12 @@ public sealed class StubDestination : IAsyncLifetime
                 return Results.Text(new string('a', size), "application/json");
             }
 
-            // A destination that has spoken for its own encoding — either
-            // because it compressed the body itself, or because it is refusing
-            // compression by declaring the body unencoded. The gateway must
-            // leave both alone, and ADR-020 rests on the second.
+            // A destination that has spoken for its own encoding, whether by
+            // compressing the body itself or by declaring it unencoded. The
+            // middleware's existing-encoding guard skips both alike, because it
+            // reads whether the header is present and never what it says — the
+            // property the two tests over this branch exist to show. ADR-020's
+            // opt-out is the no-transform case above, not this one.
             string? declared = context.Request.Query[ContentEncodingQuery];
 
             if (!string.IsNullOrEmpty(declared))

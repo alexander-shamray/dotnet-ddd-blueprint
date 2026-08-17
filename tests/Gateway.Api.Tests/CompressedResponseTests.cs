@@ -190,29 +190,25 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
     }
 
     /// <summary>
-    /// A destination declaring its body unencoded is left uncompressed —
-    /// ADR-020's opt-out, and the only one there is.
+    /// The existing-encoding guard does not care what the encoding says, so a
+    /// body declared <c>identity</c> is skipped exactly as a gzipped one is.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The first version of this ADR named the wrong mechanism, and Copilot
-    /// caught it.</b> It told PR-19's BFF to protect a secret-bearing response
-    /// by encoding it itself, which mitigates nothing: gzip opens the same
-    /// length side channel wherever it is applied, and the pass-through test
-    /// above only proves the gateway declines to encode a second time. What is
-    /// needed is a body that is never compressed at all, and the middleware's
-    /// header check supplies one — <c>Content-Encoding: identity</c> means
-    /// "no transformation applied", so a response carrying it is skipped and
-    /// reaches the client in the clear.
-    /// </para>
-    /// <para>
-    /// Asserted rather than derived from the documentation, because it is now
-    /// the whole of what ADR-020 offers a downstream and a decision resting on
-    /// an unverified mechanism rests on nothing.
+    /// <b>This is coverage of the guard, and deliberately not ADR-020's
+    /// opt-out.</b> It was the opt-out for two review rounds and is not one:
+    /// the middleware skips this response because the header is *present*, not
+    /// because the value refuses anything, so the protection is a side effect
+    /// of the double-compression check rather than a contract — and it puts a
+    /// content coding on the wire for no reason of the client's.
+    /// <see cref="A_no_transform_directive_stops_compression"/> holds the
+    /// contract. What this test is worth keeping for is that the guard is
+    /// value-blind, which is the half neither the gzip case nor the
+    /// <c>no-transform</c> case can show on its own.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_response_declaring_identity_is_not_compressed()
+    public async Task The_existing_encoding_guard_skips_any_declared_value()
     {
         CancellationToken ct = TestContext.Current.CancellationToken;
 
@@ -221,9 +217,9 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Content.Headers.ContentEncoding.ShouldBe(
             ["identity"],
-            "the declaration survives the hop — a gzip here would mean the opt-out is not one");
+            "the declaration survives the hop untouched — a gzip here would mean the guard reads the value");
 
-        // Readable without decompressing, which is the property the BFF needs.
+        // Readable without decompressing, which is what "skipped" amounts to.
         (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
     }
 

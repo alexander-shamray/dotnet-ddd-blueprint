@@ -214,9 +214,11 @@ src/Gateway/
                                  PR-27's GatewayLimits — the platform's one
                                  body ceiling, and the last two entries of
                                  §10.1's "It does" list: the Kestrel limit and
-                                 ADR-020's response compression, three
-                                 statements in Program.cs and a PR's worth of
-                                 argument in front of them
+                                 ADR-020's response compression, four
+                                 statements in Program.cs — the fourth being
+                                 NoTransformResponseCompressionProvider, which
+                                 is RFC 9111 conformance rather than a choice —
+                                 and a PR's worth of argument in front of them
 src/Services/Catalog/
   Catalog.Domain/                the first aggregate: Product (Publish factory,
                                  ProductPublishedDomainEvent), ProductId,
@@ -726,9 +728,10 @@ it itself, on the ground that the middleware skips a response already carrying
 a `Content-Encoding`. The mechanism is right and the instruction is useless:
 gzip opens the same length side channel wherever it is applied, so a
 BFF-compressed secret leaks exactly as a gateway-compressed one does. The
-opt-out is `Content-Encoding: identity` — "no transformation applied", skipped
-by the same header check and readable on the wire. Copilot round 1 again, and
-it is worth noticing that both of its findings were **the argument being
+answer taken at the time was `Content-Encoding: identity`, skipped by the same
+header check and readable on the wire — **which stood for two rounds and is
+also wrong**; the paragraph below is where it lands. Copilot round 1 again,
+and it is worth noticing that both of its findings were **the argument being
 wrong while the code was right**: the flag and the header check were correct
 in `Program.cs` throughout. A review that only diffs code would have found
 neither.
