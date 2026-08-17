@@ -435,7 +435,7 @@
         {
           "id": "8a1e4d67-0b93-4c72-9f5a-6d2b8e30c1f4",
           "name": "orders:cancel",
-          "description": "Cancel one's own order (§11.4). Required by POST /v1/orders/{id}/cancel and granted to demo. Separate from orders:write because §11.4's vocabulary distinguishes them, and a caller holding only write gets 403 — which Ordering.Api.Tests asserts.",
+          "description": "Cancel one's own order (§11.4). Required by POST /v1/orders/{id}/cancel, granted to demo. Separate from orders:write: a caller holding only write gets 403.",
           "composite": false,
           "clientRole": true,
           "containerId": "e55a8854-8088-495c-8db4-331d4b5eb68e",
@@ -444,7 +444,7 @@
         {
           "id": "c47b0f52-6e18-4d39-a806-91f3c5a7e2d8",
           "name": "orders:admin",
-          "description": "Act on an order the caller does not own (§11.4). A claim CancelOrderHandler reads against a loaded aggregate, never an endpoint policy — no route names it, and AuthorizationPolicyTests fails if one ever resolves. Grantable and granted to nobody, on inventory:admin's terms: without the role no token could carry the claim, and the handler's admin branch would be unreachable code.",
+          "description": "Act on an order the caller does not own (§11.4). A claim CancelOrderHandler reads, never an endpoint policy. Grantable and granted to nobody: without the role the handler's admin branch is unreachable.",
           "composite": false,
           "clientRole": true,
           "containerId": "e55a8854-8088-495c-8db4-331d4b5eb68e",

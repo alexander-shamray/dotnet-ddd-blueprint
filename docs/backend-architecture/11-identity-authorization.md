@@ -212,14 +212,17 @@ namespace Ordering.Api;
 /// </summary>
 public static class OrderingPermissions
 {
-    public const string Read = "orders:read";
     public const string Write = "orders:write";
     public const string Cancel = "orders:cancel";
 }
 ```
 
 **A service's vocabulary holds what its endpoints require, and nothing else.**
-Catalog's is one entry — `catalog:write` — because its listing is anonymous
+This sample carried a third entry, `orders:read`, until PR-18 shipped the
+service and had no read endpoint to require it — §6.5's query slice is PR-20's,
+so the constant arrives then. A permission printed here ahead of the endpoint
+that names it is the first half of the rule below, demonstrated by the sample
+that states it. Catalog's is one entry — `catalog:write` — because its listing is anonymous
 ([§10.2](10-api-gateway.md)); there is no `catalog:read`, because a permission
 nothing requires is a name in the realm nobody can act on. `orders:admin` is
 not here either, and for a different reason given below: it is a **claim** a

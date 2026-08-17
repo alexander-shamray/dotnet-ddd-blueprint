@@ -174,16 +174,25 @@ where the service actually is.
 export ASPNETCORE_ENVIRONMENT=Development
 export Identity__Authority='http://localhost:8080/realms/commerce'
 export ReverseProxy__Clusters__catalog__Destinations__d1__Address='http://localhost:5102/'
+export ReverseProxy__Clusters__ordering__Destinations__d1__Address='http://localhost:5101/'
 dotnet run --project src/Gateway/Gateway.Api
 ```
+
+**A destination joins this block with the PR that builds its service**, the
+same rule the Compose file's `depends_on` follows. Ordering's line arrived with
+PR-18; without it a host-run gateway 502s `/api/v1/orders`, which is the exact
+path that PR exists to stop answering 502.
 
 `ASPNETCORE_ENVIRONMENT` leads this block for the same reason it leads the one
 above, and the block is written to stand alone rather than as a delta on that
 shell: without it the authority on the next line is plain HTTP outside
 Development, `AddJwtAuthentication` refuses it at startup, and the gateway does
 not run at all. Every host here validates tokens (§11.2), so every host-run
-block that names an authority needs this line — which is both of them, and not
-the migrator below, whose job never sees a token.
+block that names an authority needs this line — and the migrator below does
+not, because its job never sees a token. **That is the rule and deliberately
+not a count**: this sentence said "both of them" until Ordering's block made
+three, which is the same way the compose smoke's image count went stale, one
+file over.
 
 `Cors__Enabled` and `Ingress__Enabled` are both absent above and both default
 to off, which is the shape the flags are written for — off is a valid

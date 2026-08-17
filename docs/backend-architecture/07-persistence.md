@@ -107,10 +107,23 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .Property(o => o.CustomerId)
             .HasConversion(id => id.Value, value => new CustomerId(value));
 
+        // By name, never by number: an enum stored as an int makes the member
+        // order a storage contract, so inserting a status in the middle
+        // silently reinterprets every existing row. 20 is the longest member
+        // plus room — AwaitingPayment is 15.
         builder
             .Property(o => o.Status)
             .HasConversion<string>()
-            .HasMaxLength(32);
+            .HasMaxLength(20);
+
+        // The order's currency is a private field rather than a property, so
+        // EF has to be told it exists at all. Every line is validated against
+        // it and Total sums in it, so an order that persists without it
+        // materialises unable to compute its own total.
+        builder
+            .Property<string>("_currency")
+            .HasColumnName("Currency")
+            .HasMaxLength(3);
 
         // Value object mapped as a complex type — columns on the same table,
         // no identity, exactly matching the domain semantics.
@@ -150,8 +163,13 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         // Optimistic concurrency — SQL Server maintains this automatically.
         builder.Property(o => o.Version).IsRowVersion();
 
+        // The column §11.4's ownership check reads on every cancellation, and
+        // the one §6.5's history query filters by — both equality on a single
+        // customer, so a plain index over it is the whole requirement. An
+        // index is added by the query that needs it and not in anticipation:
+        // this sample carried a (Status, PlacedAt) composite that no query in
+        // the blueprint seeks on, and the shipped configuration does not.
         builder.HasIndex(o => o.CustomerId);
-        builder.HasIndex(o => new { o.Status, o.PlacedAt });
 
         builder.Ignore(o => o.DomainEvents);
         builder.Ignore(o => o.Total);       // Computed, not stored.
@@ -242,7 +260,7 @@ differently:
 | Kind | Examples | Authored by |
 |---|---|---|
 | **Write model** | `Orders`, `OrderLines` | The EF model. `IEntityTypeConfiguration<T>` (§7.2) is the source of truth; `dotnet ef migrations add` produces the DDL |
-| **Read models and technical tables** | `OrderSummaries`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects |
+| **Read models and technical tables** | `OrderSummaries`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects. **`ProductPrices` is the exception and states the terms**: PR-18 maps it through an `IEntityTypeConfiguration` so `migrations add` emits it beside the aggregate's tables, and the configuration is then written to produce §6.6's printed types — `char(3)`, `DEFAULT 1` — rather than EF's defaults for the CLR ones. The rule is that the shape is the chapter's; which tool writes it is negotiable, and a generated table that drifts from the DDL a later PR copies is not |
 
 That is why [§6.6](06-cqrs.md) and [§9.4](09-messaging.md) show `CREATE TABLE` and §7.2 does not — the write
 model's schema is a projection of the aggregate, and duplicating it as SQL would

@@ -43,8 +43,26 @@ internal sealed class ProductPriceConfiguration : IEntityTypeConfiguration<Produ
         // the reader's WHERE clause seeks on.
         builder.HasKey(p => new { p.ProductId, p.Currency });
 
-        builder.Property(p => p.Currency).HasMaxLength(3);
+        // char(3) and a default, matching §6.6's printed DDL column for
+        // column. This is a read model, and §7.4 files those under
+        // hand-written DDL precisely because they are shaped for queries
+        // rather than for objects — so where the chapter prints a type, the
+        // configuration emits that type rather than EF's default for the CLR
+        // one. IsFixedLength plus IsUnicode(false) is what turns nvarchar(3)
+        // into char(3); a currency code is three ASCII letters by
+        // construction (Money.Of enforces it), so neither the Unicode pages
+        // nor the variable-length header buys anything.
+        builder
+            .Property(p => p.Currency)
+            .HasMaxLength(3)
+            .IsFixedLength()
+            .IsUnicode(false);
+
         builder.Property(p => p.Amount).HasPrecision(19, 4);
+
+        // The default is §6.6's, and it is what lets that chapter's MERGE
+        // omit the column on the insert branch if it ever wants to.
+        builder.Property(p => p.IsAvailable).HasDefaultValue(true);
     }
 }
 

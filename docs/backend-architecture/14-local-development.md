@@ -176,6 +176,11 @@ services:
     ports: [ "5000:8080" ]
     depends_on:
       keycloak: { condition: service_healthy }
+      # Every destination that exists, and only those — a Compose dependency
+      # on a service Compose cannot see fails the whole `up`, where a route to
+      # one costs nothing at startup. So a name joins this list with the PR
+      # that builds its service.
+      catalog-api: { condition: service_started }
       ordering-api: { condition: service_started }
 
   # The one host with client credentials, because it is the one host that calls
@@ -238,9 +243,13 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
 
-The realm's own logins are `demo/demo`, which holds `catalog:write`, and
-`browser/browser`, which holds nothing and is the account a refusal is proved
-against. Both are development defaults on the same terms as the three above —
+The realm's own logins are `demo/demo`, which holds every permission a shipped
+endpoint requires — `deploy/compose/README.md` carries the current list rather
+than this sentence, because a subset named here goes stale with each service
+and did exactly that when Ordering landed — and `browser/browser`, which holds
+nothing and is the account a refusal is proved against. `orders:admin` is
+grantable and held by neither, deliberately: it overrides §11.4's ownership
+check, which stays demonstrable only while no shipped login can bypass it. Both are development defaults on the same terms as the three above —
 the deliberate local-development exception to §11.6, which every deployed
 environment replaces with real users out of a directory.
 
