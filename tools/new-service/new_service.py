@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render a new service from the Catalog template (Appendix C, PR-11).
 
-    python tools/new-service/new_service.py Ordering --port 5101
+    python tools/new-service/new_service.py Yankee --port 5199
 
 There is no template directory, and that is the design rather than an
 omission. The template is `src/Services/Catalog` and `tests/Catalog.*`

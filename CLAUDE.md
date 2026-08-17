@@ -259,6 +259,52 @@ src/Services/Catalog/
                                  AllowAnonymous() out loud, because §10.2's
                                  catalog-public route is GET-only and carries
                                  no policy
+src/Services/Ordering/           PR-18's, and the scaffold's own output plus
+                                 one domain. Same five projects as Catalog,
+                                 rendered by tools/new-service and then given
+                                 an aggregate — nothing about the wiring was
+                                 hand-written or reconciled
+  Ordering.Domain/               §5's Order whole: Place, ConfirmStock,
+                                 ConfirmPayment, MarkShipped, Cancel, five
+                                 domain events, OrderLine and its own
+                                 OrderLineId (Entity<TId> compares the type,
+                                 so a shared key type would make a line equal
+                                 to its order), Ordering's own Money and
+                                 Address, CustomerId with deliberately no
+                                 New(), IOrderRepository — GetAsync and Add.
+                                 AssemblyMarker is gone; Order is the gates'
+                                 anchor, and the domain allow-list is four
+                                 entries because the first event earned
+                                 System.Collections and Money.Of earned
+                                 System.Linq
+  Ordering.Application/          AddOrderingApplication, and two slices:
+                                 Orders/PlaceOrder (§6.4 — no CustomerId on
+                                 the command, the handler reads
+                                 ICurrentUser.Id) and Orders/CancelOrder
+                                 (§11.4's fail-closed ownership check, with
+                                 CommandOrigin.User the zero value so an
+                                 unset origin checks the owner). OrderErrors,
+                                 CancellationReasons over Common.Contracts'
+                                 CancelReasons, IProductPriceReader. Handlers
+                                 are public — §6.2's scan is public-only, and
+                                 internal ones registered silently as nothing
+  Ordering.Infrastructure/       AddOrderingInfrastructure: OrderConfiguration
+                                 and OrderLineConfiguration (a related entity,
+                                 not an owned collection, because an owned
+                                 builder has no ComplexProperty), the
+                                 repository, ProjectedPriceReader over
+                                 ordering.ProductPrices, four JsonConverters
+                                 for the value objects the events carry, and
+                                 six migrations — the scaffold's four plus
+                                 AddOrders and AddProductPrices
+  Ordering.Migrator/             §7.4's job host, as rendered
+  Ordering.Api/                  OrderingPermissions (§11.4: policies only —
+                                 orders:admin is a claim the handler reads),
+                                 the two registered policies, and
+                                 Endpoints/OrderEndpoints — POST /v1/orders
+                                 and POST /v1/orders/{id}/cancel, the group
+                                 failing closed and nothing anonymous, because
+                                 an order belongs to somebody
 tests/
   Common.Domain.Tests/           xunit.v3 + Shouldly; TestModel.cs holds the
   Common.Application.Tests/      anonymous sample types both suites build on;
@@ -336,6 +382,21 @@ tests/
                                  tables — with
                                  Common.Infrastructure.Tests above, three
                                  projects need Docker, one collection each
+  Ordering.TestSupport/          NOT a test project (§4.1), same as Catalog's:
+                                 ServiceFixture with §12.4's SeedOrderAsync,
+                                 OrderingApiFactory and TestAuthHandler
+  Ordering.Domain.Tests/         the §4.2 gates re-anchored on Order, plus
+  Ordering.Application.Tests/    the aggregate's 39 tests; the registration
+  Ordering.Api.Tests/            surface and §12.4's Local-lane round trip —
+                                 which could not be copied from Catalog
+                                 unchanged, because a record's equality
+                                 compares an IReadOnlyList by reference and
+                                 three of these events carry one; then
+                                 GrantablePermissionTests, the authorization
+                                 policy suite, PlaceOrderTests and
+                                 OrderOwnershipTests, which is PR-16's
+                                 deferred 404 over HTTP. Ordering.Api.Tests
+                                 needs Docker too, so four projects do
   Platform.IntegrationTests/     §12.6, and nothing else (§4.1). References
                                  Common.Contracts alone today — "the only
                                  suite that references every service" grows a
@@ -472,7 +533,9 @@ src/Gateway/          Gateway.Api (YARP) — landed with PR-17
 src/BFF/              Web.Bff
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
                         Domain, Application, Infrastructure, Migrator, Api
-                        (Catalog's five landed with PR-07, as shells)
+                        (Catalog's five landed with PR-07, as shells;
+                        Ordering's five with PR-18, rendered rather than
+                        written — the scaffold's dogfood)
                       Shipping — the same five, but Worker in place of Api
                       Notifications — four: no Domain, and a Worker
 tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
@@ -482,7 +545,11 @@ tests/                <Service>.Domain.Tests, .Application.Tests, .Api.Tests,
                         became §4.1's second consumer — "referenced by the two
                         above, which cannot reference each other";
                         Platform.IntegrationTests with PR-15, when §12.6's
-                        rules arrived with the assembly they constrain)
+                        rules arrived with the assembly they constrain;
+                        Ordering's four with PR-18, all of them scaffolded —
+                        TestSupport included, which arrives with the service
+                        rather than waiting for a second consumer the way
+                        Catalog's did)
                       Gateway.Api.Tests is outside that pattern and landed
                         with PR-17 — the gateway is a host and not a
                         <Service>, so it has an .Api.Tests and none of the
