@@ -21,9 +21,13 @@ namespace Ordering.Infrastructure.Persistence;
 /// <c>ApplyConfigurationsFromAssembly</c> finds this class regardless.
 /// </para>
 /// <para>
-/// <c>LastSeenAt</c> is the out-of-order guard PR-20 needs — a projection
+/// <c>UpdatedAt</c> is the out-of-order guard PR-20 needs — a projection
 /// applying an older event after a newer one must be able to tell, and the
-/// column has to exist before the handler that reads it. <c>IsAvailable</c> is
+/// column has to exist before the handler that reads it. <b>The name is
+/// §6.6's, not this file's choice</b>: it shipped as <c>LastSeenAt</c> and
+/// PR-20 is specified to copy §6.6's <c>MERGE</c> verbatim, which would have
+/// failed on a column that is not there. Naming a table the next PR writes is
+/// exactly where a private preference costs somebody else a debugging session. <c>IsAvailable</c> is
 /// the reader's filter: a product Catalog unpublishes stops being orderable
 /// without its price row being deleted, so the history of what it cost
 /// survives.
@@ -56,5 +60,5 @@ internal sealed class ProductPrice
     public string Currency { get; set; } = null!;
     public decimal Amount { get; set; }
     public bool IsAvailable { get; set; }
-    public DateTimeOffset LastSeenAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }

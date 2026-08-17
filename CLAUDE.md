@@ -1164,12 +1164,15 @@ comes after:
   `xunit.v3.extensibility.core` — `xunit.v3` itself refuses non-Exe output.
 - **The compose smoke now builds images.** The application blocks carry
   `build:` stanzas, so the path-filtered workflow compiles the solution inside
-  Docker; PR-10 raised its timeout to 25 minutes and **PR-17 raised it again
-  to 30** for the gateway's image, the workflow header carrying the reason
-  each time. The number lives in `.github/workflows/compose.yml` and is
-  restated here, which is what makes it a claim to reconcile rather than a
-  fact to read: it went stale the moment a third image joined, and stayed
-  stale for four review rounds. A change under `src/` alone does not re-run
+  Docker; PR-10 raised its timeout to 25 minutes, **PR-17 raised it again to
+  30** for the gateway's image, and **PR-18 raised it to 35** for Ordering's
+  pair — five images, the same five-minutes-each arithmetic, the workflow
+  header carrying the reason every time. The number lives in
+  `.github/workflows/compose.yml` and is restated here, which is what makes it
+  a claim to reconcile rather than a fact to read: it went stale the moment a
+  third image joined, stayed stale for four review rounds, and went stale
+  again in the very branch that raised it — this sentence was still saying 30
+  while the workflow said 35, found by Grok round 4. A change under `src/` alone does not re-run
   the workflow — per-service CI builds are PR-25's.
 - **Chiselled images take the `-extra` tag, and the suffix is load-bearing.**
   Plain chiselled runs globalization-invariant and `Microsoft.Data.SqlClient`
@@ -1252,11 +1255,14 @@ after:
   `auto-generated` header that exempts them from the analysers and are left
   **exactly** as the tool wrote them: the snapshot is the input to the next
   `migrations add`, and an edited one produces a wrong migration a PR later.
-- **`dotnet test` needs Docker** — since PR-12 for three projects,
-  `Catalog.Api.Tests`, `Catalog.Application.Tests` and
-  `Common.Infrastructure.Tests`, each with its own `IntegrationCollection`
-  and therefore its own container set (§12.4's stated price). See the
-  commands below.
+- **`dotnet test` needs Docker** — since PR-12, and for four projects since
+  PR-18: `Catalog.Api.Tests`, `Catalog.Application.Tests`,
+  `Common.Infrastructure.Tests` and `Ordering.Api.Tests`, each with its own
+  `IntegrationCollection` and therefore its own container set (§12.4's stated
+  price). `Ordering.Application.Tests` is deliberately not among them — its
+  handler tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
+  `HttpContextCurrentUser` and a handler resolved in a bare scope has no
+  principal to bind a subject from. See the commands below.
 
 The building blocks are all five since PR-14, and `Common.Contracts` is
 complete since PR-15: the §9.1 envelope over five versioned namespaces holding

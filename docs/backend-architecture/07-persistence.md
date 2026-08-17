@@ -118,34 +118,34 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             o => o.ShippingAddress,
             address =>
             {
-                address.Property(a => a.Line1).HasColumnName("ShipLine1").HasMaxLength(200);
-                address.Property(a => a.City).HasColumnName("ShipCity").HasMaxLength(100);
-                address.Property(a => a.PostCode).HasColumnName("ShipPostCode").HasMaxLength(20);
-                address.Property(a => a.Country).HasColumnName("ShipCountry").HasMaxLength(2);
+                address.Property(a => a.Line1).HasColumnName("ShipToLine1").HasMaxLength(200);
+                address.Property(a => a.Line2).HasColumnName("ShipToLine2").HasMaxLength(200);
+                address.Property(a => a.City).HasColumnName("ShipToCity").HasMaxLength(100);
+                address.Property(a => a.PostalCode).HasColumnName("ShipToPostalCode").HasMaxLength(20);
+                address.Property(a => a.Country).HasColumnName("ShipToCountry").HasMaxLength(2);
             });
+
+        // A related entity rather than an owned collection, and the reason is
+        // ComplexProperty: an owned-collection builder does not offer it, so
+        // Money on a line would have to be mapped a second way — two spellings
+        // of one value object in one file, which is the drift this chapter's
+        // convention block exists to prevent. The aggregate boundary is kept by
+        // what is absent instead: no DbSet<OrderLine> on the context, and
+        // OrderLine's factory internal to the domain assembly, so a line cannot
+        // be reached or made except through Order. Reachability is the rule; the
+        // mapping construct is one implementation of it.
+        builder
+            .HasMany(o => o.Lines)
+            .WithOne()
+            .HasForeignKey("OrderId")
+            .IsRequired()
+            .OnDelete(DeleteBehavior.Cascade);
 
         // Backing field, not the public read-only property.
-        builder.Metadata
-            .FindNavigation(nameof(Order.Lines))!
-            .SetPropertyAccessMode(PropertyAccessMode.Field);
-
-        builder.OwnsMany<OrderLine>(
-            "_lines",
-            line =>
-            {
-                line.ToTable("OrderLines", "ordering");
-                line.WithOwner().HasForeignKey("OrderId");
-                line.Property<Guid>("Id");
-                line.HasKey("Id");
-
-                line.ComplexProperty(
-                    l => l.UnitPrice,
-                    money =>
-                    {
-                        money.Property(m => m.Amount).HasColumnName("UnitAmount").HasPrecision(19, 4);
-                        money.Property(m => m.Currency).HasColumnName("Currency").HasMaxLength(3);
-                    });
-            });
+        builder
+            .Navigation(o => o.Lines)
+            .HasField("_lines")
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
 
         // Optimistic concurrency — SQL Server maintains this automatically.
         builder.Property(o => o.Version).IsRowVersion();
@@ -155,6 +155,37 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.Ignore(o => o.DomainEvents);
         builder.Ignore(o => o.Total);       // Computed, not stored.
+    }
+}
+```
+
+The line's own mapping is a second `IEntityTypeConfiguration`, which is what
+the related-entity decision above costs — an owned collection would have been
+configured inline:
+
+```csharp
+internal sealed class OrderLineConfiguration : IEntityTypeConfiguration<OrderLine>
+{
+    public void Configure(EntityTypeBuilder<OrderLine> builder)
+    {
+        builder.ToTable("OrderLines", "ordering");
+        builder.HasKey(l => l.Id);
+
+        builder
+            .Property(l => l.Id)
+            .HasConversion(id => id.Value, value => new OrderLineId(value))
+            .ValueGeneratedNever();
+
+        builder.ComplexProperty(
+            l => l.UnitPrice,
+            money =>
+            {
+                money.Property(m => m.Amount).HasColumnName("UnitPriceAmount").HasPrecision(19, 4);
+                money.Property(m => m.Currency).HasColumnName("UnitPriceCurrency").HasMaxLength(3);
+            });
+
+        builder.Ignore(l => l.LineTotal);   // UnitPrice * Quantity, derived on read.
+        builder.HasIndex("OrderId");
     }
 }
 ```

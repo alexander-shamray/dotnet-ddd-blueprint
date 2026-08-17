@@ -152,7 +152,7 @@ public class OrderTests
     public void Placing_an_order_totals_all_lines()
     {
         var order = Order.Place(
-            CustomerId.New(),
+            new CustomerId(Guid.CreateVersion7()),
             AddressBuilder.Valid(),
             [
                 (ProductId.New(), 2, Money.Of(10.00m, "EUR")),
@@ -179,7 +179,7 @@ public class OrderTests
     [Fact]
     public void An_order_must_have_at_least_one_line()
     {
-        Action act = () => Order.Place(CustomerId.New(), AddressBuilder.Valid(), [], "EUR", Now);
+        Action act = () => Order.Place(new CustomerId(Guid.CreateVersion7()), AddressBuilder.Valid(), [], "EUR", Now);
 
         act.ShouldThrow<DomainException>();
     }
@@ -190,7 +190,7 @@ public class OrderTests
         var product = ProductId.New();
 
         var order = Order.Place(
-            CustomerId.New(),
+            new CustomerId(Guid.CreateVersion7()),
             AddressBuilder.Valid(),
             [
                 (product, 2, Money.Of(10m, "EUR")),
@@ -207,7 +207,7 @@ public class OrderTests
     public void All_lines_must_share_the_order_currency()
     {
         Action act = () => Order.Place(
-            CustomerId.New(),
+            new CustomerId(Guid.CreateVersion7()),
             AddressBuilder.Valid(),
             [
                 (ProductId.New(), 1, Money.Of(10m, "USD"))
@@ -235,7 +235,7 @@ internal static class OrderBuilder
     // §12.4's 404-not-403 case turns entirely on who owns the order.
     public static Order Placed(int lines = 1, string currency = "EUR", CustomerId? customer = null) =>
         Order.Place(
-            customer ?? CustomerId.New(),
+            customer ?? new CustomerId(Guid.CreateVersion7()),
             AddressBuilder.Valid(),
             Enumerable
                 .Range(0, lines)
@@ -252,8 +252,8 @@ internal static class OrderBuilder
     public static Order Shipped()
     {
         Order order = AwaitingPayment();
-        order.ConfirmPayment(PaymentReference.From("test-ref"), DefaultNow);
-        order.MarkShipped(TrackingNumber.From("TRK1"), DefaultNow);
+        order.ConfirmPayment(PaymentReference.Of("test-ref"), DefaultNow);
+        order.MarkShipped(TrackingNumber.Of("TRK1"), DefaultNow);
         return order;
     }
 }

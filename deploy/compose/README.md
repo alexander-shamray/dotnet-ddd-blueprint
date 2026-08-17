@@ -116,9 +116,12 @@ local projection of Catalog's events (§6.4), and the projection that fills
 other way round. Until then the reachable proofs are the 401, the 403 as
 `browser`, and the 404 an order you do not own returns.
 
-Override connection strings with `CATALOG_CONNECTION` and
-`CATALOG_MIGRATOR_CONNECTION`; both default to the `sa` login above, and only
-the configuration *keys* differ locally
+Override connection strings with `CATALOG_CONNECTION` /
+`CATALOG_MIGRATOR_CONNECTION` and `ORDERING_CONNECTION` /
+`ORDERING_MIGRATOR_CONNECTION` — one pair per service, all four commented out
+in `.env.example` so the nested `${SQL_PASSWORD:-…}` keeps following an
+overridden password rather than freezing it. They default to the `sa` login
+above, and only the configuration *keys* differ locally
 ([§7.1](../../docs/backend-architecture/07-persistence.md),
 [§14.2](../../docs/backend-architecture/14-local-development.md)).
 
@@ -140,6 +143,18 @@ export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;
 export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
 dotnet run --project src/Services/Catalog/Catalog.Api
+```
+
+Ordering is the same shape with its own key — `ConnectionStrings__Ordering`,
+never Catalog's, because `AddOrderingInfrastructure` reads its own name and
+`AddSqlServer` throws without it:
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Development
+export ConnectionStrings__Ordering='Server=localhost;Database=Ordering;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
+export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
+export Identity__Authority='http://localhost:8080/realms/commerce'
+dotnet run --project src/Services/Ordering/Ordering.Api
 ```
 
 `ASPNETCORE_ENVIRONMENT` is the first line for a reason: no project here ships

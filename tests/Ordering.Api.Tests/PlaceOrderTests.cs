@@ -170,7 +170,7 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
     private Task SeedPriceAsync(Guid product, decimal amount, string currency, bool available = true) =>
         fixture.ExecuteAsync(
             """
-            INSERT INTO ordering.ProductPrices (ProductId, Currency, Amount, IsAvailable, LastSeenAt)
+            INSERT INTO ordering.ProductPrices (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
             VALUES ({0}, {1}, {2}, {3}, SYSDATETIMEOFFSET());
             """,
             product,

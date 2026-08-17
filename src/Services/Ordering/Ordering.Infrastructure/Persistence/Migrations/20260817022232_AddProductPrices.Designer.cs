@@ -13,7 +13,7 @@ using Ordering.Infrastructure.Persistence;
 namespace Ordering.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(OrderingDbContext))]
-    [Migration("20260816170600_AddProductPrices")]
+    [Migration("20260817022232_AddProductPrices")]
     partial class AddProductPrices
     {
         /// <inheritdoc />
@@ -233,7 +233,7 @@ namespace Ordering.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsAvailable")
                         .HasColumnType("bit");
 
-                    b.Property<DateTimeOffset>("LastSeenAt")
+                    b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("datetimeoffset(7)");
 
                     b.HasKey("ProductId", "Currency");

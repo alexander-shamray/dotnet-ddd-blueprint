@@ -434,7 +434,17 @@ public sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser cur
 
         // The aggregate still owns the transition — this handler decides who
         // may ask, not whether the order is in a state that permits it (§5.4).
-        order.Cancel(command.Reason, clock.GetUtcNow());
+        // The catch translates the refusal rather than the rule: a shipped
+        // order throws, and without this the caller gets a 500 for asking a
+        // question the model answers. §10.5 already carries the error.
+        try
+        {
+            order.Cancel(command.Reason, clock.GetUtcNow());
+        }
+        catch (DomainException)
+        {
+            return Result.Failure(OrderErrors.AlreadyShipped);
+        }
 
         // No metric here, for the reason §6.4 gives: this runs inside the
         // transaction, and a cancellation counted before the commit is counted

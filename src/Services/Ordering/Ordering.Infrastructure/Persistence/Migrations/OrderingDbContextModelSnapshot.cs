@@ -230,7 +230,7 @@ namespace Ordering.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsAvailable")
                         .HasColumnType("bit");
 
-                    b.Property<DateTimeOffset>("LastSeenAt")
+                    b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("datetimeoffset(7)");
 
                     b.HasKey("ProductId", "Currency");

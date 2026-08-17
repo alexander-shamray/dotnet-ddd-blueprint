@@ -16,7 +16,10 @@ sequence below. The **services** are built in this order, and not in parallel:
 1. **Catalog** — simple domain, and the only service that owes nothing to
    another. Establishes the CQRS structure, caching and the query patterns, and
    is the first thing through the deployment pipeline (PR-10).
-2. **Ordering** — the core domain. Rich aggregate, outbox, saga (PR-18).
+2. **Ordering** — the core domain. Rich aggregate and outbox (PR-18), saga
+   (PR-21). The split matters because C.2 sequences them apart: PR-18 is the
+   scaffold, the database and §11.4's ownership 404, and the state machine's
+   later transitions have no caller until the saga drives them.
 3. **Inventory and Payments** — concurrency and third-party integration, once
    the surrounding patterns have settled.
 4. **Shipping** — depends on everything upstream being stable.

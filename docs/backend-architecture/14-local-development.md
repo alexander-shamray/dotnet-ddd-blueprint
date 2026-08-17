@@ -256,14 +256,16 @@ the ones that exist — Compose rejects a dependency it cannot see, and one
 undefined name fails the whole `up` rather than one service. Its *routes* are
 under no such constraint and [§10.2](10-api-gateway.md) ships all four, so
 three paths answer 502 until their services land. A route is configuration the
-gateway reads; a `depends_on` is a name Compose has to resolve.
+gateway reads; a `depends_on` is a name Compose has to resolve. Two paths
+answer 502 today — inventory and the BFF.
 
-**Which is why the fence above gates on `ordering-api` and the shipped file
-gates on `catalog-api`**, and the difference is delivery order rather than a
-discrepancy. The sample is the finished platform's, with Ordering as its
-worked pair and Catalog among the five elided as "the same shape"; the file on
-disk is the reverse, Catalog being the service that exists. Read the fence for
-the shape of a block, never for today's dependency list.
+**The fence above and the shipped file now gate on the same two services**,
+`catalog-api` and `ordering-api`, because both exist: PR-10 built the first and
+PR-18 the second. This paragraph used to explain a discrepancy — the sample was
+the finished platform's, with Ordering as its worked pair, while the file on
+disk had only Catalog — and the explanation expired when Ordering landed. Read
+the fence for the shape of a block; a destination still joins the dependency
+list with the PR that builds it, so the two will diverge again at Inventory.
 
 The collector's mounted configuration is the smallest correct pipeline —
 OTLP in on both protocols, a batch processor, OTLP out to the LGTM
@@ -322,10 +324,18 @@ the host name, because the compose file publishes each port:
 
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
-export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
+export ConnectionStrings__Ordering='Server=localhost;Database=Ordering;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
 export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
 ```
+
+**The key is the service's own**, and the block above is `Ordering.Api`'s
+because that is the host the fence names. `AddOrderingInfrastructure` reads
+`ConnectionStrings:Ordering` and `AddSqlServer` throws without it, so
+exporting Catalog's key here — which this sample did until PR-18 — is a set of
+instructions that cannot start the process it precedes. Running the migrator
+instead takes `ConnectionStrings__OrderingMigrator`, which is §7.1's whole
+point: two keys, one of which may issue DDL.
 
 **The environment is the first line and is not decoration.** No project ships a
 `launchSettings.json`, so `dotnet run` is Production unless told otherwise, and
