@@ -228,33 +228,37 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
     }
 
     /// <summary>
-    /// <c>Cache-Control: no-transform</c> does <b>not</b> stop this
-    /// middleware, and the test exists to keep anyone from believing it does.
+    /// <c>Cache-Control: no-transform</c> stops compression — ADR-020's
+    /// opt-out, and the platform's conformance with RFC 9111 §5.2.2.6.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>A negative pin on framework behaviour, and a security one.</b> A
-    /// Copilot review proposed <c>no-transform</c> as ADR-020's opt-out on the
-    /// ground that ASP.NET Core's compression middleware honours it. Measured
-    /// at this pin, it does not: an 8 KiB body sent under the directive comes
-    /// back <c>Content-Encoding: gzip</c> at 115 bytes, directive intact. So a
-    /// downstream trusting it would have its representation compressed while
-    /// believing it had refused — which is the exact failure ADR-020's opt-out
-    /// exists to prevent, arriving through the header a standards-minded
-    /// reader would reach for first.
+    /// <b>The framework does not do this; <see cref="Gateway.Api"/>'s own
+    /// provider does.</b> Measured before that provider existed: an 8 KiB body
+    /// sent under the directive came back gzipped at 115 bytes with the
+    /// directive intact. The directive "indicates that an intermediary
+    /// (regardless of whether it implements a cache) MUST NOT transform the
+    /// content", quoted verbatim, and applying a content coding is such a
+    /// transformation (RFC 9110 §7.7) — so a YARP gateway compressing past it
+    /// is not making a policy choice, it is violating the specification.
     /// </para>
     /// <para>
-    /// <b>The review's design point stands even though its premise does
-    /// not.</b> <c>no-transform</c> is the directive that travels: it tells
-    /// the ingress, the CDN and every cache on the path, where
-    /// <c>Content-Encoding: identity</c> speaks only to whatever reads the
-    /// response next. A representation that must not be rewritten anywhere
-    /// should carry both — and only one of them binds this gateway, which is
-    /// what this test records.
+    /// <b>Which is why this is the opt-out ADR-020 hands PR-19</b>, in place
+    /// of <c>Content-Encoding: identity</c>. That one works only as a side
+    /// effect of the double-compression guard — a refusal reached by looking
+    /// like an already-encoded response — and puts a content coding on the
+    /// wire for no reason of the client's. <c>no-transform</c> travels: the
+    /// ingress, the CDN and every cache on the path read it, where a content
+    /// coding speaks only to whatever reads the response next.
+    /// </para>
+    /// <para>
+    /// This test is red against the provider's registration removed, which is
+    /// the only thing standing between the platform and the measured
+    /// violation.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_no_transform_directive_does_not_stop_this_middleware()
+    public async Task A_no_transform_directive_stops_compression()
     {
         CancellationToken ct = TestContext.Current.CancellationToken;
 
@@ -267,10 +271,12 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
             true,
             "the directive survived the hop, so this is a statement about the middleware and not about YARP");
 
-        response.Content.Headers.ContentEncoding.ShouldBe(
-            ["gzip"],
-            "measured, not assumed — if this ever goes green as [] the framework has started honouring " +
-            "no-transform, and ADR-020's opt-out should be revisited rather than this test relaxed");
+        response.Content.Headers.ContentEncoding.ShouldBeEmpty(
+            "RFC 9111 forbids an intermediary transforming this content, and the gateway is one");
+
+        // Readable as it stands, which is what a downstream sending the
+        // directive is asking for.
+        (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
     }
 
     private static string Declaring(string encoding) =>

@@ -572,6 +572,13 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimit
 // scheme it reads is https even though the hop was plain.
 builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
 
+// RFC 9111's no-transform, which ASP.NET Core does not implement and which an
+// intermediary may not ignore (ADR-020). Replace rather than a registration
+// placed above AddResponseCompression, whose TryAddSingleton would otherwise
+// make ordering decide it silently.
+builder.Services.Replace(
+    ServiceDescriptor.Singleton<IResponseCompressionProvider, NoTransformResponseCompressionProvider>());
+
 // YARP is registered here and configured from the "ReverseProxy" section
 // shown in §10.2. Without this, MapReverseProxy() throws at startup and the
 // entire routing configuration is inert.

@@ -150,7 +150,7 @@ them is this file's defect however reasonable the prose sounded. It is gateway
 work depending on PR-17 alone, which is what *Edge and security* means.
 
 Its day was the one on this page that is mostly not code, and it held. The two
-capabilities are three lines together, and the day priced the decisions in
+capabilities are four lines together, and the day priced the decisions in
 front of them: a body-size limit needed a number nobody had chosen — one
 mebibyte — and turning compression on at the edge needed the `EnableForHttps`
 argument made where an ADR could hold it, which is
@@ -159,12 +159,15 @@ costs when the code is already obvious**, and pricing it at zero because the
 diff is small is how design decisions end up taken by whoever types first.
 
 What the day did not price, and what a later small-diff PR should, is the
-**tests**: the three lines needed ten, one of which cannot run on `TestServer`
+**tests**: the four lines needed ten, one of which cannot run on `TestServer`
 at all, and finding that out is most of what the day actually bought. An
 estimate derived from the diff is wrong in the same direction each time — and
 three of those ten exist only because a review found the *argument* wrong while
 the code was right, which is the half of a small PR an estimate is least
-equipped to see.
+equipped to see. The line count moving from three to four says the same thing
+about the code: the reviews turned up a specification the edge was violating,
+and a conformance fix is not something a diff-shaped estimate anticipates
+either.
 
 PR-18 is the cheapest service in the plan and that is the whole point of it —
 it is priced at three days *because* PR-11 exists, and if it turns out to cost

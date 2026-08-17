@@ -11,7 +11,7 @@ request size limits.
 
 > **All seven are configured, and the last two took a PR of their own because
 > each needed a decision rather than a line.** PR-17 delivered the first five
-> and PR-27 the remaining pair, which between them are three statements in
+> and PR-27 the remaining pair, which between them are four statements in
 > `Program.cs` — the delay was never effort. A size limit needs a **number**,
 > and Kestrel's 30 MB is a framework default rather than anything this platform
 > chose; compression needs the **HTTPS** question answered, and answering it

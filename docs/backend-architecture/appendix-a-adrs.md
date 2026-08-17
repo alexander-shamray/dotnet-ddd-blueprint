@@ -256,8 +256,11 @@ prose must not fail a build that cannot read the prose.
 both halves are named because the registration on its own compresses nothing.
 It takes the framework's default providers — Brotli and Gzip at
 `CompressionLevel.Fastest` — and its default compressible type list, which does
-**not** include `application/problem+json`. No other host in the platform
-compresses anything.
+**not** include `application/problem+json`. It replaces the framework's
+`IResponseCompressionProvider` with one that refuses any response carrying
+`Cache-Control: no-transform`, which RFC 9111 requires of an intermediary and
+ASP.NET Core does not implement. No other host in the platform compresses
+anything.
 **Why.** The framework ships `EnableForHttps = false` because compressing a
 response that mixes attacker-influenced input with a secret leaks the secret's
 length, which is BREACH and CRIME. **Here that flag is what makes compression
@@ -303,22 +306,25 @@ directions — adding the type to
 what makes that visible. **The rule is inherited rather than re-decided by
 every host behind the edge**: PR-19's BFF is the first that could hold a
 session, and its responses pass through this middleware. A BFF response
-carrying a secret therefore has to say *not compressed at all* —
-`Content-Encoding: identity`, which means "no transformation applied" and which
-the middleware skips, because it declines any response already carrying that
-header. **That is the only thing that stops this gateway**, verified rather
-than read off the documentation.
+carrying a secret says so with **`Cache-Control: no-transform`**, and
+`Gateway.Api` honours it through a `ResponseCompressionProvider` of its own.
 
-`Cache-Control: no-transform` is the directive a standards-minded reader
-reaches for first, and it does **not** work here: measured at this pin, a body
-sent under it comes back gzipped with the directive intact. It is still worth
-sending, and for the reason `identity` cannot serve — it travels, telling the
-ingress, the CDN and every cache on the path, where a content coding speaks
-only to whatever reads the response next. So a representation that must not be
-rewritten anywhere carries both, and only one of the two binds this middleware.
-`CompressedResponseTests` pins that asymmetry from the wire, because a
-downstream trusting `no-transform` alone would be compressed while believing it
-had refused.
+**That is a conformance fix, not a preference.** RFC 9111 §5.2.2.6 says the
+directive "indicates that an intermediary (regardless of whether it implements
+a cache) MUST NOT transform the content", and applying a content coding is such
+a transformation (RFC 9110 §7.7). A YARP gateway is an intermediary. ASP.NET
+Core's middleware does not implement the rule — measured, before the provider
+existed: a body sent under the directive came back gzipped with the directive
+intact — so the edge was violating it on every such response.
+
+`Content-Encoding: identity` also stops the middleware, and is **not** the
+contract offered here. It works only as a side effect of the
+double-compression guard — a refusal reached by looking like an already-encoded
+response — and it puts a content coding on the wire for no reason of the
+client's. `no-transform` is what travels: the ingress, the CDN and every cache
+on the path read it, where a content coding speaks only to whatever reads the
+response next. `CompressedResponseTests` covers both, and the `no-transform`
+one is red against the provider's registration removed.
 
 **This too was written the wrong way round first**, and the correction is worth
 keeping because the wrong version looked like a mitigation. It told the BFF to

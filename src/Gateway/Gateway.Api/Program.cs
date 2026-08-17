@@ -5,6 +5,8 @@ using Common.Web;
 using Gateway.Api;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -44,13 +46,14 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimit
 //
 // EnableForHttps is false by default, against BREACH/CRIME, and here it is
 // what makes compression happen at all. TLS terminates at the ingress (§10.1)
-// so the hop this host serves is plain http — but the block above enables
-// XForwardedProto, UseForwardedHeaders rewrites Request.Scheme from the
-// ingress's header, and this middleware takes its decision at the first WRITE,
-// below the whole pipeline, so the scheme it reads is the rewritten one. Left
-// at the default, a gateway behind an HTTPS ingress compresses nothing and
-// says nothing about it. Measured: ForwardedSchemeCompressionTests goes red
-// against the property removed.
+// so the hop this host serves is plain http — but the forwarded-headers block
+// below enables XForwardedProto, UseForwardedHeaders rewrites Request.Scheme
+// from the ingress's header, and this middleware takes its decision at the
+// first WRITE, below the whole pipeline, so the scheme it reads is the
+// rewritten one. Registration order says nothing about it. Left at the
+// default, a gateway behind an HTTPS ingress compresses nothing and says
+// nothing about it. Measured: ForwardedSchemeCompressionTests goes red against
+// the property removed.
 //
 // So the flag cannot be argued from the scheme in either direction, and
 // ADR-020 argues it from content instead — no body crossing this edge pairs a
@@ -68,6 +71,22 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimit
 // arrives plain — rather than leaving a framework list to change underneath an
 // argument ADR-020 makes.
 builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
+
+// RFC 9111's no-transform, which ASP.NET Core does not implement and which a
+// reverse proxy may not ignore: the directive says an intermediary MUST NOT
+// transform the content, and a content coding is such a transformation
+// (RFC 9110 §7.7). Measured before this line existed — a body sent under the
+// directive came back gzipped — so the gateway was violating it. This is also
+// what makes ADR-020's opt-out the standard one rather than
+// Content-Encoding: identity, which worked only as a side effect of the
+// double-compression guard.
+//
+// Replace rather than registering ahead of AddResponseCompression: that call
+// uses TryAddSingleton, so ordering would silently decide this, and a
+// registration whose correctness depends on sitting above another line is the
+// shape §10.3's own registration comment warns about.
+builder.Services.Replace(
+    ServiceDescriptor.Singleton<IResponseCompressionProvider, NoTransformResponseCompressionProvider>());
 
 // YARP is registered here and configured from the "ReverseProxy" section of
 // appsettings.json (§10.2). Without this, MapReverseProxy() throws at startup

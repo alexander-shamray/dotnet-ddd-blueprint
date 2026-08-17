@@ -733,17 +733,24 @@ wrong while the code was right**: the flag and the header check were correct
 in `Program.cs` throughout. A review that only diffs code would have found
 neither.
 
-**`Cache-Control: no-transform` does not stop this middleware, and that is
-pinned by a test because the belief that it does is the dangerous one.** Round
-3 proposed it as the opt-out, on the ground that ASP.NET Core honours it.
-Measured at this pin, it does not — an 8 KiB body sent under the directive
-comes back gzipped, directive intact. The review's *design* point survives its
-premise: `no-transform` is the directive that travels, reaching the ingress,
-the CDN and every cache, where a content coding speaks only to whatever reads
-the response next. So a representation that must not be rewritten anywhere
-carries **both**, and only one of the two binds this gateway. A downstream
-trusting `no-transform` alone would be compressed while believing it had
-refused, which is why the negative behaviour is a test rather than a sentence.
+**`Cache-Control: no-transform` was the opt-out all along, and the gateway was
+violating RFC 9111 by ignoring it.** Round 3 proposed the directive and was
+half right; round 5 pressed the other half and was fully right. The framework
+does **not** implement it — measured twice, an 8 KiB body coming back gzipped
+with the directive intact — but §5.2.2.6 says an intermediary "regardless of
+whether it implements a cache" MUST NOT transform the content, a content coding
+is such a transformation (RFC 9110 §7.7), and a YARP gateway is an
+intermediary. So the gateway now carries
+`NoTransformResponseCompressionProvider`, a subclass of the framework's own
+with one case in front of `ShouldCompressResponse`, registered by `Replace`
+rather than by sitting above `AddResponseCompression`'s `TryAddSingleton`.
+
+**The intermediate state is the lesson, and it lasted two rounds.** Having
+measured that the framework ignores the directive, this file recorded the
+measurement as though it settled the question — pinning the violation in a test
+and telling PR-19 to use `Content-Encoding: identity` instead. A measurement
+says what the code *does*; it never says what it *may* do. The specification
+was one fetch away and nothing had read it.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
 pipeline — and fourteen of its decisions bind what comes after:
