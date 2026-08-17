@@ -2371,17 +2371,30 @@ services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-services
-    // http, not https: TLS terminates at the ingress and traffic inside the
-    // cluster is plain (§10.1). The host is the Service name YARP also routes
-    // to (§10.2) — "catalog" resolves to nothing.
-    .AddGrpcClient<Pricing.PricingClient>(o =>
-        o.Address = new Uri("http://catalog-api:8080"))
-    // Resilience is registered FIRST so it sits outermost, and the credential
-    // handler runs inside it. That ordering matters: a retry then re-attaches
-    // a token, which is what recovers the case where the first attempt failed
-    // because the token expired in flight. Registered the other way round, all
-    // three attempts would reuse the same dead token.
+// http, not https: TLS terminates at the ingress and traffic inside the
+// cluster is plain (§10.1). The host is the Service name YARP also routes to
+// (§10.2) — "catalog" resolves to nothing. Port 8081 rather than 8080,
+// because a cleartext Kestrel endpoint cannot serve HTTP/1.1 and h2c at once:
+// at the default a client asking for HTTP/2 exactly, as gRPC's does, is
+// answered HTTP_1_1_REQUIRED. The service declares a second, Http2-only
+// endpoint for this hop (§4.2), and 8080 stays the REST surface §10.2 routes
+// to.
+IHttpClientBuilder pricing = services
+    .AddGrpcClient<Pricing.PricingClient>(o => o.Address = new Uri("http://catalog-api:8081"));
+
+// Resilience is registered FIRST so it sits outermost, and the credential
+// handler runs inside it. That ordering matters: a retry then re-attaches a
+// token, which is what recovers the case where the first attempt failed
+// because the token expired in flight. Registered the other way round, all
+// three attempts would reuse the same dead token.
+//
+// Two statements rather than one chain, and this is not a style choice:
+// AddStandardResilienceHandler returns an IHttpStandardResiliencePipelineBuilder
+// — a different type, scoped to the pipeline it just registered — so calling
+// AddHttpMessageHandler on its result does not compile (CS1929). Holding the
+// IHttpClientBuilder in a local keeps both calls on the same receiver and
+// keeps the order, which is the part that carries meaning.
+pricing
     .AddStandardResilienceHandler(options =>
     {
         // Outermost bound. Defaults to 30s, which would breach the hierarchy.
@@ -2399,10 +2412,36 @@ services
         options.CircuitBreaker.FailureRatio = 0.5;
         options.CircuitBreaker.MinimumThroughput = 10;
         options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(15);
-    })
-    // Registered AFTER resilience, so it sits inside it (§11.5).
-    .AddHttpMessageHandler<ClientCredentialsHandler>();
+
+        // SamplingDuration is left at its 30 s default, and the default is
+        // load-bearing: a sampling window shorter than the break duration
+        // forgets every failure while the circuit is open, so the breaker
+        // closes onto a fresh window and reopens on the first error it sees.
+    });
+
+// Registered AFTER resilience, so it sits inside it (§11.5).
+pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
 ```
+
+> **An HTTP resilience pipeline cannot retry a gRPC status, and the
+> configuration above does not say so on its face.** gRPC carries its outcome
+> in `grpc-status` — a trailer on an HTTP **200**, or a header on a
+> trailers-only response, still a 200 — so `AddStandardResilienceHandler`,
+> which decides on the HTTP status line and on `HttpRequestException`, sees a
+> successful response and hands it straight back. A Catalog that answers
+> `Unavailable` is asked **once**, whatever `MaxRetryAttempts` says. What the
+> retries do cover is a transport fault — a refused connection, a reset, a DNS
+> failure, a 502 from an intermediary — which is the shape a service that is
+> genuinely down produces.
+>
+> **The fix is deliberately not a second retry loop.** gRPC has its own retry,
+> configured on the channel through `ServiceConfig`, and it does understand
+> status codes — but it sits *outside* the `HttpClient`, so each of its
+> attempts would get a fresh `TotalRequestTimeout` and three of them would
+> spend fifteen seconds against a five-second ceiling. Stacking the two is the
+> one change that breaks the hierarchy this section exists to protect. One
+> mechanism, and its limits written down. Measured in `UpstreamRetryTests`,
+> from both sides.
 
 > **Trap — `TotalRequestTimeout` left at its default.** It defaults to 30
 > seconds, which is longer than most services' own operation budget and longer
@@ -2453,6 +2492,13 @@ public void Resilience_timeouts_respect_the_hierarchy()
         .ShouldBeLessThan(ServiceOptions.OperationTimeout);
 }
 ```
+
+`GetConfiguredOptions()` reads the options **off the built host**, by the name
+`AddStandardResilienceHandler` registers them under, rather than re-running the
+configuration callback into a fresh instance. That is what makes it a test of
+the registration; and it is self-checking about the name, because asking for
+the wrong one returns a default-constructed instance whose 30 s total request
+timeout fails the first assertion at once.
 
 ## 9.8 Failure handling
 

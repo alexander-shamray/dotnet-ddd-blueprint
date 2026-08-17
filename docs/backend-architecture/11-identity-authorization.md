@@ -713,13 +713,20 @@ Mechanically this is a `DelegatingHandler` attached to every outbound client
 public sealed class ClientCredentialsHandler(ITokenCache tokens, IOptions<ServiceIdentityOptions> identity)
     : DelegatingHandler
 {
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    // cancellationToken, not this blueprint's usual ct: CA1725 requires an
+    // override to keep the base declaration's parameter name, and ADR-019
+    // makes that an error. The same correction §7.2's ConfigureConventions
+    // sample already carries, for the same reason — a reader consulting the
+    // framework's documentation is reading about the base name.
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
     {
         // Cached until shortly before expiry; one token fetch serves many calls.
-        string token = await tokens.GetAsync(identity.Value.Scope, ct);
+        string token = await tokens.GetAsync(identity.Value.Scope, cancellationToken);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        return await base.SendAsync(request, ct);
+        return await base.SendAsync(request, cancellationToken);
     }
 }
 ```
@@ -789,7 +796,7 @@ public async Task Bff_client_credentials_token_is_accepted_by_a_service()
     string token = await Realm.ClientCredentialsAsync("web-bff");
 
     token.Audiences().ShouldContain("commerce-api");
-    (await Catalog.GetAsync("/v1/catalog/products/1", token)).StatusCode
+    (await ServiceValidatingTheRealm().GetAsync("/protected", token)).StatusCode
         .ShouldBe(HttpStatusCode.OK);
 }
 
@@ -798,13 +805,24 @@ public async Task A_client_without_the_scope_is_rejected()
 {
     // The negative half matters more: a mapper that adds the audience to every
     // token would pass the test above and grant the platform to any client the
-    // realm happens to hold.
+    // realm happens to hold. The client is created against the container
+    // rather than shipped in the realm — a credential in a deployed realm for
+    // a test's convenience is the thing §11.6 exists to prevent.
     string token = await Realm.ClientCredentialsAsync("unrelated-client");
 
-    (await Catalog.GetAsync("/v1/catalog/products/1", token)).StatusCode
+    (await ServiceValidatingTheRealm().GetAsync("/protected", token)).StatusCode
         .ShouldBe(HttpStatusCode.Unauthorized);
 }
 ```
+
+**The service in those two lines is a minimal host running the platform's own
+`AddJwtAuthentication`, not Catalog**, and the substitution is deliberate: what
+is under test is the registration plus the realm, and neither of those is
+Catalog's. Driving a real service would add a SQL container and a migrator run
+to a suite whose subject is a token, and it would still be asserting exactly
+this. The suite lives in `Web.Bff.Tests` because the BFF is the host that owns
+the client id — the same rule that put `GrantablePermissionTests` in
+`Gateway.Api.Tests`.
 
 ## 11.6 Secrets
 

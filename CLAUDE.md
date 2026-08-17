@@ -197,6 +197,26 @@ src/BuildingBlocks/
                                  reference to Common.Application was the only
                                  edge between building blocks until PR-14 drew
                                  three more
+src/BFF/
+  Web.Bff/                       PR-19's, and the third host: §10.1's
+                                 aggregation for the web client, and the ONE
+                                 host in the platform that calls a peer
+                                 synchronously (§9.7, ADR-017) — which is what
+                                 makes it the only one holding client
+                                 credentials (§11.5). One project, one
+                                 ProjectReference (Common.Web), no Application
+                                 and no Infrastructure, exactly as the gateway
+                                 has. Identity/ holds §15.4's ONE options type
+                                 in the solution — ServiceIdentityOptions,
+                                 bound, annotated and ValidateOnStart-checked —
+                                 beside ITokenCache, CachingTokenClient and
+                                 ClientCredentialsHandler; PricingHop names the
+                                 client, its resilience options and Catalog's
+                                 address; UpstreamExceptionHandler is §9.7's
+                                 "clear error decided in advance"; and
+                                 Endpoints/CheckoutEndpoints is the one screen,
+                                 GET /v1/checkout/quote, which the gateway
+                                 reaches as /bff/v1/checkout/quote
 src/Gateway/
   Gateway.Api/                   PR-17's edge, and the second host in the
                                  solution: one project, one ProjectReference
@@ -234,10 +254,13 @@ src/Services/Catalog/
                                  allow-list, one entry — the clock,
                                  RequestMetrics, the three behaviours in
                                  pipeline order, the §4.2 validator scan;
-                                 two slices —
+                                 three slices —
                                  Products/PublishProduct (command, validator,
-                                 handler) and Products/GetProducts (§6.5's
+                                 handler), Products/GetProducts (§6.5's
                                  Dapper keyset query over (PublishedAt, Id))
+                                 and PR-19's Products/GetPrices, which is the
+                                 only query in the solution reached over
+                                 something other than HTTP
   Catalog.Infrastructure/        AddCatalogInfrastructure(IConfiguration): the
                                  §6.2 scan, the sealed CatalogDbContext with
                                  §7.2's conventions, EfUnitOfWork,
@@ -262,8 +285,9 @@ src/Services/Catalog/
                                  Reads ConnectionStrings:CatalogMigrator and
                                  never the runtime key (§7.1). Has a
                                  Dockerfile since PR-10, as does Catalog.Api
-  Catalog.Api/                   the composition root of §4.2, complete since
-                                 PR-16: health probes, OpenAPI,
+  Catalog.Api/                   the composition root of §4.2, and since PR-19
+                                 the platform's one gRPC server: health probes,
+                                 OpenAPI,
                                  UseAuthentication/UseAuthorization, the one
                                  catalog:write policy over CatalogPermissions,
                                  and Endpoints/ProductEndpoints — POST and GET
@@ -271,7 +295,13 @@ src/Services/Catalog/
                                  with RequireAuthorization() and the GET saying
                                  AllowAnonymous() out loud, because §10.2's
                                  catalog-public route is GET-only and carries
-                                 no policy
+                                 no policy. PR-19 added Protos/pricing.proto —
+                                 the contract Catalog owns and Web.Bff LINKS
+                                 rather than copies — Grpc/PricingService and
+                                 Grpc/ValidationInterceptor, and the first
+                                 appsettings.json in a service, which exists
+                                 only to declare a second, HTTP/2-only Kestrel
+                                 endpoint on 8081
 src/Services/Ordering/           PR-18's, and the scaffold's own output plus
                                  one domain. Same five projects as Catalog,
                                  rendered by tools/new-service and then given
@@ -355,6 +385,31 @@ tests/
                                  that owns the constant — so the walk is a
                                  shape two suites share rather than one suite's
                                  peculiarity
+  Web.Bff.Tests/                 PR-19's, and another new row in §12.1's
+                                 pyramid: §9.7's hierarchy read off the BUILT
+                                 host rather than off a helper, the quote
+                                 endpoint over a real gRPC server on loopback,
+                                 the credential handler's position measured as
+                                 two different tokens on two attempts, and
+                                 KeycloakIdentityTests — the only suite in the
+                                 solution that starts an identity provider,
+                                 which is what §11.5 says the audience mapper
+                                 needs because nothing compiles differently
+                                 when it is missing. RealmClientTests is
+                                 PR-17's GrantablePermissionTests one host
+                                 over, and it asserts the pair no other suite
+                                 can see: the realm's web-bff secret and
+                                 docker-compose.yml's default for it
+  Web.Bff.TestSupport/           NOT a test project (§4.1), and NOT here for
+                                 §4.1's usual reason — there is one BFF suite.
+                                 StubCatalog is a real gRPC server, so it
+                                 compiles the SERVER half of pricing.proto,
+                                 and Web.Bff already compiles the client half:
+                                 both in one compilation makes every message
+                                 type a CS0436, which ADR-019 turns into an
+                                 error. Two assemblies, one .proto, one half
+                                 each, is also the honest model of
+                                 contract-first
   Gateway.Api.Tests/             PR-17's, and a new row in §12.1's pyramid —
                                  edge configuration, no containers. Reads the
                                  shipped appsettings.json through the host's
@@ -567,7 +622,7 @@ annotations mark what has already landed:
 ```
 src/BuildingBlocks/   all five exist — .Contracts since PR-14, complete at PR-15
 src/Gateway/          Gateway.Api (YARP) — landed with PR-17
-src/BFF/              Web.Bff
+src/BFF/              Web.Bff — landed with PR-19
 src/Services/         Catalog, Ordering, Inventory, Payments — five projects each:
                         Domain, Application, Infrastructure, Migrator, Api
                         (Catalog's five landed with PR-07, as shells;
@@ -610,8 +665,8 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty projects and `dotnet test` runs 624 tests, so
-the build rules and the drift rules below are live and a green run now means
+`Platform.slnx` holds thirty-three projects and `dotnet test` runs 685 tests,
+so the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
 job for them beside `licence-gate`. **PR-18 has landed** — Ordering is the
@@ -621,13 +676,133 @@ order → 404, §11.4's ownership check, which needed the first resource in the
 platform that has an owner. **PR-27 has landed too** — out of numerical order
 and in sequence, because Appendix C numbers it last and makes it depend on
 PR-17 alone, so it may land at any point after the gateway; it closes §10.1's
-"It does" list and the gateway is finished. **PR-19 (the BFF) and PR-20
-(Ordering's Catalog projection) are next**, and PR-20 is what fills the
-`ordering.ProductPrices` table PR-18 shipped with its reader and no producer.
+"It does" list and the gateway is finished. **PR-19 has landed** — the BFF is
+the third host, §9.7's one permitted synchronous hop is live end to end, and
+Catalog gained the server half of it. **PR-20 (Ordering's Catalog projection)
+is next**, and it is what fills the `ordering.ProductPrices` table PR-18
+shipped with its reader and no producer.
 PR-07 landed the Catalog skeleton, so §4.2's architecture rules are a
 build failure — each gate was observed red against a deliberately added
 forbidden reference before it was trusted, and since PR-10 the endpoints gate
-judges a real type (`ProductEndpoints`) rather than passing vacuously.
+judges real types rather than passing vacuously. **Since PR-19 it also says so
+in a test**: the gate selected `.Endpoints` alone, so the `.Grpc` namespace it
+gained was outside the rule and the file stayed green while judging half the
+transport surface. The selector is a pattern now, and a second test asserts
+that both adapters are inside it.
+
+PR-19 landed the BFF — §9.7's one synchronous hop, §11.5's client credentials,
+the `web-bff` route's service — and ten of its decisions bind what comes after:
+
+- **A cleartext Kestrel endpoint cannot serve HTTP/1.1 and h2c at once, and
+  §9.7's printed `http://catalog-api:8080` could not work.** Measured before a
+  line was written: at the default `Http1AndHttp2`, a client asking for HTTP/2
+  *exactly* — which is what `Grpc.Net.Client` does — is answered
+  `HTTP_1_1_REQUIRED` and the connection is closed. ALPN is what negotiates the
+  upgrade and there is no TLS on this hop to carry it (§10.1). An `Http2`-only
+  endpoint is the fix and it cuts the other way too: it answers an HTTP/1.1
+  request with a 400. So Catalog declares **two** endpoints and §9.7 was
+  amended to 8081.
+
+  **The second half is the one that reaches other files.** `Kestrel:Endpoints`
+  in `appsettings.json` **overrides** the container image's own port
+  configuration — measured against both spellings, `ASPNETCORE_HTTP_PORTS` and
+  `ASPNETCORE_URLS`, and neither produces a warning — and declaring *one*
+  endpoint suppresses them just as completely as declaring two. So 8080 has to
+  be restated in that file or it stops existing, and a host-run Catalog now
+  binds 8080, **which is Keycloak's published port**. The compose README grew
+  two `Kestrel__Endpoints__…__Url` exports and the reason for them, because the
+  same configuration key from a higher provider is the only thing that can move
+  a port this file has claimed.
+- **§9.7's fluent chain does not compile, and only compiling it says so.**
+  `AddStandardResilienceHandler` returns an `IHttpStandardResiliencePipelineBuilder`
+  — a different type, scoped to the pipeline it just registered — so the printed
+  `.AddStandardResilienceHandler(…).AddHttpMessageHandler<T>()` is CS1929. The
+  fix holds the `IHttpClientBuilder` in a local and calls both on it, which
+  keeps the **order**, which is the part that carries meaning. This is PR-17's
+  `KnownNetworks` finding in another chapter: a sample nobody had compiled.
+- **`Google.Protobuf` was pinned below its own floor, and `NU1109` is why that
+  is fatal rather than cosmetic.** §4.4 printed 3.29.3; `Grpc.AspNetCore`
+  2.71.0 floors it at 3.30.2, and with `CentralPackageTransitivePinningEnabled`
+  a lower pin is a package **downgrade** rather than a floor NuGet quietly
+  raises. The three `Grpc.*` rows had been unrestorable since they were written.
+- **An HTTP resilience pipeline cannot retry a gRPC status, and the
+  configuration §9.7 prints does not say so.** gRPC carries its outcome in
+  `grpc-status` — a trailer on an HTTP **200** — so `AddStandardResilienceHandler`
+  sees a successful response and hands it straight back. A Catalog answering
+  `Unavailable` is asked **once**, whatever `MaxRetryAttempts` says. What the
+  retries do cover is a transport fault, which is the shape a service that is
+  genuinely down produces. Both halves are measured in `UpstreamRetryTests`;
+  the test that found it was written expecting three calls and got one.
+
+  **The fix is deliberately not a second retry loop.** gRPC's own retry lives
+  on the channel and does understand status codes — and sits *outside* the
+  `HttpClient`, so each of its attempts would get a fresh
+  `TotalRequestTimeout`: three of them spend fifteen seconds against a
+  five-second ceiling. Stacking the two is the one change that breaks the
+  hierarchy §9.7 exists to protect.
+- **`InvariantCulture` is half of a safe decimal parse; the `NumberStyles`
+  argument is the other half.** `NumberStyles.Number` is the obvious choice and
+  includes `AllowThousands`, so `"12,50"` parses under the **invariant** culture
+  as twelve hundred and fifty — the exact hundredfold error the invariant
+  culture was chosen to rule out, arriving through the other argument. Caught by
+  a test that expected a 500 from a malformed upstream amount and got a 200. A
+  wire format has no group separators, so the parse names
+  `AllowLeadingSign | AllowDecimalPoint` and nothing else.
+- **One `.proto`, three generated halves, and CS0436 is what decides where
+  they live.** Catalog owns the contract because Catalog serves it; `Web.Bff`
+  **links** the same file rather than copying it, so the client and the server
+  cannot drift. The consequence is that any project referencing `Web.Bff` and
+  also generating from that `.proto` has every message type twice, and CS0436
+  is an error under ADR-019 — which is why `StubCatalog` lives in
+  `Web.Bff.TestSupport` and why `Catalog.Api` generates `GrpcServices="Both"`
+  for its own suite. The trade there was stated rather than dodged: a generated
+  client nothing in production calls, against a transport adapter no test can
+  reach.
+
+  **A linked file is a `COPY` line in a Dockerfile**, and the BFF's is the only
+  one in the repository that reaches into another service's tree. It is the
+  same silent-breakage class PR-14 found with `ProjectReference`, with a worse
+  message: Grpc.Tools names a path under `src/Services/Catalog` in a Dockerfile
+  that builds no Catalog project.
+- **The `.Endpoints`-only architecture gate went vacuous the moment a second
+  transport namespace existed.** `PricingService` is an endpoint in every sense
+  §4.2 cares about and lived in `.Grpc`, so the gate selected none of it and
+  stayed green. The selector is a pattern now, and — this is the half worth
+  copying — a **second test asserts the selection itself**, naming both
+  adapters. A gate that silently stops covering the newest surface is this
+  repository's most-repeated failure, and the only defence is a test whose
+  subject is what the gate is looking at rather than what it found.
+- **The realm was built through the admin API and verified by re-importing it**,
+  which is what PR-16's entry recommended and PR-16 itself did not do. The
+  `web-bff` client is Keycloak's own JSON, spliced in; the whole file was then
+  imported into a fresh Keycloak and eleven claims read off real tokens — the
+  audience present, `sub` present, and the two negative ones that matter most:
+  a service account carrying **no** `permission` claim, and every existing
+  login keeping `sub`, `email` and `realm_access`. `KeycloakIdentityTests` is
+  the standing version of that run.
+- **A premise about a rule is falsified by the first case that needs it, and
+  `No_client_secret_is_committed` was that rule.** It said no client ships a
+  secret — true while no client used the client-credentials grant, which is
+  precisely two parties holding one string, one of which is a committed Compose
+  file. Letting Keycloak generate it would leave the realm and the deployment
+  disagreeing and the BFF refused at the token endpoint on every call. The rule
+  **narrowed rather than lapsed**, and narrowing made it stronger: the value is
+  pinned to the documented local default, so a generated secret still fails and
+  so does a real one. PR-15 recorded the same shape about `EfUnitOfWork`.
+- **The scaffold's probe port had quietly taken 5200, which was the BFF's all
+  along.** `PORT = 5199` carries a careful paragraph about avoiding the 51xx
+  block; the second probe was spelt `PORT + 1`, and §14.1's fence has shown
+  5200 beside `web-bff` since PR-06. Every render in that suite started
+  refusing the day this PR landed. **A port chosen for one constant is not a
+  port reserved for two** — and arithmetic at a call site is what hid it, so the
+  second port is a named constant now.
+
+  The rest of the scaffold reconciliation is the ordinary price CLAUDE.md
+  already names: ten new files classified, the gRPC package, the `Protobuf`
+  item and both `Program.cs` blocks patched out, and the non-vacuity test
+  replaced by the comment that tells the next service when to add it back. A
+  scaffolded service was rendered and **built** afterwards, because the Python
+  suite never compiles one.
 
 PR-27 landed the last two entries of §10.1's "It does" list — the body ceiling
 and ADR-020's response compression — and five of its decisions bind what comes
@@ -1351,9 +1526,10 @@ comes after:
 - **The compose smoke now builds images.** The application blocks carry
   `build:` stanzas, so the path-filtered workflow compiles the solution inside
   Docker; PR-10 raised its timeout to 25 minutes, **PR-17 raised it again to
-  30** for the gateway's image, and **PR-18 raised it to 40** for Ordering's
-  pair — five images, five minutes each on top of the 15 that pulls alone
-  cost, the workflow header carrying the reason every time. The number lives
+  30** for the gateway's image, **PR-18 raised it to 40** for Ordering's pair
+  and **PR-19 to 45** for the BFF's — six images, five minutes each on top of
+  the 15 that pulls alone cost, the workflow header carrying the reason every
+  time. The number lives
   in `.github/workflows/compose.yml` and is restated here, which is what makes
   it a claim to reconcile rather than a fact to read: it went stale the moment
   a third image joined, stayed stale for four review rounds, and went stale
@@ -1449,11 +1625,13 @@ after:
   `auto-generated` header that exempts them from the analysers and are left
   **exactly** as the tool wrote them: the snapshot is the input to the next
   `migrations add`, and an edited one produces a wrong migration a PR later.
-- **`dotnet test` needs Docker** — since PR-12, and for four projects since
-  PR-18: `Catalog.Api.Tests`, `Catalog.Application.Tests`,
-  `Common.Infrastructure.Tests` and `Ordering.Api.Tests`, each with its own
-  `IntegrationCollection` and therefore its own container set (§12.4's stated
-  price). `Ordering.Application.Tests` is deliberately not among them — its
+- **`dotnet test` needs Docker** — since PR-12, and for five projects since
+  PR-19: `Catalog.Api.Tests`, `Catalog.Application.Tests`,
+  `Common.Infrastructure.Tests`, `Ordering.Api.Tests` and `Web.Bff.Tests`, each
+  with its own collection and therefore its own container set (§12.4's stated
+  price). The newest is the odd one — most of its 45 tests need no container at
+  all, and one class needs a Keycloak, so the suite is fast until
+  `KeycloakIdentityTests` and then pays for an identity provider once. `Ordering.Application.Tests` is deliberately not among them — its
   handler tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
   `HttpContextCurrentUser` and a handler resolved in a bare scope has no
   principal to bind a subject from. See the commands below.
