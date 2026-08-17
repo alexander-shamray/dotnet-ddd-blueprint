@@ -49,7 +49,8 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimit
 // §10.1's response compression, and the whole of ADR-020 is in the argument
 // for that one property.
 //
-// EnableForHttps is false by default, against BREACH/CRIME, and here it is
+// EnableForHttps is false by default, against BREACH — not CRIME, which
+// attacked TLS-level compression and is a different layer — and here it is
 // what makes compression happen at all. TLS terminates at the ingress (§10.1)
 // so the hop this host serves is plain http — but the forwarded-headers block
 // below enables XForwardedProto, UseForwardedHeaders rewrites Request.Scheme

@@ -53,6 +53,25 @@ internal sealed class NoTransformResponseCompressionProvider(
 {
     public override bool ShouldCompressResponse(HttpContext context)
     {
+        // Reading the REQUEST header makes the representation depend on it, so
+        // it has to be advertised as a cache-selection dimension — otherwise a
+        // shared cache serves a gzipped variant, stored for a caller who sent
+        // no directive, to one who did, and the refusal below is bypassed by
+        // something in front of this gateway. The base provider adds
+        // Accept-Encoding on its own; this is the dimension this subclass
+        // introduces and therefore the one it owes.
+        //
+        // Unconditionally, on every decision, because absence is a value: a
+        // response compressed BECAUSE no directive arrived varies on the header
+        // exactly as a refused one does. It costs cache efficiency — callers
+        // send assorted Cache-Control values — and the alternative is a cache
+        // that can undo the policy.
+        //
+        // Set here rather than at a purer seam because the interface has none:
+        // ShouldCompressResponse is the one member the middleware calls, once,
+        // before acting on the answer.
+        context.Response.Headers.Append(HeaderNames.Vary, HeaderNames.CacheControl);
+
         // Both directions, and they are not the same kind of rule. Checked
         // before the base call either way, so the directive wins outright
         // rather than depending on what else would have been decided.

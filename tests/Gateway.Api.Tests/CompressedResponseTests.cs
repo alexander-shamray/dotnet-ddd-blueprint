@@ -313,6 +313,13 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
         response.Content.Headers.ContentEncoding.ShouldBeEmpty(
             "the caller asked not to have its content transformed, and the destination said nothing either way");
 
+        // Without this a shared cache in front of the gateway may hold the
+        // gzipped variant from a caller who sent no directive and serve it to
+        // this one, undoing the refusal above from outside the process.
+        response.Headers.Vary.ShouldContain(
+            "Cache-Control",
+            "the representation depends on the request header, so it is a cache-selection dimension");
+
         (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
     }
 

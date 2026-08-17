@@ -765,6 +765,16 @@ which is false of half of it. Three rounds in a row turned on the difference
 between what a specification says and what everyone assumes it says, this one
 included: **fetch the section and paste the sentence.**
 
+**Reading a request header in a response decision costs a `Vary` entry**, and
+the fix for round 8 introduced that debt in the same commit that paid off the
+last one. The representation now depends on `Cache-Control`, so a shared cache
+with no `Vary: Cache-Control` may serve a stored gzipped variant to the one
+caller who asked for none — the policy undone from outside the process, by
+something the gateway does not control. Advertised on **every** decision,
+compressed ones included, because absence is a value. Round 9 found it, which
+makes it the second time in this branch that fixing one thing quietly broke a
+neighbouring one; the first was a wrap regression a script caught.
+
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
 pipeline — and fourteen of its decisions bind what comes after:
 

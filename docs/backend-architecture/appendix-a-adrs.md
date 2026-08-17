@@ -263,7 +263,10 @@ ASP.NET Core does not implement. No other host in the platform compresses
 anything.
 **Why.** The framework ships `EnableForHttps = false` because compressing a
 response that mixes attacker-influenced input with a secret leaks the secret's
-length, which is BREACH and CRIME. **Here that flag is what makes compression
+length, which is BREACH. **Not CRIME**, which attacked compression in the TLS
+layer rather than of an HTTP response body, and naming both would conflate two
+layers in the one paragraph deciding what this edge compresses.
+**Here that flag is what makes compression
 happen at all**, and the first version of this ADR argued the exact opposite.
 It reasoned that TLS terminates at the load balancer or Ingress
 ([§10.1](10-api-gateway.md)) and plain HTTP is forwarded inside the cluster, so
@@ -323,6 +326,15 @@ content" — an ask, where the response form is an obligation. The provider
 refuses either, because a caller who says so explicitly should be believed and
 the check is one header read. The asymmetry is written down rather than
 flattened into "the RFC requires it", which would be false of half of it.
+
+**Reading the request header costs a `Vary` entry, and forgetting it would hand
+the policy back to any cache in front.** The representation now depends on
+`Cache-Control`, so the provider advertises it as a cache-selection dimension
+on every decision — including the compressed ones, because a response
+compressed *because* no directive arrived varies on the header exactly as a
+refused one does. The price is cache efficiency, since callers send assorted
+`Cache-Control` values; the alternative is a shared cache serving a stored
+gzipped variant to the one caller who asked for none.
 
 `Content-Encoding: identity` also stops the middleware, and is **not** the
 contract offered here. It works only as a side effect of the

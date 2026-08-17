@@ -159,8 +159,9 @@ costs when the code is already obvious**, and pricing it at zero because the
 diff is small is how design decisions end up taken by whoever types first.
 
 What the day did not price, and what a later small-diff PR should, is the
-**tests**: the four lines needed eleven, one of which cannot run on `TestServer`
-at all, and finding that out is most of what the day actually bought. An
+**tests**: the four lines needed eleven, a whole suite of which cannot run on
+`TestServer` at all, and finding that out is most of what the day actually
+bought. An
 estimate derived from the diff is wrong in the same direction each time — and
 four of those eleven exist only because a review found something wrong: two
 where the *argument* was wrong and the code was right, and two where the code
