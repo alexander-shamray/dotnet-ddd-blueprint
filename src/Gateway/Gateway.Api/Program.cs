@@ -19,6 +19,50 @@ builder.Host.UseDefaultServiceProvider(o =>
 
 builder.AddCommonWebDefaults();                 // §13.2
 
+// §10.1's request size limit. Kestrel's own 30 MB is a web server's default
+// rather than a platform's choice, and this platform accepts JSON commands and
+// nothing else — GatewayLimits argues the number.
+//
+// Enforced where the body is READ, which at the edge means inside the
+// forwarder: an oversized request that fails authorization is answered 401 or
+// 403 without its size ever being considered, because neither of those
+// middlewares touches the body. Measured, not assumed. That ordering is the
+// right way round — the cheaper refusal wins — but it does mean this limit is
+// a memory bound on requests the gateway was going to proxy, not a doorman.
+//
+// Kestrel throws BadHttpRequestException(413) past it, which
+// ExceptionHandlerMiddleware turns into §10.5's problem+json on its own: the
+// status comes off the exception rather than from the 500 default, so this
+// needs no handler of its own beside ValidationExceptionHandler and
+// ConcurrencyExceptionHandler. Verified over both framings — a declared
+// Content-Length and a chunked body with none — because only the first is
+// refused before a byte of the body is read.
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GatewayLimits.MaxRequestBodyBytes);
+
+// §10.1's response compression, and the whole of ADR-020 is in the argument
+// for that one property.
+//
+// EnableForHttps is false by default, against BREACH/CRIME, and leaving it
+// there would be a mitigation this topology cannot deliver: TLS terminates at
+// the ingress (§10.1), so every request the gateway sees is plain http and the
+// flag never fires — compression would be on regardless while the code read as
+// though it were guarded. Setting it true says out loud that this edge
+// compresses whatever it is asked to, and moves the argument onto content,
+// where ADR-020 makes it.
+//
+// The providers and the compressible MIME types are the framework's defaults,
+// deliberately. Brotli and Gzip at CompressionLevel.Fastest is the right trade
+// at an edge every response passes through, and the default type list omits
+// application/problem+json — so §10.5's error bodies travel uncompressed, which
+// is both the cheaper answer for a 250-byte body and the one place the platform
+// reflects a client-supplied value (§10.4's correlation ID) back beside
+// anything else. That omission is a default this code RELIES on without
+// stating, so CompressedResponseTests pins it from the wire in both
+// directions — a proxied application/json arrives encoded and a problem+json
+// arrives plain — rather than leaving a framework list to change underneath an
+// argument ADR-020 makes.
+builder.Services.AddResponseCompression(o => o.EnableForHttps = true);
+
 // YARP is registered here and configured from the "ReverseProxy" section of
 // appsettings.json (§10.2). Without this, MapReverseProxy() throws at startup
 // and the entire routing configuration is inert.
@@ -265,6 +309,19 @@ WebApplication app = builder.Build();
 // Middleware order is behaviour, not formatting (§4.2).
 app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
 app.UseCorrelationId();           // §10.4 — assigns the ID if the client sent none
+
+// High enough to wrap every writer below it — the proxy, the limiter's 429 and
+// the status code pages — because this middleware compresses by replacing the
+// response body feature, so it can only act on what runs inside it.
+//
+// There is no ordering rule here that a test could catch, and saying so is the
+// honest version: moving this line below the limiter or the auth pair changes
+// no observable response, since the only bodies those two produce are
+// problem+json and the default MIME list does not compress it. What a test
+// does catch is the line's absence — CompressedResponseTests goes red without
+// it, which is the failure mode that matters: AddResponseCompression on its
+// own succeeds and compresses nothing, the same shape §10.3's registration has.
+app.UseResponseCompression();     // §10.1, ADR-020
 
 // §10.5's promise applied to the statuses no handler produces. A challenge and
 // a forbid are written by the middleware below before any endpoint runs, and

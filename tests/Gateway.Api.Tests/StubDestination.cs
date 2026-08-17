@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -30,6 +32,19 @@ namespace Gateway.Api.Tests;
 /// </remarks>
 public sealed class StubDestination : IAsyncLifetime
 {
+    /// <summary>
+    /// Ask for a body of this many bytes instead of the default 204. Named
+    /// here and read here, so a caller cannot spell it differently and get a
+    /// 204 that looks like a compression failure.
+    /// </summary>
+    public const string BodySizeQuery = "body";
+
+    /// <summary>
+    /// Ask for that body gzip-encoded, with the <c>Content-Encoding</c> a
+    /// destination that compressed for itself would send.
+    /// </summary>
+    public const string PreEncodedQuery = "encoded";
+
     private readonly ConcurrentQueue<string> _paths = new();
     private WebApplication? _app;
 
@@ -57,7 +72,33 @@ public sealed class StubDestination : IAsyncLifetime
             await next();
         });
 
-        app.MapFallback(() => Results.NoContent());
+        // 204 unless the caller asks for a body, which is what keeps every test
+        // written before this one unchanged: a query string is the one way to
+        // vary the response that YARP forwards untouched, so the tests that
+        // need bytes back ask for them per request rather than mutating a
+        // fixture the class beside them is also holding.
+        app.MapFallback((HttpContext context) =>
+        {
+            if (!int.TryParse(context.Request.Query[BodySizeQuery], out int size))
+                return Results.NoContent();
+
+            // A destination that has compressed for itself. The gateway must
+            // pass this through rather than encode it a second time, which is
+            // also the only way a response that must not be compressed can say
+            // so (ADR-020).
+            if (context.Request.Query.ContainsKey(PreEncodedQuery))
+            {
+                context.Response.Headers.ContentEncoding = "gzip";
+
+                return Results.Bytes(GzipOf(new string('a', size)), "application/json");
+            }
+
+            // One repeated character, so the body is at the compressible end of
+            // what a real JSON response looks like. A compression assertion
+            // wants the encoded form to be unmistakably smaller than the plain
+            // one, and incompressible bytes would leave it measuring noise.
+            return Results.Text(new string('a', size), "application/json");
+        });
 
         await app.StartAsync();
 
@@ -69,5 +110,15 @@ public sealed class StubDestination : IAsyncLifetime
     {
         if (_app is not null)
             await _app.DisposeAsync();
+    }
+
+    private static byte[] GzipOf(string body)
+    {
+        using MemoryStream buffer = new();
+
+        using (GZipStream compressor = new(buffer, CompressionLevel.Fastest, leaveOpen: true))
+            compressor.Write(Encoding.UTF8.GetBytes(body));
+
+        return buffer.ToArray();
     }
 }
