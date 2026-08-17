@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+// Catalog owns this file, because Catalog serves the RPC. Web.Bff LINKS it
+// rather than copying it (§4.3) — one contract, two generated halves, and no
+// assembly crosses the boundary. A second copy would reintroduce exactly the
+// drift §9.7 says a contract-first .proto removes.
+package catalog.pricing.v1;
+
+// Both halves generate into this namespace, in their own assemblies. §9.7
+// prints the client as `Pricing.PricingClient`, which is what names the
+// service below.
+option csharp_namespace = "Catalog.Pricing.V1";
+
+// The one synchronous hop in the platform (ADR-017). It exists for a screen —
+// the order form has to show a price before the customer submits — and not for
+// a transaction: the write path reads Ordering's own projection (§6.4), so a
+// Catalog outage costs a spinner and never an order.
+service Pricing {
+  // Prices for a known set of products, in one call rather than one per
+  // product: the hop budget is depth, and a fan-out of N round trips inside
+  // one request is the shape that turns a 1.4 s attempt timeout into N of
+  // them.
+  rpc GetPrices (GetPricesRequest) returns (GetPricesReply);
+}
+
+message GetPricesRequest {
+  // GUIDs in their canonical text form. A bytes field would be 16 rather than
+  // 36 bytes and unreadable in every log line and every grpcurl transcript
+  // this call will ever be debugged from; the saving is not worth that on a
+  // request holding a handful of ids.
+  repeated string product_id = 1;
+
+  // ISO 4217. Catalog stores one price per product, so this filters rather
+  // than converts — a product priced in another currency is absent from the
+  // reply, which is the same semantics Ordering's IProductPriceReader already
+  // has for a product it holds no row for.
+  string currency = 2;
+}
+
+message GetPricesReply {
+  // Absent, never zero: a product that does not exist, is not published, or is
+  // priced in another currency has no entry here at all. A zero-amount entry
+  // would be a free product, which is a different fact.
+  repeated ProductPrice price = 1;
+}
+
+message ProductPrice {
+  string product_id = 1;
+  string name = 2;
+
+  // A decimal as its invariant string form. Protobuf has no decimal type, and
+  // the two alternatives both cost more than they look: `double` cannot
+  // represent 0.10 exactly and this is money, while an integer minor-unit
+  // encoding bakes Catalog's own (19,4) column scale into a contract two
+  // services share. The string round-trips exactly, is readable on the wire,
+  // and both ends parse it with InvariantCulture — which is the part a test
+  // pins, because a culture-sensitive parse is the classic way this shape
+  // fails only in production.
+  //
+  // PARSE this field; do not compare it. The text carries the scale of
+  // whatever produced it — Catalog's column is decimal(19,4), so 49.99 arrives
+  // as "49.9900" — and that scale is storage's business rather than the
+  // contract's. Two spellings of one number are equal here, and a consumer
+  // that string-compared them would break on a migration that changed nothing
+  // a customer could see.
+  string amount = 3;
+
+  // Echoed back rather than assumed from the request, so a reply is
+  // self-describing in a log or a cache entry.
+  string currency = 4;
+}

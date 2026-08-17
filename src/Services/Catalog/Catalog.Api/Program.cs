@@ -1,5 +1,6 @@
 using Catalog.Api;
 using Catalog.Api.Endpoints;
+using Catalog.Api.Grpc;
 using Catalog.Application;
 using Catalog.Infrastructure;
 using Common.Web;
@@ -21,6 +22,11 @@ builder.Services.AddCatalogInfrastructure(builder.Configuration);   // §4.2, §
 
 // PR-07's OpenAPI deliverable (Appendix C): document only, no UI.
 builder.Services.AddOpenApi();
+
+// §9.7's server half. The interceptor is what keeps a malformed request from
+// arriving at the caller as Unknown — which its resilience pipeline would
+// retry three times — and its own file argues that at length.
+builder.Services.AddGrpc(o => o.Interceptors.Add<ValidationInterceptor>());
 
 // Catalog's permission policies (§11.4). Deliberately not inside either helper
 // above: Application knows nothing about HTTP, and Common.Web must not know
@@ -54,6 +60,12 @@ app.UseAuthorization();           // §11.4 — evaluates the permission policie
 app.MapCommonHealthEndpoints();   // §13.5 — anonymous; kubelet carries no token
 app.MapOpenApi();
 app.MapProductEndpoints();        // §11.4
+
+// §9.7. Reachable only on the Http2 endpoint appsettings.json declares —
+// gRPC needs HTTP/2, and mapping it says nothing about which port serves it.
+// The [Authorize] is on the service class, not here, so it travels with the
+// type rather than with this line.
+app.MapGrpcService<PricingService>();
 
 app.Run();
 
