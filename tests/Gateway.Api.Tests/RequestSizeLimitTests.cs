@@ -41,7 +41,13 @@ namespace Gateway.Api.Tests;
 /// </remarks>
 public sealed class RequestSizeLimitTests(StubDestination stub) : IClassFixture<StubDestination>
 {
-    /// <summary>Authenticated at the edge, and the only route taking a body (§10.2).</summary>
+    /// <summary>
+    /// One of the three §10.2 routes that accept a body — only
+    /// <c>catalog-public</c> restricts its methods — and the one reachable
+    /// with an ordinary authenticated principal, since <c>inventory-admin</c>
+    /// wants a permission and the body ceiling has nothing to do with
+    /// authorization.
+    /// </summary>
     private const string Route = "/api/v1/orders";
 
     /// <summary>

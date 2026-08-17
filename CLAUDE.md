@@ -379,9 +379,14 @@ tests/
                                  a suite asserting only that side would be
                                  green against no limit at all.
                                  StubDestination answers 204 until a query
-                                 string asks it for a body — a request-scoped
-                                 switch rather than a mutable fixture, so the
-                                 classes sharing it stay independent.
+                                 string asks it for a body — per-request rather
+                                 than a settable property, so nothing has to be
+                                 reset between tests in a class and no test
+                                 depends on its order. NOT for independence
+                                 between classes: IClassFixture already gives
+                                 each class its own instance, which is what
+                                 this line claimed until a review checked the
+                                 lifetime.
                                  ForwardedSchemeCompressionTests is the only
                                  test anywhere that drives the forwarded scheme
                                  into a response-side decision, and it exists

@@ -88,10 +88,16 @@ public sealed class StubDestination : IAsyncLifetime
         });
 
         // 204 unless the caller asks for a body, which is what keeps every test
-        // written before this one unchanged: a query string is the one way to
-        // vary the response that YARP forwards untouched, so the tests that
-        // need bytes back ask for them per request rather than mutating a
-        // fixture the class beside them is also holding.
+        // written before this one unchanged. A query string rather than a
+        // settable property because it is the one way to vary the response that
+        // YARP forwards untouched, and because per-request beats per-fixture
+        // setup inside a class: nothing has to be reset between tests and no
+        // test depends on the order it runs in.
+        //
+        // NOT for independence between classes — every consumer declares
+        // IClassFixture<StubDestination>, so xUnit already builds one instance
+        // each and no class holds another's. A comment here claimed otherwise
+        // until a review checked the lifetime.
         app.MapFallback((HttpContext context) =>
         {
             if (!int.TryParse(context.Request.Query[BodySizeQuery], out int size))
