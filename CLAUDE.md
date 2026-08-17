@@ -603,7 +603,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty projects and `dotnet test` runs 620 tests, so
+`Platform.slnx` holds thirty projects and `dotnet test` runs 621 tests, so
 the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -727,6 +727,18 @@ it is worth noticing that both of its findings were **the argument being
 wrong while the code was right**: the flag and the header check were correct
 in `Program.cs` throughout. A review that only diffs code would have found
 neither.
+
+**`Cache-Control: no-transform` does not stop this middleware, and that is
+pinned by a test because the belief that it does is the dangerous one.** Round
+3 proposed it as the opt-out, on the ground that ASP.NET Core honours it.
+Measured at this pin, it does not — an 8 KiB body sent under the directive
+comes back gzipped, directive intact. The review's *design* point survives its
+premise: `no-transform` is the directive that travels, reaching the ingress,
+the CDN and every cache, where a content coding speaks only to whatever reads
+the response next. So a representation that must not be rewritten anywhere
+carries **both**, and only one of the two binds this gateway. A downstream
+trusting `no-transform` alone would be compressed while believing it had
+refused, which is why the negative behaviour is a test rather than a sentence.
 
 PR-17 landed the gateway — §10.2's routes, §10.3's limiter, §4.2's edge
 pipeline — and fourteen of its decisions bind what comes after:

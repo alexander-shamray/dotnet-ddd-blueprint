@@ -227,6 +227,52 @@ public sealed class CompressedResponseTests(StubDestination stub) : IClassFixtur
         (await response.Content.ReadAsStringAsync(ct)).ShouldBe(new string('a', BodyBytes));
     }
 
+    /// <summary>
+    /// <c>Cache-Control: no-transform</c> does <b>not</b> stop this
+    /// middleware, and the test exists to keep anyone from believing it does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A negative pin on framework behaviour, and a security one.</b> A
+    /// Copilot review proposed <c>no-transform</c> as ADR-020's opt-out on the
+    /// ground that ASP.NET Core's compression middleware honours it. Measured
+    /// at this pin, it does not: an 8 KiB body sent under the directive comes
+    /// back <c>Content-Encoding: gzip</c> at 115 bytes, directive intact. So a
+    /// downstream trusting it would have its representation compressed while
+    /// believing it had refused — which is the exact failure ADR-020's opt-out
+    /// exists to prevent, arriving through the header a standards-minded
+    /// reader would reach for first.
+    /// </para>
+    /// <para>
+    /// <b>The review's design point stands even though its premise does
+    /// not.</b> <c>no-transform</c> is the directive that travels: it tells
+    /// the ingress, the CDN and every cache on the path, where
+    /// <c>Content-Encoding: identity</c> speaks only to whatever reads the
+    /// response next. A representation that must not be rewritten anywhere
+    /// should carry both — and only one of them binds this gateway, which is
+    /// what this test records.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_no_transform_directive_does_not_stop_this_middleware()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        HttpResponseMessage response = await Get(
+            $"{CompressibleRoute}&{StubDestination.NoTransformQuery}=1",
+            ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.CacheControl?.NoTransform.ShouldBe(
+            true,
+            "the directive survived the hop, so this is a statement about the middleware and not about YARP");
+
+        response.Content.Headers.ContentEncoding.ShouldBe(
+            ["gzip"],
+            "measured, not assumed — if this ever goes green as [] the framework has started honouring " +
+            "no-transform, and ADR-020's opt-out should be revisited rather than this test relaxed");
+    }
+
     private static string Declaring(string encoding) =>
         $"{CompressibleRoute}&{StubDestination.ContentEncodingQuery}={encoding}";
 

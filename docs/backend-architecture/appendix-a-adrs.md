@@ -289,8 +289,11 @@ compression never meet.
 **Consequences.** The gateway now spends CPU per response — which is precisely
 the resource §15.3 deliberately leaves *unlimited*, because CPU is compressible
 and a cap on it surfaces as unexplained p99 spikes long before the pod is short
-of capacity. Memory is the one §15.3 bounds, and a compressor's buffers are
-small beside a body this same PR refuses past a mebibyte. So an edge latency
+of capacity. Memory is the one §15.3 bounds, and what to size it against is
+**concurrent compressed responses** — each holds a compressor and its
+buffers for the life of the response. Explicitly *not* §10.1's body ceiling:
+that bounds a request, and nothing about it constrains how large a proxied
+response is or how many are in flight. So an edge latency
 regression is investigated as CPU spent here and never as a leak, and a
 compression provider is the first thing to look at. The omission of
 `application/problem+json` is a framework default this platform relies on and
@@ -303,8 +306,19 @@ session, and its responses pass through this middleware. A BFF response
 carrying a secret therefore has to say *not compressed at all* —
 `Content-Encoding: identity`, which means "no transformation applied" and which
 the middleware skips, because it declines any response already carrying that
-header. That is the only opt-out there is, and it is verified rather than read
-off the documentation.
+header. **That is the only thing that stops this gateway**, verified rather
+than read off the documentation.
+
+`Cache-Control: no-transform` is the directive a standards-minded reader
+reaches for first, and it does **not** work here: measured at this pin, a body
+sent under it comes back gzipped with the directive intact. It is still worth
+sending, and for the reason `identity` cannot serve — it travels, telling the
+ingress, the CDN and every cache on the path, where a content coding speaks
+only to whatever reads the response next. So a representation that must not be
+rewritten anywhere carries both, and only one of the two binds this middleware.
+`CompressedResponseTests` pins that asymmetry from the wire, because a
+downstream trusting `no-transform` alone would be compressed while believing it
+had refused.
 
 **This too was written the wrong way round first**, and the correction is worth
 keeping because the wrong version looked like a mitigation. It told the BFF to

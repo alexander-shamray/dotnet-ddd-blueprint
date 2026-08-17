@@ -53,6 +53,13 @@ public sealed class StubDestination : IAsyncLifetime
     /// </remarks>
     public const string ContentEncodingQuery = "encoding";
 
+    /// <summary>
+    /// Ask for that body under <c>Cache-Control: no-transform</c>, which is
+    /// what a representation that must not be rewritten says to every
+    /// intermediary on the path.
+    /// </summary>
+    public const string NoTransformQuery = "notransform";
+
     private readonly ConcurrentQueue<string> _paths = new();
     private WebApplication? _app;
 
@@ -89,6 +96,17 @@ public sealed class StubDestination : IAsyncLifetime
         {
             if (!int.TryParse(context.Request.Query[BodySizeQuery], out int size))
                 return Results.NoContent();
+
+            // The RFC 9111 directive telling intermediaries not to transform
+            // the representation. It reaches every cache and proxy on the path
+            // and stops none of them here, which is the point of the test that
+            // asks for it (ADR-020).
+            if (context.Request.Query.ContainsKey(NoTransformQuery))
+            {
+                context.Response.Headers.CacheControl = "no-transform";
+
+                return Results.Text(new string('a', size), "application/json");
+            }
 
             // A destination that has spoken for its own encoding — either
             // because it compressed the body itself, or because it is refusing
