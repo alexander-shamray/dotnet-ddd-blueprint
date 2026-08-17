@@ -198,9 +198,19 @@ public sealed class Order : AggregateRoot<OrderId>
 
         OrderLine? existing = _lines.SingleOrDefault(l => l.ProductId == product);
         if (existing is not null)
+        {
+            // The merge keeps the price already held, so a second line at a
+            // different one would silently reprice the first line's quantity
+            // as well — a Total no consumer could derive from the request.
+            if (existing.UnitPrice != unitPrice)
+                throw new DomainException("A product cannot appear twice at different prices.");
+
             existing.IncreaseQuantity(quantity);
+        }
         else
+        {
             _lines.Add(OrderLine.For(product, quantity, unitPrice));
+        }
     }
 
     public void ConfirmStock(DateTimeOffset now)

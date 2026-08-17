@@ -85,9 +85,24 @@ public sealed class Order : AggregateRoot<OrderId>
 
         OrderLine? existing = _lines.SingleOrDefault(l => l.ProductId == product);
         if (existing is not null)
+        {
+            // The merge keeps the price it already has, so a second line at a
+            // different price would silently reprice the first one's quantity
+            // too — an order whose Total no consumer could derive from the
+            // request that produced it. Nothing reaches this today, because
+            // the handler reads one price per product id from the projection
+            // and hands the same Money to both lines; that is a property of
+            // one caller, and an aggregate that is only valid while its
+            // callers behave is the thing §5.3 says it must not be.
+            if (existing.UnitPrice != unitPrice)
+                throw new DomainException("A product cannot appear twice at different prices.");
+
             existing.IncreaseQuantity(quantity);
+        }
         else
+        {
             _lines.Add(OrderLine.For(product, quantity, unitPrice));
+        }
     }
 
     public void ConfirmStock(DateTimeOffset now)

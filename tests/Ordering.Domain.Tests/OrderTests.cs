@@ -71,6 +71,20 @@ public class OrderTests
     }
 
     [Fact]
+    public void Place_refuses_the_same_product_at_two_different_prices()
+    {
+        // The merge keeps the price it already holds, so without this guard
+        // the €7 line would be absorbed at €5 and Total would be 5 × €5 —
+        // wrong, and derivable from nothing the caller sent. Unreachable
+        // through PlaceOrder, whose handler reads one price per product id;
+        // the aggregate is not allowed to depend on that.
+        var product = ProductId.New();
+
+        Should.Throw<DomainException>(() =>
+            AnOrder((product, 2, Money.Of(5m, "EUR")), (product, 3, Money.Of(7m, "EUR"))));
+    }
+
+    [Fact]
     public void Place_refuses_a_line_in_another_currency()
     {
         Should.Throw<DomainException>(() =>
