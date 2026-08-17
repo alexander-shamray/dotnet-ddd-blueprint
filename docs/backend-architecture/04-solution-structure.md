@@ -978,6 +978,17 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Testcontainers.MsSql" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.Redis" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.6.0" />
+    <!-- Transitive of the three rows above, pinned deliberately, and the third
+         instance of the shape Microsoft.OpenApi and System.Security.Cryptography.Xml
+         already carry. Testcontainers 4.6.0 floors this at 2024.2.0 for its SSH
+         port-forwarding path, and every version through 2025.1.0 carries
+         GHSA-q939-rpr3-3284 — a malicious SCP server escaping the download
+         directory through traversal sequences in a filename. NU1903 turns that
+         into a failed restore, so the pin is what makes the three rows above
+         buildable at all. Nothing here downloads over SCP; the pin is not a
+         judgement that the advisory is reachable, only that a vulnerable
+         package resolving into the graph is not a thing to carry. -->
+    <PackageVersion Include="SSH.NET" Version="2026.0.0" />
     <PackageVersion Include="Respawn" Version="6.2.1" />
     <PackageVersion Include="WireMock.Net" Version="1.8.11" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.9.0" />
