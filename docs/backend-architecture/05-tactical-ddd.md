@@ -163,7 +163,15 @@ public sealed class Order : AggregateRoot<OrderId>
         string currency,
         DateTimeOffset now)
     {
-        var order = new Order(OrderId.New(), customerId, shippingAddress, currency, now);
+        // Of rather than a bare assignment: the order's currency is what every
+        // line is checked against, so an unvalidated one makes AddLine's
+        // comparison meaningless and Money.Zero(_currency) throw later, far
+        // from the call that caused it. The validator refuses a malformed code
+        // at the edge; the aggregate does not depend on having been called
+        // through one.
+        string normalised = Money.Zero(currency).Currency;
+
+        var order = new Order(OrderId.New(), customerId, shippingAddress, normalised, now);
 
         foreach (var (product, quantity, unitPrice) in items)
             order.AddLine(product, quantity, unitPrice);

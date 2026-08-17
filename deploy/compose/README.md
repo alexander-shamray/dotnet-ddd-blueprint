@@ -97,16 +97,21 @@ there is no anonymous half, because an order belongs to somebody where a
 product listing does not:
 
 ```bash
-ORDER=$(curl -s -X POST http://localhost:5101/v1/orders \
+curl -X POST http://localhost:5101/v1/orders \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d '{"items":[{"productId":"00000000-0000-0000-0000-000000000001","quantity":1}],
          "shippingAddress":{"line1":"1 Test Street","city":"Almaty","postalCode":"050000","country":"KZ"},
-         "currency":"EUR"}')
-
-curl -X POST "http://localhost:5101/v1/orders/$ORDER/cancel" \
-    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-    -d '{"reason":"customer_request"}'
+         "currency":"EUR"}'
 ```
+
+**No cancel call here, deliberately, because there is no id to cancel with.**
+The obvious next line — capture the response and interpolate it into
+`/v1/orders/$ORDER/cancel` — is wrong twice over: today the body is a
+problem document, and after PR-20 it is `Results.Ok(guid)`, whose body is a
+JSON *string* with the quotes still on it, which `{id:guid}` cannot bind.
+A reader who wants the id then needs `| jq -r .`, and a README that says so
+before the table can produce one is documenting a shell trick rather than the
+service.
 
 **The first call answers 422 `order.products_unavailable` until PR-20 lands**,
 and that is the honest state rather than a broken example: prices come from a

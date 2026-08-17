@@ -887,7 +887,10 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
 Three consequences, and the middle one is the point:
 
 - **No network call inside the transaction.** The read is local, and a missing
-  product is a plain validation failure rather than a timeout.
+  product is a domain rule rather than a timeout — `Error.Rule`, 422,
+  `order.products_unavailable` (§10.5). Not a *validation* failure: the
+  request was well-formed and the validator passed it, and §5.7 reserves that
+  word for the 400 `ValidationBehavior` produces.
 - **Catalog can be down and orders still get placed.** Availability stops
   multiplying, which is the whole argument of §2.3 principle 4 and ADR-002.
 - **Prices can be stale by the projection's lag** — typically milliseconds.
@@ -1181,8 +1184,10 @@ published — which is what the customer experiences either way.
 
 > **A projection with no publisher is worse than a remote call.** If Catalog has
 > never emitted `ProductPublished` for a product, this table has no row for it
-> and every order containing it fails — silently, with a plain validation
-> message and no error in any log. Two mitigations, both worth having: Catalog
+> and every order containing it fails — silently, with a 422
+> `order.products_unavailable` and no error in any log. Silently is the word
+> that matters: a rule rejection is a *correct* answer from a service with no
+> prices, so nothing about it looks like a fault. Two mitigations, both worth having: Catalog
 > republishes its full catalogue on demand (an operational task, not a code
 > path), and the [§13.6](13-observability.md) alert on business volume catches the case where orders
 > stop for a reason no technical metric shows.
