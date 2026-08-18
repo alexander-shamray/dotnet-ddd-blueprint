@@ -160,9 +160,19 @@ public sealed class StubCatalog : IAsyncLifetime
     /// <param name="Authorization">
     /// The <c>Authorization</c> header as it arrived — the only place the
     /// token the credential handler attached is observable, which is what makes
-    /// the retry-refreshes-the-token assertion possible at all.
+    /// the per-attempt assertion possible at all.
     /// </param>
-    public sealed record Call(IReadOnlyList<string> ProductIds, string Currency, string? Authorization);
+    /// <param name="CorrelationId">
+    /// The <c>X-Correlation-Id</c> header as it arrived, or <c>null</c> if the
+    /// hop carried none. §10.4's promise is only checkable from the receiving
+    /// end: everything on the sending side would pass just as well against a
+    /// handler that set the header on a message nobody sent.
+    /// </param>
+    public sealed record Call(
+        IReadOnlyList<string> ProductIds,
+        string Currency,
+        string? Authorization,
+        string? CorrelationId);
 
     private sealed class StubPricingService(StubCatalog stub) : Pricing.PricingBase
     {
@@ -173,7 +183,12 @@ public sealed class StubCatalog : IAsyncLifetime
             stub._calls.Enqueue(new Call(
                 [.. request.ProductId],
                 request.Currency,
-                context.RequestHeaders.GetValue("authorization")));
+                context.RequestHeaders.GetValue("authorization"),
+                // Lower-cased: HTTP/2 header names are lower-case on the wire,
+                // and Grpc.Core's Metadata is an ordinal list rather than a
+                // case-insensitive lookup — asking for "X-Correlation-Id"
+                // returns null however faithfully the client sent it.
+                context.RequestHeaders.GetValue("x-correlation-id")));
 
             if (stub.HangFor > TimeSpan.Zero)
                 await Task.Delay(stub.HangFor, context.CancellationToken);

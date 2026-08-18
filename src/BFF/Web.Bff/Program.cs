@@ -77,8 +77,12 @@ IHttpClientBuilder pricing = builder.Services
 
 // Resilience is registered FIRST so that it sits OUTERMOST, and the credential
 // handler runs inside it. That ordering matters: the handler then runs once
-// per ATTEMPT rather than once per request, so a retried attempt carries a
-// freshly fetched token instead of replaying the first one.
+// per ATTEMPT rather than once per request, so a retried attempt asks the token
+// cache again instead of replaying the first attempt's token.
+//
+// Usually it gets the same token back — CachingTokenClient serves one until its
+// expiry guard — and that is the point of the cache rather than a hole in this.
+// What the position buys is the case where the token expired mid-request.
 //
 // The retries that fire are transport faults — a gRPC status rides an HTTP 200
 // and this pipeline never sees it (§9.7, UpstreamRetryTests) — so this is
@@ -135,6 +139,17 @@ pricing
 // Registered AFTER resilience, so it sits INSIDE it (§11.5). This one line is
 // the whole reason the ordering comment above is worth reading.
 pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
+
+// §10.4's outbound half, and the platform's only place for it: this is the one
+// synchronous hop (§9.7, ADR-017), so it is the one call that could carry an ID
+// across a process boundary and was not. Events already do — §9.1's envelope
+// has the member — so the gap was exactly this edge.
+//
+// Inside the pipeline like the handler above, though for a weaker reason: the
+// value does not change between attempts, so the position is uniformity rather
+// than correctness. Outside it would work too.
+builder.Services.AddTransient<CorrelationIdHandler>();
+pricing.AddHttpMessageHandler<CorrelationIdHandler>();
 
 WebApplication app = builder.Build();
 
