@@ -313,8 +313,9 @@ that service.
 ### Lessons that travel
 
 These generalise past the PR that found them.
-[`docs/pr-decision-log.md`](docs/pr-decision-log.md) carries each one's full
-argument and the measurement behind it.
+[`docs/pr-decision-log.md`](docs/pr-decision-log.md) carries the full argument
+and the measurement behind all but one of them; the exception says so on its
+own line rather than sending a reader to a file that does not hold it.
 
 - **A gate that silently stops covering the newest surface is this
   repository's most-repeated failure.** The only defence is a test whose
@@ -341,12 +342,14 @@ argument and the measurement behind it.
   it.** Both `EfUnitOfWork`'s tracker and the `No_client_secret_is_committed`
   rule were correct until a second caller existed.
 - **"A test that would pass" is a claim about a run nobody performed.** Measure
-  the counterfactual — four such claims in one PR were all the opposite of what
-  happens.
+  the counterfactual — three such claims in one PR were all the opposite of
+  what happens.
 - **A measurement says what the code *does*; it never says what it *may* do.**
   Fetch the specification section and paste the sentence.
 - **A rule whose stated test is a string match will be enforced as one**, by a
-  reviewer or by whoever greps next. State the rule, not the grep.
+  reviewer or by whoever greps next. State the rule, not the grep. This one's
+  argument is the `.ToArray()` narrowing in the C# style section below, not the
+  log.
 - **`ASPNETCORE_ENVIRONMENT=Development` leads every host-run block naming an
   authority.** No project ships a `launchSettings.json`, so `dotnet run`
   selects Production, where `RequireHttpsMetadata` is on and a plain-HTTP local

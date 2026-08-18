@@ -240,9 +240,9 @@ a case is not a test of it** — the streaming path is the one an attacker
 chooses, since omitting a header costs the sender nothing.
 
 **"A test that would pass" is this PR's most repeated error, and it was written
-four times before anything checked it.** Copilot round 2's suppressed block —
+three times before anything checked it.** Copilot round 2's suppressed block —
 which carried five findings under a heading saying no new comments were
-generated — caught the same inversion at four sites: that the size-limit suite
+generated — caught the same inversion at three sites: that the size-limit suite
 "would pass" over `TestServer`, that a decompressing client would "leave every
 assertion passing", and that a test carrying its own copy of the ceiling "would
 pass" against a differently configured gateway. **All three are the opposite of
