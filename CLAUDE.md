@@ -488,7 +488,9 @@ tests/
                                  policy suite, PlaceOrderTests and
                                  OrderOwnershipTests, which is PR-16's
                                  deferred 404 over HTTP. Ordering.Api.Tests
-                                 needs Docker too, so four projects do
+                                 needs Docker too — the running tally lives in
+                                 one place, the commands section below, rather
+                                 than here where it has now gone stale twice
   Platform.IntegrationTests/     §12.6, and nothing else (§4.1). References
                                  Common.Contracts alone today — "the only
                                  suite that references every service" grows a

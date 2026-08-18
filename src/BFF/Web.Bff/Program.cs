@@ -76,10 +76,15 @@ IHttpClientBuilder pricing = builder.Services
     .AddGrpcClient<Pricing.PricingClient>(PricingHop.ClientName, o => o.Address = PricingHop.Address);
 
 // Resilience is registered FIRST so that it sits OUTERMOST, and the credential
-// handler runs inside it. That ordering matters: a retry then re-attaches a
-// token, which is what recovers the case where the first attempt failed
-// because the token expired in flight. Registered the other way round, all
-// three attempts reuse the same dead token.
+// handler runs inside it. That ordering matters: the handler then runs once
+// per ATTEMPT rather than once per request, so a retried attempt carries a
+// freshly fetched token instead of replaying the first one.
+//
+// The retries that fire are transport faults — a gRPC status rides an HTTP 200
+// and this pipeline never sees it (§9.7, UpstreamRetryTests) — so this is
+// narrower than "recovers an expired token", which is how the comment read
+// until a review pointed out that the failure it described cannot trigger a
+// retry at all.
 pricing
     .AddStandardResilienceHandler(options =>
     {

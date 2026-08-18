@@ -2383,10 +2383,14 @@ IHttpClientBuilder pricing = services
     .AddGrpcClient<Pricing.PricingClient>(o => o.Address = new Uri("http://catalog-api:8081"));
 
 // Resilience is registered FIRST so it sits outermost, and the credential
-// handler runs inside it. That ordering matters: a retry then re-attaches a
-// token, which is what recovers the case where the first attempt failed
-// because the token expired in flight. Registered the other way round, all
-// three attempts would reuse the same dead token.
+// handler runs inside it. That ordering matters: the handler then runs once
+// per ATTEMPT rather than once per request, so a retried attempt carries a
+// freshly fetched token instead of replaying the first one. Registered the
+// other way round, every attempt reuses the token the first one built.
+//
+// Narrower than it sounds, and §11.5 spells out why: the retries that fire are
+// transport faults, because a gRPC status rides an HTTP 200 that this pipeline
+// reads as success.
 //
 // Two statements rather than one chain, and this is not a style choice:
 // AddStandardResilienceHandler returns an IHttpStandardResiliencePipelineBuilder

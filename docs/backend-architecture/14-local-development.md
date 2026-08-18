@@ -182,6 +182,7 @@ services:
       # that builds its service.
       catalog-api: { condition: service_started }
       ordering-api: { condition: service_started }
+      web-bff: { condition: service_started }
 
   # The one host with client credentials, because it is the one host that calls
   # a peer synchronously (§9.7). Everything else here has the authority only.
