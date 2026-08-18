@@ -2703,7 +2703,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Start from a clean, current `main` with no finished worktree left over, then run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads — or until either loop spends its twelfth check, which ends that loop unconverged and holds nothing; then **merge the PR** and tear the workspace down. **It stops for nothing that is a judgement** — check findings, `Needs a decision` rows and `Ask` threads are decided, recorded and carried past |
+| `/ship` | Start from a clean, current `main` with no finished worktree left over, then run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, which is final now that the chain merges — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads — or until either loop spends its twelfth check, which ends that loop unconverged and holds nothing; then **merge the PR** and tear the workspace down. **It stops for nothing that is a judgement** — check findings, `Needs a decision` rows and `Ask` threads are decided, recorded and carried past |
 | `/branch` | Start a correctly named branch — **in a sibling worktree** the session moves into, from a clean `main`; in place when the tree is dirty (carrying the work off `main`) or the parent is not writable |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -2820,21 +2820,25 @@ by step 0 and the run ends there, because a second removal would exit non-zero
 against a path that is no longer a worktree and stop the chain on a helper
 failure with nothing behind it.
 
-**Finished means a merged PR, or no PR and nothing ahead of `origin/main`;
-everything else is left alone, and that exception is load-bearing.** It is what
+**Finished means a merged PR, or a clean tree with no PR and nothing ahead of
+`origin/main`; everything else is left alone, and that exception is
+load-bearing.** It is what
 lets a resumed `/ship` pick a branch back up, where evicting the session to
 `main` would strand the work and leave step 1 unable to re-fork a name that
 already exists.
 
-**It took three drafts to state, and each miss was the same failure in a new
+**It took four drafts to state, and each miss was the same failure in a new
 shape.** First a worktree, fixed. Then an in-place branch — what `/branch`
 produces every time `main` was dirty — stranded by the identical switch to
 `main` minus the directory. Then the predicate itself: written as "nothing
 unpushed", it swept in a branch whose commits are all pushed and which has
 simply not reached `/pr` yet, because that phrase means something else in the
 resume table in `ship.md` itself. **A rule and its predicate drift
-separately**, and the third one arrived through a word rather than a missing
-row.
+separately**, and the third arrived through a word rather than a missing row.
+Then the working tree: a worktree forked minutes ago and edited but not yet
+committed satisfies both other clauses, and the `git worktree remove` that
+refuses a dirty tree saves the *files* while the session walks away from the
+*branch*.
 
 The merged **branch** survives all of it: `git branch -d` is denied and stays
 denied.
@@ -2917,11 +2921,19 @@ untouched, so a review that never happened cannot report as clean.
 two consecutive passes leave none. One exit skips rather than stops: the
 helper's usage-limit preflight (exit 12) hands over to Copilot without a
 clean Grok pass — reported
-as skipped-on-limits, never as a verdict, and owing Grok a re-entry on a later
-`/ship`. The split of ownership matters: Grok's half owns the
-`suggestions.md` lifecycle — writing it, rechecking it, removing it when
-clean — and the triage half never creates or deletes that file, only fixes
-what it names. Then Copilot: a review is requested through
+as skipped-on-limits, never as a verdict. **That skip is final**: `/ship` now
+merges, and a merged PR's resume row ends at step 0, so no later run can
+re-review it — the PR simply got one reviewer instead of two, and the report
+says so rather than recording a debt nobody can pay.
+
+The split of ownership matters: Grok's half owns the `suggestions.md`
+lifecycle — writing it, rechecking it, removing it when clean — and the triage
+half never creates or deletes that file, only fixes what it names. **`/ship`
+step 7 is the one exception**, and only after the loop has ended: an
+unconverged or mid-cycle-skipped run leaves the file behind, where it blocks
+`git worktree remove` and follows an in-place run onto `main`.
+
+Then Copilot: a review is requested through
 the REST reviewers endpoint — `Copilot` and
 `copilot-pull-request-reviewer[bot]` both work as the request target — and
 on every round after the first the reviewer is **removed and re-added**,

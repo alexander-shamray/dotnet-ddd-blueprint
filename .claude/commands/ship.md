@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -79,8 +79,7 @@ Copilot request that will not register produces no error at all, just silence.
 Step 6 already says never to call a branch clean because asking failed; this
 row is where that becomes a chain outcome rather than a loop one, so step 7
 cannot be reached with a loop that never finished. It is **not** *skipped on
-limits*: that exit is about quota and owes Grok a re-entry, where this is a
-round that did not happen.
+limits*: that exit is about quota, where this is a round that did not happen.
 
 **A review loop hitting its ceiling is not on that list, and putting it there
 was a real confusion rather than a wording slip.** A ceiling ends a *loop* —
@@ -301,14 +300,23 @@ same argument as never calling a branch clean because asking failed.
    | In the main checkout on an **unfinished** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
    | In the main checkout on `main` | Nothing but the teardown below |
 
-   **Finished means a merged PR, or no PR and nothing ahead of `origin/main`.**
-   Everything else is unfinished, including a branch whose commits are all
-   pushed and which has simply not reached `/pr` yet.
+   **Finished means a merged PR, or a clean tree with no PR and nothing ahead
+   of `origin/main`.** Everything else is unfinished, including a branch whose
+   commits are all pushed and which has simply not reached `/pr` yet.
 
    ```bash
    gh pr view --json state          # MERGED, or no PR at all
    git log origin/main..HEAD        # empty means nothing of its own
+   git status --short               # empty, or there is work here
    ```
+
+   **The tree check is the fourth shape of the same stranding, and it is the
+   one that bites earliest.** A worktree forked minutes ago, edited and not yet
+   committed, has no PR and nothing ahead of `origin/main` — Finished on the
+   other two reads alone. Step 0 would leave it, `git worktree remove` would
+   refuse the dirty tree and so the directory survives, and the session would
+   be on `main` with step 1 about to refuse a branch that already exists. The
+   guard that saves the files is not the guard that saves the run.
 
    **The word to avoid here is "unpushed", and avoiding it is the whole of this
    fix.** The resume table above uses it in git's ordinary sense — commits not
@@ -528,8 +536,16 @@ same argument as never calling a branch clean because asking failed.
       limits will not allow did not run, and neither a clean verdict nor a stop
       may be minted from it. It is the one non-zero exit that does not halt the
       chain; every other non-zero exit is the loop not having run and stops
-      it. Note in the report that the Grok half was skipped on limits so a later
-      `/ship` re-enters it.
+      it.
+
+      **The skip is final, and it used to owe a re-entry.** That debt was
+      payable while the chain ended at an open PR: a later `/ship` re-entered
+      step 5 and Grok reviewed the branch before a human merged it. Step 7
+      merges, and the resume table ends a merged PR's run at step 0 — so no
+      later run can re-review it, and a re-entry "owed" is one that can never
+      be paid. Say in the report that **this PR was reviewed by one reviewer
+      rather than two, permanently**, which is the true statement, rather than
+      recording a debt against a branch nobody will read again.
 
       A skip can land mid-cycle: when a recheck is owed after a triage,
       `suggestions.md` is still on disk, and exit 12 there skips the recheck,
@@ -888,6 +904,24 @@ same argument as never calling a branch clean because asking failed.
    chain that satisfied the goal by pushing to `main` would have defeated the
    rule rather than complied with it.
 
+   **First, `suggestions.md` if it is still there.** A Grok loop that ended
+   unconverged, or was skipped mid-cycle, leaves it on disk — `/review-branch`
+   removes it only after a recheck it never got to run. Left in place it takes
+   the teardown down with it: `git worktree remove` refuses an untracked file
+   and the worktree survives on the forked path, while the in-place path
+   carries it onto a `main` the next run then reads as dirty.
+
+   ```bash
+   rm suggestions.md
+   ```
+
+   **This is the one place the file may be deleted from here, and only
+   because the loop is over.** Step 5 forbids writing or deleting it while
+   `/review-branch` owns its lifecycle; that ownership ends when the loop does,
+   and what is left is untracked scratch whose findings are already fixed and
+   committed. Say in the report that it was removed and which loop outcome left
+   it.
+
    Then put the workspace back the way step 0 wants to find it. **The order is
    the instruction**, and two of the six lines depend on which outcome step 1
    produced:
@@ -943,7 +977,8 @@ findings raised, findings fixed, and what each round pushed — its running
 check count against its twelve (the PR carries the durable copy: step 5's
 ledger comments, step 6's timeline events; the report line is the
 human-readable echo), and how it ended, in that loop's own vocabulary: step 5
-clean, skipped on limits with re-entry owed, or stopped unconverged; step 6
+clean, skipped on limits (final — one reviewer, not two), or stopped
+unconverged; step 6
 **all-resolved, naming the review and the `commit` oid it read**, or stopped
 unconverged. Neither list has an ending that means "a finding stopped us" any
 more — a decided row and an answered `Ask` belong in the decisions section
