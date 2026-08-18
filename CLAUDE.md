@@ -667,7 +667,7 @@ out again costs a line per resource per service, not one deletion (§14.2).
 
 ### Which phase are you in
 
-`Platform.slnx` holds thirty-three projects and `dotnet test` runs 686 tests,
+`Platform.slnx` holds thirty-three projects and `dotnet test` runs 687 tests,
 so the build rules and the drift rules below are live and a green run now means
 something. Since PR-11 there is a second suite with a second runner:
 `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a `scaffold`
@@ -780,8 +780,16 @@ the `web-bff` route's service — and ten of its decisions bind what comes after
   imported into a fresh Keycloak and eleven claims read off real tokens — the
   audience present, `sub` present, and the two negative ones that matter most:
   a service account carrying **no** `permission` claim, and every existing
-  login keeping `sub`, `email` and `realm_access`. `KeycloakIdentityTests` is
-  the standing version of that run.
+  login keeping `sub`, `email` and `realm_access`.
+
+  **What stands afterwards is less than that run, and the difference is worth
+  knowing.** `KeycloakIdentityTests` pins four of the eleven — the audience on
+  the BFF's token, the absent `permission` claim, that a host running the real
+  `AddJwtAuthentication` accepts it, and that a client without the scope is
+  refused. The login half is `RealmImportTests`, which reads the file and
+  starts nothing. So no standing test mints a password-grant token for `demo`
+  or `browser`: the claims those logins carry were verified once, by hand, and
+  a realm edit that broke them would be caught statically or not at all.
 - **A premise about a rule is falsified by the first case that needs it, and
   `No_client_secret_is_committed` was that rule.** It said no client ships a
   secret — true while no client used the client-credentials grant, which is

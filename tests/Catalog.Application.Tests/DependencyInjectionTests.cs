@@ -1,3 +1,4 @@
+using Catalog.Application.Products.GetPrices;
 using Catalog.Application.Products.GetProducts;
 using Catalog.Application.Products.PublishProduct;
 using Common.Application;
@@ -149,13 +150,22 @@ public class DependencyInjectionTests
         services.ShouldContain(
             d => d.ServiceType == typeof(FluentValidation.IValidator<PublishProductCommand>),
             "AddValidatorsFromAssemblyContaining is §4.2's line, and losing it fails silently");
+
+        // A query's validator, and it is not the same assertion twice: the scan
+        // is one call, but ValidationBehavior is unconstrained (§6.3), so a
+        // query validator lost this way disables the id-list ceiling that is
+        // GetPrices' only bound — and nothing else would notice.
+        services.ShouldContain(
+            d => d.ServiceType == typeof(FluentValidation.IValidator<GetPricesQuery>));
     }
 
     [Fact]
     public void AddCatalogApplication_registers_the_slice_handlers()
     {
-        // The §6.2 scan found nothing until this PR; these two are the first
-        // real registrations it produces, so the scan itself is now testable.
+        // The §6.2 scan found nothing until PR-10; these are the registrations
+        // it produces, so the scan itself is testable. Every slice adds a row
+        // here — the scan is public-only, and a handler it misses registers as
+        // nothing at all rather than as something wrong.
         ServiceCollection services = new();
 
         services.AddCatalogApplication();
@@ -164,5 +174,13 @@ public class DependencyInjectionTests
             d.ServiceType == typeof(ICommandHandler<PublishProductCommand, Result<Guid>>));
         services.ShouldContain(d =>
             d.ServiceType == typeof(IQueryHandler<GetProductsQuery, CursorPage<ProductSummaryDto>>));
+
+        // PR-19's third slice. The scan is public-only (§6.2), so an internal
+        // handler, a rename or a missed IQueryHandler<,> registers as nothing
+        // and fails on the first gRPC call rather than at startup —
+        // ValidateOnBuild never constructs the dispatcher's handler map.
+        // PricingServiceTests would catch it, but only in the Docker suite.
+        services.ShouldContain(d =>
+            d.ServiceType == typeof(IQueryHandler<GetPricesQuery, IReadOnlyList<ProductPriceDto>>));
     }
 }

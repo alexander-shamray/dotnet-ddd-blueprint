@@ -628,6 +628,7 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "tests/Catalog.Application.Tests/DependencyInjectionTests.cs": (
         (
+            "using Catalog.Application.Products.GetPrices;\n"
             "using Catalog.Application.Products.GetProducts;\n"
             "using Catalog.Application.Products.PublishProduct;\n",
             "",
@@ -647,13 +648,22 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        services.ShouldContain(\n"
             "            d => d.ServiceType == typeof(FluentValidation.IValidator<PublishProductCommand>),\n"
             "            \"AddValidatorsFromAssemblyContaining is §4.2's line, and losing it fails silently\");\n"
+            "\n"
+            "        // A query's validator, and it is not the same assertion twice: the scan\n"
+            "        // is one call, but ValidationBehavior is unconstrained (§6.3), so a\n"
+            "        // query validator lost this way disables the id-list ceiling that is\n"
+            "        // GetPrices' only bound — and nothing else would notice.\n"
+            "        services.ShouldContain(\n"
+            "            d => d.ServiceType == typeof(FluentValidation.IValidator<GetPricesQuery>));\n"
             "    }\n"
             "\n"
             "    [Fact]\n"
             "    public void AddCatalogApplication_registers_the_slice_handlers()\n"
             "    {\n"
-            "        // The §6.2 scan found nothing until this PR; these two are the first\n"
-            "        // real registrations it produces, so the scan itself is now testable.\n"
+            "        // The §6.2 scan found nothing until PR-10; these are the registrations\n"
+            "        // it produces, so the scan itself is testable. Every slice adds a row\n"
+            "        // here — the scan is public-only, and a handler it misses registers as\n"
+            "        // nothing at all rather than as something wrong.\n"
             "        ServiceCollection services = new();\n"
             "\n"
             "        services.AddCatalogApplication();\n"
@@ -662,6 +672,14 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "            d.ServiceType == typeof(ICommandHandler<PublishProductCommand, Result<Guid>>));\n"
             "        services.ShouldContain(d =>\n"
             "            d.ServiceType == typeof(IQueryHandler<GetProductsQuery, CursorPage<ProductSummaryDto>>));\n"
+            "\n"
+            "        // PR-19's third slice. The scan is public-only (§6.2), so an internal\n"
+            "        // handler, a rename or a missed IQueryHandler<,> registers as nothing\n"
+            "        // and fails on the first gRPC call rather than at startup —\n"
+            "        // ValidateOnBuild never constructs the dispatcher's handler map.\n"
+            "        // PricingServiceTests would catch it, but only in the Docker suite.\n"
+            "        services.ShouldContain(d =>\n"
+            "            d.ServiceType == typeof(IQueryHandler<GetPricesQuery, IReadOnlyList<ProductPriceDto>>));\n"
             "    }\n"
             "}\n",
             "\n"

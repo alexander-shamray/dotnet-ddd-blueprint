@@ -2379,8 +2379,17 @@ services
 // answered HTTP_1_1_REQUIRED. The service declares a second, Http2-only
 // endpoint for this hop (§4.2), and 8080 stays the REST surface §10.2 routes
 // to.
+// The client is NAMED, and the name is load-bearing rather than tidy:
+// AddStandardResilienceHandler registers its options under a key derived from
+// it, and the startup assertion below reads them back by that key. Left
+// unnamed the key is the generated client type's name, the assertion asks for
+// something else, and IOptionsMonitor hands back a default instance whose 30 s
+// total timeout is exactly the trap this section says to assert against — so
+// the test passes against defaults it never configured.
 IHttpClientBuilder pricing = services
-    .AddGrpcClient<Pricing.PricingClient>(o => o.Address = new Uri("http://catalog-api:8081"));
+    .AddGrpcClient<Pricing.PricingClient>(
+        "catalog-pricing",
+        o => o.Address = new Uri("http://catalog-api:8081"));
 
 // Resilience is registered FIRST so it sits outermost, and the credential
 // handler runs inside it. That ordering matters: the handler then runs once

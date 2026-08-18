@@ -129,6 +129,35 @@ public sealed class PricingServiceTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_lower_case_currency_prices_the_same_products()
+    {
+        Guid chair = await PublishAsync("Chair", 49.99m, "GBP");
+
+        GetPricesRequest request = new() { Currency = "gbp" };
+        request.ProductId.Add(chair.ToString());
+
+        GetPricesReply reply = await Pricing.GetPricesAsync(
+            request,
+            Authenticated(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Money.Of upper-cases on the way in, so the column only ever holds
+        // "GBP" — and GetPricesValidator accepts [A-Za-z]{3}, so "gbp" is a
+        // valid request. Without the handler normalising too, this passes on a
+        // case-insensitive server and returns nothing on a case-sensitive one:
+        // a valid request answered "product absent", which is indistinguishable
+        // from a product that does not exist.
+        //
+        // The default SQL Server collation is case-insensitive, so this test
+        // cannot fail against the fixture as configured. It pins the intent
+        // rather than the collation, which is the honest thing it can do here —
+        // and it fails immediately if the normalisation is removed AND the
+        // server is ever configured CS, which is the pairing that would
+        // otherwise be discovered in production.
+        reply.Price.Single().Currency.ShouldBe("GBP");
+    }
+
+    [Fact]
     public async Task A_product_priced_in_another_currency_is_absent_rather_than_zero()
     {
         Guid chair = await PublishAsync("Chair", 49.99m, "GBP");

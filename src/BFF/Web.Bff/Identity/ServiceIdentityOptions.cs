@@ -14,7 +14,7 @@ namespace Web.Bff.Identity;
 /// environment.</b> §15.4's test for what is not configuration is whether any
 /// member would vary between Compose, the fixture and production;
 /// <c>ClientSecret</c> does, which is what separates this from
-/// <c>ServiceOptions</c> one file over.
+/// <c>ServiceOptions</c> in <c>Common.Web</c>.
 /// <para>
 /// <c>[Required]</c> on all three is what makes <c>ValidateDataAnnotations</c>
 /// do anything — a bound options class with no annotations validates

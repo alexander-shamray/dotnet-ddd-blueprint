@@ -48,11 +48,11 @@ curl http://localhost:5000/api/v1/catalog/products # through the gateway
 
 The edge adds `/api`, which the gateway strips before forwarding, and applies
 what the service does not: the rate limit, the CORS policy, and a correlation
-ID on every request that arrives without one. **Two of the four routes have no
-service behind them yet** — `/api/v1/inventory` and `/bff` answer 502 until
-Inventory and the BFF land — and they are in the file deliberately, because
-the two configuration tests over it are what PR-17 exists to deliver.
-`/api/v1/orders` was the third until PR-18, which is what "stops answering
+ID on every request that arrives without one. **One of the four routes has no
+service behind it yet** — `/api/v1/inventory` answers 502 until Inventory
+lands — and it is in the file deliberately, because the two configuration
+tests over it are what PR-17 exists to deliver. `/api/v1/orders` was one of
+three until PR-18 and `/bff` until PR-19, which is what "stops answering
 502" looks like: the route file did not change, because PR-17 shipped it whole
 and a service PR that re-decides a route is the mistake §10.2's dual-version
 trap describes. `/api/v1/catalog` is GET-only at the edge, so publishing a

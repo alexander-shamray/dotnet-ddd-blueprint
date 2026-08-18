@@ -38,10 +38,23 @@ public sealed class GetPricesHandler(IDbConnectionFactory connections)
         // Distinct, because the id list is the caller's and a repeated id would
         // otherwise cost a duplicate row the BFF would have to fold. The set is
         // the semantics the reply already has — one price per product.
+        //
+        // Upper-cased for the same reason Money.Of does it on the way in: the
+        // column only ever holds the canonical form, so comparing the caller's
+        // string as it arrived makes a valid request depend on the server's
+        // collation. Under the default case-insensitive one "gbp" matches and
+        // nothing is wrong; under a case-sensitive collation the same request
+        // returns "product absent", which is the answer this query gives for a
+        // product that does not exist. Normalising here is what keeps the two
+        // ends agreeing rather than the database settings.
         IEnumerable<ProductPriceDto> rows = await connection.QueryAsync<ProductPriceDto>(
             new CommandDefinition(
                 Sql,
-                new { ProductIds = query.ProductIds.Distinct(), Currency = query.Currency },
+                new
+                {
+                    ProductIds = query.ProductIds.Distinct(),
+                    Currency = query.Currency.ToUpperInvariant()
+                },
                 cancellationToken: ct));
 
         return [.. rows];
