@@ -24,7 +24,10 @@ They were quoted before any of this code was written, against a specification
 that was already finished — an unusually good position to estimate from. The
 blueprint names the types, the tests, the failure modes and the migration
 shapes, so most of what normally hides inside an estimate has already been
-argued out in ~10,500 lines of prose.
+argued out in ~10,500 lines of prose — the blueprint's size when these
+estimates were quoted, against ~14,900 today. The figure here is deliberately
+the historical one, because it is what the estimates were made against;
+`CLAUDE.md` carries the live count.
 
 It is also the trap. A specification this precise makes an estimate feel
 measured when it is still a guess, and the numbers below have the same standing

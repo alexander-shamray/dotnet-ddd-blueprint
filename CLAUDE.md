@@ -2,7 +2,8 @@
 
 Guidance for Claude Code when working in this repository.
 
-**Half of this file now lives in [`docs/pr-decision-log.md`](docs/pr-decision-log.md).**
+**The long half of this file's phase section now lives in
+[`docs/pr-decision-log.md`](docs/pr-decision-log.md).**
 Every landed PR appended its findings here and nothing was ever consolidated,
 so a file loaded into every session's context had grown to 3,161 lines — of
 which the per-PR changelog alone was 1,132. Those blocks moved out **verbatim
