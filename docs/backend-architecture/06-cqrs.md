@@ -896,7 +896,14 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
         IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
             new CommandDefinition(
                 Sql,
-                new { ProductIds = productIds.Select(p => p.Value), Currency = currency },
+                // Upper-cased: Money.Of normalises on the way in, so comparing
+                // the caller's string as it arrived makes a valid request
+                // depend on the server's collation.
+                new
+                {
+                    ProductIds = productIds.Select(p => p.Value),
+                    Currency = currency.ToUpperInvariant()
+                },
                 cancellationToken: ct));
 
         return rows.ToDictionary(r => new ProductId(r.ProductId), r => Money.Of(r.Amount, r.Currency));

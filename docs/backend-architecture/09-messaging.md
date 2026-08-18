@@ -2377,7 +2377,9 @@ services
 // because a cleartext Kestrel endpoint cannot serve HTTP/1.1 and h2c at once:
 // at the default a client asking for HTTP/2 exactly, as gRPC's does, is
 // answered HTTP_1_1_REQUIRED. The service declares a second, Http2-only
-// endpoint for this hop (§4.2), and 8080 stays the REST surface §10.2 routes
+// endpoint for this hop — in its own appsettings.json, which is where the
+// measurement and the trap are argued (§14.1) — and 8080 stays the REST
+// surface §10.2 routes
 // to.
 // The client is NAMED, and the name is load-bearing rather than tidy:
 // AddStandardResilienceHandler registers its options under a key derived from
