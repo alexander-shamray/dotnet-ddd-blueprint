@@ -36,9 +36,11 @@ public sealed partial class CachingTokenClient(
     /// Not a rounding allowance. The token has to survive the whole outbound
     /// call it is attached to, and §9.7 gives that call up to five seconds of
     /// retries; a token handed out with two seconds left would expire
-    /// <i>between</i> attempt one and attempt three, which is the exact failure
-    /// the handler's position inside the resilience pipeline exists to recover
-    /// from and which this makes rare rather than routine. Thirty seconds
+    /// <i>between</i> attempt one and attempt three, and this is what makes
+    /// that rare rather than routine. <c>ClientCredentialsHandler</c>'s
+    /// position inside the pipeline is the recovery when it happens anyway —
+    /// narrowly, because a retry only fires on a transport fault. Thirty
+    /// seconds
     /// covers the budget with room for drift between this host's clock and the
     /// provider's — the same drift §11.3's <c>ClockSkew</c> allows on the way
     /// in.

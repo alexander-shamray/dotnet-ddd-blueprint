@@ -731,9 +731,21 @@ public sealed class ClientCredentialsHandler(ITokenCache tokens, IOptions<Servic
 }
 ```
 
-It must sit **inside** the resilience pipeline. Registering it outside means a
-retry reuses the token from the first attempt, which defeats the main reason a
-retry would help after a 401 — see the ordering in §9.7.
+It must sit **inside** the resilience pipeline. Registering it outside means
+the handler runs once per logical request rather than once per attempt, so
+every retry replays the token the first attempt built — see the ordering in
+§9.7.
+
+> **This paragraph used to justify the position with "a retry after a 401", and
+> that reason does not survive its own configuration.** §9.7's standard
+> resilience handler retries 5xx, 408 and `HttpRequestException`; a 401 is none
+> of them, so no retry after one ever happens. On the gRPC hop it is further off
+> still, because the callee answers `Unauthenticated` as `grpc-status` on an
+> HTTP 200 and the pipeline never sees a status at all. What the inner position
+> genuinely buys is narrower and real: **whenever a retry fires — which means a
+> transport fault — the repeated attempt carries a freshly fetched token
+> instead of a stale one.** `PricingCredentialsTests` drives exactly that, and
+> it is the only case in which the two orderings produce different bytes.
 
 ### The scope has to become an audience
 

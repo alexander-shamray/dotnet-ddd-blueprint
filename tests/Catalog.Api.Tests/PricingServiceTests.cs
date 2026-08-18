@@ -217,9 +217,12 @@ public sealed class PricingServiceTests(ServiceFixture fixture) : IAsyncLifetime
                 .ResponseAsync);
 
         // ValidationInterceptor's whole job, and the status matters more than
-        // it looks: untranslated this is Unknown, which the BFF's resilience
-        // pipeline would treat as a transient fault and spend all three
-        // attempts on a request that was malformed the first time.
+        // it looks: untranslated this is Unknown, which the BFF maps to a 500 —
+        // so a caller's malformed request would come back as this platform
+        // having failed. It is not about retries, whatever an earlier version
+        // of this comment claimed: Unknown rides an HTTP 200 like every other
+        // gRPC status, and UpstreamRetryTests measures that none of them is
+        // retried.
         thrown.StatusCode.ShouldBe(StatusCode.InvalidArgument);
         thrown.Status.Detail.ShouldContain("ProductIds");
     }

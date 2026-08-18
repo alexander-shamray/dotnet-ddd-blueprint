@@ -11,8 +11,9 @@ namespace Catalog.Application.Products.GetPrices;
 /// is. §6.5 requires a cursor on any collection endpoint because the caller
 /// does not bound the result; here the caller supplies the ids, so the bound is
 /// the request itself. What that needs instead is a ceiling on how many ids one
-/// request may carry, which the handler applies — an unbounded <c>IN</c> list
-/// is the same unbounded read wearing a different hat.
+/// request may carry, and <see cref="GetPricesValidator"/> is where it lives —
+/// an unbounded <c>IN</c> list is the same unbounded read wearing a different
+/// hat, and a malformed request is the validator's to refuse (§6.3).
 /// </remarks>
 public sealed record GetPricesQuery(IReadOnlyCollection<Guid> ProductIds, string Currency)
     : IQuery<IReadOnlyList<ProductPriceDto>>;

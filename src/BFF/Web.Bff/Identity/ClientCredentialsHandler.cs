@@ -9,10 +9,17 @@ namespace Web.Bff.Identity;
 /// </summary>
 /// <remarks>
 /// <b>It must sit inside the resilience pipeline</b>, which is what registering
-/// it <i>after</i> <c>AddStandardResilienceHandler</c> does (§9.7). Outside it,
-/// every attempt of a retry reuses the token the first attempt built — so the
-/// one case a retry is most likely to fix, a token that expired in flight, is
-/// the one case it cannot.
+/// it <i>after</i> <c>AddStandardResilienceHandler</c> does (§9.7). Outside it
+/// the handler runs once per logical request rather than once per attempt, so
+/// every retry replays the token the first attempt built.
+/// <para>
+/// What that buys is narrower than "a retry after a 401", which is how §11.5
+/// used to put it and which its own configuration rules out — the standard
+/// handler retries 5xx, 408 and <c>HttpRequestException</c>, and this hop's
+/// callee answers gRPC statuses on an HTTP 200 besides. The real case is that
+/// <i>whenever</i> a retry fires — a transport fault — the repeated attempt
+/// carries a freshly fetched token rather than a stale one.
+/// </para>
 /// </remarks>
 public sealed class ClientCredentialsHandler(ITokenCache tokens, IOptions<ServiceIdentityOptions> identity)
     : DelegatingHandler

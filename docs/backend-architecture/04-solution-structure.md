@@ -199,17 +199,23 @@ violated everywhere that matters, because "Api may reference Infrastructure"
 silently licenses an endpoint to inject a `DbContext`.
 
 ```csharp
+// Every namespace holding a transport adapter, not just the HTTP one. A
+// service with one endpoint class has only `.Endpoints`; Catalog gained
+// `.Grpc` with §9.7's pricing hop, and a selector naming the first alone
+// silently stopped judging half the surface.
+private const string TransportNamespaces = @"\.(Endpoints|Grpc)$";
+
 [Fact]
-public void Endpoints_do_not_depend_on_infrastructure()
+public void The_transport_surface_does_not_depend_on_infrastructure()
 {
     // Not the service's Infrastructure namespace alone: the rule above is
     // "Application and Domain contracts only", and the concrete types it
     // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach an
-    // endpoint transitively without any Ordering.Infrastructure dependency
+    // adapter transitively without any Ordering.Infrastructure dependency
     // to trip on.
     TestResult result = Types
         .InAssembly(typeof(OrderEndpoints).Assembly)
-        .That().ResideInNamespaceContaining(".Endpoints")
+        .That().ResideInNamespaceMatching(TransportNamespaces)
         .ShouldNot().HaveDependencyOnAny(
             "Ordering.Infrastructure",
             "Microsoft.EntityFrameworkCore",
@@ -220,7 +226,36 @@ public void Endpoints_do_not_depend_on_infrastructure()
     result.IsSuccessful.ShouldBeTrue(
         $"leaked: {string.Join(", ", result.FailingTypeNames ?? [])}");
 }
+
+[Fact]
+public void The_gate_above_is_judging_every_transport_adapter()
+{
+    string[] selected =
+    [
+        .. Types
+            .InAssembly(typeof(OrderEndpoints).Assembly)
+            .That().ResideInNamespaceMatching(TransportNamespaces)
+            .GetTypes()
+            .Select(type => type.Name)
+    ];
+
+    // Named rather than counted: a count goes stale on every new adapter and
+    // gets "fixed" by editing the number. This asserts that the adapters this
+    // host has are inside the rule, so one arriving in a namespace the pattern
+    // misses fails HERE rather than passing silently there.
+    selected.ShouldContain(nameof(OrderEndpoints));
+}
 ```
+
+> **The second test is the one that matters, and it exists because the first
+> one passed while judging nothing.** Catalog's gate selected `.Endpoints`
+> alone; PR-19 added a gRPC service in `.Grpc`, which is an endpoint in every
+> sense this rule cares about — mapped into the pipeline, reachable from
+> outside the process, obliged to hold to Application contracts — and the gate
+> stayed green without ever looking at it. A dependency rule can only be
+> trusted alongside an assertion about **what it selected**; otherwise a new
+> transport namespace silently narrows it, and the failure looks exactly like
+> success.
 
 One more, for the rule [§9.3](09-messaging.md) states in prose: application code publishes through
 `IIntegrationEventPublisher` and the outbox, never through the bus directly.

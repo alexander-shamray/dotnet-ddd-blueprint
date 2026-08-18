@@ -502,8 +502,8 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "\n"
             "// §9.7's server half. The interceptor is what keeps a malformed request from\n"
-            "// arriving at the caller as Unknown — which its resilience pipeline would\n"
-            "// retry three times — and its own file argues that at length.\n"
+            "// arriving at the caller as Unknown, which the BFF would report as its own\n"
+            "// 500 rather than the caller's 400 — its own file argues that at length.\n"
             "builder.Services.AddGrpc(o => o.Interceptors.Add<ValidationInterceptor>());\n",
             "",
         ),

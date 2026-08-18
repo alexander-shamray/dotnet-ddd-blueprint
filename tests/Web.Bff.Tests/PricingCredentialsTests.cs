@@ -84,10 +84,12 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
         // An aborted connection is an HttpRequestException, which it does
         // retry — see UpstreamRetryTests, which is where that pair is measured.
         //
-        // With the retry established, this is the exact case §11.5 says the
-        // handler's position exists to recover — a token that expired in
-        // flight — and the only case in which the two orderings produce
-        // different bytes.
+        // With the retry established, this is the only case in which the two
+        // orderings produce different bytes — and therefore the only thing
+        // that can measure the claim at all. §11.5 used to justify the
+        // position with "a retry after a 401", which its own configuration
+        // rules out; what is left, and what this drives, is that a repeated
+        // attempt carries a freshly fetched token.
         _catalog.AbortNextCalls = 1;
 
         using HttpClient client = Caller();
