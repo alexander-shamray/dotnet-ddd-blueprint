@@ -2809,24 +2809,32 @@ which puts it in front of every `git status` the chain reads and inside
 because there is nothing to ignore.
 
 **It is also removed by `/ship`, at both ends.** Step 0 tears down a worktree
-whose branch is already merged before anything new is cut, and step 7 removes
-this run's own after the merge — both with a plain `git worktree remove`,
-which refuses a dirty tree and is never given `-f`. A worktree whose branch is
-**unmerged** is left alone at step 0, and that exception is load-bearing: it is
-what lets a resumed `/ship` pick a branch back up, where evicting the session
-to `main` would strand the work in a directory nobody is in and leave step 1
-unable to re-fork a branch that already exists.
+whose branch is **finished** before anything new is cut, and step 7 removes
+this run's own after the merge — both with a plain `git worktree remove`, which
+refuses a dirty tree and is never given `-f`. Exactly one of the two owns any
+given directory: a session standing in an already-merged worktree is torn down
+by step 0 and the run ends there, because a second removal would exit non-zero
+against a path that is no longer a worktree and stop the chain on a helper
+failure with nothing behind it.
 
-**The same exception has a second shape, and the first draft of step 0 carried
-the bug it exists to prevent.** An in-place branch — what `/branch` produces
-every time `main` was dirty — is stranded by exactly the same switch to
-`main`, minus the directory: step 1 forks, and the same refusal lands on the
-same name. So step 0 stays put on unmerged work whether or not a worktree is
-involved, and step 7's teardown is conditional on which of the two step 1
-produced: a forked run comes back already on `main` and wants the removal, an
-in-place run has nothing to remove and needs the switch before its pull means
-anything. The merged **branch** survives all of it: `git branch -d` is denied
-and stays denied.
+**Finished means a merged PR, or no PR and nothing ahead of `origin/main`;
+everything else is left alone, and that exception is load-bearing.** It is what
+lets a resumed `/ship` pick a branch back up, where evicting the session to
+`main` would strand the work and leave step 1 unable to re-fork a name that
+already exists.
+
+**It took three drafts to state, and each miss was the same failure in a new
+shape.** First a worktree, fixed. Then an in-place branch — what `/branch`
+produces every time `main` was dirty — stranded by the identical switch to
+`main` minus the directory. Then the predicate itself: written as "nothing
+unpushed", it swept in a branch whose commits are all pushed and which has
+simply not reached `/pr` yet, because that phrase means something else in the
+resume table three sections above. **A rule and its predicate drift
+separately**, and the third one arrived through a word rather than a missing
+row.
+
+The merged **branch** survives all of it: `git branch -d` is denied and stays
+denied.
 
 **A sweep's worktree is not this one, and none is another's precedent.** The
 sweeps' — `/security-sweep`'s and `/bug-sweep`'s alike — are detached, live

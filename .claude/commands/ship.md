@@ -89,13 +89,22 @@ that reaches a merge — so the rows below say what is owed *between* them:
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
-| On a branch whose PR is **already merged** | Step 7's teardown alone. `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change |
+| On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. Step 0's teardown is a complete one (switch, pull, remove, prune), and step 7 has nothing left to do: there is no PR to merge |
 
-**Step 0's teardown targets a finished worktree, step 7's targets this run's,
-and confusing them is how a run deletes the directory it is standing in.** A
-resumed run that starts inside its own unmerged worktree stays there — step 0's
-table says so in its second row, and that row is the one keeping this step from
-stranding the branch it was meant to tidy up around.
+**Step 0's teardown targets a worktree that is already finished; step 7's
+targets the one this run just merged. Exactly one of them owns any given
+directory.** A resumed run that starts inside its own unfinished worktree stays
+there — step 0's table says so in its second row, and that row is what keeps
+this step from stranding the branch it was meant to tidy up around.
+
+**The row above is the case where the two could collide, which is why it ends
+the run at step 0.** A session standing in a worktree whose PR is already
+merged is finished by step 0's first row *and* would be "this run's" by step
+7's. Both tearing it down means the second `git worktree remove` runs against a
+path that is no longer a worktree, exits non-zero, and stops the chain on a
+helper failure with no defect behind it. So that row is step 0 and nothing
+after: there is no merge left to perform, and the teardown has already
+happened.
 
 **The workspace is part of that state**, and it is read the way `/branch`
 step 0 reads it: `git rev-parse --git-dir --git-common-dir` differing, with no
@@ -243,11 +252,30 @@ same argument as never calling a branch clean because asking failed.
 
    | Where the session is | Do |
    |---|---|
-   | In a worktree whose branch has a **merged** PR, or no PR and nothing unpushed | Finished. `ExitWorktree({action: "keep"})`, then the teardown below on the directory just left |
-   | In a worktree whose branch is **unmerged** | **Stay.** This is a resumed run and that directory is its workspace |
-   | In the main checkout on a branch that is **merged, or has nothing unpushed and no PR** | Finished. `bash .claude/scripts/git-switch-existing.sh main`, when `git status --short` is clean |
-   | In the main checkout on an **unmerged** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
+   | In a worktree whose branch is **finished** | `ExitWorktree({action: "keep"})`, then the teardown below on the directory just left |
+   | In a worktree whose branch is **unfinished** | **Stay.** This is a resumed run and that directory is its workspace |
+   | In the main checkout on a **finished** branch | `bash .claude/scripts/git-switch-existing.sh main`, when `git status --short` is clean |
+   | In the main checkout on an **unfinished** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
    | In the main checkout on `main` | Nothing but the teardown below |
+
+   **Finished means a merged PR, or no PR and nothing ahead of `origin/main`.**
+   Everything else is unfinished, including a branch whose commits are all
+   pushed and which has simply not reached `/pr` yet.
+
+   ```bash
+   gh pr view --json state          # MERGED, or no PR at all
+   git log origin/main..HEAD        # empty means nothing of its own
+   ```
+
+   **The word to avoid here is "unpushed", and avoiding it is the whole of this
+   fix.** The resume table below uses it in git's ordinary sense — commits not
+   yet on `origin/<branch>` — and its rows need that reading. Spelling the
+   Finished predicate as "nothing unpushed" imported the other meaning: a clean
+   branch, fully pushed, with no PR yet is *nothing unpushed* and is exactly
+   the state that owes `/pr`. Step 0 would have left it, and step 1 would have
+   refused a name that already exists — the same stranding this chain has now
+   closed in three shapes rather than two, and the third arrived through a word
+   rather than through a missing row.
 
    **Two rows say Stay, and they are one rule in two shapes: never walk away
    from unmerged work.** Leaving an unmerged *worktree* strands the branch —
@@ -260,9 +288,10 @@ same argument as never calling a branch clean because asking failed.
    The second shape is easy to miss because the in-place branch is the
    *exception* in step 1 rather than the ordinary case — and it is exactly what
    `/branch` produces every time `main` was dirty, which is every time a change
-   is already half-written when the chain starts. `gh pr view --json state` on
-   the current branch, or `git log origin/main..HEAD`, answers which row
-   applies before anything is left behind.
+   is already half-written when the chain starts. The two commands above answer
+   which row applies, and they are needed **together**: the PR state alone
+   cannot see a branch that never opened one, and the commit count alone cannot
+   see one whose PR is merged.
 
    **`ExitWorktree` with `keep`, never `remove`.** The remove form only works
    on a worktree this session created with `EnterWorktree`, and a `/ship`
@@ -792,8 +821,8 @@ same argument as never calling a branch clean because asking failed.
    rule rather than complied with it.
 
    Then put the workspace back the way step 0 wants to find it. Not step 0's
-   block repeated: two of these four lines depend on which outcome step 1
-   produced, and only the prune is unconditional.
+   block repeated — **the switch and the remove read differently depending on
+   which outcome step 1 produced**, and the pull and the prune do not.
 
    ```bash
    bash .claude/scripts/git-switch-existing.sh main     # HEAD must be main to pull it
@@ -807,14 +836,18 @@ same argument as never calling a branch clean because asking failed.
    reason as step 0, and the `git worktree remove` afterwards is what actually
    removes it.
 
-   **Both of the middle two lines are conditional, and step 1's outcome is what
-   decides them.** A run that forked a worktree comes back to a main checkout
-   already on `main`, so the switch is a no-op and the remove is the point. A
-   run that branched **in place** — `main` was dirty, or the parent was not
-   writable — has no worktree to remove and *is* sitting on the merged branch,
-   so the switch is the only thing that makes the pull mean anything. Running
-   the wrong pair is how the teardown either errors on a worktree that never
-   existed or pulls a feature branch instead of `main`.
+   **Two of the four vary, and they are the first and the third.** The switch
+   is always *invoked* and does different work: after a fork the session is
+   already on `main` and it is a no-op, while after an in-place branch it is
+   the only thing that makes the pull mean `main` rather than a feature branch.
+   The remove is **fork only** — an in-place run has no worktree, and running
+   it anyway exits non-zero and stops the chain on a helper failure with
+   nothing behind it.
+
+   The pull and the prune are unconditional, once the switch has put HEAD on
+   `main`. Reading the pull as conditional is the mistake that leaves the main
+   checkout a merge behind on the forked path, which is precisely the state
+   step 0 exists to prevent the next run from starting in.
 
    **Verify the merge before tearing anything down**, and verify it from the
    remote rather than from the exit code:
