@@ -201,24 +201,15 @@ violated everywhere that matters, because "Api may reference Infrastructure"
 silently licenses an endpoint to inject a `DbContext`.
 
 ```csharp
-// Everything in the host except the composition root. NOT a namespace: the
-// rule above is about Program.cs being the one place Infrastructure may be
-// referenced, and any selector narrower than the assembly leaves somewhere
-// for a new surface to appear outside it.
-private static PredicateList HostTypesOutsideTheCompositionRoot() => Types
-    .InAssembly(typeof(Program).Assembly)
-    .That().DoNotHaveName("Program")
-    .And().DoNotHaveNameStartingWith("<");   // the compiler's, for Program's own statements
-
 [Fact]
 public void Nothing_but_the_composition_root_depends_on_infrastructure()
 {
-    // Not the service's Infrastructure namespace alone: the rule above is
-    // "Application and Domain contracts only", and the concrete types it
-    // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach a
-    // type transitively without any Ordering.Infrastructure dependency to
-    // trip on.
-    TestResult result = HostTypesOutsideTheCompositionRoot()
+    // No selector at all. The rule above is "only Program.cs may reference
+    // Infrastructure", so the assembly is judged whole and the root is
+    // subtracted from the FAILURES afterwards — where full names are available
+    // to subtract it by, and where there is no candidate set to be narrow.
+    TestResult result = Types
+        .InAssembly(typeof(Program).Assembly)
         .ShouldNot().HaveDependencyOnAny(
             "Ordering.Infrastructure",
             "Microsoft.EntityFrameworkCore",
@@ -226,38 +217,45 @@ public void Nothing_but_the_composition_root_depends_on_infrastructure()
             "StackExchange.Redis")
         .GetResult();
 
-    result.IsSuccessful.ShouldBeTrue(
-        $"leaked: {string.Join(", ", result.FailingTypeNames ?? [])}");
+    string[] leaked = [.. (result.FailingTypeNames ?? []).Where(name => !IsCompositionRoot(name))];
+
+    leaked.ShouldBeEmpty($"leaked: {string.Join(", ", leaked)}");
 }
 
-[Fact]
-public void The_gate_above_is_judging_this_host_at_all()
-{
-    string[] judged = [.. HostTypesOutsideTheCompositionRoot().GetTypes().Select(t => t.Name)];
-
-    judged.ShouldContain(nameof(OrderEndpoints));
-}
+// Top-level statements put Program and its helpers in the GLOBAL namespace, so
+// they carry no dot; anything an endpoint generates is nested inside the
+// endpoint class and keeps its namespace.
+private static bool IsCompositionRoot(string fullName) =>
+    fullName == "Program" || (!fullName.Contains('.') && fullName.StartsWith('<'));
 ```
 
-> **This gate selected a namespace for two PRs, and the selector was wrong
-> twice in the same way.** It began as
-> `.ResideInNamespaceContaining(".Endpoints")`, which silently stopped covering
-> Catalog's transport surface the moment §9.7's `PricingService` arrived in
-> `.Grpc` — the file stayed green while judging half of what it named. Widening
-> it to `\.(Endpoints|Grpc)$` fixed that instance and **kept the defect**: a
-> third adapter under some later `.GraphQL` would be outside the pattern and
-> outside the rule again.
+> **This gate was wrong four times, always by selecting less than it claimed,
+> and the sequence is worth keeping because each fix looked complete.**
+> `.ResideInNamespaceContaining(".Endpoints")` stopped covering the transport
+> surface the moment a gRPC service arrived in `.Grpc`. A namespace *pattern*
+> moved the hole one namespace further out. Excluding compiler-generated types
+> by name exempted endpoint lambdas, because a closure is generated code. And
+> filtering candidates through `HaveName(...)` exempted them again, because
+> that predicate selects nothing for a nested async state machine — and an
+> empty selection reports **success**.
 >
-> A companion test naming the known adapters does not close it either, and
-> believing it did is the subtler error. The set such a test inspects is
-> unchanged by a type the pattern never selected, so it passes exactly as
-> before — it protects against *narrowing* the pattern, never against
-> *outgrowing* it.
+> A companion test naming the known adapters closes none of it, and believing
+> otherwise is the subtler error: the set such a test inspects is unchanged by
+> a type the selector never picked up, so it passes exactly as before. It
+> guards against *narrowing* the rule, never against *outgrowing* it.
+
+> **One gap survives all four, and it belongs to NetArchTest rather than to the
+> rule.** The library does not analyse compiler-generated nested types, so a
+> forbidden reference used *only* inside an endpoint lambda is invisible to it.
+> Measured rather than inferred: a `DbContextOptionsBuilder` in an endpoint
+> method's own body fails the gate and names the endpoint class; the identical
+> line inside that method's lambda leaves it green — with no selector at all,
+> which is what rules out a narrowing predicate as the cause.
 >
-> So the selector is gone. Scoping the rule to the whole assembly minus the
-> composition root is what this section's prose said in the first place, and it
-> leaves nothing for a namespace to escape. The second test is then guarding
-> the one vacuity that remains — selecting nothing at all.
+> State it rather than close it. A reference written in a method body is
+> caught, which is where references are written; **a gate believed to be total
+> is worse than one whose gap is written down**, because the first invites
+> nobody to look.
 
 One more, for the rule [§9.3](09-messaging.md) states in prose: application code publishes through
 `IIntegrationEventPublisher` and the outbox, never through the bus directly.

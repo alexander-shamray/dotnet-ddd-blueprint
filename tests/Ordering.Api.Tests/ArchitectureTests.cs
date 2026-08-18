@@ -9,49 +9,69 @@ namespace Ordering.Api.Tests;
 /// §4.2's composition-root rule: only <c>Program.cs</c> may reference
 /// Infrastructure, and everything else in the host holds to Application and
 /// Domain contracts.
-/// This arrived vacuously green — the scaffold emits it before a service
-/// has an endpoint, because a rule introduced before the violations exist is
-/// a constraint rather than a backlog item. <c>OrderEndpoints</c> gives it
-/// real types to judge.
+/// Vacuously green from PR-07 until PR-10's first endpoint — a rule
+/// introduced before the violations exist is a constraint, not a backlog
+/// item — and judging real types since.
 /// </summary>
 /// <remarks>
-/// <b>This gate selected a NAMESPACE until PR-19, and twice that was wrong in
-/// the same way.</b> It began as <c>.ResideInNamespaceContaining(".Endpoints")</c>,
-/// which silently stopped covering the transport surface when
-/// <c>PricingService</c> arrived in Catalog's <c>.Grpc</c>; widening it to a pattern
-/// fixed that instance and kept the defect, because a third adapter under some
-/// future <c>.GraphQL</c> would be outside the pattern and outside the rule
-/// again — and a companion test naming the known adapters could not see that
-/// either, since the set it inspects is unchanged by a type the pattern never
-/// selected.
+/// <b>This gate has been wrong four times, and every one was the same mistake:
+/// selecting less than it claimed.</b> A namespace
+/// (<c>.ResideInNamespaceContaining(".Endpoints")</c>) stopped covering the
+/// transport surface when <c>PricingService</c> arrived in Catalog's <c>.Grpc</c>; a
+/// namespace <i>pattern</i> moved the hole one namespace further out; excluding
+/// compiler-generated types by name exempted **endpoint lambdas**, because a
+/// closure is generated code; and filtering candidates through
+/// <c>HaveName(...)</c> exempted them again, because that predicate selects
+/// nothing for a nested async state machine and an empty selection reports
+/// success.
 /// <para>
-/// So the selector is gone. The rule now covers the <b>whole assembly</b>
-/// except the composition root, which is what §4.2's prose says in the first
-/// place, and namespace choice stops being load-bearing. There is nothing left
-/// for a new namespace to escape.
+/// So this version selects <b>nothing at all</b> and filters the
+/// <i>result</i>. There is no candidate set to be narrow, no predicate to miss
+/// a name, and no empty selection to pass vacuously — the assembly is judged
+/// whole, and the composition root is subtracted from the failures afterwards,
+/// where full names are available to subtract it by.
+/// </para>
+/// <para>
+/// <b>A residual survives all four shapes, and it is the tool's rather than
+/// the rule's.</b> NetArchTest does not analyse compiler-generated nested
+/// types, so a forbidden reference used <i>only</i> inside an endpoint lambda
+/// is invisible to it. Measured both ways, which is the only reason this is
+/// stated rather than guessed: a <c>DbContextOptionsBuilder</c> in
+/// an endpoint method's own body fails this gate and names it; the identical line inside the POST lambda leaves it
+/// green — including with no selector at all, which is what rules out a
+/// narrowing predicate as the cause.
+/// </para>
+/// <para>
+/// So the shape below is the strongest available and not a complete one. It
+/// catches every reference written in a method body, which is where they are
+/// written; the lambda case is named here rather than papered over, because a
+/// gate believed to be total is worse than one whose gap is written down.
 /// </para>
 /// </remarks>
 public class ArchitectureTests
 {
+    private static readonly string[] Forbidden =
+    [
+        "Ordering.Infrastructure",
+        "Microsoft.EntityFrameworkCore",
+        "MassTransit",
+        "StackExchange.Redis"
+    ];
+
     /// <summary>
-    /// The two exclusions, and both are narrow on purpose.
+    /// Whether a failing type is the composition root or code the compiler
+    /// emitted <i>for it</i> — the one exemption §4.2 grants.
     /// </summary>
     /// <remarks>
-    /// <c>Program</c> is the composition root — the one place §4.2 permits an
-    /// Infrastructure reference — and naming it is what makes the exemption
-    /// visible. Renaming the root would drop the exclusion and fail this test
-    /// loudly, which is the right direction to fail in.
-    /// <para>
-    /// The <c>&lt;</c> prefix is the compiler's: closures and
-    /// <c>&lt;PrivateImplementationDetails&gt;</c> emitted for
-    /// <c>Program.cs</c>'s own statements inherit its references, so they are
-    /// the root's shadow rather than code anybody wrote.
-    /// </para>
+    /// Top-level statements put <c>Program</c> and its helpers
+    /// (<c>&lt;PrivateImplementationDetails&gt;</c>, the anonymous delegate
+    /// types its lambdas need) in the <b>global namespace</b>, so they carry no
+    /// dot. Everything an endpoint generates is nested inside the endpoint
+    /// class and keeps its namespace — which is exactly the distinction the
+    /// name-prefix exclusion could not draw.
     /// </remarks>
-    private static PredicateList HostTypesOutsideTheCompositionRoot() => Types
-        .InAssembly(typeof(Program).Assembly)
-        .That().DoNotHaveName("Program")
-        .And().DoNotHaveNameStartingWith("<");
+    private static bool IsCompositionRoot(string fullName) =>
+        fullName == "Program" || (!fullName.Contains('.') && fullName.StartsWith('<'));
 
     [Fact]
     public void Nothing_but_the_composition_root_depends_on_infrastructure()
@@ -59,33 +79,37 @@ public class ArchitectureTests
         // Not the service's Infrastructure namespace alone: §4.2's rule is
         // "Application and Domain contracts only", and the concrete types it
         // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach a
-        // type transitively without any Catalog.Infrastructure dependency to
+        // type transitively without any Ordering.Infrastructure dependency to
         // trip on.
-        TestResult result = HostTypesOutsideTheCompositionRoot()
-            .ShouldNot().HaveDependencyOnAny(
-                "Ordering.Infrastructure",
-                "Microsoft.EntityFrameworkCore",
-                "MassTransit",
-                "StackExchange.Redis")
+        TestResult result = Types
+            .InAssembly(typeof(Program).Assembly)
+            .ShouldNot().HaveDependencyOnAny(Forbidden)
             .GetResult();
 
-        result.IsSuccessful.ShouldBeTrue(
-            $"leaked: {string.Join(", ", result.FailingTypeNames ?? [])}");
+        string[] leaked = [.. (result.FailingTypeNames ?? []).Where(name => !IsCompositionRoot(name))];
+
+        leaked.ShouldBeEmpty($"leaked: {string.Join(", ", leaked)}");
     }
 
     [Fact]
-    public void The_gate_above_is_judging_this_host_at_all()
+    public void The_composition_root_is_the_only_thing_exempted()
     {
-        string[] judged = [.. HostTypesOutsideTheCompositionRoot().GetTypes().Select(t => t.Name)];
+        string[] exempted =
+        [
+            .. typeof(Program).Assembly
+                .GetTypes()
+                .Select(type => type.FullName ?? type.Name)
+                .Where(IsCompositionRoot)
+        ];
 
-        // The only vacuity left to guard. The rule above covers everything but
-        // the root, so no namespace can escape it — what could still make it
-        // meaningless is selecting nothing, which is what a wrongly-anchored
-        // assembly reference would produce.
-        //
-        // Named rather than counted: a count goes stale on every new type and
-        // gets "fixed" by editing the number. These two are the host's
-        // transport surface, and they are what the rule exists for.
-        judged.ShouldContain(nameof(Endpoints.OrderEndpoints));
+        // The exemption is the whole of this gate's trust, so it is asserted
+        // rather than assumed: it must cover the root and must not quietly
+        // grow. `Program` being present is what says the rule is looking at
+        // this host at all — a wrongly-anchored assembly reference would
+        // produce an empty list here and a vacuously green rule above.
+        exempted.ShouldContain("Program");
+        exempted.Length.ShouldBeLessThanOrEqualTo(
+            4,
+            "the exemption should cover Program and its own generated helpers, nothing more");
     }
 }

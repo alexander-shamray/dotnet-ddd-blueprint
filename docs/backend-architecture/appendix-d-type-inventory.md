@@ -35,7 +35,6 @@ repeatable check; noticing by eye is not.
 | `ICommandMessageMapper<,>` | §6.2 | Wire contract → application command |
 | `IIntegrationEvent` | §9.1 | The three envelope fields every contract carries; the constraint that lets the consumer read `OccurredAt` |
 | `ServiceIdentityOptions` | [§15.4](15-cicd-deployment.md) | Bound to `Identity:Client`, `ValidateOnStart`-checked. Registered by the BFF alone (§9.7) |
-| `ServiceOptions` | §15.4 | Static constants only — not bound, not validated, not deployable |
 | `PluggableInterfaces`, `AddPluggableFrom` | §6.2 | The one list of scanned interfaces, and the per-assembly scan that reads it |
 | `AddDispatcher` | §6.2 | Registers `IDispatcher`. It exists because `Dispatcher` is internal to `Common.Application`, so no service can write the `AddScoped` line itself |
 | `AddDomainEventDispatcher` | §7.5 | Its twin, for the same reason: `DomainEventDispatcher`, `ProjectionRegistry` and `ProjectionRegistryCache` are all internal. Registers the cache as a **singleton** and the other two scoped |
@@ -141,7 +140,7 @@ structurally always null on one path.
 | `PricingService`, `ValidationInterceptor` | §9.7 | Catalog's server half of the pricing hop, and the interceptor turning a `ValidationException` into `InvalidArgument`. Without the second, a malformed request reaches the caller as `Unknown`, which the BFF maps to a 500 — a caller's bad input reported as the platform's fault. Not a retry concern: a gRPC status rides an HTTP 200 and the resilience pipeline never sees it |
 | `PricingHop` | §9.7 | The BFF's client name, resilience options name and Catalog's address, in one place. Port **8081**, not 8080: a cleartext Kestrel endpoint cannot serve HTTP/1.1 and h2c at once |
 | `UpstreamExceptionHandler` | §9.7 | `IExceptionHandler` in `Web.Bff`; `RpcException` to a status a caller can act on — `InvalidArgument` to 400, `Unavailable`/`DeadlineExceeded` to 503, and `Internal` to 503 **when `Status.DebugException` is one of the three the pipeline itself raises**, because a failure inside the client has no gRPC status and arrives as `Internal` carrying its cause. Everything else is left **unhandled** so it stays a logged 500 rather than a quietly reclassified one |
-| `ServiceOptions` | §15.4 | Static constants in `Common.Web`; `OperationTimeout` is the ceiling §9.7's hierarchy asserts against |
+| `ServiceOptions` | §15.4 | Static constants in `Common.Web` — not bound, not validated, not deployable; `OperationTimeout` is the ceiling §9.7's hierarchy asserts against. Listed **here** rather than in D.1: it is not an application port, and it was briefly in both |
 | `ValidationBehavior<,>`, `TransactionBehavior<,>` | §6.3 | `IPipelineBehavior<,>` |
 | `LoggingBehavior<,>` | §13.3 | `IPipelineBehavior<,>`; outermost — pushes the request scope, logs the outcome and records `request.duration` |
 | `IdempotencyBehavior<,>` | §8.5 | `IPipelineBehavior<,>` over `IIdempotencyStore` |

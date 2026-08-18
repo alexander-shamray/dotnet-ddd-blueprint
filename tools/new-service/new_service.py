@@ -825,48 +825,20 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "/// forbidden reference before it was trusted — in the service this one\n"
             "/// was scaffolded from, not here, where there is nothing yet to judge.\n",
         ),
-        # The dependency rule itself TRAVELS now, and that is new. It used to
-        # select a namespace, so a service with no endpoints selected nothing;
-        # it now covers everything but the composition root, which is a true
-        # and checkable statement about a host with no adapters at all.
+        # The whole gate travels now, and that is the point of the shape it
+        # arrived at: it selects the entire assembly and subtracts the
+        # composition root from the FAILURES, so it says something true about a
+        # host with no adapters at all. A namespace selector said nothing.
         #
-        # What still leaves is the non-vacuity test, because it names the two
-        # adapters the exemplar has and this service has neither. Softening it
-        # to "zero or more" would delete the only thing it asserts.
+        # Only the two adapter names leave, because they are the exemplar's.
         (
+            "        exempted.ShouldContain(\"Program\");\n",
+            "        exempted.ShouldContain(\"Program\");\n"
             "\n"
-            "    [Fact]\n"
-            "    public void The_gate_above_is_judging_this_host_at_all()\n"
-            "    {\n"
-            "        string[] judged = [.. HostTypesOutsideTheCompositionRoot().GetTypes().Select(t => t.Name)];\n"
-            "\n"
-            "        // The only vacuity left to guard. The rule above covers everything but\n"
-            "        // the root, so no namespace can escape it — what could still make it\n"
-            "        // meaningless is selecting nothing, which is what a wrongly-anchored\n"
-            "        // assembly reference would produce.\n"
-            "        //\n"
-            "        // Named rather than counted: a count goes stale on every new type and\n"
-            "        // gets \"fixed\" by editing the number. These two are the host's\n"
-            "        // transport surface, and they are what the rule exists for.\n"
-            "        judged.ShouldContain(nameof(Endpoints.ProductEndpoints));\n"
-            "        judged.ShouldContain(\"PricingService\");\n"
-            "    }\n",
-            "\n"
-            "    // A non-vacuity test belongs here and cannot be written yet, because it\n"
-            "    // has to NAME an adapter and this service has none. Add it with the\n"
-            "    // first endpoint:\n"
-            "    //\n"
-            "    //     [Fact]\n"
-            "    //     public void The_gate_above_is_judging_this_host_at_all() =>\n"
-            "    //         HostTypesOutsideTheCompositionRoot()\n"
-            "    //             .GetTypes()\n"
-            "    //             .Select(t => t.Name)\n"
-            "    //             .ShouldContain(nameof(Endpoints.<Aggregate>Endpoints));\n"
-            "    //\n"
-            "    // Its subject is the SELECTION, not the dependencies. The rule above\n"
-            "    // needs no namespace to be right — that is exactly what it was changed\n"
-            "    // away from — so what is left to check is that it is looking at this\n"
-            "    // assembly at all.\n",
+            "        // The other half of this assertion belongs with the first endpoint:\n"
+            "        // that the gate is judging something. Until then Program is all\n"
+            "        // there is, and naming an adapter that does not exist is not an\n"
+            "        // assertion — see the service this one was scaffolded from.\n",
         ),
     ),
     "tests/Catalog.Api.Tests/HostSmokeTests.cs": (

@@ -120,7 +120,31 @@ public sealed partial class CachingTokenClient(
         string body = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
+        {
+            // A refusal splits in two, and the split is what decides whether
+            // the caller gets a retry or a 500.
+            //
+            // This runs INSIDE the pricing client's resilience pipeline —
+            // ClientCredentialsHandler is a handler on it — so what is thrown
+            // here is what Polly sees. An InvalidOperationException is not a
+            // transient fault to it, so a Keycloak that is merely restarting
+            // took the whole request down with an unmapped 500. Throwing the
+            // exception the pipeline already understands puts that case back
+            // on the retry, and on §9.7's Internal → 503 mapping when the
+            // retries are spent.
+            if (IsTransient(response.StatusCode))
+            {
+                throw new HttpRequestException(
+                    Failure(response.StatusCode, body),
+                    inner: null,
+                    response.StatusCode);
+            }
+
+            // And a credential or configuration refusal stays a deployment
+            // error, because retrying a wrong client secret three times is
+            // three ways of being wrong.
             throw new InvalidOperationException(Failure(response.StatusCode, body));
+        }
 
         using JsonDocument document = JsonDocument.Parse(body);
         JsonElement root = document.RootElement;
@@ -242,6 +266,20 @@ public sealed partial class CachingTokenClient(
             $"'{ServiceIdentityOptions.SectionName}' is the only credential set in the platform (§11.5), " +
             "so this is a deployment fault rather than a caller's.";
     }
+
+    /// <summary>
+    /// Whether the token endpoint's refusal is worth another attempt.
+    /// </summary>
+    /// <remarks>
+    /// The same three shapes <c>AddStandardResilienceHandler</c> treats as
+    /// transient over HTTP — a 5xx, a 408 and a 429 — so this host's own
+    /// judgement and the pipeline's agree rather than each having an opinion.
+    /// Everything else, 401 and 400 above all, is the deployment being wrong
+    /// about its own credentials.
+    /// </remarks>
+    private static bool IsTransient(HttpStatusCode status) =>
+        (int)status >= 500 ||
+        status is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
 
     private sealed record CachedToken(string AccessToken, DateTimeOffset ExpiresAt);
 }

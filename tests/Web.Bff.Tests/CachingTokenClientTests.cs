@@ -169,6 +169,39 @@ public sealed class CachingTokenClientTests : IAsyncLifetime
         thrown.Message.ShouldNotContain("leaked-bearer-token");
     }
 
+    [Theory]
+    [InlineData(StatusCodes.Status503ServiceUnavailable)]
+    [InlineData(StatusCodes.Status500InternalServerError)]
+    [InlineData(StatusCodes.Status408RequestTimeout)]
+    [InlineData(StatusCodes.Status429TooManyRequests)]
+    public async Task A_transient_refusal_throws_what_the_resilience_pipeline_retries(int status)
+    {
+        _provider.TokenStatus = status;
+
+        // HttpRequestException, not InvalidOperationException — and the type is
+        // the whole point rather than a detail. This runs inside the pricing
+        // client's resilience pipeline (§9.7), which decides what to retry from
+        // the exception it sees: an InvalidOperationException is not transient
+        // to it, so a Keycloak that was merely restarting used to take the
+        // request down as an unmapped 500.
+        await Should.ThrowAsync<HttpRequestException>(
+            () => Tokens.GetAsync(Scope, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.Status401Unauthorized)]
+    [InlineData(StatusCodes.Status400BadRequest)]
+    public async Task A_credential_refusal_stays_a_deployment_error(int status)
+    {
+        _provider.TokenStatus = status;
+
+        // The other half, and it must not become retryable: a wrong client
+        // secret retried three times is three ways of being wrong, and the
+        // failure a deployment needs to see is the first one.
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => Tokens.GetAsync(Scope, TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task A_discovery_document_with_no_token_endpoint_fails_naming_the_key()
     {
