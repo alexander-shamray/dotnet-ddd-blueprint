@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -23,6 +25,7 @@ namespace Web.Bff.Tests;
 public sealed class StubIdentityProvider : IAsyncLifetime
 {
     private WebApplication? _app;
+    private X509Certificate2? _certificate;
 
     /// <summary>The authority, with the trailing slash a base address needs.</summary>
     public Uri Authority { get; private set; } = null!;
@@ -48,11 +51,43 @@ public sealed class StubIdentityProvider : IAsyncLifetime
     /// <summary>Answer a 200 whose <c>access_token</c> is the empty string.</summary>
     public bool BlankAccessToken { get; set; }
 
+    /// <summary>
+    /// Serve over TLS with a self-signed certificate, so <see cref="Authority"/>
+    /// is an <c>https</c> URL.
+    /// </summary>
+    /// <remarks>
+    /// The one thing a plain-HTTP stub cannot express is a <i>downgrade</i>, so
+    /// a provider that only ever spoke HTTP would leave that guard asserted in
+    /// prose and measured nowhere.
+    /// </remarks>
+    public bool UseHttps { get; set; }
+
+    /// <summary>
+    /// The <c>token_endpoint</c> to advertise, in place of this stub's own.
+    /// </summary>
+    /// <remarks>
+    /// The document is the only thing that says where the secret goes, which is
+    /// exactly why it is worth being able to make it say something hostile.
+    /// </remarks>
+    public string? AdvertisedTokenEndpoint { get; set; }
+
     public async ValueTask InitializeAsync()
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0));
+
+        if (UseHttps)
+            _certificate = SelfSigned();
+
+        builder.WebHost.ConfigureKestrel(o =>
+            o.Listen(
+                IPAddress.Loopback,
+                0,
+                listen =>
+                {
+                    if (_certificate is not null)
+                        listen.UseHttps(_certificate);
+                }));
 
         _app = builder.Build();
 
@@ -65,7 +100,10 @@ public sealed class StubIdentityProvider : IAsyncLifetime
 
             return OmitTokenEndpoint
                 ? Results.Json(new { issuer = $"{Authority}" })
-                : Results.Json(new { token_endpoint = $"{Authority}protocol/openid-connect/token" });
+                : Results.Json(new
+                {
+                    token_endpoint = AdvertisedTokenEndpoint ?? $"{Authority}protocol/openid-connect/token"
+                });
         });
 
         _app.MapPost("/realms/test/protocol/openid-connect/token", async (HttpContext context) =>
@@ -96,5 +134,34 @@ public sealed class StubIdentityProvider : IAsyncLifetime
     {
         if (_app is not null)
             await _app.DisposeAsync();
+
+        _certificate?.Dispose();
+    }
+
+    /// <summary>
+    /// A throwaway certificate for loopback, generated in process.
+    /// </summary>
+    /// <remarks>
+    /// Generated rather than taken from <c>dotnet dev-certs</c>: the suite must
+    /// pass on a runner where that has never been run, and a test that needs a
+    /// machine prepared by hand is a test that is skipped in CI.
+    /// </remarks>
+    private static X509Certificate2 SelfSigned()
+    {
+        using RSA key = RSA.Create(2048);
+        CertificateRequest request = new("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        SubjectAlternativeNameBuilder names = new();
+        names.AddDnsName("localhost");
+        names.AddIpAddress(IPAddress.Loopback);
+        request.CertificateExtensions.Add(names.Build());
+
+        using X509Certificate2 generated = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(1));
+
+        // Windows' SChannel will not serve a certificate whose key is
+        // ephemeral, so it makes a round trip through PKCS#12 first. On Linux
+        // this is a no-op that costs nothing.
+        return X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pfx), password: null);
     }
 }

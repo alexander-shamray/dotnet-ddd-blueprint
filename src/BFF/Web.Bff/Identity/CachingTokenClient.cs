@@ -226,8 +226,47 @@ public sealed partial class CachingTokenClient(
                 "host needs that same one to mint its own token (§11.5).");
         }
 
+        // The document is trusted for its CONTENT and not for where it points.
+        // Everything above proves the provider answered; nothing in it stops
+        // the answer naming a different scheme, and the very next thing this
+        // class does with the returned Uri is post ClientSecret to it.
+        //
+        // Two refusals, and the second is the one that matters. A scheme that
+        // is not HTTP(S) would fail at PostAsync anyway, with a
+        // NotSupportedException that names neither the document nor the key —
+        // so this is a better message rather than a new protection. A plain
+        // HTTP endpoint advertised by an HTTPS provider is a downgrade: the
+        // secret leaves in the clear, and the only thing that noticed was the
+        // discovery document itself.
+        if (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException(Unusable(client, parsed, "is not an http or https URL"));
+
+        // Development is where the authority is allowed to be plain HTTP
+        // (§11.3's RequireHttpsMetadata), so this cannot be an unconditional
+        // "must be HTTPS" — it is "must not be WEAKER than the channel the
+        // document arrived over". An HTTP authority stays HTTP and an HTTPS one
+        // cannot be talked down.
+        if (client.BaseAddress?.Scheme == Uri.UriSchemeHttps && parsed.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException(
+                Unusable(client, parsed, "downgrades the HTTPS authority to plain HTTP"));
+
         return parsed;
     }
+
+    /// <summary>
+    /// Why a syntactically valid <c>token_endpoint</c> is still refused.
+    /// </summary>
+    /// <remarks>
+    /// The endpoint is included because it is the thing that is wrong and it is
+    /// not a secret — it is a public URL the provider advertises to anyone who
+    /// asks. The <i>body</i> of a token response is what
+    /// <see cref="Failure(HttpStatusCode, string)"/> refuses to echo, for the
+    /// opposite reason.
+    /// </remarks>
+    private static string Unusable(HttpClient client, Uri endpoint, string fault) =>
+        $"The discovery document at '{client.BaseAddress}' declares a token_endpoint of '{endpoint}', which " +
+        $"{fault}. This host posts its client secret there (§11.5), so the endpoint may not be less protected " +
+        $"than the authority '{AuthenticationExtensions.AuthorityKey}' names (§11.3).";
 
     /// <summary>
     /// The failure message, with RFC 6749's <c>error</c> member lifted out and

@@ -747,6 +747,21 @@ every retry replays the token the first attempt built — see the ordering in
 > instead of a stale one.** `PricingCredentialsTests` drives exactly that, and
 > it is the only case in which the two orderings produce different bytes.
 
+> **The token endpoint comes from the discovery document, and the document is
+> trusted for its content rather than for where it points.** Reading
+> `token_endpoint` rather than appending a provider-shaped path keeps the
+> credentials this host presents and the tokens §11.3 accepts pointed at one
+> realm — but the URL inside that document is the address a client secret is
+> about to be posted to, and nothing upstream constrains it. An HTTPS authority
+> advertising a plain-HTTP endpoint puts the secret on the wire in the clear,
+> having passed every check before that point.
+>
+> So the discovered endpoint is refused unless it is HTTP(S), and refused again
+> if it is weaker than the channel the document arrived over. **Not an
+> unconditional "must be HTTPS"** — `Identity:Authority` is permitted to be
+> plain HTTP in Development (§11.3), and a rule that forbade it there would be
+> one every local run has to turn off.
+
 ### The scope has to become an audience
 
 `ServiceIdentityOptions.Scope` is `commerce-api` ([§14.1](14-local-development.md), [§15.4](15-cicd-deployment.md)) and §11.3
