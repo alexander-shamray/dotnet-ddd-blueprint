@@ -473,7 +473,7 @@ the flake, where the assembly-wide attribute leaves nothing to forget.
 
 ## The one rule that matters
 
-**The blueprint must not contradict itself.** It is ~10,500 lines that describe
+**The blueprint must not contradict itself.** It is ~14,900 lines that describe
 one coherent system; the failure mode is a statement in §9 that quietly
 disagrees with §6, or an appendix that lists a package no chapter uses. Most of
 the work done in this repo has been finding and closing those gaps.
@@ -596,9 +596,16 @@ file and a reviewer are the only things that do.
   `dotnet build` is silent even with `TreatWarningsAsErrors`, and so is
   `dotnet format style --diagnostics IDE0005` — both checked against a
   deliberately injected using. Turning it on costs a fourth entry in
-  `Directory.Build.props`, because it also enables CS1591 against 62 public
-  members with no XML comment. The greyed-out using in the IDE is the only live
-  signal there is.
+  `Directory.Build.props`, because it also enables CS1591 against **1,178**
+  public members with no XML comment, across `src/` and the test projects
+  alike. That figure said 62 until this branch measured it — `dotnet build
+  Platform.slnx -p:GenerateDocumentationFile=true -p:TreatWarningsAsErrors=false
+  --no-incremental`, counting unique diagnostic sites, run twice for the same
+  answer. It has grown roughly nineteenfold since it was written, which makes
+  the fourth-entry argument stronger rather than weaker. **`--no-incremental`
+  is load-bearing in that command**: an ordinary build recompiles nothing and
+  reports zero, which reads exactly like a clean result. The greyed-out using
+  in the IDE is the only live signal there is.
 - **A blank line always follows the namespace declaration** (IDE0055,
   enforced). `namespace X;` is a statement about the whole file, not the first
   line of the type below it:
