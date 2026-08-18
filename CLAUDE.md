@@ -507,8 +507,8 @@ Run `/validate-blueprint` after any substantive edit.
   fine. Cite the section that actually states the claim; a reference to a
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
-  admonition syntax. Of the 68 in the blueprint, two forms are named and
-  recurring — `**Trap — …**` (9) for a mistake worth naming, and
+  admonition syntax. Of the 120 in the blueprint, two forms are named and
+  recurring — `**Trap — …**` (16) for a mistake worth naming, and
   `**Decision — …**` (10), which always points at the ADR that records it:
 
   ```markdown
@@ -518,7 +518,7 @@ Run `/validate-blueprint` after any substantive edit.
   > **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
   ```
 
-  The other 49 are a bold assertion followed by its argument —
+  The other 94 are a bold assertion followed by its argument —
   `> **Unregistered, this fails silently and completely.** …`. That is the
   default; reach for `Trap` or `Decision` only when the callout genuinely is
   one. `**Decision.** / **Why.** / **Consequences.**` are the ADR body form,
@@ -949,7 +949,7 @@ file and a reviewer are the only things that do.
 | Target framework | .NET 10 (LTS), C# 14 |
 
 Each of these is a house style a reviewer might otherwise read as an oversight
-and "correct". They are consistent across all ~135 existing C# blocks, and the
+and "correct". They are consistent across all ~150 existing C# blocks, and the
 solution is written the same way. Changing one is a decision about the whole
 corpus, not about the file in front of you.
 
