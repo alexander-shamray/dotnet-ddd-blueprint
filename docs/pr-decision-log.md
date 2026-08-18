@@ -86,6 +86,28 @@ decisions bind what comes after:
   PR-19's `AddStandardResilienceHandler` finding and PR-17's `KnownNetworks`
   finding for the third time: **a sample nobody has compiled is a sample that
   does not compile**, and the only way to find out is to build it.
+- **A withdrawal has to survive having no row to write to, and §6.6's printed
+  `UPDATE` did not.** `ProductDiscontinued` carries no currency (§9.1) and
+  `ordering.ProductPrices` is keyed by one, so the discontinue statement
+  reached only the rows that already existed. §9.4 guarantees no ordering, so
+  a withdrawal claimed ahead of a still-retrying publish matched nothing and
+  the publish then took the upsert's `NOT MATCHED` branch — **the one branch
+  no `UpdatedAt` comparison can cover**, because there is no target row to
+  compare against — putting a discontinued product back on sale. A stale price
+  for a currency the withdrawal never saw does it with no reordering at all.
+  Copilot found it; both cases were reproduced as failing tests before the fix
+  was written.
+
+  **The answer is the one §6.6 already gives one projection up.**
+  `OrderSummaries` uses a `MERGE` rather than an `UPDATE` for its status events
+  precisely so a `Cancelled` claimed before its `OrderPlaced` does not "match
+  no row, change nothing, and be marked processed". A status event can carry
+  its own row into existence because it knows the key; a withdrawal cannot, so
+  it writes a product-level watermark — `ordering.ProductWithdrawals` — and
+  the upsert derives `IsAvailable` from it on exactly the branch that has
+  nothing else to consult. A **watermark**, not a flag, for the reason
+  `UpdatedAt` is a comparison: a later republish re-lists the product, in
+  currencies that have rows and in currencies that do not.
 - **`WITH (HOLDLOCK)` is a reasoned claim, not an observed one, and the test
   says so in its own remarks.** A bare `MERGE` takes no range lock over a key it
   failed to find, so two concurrent deliveries can both insert and the loser
@@ -111,15 +133,23 @@ decisions bind what comes after:
   fixed the reader and §6.4's sample; three sites that described the *reader*
   went on quoting the retired rationale for two more rounds, which is the same
   defect one indirection out — a comment describing what a comment says.
-- **§13.7's read-model row says *own events* now, because `projection.lag`
-  only ever measured one lane.** `ProjectionInvoker` records it off an outbox
-  row, so a read model fed by another service's contract never touches it.
-  Ordering's `ProductPrices` is the first such read model in the platform, and
-  its staleness is publish-to-consumer-start — which the table's **event
-  end-to-end** row already governs, so the fix was a qualifier and a paragraph
-  rather than a second row on the same instrument. The row was not wrong when
-  written; it became a promise of coverage over an empty series the moment a
-  broker-fed read model existed.
+- **§13.7's read-model row says *own events* now, and broker-fed staleness is
+  a named gap rather than a row.** `projection.lag` is recorded by
+  `ProjectionInvoker` off an outbox row, so a read model fed by another
+  service's contract never touches it — and `ProductPrices` is the platform's
+  first. The first fix pointed at the **event end-to-end** row instead, which
+  Copilot refuted: `IntegrationEventConsumer<T>` records
+  `messaging.delivery.lag` at the *top* of `Consume`, before it resolves a
+  handler, so the measurement stops where the projection starts and excludes
+  the SQL round trip, §9.8's retries and a terminal failure. That row can hold
+  its two-second target while the table is stale or was never written.
+
+  **A near-miss row is worse than an absence, and §13.7 already said so two
+  paragraphs down** — "an SLO that cannot be evaluated is not a weak SLO, it
+  is a claim that the service is meeting a bar nobody is checking". Closing it
+  needs an instrument that fires after a broker-lane handler commits, which is
+  a §13.3 change with a dashboard behind it; until then the gap is written
+  down, which is the standing the two cut rows already have.
 
 **`OrderSummaries` is deliberately not in this PR**, and the reason is worth
 carrying: §6.6 has two projections, and only one of them is what this PR's

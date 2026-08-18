@@ -124,8 +124,9 @@ src/Services/Catalog/        §4.1's five projects — Domain, Application,
                              platform's one gRPC server
 src/Services/Ordering/       the same five, rendered by the scaffold rather
                              than written, then given §5's Order aggregate —
-                             and, since PR-20, §6.6's price projection behind
-                             the solution's first receive endpoint
+                             and, since PR-20, §6.6's price projection with its
+                             withdrawal watermark, behind the solution's first
+                             receive endpoint
 tests/                       per service: .Domain.Tests, .Application.Tests,
                              .Api.Tests and .TestSupport — the last is NOT a
                              test project (§4.1). Plus Common.*.Tests,
@@ -287,7 +288,7 @@ endpoint and its first broker-fed read model. **PR-21 (Ordering's fulfilment
 saga) is next**, and it is the other half of the roadmap's M5.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 723 tests — so the build rules and the drift rules below
+and `dotnet test` runs 726 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly

@@ -977,7 +977,7 @@ nobody will be told to follow.
 | Alert | Condition | Symptom | Likely cause | Runbook |
 |---|---|---|---|---|
 | **Broker lane stalled** | `outbox.oldest.age{lane="Broker"}` > 2 min | *Other services* are working from stale data; sagas stop advancing | Broker unreachable, credentials expired, queue at its length limit, network policy change | `outbox-broker.md` |
-| **Local lane stalled** | `outbox.oldest.age{lane="Local"}` > 30 s | The read models this service feeds from its **own** events are stale — users see missing or outdated list data. Not the ones another service's contract feeds: those never touch this lane, and their staleness is `messaging.delivery.lag` (§13.7) | A projection handler throwing, read-model deadlock, schema drift after a migration | `projection-lag.md` |
+| **Local lane stalled** | `outbox.oldest.age{lane="Local"}` > 30 s | The read models this service feeds from its **own** events are stale — users see missing or outdated list data. Not the ones another service's contract feeds: those never touch this lane, and §13.7 records that their staleness has no direct signal yet | A projection handler throwing, read-model deadlock, schema drift after a migration | `projection-lag.md` |
 | **Outbox growth** | `sum(outbox.pending.count)` > 1000 and rising over 10 min | Either lane, not keeping up | Dispatcher not running, batch size too small for load, purge job failed | `outbox-growth.md` |
 | **Abandoned rows** | `sum(outbox.abandoned.count)` > 0 | Silent permanent data loss | A message that will never be delivered and is no longer being retried. The `lane` tag says whose loss: `Broker`, and other services never learned something; `Local`, and this service's read model is permanently wrong | `outbox-abandoned.md` |
 
@@ -1272,12 +1272,26 @@ honest.** `projection.lag` is recorded by `ProjectionInvoker` off an outbox
 row, so it only ever measures a read model this service feeds from its own
 domain events (§7.5). A read model fed by *another* service's contract never
 touches the outbox at all — Ordering's `ordering.ProductPrices` is the worked
-case (§6.6) — so `projection.lag` is empty for it and no target above governs
-it directly. The **event end-to-end** row does: publish → consumer start is
-where a broker-fed projection's staleness comes from, and the handler's own
-write is a single statement on a local connection. The row read *event raised →
-projection applied* with no qualifier until Ordering shipped such a read model,
-at which point it promised coverage of a series that is empty for it.
+case (§6.6) — so `projection.lag` is empty for it.
+
+**Broker-fed read-model staleness therefore has no SLO here, and the honest
+move is to say so rather than to point at a row that nearly fits.** The
+**event end-to-end** row above is the near miss: `IntegrationEventConsumer<T>`
+records `messaging.delivery.lag` at the top of `Consume`, *before* it resolves
+a handler, so the measurement stops where the projection starts. It excludes
+the SQL round trip, every retry §9.8 schedules, and a handler that fails
+terminally — which means that row can sit inside its two-second target while
+`ordering.ProductPrices` is stale, or was never written at all. Adopting it
+would restate this table's own defect one row over: a target that is met while
+the thing it names is broken.
+
+Closing it needs an instrument that fires *after* a broker-lane handler
+commits — the `Projected` half of `MessagingMetrics` reaches only the local
+lane today, because `ProjectionInvoker` is its only call site. That is a
+§13.3 change with a dashboard behind it, so it belongs with the observability
+work rather than with the service PR that exposed the gap. Until then this is
+a **named** gap, which is the same standing as the two rows cut below: an SLO
+nobody can compute is worse than an absence somebody has written down.
 
 Two rows were removed rather than left unmeasurable. **Gateway added latency**
 would need the gateway's own duration minus the backend's, correlated per

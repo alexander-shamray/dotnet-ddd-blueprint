@@ -1177,11 +1177,45 @@ CREATE TABLE ordering.ProductPrices
     UpdatedAt    DATETIMEOFFSET   NOT NULL,
     CONSTRAINT PK_ProductPrices PRIMARY KEY (ProductId, Currency)
 );
+
+-- The withdrawal watermark, at product level because ProductDiscontinued
+-- carries no currency (§9.1) and this table is keyed by one.
+CREATE TABLE ordering.ProductWithdrawals
+(
+    ProductId    UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    WithdrawnAt  DATETIMEOFFSET   NOT NULL
+);
 ```
 
 `IsAvailable` rather than deleting on `ProductDiscontinued`: an order already
 placed must still be explicable months later, and a row that vanishes takes its
 price history with it.
+
+> **A withdrawal has to survive having no row to write to, and the first
+> version of this section did not.** The obvious discontinue is a single
+> `UPDATE` over `ProductPrices`, and it reaches only the rows that exist when
+> it runs. [§9.4](09-messaging.md) guarantees no ordering, so a withdrawal can
+> be claimed ahead of a publish still retrying behind it: the `UPDATE` matches
+> nothing, the publish then takes the upsert's `NOT MATCHED` branch — the one
+> branch no `UpdatedAt` comparison can cover, because there is no target row to
+> compare against — and a discontinued product is back on sale. A stale price
+> for a currency the withdrawal never saw does the same with no reordering at
+> all.
+>
+> **This section already makes the argument one projection up.**
+> `OrderSummaries` uses a `MERGE` rather than an `UPDATE` for its status
+> events precisely so a
+> `Cancelled` claimed before its `OrderPlaced` does not "match no row, change
+> nothing, and be marked processed". A status event can carry its own row into
+> existence because it knows the key; a withdrawal cannot, because the key
+> includes a currency it does not have. `ProductWithdrawals` is where it puts
+> the fact instead, and the upsert consults it on exactly the branch that has
+> nothing else to consult.
+>
+> A **watermark** rather than a flag, for the reason `UpdatedAt` is a
+> comparison: a withdrawal must not make a product permanently unorderable.
+> Catalog republishing at a later `OccurredAt` re-lists it, in currencies that
+> have rows and in currencies that do not.
 
 ```csharp
 // Infrastructure, not Application: raw SQL and a connection factory. Registered
@@ -1207,24 +1241,67 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
         -- repaired by a retry policy stops holding the day somebody tunes the
         -- retry policy.
         MERGE ordering.ProductPrices WITH (HOLDLOCK) AS target
-        USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
+        -- IsAvailable is derived rather than literal, and the subquery is the
+        -- second guard: a withdrawal newer than this event means Catalog has
+        -- since pulled the product, whether or not a row for this currency
+        -- existed when the withdrawal ran.
+        USING (
+            SELECT
+                ProductId = @ProductId,
+                Currency = @Currency,
+                IsAvailable = CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM ordering.ProductWithdrawals w
+                        WHERE w.ProductId = @ProductId
+                            AND w.WithdrawnAt > @OccurredAt)
+                    THEN 0
+                    ELSE 1
+                END
+        ) AS source
             ON target.ProductId = source.ProductId
             AND target.Currency = source.Currency
+        -- NOT MATCHED is the branch no UpdatedAt comparison can cover, because
+        -- there is no target row to compare against.
         WHEN NOT MATCHED THEN
             INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-            VALUES (@ProductId, @Currency, @Amount, 1, @OccurredAt)
+            VALUES (@ProductId, @Currency, @Amount, source.IsAvailable, @OccurredAt)
         -- Same out-of-order guard as OrderSummaries: a retried stale event
         -- must not overwrite a newer price.
         WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
-            UPDATE SET Amount = @Amount, IsAvailable = 1, UpdatedAt = @OccurredAt;
+            UPDATE SET Amount = @Amount, IsAvailable = source.IsAvailable, UpdatedAt = @OccurredAt;
         """;
 
     private const string DiscontinueSql =
         """
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        -- The watermark first, because it is the half that must survive having
+        -- no price row to write to. Monotonic: a stale withdrawal must not
+        -- move it back over a later one.
+        MERGE ordering.ProductWithdrawals WITH (HOLDLOCK) AS target
+        USING (SELECT ProductId = @ProductId) AS source
+            ON target.ProductId = source.ProductId
+        WHEN NOT MATCHED THEN
+            INSERT (ProductId, WithdrawnAt)
+            VALUES (@ProductId, @OccurredAt)
+        WHEN MATCHED AND target.WithdrawnAt < @OccurredAt THEN
+            UPDATE SET WithdrawnAt = @OccurredAt;
+
+        -- Then the rows that already exist. The watermark covers the ones that
+        -- do not, so between them every currency is reached.
         UPDATE ordering.ProductPrices
         SET IsAvailable = 0, UpdatedAt = @OccurredAt
         WHERE ProductId = @ProductId
             AND UpdatedAt < @OccurredAt;
+
+        -- One transaction, because the two halves are one fact: the watermark
+        -- alone leaves existing prices orderable, the rows alone leave the
+        -- hole. Redelivery repairs either, a message that exhausts §9.8's
+        -- retries does not, and XACT_ABORT is what rolls the first statement
+        -- back when the second fails.
+        COMMIT;
         """;
 
     public Task HandleAsync(ProductPublished integrationEvent, CancellationToken ct) =>

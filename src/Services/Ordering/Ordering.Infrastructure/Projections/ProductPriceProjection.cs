@@ -50,24 +50,46 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     private const string UpsertSql =
         """
         MERGE ordering.ProductPrices WITH (HOLDLOCK) AS target
-        USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
+        -- IsAvailable is derived rather than literal, and the subquery is the
+        -- whole of the second guard. A withdrawal newer than this event means
+        -- Catalog has since pulled the product, so the row this statement is
+        -- about to write or rewrite is not orderable — whether or not a row
+        -- for this currency existed when the withdrawal ran.
+        USING (
+            SELECT
+                ProductId = @ProductId,
+                Currency = @Currency,
+                IsAvailable = CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM ordering.ProductWithdrawals w
+                        WHERE w.ProductId = @ProductId
+                            AND w.WithdrawnAt > @OccurredAt)
+                    THEN 0
+                    ELSE 1
+                END
+        ) AS source
             ON target.ProductId = source.ProductId
             AND target.Currency = source.Currency
+        -- NOT MATCHED is the branch no UpdatedAt comparison can cover, because
+        -- there is no target row to compare against — which is why the
+        -- withdrawal watermark exists at all.
         WHEN NOT MATCHED THEN
             INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-            VALUES (@ProductId, @Currency, @Amount, 1, @OccurredAt)
+            VALUES (@ProductId, @Currency, @Amount, source.IsAvailable, @OccurredAt)
         -- The out-of-order guard. At-least-once delivery (§9.4) means a
         -- redelivered ProductPublished can arrive after the PriceChanged that
         -- superseded it, and without this line the older amount wins and stays
         -- won — a wrong price on the write path, with nothing failing.
         WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
-            UPDATE SET Amount = @Amount, IsAvailable = 1, UpdatedAt = @OccurredAt;
+            UPDATE SET Amount = @Amount, IsAvailable = source.IsAvailable, UpdatedAt = @OccurredAt;
         """;
 
     /// <summary>
-    /// §6.6's discontinue. Every currency for the product, because
-    /// <c>ProductDiscontinued</c> carries none — a product is withdrawn whole
-    /// or not at all.
+    /// §6.6's discontinue, in two halves: a product-level watermark, and the
+    /// per-currency rows that already exist. Every currency for the product,
+    /// because <c>ProductDiscontinued</c> carries none — a product is
+    /// withdrawn whole or not at all.
     /// </summary>
     /// <remarks>
     /// <c>IsAvailable = 0</c> rather than a <c>DELETE</c>, which is §6.6's
@@ -75,13 +97,53 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     /// last month has to stay explicable, and a row that vanishes takes its
     /// price with it. The reader filters on the flag, so the customer meets
     /// the same <c>ProductsUnavailable</c> either way.
+    /// <para>
+    /// <b>The <c>UPDATE</c> alone was wrong, and §6.6 printed it that way.</b>
+    /// It reaches only the rows that exist when it runs, so a withdrawal
+    /// claimed ahead of a still-retrying publish (§9.4 guarantees no ordering)
+    /// touched nothing, and the publish then took the price <c>MERGE</c>'s
+    /// <c>NOT MATCHED</c> branch and inserted an orderable row for a
+    /// discontinued product. A stale price for a currency the withdrawal never
+    /// saw does the same with no reordering at all. Both are covered by
+    /// <see cref="ProductWithdrawal"/>, which the upsert consults on exactly
+    /// that branch; both were reproduced as failing tests before this was
+    /// written.
+    /// </para>
+    /// <para>
+    /// <b>One transaction, because the two halves are one fact.</b> The
+    /// watermark without the rows leaves existing prices orderable; the rows
+    /// without the watermark leaves the hole this fixes. At-least-once
+    /// redelivery would repair either, but a message that exhausts its retries
+    /// (§9.8) would not, and <c>SET XACT_ABORT ON</c> is what makes a mid-batch
+    /// failure roll the first statement back rather than leave half of it
+    /// standing.
+    /// </para>
     /// </remarks>
     private const string DiscontinueSql =
         """
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        -- The watermark first, because it is the half that must survive having
+        -- no price row to write to. Monotonic: a redelivered or stale
+        -- withdrawal must not move it backwards over a later one.
+        MERGE ordering.ProductWithdrawals WITH (HOLDLOCK) AS target
+        USING (SELECT ProductId = @ProductId) AS source
+            ON target.ProductId = source.ProductId
+        WHEN NOT MATCHED THEN
+            INSERT (ProductId, WithdrawnAt)
+            VALUES (@ProductId, @OccurredAt)
+        WHEN MATCHED AND target.WithdrawnAt < @OccurredAt THEN
+            UPDATE SET WithdrawnAt = @OccurredAt;
+
+        -- Then the rows that already exist. The watermark covers the ones that
+        -- do not, so between them every currency is reached.
         UPDATE ordering.ProductPrices
         SET IsAvailable = 0, UpdatedAt = @OccurredAt
         WHERE ProductId = @ProductId
             AND UpdatedAt < @OccurredAt;
+
+        COMMIT;
         """;
 
     public Task HandleAsync(ProductPublished integrationEvent, CancellationToken ct) =>

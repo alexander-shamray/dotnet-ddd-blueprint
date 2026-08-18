@@ -169,6 +169,67 @@ public sealed class ProductPriceProjectionTests(ServiceFixture fixture) : IAsync
     }
 
     [Fact]
+    public async Task A_withdrawal_that_arrives_before_any_price_still_withdraws_the_product()
+    {
+        // §9.4 guarantees no ordering, so a ProductDiscontinued can be claimed
+        // ahead of the ProductPublished that is still retrying behind it. The
+        // discontinue statement matches no row and the publish then takes the
+        // MERGE's NOT MATCHED branch — which is the one branch no guard
+        // covers, because there is no target row whose UpdatedAt it could
+        // compare against.
+        //
+        // §6.6 already names this exact shape one projection over: an UPDATE
+        // for OrderSummaries' status events "would be the whole defect …  a
+        // Cancelled claimed before its OrderPlaced would match no row, change
+        // nothing, and be marked processed". The price table's answer has to
+        // be the same — the withdrawal must survive having nothing to write to.
+        Guid product = Guid.CreateVersion7();
+
+        await HandleAsync(Discontinue(product, Later));
+        await HandleAsync(Publish(product, 19.99m, "EUR", Published));
+
+        (await IsAvailableAsync(product)).ShouldBeFalse(
+            "the product was withdrawn after this price was published, so the row the late publish " +
+            "creates must not be orderable — a discontinued product back on sale is the failure");
+        (await ReadPriceAsync(product, "EUR")).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_withdrawal_reaches_a_currency_it_had_never_seen_a_price_for()
+    {
+        // The same hole through the other door, and the one that needs no
+        // out-of-order broker at all to be reachable: the withdrawal only ever
+        // touched the rows that existed when it ran. A stale price for a
+        // currency nobody had projected yet inserts a fresh row, and without a
+        // product-level record of the withdrawal that row has nothing to
+        // inherit unavailability from.
+        Guid product = Guid.CreateVersion7();
+        await HandleAsync(Publish(product, 19.99m, "EUR", Published));
+
+        await HandleAsync(Discontinue(product, Later));
+        await HandleAsync(PriceOf(product, 17.99m, "GBP", Published.AddMinutes(1)));
+
+        (await ReadPriceAsync(product, "GBP")).ShouldBeNull(
+            "the GBP price predates the withdrawal, so projecting it late must not make the product " +
+            "orderable in a currency the withdrawal never saw");
+    }
+
+    [Fact]
+    public async Task A_price_published_after_a_withdrawal_relists_a_currency_that_was_never_priced()
+    {
+        // The counterweight to the two above, and the reason the guard is a
+        // comparison rather than a flag: a withdrawal must not make a product
+        // permanently unorderable. A price genuinely newer than the withdrawal
+        // re-lists it, in a currency that has no row either.
+        Guid product = Guid.CreateVersion7();
+        await HandleAsync(Discontinue(product, Published));
+
+        await HandleAsync(PriceOf(product, 17.99m, "GBP", Later));
+
+        (await ReadPriceAsync(product, "GBP")).ShouldBe(Money.Of(17.99m, "GBP"));
+    }
+
+    [Fact]
     public async Task Two_currencies_are_two_rows_rather_than_the_second_overwriting_the_first()
     {
         Guid product = Guid.CreateVersion7();
