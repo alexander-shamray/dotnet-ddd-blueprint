@@ -318,8 +318,22 @@ thirty-line file it started as silently dropped the built-in scopes and with
 them the `sub` claim. Found in an afternoon by importing it into a container
 and reading a token, which is the mitigation this entry should have named —
 build the realm through the admin API, export it, and re-import the export.
-The remaining exposure is the same shape one service further on: PR-19's
-client-credentials audience is the half no file test can reach.
+The remaining exposure was the same shape one service further on — PR-19's
+client-credentials audience, the half no file test can reach — and **it landed
+the way this entry recommended rather than the way PR-16's did**: the `web-bff`
+client was created through the admin API against a running Keycloak, read back,
+and spliced into the export, then the whole file re-imported into a fresh
+container and a token read out of it. Eleven claims checked, including the two
+negative ones that matter most — a service account carrying no `permission`
+claim, and every existing login keeping `sub`, `email` and `realm_access`.
+**What stands afterwards is four of those eleven**, and the difference is worth
+recording where the risk was: `KeycloakIdentityTests` pins the audience on the
+BFF's token, the absent `permission` claim, that a host running the real
+`AddJwtAuthentication` accepts it, and that a client without the scope is
+refused. The login half is `RealmImportTests`, which reads the export and
+starts nothing — so no standing test mints a password-grant token for `demo` or
+`browser`, and the claims those logins carry were verified once, by hand. It is
+still the only suite in the solution that starts an identity provider.
 
 **The `Directory.Build.props` analyzer policy is settled, and it is a tax.**
 [ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)

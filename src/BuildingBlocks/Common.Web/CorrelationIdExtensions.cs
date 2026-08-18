@@ -12,7 +12,20 @@ namespace Common.Web;
 /// </summary>
 public static class CorrelationIdExtensions
 {
-    private const string Header = "X-Correlation-Id";
+    /// <summary>§10.4's header, the one name the platform carries an ID under.</summary>
+    /// <remarks>
+    /// Public because it is read outside this file — by
+    /// <see cref="CorrelationIdHandler"/> on the way out and by
+    /// <c>AddCommonProblemDetails</c> when it builds §10.5's body. It was
+    /// private while both of those spelled the literal instead, which is two
+    /// copies of a contract in one assembly.
+    /// <para>
+    /// The tests deliberately keep their own literals. A contract test that
+    /// reads the constant cannot notice the constant changing, which is the
+    /// one thing it is there to notice.
+    /// </para>
+    /// </remarks>
+    public const string Header = "X-Correlation-Id";
 
     /// <summary>
     /// Assigns a correlation ID to any request that arrives without one, echoes

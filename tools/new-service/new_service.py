@@ -140,6 +140,29 @@ COPIED = frozenset(
 OMITTED = frozenset(
     {
         "src/Services/Catalog/Catalog.Api/Endpoints/ProductEndpoints.cs",
+        # PR-19's pricing hop, whole. §9.7 permits exactly one synchronous
+        # downstream call in the platform and Catalog is the callee, so a
+        # service scaffolded from it inherits a gRPC server nobody calls,
+        # a contract nobody consumes and a second Kestrel endpoint serving
+        # neither. The .proto is Catalog's own API rather than a shape
+        # every service has.
+        #
+        # appsettings.json goes with it because it exists ONLY for that
+        # hop: it declares the Http2 endpoint gRPC needs, and a cleartext
+        # port cannot serve HTTP/1.1 and h2c at once. Omitting it returns
+        # the service to the container image's own port configuration,
+        # which is what every other host here uses — and NOT omitting it
+        # would be worse than redundant, because that file overrides
+        # ASPNETCORE_HTTP_PORTS, so a service inheriting it would silently
+        # stop listening on whatever its deployment set.
+        "src/Services/Catalog/Catalog.Api/appsettings.json",
+        "src/Services/Catalog/Catalog.Api/Protos/pricing.proto",
+        "src/Services/Catalog/Catalog.Api/Grpc/PricingService.cs",
+        # Generic in subject — it translates any ValidationException into
+        # InvalidArgument — and slice by requirement: it is registered on
+        # AddGrpc, which leaves with the hop, so a service keeping it would
+        # carry an interceptor nothing installs.
+        "src/Services/Catalog/Catalog.Api/Grpc/ValidationInterceptor.cs",
         # The permission vocabulary (§11.4) is the slice's, not the service's.
         # A host with no endpoint requires no permission, and carrying
         # `ordering:write` into a service that grants it to nothing would put a
@@ -148,6 +171,10 @@ OMITTED = frozenset(
         # permission, and the Program.cs patch below drops the policy that
         # names this one.
         "src/Services/Catalog/Catalog.Api/CatalogPermissions.cs",
+        "src/Services/Catalog/Catalog.Application/Products/GetPrices/GetPricesHandler.cs",
+        "src/Services/Catalog/Catalog.Application/Products/GetPrices/GetPricesQuery.cs",
+        "src/Services/Catalog/Catalog.Application/Products/GetPrices/GetPricesValidator.cs",
+        "src/Services/Catalog/Catalog.Application/Products/GetPrices/ProductPriceDto.cs",
         "src/Services/Catalog/Catalog.Application/Products/GetProducts/GetProductsHandler.cs",
         "src/Services/Catalog/Catalog.Application/Products/GetProducts/GetProductsQuery.cs",
         "src/Services/Catalog/Catalog.Application/Products/GetProducts/ProductSummaryDto.cs",
@@ -165,12 +192,17 @@ OMITTED = frozenset(
         "tests/Catalog.Domain.Tests/MoneyTests.cs",
         "tests/Catalog.Domain.Tests/ProductTests.cs",
         "tests/Catalog.Application.Tests/CatalogIntegrationEventMapperTests.cs",
+        "tests/Catalog.Application.Tests/GetPricesValidatorTests.cs",
         "tests/Catalog.Application.Tests/GetProductsHandlerTests.cs",
         "tests/Catalog.Application.Tests/OutboxSerialisationTests.cs",
         "tests/Catalog.TestSupport/Outbox/StagesThenFails.cs",
         "tests/Catalog.Application.Tests/PublishProductHandlerTests.cs",
         "tests/Catalog.Application.Tests/PublishProductValidatorTests.cs",
         "tests/Catalog.Api.Tests/OutboxTransportIdentityTests.cs",
+        # The gRPC service's own suite, and it leaves for two reasons at
+        # once: there is no PricingService to drive, and the channel it
+        # builds needs the generated client the csproj patch below drops.
+        "tests/Catalog.Api.Tests/PricingServiceTests.cs",
         # Both name /v1/catalog/products, so both are slice by requirement:
         # they read the host as a deployment rather than a fixture, and a
         # service with no endpoint has nothing to read. They return with the
@@ -427,8 +459,63 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // domain types, which would put EF Core in Catalog.Domain.\n",
         ),
     ),
+    "src/Services/Catalog/Catalog.Api/Catalog.Api.csproj": (
+        (
+            "    <!-- The server half of §9.7's one synchronous hop. Grpc.AspNetCore brings\n"
+            "         Grpc.Tools and Google.Protobuf with it, which is why neither is named\n"
+            "         here — Appendix B registers all four as one row because they ship and\n"
+            "         version as one thing. -->\n"
+            "    <PackageReference Include=\"Grpc.AspNetCore\" />\n",
+            "",
+        ),
+        # The whole ItemGroup, not just the Protobuf line: with the contract
+        # gone the group is empty, and an empty ItemGroup is a place a reader
+        # looks for something that is not there.
+        (
+            "\n"
+            "  <ItemGroup>\n"
+            "    <!-- Catalog owns the contract because Catalog serves it. Web.Bff compiles\n"
+            "         this same file as a Client, by link — see the comment on that\n"
+            "         reference, and pricing.proto's own header.\n"
+            "\n"
+            "         BOTH halves, not Server alone, and the client half is here for its own\n"
+            "         suite. Catalog.Api.Tests drives PricingService over the real pipeline,\n"
+            "         which needs a client; generating one in the test project instead would\n"
+            "         put a second copy of every message type in a compilation that already\n"
+            "         references this assembly, and CS0436 is an error under ADR-019. So the\n"
+            "         choice is a generated client nothing in production calls, or a\n"
+            "         transport adapter no test can reach — and an untested adapter is the\n"
+            "         worse of the two. Web.Bff.TestSupport's own file argues the mirror\n"
+            "         image of this for the server half. -->\n"
+            "    <Protobuf Include=\"Protos\\pricing.proto\" GrpcServices=\"Both\" />\n"
+            "  </ItemGroup>\n",
+            "",
+        ),
+    ),
     "src/Services/Catalog/Catalog.Api/Program.cs": (
         ("using Catalog.Api;\nusing Catalog.Api.Endpoints;\n", ""),
+        ("using Catalog.Api.Grpc;\n", ""),
+        # §9.7's hop is Catalog's, so its registration and its mapping both
+        # leave. What does NOT leave is the middleware pair below — every
+        # host validates its own tokens (§11.2) whether or not it serves
+        # anything, which is the same split the permission policy takes.
+        (
+            "\n"
+            "// §9.7's server half. The interceptor is what keeps a malformed request from\n"
+            "// arriving at the caller as Unknown, which the BFF would report as its own\n"
+            "// 500 rather than the caller's 400 — its own file argues that at length.\n"
+            "builder.Services.AddGrpc(o => o.Interceptors.Add<ValidationInterceptor>());\n",
+            "",
+        ),
+        (
+            "\n"
+            "// §9.7. Reachable only on the Http2 endpoint appsettings.json declares —\n"
+            "// gRPC needs HTTP/2, and mapping it says nothing about which port serves it.\n"
+            "// The [Authorize] is on the service class, not here, so it travels with the\n"
+            "// type rather than with this line.\n"
+            "app.MapGrpcService<PricingService>();\n",
+            "",
+        ),
         # The permission policies leave with the slice that names them. What
         # stays is UseAuthentication/UseAuthorization below: every host
         # validates its own tokens (§11.2) whether or not it has an endpoint,
@@ -541,6 +628,7 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "tests/Catalog.Application.Tests/DependencyInjectionTests.cs": (
         (
+            "using Catalog.Application.Products.GetPrices;\n"
             "using Catalog.Application.Products.GetProducts;\n"
             "using Catalog.Application.Products.PublishProduct;\n",
             "",
@@ -560,13 +648,22 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        services.ShouldContain(\n"
             "            d => d.ServiceType == typeof(FluentValidation.IValidator<PublishProductCommand>),\n"
             "            \"AddValidatorsFromAssemblyContaining is §4.2's line, and losing it fails silently\");\n"
+            "\n"
+            "        // A query's validator, and it is not the same assertion twice: the scan\n"
+            "        // is one call, but ValidationBehavior is unconstrained (§6.3), so a\n"
+            "        // query validator lost this way disables the id-list ceiling that is\n"
+            "        // GetPrices' only bound — and nothing else would notice.\n"
+            "        services.ShouldContain(\n"
+            "            d => d.ServiceType == typeof(FluentValidation.IValidator<GetPricesQuery>));\n"
             "    }\n"
             "\n"
             "    [Fact]\n"
             "    public void AddCatalogApplication_registers_the_slice_handlers()\n"
             "    {\n"
-            "        // The §6.2 scan found nothing until this PR; these two are the first\n"
-            "        // real registrations it produces, so the scan itself is now testable.\n"
+            "        // The §6.2 scan found nothing until PR-10; these are the registrations\n"
+            "        // it produces, so the scan itself is testable. Every slice adds a row\n"
+            "        // here — the scan is public-only, and a handler it misses registers as\n"
+            "        // nothing at all rather than as something wrong.\n"
             "        ServiceCollection services = new();\n"
             "\n"
             "        services.AddCatalogApplication();\n"
@@ -575,6 +672,14 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "            d.ServiceType == typeof(ICommandHandler<PublishProductCommand, Result<Guid>>));\n"
             "        services.ShouldContain(d =>\n"
             "            d.ServiceType == typeof(IQueryHandler<GetProductsQuery, CursorPage<ProductSummaryDto>>));\n"
+            "\n"
+            "        // PR-19's third slice. The scan is public-only (§6.2), so an internal\n"
+            "        // handler, a rename or a missed IQueryHandler<,> registers as nothing\n"
+            "        // and fails on the first gRPC call rather than at startup —\n"
+            "        // ValidateOnBuild never constructs the dispatcher's handler map.\n"
+            "        // PricingServiceTests would catch it, but only in the Docker suite.\n"
+            "        services.ShouldContain(d =>\n"
+            "            d.ServiceType == typeof(IQueryHandler<GetPricesQuery, IReadOnlyList<ProductPriceDto>>));\n"
             "    }\n"
             "}\n",
             "\n"
@@ -698,6 +803,19 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
     "tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj": (
+        # PricingServiceTests is Catalog's and does not travel, so the package
+        # it named goes with it. A reference nothing in the rendered project
+        # uses is the unused-dependency claim CLAUDE.md rules out, one file
+        # type over.
+        (
+            "    <!-- GrpcChannel and Grpc.Core's StatusCode, which PricingServiceTests uses\n"
+            "         to call the gRPC server over loopback. Carried transitively through\n"
+            "         Catalog.Api; named here on the same honesty rule Web.Bff.Tests states,\n"
+            "         because a project that names a type declares the package rather than\n"
+            "         relying on a production csproj it does not control. -->\n"
+            "    <PackageReference Include=\"Grpc.Net.ClientFactory\" />\n",
+            "",
+        ),
         (
             "    <!-- ServiceFixture and CatalogApiFactory (§12.4, §4.1) — the containers,\n"
             "         the migrator runs and the reset live there, shared with\n"
@@ -713,12 +831,27 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "/// Vacuously green from PR-07 until PR-10's first endpoint — a rule\n"
             "/// introduced before the violations exist is a constraint, not a backlog\n"
-            "/// item — and judging <c>ProductEndpoints</c> for real since.\n",
+            "/// item — and judging real types since.\n",
             "/// Vacuously green until this service maps its first endpoint: a rule\n"
             "/// introduced before the violations exist is a constraint, not a backlog\n"
             "/// item. The rule was observed failing against a deliberately added\n"
             "/// forbidden reference before it was trusted — in the service this one\n"
             "/// was scaffolded from, not here, where there is nothing yet to judge.\n",
+        ),
+        # The whole gate travels now, and that is the point of the shape it
+        # arrived at: it selects the entire assembly and subtracts the
+        # composition root from the FAILURES, so it says something true about a
+        # host with no adapters at all. A namespace selector said nothing.
+        #
+        # Only the two adapter names leave, because they are the exemplar's.
+        (
+            "        exempted.ShouldContain(\"Program\");\n",
+            "        exempted.ShouldContain(\"Program\");\n"
+            "\n"
+            "        // The other half of this assertion belongs with the first endpoint:\n"
+            "        // that the gate is judging something. Until then Program is all\n"
+            "        // there is, and naming an adapter that does not exist is not an\n"
+            "        // assertion — see the service this one was scaffolded from.\n",
         ),
     ),
     "tests/Catalog.Api.Tests/HostSmokeTests.cs": (

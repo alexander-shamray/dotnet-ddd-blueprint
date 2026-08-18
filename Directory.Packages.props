@@ -86,13 +86,29 @@
     <PackageVersion Include="Grpc.Net.ClientFactory" Version="2.71.0" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
-    <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- 3.30.2, not §4.4's printed 3.29.3, and the chapter was amended in this
+         change. Grpc.AspNetCore 2.71.0 floors this at 3.30.2; with
+         CentralPackageTransitivePinningEnabled the lower pin is a package
+         DOWNGRADE rather than a floor NuGet quietly raises, so NU1109 fails
+         the restore and the three rows above are unbuildable without it. The
+         blueprint's number was written from the outside and is the one thing
+         here that could only be found by compiling it. -->
+    <PackageVersion Include="Google.Protobuf" Version="3.30.2" />
     <!-- §11.3's JWT bearer handler, referenced by Common.Web. Not carried by
          Microsoft.AspNetCore.App — the shared framework has the authentication
          abstractions and the cookie handler, and the JWT one has been a
          package since ASP.NET Core 3.0. Same version line as the runtime
          above: it ships with the framework and moves with it. -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <!-- JwtSecurityTokenHandler, which §11.5's Keycloak suite reads an `aud`
+         claim with. Carried transitively by the row above; pinned because a
+         test names the type, on the register's honesty rule.
+         8.19.2 rather than a round number, because that is the floor the row
+         above reaches it at — through Microsoft.IdentityModel.Protocols.OpenIdConnect
+         — and with CentralPackageTransitivePinningEnabled anything lower is a
+         package DOWNGRADE that fails the restore. The same shape Google.Protobuf
+         carries above. -->
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
     <!-- PR-07's OpenAPI deliverable (Appendix C): the framework's own document
          generator — AddOpenApi/MapOpenApi, document only, no UI. -->
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
@@ -146,6 +162,14 @@
     <PackageVersion Include="Testcontainers.MsSql" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.Redis" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.6.0" />
+    <!-- §11.5's suite, and the ONE place in the solution that runs a real
+         Keycloak. The audience mapper it proves is realm configuration, so
+         nothing compiles differently when it is missing and no other test can
+         see it — §12.4's fixture points at an unreachable authority on
+         purpose, and therefore never validates a token Keycloak issued. Same
+         version line as the three above: the Testcontainers modules ship as
+         one release. -->
+    <PackageVersion Include="Testcontainers.Keycloak" Version="4.6.0" />
     <!-- Transitive of the three rows above, pinned deliberately, and the third
          instance of the shape Microsoft.OpenApi and System.Security.Cryptography.Xml
          already carry. Testcontainers 4.6.0 floors this at 2024.2.0 for its SSH

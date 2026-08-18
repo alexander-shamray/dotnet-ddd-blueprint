@@ -39,7 +39,7 @@ public static class ProblemDetailsExtensions
                 // one path §10.4's middleware keeps alive through an unwinding
                 // exception, and an error response is exactly when it matters.
                 context.ProblemDetails.Extensions["correlationId"] =
-                    context.HttpContext.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+                    context.HttpContext.Request.Headers[CorrelationIdExtensions.Header].FirstOrDefault();
 
                 context.ProblemDetails.Extensions["traceId"] =
                     Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;

@@ -174,15 +174,16 @@ services:
     ports: [ "5000:8080" ]
     depends_on:
       keycloak: { condition: service_healthy }
-      # The two destinations in §10.2's route file that exist today. The other
-      # two routes — inventory and the BFF — 502 until their services land,
-      # which is a true statement about the platform rather than a defect in
-      # this file: a route costs nothing at startup, where a Compose dependency
-      # on a service Compose cannot see fails the whole `up`. So a destination
-      # joins this list with the PR that builds it, and ordering-api joined
-      # with PR-18.
+      # The destinations in §10.2's route file that exist today. The one
+      # remaining route — inventory — 502s until its service lands, which is a
+      # true statement about the platform rather than a defect in this file: a
+      # route costs nothing at startup, where a Compose dependency on a service
+      # Compose cannot see fails the whole `up`. So a destination joins this
+      # list with the PR that builds it: ordering-api with PR-18, web-bff with
+      # PR-19.
       catalog-api: { condition: service_started }
       ordering-api: { condition: service_started }
+      web-bff: { condition: service_started }
 
   ordering-migrator:
     build:
@@ -235,6 +236,52 @@ services:
       # README's token command the moment it returns. Under service_started
       # that command races the realm import and can be handed a 404.
       keycloak: { condition: service_healthy }
+
+  # The one host with client credentials, because it is the one host that calls
+  # a peer synchronously (§9.7). Everything else here has the authority only.
+  # Named web-bff, matching the Aspire resource (§14.2) and the YARP
+  # destination (§10.2) — the gateway resolves the destination by hostname, so
+  # the container name IS the routing configuration.
+  #
+  # No migrator beside it and no pair rule: the BFF owns no database, so there
+  # is nothing to migrate — the same shape the gateway block above has.
+  web-bff:
+    build:
+      context: ../..
+      dockerfile: src/BFF/Web.Bff/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Identity__Authority: "http://keycloak:8080/realms/commerce"
+      # Required by ValidateOnStart (§15.4) — this host refuses to boot without
+      # all three, which is the whole point of the [Required] attributes on
+      # ServiceIdentityOptions. Local values only; production mounts a secret.
+      #
+      # The client id must exist in the realm, and RealmClientTests is what
+      # says so: a name here that Keycloak has never heard of satisfies
+      # ValidateOnStart, boots cleanly, and fails every pricing call at the
+      # token endpoint.
+      Identity__Client__ClientId: "web-bff"
+      Identity__Client__ClientSecret: "${BFF_CLIENT_SECRET:-local-dev-secret}"
+      # The scope that becomes the audience every service validates (§11.5).
+      # Not the same claim as `aud`, and nothing but the realm's audience
+      # mapper makes one imply the other.
+      Identity__Client__Scope: "commerce-api"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      # No connection strings of any kind, and therefore no readiness check
+      # (§13.5): a host with a connection string has one and a host without
+      # one does not. /health/ready answers immediately here, correctly.
+    ports: [ "5200:8080" ]
+    depends_on:
+      # Keycloak, because this host mints its own token and would otherwise
+      # discover that on the first request.
+      keycloak: { condition: service_healthy }
+      # And catalog-api, which the gateway's block above cannot say about its
+      # own destinations for a different reason — it routes to services that do
+      # not exist yet, where this one calls a service that does. The hop is
+      # over 8081, catalog-api's HTTP/2 endpoint (§9.7): a cleartext port
+      # cannot serve HTTP/1.1 and h2c at once, so Catalog declares two and this
+      # is the second. It is not published to the host and no route reaches it.
+      catalog-api: { condition: service_started }
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

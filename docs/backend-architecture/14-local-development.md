@@ -182,6 +182,7 @@ services:
       # that builds its service.
       catalog-api: { condition: service_started }
       ordering-api: { condition: service_started }
+      web-bff: { condition: service_started }
 
   # The one host with client credentials, because it is the one host that calls
   # a peer synchronously (§9.7). Everything else here has the authority only.
@@ -265,16 +266,24 @@ the ones that exist — Compose rejects a dependency it cannot see, and one
 undefined name fails the whole `up` rather than one service. Its *routes* are
 under no such constraint and [§10.2](10-api-gateway.md) ships all four, so
 a path answers 502 until its service lands. A route is configuration the
-gateway reads; a `depends_on` is a name Compose has to resolve. Two answer 502
-today — inventory and the BFF.
+gateway reads; a `depends_on` is a name Compose has to resolve. One answers 502
+today — inventory — the BFF's route having gained its service with PR-19.
 
-**The fence above and the shipped file now gate on the same two services**,
-`catalog-api` and `ordering-api`, because both exist: PR-10 built the first and
-PR-18 the second. This paragraph used to explain a discrepancy — the sample was
-the finished platform's, with Ordering as its worked pair, while the file on
-disk had only Catalog — and the explanation expired when Ordering landed. Read
-the fence for the shape of a block; a destination still joins the dependency
-list with the PR that builds it, so the two will diverge again at Inventory.
+**The fence above and the shipped file now gate on the same three services**,
+`catalog-api`, `ordering-api` and `web-bff`, because all three exist: PR-10
+built the first, PR-18 the second and PR-19 the third. This paragraph used to
+explain a discrepancy — the sample was the finished platform's, with Ordering
+as its worked pair, while the file on disk had only Catalog — and the
+explanation expired when Ordering landed. Read the fence for the shape of a
+block; a destination still joins the dependency list with the PR that builds
+it, so the two will diverge again at Inventory.
+
+**The BFF's own block gained a `depends_on` the fence above does not show**, on
+`catalog-api`, and the asymmetry with the gateway is the point: the gateway
+routes to services that may not exist, where the BFF *calls* one that does
+(§9.7). Its hop is over `catalog-api:8081` — a second, HTTP/2-only Kestrel
+endpoint, because a cleartext port cannot serve HTTP/1.1 and h2c at once — and
+that port is published to no host and reached by no route.
 
 The collector's mounted configuration is the smallest correct pipeline —
 OTLP in on both protocols, a batch processor, OTLP out to the LGTM
@@ -491,6 +500,23 @@ var ordering = WithPlatformIdentity(
         .WaitForCompletion(orderingMigrator)
         .WithHttpHealthCheck("/health/ready"));   // authority only — no peer calls
 
+// Catalog is the one resource here whose ports Aspire does NOT get to choose.
+// Its appsettings.json declares Kestrel:Endpoints — 8080 for REST and 8081 for
+// §9.7's gRPC hop, because a cleartext port cannot serve HTTP/1.1 and h2c at
+// once — and declaring that section suppresses ASPNETCORE_URLS and
+// ASPNETCORE_HTTP_PORTS entirely, which is how Aspire assigns a port. So it
+// binds 8080 whatever this host allocates, and 8080 is what AddKeycloak took
+// above: the two fight for it unless one is moved.
+//
+// Move Catalog's, with the same configuration keys the compose README uses for
+// `dotnet run` — a higher provider is the only thing that overrides that file:
+//
+//     .WithEnvironment("Kestrel__Endpoints__Rest__Url", "http://localhost:5102")
+//     .WithEnvironment("Kestrel__Endpoints__Grpc__Url", "http://localhost:8081")
+//
+// And note what WithReference cannot do here: the BFF's hop address is the
+// literal http://catalog-api:8081 (§9.7, §15.4), so a reference does not
+// re-point it. Aspire runs the BFF against whatever answers on that name.
 var catalog = WithPlatformIdentity(
     builder.AddProject<Projects.Catalog_Api>("catalog-api")
         .WithReference(catalogDb).WaitFor(catalogDb)
@@ -498,6 +524,8 @@ var catalog = WithPlatformIdentity(
         .WithReference(coordination)
         .WithReference(mq)
         .WaitForCompletion(catalogMigrator)
+        .WithEnvironment("Kestrel__Endpoints__Rest__Url", "http://localhost:5102")
+        .WithEnvironment("Kestrel__Endpoints__Grpc__Url", "http://localhost:8081")
         .WithHttpHealthCheck("/health/ready"));
 
 // The gateway validates JWTs too (§11.2) — it is the component most visible

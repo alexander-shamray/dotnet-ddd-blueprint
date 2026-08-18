@@ -13,8 +13,10 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │   ├── Common.Domain/              Entity, AggregateRoot, IDomainEvent (§5.5)
 │   │   ├── Common.Application/         Dispatcher, pipeline behaviours, Result<T>
 │   │   ├── Common.Infrastructure/      Outbox, inbox, EF conventions, Redis
-│   │   ├── Common.Web/                 Host defaults: OTel, health, auth, ProblemDetails,
-│   │   │                               resilience, versioning. Referenced by every host.
+│   │   ├── Common.Web/                 Host defaults: OTel, health, auth, ProblemDetails.
+│   │   │                               Referenced by every host. NOT resilience —
+│   │   │                               the one outbound client is the BFF's (§9.7),
+│   │   │                               so the policy lives with it.
 │   │   │                               (Aspire's template calls this ServiceDefaults.)
 │   │   └── Common.Contracts/           Integration event DTOs — the ONLY shared types
 │   │
@@ -68,6 +70,24 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │                                   property. No TestSupport beside it —
 │   │                                   that library exists where two suites
 │   │                                   share a fixture, and the gateway has one
+│   ├── Web.Bff.Tests/                  §9.7's hop and §11.5's credentials: the
+│   │                                   resilience hierarchy read off the built
+│   │                                   host, the quote endpoint over a real
+│   │                                   gRPC server on loopback, and the ONE
+│   │                                   suite in the solution that runs a real
+│   │                                   Keycloak — the audience mapper it proves
+│   │                                   is realm configuration, so nothing
+│   │                                   compiles differently when it is missing
+│   ├── Web.Bff.TestSupport/            The stub Catalog, and the SERVER half of
+│   │                                   pricing.proto with it. Not a test
+│   │                                   project — and NOT here for §4.1's usual
+│   │                                   reason: there is one BFF suite. Web.Bff
+│   │                                   compiles the client half of the same
+│   │                                   file, so generating the server half into
+│   │                                   a suite that references it would put
+│   │                                   every message type in a compilation
+│   │                                   twice, and CS0436 is an error under
+│   │                                   ADR-019
 │   ├── Catalog.Domain.Tests/
 │   ├── Catalog.Application.Tests/
 │   ├── Catalog.Api.Tests/
@@ -182,16 +202,14 @@ silently licenses an endpoint to inject a `DbContext`.
 
 ```csharp
 [Fact]
-public void Endpoints_do_not_depend_on_infrastructure()
+public void Nothing_but_the_composition_root_depends_on_infrastructure()
 {
-    // Not the service's Infrastructure namespace alone: the rule above is
-    // "Application and Domain contracts only", and the concrete types it
-    // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach an
-    // endpoint transitively without any Ordering.Infrastructure dependency
-    // to trip on.
+    // No selector at all. The rule above is "only Program.cs may reference
+    // Infrastructure", so the assembly is judged whole and the root is
+    // subtracted from the FAILURES afterwards — where full names are available
+    // to subtract it by, and where there is no candidate set to be narrow.
     TestResult result = Types
-        .InAssembly(typeof(OrderEndpoints).Assembly)
-        .That().ResideInNamespaceContaining(".Endpoints")
+        .InAssembly(typeof(Program).Assembly)
         .ShouldNot().HaveDependencyOnAny(
             "Ordering.Infrastructure",
             "Microsoft.EntityFrameworkCore",
@@ -199,10 +217,45 @@ public void Endpoints_do_not_depend_on_infrastructure()
             "StackExchange.Redis")
         .GetResult();
 
-    result.IsSuccessful.ShouldBeTrue(
-        $"leaked: {string.Join(", ", result.FailingTypeNames ?? [])}");
+    string[] leaked = [.. (result.FailingTypeNames ?? []).Where(name => !IsCompositionRoot(name))];
+
+    leaked.ShouldBeEmpty($"leaked: {string.Join(", ", leaked)}");
 }
+
+// Top-level statements put Program and its helpers in the GLOBAL namespace, so
+// they carry no dot; anything an endpoint generates is nested inside the
+// endpoint class and keeps its namespace.
+private static bool IsCompositionRoot(string fullName) =>
+    fullName == "Program" || (!fullName.Contains('.') && fullName.StartsWith('<'));
 ```
+
+> **This gate was wrong four times, always by selecting less than it claimed,
+> and the sequence is worth keeping because each fix looked complete.**
+> `.ResideInNamespaceContaining(".Endpoints")` stopped covering the transport
+> surface the moment a gRPC service arrived in `.Grpc`. A namespace *pattern*
+> moved the hole one namespace further out. Excluding compiler-generated types
+> by name exempted endpoint lambdas, because a closure is generated code. And
+> filtering candidates through `HaveName(...)` exempted them again, because
+> that predicate selects nothing for a nested async state machine — and an
+> empty selection reports **success**.
+>
+> A companion test naming the known adapters closes none of it, and believing
+> otherwise is the subtler error: the set such a test inspects is unchanged by
+> a type the selector never picked up, so it passes exactly as before. It
+> guards against *narrowing* the rule, never against *outgrowing* it.
+
+> **One gap survives all four, and it belongs to NetArchTest rather than to the
+> rule.** The library does not analyse compiler-generated nested types, so a
+> forbidden reference used *only* inside an endpoint lambda is invisible to it.
+> Measured rather than inferred: a `DbContextOptionsBuilder` in an endpoint
+> method's own body fails the gate and names the endpoint class; the identical
+> line inside that method's lambda leaves it green — with no selector at all,
+> which is what rules out a narrowing predicate as the cause.
+>
+> State it rather than close it. A reference written in a method body is
+> caught, which is where references are written; **a gate believed to be total
+> is worse than one whose gap is written down**, because the first invites
+> nobody to look.
 
 One more, for the rule [§9.3](09-messaging.md) states in prose: application code publishes through
 `IIntegrationEventPublisher` and the outbox, never through the bus directly.
@@ -952,13 +1005,24 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Grpc.Net.ClientFactory" Version="2.71.0" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.71.0" />
-    <PackageVersion Include="Google.Protobuf" Version="3.29.3" />
+    <!-- 3.30.2, not 3.29.3, and the number could only be found by compiling
+         it: Grpc.AspNetCore 2.71.0 floors this package at 3.30.2, and with
+         CentralPackageTransitivePinningEnabled a lower pin is a package
+         DOWNGRADE rather than a floor NuGet quietly raises — NU1109 fails the
+         restore and the three rows above are unbuildable. This blueprint
+         carried the lower number from the outside for four PRs. -->
+    <PackageVersion Include="Google.Protobuf" Version="3.30.2" />
     <!-- §11.3's JWT bearer handler, referenced by Common.Web. Not carried by
          Microsoft.AspNetCore.App — the shared framework has the authentication
          abstractions and the cookie handler, and the JWT one has been a package
          since ASP.NET Core 3.0. Same version line as the runtime: it ships with
          the framework and moves with it. -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <!-- JwtSecurityTokenHandler, which §11.5's Keycloak suite reads an `aud`
+         claim with. A transitive of the row above, pinned because a project
+         names the type — and pinned to 8.19.2 because that is the floor it is
+         reached at, anything lower being a downgrade NU1109 refuses. -->
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
     <!-- PR-07's OpenAPI deliverable (Appendix C): the framework's own document
          generator — AddOpenApi/MapOpenApi, document only, no UI. -->
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
@@ -1012,6 +1076,11 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Testcontainers.MsSql" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.Redis" Version="4.6.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.6.0" />
+    <!-- §11.5's suite, and the ONE place in the solution that runs a real
+         Keycloak. The audience mapper it proves is realm configuration, so
+         nothing compiles differently when it is missing. Same version line as
+         the three above: the Testcontainers modules ship as one release. -->
+    <PackageVersion Include="Testcontainers.Keycloak" Version="4.6.0" />
     <!-- Transitive of the three rows above, pinned deliberately, and the third
          instance of the shape Microsoft.OpenApi and System.Security.Cryptography.Xml
          already carry. Testcontainers 4.6.0 floors this at 2024.2.0 for its SSH

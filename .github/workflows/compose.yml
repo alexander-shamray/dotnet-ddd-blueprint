@@ -34,14 +34,15 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    # 15 covered pulls alone; five image builds ride on top — Catalog's two,
-    # PR-17's gateway and PR-18's ordering pair, each a restore plus a publish
-    # with no layer cache on a fresh runner. The base images are shared, the
-    # restores are not.
+    # 15 covered pulls alone; SIX image builds ride on top — Catalog's two,
+    # PR-17's gateway, PR-18's ordering pair and PR-19's BFF, each a restore
+    # plus a publish with no layer cache on a fresh runner. The base images are
+    # shared, the restores are not.
     #
-    # 40, up from 30: PR-17 raised 25 → 30 for one extra image, and PR-18 adds
-    # two, so it is +10 rather than the +5 one image bought. 15 + 5 × 5 gives
-    # the same 40 from the other direction.
+    # 45, up from 40: PR-19 adds one image, so it is +5. 15 + 6 × 5 gives the
+    # same 45 from the other direction, and the two arithmetics agreeing is
+    # the check — PR-18's raise went out wrong precisely because only one of
+    # them was performed.
     #
     # It went out at 35 — the recount was performed against the *previous*
     # raise instead of against the number of images, which is the arithmetic
@@ -50,7 +51,7 @@ jobs:
     # sentence describing that mechanism was itself the thing that read as
     # already-checked. A count in a comment is only a guard while somebody
     # multiplies by it.
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

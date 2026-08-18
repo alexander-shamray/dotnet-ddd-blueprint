@@ -713,20 +713,63 @@ Mechanically this is a `DelegatingHandler` attached to every outbound client
 public sealed class ClientCredentialsHandler(ITokenCache tokens, IOptions<ServiceIdentityOptions> identity)
     : DelegatingHandler
 {
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    // cancellationToken, not this blueprint's usual ct: CA1725 requires an
+    // override to keep the base declaration's parameter name, and ADR-019
+    // makes that an error. The same correction §7.2's ConfigureConventions
+    // sample already carries, for the same reason — a reader consulting the
+    // framework's documentation is reading about the base name.
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
     {
         // Cached until shortly before expiry; one token fetch serves many calls.
-        string token = await tokens.GetAsync(identity.Value.Scope, ct);
+        string token = await tokens.GetAsync(identity.Value.Scope, cancellationToken);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        return await base.SendAsync(request, ct);
+        return await base.SendAsync(request, cancellationToken);
     }
 }
 ```
 
-It must sit **inside** the resilience pipeline. Registering it outside means a
-retry reuses the token from the first attempt, which defeats the main reason a
-retry would help after a 401 — see the ordering in §9.7.
+It must sit **inside** the resilience pipeline. Registering it outside means
+the handler runs once per logical request rather than once per attempt, so
+every retry replays the token the first attempt built — see the ordering in
+§9.7.
+
+> **This paragraph used to justify the position with "a retry after a 401", and
+> that reason does not survive its own configuration.** §9.7's standard
+> resilience handler retries 5xx, 408 and `HttpRequestException`; a 401 is none
+> of them, so no retry after one ever happens. On the gRPC hop it is further off
+> still, because the callee answers `Unauthenticated` as `grpc-status` on an
+> HTTP 200 and the pipeline never sees a status at all. What the inner position
+> genuinely buys is narrower and real: **whenever a retry fires — which means a
+> transport fault — the repeated attempt asks the token cache again instead of
+> replaying the first attempt's token.** `PricingCredentialsTests` drives
+> exactly that, and it is the only case in which the two orderings produce
+> different bytes.
+>
+> **It is not that the token is newly minted, and saying so was the last thing
+> wrong with this paragraph.** `CachingTokenClient` serves a cached token until
+> its expiry guard, so two attempts milliseconds apart normally present
+> identical bytes — which is the cache working. What the ordering buys is the
+> narrower case of a token that expired *between* attempts. The test's cache
+> answers differently every time precisely because a constant one cannot show
+> that the handler ran at all.
+
+> **The token endpoint comes from the discovery document, and the document is
+> trusted for its content rather than for where it points.** Reading
+> `token_endpoint` rather than appending a provider-shaped path keeps the
+> credentials this host presents and the tokens §11.3 accepts pointed at one
+> realm — but the URL inside that document is the address a client secret is
+> about to be posted to, and nothing upstream constrains it. An HTTPS authority
+> advertising a plain-HTTP endpoint puts the secret on the wire in the clear,
+> having passed every check before that point.
+>
+> So the discovered endpoint is refused unless it is HTTP(S), and refused again
+> if it is weaker than the channel the document arrived over. **Not an
+> unconditional "must be HTTPS"** — `Identity:Authority` is permitted to be
+> plain HTTP in Development (§11.3), and a rule that forbade it there would be
+> one every local run has to turn off.
 
 ### The scope has to become an audience
 
@@ -786,10 +829,16 @@ from [§14.1](14-local-development.md) and the real JWT scheme:
 [Fact]
 public async Task Bff_client_credentials_token_is_accepted_by_a_service()
 {
-    string token = await Realm.ClientCredentialsAsync("web-bff");
+    (_, string token) = await keycloak.ClientCredentialsAsync("web-bff", "local-dev-secret");
 
-    token.Audiences().ShouldContain("commerce-api");
-    (await Catalog.GetAsync("/v1/catalog/products/1", token)).StatusCode
+    // JwtSecurityTokenHandler, not a helper: `aud` is the one claim this whole
+    // section is about, and reading it through the same type a service reads it
+    // with is what keeps the assertion about the token rather than about an
+    // extension method written beside it.
+    new JwtSecurityTokenHandler().ReadJwtToken(token).Audiences
+        .ShouldContain("commerce-api");
+
+    (await ServiceValidatingTheRealm().GetAsync("/protected", token)).StatusCode
         .ShouldBe(HttpStatusCode.OK);
 }
 
@@ -798,13 +847,27 @@ public async Task A_client_without_the_scope_is_rejected()
 {
     // The negative half matters more: a mapper that adds the audience to every
     // token would pass the test above and grant the platform to any client the
-    // realm happens to hold.
-    string token = await Realm.ClientCredentialsAsync("unrelated-client");
+    // realm happens to hold. The client is created against the container
+    // rather than shipped in the realm — a credential in a deployed realm for
+    // a test's convenience is the thing §11.6 exists to prevent.
+    await keycloak.CreateUnrelatedClientAsync("unrelated-client", "unrelated-secret");
 
-    (await Catalog.GetAsync("/v1/catalog/products/1", token)).StatusCode
+    (_, string token) =
+        await keycloak.ClientCredentialsAsync("unrelated-client", "unrelated-secret");
+
+    (await ServiceValidatingTheRealm().GetAsync("/protected", token)).StatusCode
         .ShouldBe(HttpStatusCode.Unauthorized);
 }
 ```
+
+**The service in those two lines is a minimal host running the platform's own
+`AddJwtAuthentication`, not Catalog**, and the substitution is deliberate: what
+is under test is the registration plus the realm, and neither of those is
+Catalog's. Driving a real service would add a SQL container and a migrator run
+to a suite whose subject is a token, and it would still be asserting exactly
+this. The suite lives in `Web.Bff.Tests` because the BFF is the host that owns
+the client id — the same rule that put `GrantablePermissionTests` in
+`Gateway.Api.Tests`.
 
 ## 11.6 Secrets
 

@@ -32,10 +32,10 @@ public class RealmImportTests
 
     /// <summary>
     /// The client the compose README's login names, and the only one in the
-    /// realm that mints a token a person uses. The realm holds eight: this one,
+    /// realm that mints a token a person uses. The realm holds nine: this one,
     /// the <c>commerce-api</c> resource client that owns the permission roles,
-    /// and Keycloak's own six. Assertions about "a usable token" are about
-    /// this client's.
+    /// PR-19's <c>web-bff</c> service account, and Keycloak's own six.
+    /// Assertions about "a usable token" are about this client's.
     /// </summary>
     private const string TokenClient = "web-app";
 
@@ -389,17 +389,60 @@ public class RealmImportTests
             .ShouldBe("true", "a `sub` on the id token alone is invisible to a bearer check");
     }
 
+    /// <summary>
+    /// The one client whose grant requires both sides to agree on a secret
+    /// (§11.5), and the documented local-development value it agrees on.
+    /// </summary>
+    /// <remarks>
+    /// PR-19's carve-out, and the premise it falsified is worth naming: this
+    /// test used to say <i>no</i> client ships a secret, which was true while
+    /// no client used the client-credentials grant. The BFF is the first that
+    /// does, and a client-credentials flow is precisely two parties holding
+    /// the same string — one of which is a committed Compose file. Letting
+    /// Keycloak generate the secret would leave the realm and the deployment
+    /// disagreeing, and the BFF refused at the token endpoint on every call.
+    /// <para>
+    /// So the rule narrows rather than lapses, and narrowing makes it
+    /// stronger: the value is pinned, so a randomly generated secret — a
+    /// credential nobody chose, that looks real enough to be reused where it
+    /// would matter — still fails here, and so does a real one.
+    /// </para>
+    /// </remarks>
+    private const string CredentialClient = "web-bff";
+    private const string DocumentedLocalSecret = "local-dev-secret";
+
     [Fact]
-    public void No_client_secret_is_committed()
+    public void No_client_ships_a_secret_but_the_one_whose_grant_needs_one()
     {
-        // §11.6 and the local-development carve-out: Compose's documented
-        // defaults are deliberate, and a randomly generated secret is not one
-        // of them — it is a credential nobody chose, that looks real enough to
-        // be reused somewhere it would matter. Keycloak regenerates on import.
         foreach (JsonElement client in Root.GetProperty("clients").EnumerateArray())
         {
-            client.TryGetProperty("secret", out JsonElement _)
-                .ShouldBeFalse($"'{client.GetProperty("clientId").GetString()}' ships a secret");
+            string clientId = client.GetProperty("clientId").GetString()!;
+            bool ships = client.TryGetProperty("secret", out JsonElement secret);
+
+            if (clientId != CredentialClient)
+            {
+                // §11.6 and the local-development carve-out: Compose's
+                // documented defaults are deliberate, and a randomly generated
+                // secret is not one of them. Keycloak regenerates on import.
+                ships.ShouldBeFalse($"'{clientId}' ships a secret and needs none");
+
+                continue;
+            }
+
+            ships.ShouldBeTrue(
+                $"'{clientId}' authenticates with the client-credentials grant, so the realm and " +
+                "the deployment have to hold the same value (§11.5)");
+
+            // The documented default and nothing else. The matching half lives
+            // in deploy/compose/docker-compose.yml as
+            // ${BFF_CLIENT_SECRET:-local-dev-secret}, and Web.Bff.Tests'
+            // RealmClientTests asserts the two files agree — which is the
+            // assertion this one cannot make, being a building block's suite
+            // that may not read a host's deployment.
+            secret.GetString().ShouldBe(
+                DocumentedLocalSecret,
+                "a secret in a committed realm must be the documented local default, " +
+                "never a generated or real one (§11.6)");
         }
     }
 

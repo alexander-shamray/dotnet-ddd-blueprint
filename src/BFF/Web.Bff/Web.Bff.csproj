@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Settings come from Directory.Build.props (§4.4).
+
+    One project, like the gateway and for the same reason: §10.1 gives the BFF
+    no domain and no database, so there is nothing for an Application or an
+    Infrastructure layer to hold. Program.cs is the whole composition root.
+
+    What it has that the gateway does not is an outbound call — the one
+    synchronous hop the platform permits (§9.7, ADR-017) — and that single fact
+    is why every package below is here and nowhere else.
+  -->
+
+  <ItemGroup>
+    <!-- The client half of §9.7's hop. Grpc.Net.ClientFactory is the
+         AddGrpcClient integration; Grpc.Tools is the protoc build task, which
+         Grpc.AspNetCore would have brought along on the server side and which
+         a client-only project has to name itself. Google.Protobuf is the
+         runtime the generated code compiles against. All four are one row in
+         Appendix B because they ship and version together. -->
+    <PackageReference Include="Grpc.Net.ClientFactory" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools">
+      <!-- Build-time only: protoc and the C# plugin. Nothing of it ships. -->
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- AddStandardResilienceHandler (§9.7). Retry, circuit breaker, attempt
+         and total timeouts as one registration, so the four numbers that have
+         to agree live in one callback rather than four. -->
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The only project reference, exactly as the gateway has. Everything the
+         BFF needs from the platform — observability, token validation, the
+         "authenticated" policy, problem details, the liveness probe — arrives
+         through AddCommonWebDefaults. -->
+    <ProjectReference Include="..\..\BuildingBlocks\Common.Web\Common.Web.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- LINKED, not copied, and the distinction is the whole point (§4.3): one
+         contract with two generated halves, so the client and the server
+         cannot drift. A copy in this directory would compile identically today
+         and be a different contract the first time Catalog edited its own.
+
+         It is a FILE reference and not an assembly one, so no project
+         dependency is created and §4.3's "exactly one assembly crosses a
+         service boundary" is untouched — Common.Contracts is still the only
+         one.
+
+         The cost is a build-time path into another service's tree, and it is
+         paid twice: here, and as a COPY line in this project's Dockerfile.
+         A monorepo is what makes the link possible at all; a polyrepo would
+         publish the .proto to a registry and pull it, which is the same
+         relationship with a package manager in the middle. -->
+    <Protobuf
+      Include="..\..\Services\Catalog\Catalog.Api\Protos\pricing.proto"
+      Link="Protos\pricing.proto"
+      GrpcServices="Client" />
+  </ItemGroup>
+
+</Project>

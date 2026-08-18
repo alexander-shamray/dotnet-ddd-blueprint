@@ -2340,6 +2340,19 @@ The values are configuration and will differ per system. **The ordering is the
 invariant** — that part is not negotiable, and it is what to assert in a
 configuration-validation test at startup.
 
+> **Two of these four layers are enforced today and two are documented.** The
+> outbound total and the per-attempt timeout are properties of the resilience
+> handler, so they fire. The gateway's request timeout and the service
+> operation total are not registered anywhere — no host takes request-timeout
+> middleware — so `ServiceOptions.OperationTimeout` is the ceiling the outbound
+> budget is *checked against* rather than a deadline a request meets.
+>
+> That is what the startup assertion above verifies, and it is worth naming
+> because the word "timeout" invites the stronger reading. Closing the gap
+> means middleware in every host **and** a 504 row in [§10.5](10-api-gateway.md)'s
+> table, which is a decision about the platform's error contract rather than
+> one a single host may take.
+
 ### Rules for every synchronous call
 
 1. **Timeout.** One to two seconds per attempt, per the table above; never
@@ -2352,11 +2365,22 @@ configuration-validation test at startup.
 4. **Retry only idempotent operations.** Retrying a `POST` that creates a
    payment creates two payments. `GET` and explicitly idempotent endpoints only.
 5. **Within the hop budget.** See above.
+6. **Validate the reply.** A peer is not a library call: what comes back is
+   input from another process with its own deploys and its own bugs, and every
+   invariant the producer holds is the producer's until this side checks it.
+   Catalog's own `Money` refuses a negative amount, so a negative price is a
+   contract violation rather than a price — but a consumer that relies on that
+   is depending on the producer's implementation, which is a coupling nothing
+   in the contract carries and no deploy of Catalog is obliged to preserve.
+   Where an invariant must hold on this side, the contract states it and this
+   side checks it. The BFF's quote refuses an amount it did not ask for, a
+   duplicate, a currency other than the one requested, and a negative — each a
+   500, because a contract violation between two services is nobody's caller's
+   fault.
 
 The configuration below satisfies the table rather than merely gesturing at it,
 and the budget is worked out including the waiting: 3 × 1.4 s of attempts plus
-150 ms + 300 ms of backoff is 4.65 s, which fits inside the 5 s ceiling with
-room for jitter to widen the delays:
+a backoff capped at 2 × 300 ms is 4.8 s, which fits inside the 5 s ceiling:
 
 ```csharp
 // Web.Bff/Program.cs (§4.1). Not Ordering's — see the paragraph above, and
@@ -2371,17 +2395,48 @@ services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-services
-    // http, not https: TLS terminates at the ingress and traffic inside the
-    // cluster is plain (§10.1). The host is the Service name YARP also routes
-    // to (§10.2) — "catalog" resolves to nothing.
-    .AddGrpcClient<Pricing.PricingClient>(o =>
-        o.Address = new Uri("http://catalog-api:8080"))
-    // Resilience is registered FIRST so it sits outermost, and the credential
-    // handler runs inside it. That ordering matters: a retry then re-attaches
-    // a token, which is what recovers the case where the first attempt failed
-    // because the token expired in flight. Registered the other way round, all
-    // three attempts would reuse the same dead token.
+// http, not https: TLS terminates at the ingress and traffic inside the
+// cluster is plain (§10.1). The host is the Service name YARP also routes to
+// (§10.2) — "catalog" resolves to nothing. Port 8081 rather than 8080,
+// because a cleartext Kestrel endpoint cannot serve HTTP/1.1 and h2c at once:
+// at the default a client asking for HTTP/2 exactly, as gRPC's does, is
+// answered HTTP_1_1_REQUIRED. The service declares a second, Http2-only
+// endpoint for this hop — in its own appsettings.json, which is where the
+// measurement and the trap are argued (§14.1) — and 8080 stays the REST
+// surface §10.2 routes
+// to.
+// The client is NAMED, and the name is load-bearing rather than tidy:
+// AddStandardResilienceHandler registers its options under a key derived from
+// it, and the startup assertion below reads them back by that key. Left
+// unnamed the key is the generated client type's name, the assertion asks for
+// something else, and IOptionsMonitor hands back a default instance whose 30 s
+// total timeout is exactly the trap this section says to assert against — so
+// the test passes against defaults it never configured.
+IHttpClientBuilder pricing = services
+    .AddGrpcClient<Pricing.PricingClient>(
+        "catalog-pricing",
+        o => o.Address = new Uri("http://catalog-api:8081"));
+
+// Resilience is registered FIRST so it sits outermost, and the credential
+// handler runs inside it. That ordering matters: the handler then runs once
+// per ATTEMPT rather than once per request, so a retried attempt asks the token
+// cache again instead of replaying the first attempt's token. Registered the
+// other way round, every attempt reuses the token the first one built.
+//
+// Usually the cache answers with the same token, which is what a cache is for.
+// The case this position covers is one that expired between attempts.
+//
+// Narrower than it sounds, and §11.5 spells out why: the retries that fire are
+// transport faults, because a gRPC status rides an HTTP 200 that this pipeline
+// reads as success.
+//
+// Two statements rather than one chain, and this is not a style choice:
+// AddStandardResilienceHandler returns an IHttpStandardResiliencePipelineBuilder
+// — a different type, scoped to the pipeline it just registered — so calling
+// AddHttpMessageHandler on its result does not compile (CS1929). Holding the
+// IHttpClientBuilder in a local keeps both calls on the same receiver and
+// keeps the order, which is the part that carries meaning.
+pricing
     .AddStandardResilienceHandler(options =>
     {
         // Outermost bound. Defaults to 30s, which would breach the hierarchy.
@@ -2392,17 +2447,48 @@ services
         options.Retry.UseJitter = true;
         options.Retry.Delay = TimeSpan.FromMilliseconds(150);
 
-        // 3 × 1.4 s + 150 ms + 300 ms = 4.65 s. The delays are part of the
-        // budget, not an extra on top of it — see the trap below.
+        // The cap that makes the budget below arithmetic rather than
+        // statistical. With UseJitter the nominal delay is not an upper bound
+        // — see the second trap below.
+        options.Retry.MaxDelay = TimeSpan.FromMilliseconds(300);
+
+        // 3 × 1.4 s + 2 × 300 ms = 4.8 s. The delays are part of the budget,
+        // not an extra on top of it — see the trap below.
         options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(1.4);
 
         options.CircuitBreaker.FailureRatio = 0.5;
         options.CircuitBreaker.MinimumThroughput = 10;
         options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(15);
-    })
-    // Registered AFTER resilience, so it sits inside it (§11.5).
-    .AddHttpMessageHandler<ClientCredentialsHandler>();
+
+        // SamplingDuration is left at its 30 s default, and the default is
+        // load-bearing: a sampling window shorter than the break duration
+        // forgets every failure while the circuit is open, so the breaker
+        // closes onto a fresh window and reopens on the first error it sees.
+    });
+
+// Registered AFTER resilience, so it sits inside it (§11.5).
+pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
 ```
+
+> **An HTTP resilience pipeline cannot retry a gRPC status, and the
+> configuration above does not say so on its face.** gRPC carries its outcome
+> in `grpc-status` — a trailer on an HTTP **200**, or a header on a
+> trailers-only response, still a 200 — so `AddStandardResilienceHandler`,
+> which decides on the HTTP status line and on `HttpRequestException`, sees a
+> successful response and hands it straight back. A Catalog that answers
+> `Unavailable` is asked **once**, whatever `MaxRetryAttempts` says. What the
+> retries do cover is a transport fault — a refused connection, a reset, a DNS
+> failure, a 502 from an intermediary — which is the shape a service that is
+> genuinely down produces.
+>
+> **The fix is deliberately not a second retry loop.** gRPC has its own retry,
+> configured on the channel through `ServiceConfig`, and it does understand
+> status codes — but it sits *outside* the `HttpClient`, so each of its
+> attempts would get a fresh `TotalRequestTimeout` and three of them would
+> spend fifteen seconds against a five-second ceiling. Stacking the two is the
+> one change that breaks the hierarchy this section exists to protect. One
+> mechanism, and its limits written down. Measured in `UpstreamRetryTests`,
+> from both sides.
 
 > **Trap — `TotalRequestTimeout` left at its default.** It defaults to 30
 > seconds, which is longer than most services' own operation budget and longer
@@ -2411,14 +2497,26 @@ services
 >
 > **And the sum that has to fit inside it includes the backoff.** The obvious
 > budget is `AttemptTimeout × (MaxRetryAttempts + 1)`; the real one adds the
-> delays *between* those attempts, which for exponential backoff is
-> `Delay × (2ⁿ − 1)`. Leave the delays out and the arithmetic clears the ceiling
-> while the configuration does not: at 1.5 s and a 200 ms base the attempts
-> alone come to 4.5 s against a 5 s total and look fine, but the two waits push
-> the real worst case to 5.1 s — so the third attempt is cancelled part-way and
-> the request fails having never completed the retry that was meant to save it.
-> The failure looks like a slow dependency rather than a misconfigured client,
-> which is why it needs an assertion and not a review.
+> delays *between* those attempts. Leave them out and the arithmetic clears the
+> ceiling while the configuration does not: at 1.5 s and a 200 ms base the
+> attempts alone come to 4.5 s against a 5 s total and look fine, but the two
+> waits push the real worst case past it — so the third attempt is cancelled
+> part-way and the request fails having never completed the retry that was
+> meant to save it. The failure looks like a slow dependency rather than a
+> misconfigured client, which is why it needs an assertion and not a review.
+
+> **Trap — `UseJitter` with no `MaxDelay`, which makes the sum above a
+> statistic rather than a bound.** `Delay × (2ⁿ − 1)` is the *nominal* backoff,
+> and jitter is not a small perturbation of it: Polly's decorrelated jitter was
+> measured producing a 392 ms wait where the nominal was 300 ms. Over 400
+> samples the worst total stayed under the un-jittered figure — but a sample is
+> not a bound, and the strategy documents none.
+>
+> `MaxDelay` restores one, and it caps the value *after* jitter — also
+> measured, by observing delays land on the cap exactly. With it the worst case
+> is `MaxDelay × MaxRetryAttempts` whatever the draw, which is a number a
+> startup assertion can be written against. Without it the assertion is
+> checking an average.
 
 Assert this at startup rather than trusting review:
 
@@ -2431,16 +2529,18 @@ public void Resilience_timeouts_respect_the_hierarchy()
     TimeSpan attempts =
         o.AttemptTimeout.Timeout * (o.Retry.MaxRetryAttempts + 1);
 
-    // The waits between attempts, not just the attempts. Exponential backoff
-    // from a base d over n retries sums to d × (2ⁿ − 1); a linear or constant
-    // policy would be d × n. Omitting this term is what lets a configuration
-    // that overruns its own ceiling pass a test written to prevent exactly that.
-    TimeSpan backoff = o.Retry.BackoffType switch
-    {
-        DelayBackoffType.Exponential =>
-            o.Retry.Delay * ((1 << o.Retry.MaxRetryAttempts) - 1),
-        _ => o.Retry.Delay * o.Retry.MaxRetryAttempts
-    };
+    // The waits between attempts, not just the attempts. Omitting this term is
+    // what lets a configuration that overruns its own ceiling pass a test
+    // written to prevent exactly that.
+    //
+    // Taken from MaxDelay rather than from d × (2ⁿ − 1), because that nominal
+    // is not an upper bound once UseJitter is on — the trap above measures a
+    // delay exceeding it. Requiring the cap is also what stops this assertion
+    // silently becoming a statement about the average case.
+    o.Retry.MaxDelay.ShouldNotBeNull(
+        "with UseJitter the nominal delay is not an upper bound (§9.7).");
+
+    TimeSpan backoff = o.Retry.MaxDelay.Value * o.Retry.MaxRetryAttempts;
 
     (attempts + backoff)
         .ShouldBeLessThanOrEqualTo(
@@ -2453,6 +2553,13 @@ public void Resilience_timeouts_respect_the_hierarchy()
         .ShouldBeLessThan(ServiceOptions.OperationTimeout);
 }
 ```
+
+`GetConfiguredOptions()` reads the options **off the built host**, by the name
+`AddStandardResilienceHandler` registers them under, rather than re-running the
+configuration callback into a fresh instance. That is what makes it a test of
+the registration; and it is self-checking about the name, because asking for
+the wrong one returns a default-constructed instance whose 30 s total request
+timeout fails the first assertion at once.
 
 ## 9.8 Failure handling
 

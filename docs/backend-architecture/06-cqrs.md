@@ -896,7 +896,14 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
         IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
             new CommandDefinition(
                 Sql,
-                new { ProductIds = productIds.Select(p => p.Value), Currency = currency },
+                // Upper-cased: Money.Of normalises on the way in, so comparing
+                // the caller's string as it arrived makes a valid request
+                // depend on the server's collation.
+                new
+                {
+                    ProductIds = productIds.Select(p => p.Value),
+                    Currency = currency.ToUpperInvariant()
+                },
                 cancellationToken: ct));
 
         return rows.ToDictionary(r => new ProductId(r.ProductId), r => Money.Of(r.Amount, r.Currency));
@@ -1031,8 +1038,16 @@ Rules for the read side:
 - The query returns exactly the shape the caller needs. No generic DTO reused
   across six endpoints.
 - Never `SELECT *`. Column lists are a contract.
-- Pagination is mandatory on any collection endpoint, and cursor-based by
+- Pagination is mandatory on any collection endpoint whose size the **caller
+  does not bound**, and cursor-based by
   default. There is no such thing as a small table in production.
+
+  The exception is narrow and has exactly one instance: a query the caller
+  bounds by *enumerating* what it wants — §9.7's `GetPrices`, which takes a
+  list of product ids and returns one row each. A cursor there would paginate
+  a set the caller already holds. What such a query owes instead is a **ceiling
+  on the list**, enforced by its validator, because an unbounded `IN` list is
+  the same unbounded read wearing a different hat.
 - `limit` is clamped server-side. A client asking for 100,000 rows gets 100.
 - Avoid `COUNT(*)` alongside a page. Fetching `limit + 1` rows answers "is there
   more?" without scanning the table. Return a total only where the UI genuinely

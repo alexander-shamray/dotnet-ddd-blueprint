@@ -35,6 +35,7 @@ and exits, then `catalog-api` starts (§14.1's pair rule).
 | Catalog API | http://localhost:5102 | `/health/live`, `/health/ready`, `/openapi/v1.json`, `/v1/catalog/products` |
 | Gateway | http://localhost:5000 | `/health/live`, `/health/ready`, and [§10.2](../../docs/backend-architecture/10-api-gateway.md)'s four routes |
 | Ordering API | http://localhost:5101 | `/health/live`, `/health/ready`, `/openapi/v1.json`, `/v1/orders` — every route needs a token, unlike Catalog's listing |
+| Web BFF | http://localhost:5200 | `/health/live`, `/health/ready`, `/v1/checkout/quote?productId=…&currency=GBP` — a token needed, and the only host that mints one of its own ([§11.5](../../docs/backend-architecture/11-identity-authorization.md)) |
 
 The gateway is the single entry point for external clients
 ([§10.1](../../docs/backend-architecture/10-api-gateway.md)), so the same
@@ -47,11 +48,11 @@ curl http://localhost:5000/api/v1/catalog/products # through the gateway
 
 The edge adds `/api`, which the gateway strips before forwarding, and applies
 what the service does not: the rate limit, the CORS policy, and a correlation
-ID on every request that arrives without one. **Two of the four routes have no
-service behind them yet** — `/api/v1/inventory` and `/bff` answer 502 until
-Inventory and the BFF land — and they are in the file deliberately, because
-the two configuration tests over it are what PR-17 exists to deliver.
-`/api/v1/orders` was the third until PR-18, which is what "stops answering
+ID on every request that arrives without one. **One of the four routes has no
+service behind it yet** — `/api/v1/inventory` answers 502 until Inventory
+lands — and it is in the file deliberately, because the two configuration
+tests over it are what PR-17 exists to deliver. `/api/v1/orders` was one of
+three until PR-18 and `/bff` until PR-19, which is what "stops answering
 502" looks like: the route file did not change, because PR-17 shipped it whole
 and a service PR that re-decides a route is the mistake §10.2's dual-version
 trap describes. `/api/v1/catalog` is GET-only at the edge, so publishing a
@@ -147,8 +148,26 @@ export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
 export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
+# Catalog is the ONE service that pins its own ports, and on the host they
+# have to move. Its appsettings.json declares two Kestrel endpoints — 8080 for
+# REST and 8081 for §9.7's gRPC hop, because a cleartext port cannot serve
+# HTTP/1.1 and h2c at once — and 8080 on the host belongs to Keycloak, so a
+# host run without these two lines fails to bind.
+#
+# They are the only way to move them: declaring Kestrel:Endpoints at all
+# suppresses ASPNETCORE_URLS and ASPNETCORE_HTTP_PORTS entirely, measured
+# against both. What still works is the same configuration key from a higher
+# provider, which is what these are.
+export Kestrel__Endpoints__Rest__Url='http://localhost:5102'
+export Kestrel__Endpoints__Grpc__Url='http://localhost:8081'
 dotnet run --project src/Services/Catalog/Catalog.Api
 ```
+
+The failure without them is loud — *Failed to bind to address
+http://0.0.0.0:8080: address already in use* — which is the right shape for a
+clash between two things that both want a port. It is named here anyway,
+because the address it names is Keycloak's and the project it names is
+Catalog's, and nothing in that message says the two are related.
 
 Ordering is the same shape with its own key — `ConnectionStrings__Ordering`,
 never Catalog's, because `AddOrderingInfrastructure` reads its own name and
@@ -180,13 +199,38 @@ export ASPNETCORE_ENVIRONMENT=Development
 export Identity__Authority='http://localhost:8080/realms/commerce'
 export ReverseProxy__Clusters__catalog__Destinations__d1__Address='http://localhost:5102/'
 export ReverseProxy__Clusters__ordering__Destinations__d1__Address='http://localhost:5101/'
+export ReverseProxy__Clusters__web-bff__Destinations__d1__Address='http://localhost:5200/'
 dotnet run --project src/Gateway/Gateway.Api
 ```
 
 **A destination joins this block with the PR that builds its service**, the
 same rule the Compose file's `depends_on` follows. Ordering's line arrived with
-PR-18; without it a host-run gateway 502s `/api/v1/orders`, which is the exact
-path that PR exists to stop answering 502.
+PR-18 and the BFF's with PR-19; without one a host-run gateway 502s the exact
+path the PR exists to stop answering 502.
+
+The BFF is excluded too, and it is the one host that needs more than an
+authority — §15.4 marks `Identity__Client__*` BFF-only, `ValidateOnStart`
+refuses to boot without all three, and its own hop needs Catalog's **gRPC**
+port rather than its REST one:
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Development
+export Identity__Authority='http://localhost:8080/realms/commerce'
+export Identity__Client__ClientId='web-bff'
+export Identity__Client__ClientSecret='local-dev-secret'
+export Identity__Client__Scope='commerce-api'
+dotnet run --project src/BFF/Web.Bff
+```
+
+**That block leaves the hop pointed at `catalog-api:8081`, which resolves on
+the Compose network and nowhere else**, so a host-run BFF answers 503 on
+`/v1/checkout/quote` until Catalog is reachable under that name. The address is
+a literal rather than a configuration key on purpose (§9.7): it is the same
+string in Compose and in Kubernetes, and §15.4's rule is that a value which
+does not vary is not configuration. A `hosts` entry mapping `catalog-api` to
+`127.0.0.1` is the honest local workaround — and note that a host-run
+`Catalog.Api` does listen on 8081, because its `appsettings.json` declares both
+endpoints and that file overrides `ASPNETCORE_HTTP_PORTS`.
 
 `ASPNETCORE_ENVIRONMENT` leads this block for the same reason it leads the one
 above, and the block is written to stand alone rather than as a delta on that

@@ -53,10 +53,22 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections) : I
             return new Dictionary<ProductId, Money>();
 
         using IDbConnection connection = connections.Create();
+
+        // Upper-cased, because Money.Of normalises on the way in and this
+        // column is written through it (PR-20). Comparing the caller's string
+        // as it arrived makes a valid [A-Za-z]{3} request depend on the
+        // server's collation: under a case-sensitive one "gbp" finds nothing
+        // and PlaceOrder answers order.products_unavailable — which is what it
+        // says about a product that does not exist. Catalog's GetPricesHandler
+        // carries the same line for the same reason.
         IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
             new CommandDefinition(
                 Sql,
-                new { ProductIds = productIds.Select(p => p.Value), Currency = currency },
+                new
+                {
+                    ProductIds = productIds.Select(p => p.Value),
+                    Currency = currency.ToUpperInvariant()
+                },
                 cancellationToken: ct));
 
         return rows.ToDictionary(r => new ProductId(r.ProductId), r => Money.Of(r.Amount, r.Currency));

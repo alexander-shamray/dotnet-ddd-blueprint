@@ -637,7 +637,11 @@ public static class ServiceOptions
 {
     // The ceiling §9.7's timeout hierarchy asserts against. Not bound, not
     // validated, not deployable — it is a compile-time invariant.
-    public static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(30);
+    //
+    // Twenty seconds is the MIDDLE of §9.7's 10–30 s band and not its top: a
+    // gateway taking the floor of its own 30–60 s band is also at 30, and
+    // §9.7's ordering is a strict decrease, so the two would tie.
+    public static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(20);
 }
 ```
 

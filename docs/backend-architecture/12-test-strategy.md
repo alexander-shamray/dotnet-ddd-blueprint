@@ -20,6 +20,7 @@
 | API contract | HTTP in, HTTP out | `WebApplicationFactory` + containers | < 1 s | Tens | `*.Api.Tests` |
 | Host building block | One middleware or host extension | `TestServer` — no containers, no entry point | < 50 ms | Tens | `Common.Web.Tests` |
 | Edge configuration | The route file of §10.2 against the host that loaded it, and §10.1's edge behaviours — compression and the body ceiling | `WebApplicationFactory` + a stub destination on loopback — no containers, and `UseKestrel` where the property under test is the server's own | < 1 s | One suite | `Gateway.Api.Tests` |
+| Outbound hop | §9.7's one synchronous call: the timeout hierarchy read off the built host, the credential handler's position inside the resilience pipeline, and §11.5's realm | `WebApplicationFactory` + a real gRPC server on loopback; one class also runs a real Keycloak | < 1 s, and seconds for the Keycloak class | One suite | `Web.Bff.Tests` |
 | Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
 | Contract | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
@@ -1506,6 +1507,59 @@ public async Task The_service_receives_the_path_with_the_namespace_prefix_remove
 > for anything the *application* decides, and a real server for anything the
 > *server* decides. The configuration is the part that fails silently — it
 > binds, it reports nothing, and it governs nothing.
+
+### The outbound hop
+
+The pyramid's last row is `Web.Bff.Tests`, and it exists because §9.7's one
+synchronous call has three properties no other suite can reach: a timeout
+hierarchy, a credential handler's *position*, and a realm that nothing
+compiles against.
+
+The hierarchy is read off the **built host** rather than recomputed from the
+numbers a helper returns — which is what makes it a test of the registration:
+
+```csharp
+HttpStandardResilienceOptions options = factory.Services
+    .GetRequiredService<IOptionsMonitor<HttpStandardResilienceOptions>>()
+    .Get(PricingHop.ResilienceOptionsName);
+
+(attempts + backoff).ShouldBeLessThanOrEqualTo(options.TotalRequestTimeout.Timeout);
+```
+
+It is also self-checking about the options name, which is why §9.7 registers a
+**named** client: ask for the wrong key and `IOptionsMonitor` hands back a
+default instance whose 30 s total timeout fails this assertion at once, rather
+than a configuration that silently was never read.
+
+The credential handler's position is the harder one, because both orderings
+compile, start and serve. It is observable only through a stub that records
+what arrived:
+
+```csharp
+_catalog.AbortNextCalls = 1;                  // a transport fault — see below
+
+await client.GetFromJsonAsync<QuoteResponse>(Quote);
+
+presented.ShouldBe(["Bearer token-1", "Bearer token-2"]);
+```
+
+> **Two attempts, two *different* tokens, and a constant token would make the
+> correct pipeline and the reversed one produce identical bytes.** That is the
+> whole assertion: registered outside the resilience handler, the credential
+> handler runs once per request rather than once per attempt, and both lines
+> read `token-1`.
+>
+> **The fault has to be a transport one**, and that is not a detail of the
+> stub. A gRPC outcome travels as `grpc-status` on an HTTP **200**, so the
+> resilience pipeline reads it as success and retries nothing — a stubbed
+> `Unavailable` produces one attempt and measures neither ordering. Only an
+> aborted connection reaches the retry. §9.7's callout carries the same point
+> from the other side.
+
+The realm is the third, and it is the one suite in the solution that starts a
+real Keycloak (§11.5). Everything else points at an unreachable authority on
+purpose, so an audience mapper missing from the realm export is invisible to
+every other test here — nothing compiles differently when it is gone.
 
 ## 12.5 Testing the saga
 

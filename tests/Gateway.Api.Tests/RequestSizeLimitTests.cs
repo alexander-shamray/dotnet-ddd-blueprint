@@ -137,6 +137,36 @@ public sealed class RequestSizeLimitTests(StubDestination stub) : IClassFixture<
         response.StatusCode.ShouldBe(HttpStatusCode.RequestEntityTooLarge);
     }
 
+    /// <summary>
+    /// Posts <paramref name="bytes"/> with <c>Expect: 100-continue</c>, which
+    /// is what makes the refusal observable rather than a race.
+    /// </summary>
+    /// <remarks>
+    /// <b>Without it this test fails on the FIRST request a process makes, and
+    /// only that one.</b> Measured rather than inferred, six cold runs each
+    /// way: plain, the first request throws
+    /// <c>HttpRequestException → IOException</c> every time and the second
+    /// onwards answer 413; with the expectation, all four of four succeed
+    /// including the first. That is why it looked intermittent — a full suite
+    /// usually ran something else first, and running this class alone did not.
+    /// <para>
+    /// The cause is not the gateway and cannot be fixed there. Kestrel reads
+    /// <c>Content-Length</c>, refuses before a byte of the body, and closes;
+    /// the client is meanwhile writing a megabyte into a socket nobody is
+    /// draining, and an abortive close discards the 413 already sitting in its
+    /// receive buffer. HTTP has one mechanism for this and it is the
+    /// expectation — a client sending a body this size asks first, which is
+    /// exactly what <c>100-continue</c> is for.
+    /// </para>
+    /// <para>
+    /// So this is a more realistic client rather than a weaker test. Kestrel
+    /// still refuses on the declared length and still answers §10.5's shape;
+    /// what changes is only that the client is still listening when it does.
+    /// The chunked case below deliberately keeps the plain framing, because
+    /// there the length is unknown up front — the server has to count as it
+    /// reads, so it drains, and there is no reset to lose the answer to.
+    /// </para>
+    /// </remarks>
     private static async Task<HttpResponseMessage> Post(long bytes, string destination, CancellationToken ct)
     {
         using GatewayOnKestrel gateway = new(destination);
@@ -144,6 +174,7 @@ public sealed class RequestSizeLimitTests(StubDestination stub) : IClassFixture<
         using HttpRequestMessage request = Authenticated(HttpMethod.Post, Route);
         request.Content = new ByteArrayContent(new byte[bytes]);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        request.Headers.ExpectContinue = true;
 
         return await gateway.Client.SendAsync(request, ct);
     }
