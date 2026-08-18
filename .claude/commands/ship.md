@@ -288,12 +288,12 @@ same argument as never calling a branch clean because asking failed.
    rather than through a missing row.
 
    **Two rows say Stay, and they are one rule in two shapes: never walk away
-   from unmerged work.** Leaving an unmerged *worktree* strands the branch —
-   the session returns to `main`, step 1 forks, and `git-worktree-fork.sh`
-   refuses a name that already exists, leaving the commits in a directory
-   nobody is in. Leaving an unmerged *in-place* branch does the same thing
-   without the directory: `git switch main` succeeds, step 1 forks, and the
-   same refusal lands on the same name.
+   from unfinished work.** Leaving an unfinished *worktree* strands the
+   branch — the session returns to `main`, step 1 forks, and
+   `git-worktree-fork.sh` refuses a name that already exists, leaving the
+   commits in a directory nobody is in. Leaving an unfinished *in-place* branch
+   does the same thing without the directory: `git switch main` succeeds,
+   step 1 forks, and the same refusal lands on the same name.
 
    The second shape is easy to miss because the in-place branch is the
    *exception* in step 1 rather than the ordinary case — and it is exactly what
@@ -309,7 +309,8 @@ same argument as never calling a branch clean because asking failed.
    with *this session is not the owner*, which is another stop with nothing
    behind it. Leave, then tear down with git.
 
-   Then, in the main checkout:
+   Then the teardown. **"Then" is a sequence, not a destination — a Stay row
+   does not travel to the main checkout to run these:**
 
    ```bash
    git worktree prune                      # registrations whose directories are gone
@@ -317,10 +318,20 @@ same argument as never calling a branch clean because asking failed.
    git pull --ff-only                      # ONLY when HEAD is main — see below
    ```
 
-   **The pull is guarded on being on `main`**, because the one row above that
-   leaves the session elsewhere is the dirty-checkout row, and a bare
-   `git pull --ff-only` there updates whatever branch HEAD is on. Prune and
-   list are safe anywhere; the pull is the only one that reads HEAD.
+   **Both Stay rows leave the session off `main`**, and one of them leaves it
+   outside the main checkout entirely. Prune and list are safe from anywhere in
+   the repository, which is why they are unguarded; the pull is the only line
+   that reads HEAD, and on either Stay row a bare `git pull --ff-only` would
+   update the feature branch instead.
+
+   **Reading the heading as "go to the main checkout" is the failure mode, and
+   it undoes the row that was just obeyed.** A session that Stayed in an
+   unfinished worktree and then travelled to `main` has performed the exact
+   eviction the second row forbids: step 1 forks, `git-worktree-fork.sh`
+   refuses the name, and the commits sit in a directory nobody is in. The rows
+   that do reach the main checkout arrive there by their own action — the
+   `ExitWorktree` in row one, the switch in row three — rather than by reading
+   this heading.
 
    **Remove a sibling worktree only when its branch is merged and its tree is
    clean**, and let git decide the second half:
