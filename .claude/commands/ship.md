@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash
 Take the working tree from wherever it is to a merged PR. Description:
 $ARGUMENTS — if empty, each step derives its own.
 
-## This command owns no rules
+## It owns its own ends and nothing in the middle
 
 `/branch`, `/commit` and `/pr` hold the branch-naming table, the
 commit-splitting test and the PR body form. **Load each and follow it. Do not
@@ -15,8 +15,18 @@ restate them here** — a fourth copy of the naming table is exactly the drift
 this repo exists to close, and a chainer that paraphrases the steps it calls is
 the worst place for that copy to live.
 
-What this command adds is the handoffs: which steps are still owed, and where
-the sequence is allowed to stop.
+**The two ends are different, and this file is the only place they are
+written.** Step 0's workspace hygiene and step 7's merge and teardown belong to
+no other command — there is nothing to delegate to and nothing to restate — so
+they are argued here in full. Between them, this command adds only the
+handoffs: which steps are still owed, and where the sequence is allowed to
+stop.
+
+This heading used to read *This command owns no rules*, which was true while
+the chain began at `/branch` and ended at an open PR. It stopped being true in
+the same change that added the two ends, and it is corrected here rather than
+in a later sweep because a section title is exactly the kind of summary this
+branch keeps catching a round late.
 
 ## It runs to the end, and the end is a merged PR
 

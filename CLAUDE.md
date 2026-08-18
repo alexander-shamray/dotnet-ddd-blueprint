@@ -2708,7 +2708,7 @@ Delivery:
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
 | `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread **except an `Ask`** with a `done` or `rejected` marker and resolve it. An `Ask` is left open, because an unresolved thread is how a genuine ambiguity reaches a person; inside `/ship` the chain overrides that and answers it |
-| `/review-grok` | Triage an external review into a resolution record |
+| `/review-grok` | Triage an external review into a resolution record. A `Needs a decision` row is left for the user; inside `/ship` the chain overrides that and answers it in the record — the same split the row above carries |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 | `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
 | `/bug-sweep` | The same loop aimed at defects rather than vulnerabilities — logic and execution bugs, filed at **critical or high** only, confirmed by reading because the grant runs no build |
