@@ -126,6 +126,70 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
         (await PlaceAsync(product)).StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
     }
 
+    /// <summary>
+    /// A lower-case currency finds the projected price under a
+    /// <b>case-sensitive</b> collation — the only configuration in which
+    /// <c>ProjectedPriceReader</c>'s normalisation does anything at all.
+    /// </summary>
+    /// <remarks>
+    /// <b>Without this the line was covered by nothing.</b> Every fixture here
+    /// runs SQL Server's case-insensitive default, so deleting
+    /// <c>ToUpperInvariant</c> left the whole suite green while a valid
+    /// <c>[A-Za-z]{3}</c> request would answer
+    /// <c>order.products_unavailable</c> on a case-sensitive deployment — the
+    /// same answer a product nobody has priced gets, which is what makes it
+    /// invisible.
+    /// <para>
+    /// The collation is changed for one test and restored in a
+    /// <c>finally</c>. Safe here and nowhere else:
+    /// <c>IntegrationCollection</c> is the only collection holding the
+    /// fixture and xUnit runs a collection's tests serially, so nothing else
+    /// reads this table while it is altered. Respawn resets rows, not schema,
+    /// which is why the restore belongs to the test.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_lower_case_currency_prices_under_a_case_sensitive_collation()
+    {
+        Guid product = Guid.CreateVersion7();
+        await SeedPriceAsync(product, 19.99m, "EUR");
+
+        // Read rather than assumed, for the reason Catalog's twin states: a
+        // hard-coded restore re-collates the column into a state it may never
+        // have been in on a server configured differently.
+        string original = await CurrencyCollationAsync();
+
+        await SetCurrencyCollationAsync("Latin1_General_CS_AS");
+
+        try
+        {
+            HttpResponseMessage response = await PlaceAsync(product, currency: "eur");
+
+            // 422 is what this returns with the normalisation removed: the
+            // lookup misses, every line is unpriceable, and the order is
+            // refused for a reason that has nothing to do with the request.
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+        finally
+        {
+            await SetCurrencyCollationAsync(original);
+        }
+    }
+
+    /// <summary>The collation <c>Currency</c> currently carries.</summary>
+    private Task<string> CurrencyCollationAsync() =>
+        fixture.ScalarAsync<string>(
+            // Value, and no terminator: ScalarAsync goes through
+            // SqlQueryRaw, which wraps this as a subquery and reads one
+            // column by that name. The repo's other scalar probes are
+            // spelt the same way.
+            """
+            SELECT Value = collation_name
+            FROM sys.columns
+            WHERE object_id = OBJECT_ID('ordering.ProductPrices')
+                AND name = 'Currency'
+            """);
+
     [Fact]
     public async Task A_malformed_request_is_a_400_before_the_domain_sees_it()
     {
@@ -155,14 +219,44 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
         return client;
     }
 
-    private Task<HttpResponseMessage> PlaceAsync(Guid product, int quantity = 1) =>
+    private Task<HttpResponseMessage> PlaceAsync(Guid product, int quantity = 1, string currency = "EUR") =>
         Authenticated().PostAsJsonAsync(
             "/v1/orders",
             new PlaceOrderCommand(
                 [new PlaceOrderItem(product, quantity)],
                 new AddressDto("1 Test Street", null, "Almaty", "050000", "KZ"),
-                "EUR"),
+                currency),
             TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// Re-declares <c>Currency</c> with the named collation, around the
+    /// primary key that depends on it.
+    /// </summary>
+    /// <remarks>
+    /// The constraint has to go first: SQL Server refuses to alter a column a
+    /// key is built on. Catalog's equivalent needs none of this because its
+    /// <c>PriceCurrency</c> is an ordinary column — the two services carry the
+    /// same normalisation and the same test, and only the schema around it
+    /// differs.
+    /// <para>
+    /// The declaration is restated in full because <c>ALTER COLUMN</c> takes
+    /// one rather than a patch, and losing <c>char(3)</c> or <c>NOT NULL</c>
+    /// here would silently relax what the migration set. The collation name is
+    /// interpolated because SQL Server accepts no parameter in that position;
+    /// it is a literal from this file and never from a caller.
+    /// </para>
+    /// </remarks>
+    private async Task SetCurrencyCollationAsync(string collation)
+    {
+        await fixture.ExecuteAsync("ALTER TABLE ordering.ProductPrices DROP CONSTRAINT PK_ProductPrices;");
+        await fixture.ExecuteAsync(
+            $"ALTER TABLE ordering.ProductPrices ALTER COLUMN Currency char(3) COLLATE {collation} NOT NULL;");
+        await fixture.ExecuteAsync(
+            """
+            ALTER TABLE ordering.ProductPrices
+            ADD CONSTRAINT PK_ProductPrices PRIMARY KEY (ProductId, Currency);
+            """);
+    }
 
     private static async Task<Guid> IdOfAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<Guid>(TestContext.Current.CancellationToken);

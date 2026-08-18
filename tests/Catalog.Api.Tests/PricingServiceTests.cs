@@ -143,19 +143,101 @@ public sealed class PricingServiceTests(ServiceFixture fixture) : IAsyncLifetime
 
         // Money.Of upper-cases on the way in, so the column only ever holds
         // "GBP" — and GetPricesValidator accepts [A-Za-z]{3}, so "gbp" is a
-        // valid request. Without the handler normalising too, this passes on a
-        // case-insensitive server and returns nothing on a case-sensitive one:
-        // a valid request answered "product absent", which is indistinguishable
-        // from a product that does not exist.
+        // valid request.
         //
-        // The default SQL Server collation is case-insensitive, so this test
-        // cannot fail against the fixture as configured. It pins the intent
-        // rather than the collation, which is the honest thing it can do here —
-        // and it fails immediately if the normalisation is removed AND the
-        // server is ever configured CS, which is the pairing that would
-        // otherwise be discovered in production.
+        // This one passes with the handler's ToUpperInvariant deleted, because
+        // the fixture's collation is case-insensitive. It is here for the
+        // request shape; the test below is the one that holds the
+        // normalisation, and neither is a substitute for the other.
         reply.Price.Single().Currency.ShouldBe("GBP");
     }
+
+    /// <summary>
+    /// The same request against a <b>case-sensitive</b> column, which is the
+    /// only configuration in which the handler's normalisation does anything.
+    /// </summary>
+    /// <remarks>
+    /// <b>The test above cannot fail, and saying so in a comment was not
+    /// enough.</b> `ToUpperInvariant` exists for a deployment whose collation
+    /// is case-sensitive, and every fixture in this repository runs SQL
+    /// Server's case-insensitive default — so the line was covered by a test
+    /// that a do-nothing implementation satisfies, with the gap written down
+    /// beside it. A cheaply closable gap is closed rather than named.
+    /// <para>
+    /// The collation is changed on the column for the duration of one test and
+    /// restored in a <c>finally</c>. That is safe here and would not be
+    /// anywhere: <c>IntegrationCollection</c> is the only collection holding
+    /// the fixture and xUnit runs a collection's tests serially, so nothing
+    /// else is reading this table while it is altered. <c>Respawn</c> resets
+    /// rows and not schema, which is why the restore is this test's own job.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_lower_case_currency_matches_under_a_case_sensitive_collation()
+    {
+        Guid chair = await PublishAsync("Chair", 49.99m, "GBP");
+
+        // Read rather than assumed. Restoring to a hard-coded
+        // SQL_Latin1_General_CP1_CI_AS would be right for the image this runs
+        // against today and would silently re-collate the column on any server
+        // configured differently — a test that repairs the schema into a state
+        // it was never in is worse than one that leaves it broken loudly.
+        string original = await CurrencyCollationAsync();
+
+        await SetCurrencyCollationAsync("Latin1_General_CS_AS");
+
+        try
+        {
+            GetPricesRequest request = new() { Currency = "gbp" };
+            request.ProductId.Add(chair.ToString());
+
+            GetPricesReply reply = await Pricing.GetPricesAsync(
+                request,
+                Authenticated(),
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            // Without the handler's ToUpperInvariant this is empty: "gbp" is
+            // compared to the stored "GBP" under a collation that tells them
+            // apart, and a valid request is answered "product absent" — the
+            // same answer a product that does not exist gets, which is what
+            // makes the failure mode invisible in production.
+            reply.Price.Single().Currency.ShouldBe("GBP");
+        }
+        finally
+        {
+            await SetCurrencyCollationAsync(original);
+        }
+    }
+
+    /// <summary>The collation <c>PriceCurrency</c> currently carries.</summary>
+    private Task<string> CurrencyCollationAsync() =>
+        fixture.ScalarAsync<string>(
+            // Value, and no terminator: ScalarAsync goes through
+            // SqlQueryRaw, which wraps this as a subquery and reads one
+            // column by that name. The repo's other scalar probes are
+            // spelt the same way.
+            """
+            SELECT Value = collation_name
+            FROM sys.columns
+            WHERE object_id = OBJECT_ID('catalog.Products')
+                AND name = 'PriceCurrency'
+            """);
+
+    /// <summary>
+    /// Re-declares <c>PriceCurrency</c> with the named collation.
+    /// </summary>
+    /// <remarks>
+    /// The type is restated because <c>ALTER COLUMN</c> takes a whole
+    /// declaration rather than a patch, and dropping <c>NOT NULL</c> here
+    /// would quietly relax a constraint the migration set. The collation name
+    /// is interpolated because SQL Server does not accept a parameter in this
+    /// position — it is a literal from this file and never from a caller,
+    /// which is the same argument <c>OutboxTable</c> makes about a schema
+    /// name.
+    /// </remarks>
+    private async Task SetCurrencyCollationAsync(string collation) =>
+        await fixture.ExecuteAsync(
+            $"ALTER TABLE catalog.Products ALTER COLUMN PriceCurrency nvarchar(3) COLLATE {collation} NOT NULL;");
 
     [Fact]
     public async Task A_product_priced_in_another_currency_is_absent_rather_than_zero()
