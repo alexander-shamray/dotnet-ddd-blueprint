@@ -324,7 +324,10 @@ same argument as never calling a branch clean because asking failed.
    **Measured on this repository's own forked path, because a review disputed
    it.** The claim under review was that `/branch`'s `EnterWorktree` makes the
    session the owner and `remove` would therefore succeed; run against
-   `ashamray-bff` it refused, naming the `{path}` entry as the reason. The
+   `ashamray-bff` it refused. It offered two candidate reasons rather than one
+   — a `{path}` entry, or another session holding the liveness lock — and only
+   the first applied, which is enough to settle the outcome and worth quoting
+   precisely rather than tidying into a single cause. The
    review was right about the mechanism and wrong about the outcome — it is the
    `{name}`/`{path}` distinction rather than which helper made the directory,
    and this file said the latter. A resumed session is the same answer by a
