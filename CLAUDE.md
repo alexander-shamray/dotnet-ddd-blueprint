@@ -2815,8 +2815,18 @@ which refuses a dirty tree and is never given `-f`. A worktree whose branch is
 **unmerged** is left alone at step 0, and that exception is load-bearing: it is
 what lets a resumed `/ship` pick a branch back up, where evicting the session
 to `main` would strand the work in a directory nobody is in and leave step 1
-unable to re-fork a branch that already exists. The merged **branch** survives
-both: `git branch -d` is denied and stays denied.
+unable to re-fork a branch that already exists.
+
+**The same exception has a second shape, and the first draft of step 0 carried
+the bug it exists to prevent.** An in-place branch — what `/branch` produces
+every time `main` was dirty — is stranded by exactly the same switch to
+`main`, minus the directory: step 1 forks, and the same refusal lands on the
+same name. So step 0 stays put on unmerged work whether or not a worktree is
+involved, and step 7's teardown is conditional on which of the two step 1
+produced: a forked run comes back already on `main` and wants the removal, an
+in-place run has nothing to remove and needs the switch before its pull means
+anything. The merged **branch** survives all of it: `git branch -d` is denied
+and stays denied.
 
 **A sweep's worktree is not this one, and none is another's precedent.** The
 sweeps' — `/security-sweep`'s and `/bug-sweep`'s alike — are detached, live

@@ -240,16 +240,24 @@ same argument as never calling a branch clean because asking failed.
    |---|---|
    | In a worktree whose branch has a **merged** PR, or no PR and nothing unpushed | Finished. `ExitWorktree({action: "keep"})`, then the teardown below on the directory just left |
    | In a worktree whose branch is **unmerged** | **Stay.** This is a resumed run and that directory is its workspace |
-   | In the main checkout, not on `main` | `bash .claude/scripts/git-switch-existing.sh main`, when `git status --short` is clean; carry on where it is not, and say so |
+   | In the main checkout on a branch that is **merged, or has nothing unpushed and no PR** | Finished. `bash .claude/scripts/git-switch-existing.sh main`, when `git status --short` is clean |
+   | In the main checkout on an **unmerged** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
    | In the main checkout on `main` | Nothing but the teardown below |
 
-   **The second row is what stops this step eating the run it belongs to.**
-   Leaving an unmerged worktree strands the branch: the session returns to
-   `main`, step 1 sees a clean `main` and forks — and `git-worktree-fork.sh`
-   refuses a branch that already exists, which is a stop with no defect behind
-   it and the work still sitting in a directory nobody is in. `gh pr view
-   --json state` on the current branch, or `git log origin/main..HEAD`, answers
-   which row applies before anything is left.
+   **Two rows say Stay, and they are one rule in two shapes: never walk away
+   from unmerged work.** Leaving an unmerged *worktree* strands the branch —
+   the session returns to `main`, step 1 forks, and `git-worktree-fork.sh`
+   refuses a name that already exists, leaving the commits in a directory
+   nobody is in. Leaving an unmerged *in-place* branch does the same thing
+   without the directory: `git switch main` succeeds, step 1 forks, and the
+   same refusal lands on the same name.
+
+   The second shape is easy to miss because the in-place branch is the
+   *exception* in step 1 rather than the ordinary case — and it is exactly what
+   `/branch` produces every time `main` was dirty, which is every time a change
+   is already half-written when the chain starts. `gh pr view --json state` on
+   the current branch, or `git log origin/main..HEAD`, answers which row
+   applies before anything is left behind.
 
    **`ExitWorktree` with `keep`, never `remove`.** The remove form only works
    on a worktree this session created with `EnterWorktree`, and a `/ship`
@@ -283,16 +291,23 @@ same argument as never calling a branch clean because asking failed.
    remove is left where it is and named in the report; do not reach for `-f`,
    which is the one spelling that discards somebody's work.
 
-   > **`Bash(git worktree remove:*)` is a wider grant than the operation it
-   > buys, and that is a known residual rather than an oversight.** A prefix
-   > rule cannot exclude a flag — the argument the push rules already make — so
-   > the grant admits `-f` even though this file forbids it. Every comparable
-   > case in this repository is fixed by a helper that spells the flags itself,
-   > and the two that exist (`git-worktree-detach.sh`, `git-worktree-drop.sh`)
-   > shape-check their argument against `secsweep-??????` and therefore refuse
-   > a PR worktree by design. A third helper is owed here; until someone with
-   > the `Edit(.claude/scripts/**)` deny lifted writes it, the rule above is
-   > carried by this file, like the `[` placement rule in `CLAUDE.md`.
+   > **Two grants in this file are wider than the operations they buy, and both
+   > are known residuals rather than oversights.** A prefix rule cannot exclude
+   > a *trailing* flag — the argument the push rules already make — so
+   > `Bash(git worktree remove:*)` admits the `-f` this file forbids, and
+   > `Bash(gh pr merge --merge:*)` admits a trailing `--admin`, which merges
+   > past the failing checks step 7 treats as a hard stop. Pinning `--merge` at
+   > the front does close the *method* — `gh` refuses two of `--merge`,
+   > `--squash` and `--rebase` together — so that half is real; the bypass half
+   > is not.
+   >
+   > Every comparable case in this repository is fixed by a helper that spells
+   > its own flags, and the two that exist (`git-worktree-detach.sh`,
+   > `git-worktree-drop.sh`) shape-check their argument against
+   > `secsweep-??????` and therefore refuse a PR worktree by design. Two more
+   > are owed here; until someone with the `Edit(.claude/scripts/**)` deny
+   > lifted writes them, both rules are carried by this file, like the `[`
+   > placement rule in `CLAUDE.md`.
 
    Deleting the merged **branch** is not part of this. `git branch -d` is
    denied in `.claude/settings.json`, deliberately, and a merged branch costs
@@ -750,8 +765,15 @@ same argument as never calling a branch clean because asking failed.
    entry in `git log --merges` reads `Merge pull request #n from …`:
 
    ```bash
-   gh pr merge <n> --merge
+   gh pr merge --merge <n>
    ```
+
+   **The flag comes before the number, and that is about the grant rather than
+   about `gh`.** The frontmatter permits `Bash(gh pr merge --merge:*)`, and a
+   permission rule is a prefix match — `gh pr merge <n> --merge` does not start
+   with it and is simply denied. `gh` itself accepts either order (cobra
+   intersperses flags and positionals, checked rather than assumed), so writing
+   it flag-first costs nothing and keeps the narrow grant usable.
 
    `--squash` and `--rebase` are not alternatives to choose between here. The
    commits are the argument — `/commit` splits them so a reviewer can accept
@@ -768,8 +790,9 @@ same argument as never calling a branch clean because asking failed.
    three commands, now with a merged branch behind them:
 
    ```bash
-   git pull --ff-only                      # main, with the merge commit on it
-   git worktree remove ../<checkout-name>-<slug>
+   bash .claude/scripts/git-switch-existing.sh main     # HEAD must be main to pull it
+   git pull --ff-only                                   # main, with the merge commit on it
+   git worktree remove ../<checkout-name>-<slug>        # only when the run forked one
    git worktree prune
    ```
 
@@ -778,9 +801,18 @@ same argument as never calling a branch clean because asking failed.
    reason as step 0, and the `git worktree remove` afterwards is what actually
    removes it.
 
+   **Both of the middle two lines are conditional, and step 1's outcome is what
+   decides them.** A run that forked a worktree comes back to a main checkout
+   already on `main`, so the switch is a no-op and the remove is the point. A
+   run that branched **in place** — `main` was dirty, or the parent was not
+   writable — has no worktree to remove and *is* sitting on the merged branch,
+   so the switch is the only thing that makes the pull mean anything. Running
+   the wrong pair is how the teardown either errors on a worktree that never
+   existed or pulls a feature branch instead of `main`.
+
    **Verify the merge before tearing anything down**, and verify it from the
-   remote rather than from the exit code: `gh pr view <n> --json state,mergeCommit`
-   must read `MERGED` with an oid. Removing the worktree is the one step in
+   remote rather than from the exit code:
+   `gh pr view <n> --json state,mergeCommit` must read `MERGED` with an oid. Removing the worktree is the one step in
    this chain that destroys something, and doing it on an assumed merge is how
    an unmerged branch loses its only checkout.
 
