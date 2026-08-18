@@ -1212,6 +1212,25 @@ price history with it.
 > the fact instead, and the upsert consults it on exactly the branch that has
 > nothing else to consult.
 >
+> **`OccurredAt` is not a total order, and the tie rule only covers the pair
+> that has a business answer.** A withdrawal and a price sharing a timestamp
+> settle deterministically because there is a rule to appeal to — only a
+> *later* price re-lists, so a tie is not later and the withdrawal wins. Two
+> *prices* sharing one are a different matter: the publisher has said they
+> happened at the same instant, so nothing in the data ranks them, and whichever
+> reaches SQL first wins while the other is refused. Delivery order therefore
+> decides the projected amount in that case.
+>
+> **Closing it is a §9.1 change, not a projection change**, which is why it is
+> written down here rather than fixed in the `MERGE`: the ordering information
+> has to come from the publisher, as a per-product sequence in the envelope
+> every contract shares. That is a fourth envelope field for all six services,
+> a versioning decision under §9.2, and a monotonic counter Catalog would have
+> to persist. The narrower reading is that two distinct prices at one tick are
+> a publisher saying they were simultaneous, and last-writer-wins is a
+> defensible answer to that — but it is an answer nobody chose, so it is named
+> rather than left to be discovered.
+>
 > A **watermark** rather than a flag, for the reason `UpdatedAt` is a
 > comparison: a withdrawal must not make a product permanently unorderable.
 > Catalog republishing at a later `OccurredAt` re-lists it, in currencies that
@@ -1284,7 +1303,9 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
             INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
             VALUES (@ProductId, @Currency, @Amount, @IsAvailable, @OccurredAt)
         -- Same out-of-order guard as OrderSummaries: a retried stale event
-        -- must not overwrite a newer price.
+        -- must not overwrite a newer price. Strict, unlike the withdrawal
+        -- comparison above — the callout under the DDL says why the two ties
+        -- break differently.
         WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
             UPDATE SET Amount = @Amount, IsAvailable = @IsAvailable, UpdatedAt = @OccurredAt;
 

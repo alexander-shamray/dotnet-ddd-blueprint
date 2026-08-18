@@ -47,9 +47,46 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
     /// </summary>
     private static readonly TimeSpan DeliveryBudget = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Every message id this test published, so <see cref="DisposeAsync"/> can
+    /// wait for each delivery to finish before the next test truncates.
+    /// </summary>
+    private readonly List<Guid> _published = [];
+
     public async ValueTask InitializeAsync() => await fixture.ResetAsync();
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    /// <summary>
+    /// Drains the deliveries this test started. Without it a test can pass and
+    /// return while its own message is still being consumed.
+    /// </summary>
+    /// <remarks>
+    /// <b>The assertions here finish one write too early, and the inbox row is
+    /// the one they miss.</b> The projection writes through Dapper on its own
+    /// connection, inside the consumer; §9.5's filter commits the inbox row
+    /// <em>after</em> the consumer returns. So a test polling
+    /// <c>ordering.ProductPrices</c> sees what it came for while the delivery
+    /// is still in flight, returns, and the next test's <c>ResetAsync</c>
+    /// truncates the <c>ordering</c> schema underneath that pending
+    /// <c>SaveChangesAsync</c> — an intermittent failure or a row leaking into
+    /// a test that did not publish it, arriving as a flake rather than as a
+    /// defect. Copilot found it; the collection running serially is what makes
+    /// the race reachable rather than what prevents it.
+    /// <para>
+    /// The inbox row is the right thing to wait on because it is the
+    /// <b>last</b> write of the delivery, which is precisely the property
+    /// §9.5's ordering gives it — waiting on the projection's own table would
+    /// reproduce the bug.
+    /// </para>
+    /// </remarks>
+    public async ValueTask DisposeAsync()
+    {
+        foreach (Guid messageId in _published)
+            await Eventually(
+                async () => (await InboxRowsAsync(messageId)).Count,
+                expected: 1,
+                because: "a delivery still running when the next test resets the schema is a flake in " +
+                    "that test rather than a failure in this one");
+    }
 
     [Fact]
     public async Task A_published_product_reaches_the_projection_over_the_broker()
@@ -245,6 +282,8 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
             Currency = currency
         };
 
+        _published.Add(messageId);
+
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
             .Publish(published, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
@@ -266,6 +305,8 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
             Currency = currency
         };
 
+        _published.Add(messageId);
+
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
             .Publish(changed, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
@@ -282,6 +323,8 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(1),
             ProductId = product
         };
+
+        _published.Add(messageId);
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()

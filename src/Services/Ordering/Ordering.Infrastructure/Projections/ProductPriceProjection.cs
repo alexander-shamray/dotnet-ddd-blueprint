@@ -107,6 +107,14 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
         -- redelivered ProductPublished can arrive after the PriceChanged that
         -- superseded it, and without this line the older amount wins and stays
         -- won — a wrong price on the write path, with nothing failing.
+        --
+        -- STRICT here, where the withdrawal comparison is not, and §6.6 argues
+        -- the asymmetry: a tie between a price and a withdrawal has a business
+        -- answer (only a later price re-lists), and a tie between two prices
+        -- has none — the publisher said they happened at the same instant, so
+        -- delivery order decides and OccurredAt is not a total order. Ranking
+        -- them needs a per-product sequence in §9.1's envelope, which is a
+        -- platform decision rather than this statement's.
         WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
             UPDATE SET Amount = @Amount, IsAvailable = @IsAvailable, UpdatedAt = @OccurredAt;
 
