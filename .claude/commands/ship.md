@@ -295,58 +295,73 @@ same argument as never calling a branch clean because asking failed.
    | Where the session is | Do |
    |---|---|
    | In a worktree whose branch is **finished** | `ExitWorktree({action: "keep"})`, then the teardown below on the directory just left |
-   | In a worktree whose branch is **unfinished** | **Stay.** This is a resumed run and that directory is its workspace |
+   | In a worktree whose branch is **not finished** | **Stay.** Unfinished or unused alike, that directory is this run's workspace |
    | In the main checkout on a **finished** branch | `bash .claude/scripts/git-switch-existing.sh main` — the tree is clean by the predicate, so there is no second condition to check here |
-   | In the main checkout on an **unfinished** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
+   | In the main checkout on a branch that is **not finished** | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
    | In the main checkout on `main` | The teardown below — but the pull inside it only when `main` is itself clean and not ahead of `origin/main`, which is the same predicate one branch over |
 
-   **Finished means the workspace holds nothing of its own — all three of
-   these, with no limbs and no exceptions.** Everything else is unfinished,
-   including a branch whose commits are all pushed and which has simply not
-   reached `/pr` yet.
+   **Finished means this branch's work has landed — all three of these, with
+   no limbs and no exceptions.** Everything else is either unfinished or
+   unused, and both of those Stay.
 
    ```bash
-   git fetch origin main            # or the next read is about a stale ref
-   git status --short               # empty: no uncommitted or untracked work
-   git log origin/main..HEAD        # empty: nothing committed that main lacks
-   gh pr list --state open --head <branch>   # empty: nothing still owed on a PR
+   git fetch origin main                      # or the next read is stale
+   git status --short                         # empty: nothing uncommitted
+   git log origin/main..HEAD                  # empty: nothing main lacks
+   gh pr list --state merged --head <branch>  # non-empty: it landed
    ```
 
-   **The last read is `gh pr list`, not `gh pr view`, and the difference is an
-   exit code.** `gh pr view` with no PR for the current branch exits non-zero,
-   and *forked but never PR'd* is not an exotic state — it is what step 1
-   produces every time, and one of the two ways a workspace is legitimately
-   finished. Reading it with `view` would mean the ordinary case answering
-   through a failed command, in a chain whose first stop rule is that a
-   non-zero exit means the step did not run. `list` answers the same question
-   by returning nothing, and exits 0 doing it.
+   **Every read exits 0 whatever it finds, and that is deliberate.**
+   `gh pr view --json state` on a branch with no PR exits non-zero, and
+   *forked but never PR'd* is not exotic — it is what step 1 produces on every
+   run. Classifying the ordinary case through a failed command, in a chain
+   whose first stop rule is that a non-zero exit means the step did not run,
+   is a contradiction rather than a nicety. `gh pr list --state merged --head`
+   answers with a row or with `[]`, measured both ways on this repository.
+   `gh pr view --json state` keeps its job one section up, in the resume
+   table, where the question is *which* state and there is a PR to ask about.
 
-   **`gh pr view --json state` still has its job one section up**, in the
-   resume table, where the question is *which* PR state this branch is in and
-   `MERGED` is the row being selected. This predicate never asks that: since
-   the limbs went, a merged PR reaches it through `origin/main..HEAD` being
-   empty rather than through being recognised as merged.
+   **The merge read is not redundant with `origin/main..HEAD`, and the
+   difference is the whole of the next paragraph.** Merging does empty that
+   range, so the two agree on a landed branch; where they part is a branch
+   that never carried anything, which satisfies the first two reads without a
+   PR ever having existed.
 
-   **A merged PR satisfies the middle read rather than bypassing it**, which
-   is what lets the limbs go: merging puts the branch's commits into
-   `origin/main`, so `origin/main..HEAD` is empty afterwards — and it is
-   non-empty exactly when somebody committed *after* the merge, which is work
-   this run must not walk away from. The fetch is what makes that true rather
-   than accidental; without it `origin/main` is whatever it was when this
-   worktree was last pulled, and a freshly merged branch reads as ahead of it.
+   **A branch that is clean, level with `origin/main` and never merged is
+   *unused*, not finished — and the difference is what makes an interrupted
+   run resumable.** `/branch` forks a worktree and enters it; a run interrupted
+   there leaves a branch with no commits, no PR and a pristine tree. Under a
+   predicate asking only *does this hold work*, that reads as finished: step 0
+   removes the worktree, keeps the branch — `git branch -d` is denied — and
+   step 1 then hands `git-worktree-fork.sh` a name that already exists, which
+   it refuses. A stop with no defect behind it, and the workspace deleted on
+   the way to it.
 
-   **The PR read is the one that can still differ once the other two pass**,
-   which is why it stays rather than collapsing into them. A branch whose
-   commits all reached `origin/main` by some other route, with a PR still
-   open, is a question somebody owes an answer to and this chain should not
-   tidy away.
+   So an unused workspace is **kept and adopted**: step 0's Stay row takes it,
+   and step 1 skips the fork because the branch is already there. An empty
+   worktree is exactly what this run was about to create.
+
+   **An abandoned empty worktree is indistinguishable from that one**, and is
+   therefore also kept. That is the cost, taken deliberately: a stale directory
+   persists until somebody removes it, where the alternative is an interrupted
+   run that cannot resume. Name it in the report so it is visible rather than
+   merely tolerated, and note that `/branch` step 4 stops on an occupied slug
+   anyway, so it cannot silently collide with a later branch.
+
+   **This is round 2's finding resolved from the other end.** That review said
+   a teardown keyed on `merged` contradicted a predicate that called a clean
+   no-PR branch finished — true, and the fix taken then was to widen the
+   teardown. Round 6 showed the same disagreement from the side where widening
+   does damage. Narrowing the predicate settles both: the teardown asks for
+   merged, the predicate asks for merged, and nothing calls an unused
+   workspace finished in the first place.
 
    **The tree check is the fourth shape of the same stranding, and it is the
-   one that bites earliest.** A worktree forked minutes ago, edited and not yet
-   committed, has no PR and nothing ahead of `origin/main` — Finished on the
-   other two reads alone. Step 0 would leave it, `git worktree remove` would
-   refuse the dirty tree and so the directory survives, and the session would
-   be on `main` with step 1 about to refuse a branch that already exists. The
+   one that bites earliest.** A worktree forked minutes ago and edited was
+   Finished on the two reads that existed then. Step 0 would leave it,
+   `git worktree remove` would refuse the dirty tree and so the directory
+   survives, and the session would be on `main` with step 1 about to refuse a
+   branch that already exists. The
    guard that saves the files is not the guard that saves the run.
 
    **The fifth and sixth shapes are both the same defect — a read given to one
@@ -391,8 +406,8 @@ same argument as never calling a branch clean because asking failed.
    rather than through a missing row.
 
    **Two rows say Stay, and they are one rule in two shapes: never walk away
-   from unfinished work.** Leaving an unfinished *worktree* strands the
-   branch — the session returns to `main`, step 1 forks, and
+   from a workspace this run could use.** Leaving an unfinished *worktree*
+   strands the branch — the session returns to `main`, step 1 forks, and
    `git-worktree-fork.sh` refuses a name that already exists, leaving the
    commits in a directory nobody is in. Leaving an unfinished *in-place* branch
    does the same thing without the directory: `git switch main` succeeds,
@@ -487,14 +502,13 @@ same argument as never calling a branch clean because asking failed.
    git worktree remove ../<checkout-name>-<slug>
    ```
 
-   **Merged is not the test, and keying this line on it left abandoned
-   worktrees behind.** The predicate has two limbs, and a branch that was
-   forked, never committed to and never PR'd satisfies all three reads without
-   ever having had a PR to merge — step 0 will have exited it on precisely
-   that basis, and a teardown asking for `merged` would then decline the
-   directory the row above had just left, every time. One definition read at
-   both sites is the whole fix; asking for `merged` here was the same
-   asymmetry the fifth and sixth shapes turned on, in the other direction.
+   **One definition, read at both sites, and it is the predicate above rather
+   than a second spelling of it.** This line said `merged and clean` while the
+   predicate said something wider, then said `finished` while the predicate
+   was still wider — two rounds of the same disagreement, in both directions.
+   The predicate now asks for a merged PR itself, so the two cannot part: the
+   only worktree this removes is one whose work is on `main`, and an unused or
+   abandoned one is kept by the Stay row before this line is ever reached.
 
    Without `-f` that command **refuses a worktree holding uncommitted or
    untracked files**, which is the guard rather than an inconvenience — the
@@ -519,12 +533,29 @@ same argument as never calling a branch clean because asking failed.
    > are owed here; until someone with the `Edit(.claude/scripts/**)` deny
    > lifted writes them, both rules are carried by this file, like the `[`
    > placement rule in `CLAUDE.md`.
+   >
+   > **The deny is why they cannot simply be written now, and it is the same
+   > control that makes a helper worth having.** A session that could add
+   > `.claude/scripts/gh-pr-merge.sh` could also edit the one it is about to
+   > invoke, which would make every fixed endpoint in this chain a fiction. So
+   > the debt is real and it is the repo owner's to pay, deliberately.
+   >
+   > **What stands in the meantime is visibility, not prevention, and calling
+   > it anything else would be the overclaim.** Step 7 reports the **literal**
+   > `gh pr merge` and `git worktree remove` invocations it ran, flags
+   > included. That is the same substitute this chain already accepts for the
+   > human gate it removed — a decision taken here is written where the person
+   > who would have been asked can find it — applied to the two commands that
+   > can bypass a gate rather than merely take a judgement.
 
    Deleting the merged **branch** is not part of this. `git branch -d` is
    denied in `.claude/settings.json`, deliberately, and a merged branch costs
    nothing but a line in `git branch`. Name it in the report and leave it.
 
-1. **`/branch`**, passing $ARGUMENTS. Skip if already off `main`.
+1. **`/branch`**, passing $ARGUMENTS. Skip if already off `main` — which
+   includes the unused-workspace row above: step 0 stayed on a branch that
+   exists and has a worktree, so there is nothing for this step to create and
+   `git-worktree-fork.sh` would refuse the name if it tried.
 
    **This step is also where the workspace comes from, and it has two
    outcomes.** From a clean `main` with a writable parent, `/branch` forks a
@@ -995,8 +1026,17 @@ same argument as never calling a branch clean because asking failed.
 
    ```bash
    gh pr view <n> --json state,mergeable,mergeStateStatus,headRefOid
-   gh pr checks <n>
+   gh pr checks <n> --watch --fail-fast
    ```
+
+   **`--watch` is what makes this a wait rather than a sample.** Plain
+   `gh pr checks` reports whatever the checks are *now* and exits non-zero
+   while any is pending — so on the ordinary path, a push followed
+   immediately by this gate reads pending, the chain treats a non-zero exit as
+   a step that did not run, and it stops one line short of the merge it exists
+   to perform. The rule above says to wait for the run on the pushed head;
+   `--watch` is the spelling that actually does, and `--fail-fast` returns the
+   moment one check fails rather than sitting out the rest.
 
    **`headRefOid` is read here, before the checks and before the merge**, and
    it is the `<oid>` the merge below matches on. Reading it afterwards would
@@ -1021,6 +1061,12 @@ same argument as never calling a branch clean because asking failed.
    ```bash
    gh pr merge --merge <n> --match-head-commit <oid>
    ```
+
+   **Never `--admin`.** The grant admits it, for the reason step 0's callout
+   argues at length, and it is the one flag that turns the check gate above
+   into a formality — a PR merged past failing checks by a chain whose report
+   says the checks gated it. The invocation goes into the report verbatim so
+   that claim is checkable rather than trusted.
 
    **`--match-head-commit` is what binds the merge to the head whose checks
    were read.** Without it the green verdict and the merge are two reads of a
@@ -1152,6 +1198,9 @@ took decisions and lists none of them has not reported — it has hidden. A run
 that took none says so in one line.
 
 **Then the merge and the workspace.** Whether the PR merged and its merge oid,
+the literal `gh pr merge` and `git worktree remove` lines that ran, flags and
+all, because those two grants admit a flag this file forbids and a report is
+the only place the forbidding is checkable;
 or which of the two gates stopped it; that `main` was pulled, the HEAD it is
 now at, and that that HEAD contains the merge oid — containment rather than
 equality, because a PR merging in between leaves `main` at a later descendant

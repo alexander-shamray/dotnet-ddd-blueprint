@@ -2820,15 +2820,15 @@ by step 0 and the run ends there, because a second removal would exit non-zero
 against a path that is no longer a worktree and stop the chain on a helper
 failure with nothing behind it.
 
-**Finished means the workspace holds nothing of its own — a clean tree,
-nothing ahead of a freshly fetched `origin/main`, and no open PR, all three at
-once; everything else is left alone, and that exception is load-bearing.** It
+**Finished means this branch's work has landed — a clean tree, nothing ahead of
+a freshly fetched `origin/main`, and a **merged** PR, all three at once;
+everything else is left alone, and that exception is load-bearing.** It
 is what lets a resumed `/ship` pick a branch back up, where evicting the
 session to `main` would strand the work and leave step 1 unable to re-fork a
 name that already exists.
 
-**It took six drafts to state, and every miss after the first was one read
-missing from one limb of a disjunction.** First a worktree, fixed. Then an
+**It took seven drafts to state, and the last three are the interesting
+ones.** First a worktree, fixed. Then an
 in-place branch — what `/branch` produces every time `main` was dirty —
 stranded by the identical switch to
 `main` minus the directory. Then the predicate itself: written as "nothing
@@ -2849,6 +2849,19 @@ predicate has no limbs now** — a clean tree, nothing ahead of a fetched
 `origin/main`, and no open PR, conjoined. All three ask *is there work here*,
 nothing about a PR's state exempts a workspace from being asked, and a
 conjunction cannot carry the defect a disjunction kept generating.
+
+**Then the conjunction turned out to be too generous, and the fix ran the other
+way.** A branch forked and never used — no commits, no PR, a pristine tree —
+held nothing of its own either, so step 0 removed its worktree, kept the branch
+(`git branch -d` is denied) and left step 1 handing the fork helper a name it
+refuses. An interrupted run could not resume, and its workspace was deleted on
+the way to finding out. **A workspace that never held work is *unused*, not
+finished**: it is kept and adopted, and step 1 skips the fork. An abandoned
+empty worktree is indistinguishable from that one and is therefore also kept —
+a stale directory, named in the report, against a run that cannot resume. So
+the predicate asks for a **merged** PR, which is what the teardown asked for
+all along; the two disagreed for two rounds, once in each direction, and
+narrowing rather than widening is what made them one.
 
 The merged **branch** survives all of it: `git branch -d` is denied and stays
 denied.
