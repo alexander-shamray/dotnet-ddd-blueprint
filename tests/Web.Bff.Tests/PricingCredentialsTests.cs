@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using Grpc.Core;
 using Shouldly;
 using Web.Bff.TestSupport;
 using Web.Bff.Endpoints;
