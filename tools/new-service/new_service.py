@@ -803,6 +803,19 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
     "tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj": (
+        # PricingServiceTests is Catalog's and does not travel, so the package
+        # it named goes with it. A reference nothing in the rendered project
+        # uses is the unused-dependency claim CLAUDE.md rules out, one file
+        # type over.
+        (
+            "    <!-- GrpcChannel and Grpc.Core's StatusCode, which PricingServiceTests uses\n"
+            "         to call the gRPC server over loopback. Carried transitively through\n"
+            "         Catalog.Api; named here on the same honesty rule Web.Bff.Tests states,\n"
+            "         because a project that names a type declares the package rather than\n"
+            "         relying on a production csproj it does not control. -->\n"
+            "    <PackageReference Include=\"Grpc.Net.ClientFactory\" />\n",
+            "",
+        ),
         (
             "    <!-- ServiceFixture and CatalogApiFactory (§12.4, §4.1) — the containers,\n"
             "         the migrator runs and the reset live there, shared with\n"
