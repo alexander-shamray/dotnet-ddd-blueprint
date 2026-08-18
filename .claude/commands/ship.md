@@ -309,8 +309,23 @@ same argument as never calling a branch clean because asking failed.
    git fetch origin main            # or the next read is about a stale ref
    git status --short               # empty: no uncommitted or untracked work
    git log origin/main..HEAD        # empty: nothing committed that main lacks
-   gh pr view --json state          # not OPEN: nothing still owed on a PR
+   gh pr list --state open --head <branch>   # empty: nothing still owed on a PR
    ```
+
+   **The last read is `gh pr list`, not `gh pr view`, and the difference is an
+   exit code.** `gh pr view` with no PR for the current branch exits non-zero,
+   and *forked but never PR'd* is not an exotic state — it is what step 1
+   produces every time, and one of the two ways a workspace is legitimately
+   finished. Reading it with `view` would mean the ordinary case answering
+   through a failed command, in a chain whose first stop rule is that a
+   non-zero exit means the step did not run. `list` answers the same question
+   by returning nothing, and exits 0 doing it.
+
+   **`gh pr view --json state` still has its job one section up**, in the
+   resume table, where the question is *which* PR state this branch is in and
+   `MERGED` is the row being selected. This predicate never asks that: since
+   the limbs went, a merged PR reaches it through `origin/main..HEAD` being
+   empty rather than through being recognised as merged.
 
    **A merged PR satisfies the middle read rather than bypassing it**, which
    is what lets the limbs go: merging puts the branch's commits into
@@ -772,10 +787,24 @@ same argument as never calling a branch clean because asking failed.
    is reported as skipped-on-limits and proceeds to step 6. Every other
    outright failure mints nothing and stops the chain.
 
-6. **The Copilot loop.** Once the Grok loop ends clean — or was reported
-   skipped-on-limits this run, which hands over without being evidence of
-   Grok convergence — hand the branch to the second reviewer and alternate
-   the same way:
+6. **The Copilot loop.** Once the Grok loop has ended — however it ended —
+   hand the branch to the second reviewer and alternate the same way. All
+   three of its outcomes come here:
+
+   | Grok ended | Reaches step 6 because |
+   |---|---|
+   | Clean, on two consecutive passes | Convergence, the outcome the loop is for |
+   | Skipped on limits | Quota, not a verdict; reported as skipped, and final |
+   | Unconverged at the twelfth check | A budget ran out, which is not a reason to withhold the second reviewer |
+
+   **The third row was missing and step 7 asserted it anyway.** That step opens
+   by saying both loops have finished — *clean, all-resolved, skipped on
+   limits, or unconverged at a ceiling* — while this step admitted only the
+   first two, so a Grok loop that spent its twelfth check reached an assertion
+   nothing could satisfy and the chain simply had no next instruction. Step 7
+   already argues that a ceiling is a budget running out rather than a
+   verdict, and that argument applies here first: a branch Grok had more to
+   say about is the last one to skip a second reviewer over.
 
    1. **Request GitHub's Copilot review** on the PR:
 
@@ -1084,9 +1113,9 @@ same argument as never calling a branch clean because asking failed.
    nothing behind it.
 
    The pull, the ancestry check and the prune run on both paths, once whichever
-   of lines 2 and 3 applies has put HEAD on `main`. Skipping the pull is what leaves the main
-   checkout a merge behind — precisely the state step 0 exists to stop the next
-   run from starting in.
+   of lines 2 and 3 applies has put HEAD on `main`. Skipping the pull is what
+   leaves the main checkout a merge behind — precisely the state step 0 exists
+   to stop the next run from starting in.
 
    The merged branch itself stays. `git branch -d` is denied, deliberately, and
    a merged branch costs a line in `git branch` — name it in the report.
