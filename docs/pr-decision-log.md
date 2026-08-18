@@ -9,13 +9,14 @@ every session's context was carrying a changelog nobody needed in order to act.
 
 **The entries below are verbatim in their arguments**, because the arguments
 are the whole value and a summary of an argument is how a rule gets "corrected"
-back. Three kinds of edit were made on the way out, and naming them is cheaper
+back. Four kinds of edit were made on the way out, and naming them is cheaper
 than a claim that does not survive a grep: each block gained a `## PR-NN`
 heading; **self-references were rebased**, since a sentence saying "the rule at
 the top of this file" pointed at a section that did not travel and would
-otherwise now point at nothing; and where a block stated a *live* fact that
+otherwise now point at nothing; where a block stated a *live* fact that
 `CLAUDE.md` also carries, it now points there instead of holding a second copy
-that drifts. Not one argument was shortened.
+that drifts; and one 136-column line was rewrapped. Not one argument was
+shortened.
 
 Five lines still run one to nine columns past 80, each ending in a backticked
 identifier too long to break. They came across as they were, and the original
@@ -1063,17 +1064,11 @@ after:
   `auto-generated` header that exempts them from the analysers and are left
   **exactly** as the tool wrote them: the snapshot is the input to the next
   `migrations add`, and an edited one produces a wrong migration a PR later.
-- **`dotnet test` needs Docker** — since PR-12, and for five projects since
-  PR-19: `Catalog.Api.Tests`, `Catalog.Application.Tests`,
-  `Common.Infrastructure.Tests`, `Ordering.Api.Tests` and `Web.Bff.Tests`, each
-  with its own collection and therefore its own container set (§12.4's stated
-  price). The newest is the odd one — most of its 45 tests need no container at
-  all, and one class needs a Keycloak, so the suite is fast until
-  `KeycloakIdentityTests` and then pays for an identity provider once.
-  `Ordering.Application.Tests` is deliberately not among them — its
-  handler tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
-  `HttpContextCurrentUser` and a handler resolved in a bare scope has no
-  principal to bind a subject from. **The live list of Docker-needing projects
-  is `CLAUDE.md`'s**, in its commands section — it has grown twice since PR-08
-  and this entry records only what PR-08 decided.
+- **`dotnet test` needs Docker from here on.** Persistence is what made it
+  true: Catalog gained a connection string and a real migrator run, so its
+  container-backed suites cannot be satisfied by a fake. Each such suite owns
+  its collection and therefore its own container set, which is §12.4's stated
+  price. **The live list of which projects need a daemon is `CLAUDE.md`'s**, in
+  its commands section — it has grown twice since PR-08, and this entry records
+  the decision rather than the tally.
 

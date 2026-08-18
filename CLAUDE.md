@@ -5,9 +5,12 @@ Guidance for Claude Code when working in this repository.
 **Half of this file now lives in [`docs/pr-decision-log.md`](docs/pr-decision-log.md).**
 Every landed PR appended its findings here and nothing was ever consolidated,
 so a file loaded into every session's context had grown to 3,161 lines of
-which two thirds was a changelog. Those blocks moved out **verbatim** — the
-arguments are the whole value, and a summary of an argument is how a rule gets
-"corrected" back. What stayed is what an agent needs in order to *act*: the
+which two thirds was a changelog. Those blocks moved out **verbatim in their
+arguments** — not one was shortened, because a summary of an argument is how a
+rule gets "corrected" back. What *was* edited on the way out is listed in the
+log's own header: headings added, positional self-references rebased, and live
+facts replaced by a pointer rather than a second copy. What stayed here is what
+an agent needs in order to *act*: the
 repo's shape, the phase, the one rule, and the style the prose and the code are
 written in.
 
@@ -193,10 +196,12 @@ reason.
   disagree, Appendix C wins**, always. Being outside the tree, no nav footer or
   index row catches its drift — `/validate-blueprint` check 10 is the only
   thing that does, which is why it is named in that command's scope.
-- **`docs/pr-decision-log.md`** is beside the roadmap for the same reason and
-  with the same consequence: in no index, no nav footer, and in the scope of
-  neither `/validate-blueprint` nor `/check-links`. The one rule below is what
-  carries it.
+- **`docs/pr-decision-log.md`** is beside the roadmap for the same reason —
+  outside the blueprint tree, so in no index and behind no nav footer. The
+  consequence is its own and is one step further: the roadmap at least has
+  check 10, where the log is in the scope of **neither**
+  `/validate-blueprint` nor `/check-links`. The one rule below is the only
+  thing carrying it.
 - **`docs/superpowers/`** is a **frozen historical record**. Each pair — a
   design spec and the plan derived from it — records how one PR was thought
   through *before* it was built. **Where one disagrees with the blueprint, the
