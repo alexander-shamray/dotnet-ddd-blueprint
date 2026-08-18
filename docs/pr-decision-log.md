@@ -95,14 +95,22 @@ decisions bind what comes after:
   each. So the hint stays and §6.6 gained it, and the test carries the class it
   is in — PR-17's rate-limiter ordering row, reasoned and unobserved —
   rather than looking like the guard it is not.
-- **The currency is normalised on the way *in*, and the reader had already
-  promised it would be.** `ProjectedPriceReader` upper-cases its parameter and
-  argues that this column is written through `Money.Of` — true of Catalog's
-  `Money` and not of the wire, where `Currency` is a `string` like any other.
-  Under a case-sensitive collation an unnormalised contract writes a row the
-  reader cannot find *and* a second primary-key row beside the one it can. **A
-  comment describing what some other file does is a claim about that file**, and
-  this one was a year early.
+- **The currency is normalised on the write side as well as the read side, and
+  neither call is redundant.** Nothing between Catalog's `Money` and the
+  `MERGE` normalises anything — `Currency` crosses the wire as a `string` like
+  any other — so an unnormalised contract writes a row `ProjectedPriceReader`
+  cannot find *and* a second primary-key row beside the one it can, under a
+  case-sensitive collation.
+
+  **What the reader's comment said before this PR is the lesson, and it took
+  two review rounds to finish.** It justified its own `ToUpperInvariant` by
+  asserting that the column "is written through `Money.Of`" — a claim about a
+  file that did not exist yet, and one that stayed false after it did, because
+  the value arrives over a wire and not through the domain. **A comment
+  describing what some other file does is a claim about that file.** Round 1
+  fixed the reader and §6.4's sample; three sites that described the *reader*
+  went on quoting the retired rationale for two more rounds, which is the same
+  defect one indirection out — a comment describing what a comment says.
 - **§13.7's read-model row says *own events* now, because `projection.lag`
   only ever measured one lane.** `ProjectionInvoker` records it off an outbox
   row, so a read model fed by another service's contract never touches it.

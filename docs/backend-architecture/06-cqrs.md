@@ -1249,13 +1249,13 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
             new { integrationEvent.ProductId, integrationEvent.OccurredAt },
             ct);
 
-    // The currency is upper-cased HERE and not only in the reader.
-    // ProjectedPriceReader (§6.4) normalises its parameter on the grounds that
-    // this column is written through Money.Of — which is true of Catalog's
-    // Money and not of the wire, where Currency is a string like any other.
-    // Under a case-sensitive collation an unnormalised contract writes a row
-    // the reader cannot find, and a second primary-key row beside the one it
-    // can.
+    // The currency is upper-cased HERE, and in the reader (§6.4) as well.
+    // Nothing between Catalog's Money and this statement normalises anything:
+    // Currency crosses the wire as a string like any other, so what arrives is
+    // whatever the publisher put in the contract. Under a case-sensitive
+    // collation an unnormalised one writes a row the reader cannot find, and a
+    // second primary-key row beside the one it can — so both sides normalise,
+    // and neither call is redundant.
     private Task UpsertAsync(
         Guid productId,
         string currency,

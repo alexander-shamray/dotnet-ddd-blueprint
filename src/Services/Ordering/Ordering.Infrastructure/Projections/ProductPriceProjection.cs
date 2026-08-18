@@ -137,15 +137,14 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     /// guard it is not.
     /// </para>
     /// <para>
-    /// <b>The currency is upper-cased on the way in, and the reader already
-    /// promised that it would be.</b> <c>ProjectedPriceReader</c> upper-cases
-    /// its parameter and says so, on the grounds that this column is written
-    /// through <c>Money.Of</c>'s normalisation — which is true of Catalog's
-    /// <c>Money</c> and not of the wire, where <c>Currency</c> is a
-    /// <c>string</c> like any other. Under a case-sensitive collation a
-    /// lower-cased contract would produce a row the reader cannot find, and a
-    /// second primary-key row beside the one it can, so the normalisation
-    /// belongs on the side that writes as much as on the side that reads.
+    /// <b>The currency is upper-cased here, and on the read side too.</b>
+    /// Nothing between Catalog's <c>Money</c> and this statement normalises
+    /// anything: <c>Currency</c> crosses the wire as a <c>string</c> like any
+    /// other, so the value that reaches this parameter is whatever the
+    /// publisher put in the contract. Under a case-sensitive collation an
+    /// unnormalised one writes a row <c>ProjectedPriceReader</c> cannot find,
+    /// and a second primary-key row beside the one it can — so both sides
+    /// upper-case, and neither is redundant.
     /// </para>
     /// </remarks>
     private Task UpsertAsync(
