@@ -587,7 +587,7 @@ comes after:
   inside a nested probe handler, where `Scheme` silently bound to the base
   property instead of the enclosing constant.
 
-**Three more arrived from the review loops, and all three are about things no
+**Four more arrived from the review loops, and all four are about things no
 test in the repository was watching.**
 
 - **A `ProjectReference` is a `COPY` line in two Dockerfiles, and forgetting it

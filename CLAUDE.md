@@ -4,15 +4,18 @@ Guidance for Claude Code when working in this repository.
 
 **Half of this file now lives in [`docs/pr-decision-log.md`](docs/pr-decision-log.md).**
 Every landed PR appended its findings here and nothing was ever consolidated,
-so a file loaded into every session's context had grown to 3,161 lines of
-which two thirds was a changelog. Those blocks moved out **verbatim in their
-arguments** — not one was shortened, because a summary of an argument is how a
-rule gets "corrected" back. What *was* edited on the way out is listed in the
-log's own header: headings added, positional self-references rebased, and live
-facts replaced by a pointer rather than a second copy. What stayed here is what
-an agent needs in order to *act*: the
-repo's shape, the phase, the one rule, and the style the prose and the code are
-written in.
+so a file loaded into every session's context had grown to 3,161 lines — of
+which the per-PR changelog alone was 1,132. Those blocks moved out **verbatim
+in their arguments**: not one was shortened, because a summary of an argument
+is how a rule gets "corrected" back. The log's own header lists what *was*
+edited on the way out. The rest of what left went for a different reason —
+duplication of Appendix D and of `.claude/commands/*.md`, argued below — and
+the changelog was the largest single part of it. **No line count of this file
+appears in this paragraph on purpose**: a file that states its own length
+invalidates the claim with the next edit, including the edit that fixes it.
+What stayed is what an agent needs
+in order to *act*: the repo's shape, the phase, the one rule, and the style the
+prose and the code are written in.
 
 **Read the log before working in an area it covers.** It is where the traps are
 recorded; this file keeps only the lessons that generalise past the PR that
@@ -297,6 +300,10 @@ reason, since §6.4 warns the field without the interface is unprotected. Both
 join with §8.5's PR. `PluggableInterfaces.All` is **complete at five** —
 adding an interface there and nowhere else is the design, and adding one before
 its PR is inventing a project early by another route.
+
+**`AddCommonWebDefaults` is complete at all five of §13.2's pieces since
+PR-16** — the gap it used to carry was JWT validation, and closing it brought
+§11.4's port with it for want of anywhere else a `FrameworkReference` lives.
 
 **`Common.Contracts` is complete but not closed.** The rule governing the next
 addition is the one PR-15 suspended exactly once: a record belongs in the PR
