@@ -120,8 +120,10 @@ the `web-bff` route's service — and ten of its decisions bind what comes after
   a test that expected a 500 from a malformed upstream amount and got a 200. A
   wire format has no group separators, so the parse names
   `AllowLeadingSign | AllowDecimalPoint` and nothing else.
-- **One `.proto`, three generated halves, and CS0436 is what decides where
-  they live.** Catalog owns the contract because Catalog serves it; `Web.Bff`
+- **One `.proto`, four generated halves across three projects, and CS0436 is
+  what decides where they live.** Catalog owns the contract because Catalog
+  serves it — `Catalog.Api` generates `Both`, which is two of the four —
+  and `Web.Bff`
   **links** the same file rather than copying it, so the client and the server
   cannot drift. The consequence is that any project referencing `Web.Bff` and
   also generating from that `.proto` has every message type twice, and CS0436
@@ -373,7 +375,8 @@ to the next person who trims the description.
   builder has no `ComplexProperty`, and the line carries `Money`.
 - **The `Local`-lane round trip could not be copied from Catalog unchanged.**
   A record's generated equality compares an `IReadOnlyList` **by reference**,
-  and three of Ordering's five events carry one — so the assertion that passes
+  and two of Ordering's five events carry one — `OrderPlacedDomainEvent` and
+  `OrderConfirmedDomainEvent` — so the assertion that passes
   for Catalog's single-valued event silently compares identity here. The
   domain allow-list is four entries for a neighbouring reason: the first event
   earned `System.Collections` and `Money.Of` earned `System.Linq`.
