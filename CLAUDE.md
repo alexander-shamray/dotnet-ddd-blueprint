@@ -2799,9 +2799,12 @@ which is the part a reader needs; the attribution cost is unchanged and small.
 from.** From a clean `main` with a writable parent — the ordinary case — the
 new branch is cut into a sibling directory (`../ashamray-<slug>`, the shape
 `ashamray-groklimit` is already on disk in) and the session moves into it, so
-the whole of `/ship` runs there and this checkout stays on `main`. The two
-paragraphs below name the cases where it cannot, and in both of them the branch
-is made in place and the command says so. Outside the
+the whole of `/ship` runs there and this checkout stays on `main`. It cannot
+in two cases — **a dirty `main`, and a parent that is not writable** — and in
+both the branch is made in place and the command says so; each is argued below,
+named rather than pointed at, because this sentence used to say "the two
+paragraphs below" and four paragraphs were later inserted between it and them.
+Outside the
 repository tree is the load-bearing half rather than the naming: a worktree
 under `.claude/worktrees/` would be untracked content inside the checkout,
 which puts it in front of every `git status` the chain reads and inside

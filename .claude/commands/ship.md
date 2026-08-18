@@ -314,10 +314,21 @@ same argument as never calling a branch clean because asking failed.
    see one whose PR is merged.
 
    **`ExitWorktree` with `keep`, never `remove`.** The remove form only works
-   on a worktree this session created with `EnterWorktree`, and a `/ship`
-   worktree comes from `/branch`'s `git-worktree-fork.sh` — so `remove` refuses
-   with *this session is not the owner*, which is another stop with nothing
-   behind it. Leave, then tear down with git.
+   on a worktree this session *created* — `EnterWorktree({name})`. `/branch`
+   creates the directory with `git-worktree-fork.sh` and then enters it with
+   `EnterWorktree({path})`, and entering an existing worktree does not confer
+   ownership: `remove` answers *this session is not the owner*, which is
+   another stop with nothing behind it. Leave, then tear down with git, which
+   is also the form that refuses a dirty tree.
+
+   **Measured on this repository's own forked path, because a review disputed
+   it.** The claim under review was that `/branch`'s `EnterWorktree` makes the
+   session the owner and `remove` would therefore succeed; run against
+   `ashamray-bff` it refused, naming the `{path}` entry as the reason. The
+   review was right about the mechanism and wrong about the outcome — it is the
+   `{name}`/`{path}` distinction rather than which helper made the directory,
+   and this file said the latter. A resumed session is the same answer by a
+   third route: it never called `EnterWorktree` at all.
 
    Then the teardown. **"Then" is a sequence, not a destination — a Stay row
    does not travel to the main checkout to run these:**
