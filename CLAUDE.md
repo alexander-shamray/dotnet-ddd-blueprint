@@ -520,8 +520,8 @@ Run `/validate-blueprint` after any substantive edit.
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
   admonition syntax. Of the 120 in the blueprint, two forms are named and
-  recurring — `**Trap — …**` (16) for a mistake worth naming, and
-  `**Decision — …**` (10), which always points at the ADR that records it:
+  recurring — `**Trap — …**` (15) for a mistake worth naming, and
+  `**Decision — …**` (8), which always points at the ADR that records it:
 
   ```markdown
   > **Trap — projecting everything by default.** Each projection is a second
@@ -530,11 +530,19 @@ Run `/validate-blueprint` after any substantive edit.
   > **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
   ```
 
-  The other 94 are a bold assertion followed by its argument —
+  The other 97 are a bold assertion followed by its argument —
   `> **Unregistered, this fails silently and completely.** …`. That is the
   default; reach for `Trap` or `Decision` only when the callout genuinely is
   one. `**Decision.** / **Why.** / **Consequences.**` are the ADR body form,
   not callouts.
+
+  **Three callouts spell the dash outside the bold and are not counted above**:
+  §1.3's two glossary entries, which *define* `Trap` and `Decision` rather than
+  being instances of them, and one `**Decision** —` in §14. Counting a
+  definition as an instance is what made an earlier revision of this sentence
+  say 16 and 10 — an arithmetic that added to 120 only by including two entries
+  that fail the predicates beside them, since a glossary line is not "a mistake
+  worth naming" and does not "point at the ADR that records it".
 - **Em dashes** (`—`) for asides, **en dashes** (`–`) for ranges. Both are
   literal Unicode, not `--`.
 - **Every chapter ends with a rule and a nav footer**, in this exact shape:
@@ -955,7 +963,7 @@ file and a reviewer are the only things that do.
 | | |
 |---|---|
 | Namespaces | File-scoped (`namespace X;`), never block-scoped |
-| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: `Common.Web`'s six extension classes still use the classic `this`-parameter form. Four extend a receiver nothing else does, but `ObservabilityExtensions` and `CommonWebDefaultsExtensions` both extend `IHostApplicationBuilder` and could be grouped. Whether to group that pair is open and deliberately unsettled — they are separate files because one composes the other. Converting anything here is a decision about the whole corpus |
+| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: `Common.Web`'s **eight** extension classes still use the classic `this`-parameter form. **Five** extend a receiver nothing else does — `CorrelationIdExtensions` (`IApplicationBuilder`), `ProblemDetailsExtensions` (`IServiceCollection`), `HealthCheckExtensions` (`IEndpointRouteBuilder`), `AuthorizationPolicyExtensions` (`AuthorizationPolicyBuilder`) and `ResultExtensions` (`Result`) — while **three** share `IHostApplicationBuilder`: `ObservabilityExtensions`, `AuthenticationExtensions` and the `CommonWebDefaultsExtensions` that composes them. Whether to group those three is open and deliberately unsettled — they are separate files because one composes the other two, and merging would put a caller-facing entry point in the same block as the pieces it calls. The receivers are listed rather than counted because a bare count is what went stale here: this cell said six and four from before PR-16 added `AuthenticationExtensions`. Converting anything is a decision about the whole corpus |
 | Expression-bodied members | Used for one-line members, not for constructors |
 | Braces | Optional for a single statement, required for two or more |
 | Target framework | .NET 10 (LTS), C# 14 |
