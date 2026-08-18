@@ -326,8 +326,14 @@ and spliced into the export, then the whole file re-imported into a fresh
 container and a token read out of it. Eleven claims checked, including the two
 negative ones that matter most — a service account carrying no `permission`
 claim, and every existing login keeping `sub`, `email` and `realm_access`.
-`KeycloakIdentityTests` is the standing version of that run, and it is the only
-suite in the solution that starts an identity provider.
+**What stands afterwards is four of those eleven**, and the difference is worth
+recording where the risk was: `KeycloakIdentityTests` pins the audience on the
+BFF's token, the absent `permission` claim, that a host running the real
+`AddJwtAuthentication` accepts it, and that a client without the scope is
+refused. The login half is `RealmImportTests`, which reads the export and
+starts nothing — so no standing test mints a password-grant token for `demo` or
+`browser`, and the claims those logins carry were verified once, by hand. It is
+still the only suite in the solution that starts an identity provider.
 
 **The `Directory.Build.props` analyzer policy is settled, and it is a tax.**
 [ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)

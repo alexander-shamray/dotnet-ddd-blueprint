@@ -805,9 +805,15 @@ from [§14.1](14-local-development.md) and the real JWT scheme:
 [Fact]
 public async Task Bff_client_credentials_token_is_accepted_by_a_service()
 {
-    string token = await Realm.ClientCredentialsAsync("web-bff");
+    (_, string token) = await keycloak.ClientCredentialsAsync("web-bff", "local-dev-secret");
 
-    token.Audiences().ShouldContain("commerce-api");
+    // JwtSecurityTokenHandler, not a helper: `aud` is the one claim this whole
+    // section is about, and reading it through the same type a service reads it
+    // with is what keeps the assertion about the token rather than about an
+    // extension method written beside it.
+    new JwtSecurityTokenHandler().ReadJwtToken(token).Audiences
+        .ShouldContain("commerce-api");
+
     (await ServiceValidatingTheRealm().GetAsync("/protected", token)).StatusCode
         .ShouldBe(HttpStatusCode.OK);
 }
@@ -820,7 +826,10 @@ public async Task A_client_without_the_scope_is_rejected()
     // realm happens to hold. The client is created against the container
     // rather than shipped in the realm — a credential in a deployed realm for
     // a test's convenience is the thing §11.6 exists to prevent.
-    string token = await Realm.ClientCredentialsAsync("unrelated-client");
+    await keycloak.CreateUnrelatedClientAsync("unrelated-client", "unrelated-secret");
+
+    (_, string token) =
+        await keycloak.ClientCredentialsAsync("unrelated-client", "unrelated-secret");
 
     (await ServiceValidatingTheRealm().GetAsync("/protected", token)).StatusCode
         .ShouldBe(HttpStatusCode.Unauthorized);
