@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -183,7 +183,7 @@ the direction it must fail in.
 
 `git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
 one PR read, and a look for `suggestions.md` (it decides recheck versus full
-review inside step 5, not whether step 5 runs) answer all six rows and the
+review inside step 5, not whether step 5 runs) answer all seven rows and the
 Grok half. Read them before doing anything.
 
 ```bash
@@ -314,6 +314,16 @@ same argument as never calling a branch clean because asking failed.
    | In the main checkout on a **finished** branch | `bash .claude/scripts/git-switch-existing.sh main` — the tree is clean by the predicate, so there is no second condition to check here |
    | In the main checkout on a branch that is **not finished** | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
    | In the main checkout on `main` | The teardown below — but the pull inside it only when `main` is itself clean and not ahead of `origin/main`, which is the same predicate one branch over |
+   | **Detached**, anywhere | **Stay**, and classify nothing. There is no branch name, so the predicate cannot be evaluated at all; step 1 creates a branch from `HEAD` and carries whatever is here |
+
+   **The detached row is not a special case of the others, it is the absence
+   of the thing they read.** `git branch --show-current` prints nothing, so
+   `gh pr list --head <branch>` has no argument and the promised exit-zero
+   classification cannot be attempted, let alone answered — the step would
+   stop on a malformed command before `/branch` ever got the chance to make a
+   branch out of the state. `/branch` handles this deliberately (it is the
+   shape a sweep's worktree has), and the only thing step 0 owes it is to keep
+   the checkout where it is.
 
    **Finished means this branch's work has landed — all three of these, with
    no limbs and no exceptions.** Everything else is either unfinished or
@@ -1080,8 +1090,17 @@ same argument as never calling a branch clean because asking failed.
    is the whole of round 10's second finding:
 
    ```bash
-   rm suggestions.md
+   rm -f suggestions.md
    ```
+
+   **`-f` is doing the load-bearing work, and without it this line stopped the
+   chain on the *common* path.** A Grok loop that converged deleted the file
+   itself, so the ordinary run reaches here with nothing to remove, `rm` exits
+   non-zero, and the helper-failure rule ends the run one gate short of the
+   merge — a clean review producing a worse outcome than an unconverged one.
+   The flag is narrow enough to grant exactly: the path is a fixed literal, so
+   `-f` buys only the missing-file case and no recursion, no glob and no
+   second argument.
 
    **Removing it after the merge made the workspace gate unsatisfiable.** A
    Grok loop that ended unconverged or was skipped mid-cycle leaves that file
@@ -1241,8 +1260,8 @@ same argument as never calling a branch clean because asking failed.
    it earlier and it does that job better from there.
 
    Now put the workspace back the way step 0 wants to find it. **The order is
-   the instruction**, and two of the six lines depend on which outcome step 1
-   produced:
+   the instruction**, and three of the seven lines depend on which outcome
+   step 1 produced:
 
    ```bash
    gh pr view <n> --json state,mergeCommit              # 1. MERGED, with an oid
