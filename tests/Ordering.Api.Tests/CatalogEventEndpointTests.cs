@@ -86,7 +86,7 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
         // the ProductPublished binding deleted, MassTransit manufactured a
         // queue named after the consumer type, the projection ran, and NO
         // inbox row was written — a policied endpoint on paper and an
-        // unpolicied one in the broker. That call is gone for that reason, and
+        // policy-free one in the broker. That call is gone for that reason, and
         // this row is the standing check that it does not come back.
         //
         // The count is the second claim: one publish, one queue, one row. Two

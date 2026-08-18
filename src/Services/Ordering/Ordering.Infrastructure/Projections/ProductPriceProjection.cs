@@ -43,32 +43,46 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
       IIntegrationEventHandler<ProductDiscontinued>
 {
     /// <summary>
-    /// §6.6's upsert, hint and all. <c>WITH (HOLDLOCK)</c> is a correctness
-    /// property rather than a tuning one, and <see cref="UpsertAsync"/>'s
-    /// remarks argue it.
+    /// §6.6's upsert, both hints and all. <c>WITH (HOLDLOCK)</c> appears twice
+    /// and guards two different things — a concurrent insert of the same
+    /// price key, and a concurrent withdrawal of the product — and
+    /// <see cref="UpsertAsync"/>'s remarks argue both.
     /// </summary>
     private const string UpsertSql =
         """
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        -- The watermark is read FIRST, and under HOLDLOCK, and both halves are
+        -- load-bearing. A withdrawal newer than this event means Catalog has
+        -- since pulled the product, so the row this statement is about to
+        -- write is not orderable — whether or not a row for this currency
+        -- existed when the withdrawal ran.
+        --
+        -- HOLDLOCK because the interesting answer is an ABSENCE: at read
+        -- committed the lock is released immediately, so a discontinuation can
+        -- commit between this read and the insert below and leave a withdrawn
+        -- product available. A key-range lock on this ProductId is what makes
+        -- "no withdrawal" hold until COMMIT. HOLDLOCK on ProductPrices does
+        -- not reach this table.
+        --
+        -- FIRST because the discontinue statement takes these two tables in
+        -- this order as well. Same order, no cycle — the deadlock that
+        -- otherwise appears the moment both statements run concurrently for
+        -- one product.
+        DECLARE @IsAvailable bit =
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM ordering.ProductWithdrawals WITH (HOLDLOCK)
+                    WHERE ProductId = @ProductId
+                        AND WithdrawnAt > @OccurredAt)
+                THEN 0
+                ELSE 1
+            END;
+
         MERGE ordering.ProductPrices WITH (HOLDLOCK) AS target
-        -- IsAvailable is derived rather than literal, and the subquery is the
-        -- whole of the second guard. A withdrawal newer than this event means
-        -- Catalog has since pulled the product, so the row this statement is
-        -- about to write or rewrite is not orderable — whether or not a row
-        -- for this currency existed when the withdrawal ran.
-        USING (
-            SELECT
-                ProductId = @ProductId,
-                Currency = @Currency,
-                IsAvailable = CASE
-                    WHEN EXISTS (
-                        SELECT 1
-                        FROM ordering.ProductWithdrawals w
-                        WHERE w.ProductId = @ProductId
-                            AND w.WithdrawnAt > @OccurredAt)
-                    THEN 0
-                    ELSE 1
-                END
-        ) AS source
+        USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
             ON target.ProductId = source.ProductId
             AND target.Currency = source.Currency
         -- NOT MATCHED is the branch no UpdatedAt comparison can cover, because
@@ -76,13 +90,15 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
         -- withdrawal watermark exists at all.
         WHEN NOT MATCHED THEN
             INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-            VALUES (@ProductId, @Currency, @Amount, source.IsAvailable, @OccurredAt)
+            VALUES (@ProductId, @Currency, @Amount, @IsAvailable, @OccurredAt)
         -- The out-of-order guard. At-least-once delivery (§9.4) means a
         -- redelivered ProductPublished can arrive after the PriceChanged that
         -- superseded it, and without this line the older amount wins and stays
         -- won — a wrong price on the write path, with nothing failing.
         WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
-            UPDATE SET Amount = @Amount, IsAvailable = source.IsAvailable, UpdatedAt = @OccurredAt;
+            UPDATE SET Amount = @Amount, IsAvailable = @IsAvailable, UpdatedAt = @OccurredAt;
+
+        COMMIT;
         """;
 
     /// <summary>
@@ -187,6 +203,18 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     /// the second attempt, which is exactly why it is worth closing here: a
     /// correctness property that happens to be repaired by a retry policy is
     /// one that stops holding the day somebody tunes the retry policy.
+    /// <para>
+    /// <b>The watermark read carries the same hint, for a different absence.</b>
+    /// The upsert's second guard asks whether a withdrawal exists, and at read
+    /// committed the interesting answer — <em>no</em> — is protected by
+    /// nothing: a discontinuation can commit between that read and the insert,
+    /// and the product goes back on sale. <c>HOLDLOCK</c> on
+    /// <c>ProductPrices</c> does not reach <c>ProductWithdrawals</c>, so the
+    /// read takes its own, inside a transaction, and takes it <em>first</em> —
+    /// the order the discontinue statement already uses, which is what keeps
+    /// the two from deadlocking against each other. Copilot found this one, in
+    /// the fix for the bug it had found the round before.
+    /// </para>
     /// <para>
     /// <b>No test catches the hint being deleted, and that was measured
     /// rather than assumed.</b> Removing it left

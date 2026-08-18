@@ -1216,6 +1216,16 @@ price history with it.
 > comparison: a withdrawal must not make a product permanently unorderable.
 > Catalog republishing at a later `OccurredAt` re-lists it, in currencies that
 > have rows and in currencies that do not.
+>
+> **The upsert's read of that watermark needs its own `HOLDLOCK`, and taking
+> it first is what stops the two statements deadlocking.** The answer that
+> matters there is an *absence*, and at read committed the lock protecting it
+> is released immediately — so a discontinuation can commit between the read
+> and the insert, and the hole reopens one level down. `HOLDLOCK` on
+> `ProductPrices` does not reach `ProductWithdrawals`; each table's lock is its
+> own. The discontinue statement already takes the two in watermark-then-prices
+> order, so the upsert takes them in that order as well, which is the whole of
+> the deadlock argument.
 
 ```csharp
 // Infrastructure, not Application: raw SQL and a connection factory. Registered
@@ -1240,36 +1250,45 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
         -- which is the argument FOR closing it here: a correctness property
         -- repaired by a retry policy stops holding the day somebody tunes the
         -- retry policy.
-        MERGE ordering.ProductPrices WITH (HOLDLOCK) AS target
-        -- IsAvailable is derived rather than literal, and the subquery is the
-        -- second guard: a withdrawal newer than this event means Catalog has
-        -- since pulled the product, whether or not a row for this currency
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        -- The second guard: a withdrawal newer than this event means Catalog
+        -- has since pulled the product, whether or not a row for this currency
         -- existed when the withdrawal ran.
-        USING (
-            SELECT
-                ProductId = @ProductId,
-                Currency = @Currency,
-                IsAvailable = CASE
-                    WHEN EXISTS (
-                        SELECT 1
-                        FROM ordering.ProductWithdrawals w
-                        WHERE w.ProductId = @ProductId
-                            AND w.WithdrawnAt > @OccurredAt)
-                    THEN 0
-                    ELSE 1
-                END
-        ) AS source
+        --
+        -- HOLDLOCK because the interesting answer is an ABSENCE, and at read
+        -- committed that lock is released at once — a discontinuation can then
+        -- commit between this read and the insert below and leave a withdrawn
+        -- product available. HOLDLOCK on ProductPrices does not reach this
+        -- table. FIRST because the discontinue statement takes the two tables
+        -- in this order too: same order, no deadlock.
+        DECLARE @IsAvailable bit =
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM ordering.ProductWithdrawals WITH (HOLDLOCK)
+                    WHERE ProductId = @ProductId
+                        AND WithdrawnAt > @OccurredAt)
+                THEN 0
+                ELSE 1
+            END;
+
+        MERGE ordering.ProductPrices WITH (HOLDLOCK) AS target
+        USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
             ON target.ProductId = source.ProductId
             AND target.Currency = source.Currency
         -- NOT MATCHED is the branch no UpdatedAt comparison can cover, because
         -- there is no target row to compare against.
         WHEN NOT MATCHED THEN
             INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-            VALUES (@ProductId, @Currency, @Amount, source.IsAvailable, @OccurredAt)
+            VALUES (@ProductId, @Currency, @Amount, @IsAvailable, @OccurredAt)
         -- Same out-of-order guard as OrderSummaries: a retried stale event
         -- must not overwrite a newer price.
         WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
-            UPDATE SET Amount = @Amount, IsAvailable = source.IsAvailable, UpdatedAt = @OccurredAt;
+            UPDATE SET Amount = @Amount, IsAvailable = @IsAvailable, UpdatedAt = @OccurredAt;
+
+        COMMIT;
         """;
 
     private const string DiscontinueSql =
