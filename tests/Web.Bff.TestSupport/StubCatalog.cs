@@ -93,6 +93,20 @@ public sealed class StubCatalog : IAsyncLifetime
     /// </remarks>
     public int AbortNextCalls { get; set; }
 
+    /// <summary>
+    /// How long the next calls should hang before answering, so the resilience
+    /// pipeline's own timeout fires.
+    /// </summary>
+    /// <remarks>
+    /// A third failure mode rather than a variant of the two above, and the
+    /// three are distinguished by what the CLIENT ends up throwing: a gRPC
+    /// status, an <c>HttpRequestException</c>, and Polly's
+    /// <c>TimeoutRejectedException</c>. All three reach
+    /// <c>UpstreamExceptionHandler</c> differently, and it mapped only the
+    /// first until they were measured.
+    /// </remarks>
+    public TimeSpan HangFor { get; set; }
+
     public async ValueTask InitializeAsync()
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -136,12 +150,17 @@ public sealed class StubCatalog : IAsyncLifetime
 
     private sealed class StubPricingService(StubCatalog stub) : Pricing.PricingBase
     {
-        public override Task<GetPricesReply> GetPrices(GetPricesRequest request, ServerCallContext context)
+        public override async Task<GetPricesReply> GetPrices(
+            GetPricesRequest request,
+            ServerCallContext context)
         {
             stub._calls.Enqueue(new Call(
                 [.. request.ProductId],
                 request.Currency,
                 context.RequestHeaders.GetValue("authorization")));
+
+            if (stub.HangFor > TimeSpan.Zero)
+                await Task.Delay(stub.HangFor, context.CancellationToken);
 
             if (stub.AbortNextCalls > 0)
             {
@@ -157,7 +176,7 @@ public sealed class StubCatalog : IAsyncLifetime
             GetPricesReply reply = new();
 
             if (!string.Equals(request.Currency, stub.Currency, StringComparison.Ordinal))
-                return Task.FromResult(reply);
+                return reply;
 
             foreach (string id in request.ProductId)
             {
@@ -176,7 +195,7 @@ public sealed class StubCatalog : IAsyncLifetime
                 });
             }
 
-            return Task.FromResult(reply);
+            return reply;
         }
     }
 }

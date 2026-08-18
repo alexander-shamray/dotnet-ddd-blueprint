@@ -229,6 +229,31 @@ public sealed class PricingServiceTests(ServiceFixture fixture) : IAsyncLifetime
         thrown.Status.Detail.ShouldNotContain("not-a-guid");
     }
 
+    [Theory]
+    [InlineData("11111111111111111111111111111111")]
+    [InlineData("{11111111-1111-1111-1111-111111111111}")]
+    [InlineData("(11111111-1111-1111-1111-111111111111)")]
+    public async Task A_non_canonical_guid_is_refused(string productId)
+    {
+        GetPricesRequest request = new() { Currency = "GBP" };
+        request.ProductId.Add(productId);
+
+        RpcException thrown = await Should.ThrowAsync<RpcException>(
+            () => Pricing
+                .GetPricesAsync(
+                    request,
+                    Authenticated(),
+                    cancellationToken: TestContext.Current.CancellationToken)
+                .ResponseAsync);
+
+        // pricing.proto says "GUIDs in their canonical text form", and
+        // Guid.TryParse accepts four more spellings than that — so every one
+        // of these was a valid product id in a service whose contract says it
+        // is not. Accepting more than the contract states is how two ends stop
+        // agreeing about what the contract is.
+        thrown.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+    }
+
     [Fact]
     public async Task Too_many_products_is_InvalidArgument_rather_than_Unknown()
     {

@@ -1,6 +1,8 @@
 using Grpc.Core;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 
 namespace Web.Bff;
 
@@ -42,12 +44,24 @@ internal sealed class UpstreamExceptionHandler(IProblemDetailsService problemDet
             // read Catalog's logs for a mistake in their own URL.
             StatusCode.InvalidArgument => (StatusCodes.Status400BadRequest, "Invalid pricing request"),
 
-            // The upstream is down, refusing connections, or the circuit
-            // breaker is open — the last of which presents as Unavailable
-            // without a call having left this process. 503 rather than 502,
-            // because it is the status that says "try again later" and a
-            // breaker's whole promise is that later is different.
+            // Catalog answered Unavailable itself, as a gRPC status. 503 rather
+            // than 502, because it is the status that says "try again later".
             StatusCode.Unavailable or StatusCode.DeadlineExceeded =>
+                (StatusCodes.Status503ServiceUnavailable, "Pricing is temporarily unavailable"),
+
+            // And the same outage arriving the OTHER way, which this handler
+            // missed until it was measured. When the failure happens in the
+            // client pipeline rather than at the server, Grpc.Net.Client has no
+            // gRPC status to report: it raises Internal and preserves the real
+            // cause in Status.DebugException. So an exhausted retry, a Polly
+            // timeout and an open circuit — the three temporary conditions this
+            // type exists to translate — all reached the 500 below.
+            //
+            // Measured, not assumed: an exhausted transport fault arrives as
+            // `Internal` with `HttpRequestException` in DebugException, and the
+            // comment this replaces claimed an open circuit "presents as
+            // Unavailable", which it does not.
+            StatusCode.Internal when IsTransient(rpc.Status.DebugException) =>
                 (StatusCodes.Status503ServiceUnavailable, "Pricing is temporarily unavailable"),
 
             _ => (StatusCodes.Status500InternalServerError, "Pricing failed")
@@ -80,4 +94,20 @@ internal sealed class UpstreamExceptionHandler(IProblemDetailsService problemDet
 
         return true;
     }
+
+    /// <summary>
+    /// Whether an <c>Internal</c> gRPC status is really one of §9.7's temporary
+    /// upstream conditions wearing the only status the client could produce.
+    /// </summary>
+    /// <remarks>
+    /// <b>A closed list, and deliberately not "any Internal".</b> The point of
+    /// leaving unmapped statuses on the 500 is that a fault this code has not
+    /// thought about stays loud; widening the arm to every <c>Internal</c>
+    /// would take that back and quietly relabel real defects as outages. These
+    /// three are the exceptions the resilience pipeline itself raises — the
+    /// retry giving up, the attempt or total timeout firing, and the breaker
+    /// refusing to call at all — and nothing else in this host produces them.
+    /// </remarks>
+    private static bool IsTransient(Exception? cause) =>
+        cause is HttpRequestException or TimeoutRejectedException or BrokenCircuitException;
 }

@@ -98,8 +98,65 @@ public sealed class UpstreamRetryTests : IAsyncLifetime
         HttpResponseMessage response = await client.GetAsync(
             $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
 
-        response.StatusCode.ShouldNotBe(HttpStatusCode.OK);
+        // 503, not merely "not OK". The loose assertion this replaced permitted
+        // a 500, so breaking UpstreamExceptionHandler's outage mapping left
+        // this budget test green — a test that cannot fail in the direction
+        // that matters, which is the shape this repository keeps naming.
+        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
         _catalog.Calls.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task A_pipeline_timeout_is_503_rather_than_500()
+    {
+        // Longer than the 1.4 s attempt timeout, so Polly's own timeout fires
+        // rather than the server answering slowly.
+        _catalog.HangFor = TimeSpan.FromSeconds(2);
+
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+
+        // Grpc.Net.Client has no gRPC status for a failure raised inside the
+        // client pipeline, so it reports Internal and puts Polly's
+        // TimeoutRejectedException in Status.DebugException. Mapping only
+        // Unavailable — which this handler did until it was measured — left
+        // every timeout as a 500: the platform reporting its own fault for an
+        // upstream that was merely slow.
+        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task An_open_circuit_is_503_without_calling_Catalog_at_all()
+    {
+        // §9.7's breaker: a 0.5 failure ratio over a minimum throughput of 10.
+        // Aborting generously guarantees the window trips rather than relying
+        // on how many of these requests share a sampling window.
+        _catalog.AbortNextCalls = 200;
+
+        using HttpClient client = Caller();
+
+        for (int i = 0; i < 12; i++)
+        {
+            await client.GetAsync(
+                $"/v1/checkout/quote?productId={Chair}&currency=GBP",
+                TestContext.Current.CancellationToken);
+        }
+
+        int callsBeforeOpen = _catalog.Calls.Count;
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+
+        // The half that makes it a breaker rather than a slow failure: once
+        // open it refuses without a call leaving this process. The handler's
+        // own comment used to claim this case "presents as Unavailable" — it
+        // presents as Internal carrying a BrokenCircuitException, which is why
+        // it was reaching the 500 arm.
+        _catalog.Calls.Count.ShouldBe(callsBeforeOpen);
     }
 
     [Fact]

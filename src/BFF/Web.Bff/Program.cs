@@ -97,12 +97,27 @@ pricing
         options.Retry.UseJitter = true;
         options.Retry.Delay = TimeSpan.FromMilliseconds(150);
 
-        // 3 × 1.4 s + 150 ms + 300 ms = 4.65 s. The delays are part of the
-        // budget rather than an extra on top of it: leave them out and the
-        // arithmetic clears the ceiling while the configuration does not, so
-        // the third attempt is cancelled part-way and the retry that was meant
-        // to save the request never had a chance. ResilienceHierarchyTests
-        // asserts the sum including backoff for exactly that reason.
+        // The cap that makes the budget below ARITHMETIC rather than
+        // statistical, and without it the stated sum is not a bound at all.
+        // UseJitter randomises each delay, and Polly's decorrelated jitter can
+        // exceed the nominal for a single retry — measured at 392 ms against a
+        // 300 ms nominal over 400 samples. The observed worst TOTAL stayed
+        // under the un-jittered 450 ms, but a sample is not a bound, and the
+        // strategy documents none without this.
+        //
+        // Capped, the worst case is 2 × 300 ms whatever the jitter draws, so
+        // 3 × 1.4 s + 0.6 s = 4.8 s fits inside the 5 s total with the last
+        // attempt able to finish. ResilienceHierarchyTests computes it from
+        // this property rather than from the nominal.
+        options.Retry.MaxDelay = TimeSpan.FromMilliseconds(300);
+
+        // 3 × 1.4 s + 2 × 300 ms = 4.8 s. The delays are part of the budget
+        // rather than an extra on top of it: leave them out and the arithmetic
+        // clears the ceiling while the configuration does not, so the third
+        // attempt is cancelled part-way and the retry that was meant to save
+        // the request never had a chance. ResilienceHierarchyTests asserts the
+        // sum including backoff for exactly that reason, and takes the backoff
+        // from MaxDelay above rather than from the nominal.
         options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(1.4);
 
         options.CircuitBreaker.FailureRatio = 0.5;

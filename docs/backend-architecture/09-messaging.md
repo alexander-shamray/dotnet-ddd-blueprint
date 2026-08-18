@@ -2355,8 +2355,7 @@ configuration-validation test at startup.
 
 The configuration below satisfies the table rather than merely gesturing at it,
 and the budget is worked out including the waiting: 3 × 1.4 s of attempts plus
-150 ms + 300 ms of backoff is 4.65 s, which fits inside the 5 s ceiling with
-room for jitter to widen the delays:
+a backoff capped at 2 × 300 ms is 4.8 s, which fits inside the 5 s ceiling:
 
 ```csharp
 // Web.Bff/Program.cs (§4.1). Not Ordering's — see the paragraph above, and
@@ -2420,8 +2419,13 @@ pricing
         options.Retry.UseJitter = true;
         options.Retry.Delay = TimeSpan.FromMilliseconds(150);
 
-        // 3 × 1.4 s + 150 ms + 300 ms = 4.65 s. The delays are part of the
-        // budget, not an extra on top of it — see the trap below.
+        // The cap that makes the budget below arithmetic rather than
+        // statistical. With UseJitter the nominal delay is not an upper bound
+        // — see the second trap below.
+        options.Retry.MaxDelay = TimeSpan.FromMilliseconds(300);
+
+        // 3 × 1.4 s + 2 × 300 ms = 4.8 s. The delays are part of the budget,
+        // not an extra on top of it — see the trap below.
         options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(1.4);
 
         options.CircuitBreaker.FailureRatio = 0.5;
@@ -2465,14 +2469,26 @@ pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
 >
 > **And the sum that has to fit inside it includes the backoff.** The obvious
 > budget is `AttemptTimeout × (MaxRetryAttempts + 1)`; the real one adds the
-> delays *between* those attempts, which for exponential backoff is
-> `Delay × (2ⁿ − 1)`. Leave the delays out and the arithmetic clears the ceiling
-> while the configuration does not: at 1.5 s and a 200 ms base the attempts
-> alone come to 4.5 s against a 5 s total and look fine, but the two waits push
-> the real worst case to 5.1 s — so the third attempt is cancelled part-way and
-> the request fails having never completed the retry that was meant to save it.
-> The failure looks like a slow dependency rather than a misconfigured client,
-> which is why it needs an assertion and not a review.
+> delays *between* those attempts. Leave them out and the arithmetic clears the
+> ceiling while the configuration does not: at 1.5 s and a 200 ms base the
+> attempts alone come to 4.5 s against a 5 s total and look fine, but the two
+> waits push the real worst case past it — so the third attempt is cancelled
+> part-way and the request fails having never completed the retry that was
+> meant to save it. The failure looks like a slow dependency rather than a
+> misconfigured client, which is why it needs an assertion and not a review.
+
+> **Trap — `UseJitter` with no `MaxDelay`, which makes the sum above a
+> statistic rather than a bound.** `Delay × (2ⁿ − 1)` is the *nominal* backoff,
+> and jitter is not a small perturbation of it: Polly's decorrelated jitter was
+> measured producing a 392 ms wait where the nominal was 300 ms. Over 400
+> samples the worst total stayed under the un-jittered figure — but a sample is
+> not a bound, and the strategy documents none.
+>
+> `MaxDelay` restores one, and it caps the value *after* jitter — also
+> measured, by observing delays land on the cap exactly. With it the worst case
+> is `MaxDelay × MaxRetryAttempts` whatever the draw, which is a number a
+> startup assertion can be written against. Without it the assertion is
+> checking an average.
 
 Assert this at startup rather than trusting review:
 
@@ -2485,16 +2501,18 @@ public void Resilience_timeouts_respect_the_hierarchy()
     TimeSpan attempts =
         o.AttemptTimeout.Timeout * (o.Retry.MaxRetryAttempts + 1);
 
-    // The waits between attempts, not just the attempts. Exponential backoff
-    // from a base d over n retries sums to d × (2ⁿ − 1); a linear or constant
-    // policy would be d × n. Omitting this term is what lets a configuration
-    // that overruns its own ceiling pass a test written to prevent exactly that.
-    TimeSpan backoff = o.Retry.BackoffType switch
-    {
-        DelayBackoffType.Exponential =>
-            o.Retry.Delay * ((1 << o.Retry.MaxRetryAttempts) - 1),
-        _ => o.Retry.Delay * o.Retry.MaxRetryAttempts
-    };
+    // The waits between attempts, not just the attempts. Omitting this term is
+    // what lets a configuration that overruns its own ceiling pass a test
+    // written to prevent exactly that.
+    //
+    // Taken from MaxDelay rather than from d × (2ⁿ − 1), because that nominal
+    // is not an upper bound once UseJitter is on — the trap above measures a
+    // delay exceeding it. Requiring the cap is also what stops this assertion
+    // silently becoming a statement about the average case.
+    o.Retry.MaxDelay.ShouldNotBeNull(
+        "with UseJitter the nominal delay is not an upper bound (§9.7).");
+
+    TimeSpan backoff = o.Retry.MaxDelay.Value * o.Retry.MaxRetryAttempts;
 
     (attempts + backoff)
         .ShouldBeLessThanOrEqualTo(

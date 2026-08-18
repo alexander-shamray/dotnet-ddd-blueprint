@@ -51,7 +51,13 @@ internal sealed class PricingService(IDispatcher dispatcher) : PricingGrpc.Prici
 
         for (int i = 0; i < request.ProductId.Count; i++)
         {
-            if (!Guid.TryParse(request.ProductId[i], out productIds[i]))
+            // TryParseExact with "D", not TryParse: the contract says "GUIDs in
+            // their canonical text form", and TryParse also accepts the N, B
+            // and P formats — so "{11111111-...}" and the 32-digit run would
+            // become valid product ids in a service whose own proto says they
+            // are not. Accepting more than the contract states is how two ends
+            // stop agreeing about what the contract is.
+            if (!Guid.TryParseExact(request.ProductId[i], "D", out productIds[i]))
             {
                 // The index, never the value. It is a caller-supplied string
                 // arriving in an error message that reaches the logs, and

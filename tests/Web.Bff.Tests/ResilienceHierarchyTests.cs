@@ -61,20 +61,26 @@ public class ResilienceHierarchyTests
 
         TimeSpan attempts = options.AttemptTimeout.Timeout * (options.Retry.MaxRetryAttempts + 1);
 
-        // The waits BETWEEN attempts, not just the attempts. Exponential
-        // backoff from a base d over n retries sums to d × (2ⁿ − 1); a linear
-        // or constant policy would be d × n. Omitting this term is exactly
-        // what lets a configuration that overruns its own ceiling pass a test
-        // written to prevent that: at 1.5 s and a 200 ms base the attempts
-        // alone come to 4.5 s against a 5 s total and look fine, while the two
-        // waits push the real worst case to 5.1 s — so the third attempt is
-        // cancelled part-way and the retry never had a chance to help.
-        TimeSpan backoff = options.Retry.BackoffType switch
-        {
-            DelayBackoffType.Exponential =>
-                options.Retry.Delay * ((1 << options.Retry.MaxRetryAttempts) - 1),
-            _ => options.Retry.Delay * options.Retry.MaxRetryAttempts
-        };
+        // The waits BETWEEN attempts, not just the attempts. Omitting this
+        // term is exactly what lets a configuration that overruns its own
+        // ceiling pass a test written to prevent that: the attempts alone can
+        // look comfortable while the waits push the real worst case past the
+        // total, so the last attempt is cancelled part-way and the retry never
+        // had a chance to help.
+        //
+        // **With UseJitter on, the nominal is not the bound.** Exponential
+        // backoff from a base d over n retries sums to d × (2ⁿ − 1), and that
+        // is the figure this test used — but jitter randomises each delay, and
+        // Polly's decorrelated jitter was measured at 392 ms for a delay whose
+        // nominal is 300 ms. A configuration relying on the nominal is relying
+        // on a draw. MaxDelay is what turns it back into arithmetic, so where
+        // one is set the bound is taken from it, and where one is not the test
+        // says so rather than quietly trusting the nominal.
+        options.Retry.MaxDelay.ShouldNotBeNull(
+            "with UseJitter the nominal delay is not an upper bound, so the budget below " +
+            "would be asserting a number the runtime is free to exceed (§9.7).");
+
+        TimeSpan backoff = options.Retry.MaxDelay.Value * options.Retry.MaxRetryAttempts;
 
         (attempts + backoff).ShouldBeLessThanOrEqualTo(
             options.TotalRequestTimeout.Timeout,
