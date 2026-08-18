@@ -293,11 +293,18 @@ Six things, ordered by how much of the total they can move.
 **The domain question is unsettled, and it is the largest single risk.** Both
 READMEs call the e-commerce domain "illustrative only", while
 [§4.1](backend-architecture/04-solution-structure.md) and Appendix C name six
-services concretely. PR-10 and PR-18 have since landed on the illustrative
-domain, so for them substitution now means reworking shipped code; PR-20 and
-PR-21 are still re-specified rather than re-estimated. Together that is 17 of
-the 99 days, and the four that carry the most design argument. Nothing else on
-this list is close.
+services concretely. PR-10, PR-18 and PR-19 have since landed on the
+illustrative domain, so for them substitution now means reworking shipped code;
+PR-20 and PR-21 are still re-specified rather than re-estimated. Together that
+is 21 of the 99 days, and the five that carry the most design argument. Nothing
+else on this list is close.
+
+**PR-19 belongs in that set and was missing from it until this count was
+re-derived.** Appendix C gives it "one deliberate **BFF → Catalog** pricing
+call" and Catalog's `GetPrices` slice — product pricing is the illustrative
+domain, so substituting the domain reworks those four days exactly as it
+reworks PR-10's. Counting whole PRs is the same accounting the other four
+already use.
 
 **This item said "settle it before M2", and M2 has now been reached with it
 still open.** That advice is spent, and what replaces it is worse rather than

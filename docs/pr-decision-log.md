@@ -1045,11 +1045,14 @@ edits `CatalogDbContext`.
   product. What is still dropped is the *`Local`* lane: Catalog registers no
   `IProjectionHandler`, so §7.5 stages no row for one, and that is asserted
   rather than assumed.
-- **`IdempotencyBehavior`'s seat.** The pipeline registers three of four
-  behaviours; the missing one slots in *between* Validation and Transaction,
-  and the registration comment names the seat. `PublishProductCommand`
-  carries no `CommandId` for the same reason — §6.4 warns the field without
-  the interface is unprotected, so both join with §8.5's PR.
+- **`IdempotencyBehavior`'s seat was reserved rather than filled.** PR-09
+  added the third behaviour and left the fourth's place *between* Validation
+  and Transaction, with the registration comment naming it.
+  `PublishProductCommand` carries no `CommandId` for the same reason — §6.4
+  warns the field without the interface is unprotected, so both join with
+  §8.5's PR. **How many behaviours the pipeline registers today is
+  `CLAUDE.md`'s**, not this entry's: it changes when §8.5 lands, and a count
+  in two places is one to reconcile.
 
 **What PR-09's line does not fix is the commit-acknowledgement race**, and that
 stays open past it on purpose. If `CommitAsync` succeeds on the server and
