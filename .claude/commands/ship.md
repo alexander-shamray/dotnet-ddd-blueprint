@@ -57,21 +57,23 @@ open by an earlier round can never be reached past — the loop would run to its
 ceiling on every subsequent round with nothing new to fix. Answer, resolve,
 carry on.
 
-**Five things still stop the chain**, and none of them is a decision somebody
+**Six things still stop the chain**, and none of them is a decision somebody
 could have made differently:
 
 | | |
 |---|---|
 | A helper exits non-zero | The step did not run; a report that says otherwise is false |
+| This branch's PR was closed unmerged | Reopening a deliberate closure is not a recommended option |
 | A requested review never registers | Same shape: the round did not happen, so no verdict may be minted from it |
 | `main` is ahead of `origin/main` at step 0 | Local commits on `main` need a decision this chain has no way to take |
 | CI is not green at step 7 | A merge onto a red `main` is not a judgement call |
 | The PR is not mergeable | Conflicts are the caller's tree, not this chain's |
 
-The last three are worth separating from the first two. A helper failing and a
-review that never arrives are questions about *this* run; those three are
-questions about the repository's state, and no recommended option exists for
-any of them.
+The first two are questions about *this* run; the other four are questions
+about the repository's state, and no recommended option exists for any of
+them. Two of the four are somebody's decision this chain would otherwise
+undo in silence — commits placed on `main`, and a PR deliberately closed —
+which is a sharper reason to stop than not knowing what to do.
 
 **The second row is Copilot's analogue of a Grok helper exiting non-zero, and
 it needed saying because it is the one failure with no exit code.** Grok's
@@ -111,7 +113,8 @@ that reaches a merge — so the rows below say what is owed *between* them:
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
-| On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With nothing left in the workspace, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty tree or commits made after the merge the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
+| On a branch whose PR was **closed unmerged** | **Stop.** Somebody decided this branch does not land, and the open-PR read cannot see that: with no open PR the *clean and pushed* row would send the run to `/pr`, which refuses only an **open** one — so the chain would open a replacement and merge it, overriding a deliberate closure with no human in the loop. Report the closed PR and its number |
+   | On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With nothing left in the workspace, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty tree or commits made after the merge the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
 
 **Step 0's teardown targets a worktree that is already finished; step 7's
 targets the one this run just merged. Exactly one of them owns any given
@@ -392,7 +395,7 @@ same argument as never calling a branch clean because asking failed.
    from a merged branch leaves `gh pr view --json state` answering `MERGED`
    from the *first* one on every later resume, so the branch becomes unreadable
    to this command permanently. Report what the workspace still holds and the
-   directory holding it, and end there. **That is not one of the five stops** —
+   directory holding it, and end there. **That is not one of the six stops** —
    nothing failed and nothing is being asked; it is a run that found nothing to
    do, and saying so is the whole of what it owes.
 
@@ -1062,12 +1065,40 @@ same argument as never calling a branch clean because asking failed.
    Report the state plainly — findings per round and whether the rate was
    still flat when the budget ran out is the useful signal — and merge.
 
-   Two things genuinely gate it, and neither is a judgement:
+   Three things genuinely gate it, and none is a judgement:
 
    ```bash
    gh pr view <n> --json state,mergeable,mergeStateStatus,headRefOid
    gh pr checks <n> --watch --fail-fast
+   git status --short              # empty
+   git log <headRefOid>..HEAD      # empty: this workspace holds nothing extra
    ```
+
+   **The first two read the remote and the last two read the workspace, and
+   until round 9 only the remote half existed.** `headRefOid`, the checks and
+   `--match-head-commit` all agree happily about a head this checkout has
+   since moved past: a commit made after the last review, or an edit made
+   while the loops ran, satisfies none of them and is invisible to all three.
+   The merge then succeeds for the older head and the teardown removes the
+   worktree, stranding the newer work on a merged branch — step 0's whole
+   argument, arriving at the other end of the run because the step that
+   destroys a workspace was not reading it.
+
+   **`git log <headRefOid>..HEAD` is the read rather than an equality**, and
+   the asymmetry is deliberate. A HEAD *behind* the PR's head loses nothing —
+   the remote is authoritative and everything here is already in it — where a
+   HEAD carrying anything the remote lacks is the case that strands. The
+   question is not whether the two match; it is whether this workspace holds
+   something the merge will not take.
+
+   **Non-empty is not a stop, because there is an obvious right answer.** The
+   run goes back: commit — **scoped**, `suggestions.md` is still on disk —
+   push, and re-enter both review loops for whatever each has left of its
+   twelve, then return to this gate. That is exactly what a resumed `/ship`
+   would do from the *on a branch with an open PR* row, so doing it here costs
+   nothing new and terminates for the same reason: the budgets are counted per
+   PR, so an exhausted loop reports unconverged and this step merges. Stopping
+   would hand back a question whose answer the resume table already contains.
 
    **`--watch` is what makes this a wait rather than a sample.** Plain
    `gh pr checks` reports whatever the checks are *now* and exits non-zero
@@ -1170,6 +1201,18 @@ same argument as never calling a branch clean because asking failed.
    ```bash
    rm suggestions.md
    ```
+
+   **An interruption between the merge and this line is a dead end, and step 0
+   is where it is dug out.** The next run finds a merged PR with a dirty
+   tree — dirty by exactly one untracked file, this one — so the predicate
+   says not finished, the Stay row keeps the workspace, the merged-PR resume
+   row ends the run, and nothing reaches this cleanup ever again. So step 0
+   special-cases it: **on a branch whose PR is merged, if the only thing
+   making the tree dirty is `suggestions.md`, remove it and evaluate the
+   predicate again.** Any other change — an edit, a second untracked file —
+   and the workspace is kept untouched, because the narrow case is the only
+   one whose contents this chain wrote and therefore the only one it may
+   discard.
 
    **This is the one place the file may be deleted from here, and only
    because the loop is over.** Step 5 forbids writing or deleting it while

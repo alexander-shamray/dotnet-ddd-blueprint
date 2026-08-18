@@ -3034,12 +3034,15 @@ and an open `Ask` thread used to halt the chain and hand the question back;
 each is now answered by the run itself and recorded — in the commit body, in
 the resolution record, as a reply on the thread — and the PR is merged at the
 end. What still halts it is a helper failing, a requested review that never
-registers, a local `main` carrying commits `origin/main` does not, red CI and
-an unmergeable branch: the things with no recommended option rather than the
-things somebody might have answered differently. The second is Copilot's
-analogue of the first — the one failure with no exit code, just silence where
-a review should be. The third is the only one that fires before anything has
-happened, and it earned its place by being tried the other way: *carry on and
+registers, a local `main` carrying commits `origin/main` does not, a PR
+somebody closed unmerged, red CI and an unmergeable branch: the things with no
+recommended option rather than the things somebody might have answered
+differently. The second is Copilot's analogue of the first — the one failure
+with no exit code, just silence where a review should be. Two of them are
+somebody's decision the chain would otherwise undo in silence: commits placed
+on `main`, and a PR closed on purpose. The `main` one is the only stop that
+fires before anything has happened, and it earned its place by being tried the
+other way: *carry on and
 name the commits* forks from `origin/main`, merges, and then meets a diverged
 `main` at the teardown pull — a raw git failure after the merge, which is the
 worst place in the chain to stop — or, on a dirty tree, branches from `HEAD`
