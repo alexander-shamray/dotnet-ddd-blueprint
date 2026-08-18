@@ -4,7 +4,8 @@ Guidance for Claude Code when working in this repository.
 
 **The long half of this file's phase section now lives in
 [`docs/pr-decision-log.md`](docs/pr-decision-log.md).**
-Every landed PR appended its findings here and nothing was ever consolidated,
+Every landed PR from PR-08 on appended its findings here and nothing was ever
+consolidated,
 so a file loaded into every session's context had grown to 3,161 lines — of
 which the per-PR changelog alone was 1,132. Those blocks moved out **verbatim
 in their arguments**: not one was shortened, because a summary of an argument
@@ -71,7 +72,8 @@ docs/backend-architecture/   the blueprint — README index, 01-purpose ..
                              15-cicd-deployment, appendix A (ADR-001..020),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
-docs/pr-decision-log.md      what each landed PR decided — this file's other half
+docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
+                             half of this file's phase section
 docs/superpowers/            one frozen spec + plan per PR, written before it
 
 global.json                  SDK pin (§4.4)

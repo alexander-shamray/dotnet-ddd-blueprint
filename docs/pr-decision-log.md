@@ -1,10 +1,19 @@
 # PR decision log
 
-**What each landed PR decided, and why those decisions bind what comes after.**
+**What each landed PR from PR-08 onward decided, and why those decisions bind
+what comes after.**
+
+**PR-01 to PR-07 have no entries, and never did.** The practice of recording a
+PR's findings began with PR-08's persistence layer; the seven before it landed
+the foundation, the building blocks and Catalog's skeleton without one. What
+PR-07 established — §4.2's architecture gates, observed red before they were
+trusted — is stated in `CLAUDE.md`'s phase section rather than here, because it
+is a live rule and not a historical decision.
 
 This file is the long half of `CLAUDE.md`'s *Which phase are you in* section.
-It was extracted from it when that section reached 1,132 lines — every PR
-appended its findings and nothing was ever consolidated, so a file loaded into
+It was extracted from it when that section reached 1,132 lines — every PR from
+PR-08 on appended its findings and nothing was ever consolidated, so a file
+loaded into
 every session's context was carrying a changelog nobody needed in order to act.
 
 **The entries below are verbatim in their arguments**, because the arguments
