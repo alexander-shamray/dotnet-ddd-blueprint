@@ -181,6 +181,22 @@ class RendersTheTemplate(unittest.TestCase):
         ]
         self.assertIn("services.AddMassTransitMessaging(configuration);", infrastructure)
 
+        # PR-20's correction, guarded here because nowhere else can guard it.
+        # ConfigureEndpoints(context) gives a registered consumer with no
+        # explicit binding a queue named after its type, carrying neither the
+        # inbox filter nor the retry policy §9.8 requires of every endpoint.
+        # Catalog has no consumers, so its own registration tests stay green if
+        # the call comes back — and this file renders Catalog, so a rendered
+        # service is the only place the absence is observable at all. Without
+        # this assertion the trap can be handed silently to every service
+        # generated from here.
+        #
+        # The CALL, not the identifier: the template's comment explains why the
+        # line is gone and names it doing so, so a bare "ConfigureEndpoints"
+        # assertion fails on the prose that documents the fix. Caught by
+        # writing it that way first.
+        self.assertNotIn("cfg.ConfigureEndpoints(", messaging)
+
         self.assertIn(
             "tests/Zulu.Api.Tests/MessagingRegistrationTests.cs", self.rendered.created
         )

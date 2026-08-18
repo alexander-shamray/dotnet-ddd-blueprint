@@ -293,18 +293,12 @@ Six things, ordered by how much of the total they can move.
 **The domain question is unsettled, and it is the largest single risk.** Both
 READMEs call the e-commerce domain "illustrative only", while
 [§4.1](backend-architecture/04-solution-structure.md) and Appendix C name six
-services concretely. PR-10, PR-18 and PR-19 have since landed on the
+services concretely. PR-10, PR-18, PR-19 and PR-20 have since landed on the
 illustrative domain, so for them substitution now means reworking shipped code;
-PR-20 and PR-21 are still re-specified rather than re-estimated. Together that
-is 21 of the 99 days, and the five that carry the most design argument. Nothing
-else on this list is close.
-
-**PR-19 belongs in that set and was missing from it until this count was
-re-derived.** Appendix C gives it "one deliberate **BFF → Catalog** pricing
-call" and Catalog's `GetPrices` slice — product pricing is the illustrative
-domain, so substituting the domain reworks those four days exactly as it
-reworks PR-10's. Counting whole PRs is the same accounting the other four
-already use.
+only PR-21 is still re-specified rather than re-estimated. Together that is 21
+of the 99 days, and the five that carry the most design argument. Nothing else
+on this list is close, and the share of it that is rework rather than
+respecification has grown with every service PR that landed.
 
 **This item said "settle it before M2", and M2 has now been reached with it
 still open.** That advice is spent, and what replaces it is worse rather than
@@ -313,8 +307,8 @@ a re-specification, and every service PR after this one adds to what would
 have to be reworked. **The deadline this item named was PR-18, and it has
 passed** — the second service was where a domain nobody has agreed to stopped
 being one service's problem, and it shipped with the question still open. What
-remains is not a deadline but a rising bill: PR-19 has landed on top of it,
-and PR-20 and PR-21 are next.
+remains is not a deadline but a rising bill: PR-19 and PR-20 have landed on
+top of it, and PR-21 is next.
 
 PR-11 and PR-12 are the delivered pull requests that do **not** move if the
 domain changes, and both were built that way deliberately: the scaffold

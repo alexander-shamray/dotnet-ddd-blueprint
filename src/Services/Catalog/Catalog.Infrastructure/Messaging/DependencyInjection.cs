@@ -45,12 +45,22 @@ public static class DependencyInjection
             {
                 cfg.Host(new Uri(connectionString));
 
-                // Nothing to configure until PR-15's consumers — the call
-                // stays because it is the line every later consumer rides in
-                // on, and its absence is the silent kind of wrong. Retry is
-                // deliberately absent too: §9.8 configures it per receive
-                // endpoint, and there are none.
-                cfg.ConfigureEndpoints(context);
+                // Nothing further. This service binds no receive endpoint,
+                // so there is no retry policy either: §9.8 configures retry
+                // per receive endpoint, and there are none.
+                //
+                // There is deliberately no ConfigureEndpoints(context) call.
+                // It is inert while no consumer is registered, and what it
+                // does once one is is manufacture a queue named after the
+                // consumer type — carrying NEITHER the inbox filter NOR the
+                // retry policy, both being per-endpoint configuration that an
+                // invented endpoint never receives. §9.8 permits an endpoint
+                // without the inbox exactly once, for the saga, and requires
+                // that opt-out to be written down where it is taken; a queue
+                // MassTransit invents takes it and writes nothing. So a
+                // consumer added here needs an explicit ReceiveEndpoint with
+                // its own policy, which is what the absence of this line
+                // forces.
             });
         });
 

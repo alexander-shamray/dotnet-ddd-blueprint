@@ -20,10 +20,12 @@ namespace Ordering.Application.Orders;
 /// be synchronous and may fail with a spinner. The write path may not.
 /// </para>
 /// <para>
-/// The table behind it is empty until PR-20 lands the projection that fills
-/// it, and that is the honest state rather than a gap: this PR is the consumer
-/// and PR-20 is the producer, which is the order the delivery plan sequences
-/// them in — PR-20 depends on this one.
+/// The table behind it has a producer since PR-20 — §6.6's projection, over
+/// Catalog's three product events. What that did not change is the answer for
+/// a product Catalog has never published: no row, no price, and the order is
+/// refused. That is a fact about an unpublished product rather than a gap
+/// waiting on a pull request, and it is the standing consequence §6.6's
+/// callout names.
 /// </para>
 /// </remarks>
 public interface IProductPriceReader

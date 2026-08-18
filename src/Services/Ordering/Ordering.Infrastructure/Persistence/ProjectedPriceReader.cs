@@ -13,15 +13,15 @@ namespace Ordering.Infrastructure.Persistence;
 /// not stop an order being placed (ADR-002).
 /// </summary>
 /// <remarks>
-/// <b>The table is empty until PR-20.</b> This PR builds the consumer and the
-/// schema; the projection that fills <c>ordering.ProductPrices</c> from
-/// Catalog's <c>ProductPublished</c> and <c>PriceChanged</c> events is PR-20's
-/// deliverable, and PR-20 depends on this one. Until it lands, every
-/// <c>PlaceOrder</c> against a real database returns
-/// <c>order.products_unavailable</c> — which is the correct answer to "price
-/// these products" from a service that has no prices, not a defect. §12.4's
-/// handler tests seed the table directly, which is what lets the slice be
-/// proven before its producer exists.
+/// <b>The table has a producer since PR-20</b> — <c>ProductPriceProjection</c>
+/// (§6.6), on the <c>ordering-catalog-events</c> endpoint. What stands from
+/// the PR that shipped this file is the standing consequence rather than the
+/// gap: a product Catalog has never published still has no row here, and every
+/// <c>PlaceOrder</c> naming it returns <c>order.products_unavailable</c> —
+/// which is the correct answer to "price these products" from a service that
+/// has no price for them, not a defect. §12.4's handler tests seed the table
+/// directly, which is what keeps this slice's assertions about the write path
+/// rather than about the broker.
 /// <para>
 /// Dapper rather than EF (§6.5): this is a read, and it does not load an
 /// aggregate. Prices can be stale by the projection's lag — typically
@@ -54,8 +54,9 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections) : I
 
         using IDbConnection connection = connections.Create();
 
-        // Upper-cased, because Money.Of normalises on the way in and this
-        // column is written through it (PR-20). Comparing the caller's string
+        // Upper-cased, because the projection normalises on the way in and
+        // this column is written through it — ProductPriceProjection's
+        // UpsertAsync, since PR-20. Comparing the caller's string
         // as it arrived makes a valid [A-Za-z]{3} request depend on the
         // server's collation: under a case-sensitive one "gbp" finds nothing
         // and PlaceOrder answers order.products_unavailable — which is what it

@@ -10,10 +10,11 @@ namespace Ordering.Infrastructure.Persistence.Migrations;
 /// comment), and the <c>.Designer.cs</c> and snapshot are machine-owned.
 /// </summary>
 /// <remarks>
-/// <b>The table ships empty and stays empty until PR-20</b>, which fills it
-/// from Catalog's events and depends on this PR rather than the other way
-/// round. Shipping the schema with its one reader
-/// (<see cref="ProjectedPriceReader"/>) is what lets the slice be tested.
+/// <b>The table shipped empty and gained its producer in PR-20</b>, which
+/// fills it from Catalog's events and depended on this PR rather than the
+/// other way round. Shipping the schema with its one reader
+/// (<see cref="ProjectedPriceReader"/>) is what let the slice be tested a PR
+/// before anything wrote to it.
 /// <para>
 /// <b>Every column matches §6.6's printed DDL, and two of them only after
 /// being asked to.</b> §7.4 files read models under hand-written DDL because
@@ -23,9 +24,9 @@ namespace Ordering.Infrastructure.Persistence.Migrations;
 /// the CLR ones. <c>Currency</c> is <c>char(3)</c> via <c>IsFixedLength</c> +
 /// <c>IsUnicode(false)</c>, not <c>nvarchar(3)</c>; <c>IsAvailable</c> carries
 /// §6.6's <c>DEFAULT 1</c>. <c>UpdatedAt</c> is the chapter's name too, and it
-/// shipped as <c>LastSeenAt</c> until Grok round 4 — PR-20 copies §6.6's
-/// <c>MERGE</c> verbatim, so a table this PR creates and that one writes is
-/// the last place to hold two schemas.
+/// shipped as <c>LastSeenAt</c> until Grok round 4 — PR-20 copied §6.6's
+/// <c>MERGE</c> almost verbatim, so a table this PR creates and that one
+/// writes is the last place to hold two schemas.
 /// </para>
 /// </remarks>
 public partial class AddProductPrices : Migration

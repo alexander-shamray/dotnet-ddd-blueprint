@@ -50,8 +50,21 @@ public static class DependencyInjection
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<OrderingDbContext>());
 
         // Each layer scans itself (§6.2): projections, cache invalidators and
-        // command mappers will live here, and scanning only Application would
-        // skip them all. Finding nothing yet is the truthful state.
+        // command mappers live here, and scanning only Application would skip
+        // them all. Since PR-20 this finds ProductPriceProjection under three
+        // closed IIntegrationEventHandler<> interfaces, which is the whole of
+        // its registration — the scan is public-only, so an internal modifier
+        // registers it as nothing at all.
+        //
+        // That failure is silent at STARTUP and loud at the first message, and
+        // the two halves are worth keeping apart (§6.2 makes the same
+        // distinction about this type). No constructor names the projection, so
+        // ValidateOnBuild sees a graph it can build; the registration test is
+        // the only startup guard that fires. But ordering-catalog-events binds
+        // all three types, so IntegrationEventConsumer<T> resolves an empty
+        // handler list on the next delivery and throws — §9.4's "the endpoint
+        // binds this type, so something should handle it". Missing the guard
+        // costs an error queue rather than a quietly stale table.
         services.AddPluggableFrom(typeof(DependencyInjection).Assembly);
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3

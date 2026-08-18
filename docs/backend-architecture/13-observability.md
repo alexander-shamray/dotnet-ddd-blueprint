@@ -961,7 +961,7 @@ actionable — if the response is "acknowledge and ignore", delete it.
 | Orders awaiting review | any row in `ordering.OrderReviews` older than 1 h | A saga hit a wait it could not compensate and escalated (§9.6). It has already finalised, so the saga-age alert above will *not* catch this | `order-review.md` |
 | Migration job failed | Helm `pre-upgrade` hook non-zero, or a release stuck pending | The deploy stopped before any pod rolled ([§7.4](07-persistence.md)); the previous version is still serving, which is why nothing else fires | `migration-failure.md` |
 | Cache hit ratio collapse | `rate(cache_hits) / rate(cache_hits + cache_misses)` < 50% over 10 min, from `Microsoft.Extensions.Caching.Hybrid` | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |
-| Business volume | `orders.placed` per hour drops > 50% vs the same hour last week | The most valuable alert here — it catches failures no technical metric detects. §6.6's worked case: `ordering.ProductPrices` has no row for a product, every order containing it fails validation, and the result is a 400 the customer sees, no exception, no 5xx and no lag. Week-over-week rather than a fixed floor, because a volume alert without a seasonality model is the first pager people mute | `business-volume.md` |
+| Business volume | `orders.placed` per hour drops > 50% vs the same hour last week | The most valuable alert here — it catches failures no technical metric detects. §6.6's worked case: `ordering.ProductPrices` has no row for a product, every order containing it is **refused by the domain**, and the result is a 422 `order.products_unavailable` the customer sees, no exception, no 5xx and no lag. **Not a 400, and the difference is where the on-call looks**: the request is well-formed and the validator passed it (§10.5 maps `Error.Rule` to 422, `ValidationException` to 400), so a 400 dashboard shows a path this request never took. Week-over-week rather than a fixed floor, because a volume alert without a seasonality model is the first pager people mute | `business-volume.md` |
 
 ### Outbox alerts are per lane
 
@@ -977,7 +977,7 @@ nobody will be told to follow.
 | Alert | Condition | Symptom | Likely cause | Runbook |
 |---|---|---|---|---|
 | **Broker lane stalled** | `outbox.oldest.age{lane="Broker"}` > 2 min | *Other services* are working from stale data; sagas stop advancing | Broker unreachable, credentials expired, queue at its length limit, network policy change | `outbox-broker.md` |
-| **Local lane stalled** | `outbox.oldest.age{lane="Local"}` > 30 s | *This service's* read models are stale — users see missing or outdated list data | A projection handler throwing, read-model deadlock, schema drift after a migration | `projection-lag.md` |
+| **Local lane stalled** | `outbox.oldest.age{lane="Local"}` > 30 s | The read models this service feeds from its **own** events are stale — users see missing or outdated list data. Not the ones another service's contract feeds: those never touch this lane, and §13.7 records that their staleness has no direct signal yet | A projection handler throwing, read-model deadlock, schema drift after a migration | `projection-lag.md` |
 | **Outbox growth** | `sum(outbox.pending.count)` > 1000 and rising over 10 min | Either lane, not keeping up | Dispatcher not running, batch size too small for load, purge job failed | `outbox-growth.md` |
 | **Abandoned rows** | `sum(outbox.abandoned.count)` > 0 | Silent permanent data loss | A message that will never be delivered and is no longer being retried. The `lane` tag says whose loss: `Broker`, and other services never learned something; `Local`, and this service's read model is permanently wrong | `outbox-abandoned.md` |
 
@@ -1264,8 +1264,34 @@ satisfied. A row that cannot name one does not belong in the table.
 | Event end-to-end p95 (publish → consumer start) | < 2 s | `messaging.delivery.lag` |
 | Outbox oldest unprocessed, **broker lane**, p99 | < 5 s | `outbox.oldest.age`, `lane` tag (§13.6) |
 | Outbox oldest unprocessed, **local lane**, p99 | < 1 s | same gauge, other lane |
-| Read-model staleness (event raised → projection applied), p99 | < 1 s | `projection.lag` |
+| Read-model staleness, **own events**, p99 | < 1 s | `projection.lag` |
 | Availability, per service | 99.9% monthly | `http.server.request.duration`, ASP.NET Core instrumentation |
+
+**The read-model row says *own events*, and the qualifier is what keeps it
+honest.** `projection.lag` is recorded by `ProjectionInvoker` off an outbox
+row, so it only ever measures a read model this service feeds from its own
+domain events (§7.5). A read model fed by *another* service's contract never
+touches the outbox at all — Ordering's `ordering.ProductPrices` is the worked
+case (§6.6) — so `projection.lag` is empty for it.
+
+**Broker-fed read-model staleness therefore has no SLO here, and the honest
+move is to say so rather than to point at a row that nearly fits.** The
+**event end-to-end** row above is the near miss: `IntegrationEventConsumer<T>`
+records `messaging.delivery.lag` at the top of `Consume`, *before* it resolves
+a handler, so the measurement stops where the projection starts. It excludes
+the SQL round trip, every retry §9.8 schedules, and a handler that fails
+terminally — which means that row can sit inside its two-second target while
+`ordering.ProductPrices` is stale, or was never written at all. Adopting it
+would restate this table's own defect one row over: a target that is met while
+the thing it names is broken.
+
+Closing it needs an instrument that fires *after* a broker-lane handler
+commits — the `Projected` half of `MessagingMetrics` reaches only the local
+lane today, because `ProjectionInvoker` is its only call site. That is a
+§13.3 change with a dashboard behind it, so it belongs with the observability
+work rather than with the service PR that exposed the gap. Until then this is
+a **named** gap, which is the same standing as the two rows cut below: an SLO
+nobody can compute is worse than an absence somebody has written down.
 
 Two rows were removed rather than left unmeasurable. **Gateway added latency**
 would need the gateway's own duration minus the backend's, correlated per

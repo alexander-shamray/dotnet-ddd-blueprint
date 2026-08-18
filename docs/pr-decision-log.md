@@ -60,6 +60,106 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-20 — the first projection and the first receive endpoint
+
+PR-20 landed the first projection and the first receive endpoint — §6.6's
+`ProductPriceProjection`, §9.8's `ordering-catalog-events` — and six of its
+decisions bind what comes after:
+
+- **`ConfigureEndpoints(context)` is gone from both services, and it is a
+  fail-open rather than a leftover.** PR-13 left the call in Catalog and
+  Ordering with a comment calling it "the line every later consumer rides in
+  on"; what it actually does for a registered consumer whose explicit binding
+  is missing is manufacture a queue named after the consumer type — carrying
+  **neither** the inbox filter **nor** the retry policy, because both are
+  per-endpoint configuration an invented endpoint never receives. §9.8 permits
+  an endpoint without the inbox exactly once, for the saga, and requires the
+  opt-out to be written down where it is taken; a queue MassTransit invents
+  takes it and writes nothing. Measured both ways by deleting one
+  `ConfigureConsumer` line: with the call present the event was still projected
+  and **no inbox row was written**, and one of three tests noticed; with it gone
+  all three go red. The cost is stated rather than dodged — a consumer now
+  needs a line in two places and nothing at startup complains if it gets one.
+- **§9.8's printed `e.UseInMemoryOutbox()` does not compile at this pin.** The
+  parameterless overload carries `CS0618`, which ADR-019 makes an error, so
+  three sites in §9 had been unbuildable since they were written. This is
+  PR-19's `AddStandardResilienceHandler` finding and PR-17's `KnownNetworks`
+  finding for the third time: **a sample nobody has compiled is a sample that
+  does not compile**, and the only way to find out is to build it.
+- **A withdrawal has to survive having no row to write to, and §6.6's printed
+  `UPDATE` did not.** `ProductDiscontinued` carries no currency (§9.1) and
+  `ordering.ProductPrices` is keyed by one, so the discontinue statement
+  reached only the rows that already existed. §9.4 guarantees no ordering, so
+  a withdrawal claimed ahead of a still-retrying publish matched nothing and
+  the publish then took the upsert's `NOT MATCHED` branch — **the one branch
+  no `UpdatedAt` comparison can cover**, because there is no target row to
+  compare against — putting a discontinued product back on sale. A stale price
+  for a currency the withdrawal never saw does it with no reordering at all.
+  Copilot found it; both cases were reproduced as failing tests before the fix
+  was written.
+
+  **The answer is the one §6.6 already gives one projection up.**
+  `OrderSummaries` uses a `MERGE` rather than an `UPDATE` for its status events
+  precisely so a `Cancelled` claimed before its `OrderPlaced` does not "match
+  no row, change nothing, and be marked processed". A status event can carry
+  its own row into existence because it knows the key; a withdrawal cannot, so
+  it writes a product-level watermark — `ordering.ProductWithdrawals` — and
+  the upsert derives `IsAvailable` from it on exactly the branch that has
+  nothing else to consult. A **watermark**, not a flag, for the reason
+  `UpdatedAt` is a comparison: a later republish re-lists the product, in
+  currencies that have rows and in currencies that do not.
+- **`WITH (HOLDLOCK)` is a reasoned claim, not an observed one, and the test
+  says so in its own remarks.** A bare `MERGE` takes no range lock over a key it
+  failed to find, so two concurrent deliveries can both insert and the loser
+  violates the primary key — which the endpoint's retry would absorb, so the
+  defect reads as warnings rather than as a failure. Deleting the hint left the
+  suite green at eight-way and again at sixty-four-way concurrency, three runs
+  each. So the hint stays and §6.6 gained it, and the test carries the class it
+  is in — PR-17's rate-limiter ordering row, reasoned and unobserved —
+  rather than looking like the guard it is not.
+- **The currency is normalised on the write side as well as the read side, and
+  neither call is redundant.** Nothing between Catalog's `Money` and the
+  `MERGE` normalises anything — `Currency` crosses the wire as a `string` like
+  any other — so an unnormalised contract writes a row `ProjectedPriceReader`
+  cannot find *and* a second primary-key row beside the one it can, under a
+  case-sensitive collation.
+
+  **What the reader's comment said before this PR is the lesson, and it took
+  two review rounds to finish.** It justified its own `ToUpperInvariant` by
+  asserting that the column "is written through `Money.Of`" — a claim about a
+  file that did not exist yet, and one that stayed false after it did, because
+  the value arrives over a wire and not through the domain. **A comment
+  describing what some other file does is a claim about that file.** Round 1
+  fixed the reader and §6.4's sample; three sites that described the *reader*
+  went on quoting the retired rationale for two more rounds, which is the same
+  defect one indirection out — a comment describing what a comment says.
+- **§13.7's read-model row says *own events* now, and broker-fed staleness is
+  a named gap rather than a row.** `projection.lag` is recorded by
+  `ProjectionInvoker` off an outbox row, so a read model fed by another
+  service's contract never touches it — and `ProductPrices` is the platform's
+  first. The first fix pointed at the **event end-to-end** row instead, which
+  Copilot refuted: `IntegrationEventConsumer<T>` records
+  `messaging.delivery.lag` at the *top* of `Consume`, before it resolves a
+  handler, so the measurement stops where the projection starts and excludes
+  the SQL round trip, §9.8's retries and a terminal failure. That row can hold
+  its two-second target while the table is stale or was never written.
+
+  **A near-miss row is worse than an absence, and §13.7 already said so two
+  paragraphs down** — "an SLO that cannot be evaluated is not a weak SLO, it
+  is a claim that the service is meeting a bar nobody is checking". Closing it
+  needs an instrument that fires after a broker-lane handler commits, which is
+  a §13.3 change with a dashboard behind it; until then the gap is written
+  down, which is the standing the two cut rows already have.
+
+**`OrderSummaries` is deliberately not in this PR**, and the reason is worth
+carrying: §6.6 has two projections, and only one of them is what this PR's
+title names. The other is fed mostly by Ordering's own domain events on the
+local lane and needs §13.3's `OrderMetrics` and §6.6's escalated history query
+with it. Appendix C names no PR for it; whoever builds the history screen
+builds it.
+
+---
+
 ## PR-19 — the BFF, and Catalog as a gRPC server
 
 PR-19 landed the BFF — §9.7's one synchronous hop, §11.5's client credentials,

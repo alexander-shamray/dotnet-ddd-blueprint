@@ -123,7 +123,10 @@ src/Services/Catalog/        §4.1's five projects — Domain, Application,
                              service, the scaffold's template, and the
                              platform's one gRPC server
 src/Services/Ordering/       the same five, rendered by the scaffold rather
-                             than written, then given §5's Order aggregate
+                             than written, then given §5's Order aggregate —
+                             and, since PR-20, §6.6's price projection with its
+                             withdrawal watermark, behind the solution's first
+                             receive endpoint
 tests/                       per service: .Domain.Tests, .Application.Tests,
                              .Api.Tests and .TestSupport — the last is NOT a
                              test project (§4.1). Plus Common.*.Tests,
@@ -273,19 +276,29 @@ because a probe cannot quietly become a service later.
 
 ## Which phase are you in
 
-**PR-01 through PR-19 have landed, and PR-27 with them** — out of numerical
+**PR-01 through PR-20 have landed, and PR-27 with them** — out of numerical
 order and in sequence, because Appendix C numbers it last and makes it depend
 on PR-17 alone, so it may land at any point after the gateway. The blueprint,
 the foundation, all five building blocks, §14.1's Compose infrastructure,
 Catalog and Ordering as the first two services, the scaffold, §8's Redis, all
 three of §9's instalments, PR-16's security, the gateway and the BFF are
-therefore live. **PR-20 (Ordering's Catalog projection) is next**, and it is
-what fills the `ordering.ProductPrices` table PR-18 shipped with its reader and
-no producer.
+therefore live. PR-20 filled the `ordering.ProductPrices` table PR-18 shipped
+with its reader and no producer, and gave the platform its first receive
+endpoint and its first broker-fed read model. **PR-21 (Ordering's fulfilment
+saga) is next**, and it is the other half of the roadmap's M5.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 710 tests — so the build rules and the drift rules below
-are live and a green run means something. Since PR-11 there is a second suite
+and `dotnet test` runs 730 tests — so the build rules and the drift rules below
+are live and a green run means something.
+
+**That number is a claim to reconcile rather than a fact to read**, exactly
+as the compose timeout is: it is restated here, and nothing recomputes it. The
+cheap check is a CI run that has already happened — `gh run view <id> --log`,
+summed over the thirteen per-project totals — which beats the arithmetic that
+would otherwise have to guess. PR-20 found the figure eight low against
+`main`'s own run and needed that command to tell which side was wrong.
+
+Since PR-11 there is a second suite
 with a second runner: `py -3.12 -m unittest` in `tools/new-service` runs 81,
 and CI has a `scaffold` job for them beside `licence-gate`.
 

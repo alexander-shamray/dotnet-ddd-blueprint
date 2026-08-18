@@ -256,9 +256,26 @@ Redis key prefix, a token request with no scope.
 
 Worked examples of each: `IProductPriceReader` unregistered fails
 `ValidateOnBuild`, because `PlaceOrderHandler` needs it. `ProductPriceProjection`
-unregistered fails only the test — nothing constructs it, it is simply never
-called. `ServiceIdentityOptions` unbound fails only `ValidateOnStart` — the
-container resolves `IOptions<T>` happily and hands back an empty instance.
+unregistered fails only the test — no constructor names it, so the container
+starts as happily as ever. `ServiceIdentityOptions` unbound fails only
+`ValidateOnStart` — the container resolves `IOptions<T>` happily and hands
+back an empty instance.
+
+**What "fails only the test" does *not* mean is that nothing notices at
+runtime**, and the middle example is the one where that distinction became
+real. While no endpoint bound Catalog's events, an unregistered
+`ProductPriceProjection` was silent in the fullest sense: nothing resolved
+`IIntegrationEventHandler<ProductPublished>`, so nothing missed it. Once
+`ordering-catalog-events` binds those three types ([§9.8](09-messaging.md)),
+`IntegrationEventConsumer<T>` resolves the handler list on every delivery and
+**throws** on an empty one — §9.4's "the endpoint binds this type, so
+something should handle it". So the registration test remains the only one of
+the three *startup* guards that fires, which is what this row is about, and
+the failure behind it moved from silence to a message on the error queue.
+
+A guard's value is what it catches before deployment; how loudly the gap
+announces itself afterwards is a separate axis. The two are easy to collapse
+into one sentence, and this paragraph exists because they were.
 
 ```csharp
 [Fact]
@@ -871,8 +888,10 @@ gRPC — and it would run inside the write transaction (§6.3), holding a databa
 transaction open across a network call to another service.
 
 Instead, `IProductPriceReader` reads a **local projection** in Ordering's own
-database, kept current by Catalog's `PriceChanged` and `ProductPublished`
-events (§6.6):
+database, kept current by all three of Catalog's product events —
+`ProductPublished`, `PriceChanged` and `ProductDiscontinued` (§6.6). The third
+is easy to leave off a list like this one and is what stops a withdrawn product
+staying orderable:
 
 ```csharp
 internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
@@ -896,9 +915,11 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
         IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
             new CommandDefinition(
                 Sql,
-                // Upper-cased: Money.Of normalises on the way in, so comparing
-                // the caller's string as it arrived makes a valid request
-                // depend on the server's collation.
+                // Upper-cased because the PROJECTION upper-cases on write
+                // (§6.6) — not because Money.Of does, which is true of the
+                // domain and not of the wire the projection reads from.
+                // Comparing the caller's string as it arrived makes a valid
+                // request depend on the server's collation.
                 new
                 {
                     ProductIds = productIds.Select(p => p.Value),
@@ -1156,16 +1177,80 @@ CREATE TABLE ordering.ProductPrices
     UpdatedAt    DATETIMEOFFSET   NOT NULL,
     CONSTRAINT PK_ProductPrices PRIMARY KEY (ProductId, Currency)
 );
+
+-- The withdrawal watermark, at product level because ProductDiscontinued
+-- carries no currency (§9.1) and this table is keyed by one.
+CREATE TABLE ordering.ProductWithdrawals
+(
+    ProductId    UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    WithdrawnAt  DATETIMEOFFSET   NOT NULL
+);
 ```
 
 `IsAvailable` rather than deleting on `ProductDiscontinued`: an order already
 placed must still be explicable months later, and a row that vanishes takes its
 price history with it.
 
+> **A withdrawal has to survive having no row to write to, and the first
+> version of this section did not.** The obvious discontinue is a single
+> `UPDATE` over `ProductPrices`, and it reaches only the rows that exist when
+> it runs. [§9.4](09-messaging.md) guarantees no ordering, so a withdrawal can
+> be claimed ahead of a publish still retrying behind it: the `UPDATE` matches
+> nothing, the publish then takes the upsert's `NOT MATCHED` branch — the one
+> branch no `UpdatedAt` comparison can cover, because there is no target row to
+> compare against — and a discontinued product is back on sale. A stale price
+> for a currency the withdrawal never saw does the same with no reordering at
+> all.
+>
+> **This section already makes the argument one projection up.**
+> `OrderSummaries` uses a `MERGE` rather than an `UPDATE` for its status
+> events precisely so a
+> `Cancelled` claimed before its `OrderPlaced` does not "match no row, change
+> nothing, and be marked processed". A status event can carry its own row into
+> existence because it knows the key; a withdrawal cannot, because the key
+> includes a currency it does not have. `ProductWithdrawals` is where it puts
+> the fact instead, and the upsert consults it on exactly the branch that has
+> nothing else to consult.
+>
+> **`OccurredAt` is not a total order, and the tie rule only covers the pair
+> that has a business answer.** A withdrawal and a price sharing a timestamp
+> settle deterministically because there is a rule to appeal to — only a
+> *later* price re-lists, so a tie is not later and the withdrawal wins. Two
+> *prices* sharing one are a different matter: the publisher has said they
+> happened at the same instant, so nothing in the data ranks them, and whichever
+> reaches SQL first wins while the other is refused. Delivery order therefore
+> decides the projected amount in that case.
+>
+> **Closing it is a §9.1 change, not a projection change**, which is why it is
+> written down here rather than fixed in the `MERGE`: the ordering information
+> has to come from the publisher, as a per-product sequence in the envelope
+> every contract shares. That is a fourth envelope field for all six services,
+> a versioning decision under §9.2, and a monotonic counter Catalog would have
+> to persist. The narrower reading is that two distinct prices at one tick are
+> a publisher saying they were simultaneous, and last-writer-wins is a
+> defensible answer to that — but it is an answer nobody chose, so it is named
+> rather than left to be discovered.
+>
+> A **watermark** rather than a flag, for the reason `UpdatedAt` is a
+> comparison: a withdrawal must not make a product permanently unorderable.
+> Catalog republishing at a later `OccurredAt` re-lists it, in currencies that
+> have rows and in currencies that do not.
+>
+> **The upsert's read of that watermark needs its own `HOLDLOCK`, and taking
+> it first is what stops the two statements deadlocking.** The answer that
+> matters there is an *absence*, and at read committed the lock protecting it
+> is released immediately — so a discontinuation can commit between the read
+> and the insert, and the hole reopens one level down. `HOLDLOCK` on
+> `ProductPrices` does not reach `ProductWithdrawals`; each table's lock is its
+> own. The discontinue statement already takes the two in watermark-then-prices
+> order, so the upsert takes them in that order as well, which is the whole of
+> the deadlock argument.
+
 ```csharp
 // Infrastructure, not Application: raw SQL and a connection factory. Registered
 // by AddOrderingInfrastructure's scan (§6.2) — Application's scan would not
-// see it.
+// see it. Public, because that scan is public-only: an internal handler is
+// registered as nothing at all, silently, with the endpoint still bound.
 namespace Ordering.Infrastructure.Projections;
 
 public sealed class ProductPriceProjection(IDbConnectionFactory connections)
@@ -1175,35 +1260,135 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
 {
     private const string UpsertSql =
         """
-        MERGE ordering.ProductPrices AS target
+        -- WITH (HOLDLOCK) is not decoration. A bare MERGE takes no range lock
+        -- over the key it failed to find, so two deliveries for one
+        -- (ProductId, Currency) can both take the NOT MATCHED branch and the
+        -- loser violates the primary key. The endpoint (§9.8) sets no
+        -- ConcurrentMessageLimit, so deliveries can overlap and that is
+        -- ordinary rather than contrived — and its retry would absorb it,
+        -- which is the argument FOR closing it here: a correctness property
+        -- repaired by a retry policy stops holding the day somebody tunes the
+        -- retry policy.
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        -- The second guard: a withdrawal newer than this event means Catalog
+        -- has since pulled the product, whether or not a row for this currency
+        -- existed when the withdrawal ran.
+        --
+        -- HOLDLOCK because the interesting answer is an ABSENCE, and at read
+        -- committed that lock is released at once — a discontinuation can then
+        -- commit between this read and the insert below and leave a withdrawn
+        -- product available. HOLDLOCK on ProductPrices does not reach this
+        -- table. FIRST because the discontinue statement takes the two tables
+        -- in this order too: same order, no deadlock.
+        DECLARE @IsAvailable bit =
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM ordering.ProductWithdrawals WITH (HOLDLOCK)
+                    WHERE ProductId = @ProductId
+                        AND WithdrawnAt >= @OccurredAt)
+                THEN 0
+                ELSE 1
+            END;
+
+        MERGE ordering.ProductPrices WITH (HOLDLOCK) AS target
         USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
             ON target.ProductId = source.ProductId
             AND target.Currency = source.Currency
+        -- NOT MATCHED is the branch no UpdatedAt comparison can cover, because
+        -- there is no target row to compare against.
         WHEN NOT MATCHED THEN
             INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-            VALUES (@ProductId, @Currency, @Amount, 1, @OccurredAt)
+            VALUES (@ProductId, @Currency, @Amount, @IsAvailable, @OccurredAt)
         -- Same out-of-order guard as OrderSummaries: a retried stale event
-        -- must not overwrite a newer price.
+        -- must not overwrite a newer price. Strict, unlike the withdrawal
+        -- comparison above — the callout under the DDL says why the two ties
+        -- break differently.
         WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
-            UPDATE SET Amount = @Amount, IsAvailable = 1, UpdatedAt = @OccurredAt;
+            UPDATE SET Amount = @Amount, IsAvailable = @IsAvailable, UpdatedAt = @OccurredAt;
+
+        COMMIT;
         """;
 
     private const string DiscontinueSql =
         """
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        -- The watermark first, because it is the half that must survive having
+        -- no price row to write to. Monotonic: a stale withdrawal must not
+        -- move it back over a later one.
+        MERGE ordering.ProductWithdrawals WITH (HOLDLOCK) AS target
+        USING (SELECT ProductId = @ProductId) AS source
+            ON target.ProductId = source.ProductId
+        WHEN NOT MATCHED THEN
+            INSERT (ProductId, WithdrawnAt)
+            VALUES (@ProductId, @OccurredAt)
+        WHEN MATCHED AND target.WithdrawnAt < @OccurredAt THEN
+            UPDATE SET WithdrawnAt = @OccurredAt;
+
+        -- Then the rows that already exist. The watermark covers the ones that
+        -- do not, so between them every currency is reached.
         UPDATE ordering.ProductPrices
         SET IsAvailable = 0, UpdatedAt = @OccurredAt
         WHERE ProductId = @ProductId
-            AND UpdatedAt < @OccurredAt;
+            AND UpdatedAt <= @OccurredAt;
+
+        -- One transaction, because the two halves are one fact: the watermark
+        -- alone leaves existing prices orderable, the rows alone leave the
+        -- hole. Redelivery repairs either, a message that exhausts §9.8's
+        -- retries does not, and XACT_ABORT is what rolls the first statement
+        -- back when the second fails.
+        COMMIT;
         """;
 
-    public Task HandleAsync(ProductPublished e, CancellationToken ct) =>
-        ExecuteAsync(UpsertSql, new { e.ProductId, e.Currency, e.Amount, e.OccurredAt }, ct);
+    public Task HandleAsync(ProductPublished integrationEvent, CancellationToken ct) =>
+        UpsertAsync(
+            integrationEvent.ProductId,
+            integrationEvent.Currency,
+            integrationEvent.Amount,
+            integrationEvent.OccurredAt,
+            ct);
 
-    public Task HandleAsync(PriceChanged e, CancellationToken ct) =>
-        ExecuteAsync(UpsertSql, new { e.ProductId, e.Currency, e.Amount, e.OccurredAt }, ct);
+    public Task HandleAsync(PriceChanged integrationEvent, CancellationToken ct) =>
+        UpsertAsync(
+            integrationEvent.ProductId,
+            integrationEvent.Currency,
+            integrationEvent.Amount,
+            integrationEvent.OccurredAt,
+            ct);
 
-    public Task HandleAsync(ProductDiscontinued e, CancellationToken ct) =>
-        ExecuteAsync(DiscontinueSql, new { e.ProductId, e.OccurredAt }, ct);
+    public Task HandleAsync(ProductDiscontinued integrationEvent, CancellationToken ct) =>
+        ExecuteAsync(
+            DiscontinueSql,
+            new { integrationEvent.ProductId, integrationEvent.OccurredAt },
+            ct);
+
+    // The currency is upper-cased HERE, and in the reader (§6.4) as well.
+    // Nothing between Catalog's Money and this statement normalises anything:
+    // Currency crosses the wire as a string like any other, so what arrives is
+    // whatever the publisher put in the contract. Under a case-sensitive
+    // collation an unnormalised one writes a row the reader cannot find, and a
+    // second primary-key row beside the one it can — so both sides normalise,
+    // and neither call is redundant.
+    private Task UpsertAsync(
+        Guid productId,
+        string currency,
+        decimal amount,
+        DateTimeOffset occurredAt,
+        CancellationToken ct) =>
+        ExecuteAsync(
+            UpsertSql,
+            new
+            {
+                ProductId = productId,
+                Currency = currency.ToUpperInvariant(),
+                Amount = amount,
+                OccurredAt = occurredAt
+            },
+            ct);
 
     private async Task ExecuteAsync(string sql, object parameters, CancellationToken ct)
     {
@@ -1226,6 +1411,25 @@ published — which is what the customer experiences either way.
 > republishes its full catalogue on demand (an operational task, not a code
 > path), and the [§13.6](13-observability.md) alert on business volume catches the case where orders
 > stop for a reason no technical metric shows.
+
+> **This projection's rebuild procedure is Catalog's republish, and it does not
+> exist yet.** The trap at the end of this chapter says to keep a rebuild
+> script in source control from day one, and Ordering cannot hold one: it has
+> no source of truth for prices to rebuild *from*. Everything published before
+> `ordering-catalog-events` was first declared is simply absent — the broker
+> drops what no queue is bound for — so a product Catalog listed last year is
+> unorderable until somebody republishes it. That is the same silence the
+> callout above describes, with a cause nobody can see from Ordering.
+>
+> **The republish must carry each product's original `OccurredAt`, and this is
+> the part that is easy to get wrong.** A loop that re-emits `ProductPublished`
+> stamped `now` would sail past every guard the projection has: the withdrawal
+> watermark compares against the event's own timestamp, so a fresh one re-lists
+> every product Catalog has ever discontinued. Rebuilding a read model is
+> therefore not "replay the current state" but "replay the facts with the times
+> they happened", which means Catalog has to have kept them. Naming that here
+> is cheaper than discovering it during an incident, which is when a rebuild is
+> reached for.
 
 The projection reacts to two different sources, so it implements two different
 interfaces (§9.4): `IProjectionHandler<T>` for this service's own events,

@@ -18,10 +18,12 @@ namespace Ordering.Api.Tests;
 /// consume context rather than of the broker.
 /// </summary>
 /// <remarks>
-/// This service binds no receive endpoint of its own yet, so this suite
-/// declares the endpoints it needs. The mechanism lands before the first
-/// consumer that uses it, and binding one here to make a test easier would be
-/// inventing a subscription §3.2 does not give this service.
+/// This suite declares its own endpoints and its own probe message, and keeps
+/// doing so now that <c>ordering-catalog-events</c> exists (PR-20). Two
+/// endpoints are what make the composite key a claim, one consumer has to
+/// throw and another has to clear the change tracker — none of which the real
+/// endpoint's consumers do, and arranging them onto it would be testing the
+/// projection rather than the filter.
 /// </remarks>
 [Collection(nameof(IntegrationCollection))]
 public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime

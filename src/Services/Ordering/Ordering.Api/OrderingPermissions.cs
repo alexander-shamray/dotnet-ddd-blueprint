@@ -17,7 +17,9 @@ namespace Ordering.Api;
 /// deliberately absent until there is a read endpoint to require it:
 /// a service's vocabulary holds what its endpoints require and nothing else,
 /// and a permission nothing requires is a dead name in the realm. §6.5's
-/// query slice is PR-20's, and <c>orders:read</c> arrives with it.
+/// query slice is not PR-20's — that one consumed Catalog's events into
+/// <c>ordering.ProductPrices</c> and added no endpoint — so <c>orders:read</c>
+/// still arrives with whichever PR gives this service a read endpoint.
 /// </para>
 /// <para>
 /// <b><c>orders:admin</c> is not here, and that is the chapter's point rather
