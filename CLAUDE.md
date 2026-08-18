@@ -2703,12 +2703,12 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads |
+| `/ship` | Start from a clean, current `main` with no finished worktree left over, then run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, which is final now that the chain merges — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads — or until either loop spends its twelfth check without having converged on it, which ends that loop unconverged and holds nothing — a loop that converges *on* its last permitted check has converged like any other; then **merge the PR** and tear the workspace down. **It stops for nothing that is a judgement** — check findings, `Needs a decision` rows and `Ask` threads are decided, recorded and carried past |
 | `/branch` | Start a correctly named branch — **in a sibling worktree** the session moves into, from a clean `main`; in place when the tree is dirty (carrying the work off `main`) or the parent is not writable |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
-| `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread with a `done` or `rejected` marker and resolve it |
-| `/review-grok` | Triage an external review into a resolution record |
+| `/review-copilot` | Triage Copilot's PR comments — verify each before acting, then close every thread **except an `Ask`** with a `done` or `rejected` marker and resolve it. An `Ask` is left open, because an unresolved thread is how a genuine ambiguity reaches a person; inside `/ship` the chain overrides that and answers it |
+| `/review-grok` | Triage an external review into a resolution record. A `Needs a decision` row is left for the user; inside `/ship` the chain overrides that and answers it in the record — the same split the row above carries |
 | `/review-branch` | Review the branch (or working tree) against `main` for contradictions; writes `suggestions.md` and rechecks it on the next run |
 | `/security-sweep` | Loop a defensive security audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new |
 | `/bug-sweep` | The same loop aimed at defects rather than vulnerabilities — logic and execution bugs, filed at **critical or high** only, confirmed by reading because the grant runs no build |
@@ -2799,14 +2799,76 @@ which is the part a reader needs; the attribution cost is unchanged and small.
 from.** From a clean `main` with a writable parent — the ordinary case — the
 new branch is cut into a sibling directory (`../ashamray-<slug>`, the shape
 `ashamray-groklimit` is already on disk in) and the session moves into it, so
-the whole of `/ship` runs there and this checkout stays on `main`. The two
-paragraphs below name the cases where it cannot, and in both of them the branch
-is made in place and the command says so. Outside the
+the whole of `/ship` runs there and this checkout stays on `main`. It cannot
+in two cases — **a dirty `main`, and a parent that is not writable** — and in
+both the branch is made in place and the command says so; each is argued below,
+named rather than pointed at, because this sentence used to say "the two
+paragraphs below" and four paragraphs were later inserted between it and them.
+Outside the
 repository tree is the load-bearing half rather than the naming: a worktree
 under `.claude/worktrees/` would be untracked content inside the checkout,
 which puts it in front of every `git status` the chain reads and inside
 `grok-review.sh`'s clean-tree refusal. A sibling needs no `.gitignore` entry
 because there is nothing to ignore.
+
+**It is also removed by `/ship`, at both ends.** Step 0 tears down a worktree
+whose branch is **finished** before anything new is cut, and step 7 removes
+this run's own after the merge — both with a plain `git worktree remove`, which
+refuses a dirty tree and is never given `-f`. Exactly one of the two owns any
+given directory: a session standing in an already-merged worktree is torn down
+by step 0 and the run ends there, because a second removal would exit non-zero
+against a path that is no longer a worktree and stop the chain on a helper
+failure with nothing behind it.
+
+**Finished means this branch's work has landed — a clean tree, nothing ahead of
+a freshly fetched `origin/main`, and a **merged** PR, all three at once;
+everything else is left alone, and that exception is load-bearing.** It
+is what lets a resumed `/ship` pick a branch back up, where evicting the
+session to `main` would strand the work and leave step 1 unable to re-fork a
+name that already exists.
+
+**It took seven drafts to state, and the last three are the interesting
+ones.** First a worktree, fixed. Then an
+in-place branch — what `/branch` produces every time `main` was dirty —
+stranded by the identical switch to
+`main` minus the directory. Then the predicate itself: written as "nothing
+unpushed", it swept in a branch whose commits are all pushed and which has
+simply not reached `/pr` yet, because that phrase means something else in the
+resume table in `ship.md` itself. **A rule and its predicate drift
+separately**, and the third arrived through a word rather than a missing row.
+Then the working tree: a worktree forked minutes ago and edited but not yet
+committed satisfies both other clauses, and the `git worktree remove` that
+refuses a dirty tree saves the *files* while the session walks away from the
+*branch*. Then that clause was written as though it qualified only the no-PR
+half, which reopened the same hole one limb over: a **merged** PR with
+uncommitted edits beside it passed as finished, and the teardown's refusal
+saved the files while the merged-PR resume row ended the run around them.
+Then the same hole one read over: a merged PR with clean commits made *after*
+the merge is ahead of `origin/main`, and only the no-PR limb was asking. **The
+predicate has no limbs now** — a clean tree, nothing ahead of a fetched
+`origin/main`, and a merged PR, conjoined. All three ask one question about
+one thing, nothing about a PR's state exempts a workspace from being asked,
+and a conjunction cannot carry the defect a disjunction kept generating.
+
+That third conjunct read *no open PR* for one draft, which is what the
+conjunction looked like before the next paragraph narrowed it, and it stood
+here for a round after the sentence above had moved.
+
+**Then the conjunction turned out to be too generous, and the fix ran the other
+way.** A branch forked and never used — no commits, no PR, a pristine tree —
+held nothing of its own either, so step 0 removed its worktree, kept the branch
+(`git branch -d` is denied) and left step 1 handing the fork helper a name it
+refuses. An interrupted run could not resume, and its workspace was deleted on
+the way to finding out. **A workspace that never held work is *unused*, not
+finished**: it is kept and adopted, and step 1 skips the fork. An abandoned
+empty worktree is indistinguishable from that one and is therefore also kept —
+a stale directory, named in the report, against a run that cannot resume. So
+the predicate asks for a **merged** PR, which is what the teardown asked for
+all along; the two disagreed for two rounds, once in each direction, and
+narrowing rather than widening is what made them one.
+
+The merged **branch** survives all of it: `git branch -d` is denied and stays
+denied.
 
 **A sweep's worktree is not this one, and none is another's precedent.** The
 sweeps' — `/security-sweep`'s and `/bug-sweep`'s alike — are detached, live
@@ -2886,11 +2948,19 @@ untouched, so a review that never happened cannot report as clean.
 two consecutive passes leave none. One exit skips rather than stops: the
 helper's usage-limit preflight (exit 12) hands over to Copilot without a
 clean Grok pass — reported
-as skipped-on-limits, never as a verdict, and owing Grok a re-entry on a later
-`/ship`. The split of ownership matters: Grok's half owns the
-`suggestions.md` lifecycle — writing it, rechecking it, removing it when
-clean — and the triage half never creates or deletes that file, only fixes
-what it names. Then Copilot: a review is requested through
+as skipped-on-limits, never as a verdict. **That skip is final**: `/ship` now
+merges, and a merged PR's resume row ends at step 0, so no later run can
+re-review it — the PR simply got one reviewer instead of two, and the report
+says so rather than recording a debt nobody can pay.
+
+The split of ownership matters: Grok's half owns the `suggestions.md`
+lifecycle — writing it, rechecking it, removing it when clean — and the triage
+half never creates or deletes that file, only fixes what it names. **`/ship`
+step 7 is the one exception**, and only after the loop has ended: an
+unconverged or mid-cycle-skipped run leaves the file behind, where it blocks
+`git worktree remove` and follows an in-place run onto `main`.
+
+Then Copilot: a review is requested through
 the REST reviewers endpoint — `Copilot` and
 `copilot-pull-request-reviewer[bot]` both work as the request target — and
 on every round after the first the reviewer is **removed and re-added**,
@@ -2905,9 +2975,11 @@ the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. **`ship.md` owns the stopping
 condition**, and the two loops no longer share one: Grok ends on **two
 consecutive clean passes**, Copilot on the **first** clean round, and each
-carries its own ceiling of twelve rounds per PR. Either loop also stops early
-on the finding class that is the user's: `Needs a decision` from the Grok
-triage, an open `Ask` thread from the Copilot one.
+carries its own ceiling of twelve rounds per PR. **Neither stops early on the
+finding class that used to be the user's**: inside `/ship` a `Needs a decision`
+row and an open `Ask` thread are decided, recorded and carried past. Run on
+their own, `/review-grok` and `/review-copilot` still surface both — that is
+what those statuses are for, and it is a different claim from this one.
 
 **The asymmetry is a decision with its cost on the record.** Two rather than
 one was Grok's rule for the reason below, and it holds there: one clean pass is
@@ -2954,8 +3026,34 @@ This replaced a blanket `Bash(git push:*)` deny, under which `/pr` stopped and
 asked the user to push. Worth knowing what that cost: the stop was the last
 moment the work was still cheap to change, and **the checks in `/ship` step 2
 now carry that weight** — with the two review loops behind the PR as the
-second net. A check finding, a `Needs a decision` triage row and an open
-`Ask` thread are what halt the chain.
+second net.
+
+**Then `/ship` gained a merge and lost every stop that was a judgement, and
+those two changes compound.** A check finding, a `Needs a decision` triage row
+and an open `Ask` thread used to halt the chain and hand the question back;
+each is now answered by the run itself and recorded — in the commit body, in
+the resolution record, as a reply on the thread — and the PR is merged at the
+end. What still halts it is a helper failing, a requested review that never
+registers, a local `main` carrying commits `origin/main` does not, a PR
+somebody closed unmerged, red CI and an unmergeable branch: the things with no
+recommended option rather than the things somebody might have answered
+differently. The second is Copilot's analogue of the first — the one failure
+with no exit code, just silence where a review should be. Two of them are
+somebody's decision the chain would otherwise undo in silence: commits placed
+on `main`, and a PR closed on purpose. The `main` one is the only stop that
+fires before anything has happened, and it earned its place by being tried the
+other way: *carry on and
+name the commits* forks from `origin/main`, merges, and then meets a diverged
+`main` at the teardown pull — a raw git failure after the merge, which is the
+worst place in the chain to stop — or, on a dirty tree, branches from `HEAD`
+and silently adopts the commits the same paragraph promised to leave alone.
+
+So `main` is now reachable without a person in the loop, and **step 2 is the
+last gate in front of it that is not a review bot**. Skipping those checks was
+once a minute saved; it is now the whole of the remaining defence. The decision
+to run this way is the repo owner's and is recorded here rather than argued in
+the command — but the cost of it belongs beside the deny list it leans on,
+which is why it is written down here too.
 
 **File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
 covers every file-editing tool, `Write` included; a `Write(path)` rule matches
