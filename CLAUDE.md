@@ -2703,7 +2703,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads |
+| `/ship` | Start from a clean, current `main` with no finished worktree left over, then run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, owing Grok a later re-entry — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads; then **merge the PR** and tear the workspace down. **It stops for nothing that is a judgement** — check findings, `Needs a decision` rows and `Ask` threads are decided, recorded and carried past |
 | `/branch` | Start a correctly named branch — **in a sibling worktree** the session moves into, from a clean `main`; in place when the tree is dirty (carrying the work off `main`) or the parent is not writable |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -2807,6 +2807,16 @@ under `.claude/worktrees/` would be untracked content inside the checkout,
 which puts it in front of every `git status` the chain reads and inside
 `grok-review.sh`'s clean-tree refusal. A sibling needs no `.gitignore` entry
 because there is nothing to ignore.
+
+**It is also removed by `/ship`, at both ends.** Step 0 tears down a worktree
+whose branch is already merged before anything new is cut, and step 7 removes
+this run's own after the merge — both with a plain `git worktree remove`,
+which refuses a dirty tree and is never given `-f`. A worktree whose branch is
+**unmerged** is left alone at step 0, and that exception is load-bearing: it is
+what lets a resumed `/ship` pick a branch back up, where evicting the session
+to `main` would strand the work in a directory nobody is in and leave step 1
+unable to re-fork a branch that already exists. The merged **branch** survives
+both: `git branch -d` is denied and stays denied.
 
 **A sweep's worktree is not this one, and none is another's precedent.** The
 sweeps' — `/security-sweep`'s and `/bug-sweep`'s alike — are detached, live
@@ -2954,8 +2964,23 @@ This replaced a blanket `Bash(git push:*)` deny, under which `/pr` stopped and
 asked the user to push. Worth knowing what that cost: the stop was the last
 moment the work was still cheap to change, and **the checks in `/ship` step 2
 now carry that weight** — with the two review loops behind the PR as the
-second net. A check finding, a `Needs a decision` triage row and an open
-`Ask` thread are what halt the chain.
+second net.
+
+**Then `/ship` gained a merge and lost every stop that was a judgement, and
+those two changes compound.** A check finding, a `Needs a decision` triage row
+and an open `Ask` thread used to halt the chain and hand the question back;
+each is now answered by the run itself and recorded — in the commit body, in
+the resolution record, as a reply on the thread — and the PR is merged at the
+end. What still halts it is a helper failing, red CI and an unmergeable
+branch: the things with no recommended option rather than the things somebody
+might have answered differently.
+
+So `main` is now reachable without a person in the loop, and **step 2 is the
+last gate in front of it that is not a review bot**. Skipping those checks was
+once a minute saved; it is now the whole of the remaining defence. The decision
+to run this way is the repo owner's and is recorded here rather than argued in
+the command — but the cost of it belongs beside the deny list it leans on,
+which is why it is written down here too.
 
 **File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
 covers every file-editing tool, `Write` included; a `Write(path)` rule matches

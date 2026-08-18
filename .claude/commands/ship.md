@@ -1,7 +1,7 @@
 ---
-description: Fork a worktree where one can be forked, branch, commit, push and open a PR in one pass, then loop the external reviews — Grok until two consecutive clean passes, Copilot until one — or until a Grok usage-limit skip leaves Copilot to finish with the Grok re-entry owed
+description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to an open PR. Description:
@@ -18,40 +18,79 @@ the worst place for that copy to live.
 What this command adds is the handoffs: which steps are still owed, and where
 the sequence is allowed to stop.
 
-## It runs to the end
+## It runs to the end, and the end is a merged PR
 
 `/pr` pushes the branch itself, so the chain reaches an open PR without waiting
-for anyone — and the PR is no longer where it stops. Steps 5 and 6 keep going:
-Grok reads the branch and `/review-grok` triages what it found, then Copilot
-reads the PR and `/review-copilot` triages that, and the chain ends when both
-reviewers have nothing left to say — or, if Grok was skipped on usage limits
-(step 5's exit 12), when Copilot has finished, with the Grok re-entry owed to
-a later run. **Step 2, a `Needs a decision` finding in step 5 and an `Ask`
-thread in step 6 are the stops that hand a decision back to the user** — a
-check that finds something halts the run and hands the finding back, because
-fixing it is the user's call. Helper failures and either loop's ceiling stop
-the chain too, reported as what they are rather than looped past.
+for anyone, and step 7 merges it. Steps 5 and 6 sit between: Grok reads the
+branch and `/review-grok` triages what it found, then Copilot reads the PR and
+`/review-copilot` triages that. When both loops have finished — however they
+finished — the PR is merged, the session returns to the main checkout and the
+worktree is removed.
 
-That is a real change in character and worth naming. Under the old blanket
-`Bash(git push:*)` deny this command could not finish: it stopped before the
-push, and that stop was the last cheap moment to change the work. The narrow
-denies that replaced it — `--force`, `--delete`, any push to `main` — keep
-the cases that are decisions rather than steps. Everything else now proceeds,
-which means **the checks are carrying the weight the stop used to.** Skipping
-them to save a minute is no longer a small thing.
+**Nothing in this chain stops to ask.** Where an earlier version handed a
+finding back — step 2's checks, a `Needs a decision` row from the Grok triage,
+an open `Ask` thread from the Copilot one — the run now takes the recommended
+option itself and keeps going. That is the caller's standing instruction and
+not a judgement about the findings.
+
+**Deciding is not the same as going quiet, and this is the part that makes the
+change survivable.** A decision taken here is written down where the person who
+would have been asked can find it: an `Ask` thread gets the answer posted on
+the thread and is then resolved, a `Needs a decision` row is answered in the
+resolution record, and both appear in the report with the option taken and the
+one rejected. A silent decision is the failure mode this rule creates; a stated
+one is the thing it trades an interruption for.
+
+**Resolving `Ask` threads is load-bearing rather than tidy.** Step 6's
+all-resolved state is defined over *no unresolved threads*, so a thread left
+open by an earlier round can never be reached past — the loop would run to its
+ceiling on every subsequent round with nothing new to fix. Answer, resolve,
+carry on.
+
+**Four things still stop the chain**, and none of them is a decision somebody
+could have made differently:
+
+| | |
+|---|---|
+| A helper exits non-zero | The step did not run; a report that says otherwise is false |
+| Either review loop hits its ceiling | Reported as unconverged, and step 7 still merges — see there |
+| CI is not green at step 7 | A merge onto a red `main` is not a judgement call |
+| The PR is not mergeable | Conflicts are the caller's tree, not this chain's |
+
+That last pair is worth separating from the rest. Everything above them is a
+question about *this* change and is now answered here; those two are questions
+about the repository's state, and no recommended option exists for them.
+
+**The checks carry the weight the stops used to, and they now carry more of
+it.** Under the old blanket `Bash(git push:*)` deny this command could not
+finish at all: it stopped before the push, and that stop was the last cheap
+moment to change the work. Then the narrow denies let it reach an open PR, and
+a human still saw the PR before it landed. Now it merges. Step 2 is the only
+thing left between a bad edit and `main` that is not a review bot, so
+**skipping it is no longer a minute saved — it is the last gate**.
 
 ## Resume, don't restart
 
 **Read the state first and run only what is still owed.** Every step is
 skippable because an earlier run already did it:
 
+**Step 0 runs on every entry, resumed or not**, and step 7 closes every one
+that reaches a merge — so the rows below say what is owed *between* them:
+
 | State | What is owed |
 |---|---|
-| On `main` | All of it — start at step 1, which forks the workspace when the tree is clean and the parent is writable, and otherwise branches in place |
+| On `main` | All of it — step 1 forks the workspace when the tree is clean and the parent is writable, and otherwise branches in place |
 | On a branch, tree dirty | Checks, `/commit`, push, `/pr` |
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
+| On a branch whose PR is **already merged** | Step 7's teardown alone. `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change |
+
+**Step 0's teardown targets a finished worktree, step 7's targets this run's,
+and confusing them is how a run deletes the directory it is standing in.** A
+resumed run that starts inside its own unmerged worktree stays there — step 0's
+table says so in its second row, and that row is the one keeping this step from
+stranding the branch it was meant to tidy up around.
 
 **The workspace is part of that state**, and it is read the way `/branch`
 step 0 reads it: `git rev-parse --git-dir --git-common-dir` differing, with no
@@ -187,6 +226,78 @@ same argument as never calling a branch clean because asking failed.
 
 ## Steps
 
+0. **Start from the main checkout, on an up-to-date `main`, with no leftover
+   worktree.** A run that begins inside the *previous* PR's directory is the
+   failure this exists to prevent: step 1 reads "already on a branch", adopts
+   it, and the whole chain commits this change onto the last one's branch.
+
+   **Being in a worktree is not by itself the problem — being in a *finished*
+   one is.** `git rev-parse --git-dir --git-common-dir` differing, with no
+   `--show-superproject-working-tree`, says the session is in a linked
+   worktree; what decides whether to leave it is the branch it holds:
+
+   | Where the session is | Do |
+   |---|---|
+   | In a worktree whose branch has a **merged** PR, or no PR and nothing unpushed | Finished. `ExitWorktree({action: "keep"})`, then the teardown below on the directory just left |
+   | In a worktree whose branch is **unmerged** | **Stay.** This is a resumed run and that directory is its workspace |
+   | In the main checkout, not on `main` | `bash .claude/scripts/git-switch-existing.sh main`, when `git status --short` is clean; carry on where it is not, and say so |
+   | In the main checkout on `main` | Nothing but the teardown below |
+
+   **The second row is what stops this step eating the run it belongs to.**
+   Leaving an unmerged worktree strands the branch: the session returns to
+   `main`, step 1 sees a clean `main` and forks — and `git-worktree-fork.sh`
+   refuses a branch that already exists, which is a stop with no defect behind
+   it and the work still sitting in a directory nobody is in. `gh pr view
+   --json state` on the current branch, or `git log origin/main..HEAD`, answers
+   which row applies before anything is left.
+
+   **`ExitWorktree` with `keep`, never `remove`.** The remove form only works
+   on a worktree this session created with `EnterWorktree`, and a `/ship`
+   worktree comes from `/branch`'s `git-worktree-fork.sh` — so `remove` refuses
+   with *this session is not the owner*, which is another stop with nothing
+   behind it. Leave, then tear down with git.
+
+   Then, in the main checkout:
+
+   ```bash
+   git worktree prune                      # registrations whose directories are gone
+   git worktree list                       # what is actually still there
+   git pull --ff-only                      # ONLY when HEAD is main — see below
+   ```
+
+   **The pull is guarded on being on `main`**, because the one row above that
+   leaves the session elsewhere is the dirty-checkout row, and a bare
+   `git pull --ff-only` there updates whatever branch HEAD is on. Prune and
+   list are safe anywhere; the pull is the only one that reads HEAD.
+
+   **Remove a sibling worktree only when its branch is merged and its tree is
+   clean**, and let git decide the second half:
+
+   ```bash
+   git worktree remove ../<checkout-name>-<slug>
+   ```
+
+   Without `-f` that command **refuses a worktree holding uncommitted or
+   untracked files**, which is the guard rather than an inconvenience — the
+   same refusal `/security-sweep`'s teardown uses. A worktree it declines to
+   remove is left where it is and named in the report; do not reach for `-f`,
+   which is the one spelling that discards somebody's work.
+
+   > **`Bash(git worktree remove:*)` is a wider grant than the operation it
+   > buys, and that is a known residual rather than an oversight.** A prefix
+   > rule cannot exclude a flag — the argument the push rules already make — so
+   > the grant admits `-f` even though this file forbids it. Every comparable
+   > case in this repository is fixed by a helper that spells the flags itself,
+   > and the two that exist (`git-worktree-detach.sh`, `git-worktree-drop.sh`)
+   > shape-check their argument against `secsweep-??????` and therefore refuse
+   > a PR worktree by design. A third helper is owed here; until someone with
+   > the `Edit(.claude/scripts/**)` deny lifted writes it, the rule above is
+   > carried by this file, like the `[` placement rule in `CLAUDE.md`.
+
+   Deleting the merged **branch** is not part of this. `git branch -d` is
+   denied in `.claude/settings.json`, deliberately, and a merged branch costs
+   nothing but a line in `git branch`. Name it in the report and leave it.
+
 1. **`/branch`**, passing $ARGUMENTS. Skip if already off `main`.
 
    **This step is also where the workspace comes from, and it has two
@@ -220,8 +331,24 @@ same argument as never calling a branch clean because asking failed.
    footnote: `/pr` requires the body to state whether these ran, so skipping
    them quietly makes the PR body untrue.
 
-   Stop on a finding and report it. Fixing it is the user's call, not yours. If
-   the user asks to skip the checks, skip them — and say so in the PR body.
+   **Fix what they find, then run them again.** This step used to stop and hand
+   the finding back; it no longer does, and it is the step that changed most in
+   losing that. A blueprint contradiction has one correct resolution far more
+   often than it has two — reconcile to whichever side the rest of the system
+   depends on, exactly as `/validate-blueprint` already instructs, and record
+   the direction in the commit body.
+
+   Where a finding genuinely has two defensible answers, take the one the
+   surrounding argument supports, say which you rejected, and put both in the
+   report. That is what this chain now does everywhere; the difference here is
+   only that nothing downstream will catch a wrong choice, because the reviewers
+   read the branch and not the specification.
+
+   **Do not skip these to reach the PR sooner.** Step 7 merges, so this is the
+   last gate before `main` that is not a review bot. If they are skipped for a
+   reason, the reason goes in the PR body and in the report — `/pr` requires the
+   body to state whether they ran, and a body that says they did is false
+   otherwise.
 
 3. **`/commit`**. Skip if the tree is clean.
 
@@ -327,11 +454,17 @@ same argument as never calling a branch clean because asking failed.
       commit the review record itself. Push the branch by name so the next
       Grok pass (and the PR) reads the fixed state, and go back to (1).
 
-   Two exits short of clean, both reported rather than looped past:
+   One exit short of clean, reported rather than looped past — and one row
+   that used to be a second:
 
-   - **A `Needs a decision` row** from `/review-grok` stops the loop — that
-     status exists because the finding is the user's call, and a loop that
-     keeps running past it buries the one thing that needed a human.
+   - **A `Needs a decision` row** from `/review-grok` no longer stops
+     anything. That status exists because the finding is a judgement, and this
+     chain now makes the judgement: take the option the surrounding argument
+     supports, **write the answer into the resolution record beside the row**
+     so the reasoning outlives the run, and continue to the recheck. The row
+     is reported with the option taken and the option rejected. What must not
+     happen is the quiet version — a row silently reclassified as `Fixed`,
+     which loses both the question and the answer.
    - **Two consecutive clean rounds end it; twelve rounds is the ceiling.**
      Two clauses, and the first is deliberately *two* — **in this loop only**.
      Clean here means a pass that leaves no `suggestions.md` — a full review
@@ -497,7 +630,7 @@ same argument as never calling a branch clean because asking failed.
       round that a fresh clean review never repeats, so before declaring the
       loop done, list the PR's unresolved review threads with
       `bash .claude/scripts/pr-review-threads.sh <n>` — an unresolved
-      `Ask` stops the loop exactly as a new one would, and any other
+      `Ask` is answered, resolved and reported rather than left, and any other
       unresolved thread is triage the loop still owes.
 
       **Zero findings and zero unresolved threads is all-resolved, and the
@@ -540,10 +673,23 @@ same argument as never calling a branch clean because asking failed.
       request reviews the fixed state, and go back to (1).
 
    **This loop does not share step 5's stopping condition, and the asymmetry
-   is the point rather than an oversight.** An **`Ask`** thread — left open by
-   `/review-copilot` by design — stops it, exactly as a `Needs a decision` row
-   stops the Grok half. Otherwise it ends on the **first** clean round, marked
-   all-resolved, where step 5 still wants two. The ceiling is unchanged:
+   is the point rather than an oversight.** It ends on the **first** clean
+   round, marked all-resolved, where step 5 still wants two.
+
+   **An `Ask` thread is answered here rather than left open**, which is a
+   change to what `/review-copilot` does on its own. That command leaves one
+   open by design, because an unresolved thread is how a genuine ambiguity
+   reaches a person; this chain has nobody to reach, so it decides, posts the
+   decision and the rejected alternative **as a reply on the thread**, marks it
+   `done`, and resolves it. The reply is the whole of what replaces the
+   interruption — resolving without it destroys the question rather than
+   answering it.
+
+   The mechanical reason is worth knowing too: all-resolved is defined over
+   *no unresolved threads*, so an `Ask` left open by round three is still open
+   at round eleven. Left alone it does not stop this loop once — it stops it
+   every subsequent round, and the loop runs to its ceiling with nothing new
+   to fix. The ceiling is unchanged:
    twelve requested-review rounds per PR, counted from the timeline's
    `review_requested` events, the ones `copilot-request-count.sh` already
    proves each request by, so a resumed run recovers the count with no ledger
@@ -572,6 +718,75 @@ same argument as never calling a branch clean because asking failed.
    did, because a loop that ran longer than its rule is as much a departure as
    one that ran shorter.
 
+7. **Merge, then tear the workspace down.** Both loops have finished — clean,
+   all-resolved, skipped on limits, or unconverged at a ceiling — and the goal
+   of this chain is a merged PR, so it merges.
+
+   **Unconverged is not a reason to hold the PR.** A ceiling is a budget
+   running out, not a verdict, and a branch that is green, reviewed and
+   mergeable does not become less so because the reviewer had more to say.
+   Report the state plainly — findings per round and whether the rate was
+   still flat when the budget ran out is the useful signal — and merge.
+
+   Two things genuinely gate it, and neither is a judgement:
+
+   ```bash
+   gh pr view <n> --json state,mergeable,mergeStateStatus
+   gh pr checks <n>
+   ```
+
+   `mergeable` must be `MERGEABLE` and every check must pass. **A merge onto a
+   red `main` is not a recommended option**, and a conflicted branch is a
+   question about the caller's tree that this chain cannot answer. Either one
+   stops here and is reported as what it is.
+
+   **CI runs on the head commit, not on the PR**, so check the oid: a review
+   round that pushed a fix invalidates the previous run, and `gh pr checks`
+   reporting green for a commit that is no longer the head is the same
+   stale-artefact trap step 6's `commit` oid exists for. Wait for the run on
+   the pushed head rather than reading whichever finished last.
+
+   Then merge with a merge commit, which is this repository's shape — every
+   entry in `git log --merges` reads `Merge pull request #n from …`:
+
+   ```bash
+   gh pr merge <n> --merge
+   ```
+
+   `--squash` and `--rebase` are not alternatives to choose between here. The
+   commits are the argument — `/commit` splits them so a reviewer can accept
+   one and reject the next, and `/pr` writes its body from them — so squashing
+   discards the thing two earlier steps spent their effort producing.
+
+   **The merge is `gh`'s, not a push.** `.claude/settings.json` denies every
+   push to `main` and that deny is untouched: the branch is merged on the
+   remote by the API, and this checkout learns about it from `git fetch`. A
+   chain that satisfied the goal by pushing to `main` would have defeated the
+   rule rather than complied with it.
+
+   Then put the workspace back the way step 0 wants to find it — the same
+   three commands, now with a merged branch behind them:
+
+   ```bash
+   git pull --ff-only                      # main, with the merge commit on it
+   git worktree remove ../<checkout-name>-<slug>
+   git worktree prune
+   ```
+
+   Leave the session in the main checkout. `ExitWorktree({action: "keep"})`
+   first when the run happened in a worktree — the same `keep`, for the same
+   reason as step 0, and the `git worktree remove` afterwards is what actually
+   removes it.
+
+   **Verify the merge before tearing anything down**, and verify it from the
+   remote rather than from the exit code: `gh pr view <n> --json state,mergeCommit`
+   must read `MERGED` with an oid. Removing the worktree is the one step in
+   this chain that destroys something, and doing it on an assumed merge is how
+   an unmerged branch loses its only checkout.
+
+   The merged branch itself stays. `git branch -d` is denied, deliberately, and
+   a merged branch costs a line in `git branch` — name it in the report.
+
 ## Report
 
 **Open with the workspace**: the worktree this run happened in and the branch
@@ -588,12 +803,24 @@ ledger comments, step 6's timeline events; the report line is the
 human-readable echo), and how it ended, in that loop's own vocabulary: step 5
 clean, stopped on a decision, skipped on limits with re-entry owed, or stopped
 unconverged; step 6 **all-resolved, naming the review and the `commit` oid it
-read**, stopped on an open `Ask`, or stopped unconverged. The oid is not
+read**, an `Ask` answered and resolved, or stopped unconverged. The oid is not
 decoration — it is the whole of step 6's marker, and a later `/ship` compares
 it against the pushed head to decide whether that loop is owed at all.
-End with the PR URL.
+
+**Then the decisions.** Every place this chain answered a question that used to
+stop it gets a line: the check finding it reconciled and which side won, the
+`Needs a decision` row and the option rejected, the `Ask` thread and what was
+posted on it. This is the section that replaces the interruption, so a run that
+took decisions and lists none of them has not reported — it has hidden. A run
+that took none says so in one line.
+
+**Then the merge and the workspace.** Whether the PR merged and its merge oid,
+or which of the two gates stopped it; that `main` was pulled and is now at that
+oid; the worktree removed, or the one left behind and why git refused it; and
+the merged branch still sitting in `git branch`.
 
 A step skipped on an assumption gets its assumption restated here rather than
 left in the middle of the run, and a check that did not run is named. The whole
-value of chaining six commands is that the summary is still honest about each
-one.
+value of chaining these commands is that the summary is still honest about each
+one — and now that nothing stops for a person, the report is the only place a
+person finds out what was decided on their behalf.
