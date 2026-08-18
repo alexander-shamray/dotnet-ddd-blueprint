@@ -871,8 +871,10 @@ gRPC — and it would run inside the write transaction (§6.3), holding a databa
 transaction open across a network call to another service.
 
 Instead, `IProductPriceReader` reads a **local projection** in Ordering's own
-database, kept current by Catalog's `PriceChanged` and `ProductPublished`
-events (§6.6):
+database, kept current by all three of Catalog's product events —
+`ProductPublished`, `PriceChanged` and `ProductDiscontinued` (§6.6). The third
+is easy to leave off a list like this one and is what stops a withdrawn product
+staying orderable:
 
 ```csharp
 internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
@@ -896,9 +898,11 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
         IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
             new CommandDefinition(
                 Sql,
-                // Upper-cased: Money.Of normalises on the way in, so comparing
-                // the caller's string as it arrived makes a valid request
-                // depend on the server's collation.
+                // Upper-cased because the PROJECTION upper-cases on write
+                // (§6.6) — not because Money.Of does, which is true of the
+                // domain and not of the wire the projection reads from.
+                // Comparing the caller's string as it arrived makes a valid
+                // request depend on the server's collation.
                 new
                 {
                     ProductIds = productIds.Select(p => p.Value),

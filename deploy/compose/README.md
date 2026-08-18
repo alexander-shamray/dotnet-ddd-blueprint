@@ -107,20 +107,23 @@ curl -X POST http://localhost:5101/v1/orders \
 
 **No cancel call here, deliberately, because there is no id to cancel with.**
 The obvious next line — capture the response and interpolate it into
-`/v1/orders/$ORDER/cancel` — is wrong twice over: today the body is a
-problem document, and after PR-20 it is `Results.Ok(guid)`, whose body is a
-JSON *string* with the quotes still on it, which `{id:guid}` cannot bind.
-A reader who wants the id then needs `| jq -r .`, and a README that says so
-before the table can produce one is documenting a shell trick rather than the
+`/v1/orders/$ORDER/cancel` — is wrong twice over: this call answers with a
+problem document, and a call that succeeds answers `Results.Ok(guid)`, whose
+body is a JSON *string* with the quotes still on it, which `{id:guid}` cannot
+bind. A reader who wants the id then needs `| jq -r .`, and a README that says
+so before it can produce one is documenting a shell trick rather than the
 service.
 
-**The first call answers 422 `order.products_unavailable` until PR-20 lands**,
-and that is the honest state rather than a broken example: prices come from a
-local projection of Catalog's events (§6.4), and the projection that fills
-`ordering.ProductPrices` is PR-20's. The table ships with its reader because
-`PlaceOrderHandler` is the consumer and PR-20 depends on this PR, not the
-other way round. Until then the reachable proofs are the 401, the 403 as
-`browser`, and the 404 an order you do not own returns.
+**This call answers 422 `order.products_unavailable`, and it will keep doing
+so.** That is not a gap waiting on a pull request: prices come from a local
+projection of Catalog's events (§6.4), and `00000000-…-0001` is an id no
+Catalog event names. The projection that fills `ordering.ProductPrices` has
+existed since PR-20 — a product it has never heard of has no row, no price and
+no order, which is §6.6's standing consequence rather than a broken example.
+Making this `curl` succeed means publishing a Catalog product and ordering
+*that* id, which is two more steps than a README block earns; the reachable
+proofs here stay the 401, the 403 as `browser`, and the 404 an order you do not
+own returns.
 
 Override connection strings with `CATALOG_CONNECTION` /
 `CATALOG_MIGRATOR_CONNECTION` and `ORDERING_CONNECTION` /

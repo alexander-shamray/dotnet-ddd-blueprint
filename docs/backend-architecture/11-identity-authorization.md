@@ -225,8 +225,13 @@ public static class OrderingPermissions
 
 **A service's vocabulary holds what its endpoints require, and nothing else.**
 This sample carried a third entry, `orders:read`, until PR-18 shipped the
-service and had no read endpoint to require it — §6.5's query slice is PR-20's,
-so the constant arrives then. A permission printed here ahead of the endpoint
+service and had no read endpoint to require it. It arrives with whichever PR
+gives Ordering a read endpoint, and that is deliberately not a PR number: this
+sentence said PR-20's, and PR-20 turned out to consume Catalog's events into a
+projection and add no endpoint at all. **A permission dated to a PR is a claim
+about that PR's scope**, which is not this chapter's to make — the rule is
+that the constant follows the endpoint, whichever PR brings one. A permission
+printed here ahead of the endpoint
 that names it is the first half of the rule below, demonstrated by the sample
 that states it. Catalog's is one entry — `catalog:write` — because its listing is anonymous
 ([§10.2](10-api-gateway.md)); there is no `catalog:read`, because a permission
