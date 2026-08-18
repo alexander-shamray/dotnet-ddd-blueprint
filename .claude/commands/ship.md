@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -298,7 +298,7 @@ same argument as never calling a branch clean because asking failed.
    | In a worktree whose branch is **unfinished** | **Stay.** This is a resumed run and that directory is its workspace |
    | In the main checkout on a **finished** branch | `bash .claude/scripts/git-switch-existing.sh main` — the tree is clean by the predicate, so there is no second condition to check here |
    | In the main checkout on an **unfinished** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
-   | In the main checkout on `main` | Nothing but the teardown below |
+   | In the main checkout on `main` | The teardown below — but the pull inside it only when `main` is itself clean and not ahead of `origin/main`, which is the same predicate one branch over |
 
    **Finished means the workspace holds nothing of its own — all three of
    these, with no limbs and no exceptions.** Everything else is unfinished,
@@ -417,7 +417,8 @@ same argument as never calling a branch clean because asking failed.
    ```bash
    git worktree prune                      # registrations whose directories are gone
    git worktree list                       # what is actually still there
-   git pull --ff-only                      # ONLY when HEAD is main — see below
+   git pull --ff-only                      # ONLY on a clean main that is not
+                                           # ahead of origin/main — see below
    ```
 
    **Both Stay rows leave the session off `main`**, and one of them leaves it
@@ -425,6 +426,34 @@ same argument as never calling a branch clean because asking failed.
    the repository, which is why they are unguarded; the pull is the only line
    that reads HEAD, and on either Stay row a bare `git pull --ff-only` would
    update the feature branch instead.
+
+   **`main` is a workspace too, and the last row used to exempt it from the
+   only predicate this step has.** Two states break the unconditional pull, and
+   they break it in opposite directions. A **dirty** `main` is the state
+   `/branch` handles by branching in place and carrying the work — and
+   `git pull --ff-only` refuses when the fast-forward would touch a modified
+   file, so the pull fails first and takes the documented path down with it, on
+   a raw git error rather than on anything this file names. A `main` **ahead of
+   `origin/main`** is worse for being quiet: the pull succeeds or reports
+   nothing to do, step 1 forks from `origin/main`, and the local commits stay
+   on `main` outside the PR with nothing saying so.
+
+   So the pull is guarded on both reads, and the two states are then reported
+   rather than acted on:
+
+   - **Dirty.** Skip the pull, say the base was not refreshed, and carry on —
+     `/branch` owns the branch-in-place path and this step must not preempt it
+     by failing in front of it.
+   - **Ahead.** Skip the pull and **name the commits**. This chain does not
+     adopt them: work committed directly to `main` is what `/commit` refuses
+     and `/branch` exists to prevent, and folding it into an unrelated PR
+     because it happened to be sitting there is a worse answer than leaving it
+     visible. The rejected alternative was branching from `HEAD` instead of
+     `origin/main` — it would carry the commits, and it would also make every
+     ordinary run's base depend on whatever was last committed locally, which
+     is the staleness `/branch` cuts from `origin/main` to avoid.
+
+   Neither is a stop. Both are one line in the report.
 
    **Reading the heading as "go to the main checkout" is the failure mode, and
    it undoes the row that was just obeyed.** A session that Stayed in an
@@ -1018,10 +1047,21 @@ same argument as never calling a branch clean because asking failed.
    gh pr view <n> --json state,mergeCommit              # 1. MERGED, with an oid
    #    ExitWorktree({action: "keep"})                  # 2. forked runs only — a tool, not bash
    bash .claude/scripts/git-switch-existing.sh main     # 3. in-place runs only
-   git pull --ff-only                                   # 4. main, with the merge commit on it
-   git worktree remove ../<checkout-name>-<slug>        # 5. forked runs only
-   git worktree prune                                   # 6.
+   git pull --ff-only                                   # 4. main, now containing the merge
+   git merge-base --is-ancestor <merge-oid> HEAD        # 5. and it really does contain it
+   git worktree remove ../<checkout-name>-<slug>        # 6. forked runs only
+   git worktree prune                                   # 7.
    ```
+
+   **`main` ends at a descendant of the merge, not at the merge**, and the
+   ancestry check is what says so honestly. Another PR merging between this
+   merge and the pull leaves local `main` correctly ahead of this run's oid —
+   nothing has gone wrong, and a report claiming `main` *is* that oid would be
+   false on an ordinary Tuesday. What the run can promise is containment, so
+   that is what it checks and what it reports: the HEAD `main` actually landed
+   on, and that the merge is in its history. The check is the only guard
+   between a pull that silently did nothing and a report that says the merge
+   arrived.
 
    **Verify first.** Removing the worktree is the one step in this chain that
    destroys something, and doing it on an assumed merge is how an unmerged
@@ -1039,12 +1079,12 @@ same argument as never calling a branch clean because asking failed.
    **The in-place path is the mirror image.** There is no worktree to leave and
    none to remove, and the session *is* sitting on the merged branch in the
    main checkout — so line 3 is the only thing that makes the pull mean `main`,
-   and lines 2 and 5 are skipped. Running line 5 anyway exits non-zero against
+   and lines 2 and 6 are skipped. Running line 6 anyway exits non-zero against
    a worktree that never existed and stops the chain on a helper failure with
    nothing behind it.
 
-   The pull and the prune run on both paths, once whichever of lines 2 and 3
-   applies has put HEAD on `main`. Skipping the pull is what leaves the main
+   The pull, the ancestry check and the prune run on both paths, once whichever
+   of lines 2 and 3 applies has put HEAD on `main`. Skipping the pull is what leaves the main
    checkout a merge behind — precisely the state step 0 exists to stop the next
    run from starting in.
 
@@ -1083,9 +1123,11 @@ took decisions and lists none of them has not reported — it has hidden. A run
 that took none says so in one line.
 
 **Then the merge and the workspace.** Whether the PR merged and its merge oid,
-or which of the two gates stopped it; that `main` was pulled and is now at that
-oid; the worktree removed, or the one left behind and why git refused it; and
-the merged branch still sitting in `git branch`.
+or which of the two gates stopped it; that `main` was pulled, the HEAD it is
+now at, and that that HEAD contains the merge oid — containment rather than
+equality, because a PR merging in between leaves `main` at a later descendant
+and nothing is wrong; the worktree removed, or the one left behind and why git
+refused it; and the merged branch still sitting in `git branch`.
 
 A step skipped on an assumption gets its assumption restated here rather than
 left in the middle of the run, and a check that did not run is named. The whole
