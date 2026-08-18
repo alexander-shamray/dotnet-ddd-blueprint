@@ -45,7 +45,18 @@ directory. Nothing structural will catch its drift; the *one rule* is what
 carries it, exactly as it carries `CLAUDE.md` itself.
 
 **Newest first.** A PR appends its block at the top of the log, under the same
-heading form as its neighbours, and does not edit anyone else's.
+heading form as its neighbours.
+
+**It does not rewrite another PR's argument — but it does reconcile another
+PR's live claims, and the two are not the same thing.** An entry records how a
+PR was reasoned through, so re-arguing it later destroys the only thing the
+entry is for. A *number* restated inside that argument is different: it is a
+claim about the system, and the one rule above binds it exactly as it binds any
+other. PR-10's block is the worked example — it states the compose smoke's
+timeout and says in place that the figure "is restated here, which is what
+makes it a claim to reconcile rather than a fact to read". PR-17, PR-18 and
+PR-19 each raised it, in that block, and were right to. **A log that forbade
+those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
