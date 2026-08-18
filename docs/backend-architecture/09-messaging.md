@@ -1437,7 +1437,7 @@ cfg.ReceiveEndpoint(
         // rather than a preference, and the callout below says what the other
         // order costs.
         e.UseConsumeFilter(typeof(InboxFilter<>), context);
-        e.UseInMemoryOutbox();
+        e.UseInMemoryOutbox(context);
 
         // One per command in §3.2's Accepts column. The saga sends four; a type
         // missing here is sent into a queue that ignores it.
@@ -1461,10 +1461,15 @@ cfg.ReceiveEndpoint(
     "ordering-catalog-events",
     e =>
     {
-        // One registration per event type this service subscribes to. The list
-        // must match Ordering's Consumes column in §3.2 — a handler with no
-        // registration here is never invoked, and looks correct while doing
-        // nothing.
+        // One line per event type this service subscribes to. The list must
+        // match Ordering's Consumes column in §3.2 — a handler with no line
+        // here is never invoked, and looks correct while doing nothing.
+        //
+        // Each of these types also needs an x.AddConsumer<T>() beside
+        // DisableUsageTelemetry, in the AddMassTransit callback that encloses
+        // this one: registering a consumer and binding it are two statements,
+        // and ConfigureConsumer resolves what AddConsumer registered. Nothing
+        // fails at startup if a type gets one and not the other.
         e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
         e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
         e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
@@ -2600,7 +2605,12 @@ cfg.ReceiveEndpoint(
 
         // Defers any Publish/Send until the consumer completes, so a retry does
         // not re-emit messages the failed attempt already sent.
-        e.UseInMemoryOutbox();
+        //
+        // The context argument is required rather than optional: the
+        // parameterless overload carries CS0618 at the pinned MassTransit
+        // version, which ADR-019 turns into a failed build. This line was
+        // printed without it until PR-20 compiled it.
+        e.UseInMemoryOutbox(context);
 
         e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
         e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
@@ -2608,9 +2618,24 @@ cfg.ReceiveEndpoint(
     });
 ```
 
+> **There is no `ConfigureEndpoints(context)` beside these, and its absence is
+> a decision.** That call gives every *registered* consumer with no explicit
+> binding a receive endpoint named after its type — and such an endpoint
+> carries neither the retry policy above nor the inbox filter, because both are
+> per-endpoint configuration that an invented endpoint never receives. This
+> section's own rule is that the inbox is the default and the saga is the one
+> written-down exception; an endpoint MassTransit creates takes that exemption
+> and writes nothing down. Measured while building PR-20: with
+> `ConfigureEndpoints` present and one `ConfigureConsumer` line deleted, the
+> event was still consumed and no inbox row was written. The cost of leaving it
+> out is that a consumer needs a line here as well as an `AddConsumer`, and
+> nothing at startup complains if it gets one and not the other — a gap that
+> fails visibly, traded against a convenience that fails quietly.
+
 > **Trap — the inbox filter inside the in-memory outbox.** Filters added first
-> are outermost, so `UseInMemoryOutbox()` before `UseConsumeFilter(…)` puts the
-> outbox *outside* the inbox — and the in-memory outbox flushes its buffered
+> are outermost, so `UseInMemoryOutbox(context)` before
+> `UseConsumeFilter(…)` puts the outbox *outside* the inbox — and the
+> in-memory outbox flushes its buffered
 > `Publish`/`Send` calls **after** the inner pipeline returns. The inbox row is
 > then committed first and the messages go out second, which is the wrong way
 > round in the one case that matters: if the flush fails, the broker redelivers,
@@ -2644,7 +2669,7 @@ cfg.ReceiveEndpoint(
                 maxInterval: TimeSpan.FromMinutes(1),
                 intervalDelta: TimeSpan.FromSeconds(2)));
 
-        e.UseInMemoryOutbox();
+        e.UseInMemoryOutbox(context);
 
         // No InboxFilter here. The saga is idempotent by construction: a
         // redelivered StockReserved finds the instance already past
