@@ -256,9 +256,26 @@ Redis key prefix, a token request with no scope.
 
 Worked examples of each: `IProductPriceReader` unregistered fails
 `ValidateOnBuild`, because `PlaceOrderHandler` needs it. `ProductPriceProjection`
-unregistered fails only the test — nothing constructs it, it is simply never
-called. `ServiceIdentityOptions` unbound fails only `ValidateOnStart` — the
-container resolves `IOptions<T>` happily and hands back an empty instance.
+unregistered fails only the test — no constructor names it, so the container
+starts as happily as ever. `ServiceIdentityOptions` unbound fails only
+`ValidateOnStart` — the container resolves `IOptions<T>` happily and hands
+back an empty instance.
+
+**What "fails only the test" does *not* mean is that nothing notices at
+runtime**, and the middle example is the one where that distinction became
+real. While no endpoint bound Catalog's events, an unregistered
+`ProductPriceProjection` was silent in the fullest sense: nothing resolved
+`IIntegrationEventHandler<ProductPublished>`, so nothing missed it. Once
+`ordering-catalog-events` binds those three types ([§9.8](09-messaging.md)),
+`IntegrationEventConsumer<T>` resolves the handler list on every delivery and
+**throws** on an empty one — §9.4's "the endpoint binds this type, so
+something should handle it". So the registration test remains the only one of
+the three *startup* guards that fires, which is what this row is about, and
+the failure behind it moved from silence to a message on the error queue.
+
+A guard's value is what it catches before deployment; how loudly the gap
+announces itself afterwards is a separate axis. The two are easy to collapse
+into one sentence, and this paragraph exists because they were.
 
 ```csharp
 [Fact]
