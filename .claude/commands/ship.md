@@ -110,7 +110,7 @@ that reaches a merge — so the rows below say what is owed *between* them:
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
-| On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With a clean tree, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty one the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
+| On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With nothing left in the workspace, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty tree or commits made after the merge the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
 
 **Step 0's teardown targets a worktree that is already finished; step 7's
 targets the one this run just merged. Exactly one of them owns any given
@@ -300,16 +300,31 @@ same argument as never calling a branch clean because asking failed.
    | In the main checkout on an **unfinished** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
    | In the main checkout on `main` | Nothing but the teardown below |
 
-   **Finished means a clean tree, and then either a merged PR or no PR with
-   nothing ahead of `origin/main`.** Everything else is unfinished, including a
-   branch whose commits are all pushed and which has simply not reached `/pr`
-   yet.
+   **Finished means the workspace holds nothing of its own — all three of
+   these, with no limbs and no exceptions.** Everything else is unfinished,
+   including a branch whose commits are all pushed and which has simply not
+   reached `/pr` yet.
 
    ```bash
-   gh pr view --json state          # MERGED, or no PR at all
-   git log origin/main..HEAD        # empty means nothing of its own
-   git status --short               # empty, or there is work here
+   git fetch origin main            # or the next read is about a stale ref
+   git status --short               # empty: no uncommitted or untracked work
+   git log origin/main..HEAD        # empty: nothing committed that main lacks
+   gh pr view --json state          # not OPEN: nothing still owed on a PR
    ```
+
+   **A merged PR satisfies the middle read rather than bypassing it**, which
+   is what lets the limbs go: merging puts the branch's commits into
+   `origin/main`, so `origin/main..HEAD` is empty afterwards — and it is
+   non-empty exactly when somebody committed *after* the merge, which is work
+   this run must not walk away from. The fetch is what makes that true rather
+   than accidental; without it `origin/main` is whatever it was when this
+   worktree was last pulled, and a freshly merged branch reads as ahead of it.
+
+   **The PR read is the one that can still differ once the other two pass**,
+   which is why it stays rather than collapsing into them. A branch whose
+   commits all reached `origin/main` by some other route, with a PR still
+   open, is a question somebody owes an answer to and this chain should not
+   tidy away.
 
    **The tree check is the fourth shape of the same stranding, and it is the
    one that bites earliest.** A worktree forked minutes ago, edited and not yet
@@ -319,28 +334,36 @@ same argument as never calling a branch clean because asking failed.
    be on `main` with step 1 about to refuse a branch that already exists. The
    guard that saves the files is not the guard that saves the run.
 
-   **The tree check governs both limbs, and attaching it to the no-PR one
-   alone is the fifth shape.** A merged PR with uncommitted edits beside it
-   satisfies every other read, so a predicate reading *merged, or a clean tree
-   with no PR* calls it finished: step 0 exits the worktree, `git worktree
-   remove` refuses the dirty directory, and the resume table's merged-PR row
-   then ends the run — session on `main`, edits in a directory nobody is in,
-   and nothing left that will ever look at it again. Cleanliness is a fact
-   about the **workspace**; the PR state is a fact about the **branch**. Only
-   one of the two answers *is there work here*, and it is the one that has to
-   be true on both limbs.
+   **The fifth and sixth shapes are both the same defect — a read given to one
+   limb of a two-limbed predicate — and that is why the limbs are gone.** It
+   used to read *a merged PR, **or** a clean tree with no PR and nothing ahead
+   of `origin/main`*, and each of the two reads on the right-hand limb was
+   missing from the left. A merged PR with **uncommitted edits** beside it
+   passed (fifth); so did a merged PR with **clean commits made after the
+   merge** (sixth). Both end identically: step 0 exits the worktree, the resume
+   table's merged-PR row ends the run, and the work is left where nothing will
+   look at it again — the edits in a directory nobody is in, or the commits on
+   a branch no later run will name.
 
-   **So a merged PR with a dirty tree is unfinished, the second row keeps the
-   session in it, and that is a run with nothing owed rather than the start of
-   one.** There is nothing to ship — the PR has landed, and the uncommitted
-   work belongs to whatever comes next. Nor may it be adopted onto this branch,
-   tempting as step 1's already-on-a-branch override makes it: a second PR cut
+   **A conjunction cannot carry this defect and a disjunction kept generating
+   it**, which is worth more than either fix. All three reads ask one question
+   about one thing — *is there work here* — and nothing about a PR's state
+   exempts a workspace from being asked. Two shapes arrived one review round
+   apart, in the same file, the second landing in the commit that fixed the
+   first; the shape is what produced them, so the shape is what changed.
+
+   **So a merged PR with work beside it is unfinished, the second row keeps
+   the session in it, and that is a run with nothing owed rather than the start
+   of one.** There is nothing to ship — the PR has landed, and the uncommitted
+   edits or the later commits belong to whatever comes next. Nor may either be
+   adopted onto this branch, tempting as step 1's already-on-a-branch override
+   makes it: a second PR cut
    from a merged branch leaves `gh pr view --json state` answering `MERGED`
    from the *first* one on every later resume, so the branch becomes unreadable
-   to this command permanently. Report the uncommitted work and the directory
-   holding it, and end there. **That is not one of the four stops** — nothing
-   failed and nothing is being asked; it is a run that found nothing to do, and
-   saying so is the whole of what it owes.
+   to this command permanently. Report what the workspace still holds and the
+   directory holding it, and end there. **That is not one of the four stops** —
+   nothing failed and nothing is being asked; it is a run that found nothing to
+   do, and saying so is the whole of what it owes.
 
    **The word to avoid here is "unpushed", and avoiding it is the whole of this
    fix.** The resume table above uses it in git's ordinary sense — commits not
@@ -422,12 +445,12 @@ same argument as never calling a branch clean because asking failed.
 
    **Merged is not the test, and keying this line on it left abandoned
    worktrees behind.** The predicate has two limbs, and a branch that was
-   forked, never committed to and never PR'd is finished by the second one —
-   step 0 will have exited it on precisely that basis, and a teardown asking
-   for `merged` would then decline the directory the row above had just left,
-   every time. One definition read at both sites is the whole fix; the
-   asymmetry was the same one the fifth shape above turned on, in the other
-   direction.
+   forked, never committed to and never PR'd satisfies all three reads without
+   ever having had a PR to merge — step 0 will have exited it on precisely
+   that basis, and a teardown asking for `merged` would then decline the
+   directory the row above had just left, every time. One definition read at
+   both sites is the whole fix; asking for `merged` here was the same
+   asymmetry the fifth and sixth shapes turned on, in the other direction.
 
    Without `-f` that command **refuses a worktree holding uncommitted or
    untracked files**, which is the guard rather than an inconvenience — the
@@ -587,9 +610,15 @@ same argument as never calling a branch clean because asking failed.
       file records are already triaged and fixed by then, and stalling the
       chain on the verification the limits refuse is the failure this exit
       exists to avoid — but the file stays where it is as the record of the
-      unfinished half, the report says a recheck is owed rather than merely
-      skipped, and every commit while it sits there stays scoped, exactly as
-      the resume table requires.
+      unfinished half, and every commit while it sits there stays scoped,
+      exactly as the resume table requires.
+
+      **The report says the recheck was skipped and the file cleaned up, not
+      that one is owed** — the same correction the paragraph above makes for
+      the whole-loop case, missed here when that one was written. Step 7
+      removes `suggestions.md` and merges, so a recheck booked as outstanding
+      is work no later run can perform and no branch will carry. Name the
+      verification that did not happen; do not record it as a debt.
 
       Residual, stated in the script and in `CLAUDE.md`: **egress is not
       restricted**. The container reaches the network, and confining it to
@@ -907,9 +936,15 @@ same argument as never calling a branch clean because asking failed.
    Two things genuinely gate it, and neither is a judgement:
 
    ```bash
-   gh pr view <n> --json state,mergeable,mergeStateStatus
+   gh pr view <n> --json state,mergeable,mergeStateStatus,headRefOid
    gh pr checks <n>
    ```
+
+   **`headRefOid` is read here, before the checks and before the merge**, and
+   it is the `<oid>` the merge below matches on. Reading it afterwards would
+   defeat the point: the value has to come from the same look that decided the
+   PR was mergeable, so that everything between that decision and the merge is
+   something the merge can refuse.
 
    `mergeable` must be `MERGEABLE` and every check must pass. **A merge onto a
    red `main` is not a recommended option**, and a conflicted branch is a
@@ -926,8 +961,18 @@ same argument as never calling a branch clean because asking failed.
    entry in `git log --merges` reads `Merge pull request #n from …`:
 
    ```bash
-   gh pr merge --merge <n>
+   gh pr merge --merge <n> --match-head-commit <oid>
    ```
+
+   **`--match-head-commit` is what binds the merge to the head whose checks
+   were read.** Without it the green verdict and the merge are two reads of a
+   moving target: a push landing between them merges a commit whose checks
+   never ran, and the rule above — wait for the run on the pushed head —
+   would have been satisfied by a commit that is no longer the head. The oid
+   is the one captured before polling, from `gh pr view <n> --json
+   headRefOid`, and an intervening push then fails the merge rather than
+   riding in on it. **It is
+   the only guard in this step that fails closed**, and it costs one argument.
 
    **The flag comes before the number, and that is about the grant rather than
    about `gh`.** The frontmatter permits `Bash(gh pr merge --merge:*)`, and a

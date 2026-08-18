@@ -2703,7 +2703,7 @@ Delivery:
 
 | | |
 |---|---|
-| `/ship` | Start from a clean, current `main` with no finished worktree left over, then run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, which is final now that the chain merges — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads — or until either loop spends its twelfth check, which ends that loop unconverged and holds nothing; then **merge the PR** and tear the workspace down. **It stops for nothing that is a judgement** — check findings, `Needs a decision` rows and `Ask` threads are decided, recorded and carried past |
+| `/ship` | Start from a clean, current `main` with no finished worktree left over, then run the three below in sequence — the first of them forking the PR's own worktree where it can, and saying so when it cannot — resuming where a previous run stopped; once the PR is open, loop `/review-branch` (run by Grok) and `/review-grok` until two consecutive passes leave no `suggestions.md` — or until a Grok usage-limit skip hands over early, which is final now that the chain merges — then loop a requested Copilot review and `/review-copilot` until one review lands with no new findings and no unresolved threads — or until either loop spends its twelfth check without having converged on it, which ends that loop unconverged and holds nothing — a loop that converges *on* its last permitted check has converged like any other; then **merge the PR** and tear the workspace down. **It stops for nothing that is a judgement** — check findings, `Needs a decision` rows and `Ask` threads are decided, recorded and carried past |
 | `/branch` | Start a correctly named branch — **in a sibling worktree** the session moves into, from a clean `main`; in place when the tree is dirty (carrying the work off `main`) or the parent is not writable |
 | `/commit` | Split the working tree into semantic commits with arguing bodies |
 | `/pr` | Open a PR in the house body form |
@@ -2820,16 +2820,17 @@ by step 0 and the run ends there, because a second removal would exit non-zero
 against a path that is no longer a worktree and stop the chain on a helper
 failure with nothing behind it.
 
-**Finished means a clean tree, and then either a merged PR or no PR with
-nothing ahead of `origin/main`; everything else is left alone, and that
-exception is load-bearing.** It is what
-lets a resumed `/ship` pick a branch back up, where evicting the session to
-`main` would strand the work and leave step 1 unable to re-fork a name that
-already exists.
+**Finished means the workspace holds nothing of its own — a clean tree,
+nothing ahead of a freshly fetched `origin/main`, and no open PR, all three at
+once; everything else is left alone, and that exception is load-bearing.** It
+is what lets a resumed `/ship` pick a branch back up, where evicting the
+session to `main` would strand the work and leave step 1 unable to re-fork a
+name that already exists.
 
-**It took five drafts to state, and each miss was the same failure in a new
-shape.** First a worktree, fixed. Then an in-place branch — what `/branch`
-produces every time `main` was dirty — stranded by the identical switch to
+**It took six drafts to state, and every miss after the first was one read
+missing from one limb of a disjunction.** First a worktree, fixed. Then an
+in-place branch — what `/branch` produces every time `main` was dirty —
+stranded by the identical switch to
 `main` minus the directory. Then the predicate itself: written as "nothing
 unpushed", it swept in a branch whose commits are all pushed and which has
 simply not reached `/pr` yet, because that phrase means something else in the
@@ -2842,8 +2843,12 @@ refuses a dirty tree saves the *files* while the session walks away from the
 half, which reopened the same hole one limb over: a **merged** PR with
 uncommitted edits beside it passed as finished, and the teardown's refusal
 saved the files while the merged-PR resume row ended the run around them.
-Cleanliness is a fact about the workspace and belongs to neither limb in
-particular.
+Then the same hole one read over: a merged PR with clean commits made *after*
+the merge is ahead of `origin/main`, and only the no-PR limb was asking. **The
+predicate has no limbs now** — a clean tree, nothing ahead of a fetched
+`origin/main`, and no open PR, conjoined. All three ask *is there work here*,
+nothing about a PR's state exempts a workspace from being asked, and a
+conjunction cannot carry the defect a disjunction kept generating.
 
 The merged **branch** survives all of it: `git branch -d` is denied and stays
 denied.
