@@ -58,18 +58,34 @@ public class OptionsValidationTests
 
     /// <summary>
     /// The base fixture's settings with one <c>Identity:Client</c> member
-    /// removed.
+    /// blanked rather than merely left unset.
     /// </summary>
+    /// <remarks>
+    /// <b>Omitting it is not the same as removing it, and the difference is a
+    /// developer's shell.</b> Configuration is layered, so a member this
+    /// factory simply declines to supply can still be filled by a lower
+    /// provider — and the environment is exactly where it would come from:
+    /// <c>deploy/compose/README.md</c> tells a developer to
+    /// <c>export Identity__Client__ClientId=web-bff</c> to run this host,
+    /// which is the same shell they then run <c>dotnet test</c> in. The
+    /// "missing" case would quietly become "present", the host would start,
+    /// and this test would fail — or worse, pass for the wrong reason on the
+    /// one machine that had not exported anything.
+    /// <para>
+    /// Setting the key to an empty string is what makes the removal real. It
+    /// is also the more faithful case: §11.3 already records that a blank
+    /// environment variable reaches configuration as <c>""</c> rather than
+    /// null, and <c>[Required]</c> refuses both.
+    /// </para>
+    /// </remarks>
     private sealed class MissingSettingFactory(string member) : BffFactory
     {
         protected override IEnumerable<KeyValuePair<string, string?>> Settings =>
         [
             new(AuthenticationExtensions.AuthorityKey, UnreachableAuthority),
-            .. Members
-                .Where(name => !string.Equals(name, member, StringComparison.Ordinal))
-                .Select(name => new KeyValuePair<string, string?>(
-                    $"{ServiceIdentityOptions.SectionName}:{name}",
-                    "supplied"))
+            .. Members.Select(name => new KeyValuePair<string, string?>(
+                $"{ServiceIdentityOptions.SectionName}:{name}",
+                string.Equals(name, member, StringComparison.Ordinal) ? "" : "supplied"))
         ];
     }
 }

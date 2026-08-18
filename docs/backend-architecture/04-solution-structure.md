@@ -201,23 +201,24 @@ violated everywhere that matters, because "Api may reference Infrastructure"
 silently licenses an endpoint to inject a `DbContext`.
 
 ```csharp
-// Every namespace holding a transport adapter, not just the HTTP one. A
-// service with one endpoint class has only `.Endpoints`; Catalog gained
-// `.Grpc` with §9.7's pricing hop, and a selector naming the first alone
-// silently stopped judging half the surface.
-private const string TransportNamespaces = @"\.(Endpoints|Grpc)$";
+// Everything in the host except the composition root. NOT a namespace: the
+// rule above is about Program.cs being the one place Infrastructure may be
+// referenced, and any selector narrower than the assembly leaves somewhere
+// for a new surface to appear outside it.
+private static PredicateList HostTypesOutsideTheCompositionRoot() => Types
+    .InAssembly(typeof(Program).Assembly)
+    .That().DoNotHaveName("Program")
+    .And().DoNotHaveNameStartingWith("<");   // the compiler's, for Program's own statements
 
 [Fact]
-public void The_transport_surface_does_not_depend_on_infrastructure()
+public void Nothing_but_the_composition_root_depends_on_infrastructure()
 {
     // Not the service's Infrastructure namespace alone: the rule above is
     // "Application and Domain contracts only", and the concrete types it
-    // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach an
-    // adapter transitively without any Ordering.Infrastructure dependency
-    // to trip on.
-    TestResult result = Types
-        .InAssembly(typeof(OrderEndpoints).Assembly)
-        .That().ResideInNamespaceMatching(TransportNamespaces)
+    // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach a
+    // type transitively without any Ordering.Infrastructure dependency to
+    // trip on.
+    TestResult result = HostTypesOutsideTheCompositionRoot()
         .ShouldNot().HaveDependencyOnAny(
             "Ordering.Infrastructure",
             "Microsoft.EntityFrameworkCore",
@@ -230,34 +231,33 @@ public void The_transport_surface_does_not_depend_on_infrastructure()
 }
 
 [Fact]
-public void The_gate_above_is_judging_every_transport_adapter()
+public void The_gate_above_is_judging_this_host_at_all()
 {
-    string[] selected =
-    [
-        .. Types
-            .InAssembly(typeof(OrderEndpoints).Assembly)
-            .That().ResideInNamespaceMatching(TransportNamespaces)
-            .GetTypes()
-            .Select(type => type.Name)
-    ];
+    string[] judged = [.. HostTypesOutsideTheCompositionRoot().GetTypes().Select(t => t.Name)];
 
-    // Named rather than counted: a count goes stale on every new adapter and
-    // gets "fixed" by editing the number. This asserts that the adapters this
-    // host has are inside the rule, so one arriving in a namespace the pattern
-    // misses fails HERE rather than passing silently there.
-    selected.ShouldContain(nameof(OrderEndpoints));
+    judged.ShouldContain(nameof(OrderEndpoints));
 }
 ```
 
-> **The second test is the one that matters, and it exists because the first
-> one passed while judging nothing.** Catalog's gate selected `.Endpoints`
-> alone; PR-19 added a gRPC service in `.Grpc`, which is an endpoint in every
-> sense this rule cares about — mapped into the pipeline, reachable from
-> outside the process, obliged to hold to Application contracts — and the gate
-> stayed green without ever looking at it. A dependency rule can only be
-> trusted alongside an assertion about **what it selected**; otherwise a new
-> transport namespace silently narrows it, and the failure looks exactly like
-> success.
+> **This gate selected a namespace for two PRs, and the selector was wrong
+> twice in the same way.** It began as
+> `.ResideInNamespaceContaining(".Endpoints")`, which silently stopped covering
+> Catalog's transport surface the moment §9.7's `PricingService` arrived in
+> `.Grpc` — the file stayed green while judging half of what it named. Widening
+> it to `\.(Endpoints|Grpc)$` fixed that instance and **kept the defect**: a
+> third adapter under some later `.GraphQL` would be outside the pattern and
+> outside the rule again.
+>
+> A companion test naming the known adapters does not close it either, and
+> believing it did is the subtler error. The set such a test inspects is
+> unchanged by a type the pattern never selected, so it passes exactly as
+> before — it protects against *narrowing* the pattern, never against
+> *outgrowing* it.
+>
+> So the selector is gone. Scoping the rule to the whole assembly minus the
+> composition root is what this section's prose said in the first place, and it
+> leaves nothing for a namespace to escape. The second test is then guarding
+> the one vacuity that remains — selecting nothing at all.
 
 One more, for the rule [§9.3](09-messaging.md) states in prose: application code publishes through
 `IIntegrationEventPublisher` and the outbox, never through the bus directly.

@@ -825,53 +825,48 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "/// forbidden reference before it was trusted — in the service this one\n"
             "/// was scaffolded from, not here, where there is nothing yet to judge.\n",
         ),
-        # The non-vacuity test names the two adapters the exemplar has, and a
-        # scaffolded service has neither — so it cannot travel, and softening
-        # it to "zero or more" would delete the only thing it asserts. It
-        # returns with the first adapter, which is the moment it starts being
-        # able to fail.
+        # The dependency rule itself TRAVELS now, and that is new. It used to
+        # select a namespace, so a service with no endpoints selected nothing;
+        # it now covers everything but the composition root, which is a true
+        # and checkable statement about a host with no adapters at all.
+        #
+        # What still leaves is the non-vacuity test, because it names the two
+        # adapters the exemplar has and this service has neither. Softening it
+        # to "zero or more" would delete the only thing it asserts.
         (
             "\n"
             "    [Fact]\n"
-            "    public void The_gate_above_is_judging_every_transport_adapter()\n"
+            "    public void The_gate_above_is_judging_this_host_at_all()\n"
             "    {\n"
-            "        string[] selected =\n"
-            "        [\n"
-            "            .. Types\n"
-            "                .InAssembly(typeof(Program).Assembly)\n"
-            "                .That().ResideInNamespaceMatching(TransportNamespaces)\n"
-            "                .GetTypes()\n"
-            "                .Select(type => type.Name)\n"
-            "        ];\n"
+            "        string[] judged = [.. HostTypesOutsideTheCompositionRoot().GetTypes().Select(t => t.Name)];\n"
             "\n"
-            "        // Named rather than counted. A count would go stale on every new\n"
-            "        // adapter and would be \"fixed\" by editing the number, which is the\n"
-            "        // opposite of what this test is for: it asserts that the two adapters\n"
-            "        // this host has are both inside the rule, so a third arriving in a\n"
-            "        // namespace the pattern misses fails HERE rather than passing\n"
-            "        // silently there.\n"
-            "        selected.ShouldContain(nameof(Endpoints.ProductEndpoints));\n"
-            "        selected.ShouldContain(\"PricingService\");\n"
+            "        // The only vacuity left to guard. The rule above covers everything but\n"
+            "        // the root, so no namespace can escape it — what could still make it\n"
+            "        // meaningless is selecting nothing, which is what a wrongly-anchored\n"
+            "        // assembly reference would produce.\n"
+            "        //\n"
+            "        // Named rather than counted: a count goes stale on every new type and\n"
+            "        // gets \"fixed\" by editing the number. These two are the host's\n"
+            "        // transport surface, and they are what the rule exists for.\n"
+            "        judged.ShouldContain(nameof(Endpoints.ProductEndpoints));\n"
+            "        judged.ShouldContain(\"PricingService\");\n"
             "    }\n",
             "\n"
-            "    // The gate above is VACUOUS in this service, and there is no test here\n"
-            "    // that says so — because the one that would has to name an adapter, and\n"
-            "    // naming one that does not exist is not an assertion. Add it with the\n"
+            "    // A non-vacuity test belongs here and cannot be written yet, because it\n"
+            "    // has to NAME an adapter and this service has none. Add it with the\n"
             "    // first endpoint:\n"
             "    //\n"
             "    //     [Fact]\n"
-            "    //     public void The_gate_above_is_judging_every_transport_adapter() =>\n"
-            "    //         Types\n"
-            "    //             .InAssembly(typeof(Program).Assembly)\n"
-            "    //             .That().ResideInNamespaceMatching(TransportNamespaces)\n"
+            "    //     public void The_gate_above_is_judging_this_host_at_all() =>\n"
+            "    //         HostTypesOutsideTheCompositionRoot()\n"
             "    //             .GetTypes()\n"
-            "    //             .Select(type => type.Name)\n"
+            "    //             .Select(t => t.Name)\n"
             "    //             .ShouldContain(nameof(Endpoints.<Aggregate>Endpoints));\n"
             "    //\n"
-            "    // Its subject is the SELECTION, not the dependencies: a transport\n"
-            "    // namespace the pattern above misses leaves this file green while\n"
-            "    // judging nothing, which is exactly how the .Grpc namespace escaped it\n"
-            "    // in the service this one was scaffolded from.\n",
+            "    // Its subject is the SELECTION, not the dependencies. The rule above\n"
+            "    // needs no namespace to be right — that is exactly what it was changed\n"
+            "    // away from — so what is left to check is that it is looking at this\n"
+            "    // assembly at all.\n",
         ),
     ),
     "tests/Catalog.Api.Tests/HostSmokeTests.cs": (

@@ -7,40 +7,60 @@ namespace Catalog.Api.Tests;
 
 /// <summary>
 /// §4.2's composition-root rule: only <c>Program.cs</c> may reference
-/// Infrastructure, and the transport surface holds to Application and Domain
-/// contracts.
+/// Infrastructure, and everything else in the host holds to Application and
+/// Domain contracts.
 /// Vacuously green from PR-07 until PR-10's first endpoint — a rule
 /// introduced before the violations exist is a constraint, not a backlog
 /// item — and judging real types since.
 /// </summary>
+/// <remarks>
+/// <b>This gate selected a NAMESPACE until PR-19, and twice that was wrong in
+/// the same way.</b> It began as <c>.ResideInNamespaceContaining(".Endpoints")</c>,
+/// which silently stopped covering the transport surface when
+/// <c>PricingService</c> arrived in <c>.Grpc</c>; widening it to a pattern
+/// fixed that instance and kept the defect, because a third adapter under some
+/// future <c>.GraphQL</c> would be outside the pattern and outside the rule
+/// again — and a companion test naming the known adapters could not see that
+/// either, since the set it inspects is unchanged by a type the pattern never
+/// selected.
+/// <para>
+/// So the selector is gone. The rule now covers the <b>whole assembly</b>
+/// except the composition root, which is what §4.2's prose says in the first
+/// place, and namespace choice stops being load-bearing. There is nothing left
+/// for a new namespace to escape.
+/// </para>
+/// </remarks>
 public class ArchitectureTests
 {
     /// <summary>
-    /// Every namespace holding a transport adapter.
+    /// The two exclusions, and both are narrow on purpose.
     /// </summary>
     /// <remarks>
-    /// <b>It was <c>.Endpoints</c> alone, and PR-19 made that a hole rather
-    /// than a rule.</b> <c>PricingService</c> is an endpoint in every sense
-    /// §4.2 cares about — it is mapped into the pipeline, it is reachable from
-    /// outside the process, and it must hold to Application contracts — and it
-    /// lives in <c>.Grpc</c>, so the gate selected nothing of it and stayed
-    /// green. A gate that silently stops covering the newest surface is the
-    /// failure mode this repository keeps naming, so the fix comes with the
-    /// test below that makes the selection itself an assertion.
+    /// <c>Program</c> is the composition root — the one place §4.2 permits an
+    /// Infrastructure reference — and naming it is what makes the exemption
+    /// visible. Renaming the root would drop the exclusion and fail this test
+    /// loudly, which is the right direction to fail in.
+    /// <para>
+    /// The <c>&lt;</c> prefix is the compiler's: closures and
+    /// <c>&lt;PrivateImplementationDetails&gt;</c> emitted for
+    /// <c>Program.cs</c>'s own statements inherit its references, so they are
+    /// the root's shadow rather than code anybody wrote.
+    /// </para>
     /// </remarks>
-    private const string TransportNamespaces = @"\.(Endpoints|Grpc)$";
+    private static PredicateList HostTypesOutsideTheCompositionRoot() => Types
+        .InAssembly(typeof(Program).Assembly)
+        .That().DoNotHaveName("Program")
+        .And().DoNotHaveNameStartingWith("<");
 
     [Fact]
-    public void The_transport_surface_does_not_depend_on_infrastructure()
+    public void Nothing_but_the_composition_root_depends_on_infrastructure()
     {
         // Not the service's Infrastructure namespace alone: §4.2's rule is
         // "Application and Domain contracts only", and the concrete types it
-        // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach an
-        // adapter transitively without any Catalog.Infrastructure dependency to
+        // bans — DbContext, IPublishEndpoint, IConnectionMultiplexer — reach a
+        // type transitively without any Catalog.Infrastructure dependency to
         // trip on.
-        TestResult result = Types
-            .InAssembly(typeof(Program).Assembly)
-            .That().ResideInNamespaceMatching(TransportNamespaces)
+        TestResult result = HostTypesOutsideTheCompositionRoot()
             .ShouldNot().HaveDependencyOnAny(
                 "Catalog.Infrastructure",
                 "Microsoft.EntityFrameworkCore",
@@ -53,24 +73,19 @@ public class ArchitectureTests
     }
 
     [Fact]
-    public void The_gate_above_is_judging_every_transport_adapter()
+    public void The_gate_above_is_judging_this_host_at_all()
     {
-        string[] selected =
-        [
-            .. Types
-                .InAssembly(typeof(Program).Assembly)
-                .That().ResideInNamespaceMatching(TransportNamespaces)
-                .GetTypes()
-                .Select(type => type.Name)
-        ];
+        string[] judged = [.. HostTypesOutsideTheCompositionRoot().GetTypes().Select(t => t.Name)];
 
-        // Named rather than counted. A count would go stale on every new
-        // adapter and would be "fixed" by editing the number, which is the
-        // opposite of what this test is for: it asserts that the two adapters
-        // this host has are both inside the rule, so a third arriving in a
-        // namespace the pattern misses fails HERE rather than passing
-        // silently there.
-        selected.ShouldContain(nameof(Endpoints.ProductEndpoints));
-        selected.ShouldContain("PricingService");
+        // The only vacuity left to guard. The rule above covers everything but
+        // the root, so no namespace can escape it — what could still make it
+        // meaningless is selecting nothing, which is what a wrongly-anchored
+        // assembly reference would produce.
+        //
+        // Named rather than counted: a count goes stale on every new type and
+        // gets "fixed" by editing the number. These two are the host's
+        // transport surface, and they are what the rule exists for.
+        judged.ShouldContain(nameof(Endpoints.ProductEndpoints));
+        judged.ShouldContain("PricingService");
     }
 }
