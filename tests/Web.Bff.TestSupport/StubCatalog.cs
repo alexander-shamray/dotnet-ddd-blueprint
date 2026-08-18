@@ -79,6 +79,13 @@ public sealed class StubCatalog : IAsyncLifetime
     public string? RawAmount { get; set; }
 
     /// <summary>
+    /// A currency to answer with instead of the one the request asked for, so
+    /// a reply that contradicts its own request can be driven through the
+    /// endpoint.
+    /// </summary>
+    public string? RawCurrency { get; set; }
+
+    /// <summary>
     /// How many of the next calls to answer by aborting the connection instead
     /// of replying.
     /// </summary>
@@ -191,7 +198,7 @@ public sealed class StubCatalog : IAsyncLifetime
                     ProductId = id,
                     Name = price.Name,
                     Amount = stub.RawAmount ?? price.Amount.ToString(CultureInfo.InvariantCulture),
-                    Currency = request.Currency
+                    Currency = stub.RawCurrency ?? request.Currency
                 });
             }
 

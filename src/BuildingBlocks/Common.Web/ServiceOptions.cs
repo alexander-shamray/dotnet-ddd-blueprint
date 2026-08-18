@@ -32,6 +32,21 @@ public static class ServiceOptions
     /// the top rather than the middle because the band's job is to be
     /// comfortably under the gateway's 30–60 s and comfortably over the 5 s
     /// outbound total. A compile-time invariant, not a deployable value.
+    /// <para>
+    /// <b>Nothing enforces it at runtime, and that is worth stating where the
+    /// value lives.</b> No host registers request-timeout middleware, so this
+    /// is the ceiling the outbound budget is <i>checked against</i> rather than
+    /// a timeout any request will hit — which is exactly what §9.7 asks for
+    /// ("the ordering is the invariant … what to assert in a
+    /// configuration-validation test"), and is less than the word "timeout"
+    /// suggests on its own.
+    /// </para>
+    /// <para>
+    /// Making the tier real means request-timeout middleware in every host, and
+    /// a 504 in §10.5's table to go with it — a platform decision about the
+    /// error contract rather than something the BFF may take alone, which is
+    /// why PR-19 named the gap instead of closing it.
+    /// </para>
     /// </remarks>
     public static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(30);
 }

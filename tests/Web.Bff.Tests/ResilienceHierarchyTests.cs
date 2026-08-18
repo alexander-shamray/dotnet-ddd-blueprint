@@ -49,6 +49,13 @@ public class ResilienceHierarchyTests
         // gives up in the same instant the inner one would have answered, so
         // the retry that was about to succeed is discarded — the hierarchy is
         // an ordering and an ordering has no ties.
+        //
+        // **This checks a CONFIGURATION ordering, not a runtime one**, and the
+        // distinction is worth keeping because the name invites the stronger
+        // reading. Nothing registers request-timeout middleware, so
+        // ServiceOptions.OperationTimeout is a documented ceiling rather than
+        // a timeout a request meets — §9.7 asks for exactly this assertion,
+        // and its own file records what closing the gap would cost.
         options.TotalRequestTimeout.Timeout.ShouldBeLessThan(
             ServiceOptions.OperationTimeout,
             "§9.7: the outbound client total must be below the service operation total.");

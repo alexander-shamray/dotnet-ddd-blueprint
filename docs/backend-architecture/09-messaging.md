@@ -2340,6 +2340,19 @@ The values are configuration and will differ per system. **The ordering is the
 invariant** — that part is not negotiable, and it is what to assert in a
 configuration-validation test at startup.
 
+> **Two of these four layers are enforced today and two are documented.** The
+> outbound total and the per-attempt timeout are properties of the resilience
+> handler, so they fire. The gateway's request timeout and the service
+> operation total are not registered anywhere — no host takes request-timeout
+> middleware — so `ServiceOptions.OperationTimeout` is the ceiling the outbound
+> budget is *checked against* rather than a deadline a request meets.
+>
+> That is what the startup assertion above verifies, and it is worth naming
+> because the word "timeout" invites the stronger reading. Closing the gap
+> means middleware in every host **and** a 504 row in [§10.5](10-api-gateway.md)'s
+> table, which is a decision about the platform's error contract rather than
+> one a single host may take.
+
 ### Rules for every synchronous call
 
 1. **Timeout.** One to two seconds per attempt, per the table above; never

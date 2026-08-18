@@ -191,6 +191,23 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_reply_priced_in_another_currency_stays_a_500()
+    {
+        _catalog.RawCurrency = "USD";
+
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+
+        // Without this check the endpoint totalled a USD amount and labelled
+        // the quote GBP, because the response's currency came from the REQUEST
+        // rather than from the price. pricing.proto echoes the currency so each
+        // amount is self-describing, and nothing was reading it.
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+    }
+
+    [Fact]
     public async Task A_malformed_upstream_amount_stays_a_500()
     {
         _catalog.RawAmount = "12,50";

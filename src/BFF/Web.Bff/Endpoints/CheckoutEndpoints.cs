@@ -102,6 +102,26 @@ public static class CheckoutEndpoints
                                 "pricing.proto specifies.");
                         }
 
+                        // The reply says which currency each amount is in, and
+                        // until this check nothing read it — so a Catalog that
+                        // answered USD for a GBP request would have had the
+                        // amount totalled and labelled GBP by this endpoint.
+                        // pricing.proto gives the field precisely so a price is
+                        // self-describing; ignoring it made the response a
+                        // claim about the REQUEST rather than about the money.
+                        //
+                        // A contract violation between two services, like the
+                        // malformed amount above, so it stays a 500 rather than
+                        // blaming the caller.
+                        if (!string.Equals(price.Currency, currency, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException(
+                                $"Catalog priced product {price.ProductId} in '{price.Currency}' for a " +
+                                $"'{currency}' request. A reply's currency is the amount's own label " +
+                                "(pricing.proto), so the two disagreeing is a contract violation rather " +
+                                "than a quote.");
+                        }
+
                         lines.Add(new QuoteLine(Guid.Parse(price.ProductId), price.Name, amount));
                     }
 
