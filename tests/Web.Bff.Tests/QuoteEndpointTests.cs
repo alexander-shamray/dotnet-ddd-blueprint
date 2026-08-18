@@ -258,4 +258,24 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
         // answer 200 with a hundredfold price.
         response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
     }
+
+    [Fact]
+    public async Task A_negative_upstream_amount_stays_a_500()
+    {
+        _catalog.RawAmount = "-12.50";
+
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+
+        // "-12.50" parses perfectly well, which is why this needs its own
+        // assertion rather than riding on the one above: the failure is a
+        // VALID decimal carrying an invalid value, and it reaches the total
+        // and subtracts from it. Catalog's Money.Of refuses a negative, so
+        // nothing well-behaved sends one — and a producer's invariant is not
+        // a consumer's guarantee, which is the whole reason this boundary
+        // reads the currency too.
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+    }
 }

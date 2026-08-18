@@ -2365,6 +2365,18 @@ configuration-validation test at startup.
 4. **Retry only idempotent operations.** Retrying a `POST` that creates a
    payment creates two payments. `GET` and explicitly idempotent endpoints only.
 5. **Within the hop budget.** See above.
+6. **Validate the reply.** A peer is not a library call: what comes back is
+   input from another process with its own deploys and its own bugs, and every
+   invariant the producer holds is the producer's until this side checks it.
+   Catalog's own `Money` refuses a negative amount, so a negative price is a
+   contract violation rather than a price — but a consumer that relies on that
+   is depending on the producer's implementation, which is a coupling nothing
+   in the contract carries and no deploy of Catalog is obliged to preserve.
+   Where an invariant must hold on this side, the contract states it and this
+   side checks it. The BFF's quote refuses an amount it did not ask for, a
+   duplicate, a currency other than the one requested, and a negative — each a
+   500, because a contract violation between two services is nobody's caller's
+   fault.
 
 The configuration below satisfies the table rather than merely gesturing at it,
 and the budget is worked out including the waiting: 3 × 1.4 s of attempts plus

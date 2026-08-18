@@ -112,6 +112,29 @@ public static class CheckoutEndpoints
                                 "pricing.proto specifies.");
                         }
 
+                        // AllowLeadingSign is kept and the sign is refused
+                        // HERE, one step later, on purpose. Dropping the style
+                        // would make "-1.00" fail the parse above and answer
+                        // "which is not a decimal in the invariant form" — a
+                        // false statement about a string that plainly is one,
+                        // and it would refuse a legal "+12.50" as well.
+                        //
+                        // Catalog's Money.Of already refuses a negative, so
+                        // nothing well-behaved sends one. That is exactly the
+                        // argument the currency check below declines to make:
+                        // a producer's invariant is not a consumer's guarantee,
+                        // and this is the boundary where the difference is
+                        // paid. Unchecked, a negative line reaches the quote's
+                        // total and subtracts from it.
+                        if (amount < 0)
+                        {
+                            throw new InvalidOperationException(
+                                $"Catalog priced product {price.ProductId} at '{price.Amount}', which is " +
+                                "negative. pricing.proto states the amount is never negative and Catalog's " +
+                                "own Money refuses one, so this is a contract violation rather than a " +
+                                "price.");
+                        }
+
                         // The reply says which currency each amount is in, and
                         // until this check nothing read it — so a Catalog that
                         // answered USD for a GBP request would have had the

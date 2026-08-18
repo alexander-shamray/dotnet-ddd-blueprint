@@ -63,6 +63,11 @@ message ProductPrice {
   // contract's. Two spellings of one number are equal here, and a consumer
   // that string-compared them would break on a migration that changed nothing
   // a customer could see.
+  //
+  // Never negative. Catalog's own Money.Of refuses a negative amount, so this
+  // states a property the producer already has rather than adding one — but a
+  // consumer may not infer it from that, because the producer's invariant is
+  // not the contract's until the contract says so.
   string amount = 3;
 
   // Echoed back rather than assumed from the request, so a reply is
