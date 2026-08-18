@@ -110,7 +110,7 @@ that reaches a merge — so the rows below say what is owed *between* them:
 | On a branch, tree clean, unpushed or ahead | Push, `/pr` |
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
-| On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. Step 0's teardown is a complete one (switch, pull, remove, prune), and step 7 has nothing left to do: there is no PR to merge |
+| On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With a clean tree, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty one the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
 
 **Step 0's teardown targets a worktree that is already finished; step 7's
 targets the one this run just merged. Exactly one of them owns any given
@@ -296,13 +296,14 @@ same argument as never calling a branch clean because asking failed.
    |---|---|
    | In a worktree whose branch is **finished** | `ExitWorktree({action: "keep"})`, then the teardown below on the directory just left |
    | In a worktree whose branch is **unfinished** | **Stay.** This is a resumed run and that directory is its workspace |
-   | In the main checkout on a **finished** branch | `bash .claude/scripts/git-switch-existing.sh main`, when `git status --short` is clean |
+   | In the main checkout on a **finished** branch | `bash .claude/scripts/git-switch-existing.sh main` — the tree is clean by the predicate, so there is no second condition to check here |
    | In the main checkout on an **unfinished** branch | **Stay.** `/branch` puts a branch here whenever `main` was dirty, so this is an ordinary resumed run |
    | In the main checkout on `main` | Nothing but the teardown below |
 
-   **Finished means a merged PR, or a clean tree with no PR and nothing ahead
-   of `origin/main`.** Everything else is unfinished, including a branch whose
-   commits are all pushed and which has simply not reached `/pr` yet.
+   **Finished means a clean tree, and then either a merged PR or no PR with
+   nothing ahead of `origin/main`.** Everything else is unfinished, including a
+   branch whose commits are all pushed and which has simply not reached `/pr`
+   yet.
 
    ```bash
    gh pr view --json state          # MERGED, or no PR at all
@@ -317,6 +318,29 @@ same argument as never calling a branch clean because asking failed.
    refuse the dirty tree and so the directory survives, and the session would
    be on `main` with step 1 about to refuse a branch that already exists. The
    guard that saves the files is not the guard that saves the run.
+
+   **The tree check governs both limbs, and attaching it to the no-PR one
+   alone is the fifth shape.** A merged PR with uncommitted edits beside it
+   satisfies every other read, so a predicate reading *merged, or a clean tree
+   with no PR* calls it finished: step 0 exits the worktree, `git worktree
+   remove` refuses the dirty directory, and the resume table's merged-PR row
+   then ends the run — session on `main`, edits in a directory nobody is in,
+   and nothing left that will ever look at it again. Cleanliness is a fact
+   about the **workspace**; the PR state is a fact about the **branch**. Only
+   one of the two answers *is there work here*, and it is the one that has to
+   be true on both limbs.
+
+   **So a merged PR with a dirty tree is unfinished, the second row keeps the
+   session in it, and that is a run with nothing owed rather than the start of
+   one.** There is nothing to ship — the PR has landed, and the uncommitted
+   work belongs to whatever comes next. Nor may it be adopted onto this branch,
+   tempting as step 1's already-on-a-branch override makes it: a second PR cut
+   from a merged branch leaves `gh pr view --json state` answering `MERGED`
+   from the *first* one on every later resume, so the branch becomes unreadable
+   to this command permanently. Report the uncommitted work and the directory
+   holding it, and end there. **That is not one of the four stops** — nothing
+   failed and nothing is being asked; it is a run that found nothing to do, and
+   saying so is the whole of what it owes.
 
    **The word to avoid here is "unpushed", and avoiding it is the whole of this
    fix.** The resume table above uses it in git's ordinary sense — commits not
@@ -388,12 +412,22 @@ same argument as never calling a branch clean because asking failed.
    `ExitWorktree` in row one, the switch in row three — rather than by reading
    this heading.
 
-   **Remove a sibling worktree only when its branch is merged and its tree is
-   clean**, and let git decide the second half:
+   **Remove a sibling worktree only when its branch is finished**, in exactly
+   the sense the predicate above defines, and let git decide the tree half a
+   second time:
 
    ```bash
    git worktree remove ../<checkout-name>-<slug>
    ```
+
+   **Merged is not the test, and keying this line on it left abandoned
+   worktrees behind.** The predicate has two limbs, and a branch that was
+   forked, never committed to and never PR'd is finished by the second one —
+   step 0 will have exited it on precisely that basis, and a teardown asking
+   for `merged` would then decline the directory the row above had just left,
+   every time. One definition read at both sites is the whole fix; the
+   asymmetry was the same one the fifth shape above turned on, in the other
+   direction.
 
    Without `-f` that command **refuses a worktree holding uncommitted or
    untracked files**, which is the guard rather than an inconvenience — the
@@ -814,9 +848,18 @@ same argument as never calling a branch clean because asking failed.
    open by design, because an unresolved thread is how a genuine ambiguity
    reaches a person; this chain has nobody to reach, so it decides, posts the
    decision and the rejected alternative **as a reply on the thread**, marks it
-   `done`, and resolves it. The reply is the whole of what replaces the
-   interruption — resolving without it destroys the question rather than
+   with the outcome, and resolves it. The reply is the whole of what replaces
+   the interruption — resolving without it destroys the question rather than
    answering it.
+
+   **The marker follows what the decision produced, and `done` is not the
+   default.** `/review-copilot` defines it as claiming the fix is committed, so
+   an `Ask` answered by taking the no-change option is marked **`rejected`**,
+   after the reply that argues why. Marking that thread `done` writes a commit
+   into the record that does not exist — and this repository already says a
+   marker running ahead of its fix is worse than no marker, because it is the
+   line a reviewer trusts instead of checking. Deciding an `Ask` does not make
+   every `Ask` an acceptance.
 
    The mechanical reason is worth knowing too: all-resolved is defined over
    *no unresolved threads*, so an `Ask` left open by round three is still open

@@ -2820,14 +2820,14 @@ by step 0 and the run ends there, because a second removal would exit non-zero
 against a path that is no longer a worktree and stop the chain on a helper
 failure with nothing behind it.
 
-**Finished means a merged PR, or a clean tree with no PR and nothing ahead of
-`origin/main`; everything else is left alone, and that exception is
-load-bearing.** It is what
+**Finished means a clean tree, and then either a merged PR or no PR with
+nothing ahead of `origin/main`; everything else is left alone, and that
+exception is load-bearing.** It is what
 lets a resumed `/ship` pick a branch back up, where evicting the session to
 `main` would strand the work and leave step 1 unable to re-fork a name that
 already exists.
 
-**It took four drafts to state, and each miss was the same failure in a new
+**It took five drafts to state, and each miss was the same failure in a new
 shape.** First a worktree, fixed. Then an in-place branch — what `/branch`
 produces every time `main` was dirty — stranded by the identical switch to
 `main` minus the directory. Then the predicate itself: written as "nothing
@@ -2838,7 +2838,12 @@ separately**, and the third arrived through a word rather than a missing row.
 Then the working tree: a worktree forked minutes ago and edited but not yet
 committed satisfies both other clauses, and the `git worktree remove` that
 refuses a dirty tree saves the *files* while the session walks away from the
-*branch*.
+*branch*. Then that clause was written as though it qualified only the no-PR
+half, which reopened the same hole one limb over: a **merged** PR with
+uncommitted edits beside it passed as finished, and the teardown's refusal
+saved the files while the merged-PR resume row ended the run around them.
+Cleanliness is a fact about the workspace and belongs to neither limb in
+particular.
 
 The merged **branch** survives all of it: `git branch -d` is denied and stays
 denied.
