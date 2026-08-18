@@ -111,9 +111,16 @@ than what it costs. The scaffold renders the wiring and none of the domain
 with its five projects, its migrator, its schema migration, both images, its
 Compose pair and fifty-six passing tests, and with no aggregate, no command,
 no query and no endpoint. So PR-18's three days are now three days of Ordering's
-*domain* — which is the shape the estimate always assumed, and is the first
-thing on this page that can be checked against a delivered pull request rather
+*domain* — which is the shape the estimate always assumed, and was the first
+thing on this page that could be checked against a delivered pull request rather
 than argued about.
+
+**PR-18 has since landed, and the check came out the way this paragraph
+predicted.** Ordering was rendered by the scaffold and then given its
+aggregate, with no reconciliation owed to the wiring — so the three days bought
+domain work, which is what the estimate said they were for. The estimate itself
+is left where it is: what a delivered PR settles here is the *shape* of the
+prediction, not the schedule resting on it.
 
 ### Data, cache, messaging
 
@@ -171,9 +178,12 @@ reviews turned up a specification the edge was violating, and a conformance fix
 is not something a diff-shaped estimate anticipates either.
 
 PR-18 is the cheapest service in the plan and that is the whole point of it —
-it is priced at three days *because* PR-11 exists, and if it turns out to cost
-more, the finding is about the scaffold rather than about Ordering. With PR-11
-landed, that test is now sharp: the scaffold's output is a service that builds
+it is priced at three days *because* PR-11 exists, and if it turned out to cost
+more, the finding would be about the scaffold rather than about Ordering. **Both
+have now landed, and the finding was not against the scaffold**: Ordering is the
+scaffold's own output plus one domain, with nothing about the wiring
+hand-written. With PR-11
+landed, that test was sharp: the scaffold's output is a service that builds
 and passes its tests with no domain in it, so the three days buy Ordering's
 aggregate, its first command and its endpoint. They no longer buy a gateway
 route: PR-17 shipped §10.2's file whole, `ordering` included, so what PR-18
@@ -280,18 +290,21 @@ Six things, ordered by how much of the total they can move.
 **The domain question is unsettled, and it is the largest single risk.** Both
 READMEs call the e-commerce domain "illustrative only", while
 [§4.1](backend-architecture/04-solution-structure.md) and Appendix C name six
-services concretely. PR-10 has since landed on the illustrative domain, so for
-it substitution now means reworking shipped code; PR-18, PR-20 and PR-21 are
-still re-specified rather than re-estimated. Together that is 17 of the
-99 days, and the four that carry the most design argument. Nothing else on this
-list is close.
+services concretely. PR-10 and PR-18 have since landed on the illustrative
+domain, so for them substitution now means reworking shipped code; PR-20 and
+PR-21 are still re-specified rather than re-estimated. Together that is 17 of
+the 99 days, and the four that carry the most design argument. Nothing else on
+this list is close.
 
 **This item said "settle it before M2", and M2 has now been reached with it
 still open.** That advice is spent, and what replaces it is worse rather than
 milder: PR-10 has landed, so substitution is a rework of shipped code and not
 a re-specification, and every service PR after this one adds to what would
-have to be reworked. The deadline that remains is PR-18 — the second service
-is where a domain nobody has agreed to stops being one service's problem.
+have to be reworked. **The deadline this item named was PR-18, and it has
+passed** — the second service was where a domain nobody has agreed to stopped
+being one service's problem, and it shipped with the question still open. What
+remains is not a deadline but a rising bill: PR-19 has landed on top of it,
+and PR-20 and PR-21 are next.
 
 PR-11 and PR-12 are the delivered pull requests that do **not** move if the
 domain changes, and both were built that way deliberately: the scaffold
