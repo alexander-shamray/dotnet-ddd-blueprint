@@ -68,6 +68,16 @@ public static class CheckoutEndpoints
 
                     List<QuoteLine> lines = new(reply.Price.Count);
 
+                    // The reply is checked against the question rather than
+                    // trusted to have answered it. pricing.proto promises one
+                    // price per product and QuoteResponse repeats the promise;
+                    // until this set existed the endpoint took the reply's word
+                    // for both, so an id nobody asked about was priced and
+                    // totalled, and an id answered twice was totalled twice.
+                    // Neither appears in Unpriced — that is computed from what
+                    // came back — so the only symptom was a wrong Total.
+                    HashSet<Guid> outstanding = [.. requested];
+
                     foreach (ProductPrice price in reply.Price)
                     {
                         // InvariantCulture on both sides of the wire, matching
@@ -122,7 +132,22 @@ public static class CheckoutEndpoints
                                 "than a quote.");
                         }
 
-                        lines.Add(new QuoteLine(Guid.Parse(price.ProductId), price.Name, amount));
+                        Guid pricedProduct = Guid.Parse(price.ProductId);
+
+                        // Removing rather than testing membership: one
+                        // operation answers both "was this asked for" and "has
+                        // it been answered already", which are the two faults
+                        // that end as the same wrong total.
+                        if (!outstanding.Remove(pricedProduct))
+                        {
+                            throw new InvalidOperationException(
+                                $"Catalog priced product {pricedProduct}, which this request either did " +
+                                "not ask about or has already been answered. pricing.proto promises one " +
+                                "price per product, and a quote that totalled the extra would be wrong " +
+                                "in a way only the arithmetic shows.");
+                        }
+
+                        lines.Add(new QuoteLine(pricedProduct, price.Name, amount));
                     }
 
                     // Set-based, so the answer does not depend on the reply's

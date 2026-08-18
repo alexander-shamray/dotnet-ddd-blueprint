@@ -208,6 +208,39 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_price_for_a_product_nobody_asked_about_stays_a_500()
+    {
+        _catalog.Prices[Desk] = ("Desk", 120.50m);
+        _catalog.AlsoAnswerWith.Add(Desk);
+
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+
+        // Untrusted, the Desk would have been priced and added to a total the
+        // caller never asked for — and Unpriced would not show it, because that
+        // is computed from what came back rather than from what was requested.
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+    }
+
+    [Fact]
+    public async Task A_product_priced_twice_stays_a_500()
+    {
+        _catalog.DuplicateEveryPrice = true;
+
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+
+        // The second copy would have been added and totalled, doubling the
+        // quote while every id in it was one the caller asked for — the
+        // failure mode with no visible symptom but the arithmetic.
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+    }
+
+    [Fact]
     public async Task A_malformed_upstream_amount_stays_a_500()
     {
         _catalog.RawAmount = "12,50";

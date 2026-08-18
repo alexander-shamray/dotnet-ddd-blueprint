@@ -86,6 +86,15 @@ public sealed class StubCatalog : IAsyncLifetime
     public string? RawCurrency { get; set; }
 
     /// <summary>
+    /// Product ids to price in every reply whether or not the request named
+    /// them — an upstream answering a question it was not asked.
+    /// </summary>
+    public List<Guid> AlsoAnswerWith { get; } = [];
+
+    /// <summary>Answer every price twice, which the contract forbids.</summary>
+    public bool DuplicateEveryPrice { get; set; }
+
+    /// <summary>
     /// How many of the next calls to answer by aborting the connection instead
     /// of replying.
     /// </summary>
@@ -185,7 +194,12 @@ public sealed class StubCatalog : IAsyncLifetime
             if (!string.Equals(request.Currency, stub.Currency, StringComparison.Ordinal))
                 return reply;
 
-            foreach (string id in request.ProductId)
+            List<string> answering = [.. request.ProductId, .. stub.AlsoAnswerWith.Select(id => id.ToString())];
+
+            if (stub.DuplicateEveryPrice)
+                answering = [.. answering, .. answering];
+
+            foreach (string id in answering)
             {
                 if (!Guid.TryParse(id, out Guid productId) ||
                     !stub.Prices.TryGetValue(productId, out (string Name, decimal Amount) price))
