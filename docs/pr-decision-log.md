@@ -6,9 +6,20 @@ This file is the long half of `CLAUDE.md`'s *Which phase are you in* section.
 It was extracted from it when that section reached 1,132 lines — every PR
 appended its findings and nothing was ever consolidated, so a file loaded into
 every session's context was carrying a changelog nobody needed in order to act.
-The entries below are **verbatim**: nothing was rewritten on the way out,
-because the arguments are the whole value and a summary of an argument is how a
-rule gets "corrected" back.
+
+**The entries below are verbatim in their arguments**, because the arguments
+are the whole value and a summary of an argument is how a rule gets "corrected"
+back. Three kinds of edit were made on the way out, and naming them is cheaper
+than a claim that does not survive a grep: each block gained a `## PR-NN`
+heading; **self-references were rebased**, since a sentence saying "the rule at
+the top of this file" pointed at a section that did not travel and would
+otherwise now point at nothing; and where a block stated a *live* fact that
+`CLAUDE.md` also carries, it now points there instead of holding a second copy
+that drifts. Not one argument was shortened.
+
+Five lines still run one to nine columns past 80, each ending in a backticked
+identifier too long to break. They came across as they were, and the original
+carried them the same way.
 
 **It is guidance, not specification.** Where an entry disagrees with the
 blueprint, the blueprint wins — the same rule `docs/superpowers/` carries — and
@@ -274,7 +285,7 @@ with one case in front of `ShouldCompressResponse`, registered by `Replace`
 rather than by sitting above `AddResponseCompression`'s `TryAddSingleton`.
 
 **The intermediate state is the lesson, and it lasted two rounds.** Having
-measured that the framework ignores the directive, this file recorded the
+measured that the framework ignores the directive, this record treated the
 measurement as though it settled the question — pinning the violation in a test
 and telling PR-19 to use `Content-Encoding: identity` instead. A measurement
 says what the code *does*; it never says what it *may* do. The specification
@@ -312,11 +323,11 @@ has an owner.
 **This block was written later than the rest of the log, and that is itself
 worth recording.** PR-18's findings were filed as annotations on `CLAUDE.md`'s
 directory tree rather than as a decision block, so when that tree was
-compressed to one line per entry they had nowhere to land. Six lessons were one
-edit away from being lost, and none of them was inventory. **A decision belongs
-in the log, not in a caption** — a tree annotation is read as a description of
-what a directory holds, so a rule hidden in one is invisible to the next person
-who trims the description.
+compressed to one line per entry they had nowhere to land. Seven lessons were
+one edit away from being lost, and none of them was inventory. **A decision
+belongs in the log, not in a caption** — a tree annotation is read as a
+description of what a directory holds, so a rule hidden in one is invisible
+to the next person who trims the description.
 
 - **`OrderLine` has its own `OrderLineId`, and a shared key type would be a
   silent equality bug.** `Entity<TId>` compares the *type* as well as the
@@ -449,7 +460,8 @@ pipeline — and fourteen of its decisions bind what comes after:
   of a `Program.cs` a test may not edit.
 - **"Blank counts as missing" had to be learned twice, and the second time
   was a review finding.** PR-16 wrote it into `AddJwtAuthentication` for
-  `Identity:Authority` and this file records the argument — an environment
+  `Identity:Authority` and PR-16's entry below records the argument — an
+  environment
   variable set to the empty string reaches `Configuration` as `""`, not null.
   The gateway's `Cors:Origins` then shipped guarded by `GetRequiredSection`
   alone, which proves a section *exists*: `Cors__Origins__0=` binds to an array
@@ -458,8 +470,9 @@ pipeline — and fourteen of its decisions bind what comes after:
   recorded in prose is not a lesson applied**; the guard is now a check on the
   bound values with a test behind it, which is the form that travels.
 - **The fix that lands in code and not in the sample is this repository's
-  most reliable defect, and PR-17 produced five of them.** The rule at the top
-  of this file already says a code change contradicting a chapter is not done
+  most reliable defect, and PR-17 produced five of them.** `CLAUDE.md`'s *one
+  rule that matters* already says a code change contradicting a chapter is not
+  done
   until the chapter moves with it; what PR-17 adds is the direction it actually
   fails in. Not code drifting from a written spec — a *correction* landing in
   `Program.cs` or a test and never reaching the sample it was copied from. The
@@ -620,8 +633,8 @@ test in the repository was watching.**
   fixing a fail-closed contract while it is still theoretical rather than the
   argument against.
 
-**One finding against this file's own procedure**, worth keeping because it
-cost work: the scaffold cleanup CLAUDE.md prescribes ends with
+**One finding against `CLAUDE.md`'s own procedure**, worth keeping because it
+cost work: the scaffold cleanup it prescribes ends with
 `git checkout -- Platform.slnx deploy/compose/`, which is correct only while
 the PR does not itself change `deploy/compose/`. PR-16 changes all three files
 in that tree, and the cleanup reverted them. **Commit before dogfooding the
@@ -845,8 +858,9 @@ after:
 
 - **Catalog is the template, read at run time.** There is no template
   directory, so there is one copy of the wiring rather than two that drift, and
-  the scaffold's tests render *this* repository. The consequence is stated
-  above and worth repeating here: a Catalog change can turn
+  the scaffold's tests render *this* repository. The consequence is stated in
+  `CLAUDE.md`'s scaffold section and worth repeating here: a Catalog change can
+  turn
   `tools/new-service`'s suite red, and reconciling the script belongs in the
   same change.
 - **The scaffold copies no domain.** The slice is excluded by name, so a new
@@ -939,7 +953,7 @@ comes after:
   and §7.1 was amended to match. The identity split is a cloud-side control;
   the key split is what every local environment exercises.
 - **`Catalog.TestSupport` exists**, because PR-10 was the second consumer §4.1
-  was waiting for (not PR-16, as this file once guessed): the handler tests
+  was waiting for (not PR-16, as `CLAUDE.md` once guessed): the handler tests
   live in `Catalog.Application.Tests` per §12.1 and share `ServiceFixture`
   with `Catalog.Api.Tests`. It is a Library, so it references
   `xunit.v3.extensibility.core` — `xunit.v3` itself refuses non-Exe output.
@@ -1055,8 +1069,11 @@ after:
   with its own collection and therefore its own container set (§12.4's stated
   price). The newest is the odd one — most of its 45 tests need no container at
   all, and one class needs a Keycloak, so the suite is fast until
-  `KeycloakIdentityTests` and then pays for an identity provider once. `Ordering.Application.Tests` is deliberately not among them — its
+  `KeycloakIdentityTests` and then pays for an identity provider once.
+  `Ordering.Application.Tests` is deliberately not among them — its
   handler tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
   `HttpContextCurrentUser` and a handler resolved in a bare scope has no
-  principal to bind a subject from. See the commands below.
+  principal to bind a subject from. **The live list of Docker-needing projects
+  is `CLAUDE.md`'s**, in its commands section — it has grown twice since PR-08
+  and this entry records only what PR-08 decided.
 

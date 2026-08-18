@@ -123,10 +123,17 @@ tests/                       per service: .Domain.Tests, .Application.Tests,
 ```
 
 **A `.TestSupport` project is not a test project (§4.1), and it exists for a
-reason rather than by convention.** A service gets one when two suites share a
-fixture and cannot reference each other — which is why `Catalog.TestSupport`
-arrived with PR-10's second consumer rather than with the service. A host with
-one suite gets none, so `Gateway.Api.Tests` carries its own `TestAuthHandler`
+reason rather than by convention.** The reason is two suites sharing a fixture
+and unable to reference each other — which is why `Catalog.TestSupport` arrived
+with PR-10's second consumer rather than with the service.
+
+**That is why the project type exists; it is not when a service gets one.**
+Since PR-11 the scaffold emits the library with the service (§4.5), so
+`Ordering.TestSupport` arrived with Ordering and has exactly one consumer
+today: `Ordering.Api.Tests`. `Ordering.Application.Tests` deliberately does not
+reference it and says so in its csproj, because §12.1 homes handler tests at
+that level and Ordering's live in the API suite instead. A **host** is the case
+that gets none, so `Gateway.Api.Tests` carries its own `TestAuthHandler`
 as a **second copy of Catalog's, deliberately**: §4.3 permits exactly one
 assembly to cross a service boundary and a test helper is not it.
 `Web.Bff.TestSupport` is the exception that proves the shape — one BFF suite,
