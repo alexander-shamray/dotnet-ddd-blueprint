@@ -500,6 +500,23 @@ var ordering = WithPlatformIdentity(
         .WaitForCompletion(orderingMigrator)
         .WithHttpHealthCheck("/health/ready"));   // authority only — no peer calls
 
+// Catalog is the one resource here whose ports Aspire does NOT get to choose.
+// Its appsettings.json declares Kestrel:Endpoints — 8080 for REST and 8081 for
+// §9.7's gRPC hop, because a cleartext port cannot serve HTTP/1.1 and h2c at
+// once — and declaring that section suppresses ASPNETCORE_URLS and
+// ASPNETCORE_HTTP_PORTS entirely, which is how Aspire assigns a port. So it
+// binds 8080 whatever this host allocates, and 8080 is what AddKeycloak took
+// above: the two fight for it unless one is moved.
+//
+// Move Catalog's, with the same configuration keys the compose README uses for
+// `dotnet run` — a higher provider is the only thing that overrides that file:
+//
+//     .WithEnvironment("Kestrel__Endpoints__Rest__Url", "http://localhost:5102")
+//     .WithEnvironment("Kestrel__Endpoints__Grpc__Url", "http://localhost:8081")
+//
+// And note what WithReference cannot do here: the BFF's hop address is the
+// literal http://catalog-api:8081 (§9.7, §15.4), so a reference does not
+// re-point it. Aspire runs the BFF against whatever answers on that name.
 var catalog = WithPlatformIdentity(
     builder.AddProject<Projects.Catalog_Api>("catalog-api")
         .WithReference(catalogDb).WaitFor(catalogDb)
@@ -507,6 +524,8 @@ var catalog = WithPlatformIdentity(
         .WithReference(coordination)
         .WithReference(mq)
         .WaitForCompletion(catalogMigrator)
+        .WithEnvironment("Kestrel__Endpoints__Rest__Url", "http://localhost:5102")
+        .WithEnvironment("Kestrel__Endpoints__Grpc__Url", "http://localhost:8081")
         .WithHttpHealthCheck("/health/ready"));
 
 // The gateway validates JWTs too (§11.2) — it is the component most visible

@@ -5,11 +5,17 @@
 # file cannot delete. Every application block added to docker-compose.yml
 # joins this list in the same PR.
 #
-# Both commands from the repository root — one working directory, as the
-# compose README's invocations already read:
+# Both commands run from the repository root — one working directory:
 #
 #   docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.infra-only.yml up -d
-#   dotnet run --project src/Services/Catalog/Catalog.Api
+#
+# ...then the host process. **Take that second command from README.md rather
+# than from here**, and this comment used to paste it: since PR-19, Catalog's
+# appsettings.json declares Kestrel:Endpoints, which suppresses
+# ASPNETCORE_URLS and ASPNETCORE_HTTP_PORTS entirely and pins 8080 — Keycloak's
+# published port. A host-run Catalog therefore needs two
+# Kestrel__Endpoints__…__Url exports, and a copy of the invocation here would
+# be one more place for them to be missing.
 services:
   catalog-migrator:
     profiles: [ "excluded" ]
