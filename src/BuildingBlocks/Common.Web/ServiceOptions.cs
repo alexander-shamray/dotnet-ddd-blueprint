@@ -28,10 +28,14 @@ public static class ServiceOptions
     /// below.
     /// </summary>
     /// <remarks>
-    /// Thirty seconds is the top of §9.7's 10–30 s band, and it is chosen at
-    /// the top rather than the middle because the band's job is to be
-    /// comfortably under the gateway's 30–60 s and comfortably over the 5 s
-    /// outbound total. A compile-time invariant, not a deployable value.
+    /// Twenty seconds — the middle of §9.7's 10–30 s band, and **not** its top,
+    /// which is the correction PR-19 needed. The band's job is to sit under the
+    /// gateway's 30–60 s and over the 5 s outbound total; at 30 it does not,
+    /// because a gateway taking its own band's floor is also at 30 and the two
+    /// TIE. §9.7's invariant is a strict decrease and
+    /// <c>ResilienceHierarchyTests</c> says so in as many words — "an ordering
+    /// has no ties" — so the value contradicted the rule its own test asserts.
+    /// A compile-time invariant, not a deployable value.
     /// <para>
     /// <b>Nothing enforces it at runtime, and that is worth stating where the
     /// value lives.</b> No host registers request-timeout middleware, so this
@@ -48,5 +52,5 @@ public static class ServiceOptions
     /// why PR-19 named the gap instead of closing it.
     /// </para>
     /// </remarks>
-    public static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(20);
 }

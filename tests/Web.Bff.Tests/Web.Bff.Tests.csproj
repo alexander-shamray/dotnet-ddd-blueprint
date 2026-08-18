@@ -33,6 +33,11 @@
          Keycloak. The audience mapper it proves is realm configuration, so
          nothing in the solution compiles differently when it is missing. -->
     <PackageReference Include="Testcontainers.Keycloak" />
+    <!-- JwtSecurityTokenHandler, which KeycloakIdentityTests reads `aud` with.
+         It arrives transitively through Common.Web's JwtBearer reference and is
+         named here anyway, on the same honesty rule the two rows above cite:
+         a project that names a type pays for the package. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
   </ItemGroup>
 
   <ItemGroup>

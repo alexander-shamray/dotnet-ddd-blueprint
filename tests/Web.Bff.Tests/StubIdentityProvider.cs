@@ -45,6 +45,9 @@ public sealed class StubIdentityProvider : IAsyncLifetime
     /// <summary>Answer the discovery document with no <c>token_endpoint</c>.</summary>
     public bool OmitTokenEndpoint { get; set; }
 
+    /// <summary>Answer a 200 whose <c>access_token</c> is the empty string.</summary>
+    public bool BlankAccessToken { get; set; }
+
     public async ValueTask InitializeAsync()
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -75,7 +78,7 @@ public sealed class StubIdentityProvider : IAsyncLifetime
 
             Dictionary<string, object> body = new(StringComparer.Ordinal)
             {
-                ["access_token"] = $"issued-{TokenRequests.Count}",
+                ["access_token"] = BlankAccessToken ? "" : $"issued-{TokenRequests.Count}",
                 ["token_type"] = "Bearer"
             };
 

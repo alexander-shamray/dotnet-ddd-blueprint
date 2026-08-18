@@ -149,12 +149,19 @@ public sealed partial class CachingTokenClient(
         using JsonDocument document = JsonDocument.Parse(body);
         JsonElement root = document.RootElement;
 
+        // Blank counts as missing, which is the same lesson §11.3 records for
+        // Identity:Authority one layer up. A present-but-empty access_token
+        // passes a ValueKind check and is then CACHED for expires_in, so every
+        // pricing call sends `Bearer ` until it expires — a provider fault
+        // turned into minutes of 401s that look like the audience mapper.
         if (!root.TryGetProperty("access_token", out JsonElement accessToken) ||
-            accessToken.ValueKind != JsonValueKind.String)
+            accessToken.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(accessToken.GetString()))
         {
             throw new InvalidOperationException(
-                "The token endpoint answered success with no access_token. The body is deliberately not " +
-                "echoed here: it is the one payload this host handles that carries a bearer token (§13.4).");
+                "The token endpoint answered success with no usable access_token. The body is " +
+                "deliberately not echoed here: it is the one payload this host handles that carries a " +
+                "bearer token (§13.4).");
         }
 
         // expires_in is seconds, and RFC 6749 §5.1 makes it OPTIONAL. Absent,

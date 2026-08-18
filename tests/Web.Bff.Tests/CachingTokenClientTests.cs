@@ -203,6 +203,20 @@ public sealed class CachingTokenClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_blank_access_token_is_refused_rather_than_cached()
+    {
+        _provider.BlankAccessToken = true;
+
+        // Blank counts as missing — the same lesson §11.3 records for
+        // Identity:Authority. A present-but-empty token passes a type check and
+        // is then CACHED for expires_in, so every pricing call sends `Bearer `
+        // for minutes, and the resulting 401s look like the audience mapper
+        // rather than like the provider.
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => Tokens.GetAsync(Scope, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task A_discovery_document_with_no_token_endpoint_fails_naming_the_key()
     {
         _provider.OmitTokenEndpoint = true;

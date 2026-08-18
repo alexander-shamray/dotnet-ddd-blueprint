@@ -1018,6 +1018,11 @@ EF Core minor versions and behave differently under identical code.
          since ASP.NET Core 3.0. Same version line as the runtime: it ships with
          the framework and moves with it. -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <!-- JwtSecurityTokenHandler, which §11.5's Keycloak suite reads an `aud`
+         claim with. A transitive of the row above, pinned because a project
+         names the type — and pinned to 8.19.2 because that is the floor it is
+         reached at, anything lower being a downgrade NU1109 refuses. -->
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
     <!-- PR-07's OpenAPI deliverable (Appendix C): the framework's own document
          generator — AddOpenApi/MapOpenApi, document only, no UI. -->
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
