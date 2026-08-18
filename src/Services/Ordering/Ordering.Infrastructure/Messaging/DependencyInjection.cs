@@ -1,3 +1,6 @@
+using Common.Contracts.Catalog.V1;
+using Common.Infrastructure.Inbox;
+using Common.Infrastructure.Messaging;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +20,22 @@ namespace Ordering.Infrastructure.Messaging;
 /// </summary>
 public static class DependencyInjection
 {
+    /// <summary>
+    /// §9.4's and §9.8's projection endpoint, by the name both chapters print.
+    /// A constant rather than a literal because two other things have to agree
+    /// with it: the <c>Endpoint</c> column §9.5's inbox keys each row on, and
+    /// the assertions that read those rows back.
+    /// </summary>
+    /// <remarks>
+    /// Public, unlike §9.6's <c>Endpoints</c> class, and the two are answering
+    /// different questions. That one holds <c>queue:</c> addresses the saga
+    /// <em>sends</em> to and is internal because nothing outside this assembly
+    /// sends; this is the name a queue is <em>declared</em> under, which is
+    /// what the inbox row records and therefore what a test has to be able to
+    /// name.
+    /// </remarks>
+    public const string CatalogEventsQueue = "ordering-catalog-events";
+
     public static IServiceCollection AddMassTransitMessaging(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -41,16 +60,100 @@ public static class DependencyInjection
             // this platform's telemetry, and none of it leaves silently.
             x.DisableUsageTelemetry();
 
+            // §3.2's Consumes column, Catalog's third of it. Registering a
+            // consumer and binding it are two different statements and both
+            // are needed: this one makes the type resolvable, and the
+            // ConfigureConsumer calls below are what put it on a queue. A
+            // consumer registered and never bound receives nothing, and looks
+            // exactly like one that does.
+            x.AddConsumer<IntegrationEventConsumer<ProductPublished>>();
+            x.AddConsumer<IntegrationEventConsumer<PriceChanged>>();
+            x.AddConsumer<IntegrationEventConsumer<ProductDiscontinued>>();
+
             x.UsingRabbitMq((context, cfg) =>
             {
                 cfg.Host(new Uri(connectionString));
 
-                // Nothing to configure until PR-15's consumers — the call
-                // stays because it is the line every later consumer rides in
-                // on, and its absence is the silent kind of wrong. Retry is
-                // deliberately absent too: §9.8 configures it per receive
-                // endpoint, and there are none.
-                cfg.ConfigureEndpoints(context);
+                // §9.8's projection endpoint, verbatim. Ordering's other two —
+                // ordering-commands and ordering-fulfilment-saga — arrive with
+                // the saga that needs them (§9.6), each with its own policy.
+                cfg.ReceiveEndpoint(
+                    CatalogEventsQueue,
+                    e =>
+                    {
+                        // §9.8's plain exponential five. Nothing is excluded
+                        // here the way ordering-commands excludes
+                        // ContractMappingException: every fault this endpoint
+                        // can raise is a database one, and a deadlock or a
+                        // failed connection is exactly what a backoff is for.
+                        e.UseMessageRetry(r =>
+                            r.Exponential(
+                                retryLimit: 5,
+                                minInterval: TimeSpan.FromSeconds(1),
+                                maxInterval: TimeSpan.FromMinutes(1),
+                                intervalDelta: TimeSpan.FromSeconds(2)));
+
+                        // BEFORE the in-memory outbox, which is a correctness
+                        // rule rather than a preference (§9.8): filters added
+                        // first are outermost, and the outbox flushes its
+                        // buffered sends AFTER the inner pipeline returns. The
+                        // other order commits the inbox row first, so a failed
+                        // flush leaves a message acknowledged, its sends lost,
+                        // and the redelivery suppressed by the filter's own
+                        // row. This projection publishes nothing today and the
+                        // order still matters, because the day it does is not
+                        // the day anybody re-reads this block.
+                        //
+                        // The context argument is not decoration and §9.8's
+                        // sample did not have it: the parameterless overload
+                        // carries CS0618 at the 8.5.3 pin, which ADR-019 makes
+                        // an error, so the chapter's line had been
+                        // unbuildable since it was written. Both chapters were
+                        // amended.
+                        e.UseConsumeFilter(typeof(InboxFilter<>), context);
+                        e.UseInMemoryOutbox(context);
+
+                        // One line per event in §3.2's Consumes column that
+                        // Catalog owns. A handler with no line here is never
+                        // invoked and looks correct while doing nothing, which
+                        // is why the set is asserted rather than read off this
+                        // file.
+                        e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
+                        e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
+                        e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
+                    });
+
+                // No ConfigureEndpoints, and its removal is this PR's, on a
+                // measurement rather than on taste. PR-13 left the call here
+                // with a comment calling it "the line every later consumer
+                // rides in on"; the first later consumer is the one above, and
+                // what that line actually does for a registered consumer with
+                // no explicit binding is manufacture a queue named after the
+                // consumer type — with NEITHER the inbox filter NOR the retry
+                // policy, because both are configured per endpoint and this
+                // one was configured by nobody.
+                //
+                // §9.8 is explicit that every receive endpoint applies
+                // InboxFilter<>, and that the saga is the one exception
+                // because its state is its idempotency check — "any other
+                // opt-out needs the same kind of written justification, in the
+                // endpoint that takes it". An endpoint MassTransit invents
+                // takes that opt-out and writes nothing down.
+                //
+                // Measured both ways by deleting the ProductPublished line
+                // above and running CatalogEventEndpointTests. With
+                // ConfigureEndpoints present the event was still projected and
+                // no inbox row was written — at-least-once delivery landing on
+                // a handler with no duplicate suppression — and only one of
+                // the three tests noticed. With it gone all three go red,
+                // because a forgotten binding is then a message nobody
+                // consumes rather than one consumed off the record.
+                //
+                // The cost is stated rather than dodged: a consumer added
+                // later needs a line here as well as an AddConsumer, and
+                // nothing at startup complains if it gets one and not the
+                // other. That is the trade — a gap that fails visibly against
+                // a convenience that fails quietly.
             });
         });
 

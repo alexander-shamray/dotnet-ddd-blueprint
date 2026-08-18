@@ -24,12 +24,16 @@ namespace Ordering.Api.Tests;
 /// Faking an <c>HttpContext</c> in the other project was the alternative, and
 /// it needs the framework reference §4.1 keeps out of a plain test project.
 /// <para>
-/// Prices are seeded straight into <c>ordering.ProductPrices</c>, which is the
-/// only way this slice can be exercised today: the projection that fills that
-/// table from Catalog's events is PR-20's, and PR-20 depends on this PR. A raw
-/// INSERT is allowed here where §12.4 asks for seeding through the aggregate —
-/// the table is a read model with no aggregate behind it, so there is no
-/// domain type whose shape it could drift from.
+/// Prices are seeded straight into <c>ordering.ProductPrices</c>, and since
+/// PR-20 that is a choice rather than the only option: the projection fills
+/// that table from Catalog's events, and
+/// <see cref="CatalogEventEndpointTests"/> drives it that way. This suite is
+/// about the write path, so it arranges the read model directly and leaves the
+/// broker out — a seed that went through a queue would make every assertion
+/// here wait on a delivery it is not testing. A raw INSERT is allowed where
+/// §12.4 asks for seeding through the aggregate because the table is a read
+/// model with no aggregate behind it, so there is no domain type whose shape
+/// it could drift from.
 /// </para>
 /// </remarks>
 [Collection(nameof(IntegrationCollection))]
@@ -44,9 +48,10 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task An_order_with_no_priced_products_is_refused_as_a_rule_not_a_bad_request()
     {
-        // The state every environment is in until PR-20 lands the projection:
-        // the table exists and is empty. 422 rather than 400 is the point —
-        // the request was well-formed and the validator passed it, and the
+        // The standing answer for a product Catalog has never published, which
+        // is what §6.6's callout says stays true after the projection exists:
+        // no row, no price, no order. 422 rather than 400 is the point — the
+        // request was well-formed and the validator passed it, and the
         // products being unpriceable is a fact about this service's state.
         HttpResponseMessage response = await PlaceAsync(Guid.CreateVersion7());
 

@@ -133,7 +133,7 @@ structurally always null on one path.
 | `IOutboxStats`, `OutboxStats` | §13.6 | Backlog age and abandoned count, read per-scope from a singleton |
 | `MetricsInitialiser` | §13.6 | `IHostedService` whose only job is forcing the metrics singletons to be constructed |
 | `OrderFulfilmentState` | §9.6 | `SagaStateMachineInstance`; persisted to `ordering.OrderFulfilmentStates` |
-| `ProductPriceProjection` | §6.6 | Writes `ordering.ProductPrices` from Catalog's three product events |
+| `ProductPriceProjection` | §6.6 | Writes `ordering.ProductPrices` from Catalog's three product events, on the `ordering-catalog-events` endpoint (§9.8). **Public**, because §6.2's scan is public-only and an internal handler registers as nothing while the endpoint stays bound. Its `MERGE` carries `WITH (HOLDLOCK)`: without it two concurrent deliveries for one key can both insert, which the endpoint's retry would absorb rather than surface |
 | `OrderSummaryProjection` | §6.6 | Writes `ordering.OrderSummaries` |
 | `PriceChangedCacheInvalidator` | §8.4 | Ordering's second `PriceChanged` handler — cache only |
 | `ClientCredentialsHandler` | §11.5 | `DelegatingHandler`; attaches the M2M bearer token to the BFF's outbound calls. Registered **after** the resilience handler so it sits inside it, so that **each retried attempt re-attaches a token** rather than replaying the first one. The retries that fire are transport faults (§9.7), not statuses — so this matters whenever an attempt is repeated at all, and a token that expired between attempts is what it saves |

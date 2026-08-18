@@ -60,6 +60,68 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-20 — the first projection and the first receive endpoint
+
+PR-20 landed the first projection and the first receive endpoint — §6.6's
+`ProductPriceProjection`, §9.8's `ordering-catalog-events` — and five of its
+decisions bind what comes after:
+
+- **`ConfigureEndpoints(context)` is gone from both services, and it is a
+  fail-open rather than a leftover.** PR-13 left the call in Catalog and
+  Ordering with a comment calling it "the line every later consumer rides in
+  on"; what it actually does for a registered consumer whose explicit binding
+  is missing is manufacture a queue named after the consumer type — carrying
+  **neither** the inbox filter **nor** the retry policy, because both are
+  per-endpoint configuration an invented endpoint never receives. §9.8 permits
+  an endpoint without the inbox exactly once, for the saga, and requires the
+  opt-out to be written down where it is taken; a queue MassTransit invents
+  takes it and writes nothing. Measured both ways by deleting one
+  `ConfigureConsumer` line: with the call present the event was still projected
+  and **no inbox row was written**, and one of three tests noticed; with it gone
+  all three go red. The cost is stated rather than dodged — a consumer now
+  needs a line in two places and nothing at startup complains if it gets one.
+- **§9.8's printed `e.UseInMemoryOutbox()` does not compile at this pin.** The
+  parameterless overload carries `CS0618`, which ADR-019 makes an error, so
+  three sites in §9 had been unbuildable since they were written. This is
+  PR-19's `AddStandardResilienceHandler` finding and PR-17's `KnownNetworks`
+  finding for the third time: **a sample nobody has compiled is a sample that
+  does not compile**, and the only way to find out is to build it.
+- **`WITH (HOLDLOCK)` is a reasoned claim, not an observed one, and the test
+  says so in its own remarks.** A bare `MERGE` takes no range lock over a key it
+  failed to find, so two concurrent deliveries can both insert and the loser
+  violates the primary key — which the endpoint's retry would absorb, so the
+  defect reads as warnings rather than as a failure. Deleting the hint left the
+  suite green at eight-way and again at sixty-four-way concurrency, three runs
+  each. So the hint stays and §6.6 gained it, and the test carries the class it
+  is in — PR-17's rate-limiter ordering row, reasoned and unobserved —
+  rather than looking like the guard it is not.
+- **The currency is normalised on the way *in*, and the reader had already
+  promised it would be.** `ProjectedPriceReader` upper-cases its parameter and
+  argues that this column is written through `Money.Of` — true of Catalog's
+  `Money` and not of the wire, where `Currency` is a `string` like any other.
+  Under a case-sensitive collation an unnormalised contract writes a row the
+  reader cannot find *and* a second primary-key row beside the one it can. **A
+  comment describing what some other file does is a claim about that file**, and
+  this one was a year early.
+- **§13.7's read-model row says *own events* now, because `projection.lag`
+  only ever measured one lane.** `ProjectionInvoker` records it off an outbox
+  row, so a read model fed by another service's contract never touches it.
+  Ordering's `ProductPrices` is the first such read model in the platform, and
+  its staleness is publish-to-consumer-start — which the table's **event
+  end-to-end** row already governs, so the fix was a qualifier and a paragraph
+  rather than a second row on the same instrument. The row was not wrong when
+  written; it became a promise of coverage over an empty series the moment a
+  broker-fed read model existed.
+
+**`OrderSummaries` is deliberately not in this PR**, and the reason is worth
+carrying: §6.6 has two projections, and only one of them is what this PR's
+title names. The other is fed mostly by Ordering's own domain events on the
+local lane and needs §13.3's `OrderMetrics` and §6.6's escalated history query
+with it. Appendix C names no PR for it; whoever builds the history screen
+builds it.
+
+---
+
 ## PR-19 — the BFF, and Catalog as a gRPC server
 
 PR-19 landed the BFF — §9.7's one synchronous hop, §11.5's client credentials,

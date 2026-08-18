@@ -1,3 +1,5 @@
+using Common.Contracts.Catalog.V1;
+using Common.Infrastructure.Messaging;
 using Ordering.Infrastructure.Messaging;
 using MassTransit;
 using MassTransit.Testing;
@@ -177,72 +179,59 @@ public class MessagingRegistrationTests
 
 
     [Fact]
-    public void Ordering_binds_no_consumer_and_therefore_declares_no_receive_endpoint()
+    public void Ordering_binds_a_consumer_for_every_Catalog_event_it_consumes()
     {
-        // Asserted rather than assumed: an absence nobody states is an absence
-        // nobody notices changing.
+        // §3.2's Consumes column, Catalog's third of it — the set, not merely
+        // its size, because a subscription that quietly loses one member is a
+        // handler that keeps compiling and stops being invoked.
         //
-        // A consumer belongs here once §3.2 gives this service something to
-        // consume and an IIntegrationEventHandler exists for it. Binding a
-        // type with no handler registered creates an endpoint whose every
-        // message reaches §9.4's throw: "the endpoint binds this type, so
-        // something should handle it" is one of the two sites where an empty
-        // handler list must fail rather than proceed.
+        // This asserts the REGISTRATION and deliberately not the endpoint:
+        // AddMassTransitTestHarness replaces the UsingRabbitMq callback where
+        // the receive endpoint lives, so no test in this file can see the
+        // binding. CatalogEventEndpointTests drives it over a real broker,
+        // which is where the queue name and the inbox row are asserted.
         //
-        // Consumers rather than endpoints, because ConfigureEndpoints is what
-        // turns one into the other: with none registered there is nothing for
-        // it to declare, and a test reading the bus topology would be asserting
-        // MassTransit's behaviour rather than this service's decision.
+        // Until PR-20 this test read the other way round — that Ordering bound
+        // no consumer at all — and carried a positive control beside it,
+        // because a negative assertion over a predicate that matches nothing
+        // passes for the wrong reason. A set equality cannot fail open that
+        // way, so the control left with the absence it was guarding.
         ServiceCollection services = new();
 
         services.AddMassTransitMessaging(Configuration());
 
-        services.ShouldNotContain(
-            d => IsConsumerRegistration(d),
-            "a consumer here is a subscription §3.2 does not give this service — and one bound with no " +
-            "IIntegrationEventHandler registered would fault every message it received");
-    }
-
-    [Fact]
-    public void The_no_consumer_assertion_can_actually_fail()
-    {
-        // The positive control for the test above, and it exists because that
-        // test was written wrong and passed anyway. It matched on
-        // `ServiceType` closing IConsumer<>, which MassTransit never registers:
-        // at the 8.5.3 pin AddConsumer<T> calls TryAddScoped<T>() — the
-        // CONCRETE type — so the predicate found nothing whether or not a
-        // consumer was present. An assertion that cannot fail in one direction
-        // is the fail-open shape this repository has been caught by before.
-        //
-        // Verified by running it: with the old predicate this test goes red.
-        // Deliberately NOT through AddMassTransitMessaging: that helper calls
-        // AddMassTransit itself, and MassTransit permits exactly one such call
-        // per container. What this control has to establish is what a consumer
-        // registration looks like, and a bare AddMassTransit establishes it.
-        ServiceCollection services = new();
-
-        services.AddMassTransit(x => x.AddConsumer<ProbeConsumer>());
-
-        services.ShouldContain(
-            d => IsConsumerRegistration(d),
-            "if this cannot see a consumer that IS registered, the assertion above proves nothing");
+        ConsumerTypes(services).ShouldBe(
+            [
+                typeof(IntegrationEventConsumer<ProductPublished>),
+                typeof(IntegrationEventConsumer<PriceChanged>),
+                typeof(IntegrationEventConsumer<ProductDiscontinued>)
+            ],
+            ignoreOrder: true,
+            "these three are Catalog's whole Publishes column (§3.2) and Ordering's whole subscription to " +
+            "it — a fourth here is a subscription no chapter grants, and a missing one is a projection " +
+            "that silently stops being fed");
     }
 
     /// <summary>
-    /// A registration MassTransit made for a consumer. The implementation type
-    /// is what carries the interface — the service type is the consumer class
+    /// The consumer types MassTransit registered. The implementation type is
+    /// what carries the interface — the service type is the consumer class
     /// itself — so this asks what the registered type implements rather than
     /// what it is registered as.
     /// </summary>
-    private static bool IsConsumerRegistration(ServiceDescriptor descriptor)
-    {
-        Type? candidate = descriptor.ImplementationType ?? descriptor.ServiceType;
-
-        return candidate is not null &&
-            Array.Exists(
-                candidate.GetInterfaces(),
-                i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IConsumer<>));
-    }
+    /// <remarks>
+    /// The distinction is not pedantry: an earlier version of this helper
+    /// matched on <c>ServiceType</c> closing <c>IConsumer&lt;&gt;</c>, which
+    /// MassTransit never registers — at the 8.5.3 pin <c>AddConsumer&lt;T&gt;</c>
+    /// calls <c>TryAddScoped&lt;T&gt;()</c> on the concrete type — so it found
+    /// nothing whether or not a consumer was present.
+    /// </remarks>
+    private static Type[] ConsumerTypes(IServiceCollection services) =>
+        [.. services
+            .Select(d => d.ImplementationType ?? d.ServiceType)
+            .Where(t => Array.Exists(
+                t.GetInterfaces(),
+                i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IConsumer<>)))
+            .Distinct()];
 
     [Fact]
     public void Usage_telemetry_is_disabled_by_the_production_registration_alone()

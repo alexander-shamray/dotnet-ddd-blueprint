@@ -1264,8 +1264,20 @@ satisfied. A row that cannot name one does not belong in the table.
 | Event end-to-end p95 (publish → consumer start) | < 2 s | `messaging.delivery.lag` |
 | Outbox oldest unprocessed, **broker lane**, p99 | < 5 s | `outbox.oldest.age`, `lane` tag (§13.6) |
 | Outbox oldest unprocessed, **local lane**, p99 | < 1 s | same gauge, other lane |
-| Read-model staleness (event raised → projection applied), p99 | < 1 s | `projection.lag` |
+| Read-model staleness, **own events**, p99 | < 1 s | `projection.lag` |
 | Availability, per service | 99.9% monthly | `http.server.request.duration`, ASP.NET Core instrumentation |
+
+**The read-model row says *own events*, and the qualifier is what keeps it
+honest.** `projection.lag` is recorded by `ProjectionInvoker` off an outbox
+row, so it only ever measures a read model this service feeds from its own
+domain events (§7.5). A read model fed by *another* service's contract never
+touches the outbox at all — Ordering's `ordering.ProductPrices` is the worked
+case (§6.6) — so `projection.lag` is empty for it and no target above governs
+it directly. The **event end-to-end** row does: publish → consumer start is
+where a broker-fed projection's staleness comes from, and the handler's own
+write is a single statement on a local connection. The row read *event raised →
+projection applied* with no qualifier until Ordering shipped such a read model,
+at which point it promised coverage of a series that is empty for it.
 
 Two rows were removed rather than left unmeasurable. **Gateway added latency**
 would need the gateway's own duration minus the backend's, correlated per

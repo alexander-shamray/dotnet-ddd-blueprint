@@ -46,8 +46,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // table, §9.5's inbox and the index the retention purge deletes
         // through — all of them wiring every service has rather than anything
         // this one chose. The last two are Ordering's own: the aggregate's
-        // tables, and §6.4's price projection — which is a read model with no
-        // producer until PR-20 and is here because its reader is.
+        // tables, and §6.4's price projection — a read model whose schema landed a
+        // PR ahead of its producer, because its reader needed it.
         string[] applied = await fixture.AppliedMigrationsAsync();
         applied.Length.ShouldBe(6);
         applied[0].ShouldEndWith("_InitialCreate");

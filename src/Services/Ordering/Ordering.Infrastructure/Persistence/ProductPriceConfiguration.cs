@@ -9,11 +9,12 @@ namespace Ordering.Infrastructure.Persistence;
 /// mapped here only so that <c>migrations add</c> emits its table.
 /// </summary>
 /// <remarks>
-/// <b>Mapped by EF, read by Dapper, and written by neither yet.</b>
-/// <see cref="ProjectedPriceReader"/> queries it with Dapper (§6.5), and the
-/// projection handler that maintains it is PR-20's. Configuring it through EF
-/// is what makes the schema the migration's business rather than a hand-written
-/// <c>CREATE TABLE</c> that would drift from the columns the reader selects.
+/// <b>Mapped by EF, read by Dapper, written by Dapper.</b>
+/// <see cref="ProjectedPriceReader"/> queries it (§6.5) and
+/// <c>ProductPriceProjection</c> maintains it (§6.6) — EF touches neither
+/// path. Configuring it through EF is what makes the schema the migration's
+/// business rather than a hand-written <c>CREATE TABLE</c> that would drift
+/// from the columns the reader selects.
 /// <para>
 /// There is no <c>DbSet</c> for it on the context, deliberately: nothing in
 /// this service loads a price through EF, and a set would invite a write path
@@ -21,13 +22,13 @@ namespace Ordering.Infrastructure.Persistence;
 /// <c>ApplyConfigurationsFromAssembly</c> finds this class regardless.
 /// </para>
 /// <para>
-/// <c>UpdatedAt</c> is the out-of-order guard PR-20 needs — a projection
-/// applying an older event after a newer one must be able to tell, and the
-/// column has to exist before the handler that reads it. <b>The name is
-/// §6.6's, not this file's choice</b>: it shipped as <c>LastSeenAt</c> and
-/// PR-20 is specified to copy §6.6's <c>MERGE</c> verbatim, which would have
-/// failed on a column that is not there. Naming a table the next PR writes is
-/// exactly where a private preference costs somebody else a debugging session. <c>IsAvailable</c> is
+/// <c>UpdatedAt</c> is the out-of-order guard — a projection applying an older
+/// event after a newer one must be able to tell, and since PR-20 both of
+/// §6.6's statements name this column in a predicate. <b>The name is §6.6's,
+/// not this file's choice</b>: it shipped as <c>LastSeenAt</c> and PR-20 was
+/// specified to copy §6.6's <c>MERGE</c> verbatim, which would have failed on
+/// a column that is not there. Naming a table the next PR writes is exactly
+/// where a private preference costs somebody else a debugging session. <c>IsAvailable</c> is
 /// the reader's filter: a product Catalog unpublishes stops being orderable
 /// without its price row being deleted, so the history of what it cost
 /// survives.

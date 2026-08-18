@@ -1165,7 +1165,8 @@ price history with it.
 ```csharp
 // Infrastructure, not Application: raw SQL and a connection factory. Registered
 // by AddOrderingInfrastructure's scan (§6.2) — Application's scan would not
-// see it.
+// see it. Public, because that scan is public-only: an internal handler is
+// registered as nothing at all, silently, with the endpoint still bound.
 namespace Ordering.Infrastructure.Projections;
 
 public sealed class ProductPriceProjection(IDbConnectionFactory connections)
@@ -1175,7 +1176,16 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
 {
     private const string UpsertSql =
         """
-        MERGE ordering.ProductPrices AS target
+        -- WITH (HOLDLOCK) is not decoration. A bare MERGE takes no range lock
+        -- over the key it failed to find, so two deliveries for one
+        -- (ProductId, Currency) can both take the NOT MATCHED branch and the
+        -- loser violates the primary key. The endpoint (§9.8) sets no
+        -- ConcurrentMessageLimit, so deliveries can overlap and that is
+        -- ordinary rather than contrived — and its retry would absorb it,
+        -- which is the argument FOR closing it here: a correctness property
+        -- repaired by a retry policy stops holding the day somebody tunes the
+        -- retry policy.
+        MERGE ordering.ProductPrices WITH (HOLDLOCK) AS target
         USING (SELECT ProductId = @ProductId, Currency = @Currency) AS source
             ON target.ProductId = source.ProductId
             AND target.Currency = source.Currency
@@ -1196,14 +1206,51 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
             AND UpdatedAt < @OccurredAt;
         """;
 
-    public Task HandleAsync(ProductPublished e, CancellationToken ct) =>
-        ExecuteAsync(UpsertSql, new { e.ProductId, e.Currency, e.Amount, e.OccurredAt }, ct);
+    public Task HandleAsync(ProductPublished integrationEvent, CancellationToken ct) =>
+        UpsertAsync(
+            integrationEvent.ProductId,
+            integrationEvent.Currency,
+            integrationEvent.Amount,
+            integrationEvent.OccurredAt,
+            ct);
 
-    public Task HandleAsync(PriceChanged e, CancellationToken ct) =>
-        ExecuteAsync(UpsertSql, new { e.ProductId, e.Currency, e.Amount, e.OccurredAt }, ct);
+    public Task HandleAsync(PriceChanged integrationEvent, CancellationToken ct) =>
+        UpsertAsync(
+            integrationEvent.ProductId,
+            integrationEvent.Currency,
+            integrationEvent.Amount,
+            integrationEvent.OccurredAt,
+            ct);
 
-    public Task HandleAsync(ProductDiscontinued e, CancellationToken ct) =>
-        ExecuteAsync(DiscontinueSql, new { e.ProductId, e.OccurredAt }, ct);
+    public Task HandleAsync(ProductDiscontinued integrationEvent, CancellationToken ct) =>
+        ExecuteAsync(
+            DiscontinueSql,
+            new { integrationEvent.ProductId, integrationEvent.OccurredAt },
+            ct);
+
+    // The currency is upper-cased HERE and not only in the reader.
+    // ProjectedPriceReader (§6.4) normalises its parameter on the grounds that
+    // this column is written through Money.Of — which is true of Catalog's
+    // Money and not of the wire, where Currency is a string like any other.
+    // Under a case-sensitive collation an unnormalised contract writes a row
+    // the reader cannot find, and a second primary-key row beside the one it
+    // can.
+    private Task UpsertAsync(
+        Guid productId,
+        string currency,
+        decimal amount,
+        DateTimeOffset occurredAt,
+        CancellationToken ct) =>
+        ExecuteAsync(
+            UpsertSql,
+            new
+            {
+                ProductId = productId,
+                Currency = currency.ToUpperInvariant(),
+                Amount = amount,
+                OccurredAt = occurredAt
+            },
+            ct);
 
     private async Task ExecuteAsync(string sql, object parameters, CancellationToken ct)
     {

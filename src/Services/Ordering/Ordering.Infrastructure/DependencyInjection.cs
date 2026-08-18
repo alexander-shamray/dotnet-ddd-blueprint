@@ -50,8 +50,11 @@ public static class DependencyInjection
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<OrderingDbContext>());
 
         // Each layer scans itself (§6.2): projections, cache invalidators and
-        // command mappers will live here, and scanning only Application would
-        // skip them all. Finding nothing yet is the truthful state.
+        // command mappers live here, and scanning only Application would skip
+        // them all. Since PR-20 this finds ProductPriceProjection under three
+        // closed IIntegrationEventHandler<> interfaces — which is the whole of
+        // its registration, so a public modifier lost in a refactor is a
+        // subscription that silently stops being served.
         services.AddPluggableFrom(typeof(DependencyInjection).Assembly);
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();                     // §6.3
