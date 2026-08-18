@@ -62,7 +62,7 @@ could have made differently:
 
 | | |
 |---|---|
-| A helper exits non-zero | The step did not run; a report that says otherwise is false |
+| A helper or a guarded git command exits non-zero | The step did not run; a report that says otherwise is false. `git pull --ff-only` refusing a diverged branch is the commonest one |
 | This branch's PR was closed unmerged | Reopening a deliberate closure is not a recommended option |
 | A requested review never registers | Same shape: the round did not happen, so no verdict may be minted from it |
 | `main` is ahead of `origin/main` at step 0 | Local commits on `main` need a decision this chain has no way to take |
@@ -676,7 +676,20 @@ same argument as never calling a branch clean because asking failed.
    the PR without asking again.
 
 5. **The review loop.** Once the PR is open, alternate the two halves of the
-   external review until it has nothing left to say:
+   external review until it has nothing left to say.
+
+   **First, once, synchronise the branch with its remote**, because both
+   halves read this working tree — `grok-review.sh` clones it — and a checkout
+   another session has pushed to would have Grok reviewing commits the PR no
+   longer carries:
+
+   ```bash
+   git fetch origin <branch>
+   git pull --ff-only
+   ```
+
+   A refused fast-forward is divergence rather than staleness, and it stops
+   the chain: resolving it needs a force-push, which is denied here.
 
    1. **`/review-branch`, run by Grok, not by you** — the second opinion is
       the point, and a review run by the author's own model is not one:
@@ -1145,11 +1158,34 @@ same argument as never calling a branch clean because asking failed.
    destroys a workspace was not reading it.
 
    **`git log <headRefOid>..HEAD` is the read rather than an equality**, and
-   the asymmetry is deliberate. A HEAD *behind* the PR's head loses nothing —
-   the remote is authoritative and everything here is already in it — where a
-   HEAD carrying anything the remote lacks is the case that strands. The
-   question is not whether the two match; it is whether this workspace holds
-   something the merge will not take.
+   the asymmetry is deliberate: a HEAD carrying anything the remote lacks is
+   the case that strands, and the question is whether this workspace holds
+   something the merge will not take rather than whether the two match.
+
+   **That read needs the oid to exist here, which is why the branch is
+   fetched.** Nothing in this chain ever fetched the feature branch, so a
+   checkout another session had pushed to held neither the commits nor the
+   SHA — and `git log <headRefOid>..HEAD` fails outright on an object it has
+   never seen. The gate would have stopped on a missing revision rather than
+   answered.
+
+   ```bash
+   git fetch origin <branch>
+   ```
+
+   **Being behind is not harmless, and calling it that was the mistake this
+   paragraph made.** It is true that a behind HEAD strands nothing. It is also
+   true that both review loops read the working tree — `grok-review.sh` clones
+   it — so a stale checkout means Grok reviewed commits the PR no longer has
+   and reported on a branch that does not exist upstream. The fetch and a
+   `git pull --ff-only` therefore belong **before step 5**, not only here:
+   reviewing the wrong tree is a wasted round of somebody's budget, and there
+   are twelve of them.
+
+   **A fast-forward that will not fast-forward is divergence**, which is
+   another session's history against this one's, and it stops the chain for
+   the reason an unmergeable PR does — force-pushing is denied here and is the
+   only thing that would resolve it.
 
    **Non-empty is not a stop, because there is an obvious right answer.** The
    run goes back: commit — **scoped**, always — push, and re-enter both review
@@ -1181,6 +1217,24 @@ same argument as never calling a branch clean because asking failed.
    red `main` is not a recommended option**, and a conflicted branch is a
    question about the caller's tree that this chain cannot answer. Either one
    stops here and is reported as what it is.
+
+   **Read `state` on every pass of the poll, before `mergeable`.** The two
+   arrive in the same call and only one of them was being used. A PR closed or
+   merged elsewhere while the review loops ran — and those loops are the long
+   part of this chain — may stop having its mergeability computed at all, so a
+   poll that waits for `MERGEABLE` and never asks what the PR *is* waits for
+   ever. The two states have handling already, three hundred lines up, and the
+   poll would have sat below both of them:
+
+   - **`CLOSED`** is the sixth stop, for the reason the resume table gives:
+     somebody decided this branch does not land.
+   - **`MERGED`** means another route got there first. Skip the merge — there
+     is nothing left to merge — verify it the way the teardown does, from
+     `state` and `mergeCommit`, and go straight to the workspace half of this
+     step.
+
+   **A loop that can only exit on success is not a poll, it is a wait**, and
+   the difference only shows when the thing being waited on stops existing.
 
    **`UNKNOWN` is neither of those, and treating it as a conflict stops the
    run for a value that means *ask again*.** GitHub computes mergeability
