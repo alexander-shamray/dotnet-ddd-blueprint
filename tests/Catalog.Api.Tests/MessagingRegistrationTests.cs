@@ -191,16 +191,16 @@ public class MessagingRegistrationTests
         // handler list must fail, and §8.4's cache invalidator — the handler
         // that eventually arrives — needs a cached query to invalidate.
         //
-        // Consumers rather than endpoints, and since PR-20 that is a stronger
-        // claim than it was. This test used to lean on ConfigureEndpoints —
-        // "the thing that turns one into the other" — and that call is gone
-        // from both services, because for a consumer with no explicit binding
-        // it invented a queue carrying neither the inbox filter nor the retry
-        // policy. A consumer now needs an AddConsumer AND a ConfigureConsumer,
-        // so no registration means no endpoint by construction rather than by
-        // a framework convenience. Asserting the registration keeps this about
-        // Catalog's decision; a test reading the bus topology would be
-        // asserting MassTransit's behaviour instead.
+        // Consumers rather than endpoints, and the registration is the
+        // stronger subject of the two. A consumer reaches a queue only if it
+        // has both an AddConsumer and a ConfigureConsumer naming it, and this
+        // registration calls no ConfigureEndpoints — the helper that would
+        // otherwise invent an endpoint for any consumer lacking an explicit
+        // binding, carrying neither the inbox filter nor the retry policy §9.8
+        // requires. So no registration means no endpoint by construction
+        // rather than by a framework convenience. Asserting the registration
+        // keeps this about this service's decision; a test reading the bus
+        // topology would be asserting MassTransit's behaviour instead.
         ServiceCollection services = new();
 
         services.AddMassTransitMessaging(Configuration());

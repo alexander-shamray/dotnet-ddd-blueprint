@@ -63,7 +63,7 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 ## PR-20 — the first projection and the first receive endpoint
 
 PR-20 landed the first projection and the first receive endpoint — §6.6's
-`ProductPriceProjection`, §9.8's `ordering-catalog-events` — and five of its
+`ProductPriceProjection`, §9.8's `ordering-catalog-events` — and six of its
 decisions bind what comes after:
 
 - **`ConfigureEndpoints(context)` is gone from both services, and it is a

@@ -141,7 +141,7 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     /// <c>NOT MATCHED</c> branch and inserted an orderable row for a
     /// discontinued product. A stale price for a currency the withdrawal never
     /// saw does the same with no reordering at all. Both are covered by
-    /// <see cref="ProductWithdrawal"/>, which the upsert consults on exactly
+    /// <see cref="Persistence.ProductWithdrawal"/>, which the upsert consults on exactly
     /// that branch; both were reproduced as failing tests before this was
     /// written.
     /// </para>

@@ -81,11 +81,20 @@ public static class DependencyInjection
                     CatalogEventsQueue,
                     e =>
                     {
-                        // §9.8's plain exponential five. Nothing is excluded
-                        // here the way ordering-commands excludes
-                        // ContractMappingException: every fault this endpoint
-                        // can raise is a database one, and a deadlock or a
-                        // failed connection is exactly what a backoff is for.
+                        // §9.8's plain exponential five, with nothing
+                        // excluded the way ordering-commands excludes
+                        // ContractMappingException. The faults worth retrying
+                        // dominate — a deadlock or a dropped connection is
+                        // exactly what a backoff is for — but they are not the
+                        // only ones this endpoint can raise, and claiming so
+                        // would be false about the assembly's own throw:
+                        // IntegrationEventConsumer<T> fails when the §6.2 scan
+                        // registered no handler, which no backoff repairs.
+                        // That still reaches the error queue, five attempts
+                        // later than it might, and §9.4 wants it there: a
+                        // misconfigured endpoint should be loud rather than
+                        // quick. An exclusion list is what changes if that
+                        // ever stops being an acceptable trade.
                         e.UseMessageRetry(r =>
                             r.Exponential(
                                 retryLimit: 5,

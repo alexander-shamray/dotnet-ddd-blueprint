@@ -45,26 +45,22 @@ public static class DependencyInjection
             {
                 cfg.Host(new Uri(connectionString));
 
-                // Nothing further. Catalog binds no receive endpoint — §3.2
-                // gives it one Consumes cell, StockLevelChanged, and no
-                // handler for it exists until §8.4's cache invalidator has a
-                // cached query to invalidate. Retry is absent for the
-                // neighbouring reason: §9.8 configures it per receive
-                // endpoint, and there are none.
+                // Nothing further. This service binds no receive endpoint,
+                // so there is no retry policy either: §9.8 configures retry
+                // per receive endpoint, and there are none.
                 //
-                // ConfigureEndpoints(context) stood here until PR-20 and is
-                // gone, on that PR's measurement rather than on tidiness. It
-                // is inert with no consumers registered, and what it does once
-                // one is is manufacture a queue named after the consumer type,
-                // carrying NEITHER the inbox filter NOR the retry policy —
-                // both being per-endpoint configuration that an invented
-                // endpoint never receives. §9.8 permits an endpoint without
-                // the inbox exactly once, for the saga, and requires the
-                // opt-out to be written down where it is taken. Ordering's
-                // registration carries the argument in full and the
-                // measurement behind it; this file is the scaffold's template,
-                // so it must not hand the trap to every service rendered from
-                // it.
+                // There is deliberately no ConfigureEndpoints(context) call.
+                // It is inert while no consumer is registered, and what it
+                // does once one is is manufacture a queue named after the
+                // consumer type — carrying NEITHER the inbox filter NOR the
+                // retry policy, both being per-endpoint configuration that an
+                // invented endpoint never receives. §9.8 permits an endpoint
+                // without the inbox exactly once, for the saga, and requires
+                // that opt-out to be written down where it is taken; a queue
+                // MassTransit invents takes it and writes nothing. So a
+                // consumer added here needs an explicit ReceiveEndpoint with
+                // its own policy, which is what the absence of this line
+                // forces.
             });
         });
 
