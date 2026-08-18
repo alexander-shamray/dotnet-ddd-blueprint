@@ -57,20 +57,21 @@ open by an earlier round can never be reached past — the loop would run to its
 ceiling on every subsequent round with nothing new to fix. Answer, resolve,
 carry on.
 
-**Four things still stop the chain**, and none of them is a decision somebody
+**Five things still stop the chain**, and none of them is a decision somebody
 could have made differently:
 
 | | |
 |---|---|
 | A helper exits non-zero | The step did not run; a report that says otherwise is false |
 | A requested review never registers | Same shape: the round did not happen, so no verdict may be minted from it |
+| `main` is ahead of `origin/main` at step 0 | Local commits on `main` need a decision this chain has no way to take |
 | CI is not green at step 7 | A merge onto a red `main` is not a judgement call |
 | The PR is not mergeable | Conflicts are the caller's tree, not this chain's |
 
-The last two are worth separating from the first two. A helper failing and a
-review that never arrives are questions about *this* run; those two are
+The last three are worth separating from the first two. A helper failing and a
+review that never arrives are questions about *this* run; those three are
 questions about the repository's state, and no recommended option exists for
-either.
+any of them.
 
 **The second row is Copilot's analogue of a Grok helper exiting non-zero, and
 it needed saying because it is the one failure with no exit code.** Grok's
@@ -391,7 +392,7 @@ same argument as never calling a branch clean because asking failed.
    from a merged branch leaves `gh pr view --json state` answering `MERGED`
    from the *first* one on every later resume, so the branch becomes unreadable
    to this command permanently. Report what the workspace still holds and the
-   directory holding it, and end there. **That is not one of the four stops** —
+   directory holding it, and end there. **That is not one of the five stops** —
    nothing failed and nothing is being asked; it is a run that found nothing to
    do, and saying so is the whole of what it owes.
 
@@ -474,16 +475,40 @@ same argument as never calling a branch clean because asking failed.
    - **Dirty.** Skip the pull, say the base was not refreshed, and carry on —
      `/branch` owns the branch-in-place path and this step must not preempt it
      by failing in front of it.
-   - **Ahead.** Skip the pull and **name the commits**. This chain does not
-     adopt them: work committed directly to `main` is what `/commit` refuses
-     and `/branch` exists to prevent, and folding it into an unrelated PR
-     because it happened to be sitting there is a worse answer than leaving it
-     visible. The rejected alternative was branching from `HEAD` instead of
-     `origin/main` — it would carry the commits, and it would also make every
-     ordinary run's base depend on whatever was last committed locally, which
-     is the staleness `/branch` cuts from `origin/main` to avoid.
+   - **Ahead.** **Stop, before step 1.** Report the commits — subject lines
+     and count — and say that `main` carries work `origin/main` does not.
 
-   Neither is a stop. Both are one line in the report.
+   The dirty case is one line in the report; the ahead case ends the run, and
+   the reasoning that first said otherwise is worth keeping because it was
+   wrong in an instructive way.
+
+   **The first answer was *skip the pull, name the commits, carry on*, and it
+   held only as long as nobody followed it past step 1.** Two things happen
+   downstream, and each is worse than the state that produced it:
+
+   - **Clean and ahead.** Step 1 forks from `origin/main`, the PR merges, and
+     step 7's `git pull --ff-only` meets a local `main` that has diverged —
+     its own commits on one side, the merge on the other. The pull fails, and
+     it fails *after* the merge, which is the worst place in this chain to
+     stop: the branch is on `main`, the workspace is half torn down, and the
+     failure is a raw git error rather than anything reported as an outcome.
+   - **Dirty and ahead.** `/branch` branches in place **from `HEAD`**, which
+     silently adopts the very commits the paragraph above said this chain
+     leaves alone. A rule and the path that ignores it, in one file.
+
+   **So the rejected alternative was right about the danger and wrong about
+   the remedy.** Branching from `HEAD` really would carry the commits into an
+   unrelated PR; not branching from `HEAD` does not make them safe, it makes
+   them a divergence waiting at the far end of the run. What the two have in
+   common is that neither is *this chain's* decision: commits sitting on
+   `main` want pushing, moving to a branch, or dropping, and picking one of
+   those is the caller's call in exactly the sense a merge conflict is. It
+   joins the stop table for that reason and not because the run gave up.
+
+   **It is also the one stop that fires before anything has happened**, which
+   is the cheapest place a stop can be. Nothing is branched, committed,
+   pushed or merged; the report names the commits and the tree is exactly as
+   it was found.
 
    **Reading the heading as "go to the main checkout" is the failure mode, and
    it undoes the row that was just obeyed.** A session that Stayed in an
@@ -1048,6 +1073,17 @@ same argument as never calling a branch clean because asking failed.
    red `main` is not a recommended option**, and a conflicted branch is a
    question about the caller's tree that this chain cannot answer. Either one
    stops here and is reported as what it is.
+
+   **`UNKNOWN` is neither of those, and treating it as a conflict stops the
+   run for a value that means *ask again*.** GitHub computes mergeability
+   asynchronously, so a read taken shortly after a push — which is exactly
+   where this one is taken, the review loops having just pushed a fix — finds
+   the answer still being worked out. Poll while it reads `UNKNOWN`, and take
+   `headRefOid` from the **same read that finally answered**, not from the
+   first: a run that captured the oid up front and then waited would bind the
+   merge to a head that a push during the wait had already replaced, which is
+   the guard from two paragraphs down defeated by the loop above it. Only a
+   *known* non-mergeable result stops the chain.
 
    **CI runs on the head commit, not on the PR**, so check the oid: a review
    round that pushed a fix invalidates the previous run, and `gh pr checks`
