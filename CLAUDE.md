@@ -1176,6 +1176,20 @@ Changing either is a human's edit, made with the deny lifted. Like the push
 denies it is defence in depth — `Bash` redirection can still write a file —
 but it removes the quiet path.
 
+**The external review runs in a container over a disposable clone — not a
+worktree — and its one residual is egress.** The boundary is
+`.claude/sandbox/Dockerfile`; a worktree could not be the thing mounted,
+because a worktree's `.git` is a file pointing back into this checkout, which
+is the one path the container must not reach. So the credential half is closed:
+no `gh` token, no SSH keys, no host filesystem beyond the clone, non-root
+inside, and `bypassPermissions` is no longer the risk it was because the blast
+radius is the box. **Egress is not restricted** — the container reaches the
+network, and confining it to `api.x.ai` needs an allow-list proxy Docker cannot
+supply alone. Stated here as well as in the script because `/ship` and both
+sweeps cite this file as where the boundary and its residual are recorded. The
+reviewer also has **no .NET SDK**, so `dotnet test` is this host's gate and
+never the review's.
+
 **A helper is the answer whenever a git grant is wider than the operation it
 buys**, because **a prefix rule cannot exclude a flag**. Each of these was
 confirmed by running the offending form rather than reasoning about it:
