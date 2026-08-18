@@ -57,18 +57,30 @@ open by an earlier round can never be reached past — the loop would run to its
 ceiling on every subsequent round with nothing new to fix. Answer, resolve,
 carry on.
 
-**Three things still stop the chain**, and none of them is a decision somebody
+**Four things still stop the chain**, and none of them is a decision somebody
 could have made differently:
 
 | | |
 |---|---|
 | A helper exits non-zero | The step did not run; a report that says otherwise is false |
+| A requested review never registers | Same shape: the round did not happen, so no verdict may be minted from it |
 | CI is not green at step 7 | A merge onto a red `main` is not a judgement call |
 | The PR is not mergeable | Conflicts are the caller's tree, not this chain's |
 
-The last two are worth separating from the first. A helper failing is a
-question about *this* run; those two are questions about the repository's
-state, and no recommended option exists for either.
+The last two are worth separating from the first two. A helper failing and a
+review that never arrives are questions about *this* run; those two are
+questions about the repository's state, and no recommended option exists for
+either.
+
+**The second row is Copilot's analogue of a Grok helper exiting non-zero, and
+it needed saying because it is the one failure with no exit code.** Grok's
+failures are enumerated — 12 skips to step 6, anything else stops — while a
+Copilot request that will not register produces no error at all, just silence.
+Step 6 already says never to call a branch clean because asking failed; this
+row is where that becomes a chain outcome rather than a loop one, so step 7
+cannot be reached with a loop that never finished. It is **not** *skipped on
+limits*: that exit is about quota and owes Grok a re-entry, where this is a
+round that did not happen.
 
 **A review loop hitting its ceiling is not on that list, and putting it there
 was a real confusion rather than a wording slip.** A ceiling ends a *loop* —
@@ -181,6 +193,16 @@ happens to make the same call, and that does not rescue this list: a paragraph
 that claims to classify every row and omits the only call that sees one of them
 is read as complete by whoever trusts it.
 
+> **The numberless form does resolve a merged PR, and that was measured because
+> a review said otherwise.** `gh pr view --json state`, no argument, run on a
+> branch whose PR is merged, answered `{"state":"MERGED"}` and exited 0 —
+> gh 2.92.0, this repository, `feat(gateway)/response-compression-and-size-limits`.
+> The review cited an open `cli/cli` issue for the claim that it prints *no
+> pull requests found* and exits 1, which would have collapsed this row's two
+> outcomes into one error and made the row unreachable. Whatever that issue
+> describes, it is not this version's behaviour on this path. Re-measure before
+> swapping in `gh pr list --state merged --head`; do not swap on the citation.
+
 **All-resolved needs three reads, not one**, because no single call carries the
 three signals it is defined over. `gh pr view <n> --json reviews` gives the
 review bodies, their suppressed blocks and the `commit` oid — and nothing else:
@@ -214,8 +236,9 @@ one.** `gh pr view --json reviews` reports a GraphQL node id
 `pull_request_review_id` (`4898036373`). Comparing them matches **nothing**,
 which does not merely fail — it drops every comment and reports a review full
 of findings as clean. That is the one direction this check may never fail in,
-and it is the same GraphQL-versus-REST split the reviewer's own login already
-has two paragraphs above.
+and it is the same GraphQL-versus-REST split step 6's parenthetical records for
+the reviewer's own login — `copilot-pull-request-reviewer` from GraphQL, the
+same account with a `[bot]` suffix from REST.
 
 What both sides do carry is the time, and they agree to the second: a review's
 `submittedAt` and its comments' `created_at` are the same instant, because the

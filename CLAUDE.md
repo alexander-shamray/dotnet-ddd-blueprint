@@ -2994,9 +2994,11 @@ those two changes compound.** A check finding, a `Needs a decision` triage row
 and an open `Ask` thread used to halt the chain and hand the question back;
 each is now answered by the run itself and recorded — in the commit body, in
 the resolution record, as a reply on the thread — and the PR is merged at the
-end. What still halts it is a helper failing, red CI and an unmergeable
-branch: the things with no recommended option rather than the things somebody
-might have answered differently.
+end. What still halts it is a helper failing, a requested review that never
+registers, red CI and an unmergeable branch: the things with no recommended
+option rather than the things somebody might have answered differently. The
+second is Copilot's analogue of the first — the one failure with no exit code,
+just silence where a review should be.
 
 So `main` is now reachable without a person in the loop, and **step 2 is the
 last gate in front of it that is not a review bot**. Skipping those checks was
