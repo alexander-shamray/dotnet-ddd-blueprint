@@ -486,6 +486,12 @@ client on the one response where the log scope cannot carry it:
 ```csharp
 namespace Common.Web;
 
+// Public, and read in three places: here, by AddCommonProblemDetails when it
+// builds §10.5's body, and by CorrelationIdHandler on the way out. It was a
+// local const in this sample while two of those spelled the literal instead,
+// which is three copies of one contract.
+public const string Header = "X-Correlation-Id";
+
 public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
 {
     // Resolved once, outside the delegate: this runs on every request, and
@@ -496,8 +502,6 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
 
     return app.Use(async (context, next) =>
     {
-        const string Header = "X-Correlation-Id";
-
         // FirstOrDefault on absent headers is null; an empty header value is
         // not, and would otherwise become a correlation ID of "".
         string? supplied = context.Request.Headers[Header].FirstOrDefault();
@@ -518,6 +522,65 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
     });
 }
 ```
+
+### Leaving the process
+
+**The middleware is the inbound half, and on its own it does not keep the
+promise this section opens with.** It reads or mints the ID and writes it onto
+the request and the response — everything a host needs to log consistently,
+and nothing that crosses a process boundary.
+
+Asynchronously that is enough: [§9.1](09-messaging.md)'s envelope carries
+`CorrelationId` as a member, so a message takes the ID with it by construction.
+Synchronously there is nothing to carry it, and the platform makes exactly one
+synchronous call — the BFF's hop to Catalog ([§9.7](09-messaging.md),
+[ADR-017](appendix-a-adrs.md#adr-017--one-synchronous-hop)). Without a header
+on it the callee mints an ID from its own trace, and one incident has two of
+them.
+
+`CorrelationIdHandler` is the outbound half — a `DelegatingHandler` on the
+outbound client, so no call site has to remember it:
+
+```csharp
+namespace Common.Web;
+
+public sealed class CorrelationIdHandler(IHttpContextAccessor context) : DelegatingHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        string? correlationId = context.HttpContext?.Request
+            .Headers[CorrelationIdExtensions.Header]
+            .FirstOrDefault();
+
+        // Set rather than added: a retried attempt runs this handler again on
+        // the same HttpRequestMessage, and Add would accumulate one value per
+        // attempt into a header the callee reads with FirstOrDefault.
+        if (!string.IsNullOrWhiteSpace(correlationId))
+        {
+            request.Headers.Remove(CorrelationIdExtensions.Header);
+            request.Headers.Add(CorrelationIdExtensions.Header, correlationId);
+        }
+
+        return base.SendAsync(request, cancellationToken);
+    }
+}
+```
+
+> **It lives in `Common.Web` beside the middleware, and it is registered by the
+> host rather than by `AddCommonWebDefaults`.** The guarantee is this section's
+> and not the BFF's, so keeping the two halves in one file is what stops them
+> drifting — but a `DelegatingHandler` attaches to a *named client*, and a
+> host with no outbound client has nothing to attach it to. One host
+> registers it today, and that is a fact about ADR-017 rather than about this
+> type.
+
+> **With no inbound ID it sends no header at all, which is deliberate.** The
+> callee's own middleware then mints one from the current trace — the right
+> answer for a call with no request behind it, such as a background job.
+> Sending an empty header instead would defeat the blank-counts-as-missing
+> guard above, the one this blueprint has already had to write twice.
 
 ## 10.5 Error responses
 
@@ -552,7 +615,7 @@ public static IServiceCollection AddCommonProblemDetails(this IServiceCollection
             // path §10.4's middleware keeps alive through an unwinding
             // exception, and an error response is exactly when it matters.
             context.ProblemDetails.Extensions["correlationId"] =
-                context.HttpContext.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+                context.HttpContext.Request.Headers[CorrelationIdExtensions.Header].FirstOrDefault();
 
             context.ProblemDetails.Extensions["traceId"] =
                 Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
