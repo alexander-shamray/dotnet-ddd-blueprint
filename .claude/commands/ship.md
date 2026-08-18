@@ -182,29 +182,40 @@ having finished rather than clean — so the comparison fails closed, which is
 the direction it must fail in.
 
 `git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
-`gh pr list --state open`, `gh pr view --json state` on the current branch, and
-a look for `suggestions.md` (it decides recheck versus full review inside step
-5, not whether step 5 runs) answer all six rows and the Grok half. Read them
-before doing anything.
+one PR read, and a look for `suggestions.md` (it decides recheck versus full
+review inside step 5, not whether step 5 runs) answer all six rows and the
+Grok half. Read them before doing anything.
 
-**The `gh pr view` read is what selects the last row, and nothing else can.**
-`gh pr list --state open` returns nothing for a merged PR, so on those reads
-alone a merged branch looks like *tree clean and pushed* — the row that sends
-the run to `/pr`, which stops only on an **open** PR from this branch and would
-therefore open a second one. `MERGED` selects the last row ahead of both. Step 0
-happens to make the same call, and that does not rescue this list: a paragraph
-that claims to classify every row and omits the only call that sees one of them
-is read as complete by whoever trusts it.
+```bash
+gh pr list --state all --head <branch> --json number,state
+```
 
-> **The numberless form does resolve a merged PR, and that was measured because
-> a review said otherwise.** `gh pr view --json state`, no argument, run on a
-> branch whose PR is merged, answered `{"state":"MERGED"}` and exited 0 —
-> gh 2.92.0, this repository, `feat(gateway)/response-compression-and-size-limits`.
-> The review cited an open `cli/cli` issue for the claim that it prints *no
-> pull requests found* and exits 1, which would have collapsed this row's two
-> outcomes into one error and made the row unreachable. Whatever that issue
-> describes, it is not this version's behaviour on this path. Re-measure before
-> swapping in `gh pr list --state merged --head`; do not swap on the citation.
+**One call, four outcomes, and it exits 0 for every one of them.** Empty means
+no PR has ever existed for this branch; otherwise the newest row reads `OPEN`,
+`CLOSED` or `MERGED`, and those are precisely the four cases the table above
+distinguishes — including the two that used to need a second call and the one
+that used to need a failed one.
+
+**`gh pr view --json state` cannot be that read, and the reason is an exit
+code rather than a preference.** With no PR for the current branch it exits
+non-zero, and *forked but never PR'd* is what step 1 produces on every run —
+so the commonest state in the table would have been classified through a
+failed command, in a chain whose first stop rule is that a non-zero exit means
+the step did not run. Step 0's predicate had the identical defect and fixed it
+one round earlier; this list kept it, which is what a rule fixed at one site
+and not at its neighbour looks like.
+
+> **A prior review disputed `gh pr view`'s behaviour here and was wrong on the
+> facts, and the fix arrived anyway from the other direction.** Run with no
+> argument on a branch whose PR is merged it answered `{"state":"MERGED"}` and
+> exited 0 — gh 2.92.0, this repository,
+> `feat(gateway)/response-compression-and-size-limits` — where the review had
+> cited a `cli/cli` issue claiming *no pull requests found* and exit 1. That
+> measurement stands and was worth taking. What it never covered is the case
+> that actually bites: a branch with **no** PR at all, which is a different
+> command path from a branch with a merged one. **A measurement rebuts the
+> claim it was taken against and nothing else** — and the swap the review
+> recommended turned out to be right for a reason it never gave.
 
 **All-resolved needs three reads, not one**, because no single call carries the
 three signals it is defined over. `gh pr view <n> --json reviews` gives the
@@ -1065,6 +1076,36 @@ same argument as never calling a branch clean because asking failed.
    Report the state plainly — findings per round and whether the rate was
    still flat when the budget ran out is the useful signal — and merge.
 
+   **`suggestions.md` goes first, before the gates**, and where it used to go
+   is the whole of round 10's second finding:
+
+   ```bash
+   rm suggestions.md
+   ```
+
+   **Removing it after the merge made the workspace gate unsatisfiable.** A
+   Grok loop that ended unconverged or was skipped mid-cycle leaves that file
+   on disk deliberately; the gate below reads `git status --short` and wants
+   it empty; and the retry path is a **scoped** commit, which by construction
+   never takes untracked scratch. So the run would have gone round for ever —
+   gate dirty, re-enter exhausted loops, gate dirty — and never reached the
+   line that removes it. A live loop, introduced one round earlier by the fix
+   that added the gate.
+
+   **Excluding it from the gate was the other option and this is the better
+   one, because it removes a state instead of a symptom.** With the file gone
+   first, a merged PR always has a clean workspace — so the interruption
+   window that used to leave *merged plus one untracked file* cannot arise,
+   and step 0 needs no special case for it. One carve-out avoided in the gate,
+   one dead branch avoided in step 0.
+
+   **This is the one place the file may be deleted from here, and only because
+   the loop is over.** Step 5 forbids writing or deleting it while
+   `/review-branch` owns its lifecycle; that ownership ends when the loop
+   does, and what is left is untracked scratch whose findings are already
+   fixed and committed. Say in the report that it was removed and which loop
+   outcome left it.
+
    Three things genuinely gate it, and none is a judgement:
 
    ```bash
@@ -1092,11 +1133,13 @@ same argument as never calling a branch clean because asking failed.
    something the merge will not take.
 
    **Non-empty is not a stop, because there is an obvious right answer.** The
-   run goes back: commit — **scoped**, `suggestions.md` is still on disk —
-   push, and re-enter both review loops for whatever each has left of its
-   twelve, then return to this gate. That is exactly what a resumed `/ship`
-   would do from the *on a branch with an open PR* row, so doing it here costs
-   nothing new and terminates for the same reason: the budgets are counted per
+   run goes back: commit — **scoped**, always — push, and re-enter both review
+   loops for whatever each has left of its twelve, then return to the **top of
+   this step**, not to this gate. The top is where `suggestions.md` is
+   removed, and re-entering the Grok loop is exactly what puts it back. That
+   is what a resumed `/ship` would do from the *on a branch with an open PR*
+   row, so doing it here costs nothing new and terminates for the same
+   reason: the budgets are counted per
    PR, so an exhausted loop reports unconverged and this step merges. Stopping
    would hand back a question whose answer the resume table already contains.
 
@@ -1191,37 +1234,13 @@ same argument as never calling a branch clean because asking failed.
    chain that satisfied the goal by pushing to `main` would have defeated the
    rule rather than complied with it.
 
-   **First, `suggestions.md` if it is still there.** A Grok loop that ended
-   unconverged, or was skipped mid-cycle, leaves it on disk — `/review-branch`
-   removes it only after a recheck it never got to run. Left in place it takes
-   the teardown down with it: `git worktree remove` refuses an untracked file
-   and the worktree survives on the forked path, while the in-place path
-   carries it onto a `main` the next run then reads as dirty.
+   `suggestions.md` is already gone — removed above the gates rather than
+   here, which is what keeps `git worktree remove` from refusing an untracked
+   file on the forked path and keeps the in-place path from carrying it onto
+   `main`. Both of those were this line's original job; the gate finding moved
+   it earlier and it does that job better from there.
 
-   ```bash
-   rm suggestions.md
-   ```
-
-   **An interruption between the merge and this line is a dead end, and step 0
-   is where it is dug out.** The next run finds a merged PR with a dirty
-   tree — dirty by exactly one untracked file, this one — so the predicate
-   says not finished, the Stay row keeps the workspace, the merged-PR resume
-   row ends the run, and nothing reaches this cleanup ever again. So step 0
-   special-cases it: **on a branch whose PR is merged, if the only thing
-   making the tree dirty is `suggestions.md`, remove it and evaluate the
-   predicate again.** Any other change — an edit, a second untracked file —
-   and the workspace is kept untouched, because the narrow case is the only
-   one whose contents this chain wrote and therefore the only one it may
-   discard.
-
-   **This is the one place the file may be deleted from here, and only
-   because the loop is over.** Step 5 forbids writing or deleting it while
-   `/review-branch` owns its lifecycle; that ownership ends when the loop does,
-   and what is left is untracked scratch whose findings are already fixed and
-   committed. Say in the report that it was removed and which loop outcome left
-   it.
-
-   Then put the workspace back the way step 0 wants to find it. **The order is
+   Now put the workspace back the way step 0 wants to find it. **The order is
    the instruction**, and two of the six lines depend on which outcome step 1
    produced:
 
