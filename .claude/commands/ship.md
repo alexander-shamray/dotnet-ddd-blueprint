@@ -157,9 +157,19 @@ having finished rather than clean — so the comparison fails closed, which is
 the direction it must fail in.
 
 `git status -sb`, `git branch --show-current`, the `rev-parse` pair above,
-`gh pr list --state open` and a look for `suggestions.md` (it decides recheck
-versus full review inside step 5, not whether step 5 runs) answer all five rows
-and the Grok half. Read them before doing anything.
+`gh pr list --state open`, `gh pr view --json state` on the current branch, and
+a look for `suggestions.md` (it decides recheck versus full review inside step
+5, not whether step 5 runs) answer all six rows and the Grok half. Read them
+before doing anything.
+
+**The `gh pr view` read is what selects the last row, and nothing else can.**
+`gh pr list --state open` returns nothing for a merged PR, so on those reads
+alone a merged branch looks like *tree clean and pushed* — the row that sends
+the run to `/pr`, which stops only on an **open** PR from this branch and would
+therefore open a second one. `MERGED` selects the last row ahead of both. Step 0
+happens to make the same call, and that does not rescue this list: a paragraph
+that claims to classify every row and omits the only call that sees one of them
+is read as complete by whoever trusts it.
 
 **All-resolved needs three reads, not one**, because no single call carries the
 three signals it is defined over. `gh pr view <n> --json reviews` gives the
@@ -268,7 +278,7 @@ same argument as never calling a branch clean because asking failed.
    ```
 
    **The word to avoid here is "unpushed", and avoiding it is the whole of this
-   fix.** The resume table below uses it in git's ordinary sense — commits not
+   fix.** The resume table above uses it in git's ordinary sense — commits not
    yet on `origin/<branch>` — and its rows need that reading. Spelling the
    Finished predicate as "nothing unpushed" imported the other meaning: a clean
    branch, fully pushed, with no PR yet is *nothing unpushed* and is exactly
@@ -820,40 +830,43 @@ same argument as never calling a branch clean because asking failed.
    chain that satisfied the goal by pushing to `main` would have defeated the
    rule rather than complied with it.
 
-   Then put the workspace back the way step 0 wants to find it. Not step 0's
-   block repeated — **the switch and the remove read differently depending on
-   which outcome step 1 produced**, and the pull and the prune do not.
+   Then put the workspace back the way step 0 wants to find it. **The order is
+   the instruction**, and two of the six lines depend on which outcome step 1
+   produced:
 
    ```bash
-   bash .claude/scripts/git-switch-existing.sh main     # HEAD must be main to pull it
-   git pull --ff-only                                   # main, with the merge commit on it
-   git worktree remove ../<checkout-name>-<slug>        # only when the run forked one
-   git worktree prune
+   gh pr view <n> --json state,mergeCommit              # 1. MERGED, with an oid
+   #    ExitWorktree({action: "keep"})                  # 2. forked runs only — a tool, not bash
+   bash .claude/scripts/git-switch-existing.sh main     # 3. in-place runs only
+   git pull --ff-only                                   # 4. main, with the merge commit on it
+   git worktree remove ../<checkout-name>-<slug>        # 5. forked runs only
+   git worktree prune                                   # 6.
    ```
 
-   Leave the session in the main checkout. `ExitWorktree({action: "keep"})`
-   first when the run happened in a worktree — the same `keep`, for the same
-   reason as step 0, and the `git worktree remove` afterwards is what actually
-   removes it.
+   **Verify first.** Removing the worktree is the one step in this chain that
+   destroys something, and doing it on an assumed merge is how an unmerged
+   branch loses its only checkout. Verify from the remote rather than from an
+   exit code: `state` must read `MERGED` and `mergeCommit` must carry an oid.
 
-   **Two of the four vary, and they are the first and the third.** The switch
-   is always *invoked* and does different work: after a fork the session is
-   already on `main` and it is a no-op, while after an in-place branch it is
-   the only thing that makes the pull mean `main` rather than a feature branch.
-   The remove is **fork only** — an in-place run has no worktree, and running
-   it anyway exits non-zero and stops the chain on a helper failure with
+   **Then leave the worktree, and only then is anything on `main`.** After a
+   fork the session is inside the worktree *on the feature branch* — step 1 put
+   it there and the main checkout kept `main` — so a switch attempted here
+   fails outright: git refuses to check out a branch another worktree already
+   holds. `ExitWorktree({action: "keep"})` is what returns the session to the
+   main checkout, which is already on `main`, so line 3 is skipped entirely on
+   this path rather than being a no-op.
+
+   **The in-place path is the mirror image.** There is no worktree to leave and
+   none to remove, and the session *is* sitting on the merged branch in the
+   main checkout — so line 3 is the only thing that makes the pull mean `main`,
+   and lines 2 and 5 are skipped. Running line 5 anyway exits non-zero against
+   a worktree that never existed and stops the chain on a helper failure with
    nothing behind it.
 
-   The pull and the prune are unconditional, once the switch has put HEAD on
-   `main`. Reading the pull as conditional is the mistake that leaves the main
-   checkout a merge behind on the forked path, which is precisely the state
-   step 0 exists to prevent the next run from starting in.
-
-   **Verify the merge before tearing anything down**, and verify it from the
-   remote rather than from the exit code:
-   `gh pr view <n> --json state,mergeCommit` must read `MERGED` with an oid. Removing the worktree is the one step in
-   this chain that destroys something, and doing it on an assumed merge is how
-   an unmerged branch loses its only checkout.
+   The pull and the prune run on both paths, once whichever of lines 2 and 3
+   applies has put HEAD on `main`. Skipping the pull is what leaves the main
+   checkout a merge behind — precisely the state step 0 exists to stop the next
+   run from starting in.
 
    The merged branch itself stays. `git branch -d` is denied, deliberately, and
    a merged branch costs a line in `git branch` — name it in the report.

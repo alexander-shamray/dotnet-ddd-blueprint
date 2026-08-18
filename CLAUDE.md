@@ -2829,7 +2829,7 @@ produces every time `main` was dirty — stranded by the identical switch to
 `main` minus the directory. Then the predicate itself: written as "nothing
 unpushed", it swept in a branch whose commits are all pushed and which has
 simply not reached `/pr` yet, because that phrase means something else in the
-resume table three sections above. **A rule and its predicate drift
+resume table in `ship.md` itself. **A rule and its predicate drift
 separately**, and the third one arrived through a word rather than a missing
 row.
 
