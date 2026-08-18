@@ -2846,9 +2846,13 @@ saved the files while the merged-PR resume row ended the run around them.
 Then the same hole one read over: a merged PR with clean commits made *after*
 the merge is ahead of `origin/main`, and only the no-PR limb was asking. **The
 predicate has no limbs now** — a clean tree, nothing ahead of a fetched
-`origin/main`, and no open PR, conjoined. All three ask *is there work here*,
-nothing about a PR's state exempts a workspace from being asked, and a
-conjunction cannot carry the defect a disjunction kept generating.
+`origin/main`, and a merged PR, conjoined. All three ask one question about
+one thing, nothing about a PR's state exempts a workspace from being asked,
+and a conjunction cannot carry the defect a disjunction kept generating.
+
+That third conjunct read *no open PR* for one draft, which is what the
+conjunction looked like before the next paragraph narrowed it, and it stood
+here for a round after the sentence above had moved.
 
 **Then the conjunction turned out to be too generous, and the fix ran the other
 way.** A branch forked and never used — no commits, no PR, a pristine tree —

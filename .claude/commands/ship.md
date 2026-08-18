@@ -832,9 +832,24 @@ same argument as never calling a branch clean because asking failed.
      fail-open in the script's own manifest check — three defects three rounds
      would have shipped. The loop then ran past twelve and kept finding things,
      including a *clean* round eight after which every further round found
-     more. A ceiling
-     is for a reviewer and a triager **disagreeing**, which converges or never
-     does; it was never for a loop still finding real things.
+     more.
+
+     **That argument is about the ceiling's size, not about what happens when
+     it is reached, and the two used to be run together.** It says twelve
+     rather than three, because a loop that is still finding real things has
+     not converged and a small number ships defects. What it cannot say is
+     *keep going*: a budget that yields whenever the rate is still flat is not
+     a budget. So the number is high and step 7 merges at it, and the sentence
+     that used to close this paragraph — a ceiling is for a reviewer and a
+     triager disagreeing, never for a loop still finding real things — is
+     gone, because it read as an instruction and the instruction it implied
+     contradicted step 7.
+
+     **What survives is the cost, stated plainly.** Merging at a flat ceiling
+     ships a branch its reviewer had more to say about, and the report says so
+     with the per-round numbers behind it. That is the trade this chain takes
+     when it stops asking a person: bounded review, honestly measured, rather
+     than an unbounded loop nobody is waiting on.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
@@ -1108,11 +1123,24 @@ same argument as never calling a branch clean because asking failed.
    were read.** Without it the green verdict and the merge are two reads of a
    moving target: a push landing between them merges a commit whose checks
    never ran, and the rule above — wait for the run on the pushed head —
-   would have been satisfied by a commit that is no longer the head. The oid
-   is the one captured before polling, from `gh pr view <n> --json
-   headRefOid`, and an intervening push then fails the merge rather than
-   riding in on it. **It is
+   would have been satisfied by a commit that is no longer the head. **It is
    the only guard in this step that fails closed**, and it costs one argument.
+
+   **The oid comes from the `gh pr view` read that returned a *known*
+   mergeability** — the last one of the poll above, not the first. This
+   sentence used to say "captured before polling", which was unambiguous when
+   the only wait in this step was the one on checks and became a
+   contradiction the moment mergeability grew a poll of its own: taken before
+   that wait, the oid could name a head a push during the wait had already
+   replaced, and the merge would fail on a branch that was fine.
+
+   **A push during the *checks* wait is a different matter, and there the
+   failure is the intended one.** That oid is deliberately not refreshed: the
+   whole point is that the checks were watched for one particular commit, so
+   anything arriving afterwards must not ride in on their verdict. The rule is
+   the same in both cases — the oid names the head the gates were satisfied
+   *for* — and the two waits differ only in whether they run before or after
+   the gate that produced it.
 
    **The flag comes before the number, and that is about the grant rather than
    about `gh`.** The frontmatter permits `Bash(gh pr merge --merge:*)`, and a
