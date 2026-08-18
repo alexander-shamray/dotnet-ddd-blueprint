@@ -288,7 +288,16 @@ saga) is next**, and it is the other half of the roadmap's M5.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
 and `dotnet test` runs 723 tests — so the build rules and the drift rules below
-are live and a green run means something. Since PR-11 there is a second suite
+are live and a green run means something.
+
+**That number is a claim to reconcile rather than a fact to read**, exactly
+as the compose timeout is: it is restated here, and nothing recomputes it. The
+cheap check is a CI run that has already happened — `gh run view <id> --log`,
+summed over the thirteen per-project totals — which beats the arithmetic that
+would otherwise have to guess. PR-20 found the figure eight low against
+`main`'s own run and needed that command to tell which side was wrong.
+
+Since PR-11 there is a second suite
 with a second runner: `py -3.12 -m unittest` in `tools/new-service` runs 81,
 and CI has a `scaffold` job for them beside `licence-gate`.
 

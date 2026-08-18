@@ -43,9 +43,9 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
       IIntegrationEventHandler<ProductDiscontinued>
 {
     /// <summary>
-    /// §6.6's upsert. <c>WITH (HOLDLOCK)</c> is this file's one addition to
-    /// the printed statement, and it is a correctness fix rather than a tuning
-    /// one — <see cref="UpsertAsync"/>'s remarks argue it.
+    /// §6.6's upsert, hint and all. <c>WITH (HOLDLOCK)</c> is a correctness
+    /// property rather than a tuning one, and <see cref="UpsertAsync"/>'s
+    /// remarks argue it.
     /// </summary>
     private const string UpsertSql =
         """
@@ -113,8 +113,9 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
     /// about <c>OrderSummaries</c>' status transitions).
     /// </summary>
     /// <remarks>
-    /// <b><c>WITH (HOLDLOCK)</c> is not in §6.6's printed statement, and the
-    /// chapter was amended to carry it.</b> A bare <c>MERGE</c> takes no range
+    /// <b><c>WITH (HOLDLOCK)</c> is what makes this statement safe under
+    /// concurrent delivery, and §6.6 prints it because PR-20 amended the
+    /// chapter to.</b> A bare <c>MERGE</c> takes no range
     /// lock over the key it failed to find, so two deliveries for one
     /// <c>(ProductId, Currency)</c> can both take the <c>NOT MATCHED</c>
     /// branch and the second insert violates the primary key — and the
