@@ -4,7 +4,7 @@ argument-hint: "[what the change does] — omit and each step derives its own"
 allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
 ---
 
-Take the working tree from wherever it is to an open PR. Description:
+Take the working tree from wherever it is to a merged PR. Description:
 $ARGUMENTS — if empty, each step derives its own.
 
 ## This command owns no rules
@@ -47,19 +47,24 @@ open by an earlier round can never be reached past — the loop would run to its
 ceiling on every subsequent round with nothing new to fix. Answer, resolve,
 carry on.
 
-**Four things still stop the chain**, and none of them is a decision somebody
+**Three things still stop the chain**, and none of them is a decision somebody
 could have made differently:
 
 | | |
 |---|---|
 | A helper exits non-zero | The step did not run; a report that says otherwise is false |
-| Either review loop hits its ceiling | Reported as unconverged, and step 7 still merges — see there |
 | CI is not green at step 7 | A merge onto a red `main` is not a judgement call |
 | The PR is not mergeable | Conflicts are the caller's tree, not this chain's |
 
-That last pair is worth separating from the rest. Everything above them is a
-question about *this* change and is now answered here; those two are questions
-about the repository's state, and no recommended option exists for them.
+The last two are worth separating from the first. A helper failing is a
+question about *this* run; those two are questions about the repository's
+state, and no recommended option exists for either.
+
+**A review loop hitting its ceiling is not on that list, and putting it there
+was a real confusion rather than a wording slip.** A ceiling ends a *loop* —
+the loop reports itself unconverged and step 7 merges anyway, because a budget
+running out is not a verdict. Reading it as a chain stop would hold every PR
+whose reviewer had more to say, which is the opposite of what step 7 decides.
 
 **The checks carry the weight the stops used to, and they now carry more of
 it.** Under the old blanket `Bash(git push:*)` deny this command could not
@@ -786,8 +791,9 @@ same argument as never calling a branch clean because asking failed.
    chain that satisfied the goal by pushing to `main` would have defeated the
    rule rather than complied with it.
 
-   Then put the workspace back the way step 0 wants to find it — the same
-   three commands, now with a merged branch behind them:
+   Then put the workspace back the way step 0 wants to find it. Not step 0's
+   block repeated: two of these four lines depend on which outcome step 1
+   produced, and only the prune is unconditional.
 
    ```bash
    bash .claude/scripts/git-switch-existing.sh main     # HEAD must be main to pull it
@@ -833,9 +839,12 @@ findings raised, findings fixed, and what each round pushed — its running
 check count against its twelve (the PR carries the durable copy: step 5's
 ledger comments, step 6's timeline events; the report line is the
 human-readable echo), and how it ended, in that loop's own vocabulary: step 5
-clean, stopped on a decision, skipped on limits with re-entry owed, or stopped
-unconverged; step 6 **all-resolved, naming the review and the `commit` oid it
-read**, an `Ask` answered and resolved, or stopped unconverged. The oid is not
+clean, skipped on limits with re-entry owed, or stopped unconverged; step 6
+**all-resolved, naming the review and the `commit` oid it read**, or stopped
+unconverged. Neither list has an ending that means "a finding stopped us" any
+more — a decided row and an answered `Ask` belong in the decisions section
+below, and filing one as a stop is the silent-decision failure this report
+exists to prevent. The oid is not
 decoration — it is the whole of step 6's marker, and a later `/ship` compares
 it against the pushed head to decide whether that loop is owed at all.
 

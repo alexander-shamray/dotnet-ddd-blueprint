@@ -2925,9 +2925,11 @@ the account's Copilot settings, not a request parameter; the full tier, not
 a lite one, is the one the loop wants. **`ship.md` owns the stopping
 condition**, and the two loops no longer share one: Grok ends on **two
 consecutive clean passes**, Copilot on the **first** clean round, and each
-carries its own ceiling of twelve rounds per PR. Either loop also stops early
-on the finding class that is the user's: `Needs a decision` from the Grok
-triage, an open `Ask` thread from the Copilot one.
+carries its own ceiling of twelve rounds per PR. **Neither stops early on the
+finding class that used to be the user's**: inside `/ship` a `Needs a decision`
+row and an open `Ask` thread are decided, recorded and carried past. Run on
+their own, `/review-grok` and `/review-copilot` still surface both — that is
+what those statuses are for, and it is a different claim from this one.
 
 **The asymmetry is a decision with its cost on the record.** Two rather than
 one was Grok's rule for the reason below, and it holds there: one clean pass is
