@@ -158,6 +158,74 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
     }
 
     /// <summary>
+    /// Each of the other two bindings, driven over the same queue — because
+    /// each is a line in <c>AddMassTransitMessaging</c> that nothing else
+    /// watches.
+    /// </summary>
+    /// <remarks>
+    /// <b>Registration and binding are two statements, and only one of them
+    /// had a guard.</b> <c>MessagingRegistrationTests</c> asserts the three
+    /// <c>AddConsumer</c> calls and says out loud that it cannot see a receive
+    /// endpoint — the harness replaces the callback the endpoint lives in — and
+    /// <c>ProductPriceProjectionTests</c> invokes the handlers directly. So
+    /// deleting <c>ConfigureConsumer&lt;IntegrationEventConsumer&lt;PriceChanged&gt;&gt;</c>
+    /// left every suite green while that subscription silently stopped
+    /// arriving. Copilot found it, and it is this repository's most repeated
+    /// shape: a line kept for a reason, watched by nothing.
+    /// <para>
+    /// A price rather than a publish, because <c>PriceChanged</c> reaching the
+    /// table is the whole claim; the projection's own arithmetic is
+    /// <c>ProductPriceProjectionTests</c>' subject and is not re-proved here.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_price_change_reaches_the_projection_over_the_broker()
+    {
+        Guid product = Guid.CreateVersion7();
+
+        await PublishAsync(product, 19.99m, "EUR", Guid.CreateVersion7());
+        await Eventually(
+            () => AmountPenceAsync(product),
+            expected: 1999,
+            because: "the arrange half has to land before the assert half can mean anything");
+
+        await PublishChangeAsync(product, 24.99m, "EUR");
+
+        await Eventually(
+            () => AmountPenceAsync(product),
+            expected: 2499,
+            because: "PriceChanged has its own ConfigureConsumer line, and nothing but this drives it " +
+                "over the queue that line names");
+    }
+
+    [Fact]
+    public async Task A_discontinuation_reaches_the_projection_over_the_broker()
+    {
+        Guid product = Guid.CreateVersion7();
+
+        await PublishAsync(product, 19.99m, "EUR", Guid.CreateVersion7());
+        await Eventually(
+            () => AmountPenceAsync(product),
+            expected: 1999,
+            because: "the arrange half has to land before the assert half can mean anything");
+
+        await PublishDiscontinuedAsync(product);
+
+        await Eventually(
+            () => fixture.ScalarAsync<int>(
+                """
+                SELECT Value = COUNT(*)
+                FROM ordering.ProductPrices
+                WHERE ProductId = {0}
+                    AND IsAvailable = 0
+                """,
+                product),
+            expected: 1,
+            because: "ProductDiscontinued has its own ConfigureConsumer line too, and it is the third " +
+                "binding no other test reaches");
+    }
+
+    /// <summary>
     /// Publishes with the transport id the envelope carries, which §9.1 says
     /// is one GUID rather than two — the inbox keys on the transport's, and a
     /// body claiming a different one would make the row unfindable from the
@@ -181,6 +249,58 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
             .GetRequiredService<IBus>()
             .Publish(published, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
     }
+
+    private async Task PublishChangeAsync(Guid product, decimal amount, string currency)
+    {
+        var messageId = Guid.CreateVersion7();
+
+        PriceChanged changed = new()
+        {
+            MessageId = messageId,
+            CorrelationId = Guid.CreateVersion7(),
+            // Strictly later than the publish above, which the projection's
+            // guard requires and a same-tick clock read would not guarantee.
+            OccurredAt = DateTimeOffset.UtcNow.AddMinutes(1),
+            ProductId = product,
+            Amount = amount,
+            Currency = currency
+        };
+
+        await fixture.Factory.Services
+            .GetRequiredService<IBus>()
+            .Publish(changed, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+    }
+
+    private async Task PublishDiscontinuedAsync(Guid product)
+    {
+        var messageId = Guid.CreateVersion7();
+
+        ProductDiscontinued discontinued = new()
+        {
+            MessageId = messageId,
+            CorrelationId = Guid.CreateVersion7(),
+            OccurredAt = DateTimeOffset.UtcNow.AddMinutes(1),
+            ProductId = product
+        };
+
+        await fixture.Factory.Services
+            .GetRequiredService<IBus>()
+            .Publish(discontinued, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// The amount in minor units, because <see cref="Eventually"/> polls an
+    /// <c>int</c> — and a poll on a decimal would need an equality this table
+    /// does not owe.
+    /// </summary>
+    private Task<int> AmountPenceAsync(Guid product) =>
+        fixture.ScalarAsync<int>(
+            """
+            SELECT Value = COALESCE(CAST(MAX(Amount) * 100 AS int), 0)
+            FROM ordering.ProductPrices
+            WHERE ProductId = {0}
+            """,
+            product);
 
     private async Task<IReadOnlyList<InboxMessage>> InboxRowsAsync(Guid messageId) =>
         [.. (await fixture.InboxAsync()).Where(m => m.MessageId == messageId)];

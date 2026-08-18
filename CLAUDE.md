@@ -288,7 +288,7 @@ endpoint and its first broker-fed read model. **PR-21 (Ordering's fulfilment
 saga) is next**, and it is the other half of the roadmap's M5.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 726 tests — so the build rules and the drift rules below
+and `dotnet test` runs 730 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly

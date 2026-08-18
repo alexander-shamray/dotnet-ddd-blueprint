@@ -1269,7 +1269,7 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
                     SELECT 1
                     FROM ordering.ProductWithdrawals WITH (HOLDLOCK)
                     WHERE ProductId = @ProductId
-                        AND WithdrawnAt > @OccurredAt)
+                        AND WithdrawnAt >= @OccurredAt)
                 THEN 0
                 ELSE 1
             END;
@@ -1313,7 +1313,7 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
         UPDATE ordering.ProductPrices
         SET IsAvailable = 0, UpdatedAt = @OccurredAt
         WHERE ProductId = @ProductId
-            AND UpdatedAt < @OccurredAt;
+            AND UpdatedAt <= @OccurredAt;
 
         -- One transaction, because the two halves are one fact: the watermark
         -- alone leaves existing prices orderable, the rows alone leave the
@@ -1390,6 +1390,25 @@ published — which is what the customer experiences either way.
 > republishes its full catalogue on demand (an operational task, not a code
 > path), and the [§13.6](13-observability.md) alert on business volume catches the case where orders
 > stop for a reason no technical metric shows.
+
+> **This projection's rebuild procedure is Catalog's republish, and it does not
+> exist yet.** The trap at the end of this chapter says to keep a rebuild
+> script in source control from day one, and Ordering cannot hold one: it has
+> no source of truth for prices to rebuild *from*. Everything published before
+> `ordering-catalog-events` was first declared is simply absent — the broker
+> drops what no queue is bound for — so a product Catalog listed last year is
+> unorderable until somebody republishes it. That is the same silence the
+> callout above describes, with a cause nobody can see from Ordering.
+>
+> **The republish must carry each product's original `OccurredAt`, and this is
+> the part that is easy to get wrong.** A loop that re-emits `ProductPublished`
+> stamped `now` would sail past every guard the projection has: the withdrawal
+> watermark compares against the event's own timestamp, so a fresh one re-lists
+> every product Catalog has ever discontinued. Rebuilding a read model is
+> therefore not "replay the current state" but "replay the facts with the times
+> they happened", which means Catalog has to have kept them. Naming that here
+> is cheaper than discovering it during an incident, which is when a rebuild is
+> reached for.
 
 The projection reacts to two different sources, so it implements two different
 interfaces (§9.4): `IProjectionHandler<T>` for this service's own events,

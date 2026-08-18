@@ -229,6 +229,50 @@ public sealed class ProductPriceProjectionTests(ServiceFixture fixture) : IAsync
         (await ReadPriceAsync(product, "GBP")).ShouldBe(Money.Of(17.99m, "GBP"));
     }
 
+    /// <summary>
+    /// A withdrawal and a price bearing the <b>same</b> <c>OccurredAt</c>
+    /// settle the same way whichever arrives first, and the product ends
+    /// withdrawn.
+    /// </summary>
+    /// <remarks>
+    /// <b>A tie has to break somewhere, and both statements have to break it
+    /// the same way.</b> Only a <em>later</em> event re-lists a product, so a
+    /// tie is not "later" and the withdrawal wins: the upsert asks
+    /// <c>WithdrawnAt >= @OccurredAt</c> and the discontinue asks
+    /// <c>UpdatedAt &lt;= @OccurredAt</c>. With one of them strict the pair was
+    /// order-dependent — a price applied to an existing row first left it
+    /// available and the withdrawal that followed could no longer touch it,
+    /// where the other order withdrew it and the price was refused. Copilot
+    /// found that; a theory rather than two tests, because the claim is that
+    /// order does not matter and a single ordering cannot say so.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_withdrawal_wins_a_tie_with_a_price_in_either_order(bool withdrawFirst)
+    {
+        // Seeded strictly earlier, so both events below are applicable to a row
+        // that already exists — which is the case the strict comparison got
+        // wrong. A product with no row at all ties correctly either way.
+        Guid product = Guid.CreateVersion7();
+        await HandleAsync(Publish(product, 9.99m, "EUR", Published));
+
+        if (withdrawFirst)
+        {
+            await HandleAsync(Discontinue(product, Later));
+            await HandleAsync(PriceOf(product, 19.99m, "EUR", Later));
+        }
+        else
+        {
+            await HandleAsync(PriceOf(product, 19.99m, "EUR", Later));
+            await HandleAsync(Discontinue(product, Later));
+        }
+
+        (await IsAvailableAsync(product)).ShouldBeFalse(
+            "a tie is not 'later', so it cannot re-list a withdrawn product — and the answer must not " +
+            "depend on which of the two the broker happened to deliver first");
+    }
+
     [Fact]
     public async Task Two_currencies_are_two_rows_rather_than_the_second_overwriting_the_first()
     {

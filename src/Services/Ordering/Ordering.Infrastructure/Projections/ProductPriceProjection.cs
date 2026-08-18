@@ -27,6 +27,18 @@ namespace Ordering.Infrastructure.Projections;
 /// "no handler is registered" throw instead of a table.
 /// </para>
 /// <para>
+/// <b>There is no rebuild path, and §6.6 names the one that is owed.</b> This
+/// service holds no source of truth for prices, so it cannot rebuild the table
+/// from anything of its own — the procedure is Catalog republishing its
+/// catalogue, which does not exist yet. Until it does, every product published
+/// before <c>ordering-catalog-events</c> was first declared is absent, because
+/// the broker drops what no queue is bound for, and each is an order refused
+/// with no fault anywhere. §6.6 also records the constraint that republish has
+/// to meet: it must carry each product's original <c>OccurredAt</c>, since a
+/// fresh one sails past the withdrawal watermark below and re-lists everything
+/// Catalog ever discontinued.
+/// </para>
+/// <para>
 /// <b>Three interfaces, two of them ahead of their publisher.</b> §3.2 gives
 /// Ordering all three of Catalog's events; Catalog's §9.3 allow-list maps one
 /// of them today, because <c>Product</c> has no price-change or discontinue
@@ -76,7 +88,7 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
                     SELECT 1
                     FROM ordering.ProductWithdrawals WITH (HOLDLOCK)
                     WHERE ProductId = @ProductId
-                        AND WithdrawnAt > @OccurredAt)
+                        AND WithdrawnAt >= @OccurredAt)
                 THEN 0
                 ELSE 1
             END;
@@ -157,7 +169,7 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
         UPDATE ordering.ProductPrices
         SET IsAvailable = 0, UpdatedAt = @OccurredAt
         WHERE ProductId = @ProductId
-            AND UpdatedAt < @OccurredAt;
+            AND UpdatedAt <= @OccurredAt;
 
         COMMIT;
         """;
