@@ -18,7 +18,16 @@ namespace Web.Bff.Identity;
 /// handler retries 5xx, 408 and <c>HttpRequestException</c>, and this hop's
 /// callee answers gRPC statuses on an HTTP 200 besides. The real case is that
 /// <i>whenever</i> a retry fires — a transport fault — the repeated attempt
-/// carries a freshly fetched token rather than a stale one.
+/// asks <see cref="ITokenCache"/> again rather than replaying the first
+/// attempt's token.
+/// <para>
+/// <b>Which usually returns the same token, and that is not a defect.</b>
+/// <c>CachingTokenClient</c> serves a cached token until its expiry guard, so
+/// the bytes are typically identical; what the position buys is that a token
+/// which expired between attempts is refreshed for the next one. Narrower than
+/// "carries a freshly fetched token", which is how this read until a review
+/// checked it against the cache's own behaviour.
+/// </para>
 /// </para>
 /// </remarks>
 public sealed class ClientCredentialsHandler(ITokenCache tokens, IOptions<ServiceIdentityOptions> identity)

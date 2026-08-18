@@ -2419,9 +2419,12 @@ IHttpClientBuilder pricing = services
 
 // Resilience is registered FIRST so it sits outermost, and the credential
 // handler runs inside it. That ordering matters: the handler then runs once
-// per ATTEMPT rather than once per request, so a retried attempt carries a
-// freshly fetched token instead of replaying the first one. Registered the
+// per ATTEMPT rather than once per request, so a retried attempt asks the token
+// cache again instead of replaying the first attempt's token. Registered the
 // other way round, every attempt reuses the token the first one built.
+//
+// Usually the cache answers with the same token, which is what a cache is for.
+// The case this position covers is one that expired between attempts.
 //
 // Narrower than it sounds, and §11.5 spells out why: the retries that fire are
 // transport faults, because a gRPC status rides an HTTP 200 that this pipeline

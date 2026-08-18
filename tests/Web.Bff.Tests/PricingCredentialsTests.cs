@@ -9,8 +9,10 @@ namespace Web.Bff.Tests;
 /// <summary>
 /// §11.5's outbound identity, observed at the wire: that a token is attached
 /// at all, that it is the configured scope's, and — the claim §9.7 and §11.5
-/// both make and neither could check — that a retried attempt carries a
-/// <b>fresh</b> one.
+/// both make and neither could check — that every attempt asks the cache
+/// <b>again</b> rather than replaying the first attempt's token.
+/// §10.4's outbound correlation ID is here too, for the same reason: it is a
+/// header on the same hop and only the far end can see it.
 /// </summary>
 public sealed class PricingCredentialsTests : IAsyncLifetime
 {
@@ -74,7 +76,43 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_retried_attempt_carries_a_fresh_token()
+    public async Task The_hop_carries_the_callers_correlation_id()
+    {
+        using HttpClient client = Caller();
+        client.DefaultRequestHeaders.Add("X-Correlation-Id", "018f4c2e-supplied");
+
+        await client.GetFromJsonAsync<QuoteResponse>(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
+            TestContext.Current.CancellationToken);
+
+        // §10.4 promises one ID "propagates through every service", and this
+        // is the one synchronous hop in the platform — so it is the only place
+        // that promise could be broken by a process boundary, and it was.
+        // Asserted at the RECEIVING end for the reason the token above is: a
+        // handler that sets the header on a request nobody sends looks
+        // identical from inside this process.
+        _catalog.Calls.Single().CorrelationId.ShouldBe("018f4c2e-supplied");
+    }
+
+    [Fact]
+    public async Task A_hop_with_no_inbound_id_sends_no_header()
+    {
+        using HttpClient client = Caller();
+
+        await client.GetFromJsonAsync<QuoteResponse>(
+            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
+            TestContext.Current.CancellationToken);
+
+        // The middleware mints one when the caller sends none, so this hop
+        // does carry an ID — what it must not do is invent an EMPTY one. A
+        // blank header would defeat the blank-counts-as-missing guard on the
+        // receiving side, which is a lesson this repository has already had to
+        // learn twice.
+        _catalog.Calls.Single().CorrelationId.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task A_retried_attempt_asks_the_token_cache_again()
     {
         // The first attempt fails at the TRANSPORT, not with a gRPC status,
         // and that distinction is load-bearing rather than incidental: a gRPC
@@ -88,7 +126,15 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
         // that can measure the claim at all. §11.5 used to justify the
         // position with "a retry after a 401", which its own configuration
         // rules out; what is left, and what this drives, is that a repeated
-        // attempt carries a freshly fetched token.
+        // attempt goes back to the cache instead of replaying the token the
+        // first attempt built.
+        //
+        // NOT that the token is newly minted. CachingTokenClient hands back
+        // the same one until its expiry guard, so in production two attempts
+        // milliseconds apart carry identical bytes — which is correct, and is
+        // why RecordingTokenCache answers differently every time. Its job is
+        // to make "the handler ran again" visible, and the only way to see
+        // that on the wire is to have the answer change.
         _catalog.AbortNextCalls = 1;
 
         using HttpClient client = Caller();

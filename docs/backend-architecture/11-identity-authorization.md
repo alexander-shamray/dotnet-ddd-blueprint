@@ -743,9 +743,18 @@ every retry replays the token the first attempt built — see the ordering in
 > still, because the callee answers `Unauthenticated` as `grpc-status` on an
 > HTTP 200 and the pipeline never sees a status at all. What the inner position
 > genuinely buys is narrower and real: **whenever a retry fires — which means a
-> transport fault — the repeated attempt carries a freshly fetched token
-> instead of a stale one.** `PricingCredentialsTests` drives exactly that, and
-> it is the only case in which the two orderings produce different bytes.
+> transport fault — the repeated attempt asks the token cache again instead of
+> replaying the first attempt's token.** `PricingCredentialsTests` drives
+> exactly that, and it is the only case in which the two orderings produce
+> different bytes.
+>
+> **It is not that the token is newly minted, and saying so was the last thing
+> wrong with this paragraph.** `CachingTokenClient` serves a cached token until
+> its expiry guard, so two attempts milliseconds apart normally present
+> identical bytes — which is the cache working. What the ordering buys is the
+> narrower case of a token that expired *between* attempts. The test's cache
+> answers differently every time precisely because a constant one cannot show
+> that the handler ran at all.
 
 > **The token endpoint comes from the discovery document, and the document is
 > trusted for its content rather than for where it points.** Reading
