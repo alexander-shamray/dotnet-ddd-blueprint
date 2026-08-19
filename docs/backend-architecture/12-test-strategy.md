@@ -1731,12 +1731,14 @@ public async Task Commands_are_sent_and_events_are_published()
 > inside, and the later positive would then accept the very command the
 > negative was there to forbid. A negative that is its test's last assertion
 > *may* simply wait — nothing after it is poisoned — but "may" is not "should",
-> and the second sample above is the case that shows why. It waits for a
-> publish that the test's own subject guarantees will never come, so the wait
-> is the full inactivity bound, every run, for an answer already known. **Use
-> the cancelled token for every negative and the question stops arising**;
-> PR-21's suite reached its second review still paying that ten seconds under
-> a comment claiming it never did.
+> and the second sample above is the case that showed why. It used to wait for
+> a publish the test's own subject guarantees will never come, so the wait was
+> the full inactivity bound, every run, for an answer already known; it now
+> reads the record like every other negative here. **Use the cancelled token
+> for every negative and the question stops arising.** PR-21's suite reached
+> its second review still paying that ten seconds under a comment claiming it
+> never did — and removing it took the suite from twelve seconds to two, which
+> is the measurement that priced the habit.
 
 > **A missing scheduler fails this suite in the costume the traps above
 > describe, which is why the registration is spelled out rather than trimmed.**
@@ -1754,9 +1756,11 @@ public async Task Commands_are_sent_and_events_are_published()
 > shared helper these excerpts call rather than define. Either way they are
 > stated once per harness: copy them per test and one test can quietly run on a
 > different wait from its neighbour, leave them out and it is the first trap
-> rather than a saving. Only the second sample actually spends the inactivity
-> timeout — the first reads the record instead of waiting, which is the whole
-> point of the technique.
+> rather than a saving. **Neither sample spends the inactivity timeout**, which
+> is the whole point of the technique — both read the record on a cancelled
+> token instead of waiting. The bounds still have to be stated: they are what a
+> *positive* assertion waits under, and a saturated runner is exactly when one
+> takes longer than 1.2 seconds to arrive.
 
 ## 12.6 Contract tests
 
