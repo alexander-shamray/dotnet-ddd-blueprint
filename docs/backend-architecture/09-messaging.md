@@ -2267,7 +2267,8 @@ CREATE TABLE ordering.OrderFulfilmentStates
 );
 
 -- Backs the "unfinalised saga" alert (§13.6) and the stuck-saga runbook.
--- Without it that alert is a query with no table.
+-- Without it that alert is a query with no index — the whole table, scanned,
+-- on the schedule an alert runs at. The table exists either way.
 CREATE INDEX IX_OrderFulfilmentStates_StartedAt
     ON ordering.OrderFulfilmentStates (StartedAt)
     INCLUDE (CurrentState);

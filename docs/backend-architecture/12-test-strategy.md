@@ -290,8 +290,19 @@ public sealed class ServiceFixture : IAsyncLifetime
         .WithCommand("--maxmemory-policy", "noeviction")
         .Build();
 
+    // 4.1 rather than a floating 4, because that is the base tag §14.1's
+    // broker Dockerfile builds from and this fixture's whole claim is that a
+    // test and a developer machine cannot disagree about the engine.
+    //
+    // A service that SCHEDULES cannot use a tag at all. Since ADR-021 §14.1
+    // builds the broker rather than pulling it, and the delayed exchange lives
+    // in a plugin no official image carries — so Ordering's fixture builds the
+    // same Dockerfile through ImageFromDockerfileBuilder and runs the result.
+    // The failure that forces it is a quiet one: a stock broker accepts
+    // `UseDelayedMessageScheduler`, connects and reports healthy, because the
+    // exchange is not declared until something schedules.
     private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
-        .WithImage("rabbitmq:4-management-alpine")
+        .WithImage("rabbitmq:4.1-management-alpine")
         .Build();
 
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;

@@ -16,11 +16,19 @@ namespace Ordering.Infrastructure.Messaging;
 /// boundary for the four commands §3.2 says Ordering accepts.
 /// </summary>
 /// <remarks>
-/// Each does two things <c>CommandConsumer</c> deliberately does not: it parses
-/// the wire vocabulary, and it declares the origin. A parse that fails throws
+/// Each parses the wire vocabulary, which is the thing <c>CommandConsumer</c>
+/// deliberately does not. A parse that fails throws
 /// <see cref="ContractMappingException"/>, which the <c>ordering-commands</c>
 /// endpoint excludes from retry (§9.8) — a malformed contract does not become
 /// well-formed on the fourth attempt.
+/// <para>
+/// <b>Declaring the origin is <see cref="CancelOrderMapper"/>'s alone</b>, and
+/// the asymmetry is the design rather than an oversight: <c>CancelOrder</c> is
+/// the only one of the four with a second way in, so it is the only one §11.4's
+/// ownership check has two callers to tell apart. The other three commands
+/// carry no <c>CommandOrigin</c> at all — a discriminator with one value is the
+/// kind of thing a later reader completes by adding the missing endpoint.
+/// </para>
 /// <para>
 /// <b>They are grouped in one file because they are one boundary</b>, the way
 /// <c>Common.Contracts.Ordering.V1.Commands</c> groups the four contracts they

@@ -22,8 +22,8 @@ public sealed class ConfirmStockHandler(IOrderRepository orders, TimeProvider cl
         }
         catch (DomainException)
         {
-            // Not Unavailable, and this is the one handler in the saga's four
-            // where nothing earlier can still be in flight: AwaitingStock is
+            // Not Unavailable, and this is the one handler here where nothing
+            // earlier can still be in flight: AwaitingStock is
             // the state Order.Place leaves behind, so anything else means the
             // order has already moved on. The interesting case is Cancelled —
             // a stock timeout fired, the saga cancelled and finalised, and
