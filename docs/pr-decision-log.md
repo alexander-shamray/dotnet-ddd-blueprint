@@ -68,6 +68,94 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-22 — the rest of §4.2, and a category that cannot drift
+
+PR-22 put the three rows of [§4.2](backend-architecture/04-solution-structure.md)'s
+dependency table that had no gate behind one, split the suite on
+`Category=Integration`, added `docs/testing.md` and started reporting
+domain-layer coverage. Five of its decisions bind what comes after.
+
+- **A gate the scaffold copies cannot be keyed on a name the scaffold
+  rewrites.** The obvious instrument for "no service references another
+  service's projects" is a list of §4.1's six service names, and it is wrong
+  here for a mechanical reason: `new_service.py` applies its patches and *then*
+  renames every casing of the template's name, so a list naming `Catalog`
+  reaches the new service with `Catalog` **replaced** rather than joined —
+  dropping the one service a scaffolded service is most likely to reference by
+  accident. No spelling of the patch survives that, because the rename is what
+  the patch output is fed through. So the gate asks a measured question
+  instead: **every package this platform pins is strong-named and none of this
+  repository's own projects is**, checked across all ten service assemblies.
+  `Dapper` is the single unsigned package in the graph and is named as the
+  residual. A second one would be misread as first-party and fail the gate —
+  which is the direction it has to fail in, because the failure names an
+  assembly nobody expected and the alternative predicate would have opened a
+  hole silently. The rule then covers Inventory, Payments, Shipping and
+  Notifications before any of them exists, which no list would have.
+- **§4.2's table has two kinds of row, so it gets two kinds of gate.** A row
+  saying what a project *may* reference is an allow-list and gets an allow-list
+  over `GetReferencedAssemblies`; a row saying it may reference any package
+  cannot have one and gets a named deny. Picking by the row rather than by
+  taste is what keeps a gate from contradicting the sentence it enforces —
+  a full allow-list on `*.Infrastructure` would have been the strongest
+  instrument available and would have flatly denied the "any package" the table
+  grants it. **The migrator is the row that most wanted this**, because its
+  must-not is a sentence rather than a list — *anything it does not need to
+  apply a migration* — which a deny-list cannot express at all.
+- **A pre-granted exemption for a class that does not exist is a hole, not a
+  provision.** §4.2's composition-root rule read "only `Program.cs` **and
+  host-level `*ServiceCollectionExtensions`**", and the gate had never
+  implemented the second limb; no host has such a class. Both directions were
+  available and the prose was narrowed to the code rather than the gate widened
+  to the prose. The exemption is the whole of that gate's trust, and its
+  companion test — *the composition root is the only thing exempted* — is only
+  meaningful while the exempted set is small enough to hold in mind. A host
+  that genuinely wants a registration extension may have one; what it does not
+  get is a licence written before it existed.
+- **A category is the opposite of a skip, and this repository had refused them
+  together.** `CLAUDE.md` said the container tests were "neither skipped nor
+  categorised", on one argument that only applies to the first: a skip on a
+  missing daemon fails open, so CI goes green on a runner whose Docker broke. A
+  category decides which *stage* runs a test and never whether it may be
+  absent. **Where it goes is what makes it undriftable**: the trait is declared
+  on the `[CollectionDefinition]`, so joining the container collection *is*
+  carrying the category — there is no per-class attribute to forget and
+  therefore no reflection gate owed to check that nobody did, which is the
+  first time this repo has closed one of these by construction rather than by
+  adding a second test. xUnit v3's propagation was measured before the design
+  was trusted: 10 and 72 of 82 on one assembly, 612 and 164 of 776 across the
+  solution, with no third state.
+- **"No container starts" is a claim about a run, so it was measured — and the
+  first attempt to measure it proved nothing.** Pointing `DOCKER_HOST` at a
+  dead endpoint and watching the fast half pass looked conclusive and was not:
+  Testcontainers ignored the variable on this host, and the *integration* half
+  passed against the real daemon under the same override. What settled it was
+  `docker events --filter event=create` over the window, reporting nothing
+  against a probe that captured a control container started beside it. **A
+  green run under a broken override reads exactly like a green run under a
+  working one**, which is the same shape as this repository's vacuous-gate
+  failures one layer out.
+
+Two smaller things are worth carrying. **Coverage is reported and never
+gated** — §12.9 calls it a diagnostic, and a diagnostic wired to a build
+failure stops being read and starts being satisfied; the threshold is PR-25's.
+The filter is a *pattern*, `.*\.Domain\.dll$`, so every later service's Domain
+joins it the day it exists rather than waiting for someone to edit a list. And
+the collector is the one `Microsoft.NET.Test.Sdk` already carries, so the
+figure cost no package and Appendix B no entry — measured at **85.8%** across
+`Catalog.Domain`, `Ordering.Domain` and `Common.Domain` on the run that landed
+this PR.
+
+**One thing was found and deliberately not fixed.** `Catalog.Infrastructure`
+carries a `ProjectReference` to `Catalog.Application` that its own code never
+names — `GetReferencedAssemblies` does not list it, and no file in the project
+has a `using` for it. Ordering's equivalent *is* used, so the two services
+differ. §4.2 permits the reference either way, and removing it would break the
+moment Infrastructure names an Application type, which §4.2 anticipates; it is
+recorded here rather than tidied because the reverse case — a *used*
+dependency that no csproj declares — is what `Common.Domain` in the Application
+gate is, and the two look alike from a distance and are not.
+
 ## PR-21 — the saga, and the four things §9.6 did not say
 
 PR-21 landed §9.6's `OrderFulfilmentSaga` with its four compensation paths and

@@ -74,6 +74,10 @@ docs/backend-architecture/   the blueprint — README index, 01-purpose ..
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
                              half of this file's phase section
+docs/testing.md              how to run the suites — the commands, the
+                             Category=Integration filter, which five projects
+                             need Docker, what the coverage figure measures.
+                             §12 keeps the strategy and wins any disagreement
 docs/superpowers/            one frozen spec + plan per PR, written before it
 
 global.json                  SDK pin (§4.4)
@@ -82,12 +86,16 @@ global.json                  SDK pin (§4.4)
 Directory.Build.props        shared MSBuild settings, ADR-019's analyser policy
 Directory.Packages.props     central package management, exact pins
 Platform.slnx                thirty-three projects
+coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
 .editorconfig                house style; a build input, not a hint
 .github/workflows/ci.yml     licence gate and scaffold tests, then
-                             restore/build/test
+                             restore/build/test/report-coverage
 .github/workflows/compose.yml  path-filtered smoke on deploy/compose/** —
                              config -q, up --wait, down -v, and an image build
 .github/licence-gate/        the gate, its allow-list and its tests
+.github/coverage/            the domain-coverage reporter — stdlib Python, no
+                             tests, and the file argues why: it is a report and
+                             not a gate, so it asserts nothing about the repo
 tools/new-service/           §4.5's scaffold — see the notes below
 deploy/compose/              §14.1's infrastructure, plus one application pair
                              per service and the gateway on 5000, which has no
@@ -216,6 +224,15 @@ reason.
   check 10, where the log is in the scope of **neither**
   `/validate-blueprint` nor `/check-links`. The one rule below is the only
   thing carrying it.
+- **`docs/testing.md`** is outside the tree on the same terms and lands
+  between the two: named in `/validate-blueprint`'s scope like the roadmap,
+  reached by no link check like the log. It needs **no check of its own** —
+  it is the operational half of §12, so every claim in it is a claim about a
+  chapter or about the code, and checks 1–9 reach all of them. **§12 wins
+  where they disagree**, exactly as Appendix C wins over the roadmap. The
+  split is deliberate: a runner flag goes stale on a different clock than a
+  strategy does, and a chapter that carried both would be edited for the
+  wrong half.
 - **`docs/superpowers/`** is a **frozen historical record**. Each pair — a
   design spec and the plan derived from it — records how one PR was thought
   through *before* it was built. **Where one disagrees with the blueprint, the
@@ -281,7 +298,7 @@ because a probe cannot quietly become a service later.
 
 ## Which phase are you in
 
-**PR-01 through PR-21 have landed, and PR-27 with them** — out of numerical
+**PR-01 through PR-22 have landed, and PR-27 with them** — out of numerical
 order and in sequence, because Appendix C numbers it last and makes it depend
 on PR-17 alone, so it may land at any point after the gateway. The blueprint,
 the foundation, all five building blocks, §14.1's Compose infrastructure,
@@ -292,11 +309,13 @@ with its reader and no producer, and gave the platform its first receive
 endpoint and its first broker-fed read model. PR-21 closed the roadmap's M5
 with §9.6's fulfilment saga — the platform's first state machine, its first
 scheduled message ([ADR-021](docs/backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
-its first command endpoint and the first thing Ordering publishes.
-**PR-22 (architecture rules and the test-strategy document) is next.**
+its first command endpoint and the first thing Ordering publishes. PR-22 put
+the rest of §4.2's dependency table behind gates, split the suite on
+`Category=Integration` and started reporting domain-layer coverage.
+**PR-23 (Helm charts, migration hooks, probes) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 770 tests — so the build rules and the drift rules below
+and `dotnet test` runs 776 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -318,6 +337,18 @@ it was trusted. Since PR-10 the endpoints gate judges real types rather than
 passing vacuously, and since PR-19 the selector is a *pattern* with a second
 test asserting what it selects — the `.Endpoints`-only version went vacuous the
 moment a `.Grpc` namespace existed.
+
+**Since PR-22 all five rows of the table are gated, in two shapes.** A row
+saying what a project *may* reference gets an allow-list over
+`GetReferencedAssemblies` (Domain, Application, Migrator); a row saying it may
+reference any package gets a deny (Infrastructure, Api). The cross-service rule
+is one test over all five assemblies and names **no service**: it asks whether
+a referenced assembly is strong-named, because every package this platform pins
+is and none of its own projects is — `Dapper` alone excepted, and named. That
+predicate exists because §4.5's scaffold renames the template's own name inside
+whatever it renders, so a list of service names reaches a new service with the
+one name it most needs *replaced* rather than joined. **A gate the scaffold
+copies cannot be keyed on a name the scaffold rewrites.**
 
 **`Common.Application`'s pipeline is three behaviours of four.**
 `IdempotencyBehavior` (§8.5) does not exist, and its seat is between Validation
@@ -409,7 +440,11 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 612 of 776, no daemon
 ```
+
+`docs/testing.md` is the operational reference — the filters, what needs
+Docker, the coverage run. This block is the short form.
 
 Two suites, two runners. The scaffold's tests are Python and are **not** in
 `Platform.slnx`, so `dotnet test` says nothing about them:
@@ -420,7 +455,9 @@ python tools/new-service/new_service.py <Name> --port <51xx>
 ```
 
 **`py -3.12`, not `python`, and the block above is written that way on
-purpose.** Both CI jobs pin Python 3.12; the default interpreter here is 3.14.
+purpose.** Every CI job that runs Python pins 3.12 — three of them since
+PR-22 gave the build job a coverage reporter — and the default interpreter here
+is 3.14.
 A newer one is the hazard, not an older one — it accepts APIs 3.12 does not, so
 the local suite goes green on code the runner cannot execute.
 `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly that way. The
@@ -428,21 +465,35 @@ scaffold *script* is a different matter: running it is not a test of the floor,
 so plain `python` is fine there. 3.12 is installed here, so both Python suites
 — `tools/new-service` and `.github/licence-gate` — can be run against it.
 
-**`dotnet test` requires Docker from PR-08**, and the container tests are
-neither skipped nor categorised when it is absent. Both were considered and
-both fail in a way this repository has rejected before: a skip on a missing
-daemon **fails open**, so CI would go green on a runner whose Docker broke, and
-a category is PR-22's named deliverable with PR-25 running them as their own CI
-stage. ADR-010 already made real infrastructure non-optional. Without a daemon
-the container tests fail on `Failed to connect to Docker endpoint`, which is a
-true statement about the machine and not a defect in the branch.
+**`dotnet test` requires Docker from PR-08**, and the container tests are still
+never *skipped* when it is absent: a skip on a missing daemon **fails open**, so
+CI would go green on a runner whose Docker broke. ADR-010 already made real
+infrastructure non-optional. Without a daemon they fail on `Failed to connect
+to Docker endpoint`, which is a true statement about the machine and not a
+defect in the branch.
+
+**Since PR-22 they are *categorised*, which is the opposite of a skip and used
+to be refused alongside it.** A skip runs the suite and reports a pass; a
+category runs a smaller suite and says which. `Category!=Integration` is 612 of
+the 776 and starts no container — measured with `docker events`, not inferred —
+and `Category=Integration` is the other 164, needing the daemon exactly as
+before. PR-25 runs them as separate CI stages; today CI runs one pass over
+both, because staging a split §15.1 has not grown yet would claim a pipeline
+shape that does not exist.
+
+**The trait is declared on the `[CollectionDefinition]`, not per test class**,
+so joining the container collection *is* carrying the category — there is
+nothing to forget and therefore no reflection gate guarding it. xUnit v3's
+propagation was measured before the design was trusted.
 
 **Five projects need Docker**: `Catalog.Api.Tests`, `Catalog.Application.Tests`,
 `Common.Infrastructure.Tests`, `Ordering.Api.Tests` and `Web.Bff.Tests` — each
 with its own collection and therefore its own container set (§12.4's stated
 price). The last is the odd one: most of its tests need no container, one class
 needs a Keycloak, so the suite is fast and then pays for an identity provider
-once. `Ordering.Application.Tests` is deliberately not among them — its handler
+once — 59 tests of 63 on the fast side, which is the clearest case in the repo
+for categorising a collection rather than a project.
+`Ordering.Application.Tests` is deliberately not among them — its handler
 tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
 `HttpContextCurrentUser` and a handler resolved in a bare scope has no
 principal to bind a subject from. Since PR-21 it holds §12.5's saga suite
