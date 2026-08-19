@@ -34,15 +34,23 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    # 15 covered pulls alone; SIX image builds ride on top — Catalog's two,
-    # PR-17's gateway, PR-18's ordering pair and PR-19's BFF, each a restore
-    # plus a publish with no layer cache on a fresh runner. The base images are
-    # shared, the restores are not.
+    # 15 covered pulls alone; SIX .NET image builds ride on top — Catalog's
+    # two, PR-17's gateway, PR-18's ordering pair and PR-19's BFF, each a
+    # restore plus a publish with no layer cache on a fresh runner. The base
+    # images are shared, the restores are not.
     #
     # 45, up from 40: PR-19 adds one image, so it is +5. 15 + 6 × 5 gives the
     # same 45 from the other direction, and the two arithmetics agreeing is
     # the check — PR-18's raise went out wrong precisely because only one of
     # them was performed.
+    #
+    # PR-21 makes it seven builds and does NOT raise this, which is the first
+    # time that has been the right answer. The seventh is the broker's
+    # (deploy/compose/rabbitmq), and it is not a .NET build at all: a pulled
+    # base image, a 42 KB plugin download and one `rabbitmq-plugins enable`,
+    # measured at ~1 s locally. Both arithmetics above count *restores*, so
+    # multiplying by seven would be applying a per-build cost to a build that
+    # does not carry it — the guard is the multiplication, not the count.
     #
     # It went out at 35 — the recount was performed against the *previous*
     # raise instead of against the number of images, which is the arithmetic

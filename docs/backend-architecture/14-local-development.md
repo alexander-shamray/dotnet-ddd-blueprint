@@ -45,12 +45,20 @@ services:
       interval: 10s
       retries: 5
 
+  # Built rather than pulled, and the ONE infrastructure service that is.
+  # rabbitmq/Dockerfile adds the delayed message exchange plugin §9.6's four
+  # saga timeouts are scheduled through (ADR-021), pinned by digest; the base
+  # image is still an official tag, one line inside it.
   rabbitmq:
-    image: rabbitmq:4-management-alpine
+    build:
+      context: rabbitmq
     ports: [ "5672:5672", "15672:15672" ]
     volumes: [ rabbit-data:/var/lib/rabbitmq ]
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      # check_running answers "is the broker up", which was the whole question
+      # while the image was stock. It is not any more: a broker missing the
+      # plugin is running and healthy and drops every scheduled message.
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins list -e rabbitmq_delayed_message_exchange | grep -q rabbitmq_delayed_message_exchange"]
       interval: 10s
       retries: 5
 

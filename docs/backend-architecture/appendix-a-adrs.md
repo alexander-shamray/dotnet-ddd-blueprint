@@ -367,6 +367,82 @@ accept an upload meets §10.1's body ceiling first, which is a number in
 `GatewayLimits` rather than a per-route setting: raising it is a platform
 decision made once, in the open.
 
+## ADR-021 — Saga timeouts are scheduled by the broker
+
+**Decision.** [§9.6](09-messaging.md)'s four saga schedules are delivered by
+MassTransit's **delayed message scheduler** —
+`AddDelayedMessageScheduler()` in the registration and
+`UseDelayedMessageScheduler()` on the transport, both halves named because
+either alone leaves `.Schedule(…)` throwing. On RabbitMQ that scheduler is the
+`rabbitmq_delayed_message_exchange` plugin, so `deploy/compose/rabbitmq`
+**builds** the broker image rather than pulling a stock one — the single
+infrastructure service in [§14.1](14-local-development.md) that is built. No
+Quartz, no Hangfire, and no scheduler process of this platform's own.
+
+**Why.** No chapter specified one, and the omission was invisible until a state
+machine with four waits was compiled: `Initially` arms `StockTimeout`, so the
+very first `OrderPlaced` reaches for a scheduler the container does not hold.
+Three options were live and one is disqualified outright.
+
+**An in-memory scheduler is not a candidate**, and §9.6 rules it out in its own
+words rather than on taste: "A saga waiting forever for a message that will
+never arrive is an order stuck in limbo and a support ticket." A scheduler that
+lives in the process loses every armed timeout on the next deployment, which
+manufactures exactly that order — and does it silently, because the saga row
+survives and looks healthy.
+
+That leaves two durable answers, and they differ in **where the pending timeout
+lives**. Quartz with an ADO job store would put it in Ordering's own database,
+which is the argument §9.6 already makes for the saga instance one table over —
+one database to back up, one migration history, one connection pool. It is the
+better answer at scale and it is not the one taken here, for reasons that are
+about this platform rather than about Quartz: it is three packages, roughly two
+hundred lines of vendor DDL this repository would then own inside its own
+migration, eleven `dbo`-prefixed tables cutting across the `ordering.` schema
+every other table in this service sits in ([§9.4](09-messaging.md), §9.6), and a
+second set of receive endpoints — because this
+platform deliberately does not call `ConfigureEndpoints`, so the scheduler's own
+consumers would each need declaring by hand ([§9.8](09-messaging.md)).
+
+The broker's delayed exchange needs none of that: no package, no schema, two
+registration lines, and durability that is already this architecture's model —
+§9.8's own failure table says messages queue **in the broker** while a consumer
+is down and that the outbox holds them while the broker is. A pending timeout is
+a message in flight, and this platform's answer for a message in flight is the
+broker.
+
+**It also makes the test and the production registration the same two lines**,
+which decided it. The in-memory transport implements the delay itself, so
+§12.5's harness runs `AddDelayedMessageScheduler` and
+`UseDelayedMessageScheduler` verbatim — the transport differs and the
+registration under test does not. A Quartz production path tested over an
+in-memory Quartz is a different mechanism wearing the same test.
+
+**Consequences.** The broker image is no longer a stock tag, and that is the
+whole of the cost. It is pinned to a **minor** (`rabbitmq:4.1-management-alpine`)
+because the plugin is built against a broker line and `rabbitmq-plugins enable`
+refuses one it does not match — a floating `4` would enable cleanly today and
+fail the image build on whatever Tuesday 4.2 becomes latest. The plugin is
+fetched by digest with `ADD --checksum`, so a substituted asset fails the build
+rather than reaching a broker, and it is written `--chmod=644`: `ADD` from a URL
+lands 0600 and root-owned, `enable --offline` never opens the archive, and the
+image therefore **builds cleanly and dies at start** with an Erlang `eacces`.
+That was measured, not reasoned.
+
+A broker without the plugin is the failure mode worth naming, because it is
+quiet: the exchange declaration fails at bus start and every saga timeout
+becomes a wait that never fires, which is indistinguishable from a workflow
+nobody has driven. §14.1's healthcheck therefore asserts the plugin is enabled
+as well as that the broker is running — a stock broker is *healthy* and wrong.
+
+The plugin keeps its delayed messages in Mnesia, per node and unreplicated, and
+its own guidance warns against large numbers of long delays. §9.6's despatch
+timeout is three days per order, which is precisely that shape at volume. **This
+is the ADR to supersede when it bites**, and the replacement is the Quartz
+option above rather than a new one — the state machine, the four schedules and
+the tests are all unchanged by which scheduler delivers them, which is why the
+choice could be made on cost.
+
 ---
 
 [← §15 CI/CD](15-cicd-deployment.md) · [Index](README.md) · [Appendix B →](appendix-b-licences.md)
