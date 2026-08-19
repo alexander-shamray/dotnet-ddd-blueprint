@@ -56,6 +56,13 @@ Every row above names a project **and has an example in this section**. Both
 halves are the rule: a level with no home is a level nobody writes, and a level
 whose home is empty is one nobody notices is missing.
 
+**How to run them is `docs/testing.md`**, deliberately not this chapter: the
+commands, the `Category=Integration` filter of §12.4, which five projects need
+a Docker daemon and what the coverage figure of §12.9 is measured over. This
+chapter decides what to test and that file decides how to run it, and the
+second goes stale on a different clock — a new runner flag changes nothing
+about the pyramid. Where they disagree, this chapter wins.
+
 > **A suite that never ran looks exactly like a suite that passed.** `dotnet
 > test` discovers through a VSTest adapter, and `xunit.v3` does not carry one:
 > `xunit.runner.visualstudio` is a separate package ([Appendix B](appendix-b-licences.md)).
@@ -989,8 +996,41 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 >
 > ```csharp
 > [CollectionDefinition(nameof(IntegrationCollection))]
+> [Trait("Category", "Integration")]
 > public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > ```
+>
+> **The category goes on the definition rather than on each test class, and
+> that placement is the whole of why it cannot drift.** xUnit v3 applies a
+> collection's traits to every test in it, so *joining the container collection
+> is carrying the category* — there is no per-class attribute for a new test
+> class to forget, and therefore no reflection gate needed to check that nobody
+> did. The thing that decides the category is the same thing that decides
+> whether the test gets a container.
+>
+> Measured rather than assumed, because that propagation is load-bearing: on
+> `Common.Infrastructure.Tests`, `Category=Integration` selects the ten tests
+> of the two classes in the collection and `Category!=Integration` selects the
+> other seventy-two, with no third state and nothing counted twice.
+>
+> **The fast half starts no container, and that is proved rather than
+> inferred**: `docker events --filter event=create` over a solution-wide
+> `Category!=Integration` run reported nothing, against a probe that captured a
+> control container started beside it. The mechanism is that xUnit constructs a
+> collection fixture only when a test in that collection runs, so filtering the
+> collection out means the container is never asked for.
+>
+> **A category is not a skip, and the distinction is the one this chapter
+> keeps.** A skip on a missing daemon fails open: CI goes green on a runner
+> whose Docker broke. The trait decides which *stage* runs a test and never
+> whether it may be absent — selected in it needs the daemon exactly as before,
+> and selected out it is not reported as passing. A class that needs a
+> container and forgets the collection fails loudly in the fast half, which is
+> the direction this has to fail in.
+>
+> Nothing in CI runs the halves separately yet; [§15.1](15-cicd-deployment.md)'s
+> integration stage is PR-25's, and the category ships ahead of it so the
+> filter is real before the stage that depends on it is written.
 >
 > The consequence is worth stating rather than discovering from a slow
 > pipeline: two assemblies mean two collections and therefore **two sets of
@@ -1946,6 +1986,37 @@ missing things worth testing; above roughly 85% you are usually testing getters
 to move a number. Watch the *trend* and watch coverage of the domain layer
 specifically — that is where it should be near-total, and where it is cheapest
 to achieve.
+
+That last sentence is an instruction until something measures it, so
+`coverage.runsettings` does:
+
+```bash
+dotnet test Platform.slnx --collect:"Code Coverage" --settings coverage.runsettings
+```
+
+The file filters the report to `.*\.Domain\.dll$` and emits Cobertura, and CI
+prints the figure to the job summary. **Reported, never gated** — a threshold
+that fails a build is [§15.1](15-cicd-deployment.md)'s quality gates, and a
+diagnostic wired to a build failure stops being read and starts being satisfied.
+
+Three things about that filter are deliberate:
+
+- **It is a pattern, not a list.** `Catalog.Domain`, `Ordering.Domain` and
+  `Common.Domain` match it today, and every later service's Domain matches it
+  the day it exists. A list would have to be edited by whoever adds a service,
+  which is exactly the edit that gets missed.
+- **It measures the domain assemblies over the whole run**, not the domain test
+  projects. Domain types are exercised by application and API tests too, and a
+  figure taken from `*.Domain.Tests` alone would under-report the thing it is
+  named after.
+- **The collector arrives with `Microsoft.NET.Test.Sdk`**, so no package was
+  added and [Appendix B](appendix-b-licences.md) gained no entry. A coverage
+  figure is not worth a new dependency.
+
+`docs/testing.md` carries the commands, the categories and what needs Docker —
+the operational half of this chapter, kept separate because a runner flag goes
+stale on a different clock than a strategy does. Where the two disagree, this
+chapter wins.
 
 ---
 

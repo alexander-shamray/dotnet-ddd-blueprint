@@ -226,5 +226,29 @@ public sealed class KeycloakFixture : IAsyncLifetime
 /// §12.4's per-assembly collection, so one Keycloak serves every test that
 /// needs one rather than one per class.
 /// </summary>
+/// <remarks>
+/// <b>The category sits here rather than on each member class, and that is
+/// the whole design.</b> xUnit v3 applies a collection's traits to every test
+/// in it, so joining the collection <i>is</i> carrying the category and there
+/// is no per-class attribute for a new test class to forget. It decides which
+/// stage runs a test and never whether it may be absent — a skip on a missing
+/// daemon fails open and is still refused (§12.4).
+/// <para>
+/// <b>This suite is the clearest case for putting the category on a
+/// collection rather than on a project.</b> Fifty-nine of its sixty-three
+/// tests never needed a container and four need an identity provider, so a
+/// project-level split would have had nothing to split — the assembly is
+/// mostly fast and pays for a Keycloak once.
+/// </para>
+/// <para>
+/// What that buys is a container start, not a fast suite, and the difference
+/// is worth stating because the obvious claim is the wrong one: measured here,
+/// the four integration tests cost about 35 seconds wall and the fifty-nine
+/// others still take about a minute on their own. The BFF's fast half is slow
+/// because §9.7's resilience tests wait on real timeouts, and no category
+/// changes that. See <c>docs/testing.md</c>.
+/// </para>
+/// </remarks>
 [CollectionDefinition(nameof(KeycloakCollection))]
+[Trait("Category", "Integration")]
 public sealed class KeycloakCollection : ICollectionFixture<KeycloakFixture>;

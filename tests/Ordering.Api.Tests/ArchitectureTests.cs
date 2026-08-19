@@ -1,4 +1,8 @@
+using System.Reflection;
 using NetArchTest.Rules;
+using Ordering.Domain.Orders;
+using Ordering.Infrastructure.Persistence;
+using Ordering.Migrator;
 using Shouldly;
 using Xunit;
 using TestResult = NetArchTest.Rules.TestResult;
@@ -111,5 +115,151 @@ public class ArchitectureTests
         exempted.Length.ShouldBeLessThanOrEqualTo(
             4,
             "the exemption should cover Program and its own generated helpers, nothing more");
+    }
+
+    /// <summary>
+    /// The five projects §4.1 gives a service, anchored one type each. This
+    /// suite is the only one that can see all five: it references the Api,
+    /// which carries Application, Domain and Infrastructure, and
+    /// <c>Ordering.TestSupport</c>, which carries the Migrator.
+    /// </summary>
+    private static readonly Assembly[] ServiceAssemblies =
+    [
+        typeof(Order).Assembly,
+        typeof(Ordering.Application.DependencyInjection).Assembly,
+        typeof(OrderingDbContext).Assembly,
+        typeof(MigratorHost).Assembly,
+        typeof(Program).Assembly
+    ];
+
+    /// <summary>
+    /// Whether a referenced assembly is one of this repository's own rather
+    /// than a package.
+    /// </summary>
+    /// <remarks>
+    /// <b>A list of service names would have been the obvious instrument and
+    /// is the wrong one here</b>, because the scaffold renders Catalog's copy
+    /// of this file: <c>new_service.py</c> applies its patches and <i>then</i>
+    /// renames every casing of the template's name, so a list naming the
+    /// template reaches the new service with that name replaced rather than
+    /// joined — silently dropping the one service a scaffolded service is most
+    /// likely to reference by accident. No spelling of the patch survives
+    /// that, because the rename is what the patch output is fed through. This
+    /// copy is hand-written and could have carried a list; it does not,
+    /// because two services enforcing one rule two ways is how the two drift.
+    /// <para>
+    /// So the predicate is a measured property instead. Every package this
+    /// platform pins is strong-named and none of this repository's own
+    /// projects is — checked across all five of Ordering's assemblies and all
+    /// five of Catalog's, which between them reference thirty-odd packages.
+    /// <b>Dapper is the one unsigned package in the graph</b> and is named for
+    /// that reason alone. It is not referenced by anything in this service
+    /// today and is named all the same, because §6.5 puts it here with the
+    /// first query handler and a gate that has to be edited to admit an
+    /// expected package is a gate somebody edits in a hurry.
+    /// </para>
+    /// <para>
+    /// A second unsigned package would be misread as first-party and fail the
+    /// gate below. That is the direction this has to fail in: the failure
+    /// names an assembly nobody expected and is fixed by a line here with an
+    /// argument beside it, where the alternative predicate would have opened a
+    /// hole and said nothing.
+    /// </para>
+    /// </remarks>
+    private static bool IsFirstParty(AssemblyName reference) =>
+        reference.GetPublicKeyToken() is null or [] && reference.Name != "Dapper";
+
+    [Fact]
+    public void No_project_in_this_service_references_another_service()
+    {
+        // §4.2's "must never reference: another service's projects" — the
+        // Infrastructure, Migrator and Api rows say it, and until now nothing
+        // said it in a test. The other two rows do not say it and do not need
+        // to: their allow-lists cannot admit a foreign assembly at all, which
+        // is why this gate judges all five and expects to be redundant on two. It is also §4.3 from the other side: exactly one assembly may
+        // cross a service boundary, and Common.Contracts is a building block
+        // rather than a service, so it is admitted by the Common prefix and
+        // needs no exception of its own.
+        //
+        // Stated as an allow-list of prefixes rather than a deny-list of
+        // service names, which is what makes it cover Inventory, Payments,
+        // Shipping and Notifications before any of them exists.
+        string self = typeof(Program).Assembly.GetName().Name!.Split('.')[0];
+
+        foreach (Assembly assembly in ServiceAssemblies)
+        {
+            string[] foreign =
+            [
+                .. assembly
+                    .GetReferencedAssemblies()
+                    .Where(IsFirstParty)
+                    .Select(reference => reference.Name!)
+                    .Where(name =>
+                        !name.StartsWith("Common.", StringComparison.Ordinal) &&
+                        !name.StartsWith($"{self}.", StringComparison.Ordinal))
+                    .Order()
+            ];
+
+            foreign.ShouldBeEmpty(
+                $"{assembly.GetName().Name} reaches across a service boundary: " +
+                string.Join(", ", foreign));
+        }
+    }
+
+    [Fact]
+    public void The_migrator_references_only_what_applying_a_migration_needs()
+    {
+        // §4.2's narrowest row, and the only one whose "must never" is a
+        // sentence rather than a list: "anything it does not need to apply a
+        // migration". A deny-list cannot enforce that — it can only ban what
+        // somebody thought of — so this row gets the allow-list treatment the
+        // Domain row gets, and for the same reason.
+        //
+        // What the absences are worth saying out loud: no Application, so the
+        // migrator cannot dispatch; no MassTransit and no Redis, so §4.2's
+        // "a migration job that can open a message broker is a migration job
+        // with reasons to fail that have nothing to do with migrations" is a
+        // build failure rather than a paragraph — and this service is where
+        // that stops being hypothetical, since Ordering.Infrastructure is the
+        // solution's only MassTransit EF persistence reference (§9.6) and the
+        // migrator sits one project reference away from it; no ASP.NET,
+        // because it is a job host (§7.4) and not a second composition root;
+        // and no Common.* at all, which is the strongest statement of the
+        // row — the migrator resolves a DbContext and calls
+        // Database.Migrate(), and none of the building blocks is on that path.
+        //
+        // The list is Catalog's, one word different. Two services rendering
+        // the same thirteen entries is the scaffold working rather than a
+        // duplication to factor out: a shared helper would have to live in an
+        // assembly both suites reference, and §4.3 permits exactly one such
+        // assembly, which holds integration events.
+        string[] allowed =
+        [
+            "Microsoft.EntityFrameworkCore",
+            "Microsoft.EntityFrameworkCore.Relational",
+            "Microsoft.EntityFrameworkCore.SqlServer",
+            "Microsoft.Extensions.Configuration",
+            "Microsoft.Extensions.Configuration.Abstractions",
+            "Microsoft.Extensions.DependencyInjection.Abstractions",
+            "Microsoft.Extensions.Hosting",
+            "Microsoft.Extensions.Hosting.Abstractions",
+            "Microsoft.Extensions.Logging.Abstractions",
+            "Ordering.Infrastructure",
+            "System.ComponentModel",
+            "System.Linq",
+            "System.Runtime"
+        ];
+
+        string[] unexpected =
+        [
+            .. typeof(MigratorHost).Assembly
+                .GetReferencedAssemblies()
+                .Select(reference => reference.Name!)
+                .Where(name => !allowed.Contains(name))
+                .Order()
+        ];
+
+        unexpected.ShouldBeEmpty(
+            $"the migrator does not need: {string.Join(", ", unexpected)}");
     }
 }

@@ -828,6 +828,17 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
     "tests/Catalog.Api.Tests/ArchitectureTests.cs": (
+        # The Domain anchor, twice: the whole-service gates need one type per
+        # project and a scaffolded service has no aggregate to name, so both
+        # sites take the marker the same way Catalog.Application.Tests does.
+        # The gates themselves travel unchanged — every one of them is about
+        # the shape of the reference graph, which an empty service has as much
+        # as a full one.
+        ("using Catalog.Domain.Products;\n", "using Catalog.Domain;\n"),
+        (
+            "        typeof(Product).Assembly,\n",
+            "        typeof(AssemblyMarker).Assembly,\n",
+        ),
         (
             "/// Vacuously green from PR-07 until PR-10's first endpoint — a rule\n"
             "/// introduced before the violations exist is a constraint, not a backlog\n"

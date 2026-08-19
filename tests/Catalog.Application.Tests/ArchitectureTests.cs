@@ -8,13 +8,83 @@ using TestResult = NetArchTest.Rules.TestResult;
 namespace Catalog.Application.Tests;
 
 /// <summary>
-/// The §4.2 gates that reason over type dependencies. Green on an empty
-/// skeleton by design — "an architecture rule introduced before the
-/// violations exist is a constraint", and these have been observed failing
-/// against a deliberately added forbidden reference.
+/// The §4.2 gates for this layer. Green on an empty skeleton by design — "an
+/// architecture rule introduced before the violations exist is a constraint",
+/// and these have been observed failing against a deliberately added
+/// forbidden reference.
 /// </summary>
+/// <remarks>
+/// <b>Two shapes, because §4.2's table has two.</b> A row that says what a
+/// project <i>may</i> reference gets an allow-list gate, and a row that says a
+/// project may reference any package gets a named deny. This project's row is
+/// the first kind, so the gate below is an allow-list over
+/// <c>GetReferencedAssemblies</c> — the same instrument the Domain gate uses
+/// one project down, and for the same reason: a blacklist only bans what
+/// somebody thought to name.
+/// </remarks>
 public class ArchitectureTests
 {
+    [Fact]
+    public void Application_references_only_what_the_dependency_table_allows()
+    {
+        // §4.2's second row read as the allow-list it is. What this catches
+        // that a deny-list cannot: EF Core, ASP.NET, Redis and MassTransit are
+        // all excluded by not appearing, and so is another service's assembly,
+        // which §4.3 forbids and which no deny-list here would have thought to
+        // mention.
+        //
+        // Each entry earns its line, and the two that surprise a reader are
+        // deliberate. Dapper is the read side of §6.5 — query handlers use it
+        // directly and never EF, which Catalog.Application.csproj states at
+        // the reference itself — and System.Data.Common comes with it, because
+        // §6.5's IDbConnectionFactory hands back a DbConnection.
+        //
+        // Common.Domain is the third: §4.2's row names this service's Domain
+        // and not the building block underneath it, because a service's Domain
+        // cannot exist without Common.Domain (§4.2's first row) and arrives
+        // carrying it. The table is about project references, where the line
+        // is genuinely absent; this gate is about assembly references, where
+        // the mapper's IDomainEvent puts it here whether or not a csproj says
+        // so.
+        //
+        // The list is a subset check and not an equality: an entry for
+        // something no longer referenced is a pre-authorised hole rather than
+        // a failure, which is the same trade the Domain gate takes. What both
+        // buy is that ADDING one is a decision somebody has to write down.
+        string[] allowed =
+        [
+            "Catalog.Domain",
+            "Common.Application",
+            "Common.Contracts",
+            "Common.Domain",
+            "Dapper",
+            "FluentValidation",
+            "FluentValidation.DependencyInjectionExtensions",
+            "Microsoft.Extensions.DependencyInjection.Abstractions",
+            "System.Collections",
+            "System.Data.Common",
+            "System.Linq",
+            "System.Linq.Expressions",
+            "System.Runtime"
+        ];
+
+        string[] unexpected =
+        [
+            .. typeof(DependencyInjection).Assembly
+                .GetReferencedAssemblies()
+                .Select(reference => reference.Name!)
+                .Where(name => !allowed.Contains(name))
+                .Order()
+        ];
+
+        unexpected.ShouldBeEmpty($"not on §4.2's list: {string.Join(", ", unexpected)}");
+    }
+
+    // The two gates below are subsumed by the allow-list above and kept
+    // deliberately. Each names the rule it enforces in its own failure
+    // message, where the allow-list can only say that something is not on a
+    // list — and the MassTransit one judges the Domain assembly as well, which
+    // is a second assembly this class would otherwise say nothing about.
     [Fact]
     public void Application_does_not_depend_on_ef_core()
     {

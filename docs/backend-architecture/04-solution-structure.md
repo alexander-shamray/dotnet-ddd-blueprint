@@ -105,14 +105,22 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/
-│   └── backend-architecture/           This document, one file
-│                                       per chapter; ADRs in Appendix A
+│   ├── backend-architecture/           This document, one file
+│   │                                   per chapter; ADRs in Appendix A
+│   └── testing.md                      How to run the suites, what needs
+│                                       Docker, and the categories of §12.4 —
+│                                       the operational half of §12, which
+│                                       keeps the strategy
 │
 ├── tools/
 │   └── new-service/                    The scaffold of §4.5 and its tests.
 │                                       Stdlib Python, no restore — it renders
 │                                       a service from Catalog at run time
 │
+├── coverage.runsettings                What `--collect:"Code Coverage"` measures:
+│                                       the report filtered to `.*\.Domain\.dll$`,
+│                                       which is §12.9's "coverage of the domain
+│                                       layer specifically" as an artefact
 ├── Directory.Build.props               Shared MSBuild settings
 ├── Directory.Packages.props            Central package version management
 └── Platform.slnx
@@ -190,11 +198,23 @@ public void Domain_references_only_common_domain_and_the_framework()
 
 `*.Api` may reference Infrastructure, but only in one place. Stated normatively:
 
-- **Only** `Program.cs` and host-level `*ServiceCollectionExtensions` may
-  reference `*.Infrastructure` types.
+- **Only** `Program.cs` may reference `*.Infrastructure` types.
 - **Endpoints and controllers may not.** No `DbContext`, no concrete
   repository, no `IPublishEndpoint`, no `IConnectionMultiplexer` — Application
   and Domain contracts only.
+
+> **The first bullet used to grant host-level `*ServiceCollectionExtensions`
+> the same exemption, and the gate never implemented it.** No file in any of
+> the four hosts is named `*ServiceCollectionExtensions` — `Catalog.Api`,
+> `Ordering.Api`, `Gateway.Api` and `Web.Bff` alike — so the sentence granted
+> a hole to nothing, and the test below exempts the composition root alone.
+>
+> Narrowing the prose to the code is the right direction rather than the
+> convenient one. The exemption is the whole of this gate's trust, and the
+> companion test that asserts it has not grown is only meaningful while the
+> exempted set is something a reader can hold in mind. A host that genuinely
+> wants a registration extension is welcome to one; what it does not get is a
+> pre-granted licence written before it existed.
 
 Without this rule the dependency table is satisfied at project level while being
 violated everywhere that matters, because "Api may reference Infrastructure"
@@ -281,6 +301,105 @@ public void Application_and_domain_do_not_reference_masstransit()
     }
 }
 ```
+
+### The rest of the table, enforced
+
+The three gates above cover two of the table's five rows. The other three —
+Infrastructure, Migrator and Api — said "must never reference another
+service's projects" and nothing said it in a test until PR-22.
+
+**The table has two kinds of row, so the gates have two shapes.** A row that
+says what a project *may* reference is an allow-list, and gets an allow-list
+gate over `GetReferencedAssemblies`. A row that says a project may reference
+any package cannot have one, and gets a named deny instead. Choosing by the
+row rather than by taste is what keeps a gate from contradicting the sentence
+it enforces:
+
+| Row | Shape | Gate |
+|---|---|---|
+| `*.Domain` | allow-list | every referenced assembly is on a list |
+| `*.Application` | allow-list | the same, one layer out |
+| `*.Infrastructure` | any package | no assembly from another service |
+| `*.Migrator` | allow-list, narrowest | every referenced assembly is on a list |
+| `*.Api` | composition root, plus any package | the root rule above, and no assembly from another service |
+
+**The cross-service rule is one test over all five assemblies**, and it is
+stated as an allow-list of *prefixes* rather than a deny-list of service
+names — which is what makes it cover Inventory, Payments, Shipping and
+Notifications before any of them exists:
+
+```csharp
+// Every referenced assembly that is one of this repository's own must belong
+// to this service or to a building block. Common.Contracts is admitted by the
+// Common prefix, which is §4.3 from the other side: it is a building block
+// rather than a service, so the one assembly permitted to cross a boundary
+// needs no exception of its own.
+string self = typeof(Program).Assembly.GetName().Name!.Split('.')[0];
+
+string[] foreign =
+[
+    .. assembly
+        .GetReferencedAssemblies()
+        .Where(IsFirstParty)
+        .Select(reference => reference.Name!)
+        .Where(name =>
+            !name.StartsWith("Common.", StringComparison.Ordinal) &&
+            !name.StartsWith($"{self}.", StringComparison.Ordinal))
+        .Order()
+];
+```
+
+> **`IsFirstParty` is a measured property rather than a list, and the reason
+> is the scaffold.** §4.5's script renders this file:
+> it applies its patches and *then* renames every casing of the template's
+> name, so a list naming `Catalog` reaches the new service with `Catalog`
+> replaced rather than joined — silently dropping the one service a scaffolded
+> service is most likely to reference by accident. No spelling of the patch
+> survives that, because the rename is what the patch output is fed through.
+>
+> So the predicate asks a question the rename cannot answer wrongly: **every
+> package this platform pins is strong-named, and none of this repository's own
+> projects is.** Checked across all ten service assemblies, which between them
+> reference thirty-odd packages. `Dapper` is the one unsigned package in the
+> graph and is named for that reason alone.
+>
+> ```csharp
+> private static bool IsFirstParty(AssemblyName reference) =>
+>     reference.GetPublicKeyToken() is null or [] && reference.Name != "Dapper";
+> ```
+>
+> A second unsigned package would be misread as first-party and fail the gate.
+> **That is the direction this has to fail in**: the failure names an assembly
+> nobody expected and is closed by a line with an argument beside it, where a
+> predicate erring the other way would have opened a hole and said nothing.
+
+**The migrator's row is the one that most wanted a gate**, because its "must
+never" is a sentence rather than a list — *anything it does not need to apply a
+migration*. A deny-list cannot enforce that; it can only ban what somebody
+thought of. So the narrowest row gets the strictest instrument, and what the
+absences buy is worth reading as a list of things that cannot happen: no
+Application, so the migrator cannot dispatch; no MassTransit and no Redis, so
+the paragraph above about a migration job that can open a message broker is a
+build failure; no ASP.NET, because it is a job host
+([§7.4](07-persistence.md)) and not a second composition root; and **no
+`Common.*` at all**, which is the strongest statement of the row — the migrator
+resolves a `DbContext` and calls `Database.Migrate()`, and none of the building
+blocks is on that path.
+
+**`*.Application`'s gate lists `Common.Domain` and the table above does not,
+and both are right.** The table is about project references, where the line is
+genuinely absent: a service's Application references its own Domain, and that
+Domain cannot exist without `Common.Domain` (row one), so it arrives carrying
+it. The gate is about *assembly* references, where §9.3's mapper naming
+`IDomainEvent` puts `Common.Domain` in the list whether or not any csproj says
+so. Adding the project reference to close the gap was considered and rejected:
+it would make the second row disagree with the first about what "its own
+Domain" includes, to no benefit a compiler can see.
+
+**Each list is a subset check rather than an equality.** An entry for something
+no longer referenced is a pre-authorised hole rather than a failure, which is a
+real cost and the smaller one — the alternative fails a build for a legitimate
+*removal*, and the decision worth forcing is the one that adds a dependency.
 
 If the namespace rule proves awkward to enforce, split the host into
 `Ordering.Host` (composition, references Infrastructure) and `Ordering.Api`
