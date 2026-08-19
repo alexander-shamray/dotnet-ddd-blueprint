@@ -419,7 +419,9 @@ registration under test does not. A Quartz production path tested over an
 in-memory Quartz is a different mechanism wearing the same test.
 
 **Consequences.** The broker image is no longer a stock tag, and that is the
-whole of the cost. It is pinned to a **minor** (`rabbitmq:4.1-management-alpine`)
+whole of the cost *to deploy* — the cost to **run** is the uncancellable
+timeout below, which is larger and is where this decision gets superseded.
+The image is pinned to a **minor** (`rabbitmq:4.1-management-alpine`)
 because the plugin is built against a broker line and `rabbitmq-plugins enable`
 refuses one it does not match — a floating `4` would enable cleanly today and
 fail the image build on whatever Tuesday 4.2 becomes latest. The plugin is
