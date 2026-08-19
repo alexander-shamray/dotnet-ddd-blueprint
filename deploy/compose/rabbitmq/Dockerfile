@@ -3,10 +3,15 @@
 # MassTransit's `UseDelayedMessageScheduler` (ADR-021) schedules a message by
 # publishing it to a delayed exchange, and on RabbitMQ that exchange type comes
 # from `rabbitmq_delayed_message_exchange` — a community plugin that ships in
-# no official image. Without it the publish is ACCEPTED and never delivered:
-# the exchange declaration fails at bus start, and every saga timeout is a wait
-# that silently never fires. That is the failure §9.6 exists to prevent,
-# arriving as infrastructure rather than as a missing transition.
+# no official image.
+#
+# Without it, measured: the bus starts CLEAN, and the first `.Schedule(…)`
+# fails `exchange.declare` with `precondition_failed: unknown exchange type
+# 'x-delayed-message'`, after which MassTransit retries the topology for ever.
+# The call never returns, the saga's transition never completes, and the only
+# trace is a channel error in the BROKER's log every few seconds — the service
+# stays healthy and silent. That is §9.6's stuck order arriving as
+# infrastructure rather than as a missing transition.
 #
 # The tag is pinned to a minor rather than tracking `4`, and that is the
 # plugin's constraint rather than a preference: the plugin is built against a

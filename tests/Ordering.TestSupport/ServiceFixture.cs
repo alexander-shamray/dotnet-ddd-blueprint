@@ -54,13 +54,14 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// <remarks>
     /// <b>The stock tag is not an option any more, and the failure it would
     /// cause is the quiet kind.</b> This fixture starts the <em>production</em>
-    /// bus, which registers <c>UseDelayedMessageScheduler</c> (ADR-021) — and a
-    /// stock broker accepts that registration, connects, and reports healthy,
-    /// because the delayed exchange is not declared until something schedules.
-    /// Measured: every test here passes against <c>rabbitmq:4-management-alpine</c>
-    /// today, since none of them drives the saga. The first one that does would
-    /// fail on a broker missing a plugin, several files from anything naming
-    /// one.
+    /// bus, which registers <c>UseDelayedMessageScheduler</c> (ADR-021). A
+    /// stock broker takes that registration, connects and reports healthy —
+    /// the delayed exchange is not declared until something schedules — so
+    /// every test here passes against <c>rabbitmq:4-management-alpine</c>
+    /// today, none of them driving the saga. The first one that did would not
+    /// fail either: ADR-021's measurement is that the scheduling call **hangs**
+    /// while MassTransit retries a declare the broker refuses, so the test
+    /// would time out with nothing on the service side naming a plugin.
     /// <para>
     /// So the tag was not merely stale — it made this fixture's own reason for
     /// existing false. "A test and a developer machine cannot disagree about

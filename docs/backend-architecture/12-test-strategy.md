@@ -298,9 +298,10 @@ public sealed class ServiceFixture : IAsyncLifetime
     // builds the broker rather than pulling it, and the delayed exchange lives
     // in a plugin no official image carries — so Ordering's fixture builds the
     // same Dockerfile through ImageFromDockerfileBuilder and runs the result.
-    // The failure that forces it is a quiet one: a stock broker accepts
-    // `UseDelayedMessageScheduler`, connects and reports healthy, because the
-    // exchange is not declared until something schedules.
+    // The failure that forces it is a quiet one: a stock broker connects and
+    // reports healthy, because the exchange is not declared until something
+    // schedules, and the schedule that does then HANGS on a declare the broker
+    // refuses. ADR-021 has the measurement.
     private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
         .WithImage("rabbitmq:4.1-management-alpine")
         .Build();

@@ -442,11 +442,22 @@ rather than before; nothing reaches a running broker either way. **Do not
 "tidy" these back onto the `ADD`** — that re-arms the fallback, and it is the
 kind of edit that looks like a simplification.
 
-A broker without the plugin is the failure mode worth naming, because it is
-quiet: the exchange declaration fails at bus start and every saga timeout
-becomes a wait that never fires, which is indistinguishable from a workflow
-nobody has driven. §14.1's healthcheck therefore asserts the plugin is enabled
-as well as that the broker is running — a stock broker is *healthy* and wrong.
+A broker without the plugin is the failure mode worth naming, and it was
+measured rather than reasoned — three earlier drafts of this paragraph each
+described it differently and all three were wrong. What actually happens:
+
+| | |
+|---|---|
+| Bus start | **Clean.** The connection is made, the endpoints declare, readiness reports ready |
+| First `.Schedule(…)` | `exchange.declare` fails with `precondition_failed: unknown exchange type 'x-delayed-message'` |
+| After that | MassTransit **retries the topology indefinitely**, so the scheduling call never returns and the saga's transition never completes. The broker logs a channel error every few seconds; the service logs nothing and stays healthy |
+
+So the message is neither delivered nor rejected, and the order waits for a
+timeout that cannot arrive — §9.6's stuck order, produced by infrastructure
+rather than by a missing transition. **Nothing on the service side ever says
+so**, which is why §14.1's healthcheck asserts the plugin is enabled as well as
+that the broker is running: a stock broker is *healthy* and wrong, and the only
+evidence is in a log belonging to something else.
 
 The plugin keeps its delayed messages in Mnesia, per node and unreplicated, and
 its own guidance warns against large numbers of long delays. §9.6's despatch

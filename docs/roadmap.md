@@ -253,9 +253,17 @@ machinery behind it now renders the second service in one command. Whether the
 calendar held is not something this file can answer — it prices ideal
 engineer-days and the *Basis* section says why that is deliberately not a date.
 
-**M3 and M5 are the two that can slip quietly.** Both are dominated by a single
-large pull request whose difficulty is invisible from outside — the outbox and
-the saga — and both are places where "nearly done" can last a week.
+**M3 and M5 were the two that could slip quietly, and both have landed.** Each
+was dominated by a single large pull request whose difficulty is invisible from
+outside — PR-14's outbox and PR-21's saga — and each was a place where "nearly
+done" can last a week. The warning is kept in the past tense rather than
+deleted, because it was right: the saga's own PR spent most of its work on
+things §9.6 did not say it needed, none of which is visible in a one-line
+milestone row.
+
+**M6 inherits the shape**, and nothing here has priced that yet: PR-23's charts
+and PR-24's twelve runbooks are the same "invisible from outside" kind, and
+they are the only large ones left.
 
 ## Critical path
 
