@@ -57,7 +57,8 @@ services:
     healthcheck:
       # check_running answers "is the broker up", which was the whole question
       # while the image was stock. It is not any more: a broker missing the
-      # plugin is running and healthy and drops every scheduled message.
+      # plugin is running and healthy while every saga schedule hangs on a
+      # declare it refuses (ADR-021).
       test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins list -e rabbitmq_delayed_message_exchange | grep -q rabbitmq_delayed_message_exchange"]
       interval: 10s
       retries: 5
@@ -436,8 +437,8 @@ var coordination = builder
 // The stock image, and since ADR-021 that is a STATED GAP rather than a
 // parity with §14.1. Ordering's saga schedules through the delayed message
 // exchange, which is a community plugin no official image carries — so this
-// line brings up a broker that accepts UseDelayedMessageScheduler, connects,
-// reports healthy, and drops every saga timeout. §14.1 builds
+// line brings up a broker that takes UseDelayedMessageScheduler, connects,
+// reports healthy, and then hangs on the first saga schedule. §14.1 builds
 // deploy/compose/rabbitmq for exactly that reason.
 //
 // It is left as the stock call because Aspire is not adopted (ADR-011) and a

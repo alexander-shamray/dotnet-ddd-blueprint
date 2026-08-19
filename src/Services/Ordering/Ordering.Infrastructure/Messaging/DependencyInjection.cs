@@ -158,9 +158,11 @@ public static class DependencyInjection
                 // The transport half of ADR-021's scheduler. On RabbitMQ this
                 // is the delayed message exchange, which is a PLUGIN rather
                 // than a broker feature — deploy/compose builds the image that
-                // carries it, and a broker without it accepts the publish and
-                // never delivers it. The ADR argues the choice and names what
-                // it costs.
+                // carries it. On a broker without it the bus still starts
+                // clean and the first schedule HANGS — the declare is refused
+                // and MassTransit retries it for ever (ADR-021 has the
+                // measurement). The ADR argues the choice and names what it
+                // costs.
                 cfg.UseDelayedMessageScheduler();
 
                 // §9.8's projection endpoint, verbatim. Ordering's other three

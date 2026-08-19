@@ -2328,8 +2328,10 @@ cfg.UseDelayedMessageScheduler();
 [ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
 records the choice and what it costs. The short of it: on RabbitMQ this
 scheduler is the delayed message exchange **plugin**, so §14.1 builds the broker
-image rather than pulling a stock one, and a broker without the plugin accepts
-the bus's connection and delivers no timeout at all.
+image rather than pulling a stock one. A broker without the plugin takes the
+bus's connection, reports healthy, and then hangs on the first schedule — the
+declare is refused and retried for ever, so the order waits on a timeout that
+cannot arrive. The ADR carries the measurement.
 
 ### Who moves the order while the saga coordinates it
 
