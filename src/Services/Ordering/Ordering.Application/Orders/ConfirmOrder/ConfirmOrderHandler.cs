@@ -18,10 +18,11 @@ namespace Ordering.Application.Orders.ConfirmOrder;
 /// <para>
 /// <b>No ownership check, and its absence is the same decision the missing
 /// <c>CommandOrigin</c> is.</b> §11.4's check exists to stop one customer
-/// acting on another's order; this command has no customer behind it and no
-/// endpoint to arrive through, so there is no principal to compare against and
-/// nothing a caller could assert. What guards it is arrival on
-/// <c>ordering-commands</c>, with the weakness §9.4's callout states in full.
+/// acting on another's order; this command has no customer behind it and **no
+/// HTTP route to arrive through** — it arrives on <c>ordering-commands</c> and
+/// nowhere else — so there is no principal to compare against and nothing a
+/// caller could assert. What guards it is that arrival, with the weakness
+/// §9.4's callout states in full.
 /// </para>
 /// </remarks>
 public sealed class ConfirmOrderHandler(IOrderRepository orders, TimeProvider clock)

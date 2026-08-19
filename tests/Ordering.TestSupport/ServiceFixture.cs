@@ -69,7 +69,7 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// same change that made the plugin load-bearing.
     /// </para>
     /// </remarks>
-    private RabbitMqContainer _rabbit = null!;
+    private RabbitMqContainer? _rabbit;
 
     private Respawner? _respawner;
 
@@ -132,13 +132,13 @@ public sealed class ServiceFixture : IAsyncLifetime
             .WithCleanUp(false)
             .Build();
 
-        // Constructed BEFORE the build, so a failed build is reported as
-        // itself. xUnit disposes a fixture whose InitializeAsync threw, and
-        // DisposeAsync dereferences this field — so assigning it after
-        // CreateAsync means a checksum mismatch or an unreachable release
-        // surfaces as a NullReferenceException in teardown with the real error
-        // nowhere in the output. Copilot found it; the container is inert until
-        // StartAsync, so building it early costs nothing.
+        // Constructed before the build rather than after it, so the ordinary
+        // failure — a checksum mismatch, an unreachable release — leaves a
+        // container for the teardown to dispose. That was the first fix and it
+        // was not enough on its own: BrokerContextPath() and the builder chain
+        // above both run earlier and both can throw, which is why the teardown
+        // is null-safe as well. Two guards, because the field is assigned in
+        // the middle of a method that can fail on either side of it.
         _rabbit = new RabbitMqBuilder().WithImage(broker).Build();
 
         await broker.CreateAsync(TestContext.Current.CancellationToken);
@@ -470,7 +470,16 @@ public sealed class ServiceFixture : IAsyncLifetime
             }
             finally
             {
-                await _rabbit.DisposeAsync();
+                // Null when InitializeAsync threw before the container was
+                // built — a missing Dockerfile, an unreadable build context, a
+                // failed image build. xUnit disposes a fixture whose
+                // initialisation threw, so dereferencing here would replace
+                // that diagnosis with a NullReferenceException. Moving the
+                // assignment earlier was the first attempt and did not close
+                // it: BrokerContextPath() and the builder chain both run
+                // before the assignment, and both can throw.
+                if (_rabbit is not null)
+                    await _rabbit.DisposeAsync();
             }
         }
     }

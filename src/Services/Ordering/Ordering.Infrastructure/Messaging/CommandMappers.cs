@@ -27,7 +27,10 @@ namespace Ordering.Infrastructure.Messaging;
 /// the only one of the four with a second way in, so it is the only one §11.4's
 /// ownership check has two callers to tell apart. The other three commands
 /// carry no <c>CommandOrigin</c> at all — a discriminator with one value is the
-/// kind of thing a later reader completes by adding the missing endpoint.
+/// kind of thing a later reader completes by adding the second ingress it
+/// implies. <b>Not "the missing endpoint"</b>: all four are mapped on
+/// <c>ordering-commands</c> right here, and what none of the three has is an
+/// HTTP route.
 /// </para>
 /// <para>
 /// <b>They are grouped in one file because they are one boundary</b>, the way
