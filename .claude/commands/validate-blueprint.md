@@ -13,9 +13,19 @@ the prices, so it drifts exactly as an appendix would — and unlike an appendix
 no link checker or nav footer will notice when it does. Check 10 covers what is
 particular to it; checks 1–8 apply to it unchanged.
 
-Scope: $1 — if empty, sweep the whole blueprint and the roadmap; if a filename,
-audit that chapter against every other chapter; if a topic, trace that topic
-everywhere it appears.
+**`docs/testing.md` is in scope on the same terms**, and needs no check of its
+own. It is the operational half of §12 — the commands, the
+`Category=Integration` filter, which projects need a Docker daemon, what the
+coverage filter measures — so every claim in it is a claim about a chapter or
+about the code, and checks 1–9 reach all of them unchanged.
+What it shares with the roadmap is the reason it has to be named here at all:
+outside the tree, in no index, behind no nav footer, so nothing structural
+notices when it drifts. **§12 wins where they disagree**, exactly as Appendix C
+wins over the roadmap.
+
+Scope: $1 — if empty, sweep the whole blueprint, the roadmap and
+`docs/testing.md`; if a filename, audit that chapter against every other
+chapter; if a topic, trace that topic everywhere it appears.
 
 **First, establish the phase.** If `Platform.slnx` (or any `src/`) exists, the
 code is in scope and check 9 below applies. If not, this is a docs-only audit
