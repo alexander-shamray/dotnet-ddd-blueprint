@@ -31,9 +31,9 @@ dotnet test  Platform.slnx         # needs a running Docker daemon
 cd tools/new-service && py -3.12 -m unittest    # no Docker, no SDK
 ```
 
-**`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12, and a newer
-interpreter is the hazard — it accepts APIs 3.12 does not, so the local suite
-goes green on code the runner cannot execute. The scaffold *script* is a
+**`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12, and a
+newer interpreter is the hazard — it accepts APIs 3.12 does not, so the local
+suite goes green on code the runner cannot execute. The scaffold *script* is a
 different matter: running it is not a test of the floor, so plain `python` is
 fine there.
 
@@ -116,10 +116,12 @@ rather than quietly**, which is the direction this has to fail in. It has no
 fixture, so it does not run against one; it also carries no category, so it
 runs in the fast half and fails there. What it cannot do is report a pass.
 
-**Nothing in CI runs the two halves separately yet.** PR-25 owns the staged
-pipeline of [§15.1](backend-architecture/15-cicd-deployment.md); this is the
-category it stages on, delivered ahead of it so the filter is real before the
-stage that depends on it is written.
+**Nothing in CI runs the two *category* halves separately yet.** PR-25 owns the
+staged pipeline of [§15.1](backend-architecture/15-cicd-deployment.md); this is
+the category it stages on, delivered ahead of it so the filter is real before
+the stage that depends on it is written. CI does run `dotnet test` twice, and
+that seam is a different one — architecture gates versus everything else, for
+the instrumentation reason under Coverage below.
 
 > **A filter is a new way for a suite to not run, and that is
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
@@ -139,8 +141,19 @@ build is PR-25's quality gates. What ships here is the number, measured over
 the layer where it means something.
 
 ```bash
-dotnet test Platform.slnx --collect:"Code Coverage" --settings coverage.runsettings
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests" \
+    --collect:"Code Coverage" --settings coverage.runsettings \
+    --results-directory ./TestResults
+python .github/coverage/domain_coverage.py ./TestResults
 ```
+
+**`--results-directory` is not decoration, and leaving it off is why this
+command is written in full.** Without it the collector writes under each *test
+project's* own `TestResults/` — measured, one file at
+`tests/Catalog.Domain.Tests/TestResults/<guid>/` — and the reporter, which
+defaults to `./TestResults` at the repo root, then finds nothing and exits
+non-zero. The filter is the second half of the same point and is explained
+under Coverage below.
 
 `coverage.runsettings` filters the report to `.*\.Domain\.dll$` and emits
 Cobertura. That is §12.9's "watch coverage of the domain layer specifically —

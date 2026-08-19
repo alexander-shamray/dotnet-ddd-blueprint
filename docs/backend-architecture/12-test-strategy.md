@@ -985,10 +985,23 @@ Containers start once per test collection, not per test. Truncating with
 Respawn between tests keeps them isolated at a fraction of the cost.
 
 > **A collection is per assembly, and the fixture has to live somewhere both
-> can see.** `ServiceFixture` and `TestAuthHandler` are used by
-> `Ordering.Application.Tests` (handler tests) and `Ordering.Api.Tests` (the
-> contract tests below), and those cannot reference each other — so both live in
-> `Ordering.TestSupport` ([§4.1](04-solution-structure.md)), a library rather than a test project.
+> can see.** `ServiceFixture` and `TestAuthHandler` are used by a service's
+> `*.Application.Tests` (handler tests) and its `*.Api.Tests` (the contract
+> tests below), and those cannot reference each other — so both live in
+> `*.TestSupport` ([§4.1](04-solution-structure.md)), a library rather than a test project.
+> Catalog is where that shape is realised: both its suites take the fixture,
+> which is exactly why the library exists.
+>
+> **Ordering is the exception, and it is the code's rather than this
+> section's.** Its handler tests moved to `Ordering.Api.Tests`, because
+> `ICurrentUser` is `HttpContextCurrentUser` and a handler resolved in a bare
+> scope has no principal to bind a subject from — so
+> `Ordering.Application.Tests` references no `TestSupport`, declares no
+> collection, and holds §12.5's saga suite instead, which needs no
+> infrastructure at all. The library is still right for the reason above; it
+> simply has one consumer there rather than two. `docs/testing.md` says the
+> same thing from the other side, and this paragraph exists because that file
+> would otherwise contradict this one.
 >
 > The `[CollectionDefinition]` does **not** move there. xUnit resolves
 > collections within an assembly, so each test project declares its own, naming
@@ -1991,8 +2004,17 @@ That last sentence is an instruction until something measures it, so
 `coverage.runsettings` does:
 
 ```bash
-dotnet test Platform.slnx --collect:"Code Coverage" --settings coverage.runsettings
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests" \
+    --collect:"Code Coverage" --settings coverage.runsettings \
+    --results-directory ./TestResults
 ```
+
+**Both flags after the settings file are load-bearing.** Without
+`--results-directory` the collector writes under each test project's own
+`TestResults/` rather than the repo root, so the reporter finds nothing; the
+filter is what keeps §4.2's gates out of the instrumented run, for the reason
+the callout below gives. `docs/testing.md` carries the reporting command that
+follows it.
 
 The file filters the report to `.*\.Domain\.dll$` and emits Cobertura, and CI
 prints the figure to the job summary. **Reported, never gated** — a threshold

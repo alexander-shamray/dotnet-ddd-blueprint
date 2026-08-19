@@ -304,9 +304,13 @@ public void Application_and_domain_do_not_reference_masstransit()
 
 ### The rest of the table, enforced
 
-The three gates above cover two of the table's five rows. The other three —
-Infrastructure, Migrator and Api — said "must never reference another
-service's projects" and nothing said it in a test until PR-22.
+**What the three gates above leave uncovered is a clause rather than a row**,
+and saying "three rows had no test" would erase work that exists. Between them
+they cover the Domain row whole, the Application row's named must-nots, and the
+Api row's composition-root half. What none of them says is the clause
+**Infrastructure, Migrator and Api** all carry — *must never reference another
+service's projects* — and the Migrator row is the one with no gate of any kind
+until PR-22.
 
 **The table has two kinds of row, so the gates have two shapes.** A row that
 says what a project *may* reference is an allow-list, and gets an allow-list

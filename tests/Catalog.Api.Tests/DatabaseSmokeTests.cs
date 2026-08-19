@@ -21,9 +21,16 @@ namespace Catalog.Api.Tests;
 /// </summary>
 /// <remarks>
 /// These tests require Docker and are deliberately not skipped without it.
-/// ADR-010 already made real infrastructure non-optional; a skip would let CI
-/// go green on a runner whose daemon had broken, and a category is PR-22's
-/// deliverable rather than something to invent two PRs early.
+/// ADR-010 already made real infrastructure non-optional, and a skip would let
+/// CI go green on a runner whose daemon had broken.
+/// <para>
+/// They <i>are</i> categorised, which is the opposite of a skip rather than a
+/// softer version of it: <see cref="IntegrationCollection"/> carries
+/// <c>[Trait("Category", "Integration")]</c> and xUnit applies it to every
+/// test in the collection, so joining the collection is what puts these in the
+/// half that needs a daemon. Selected out they do not run; selected in they
+/// need Docker exactly as before. Neither state reports a pass without one.
+/// </para>
 /// </remarks>
 [Collection(nameof(IntegrationCollection))]
 public class DatabaseSmokeTests(ServiceFixture fixture)
