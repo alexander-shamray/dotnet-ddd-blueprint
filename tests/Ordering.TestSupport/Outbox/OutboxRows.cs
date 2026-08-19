@@ -1,4 +1,5 @@
 using Common.Application;
+using Common.Contracts.Ordering.V1;
 using Common.Infrastructure.Outbox;
 
 namespace Ordering.TestSupport.Outbox;
@@ -34,10 +35,41 @@ public static class OutboxRows
     public static OutboxMessage Blocking(ServiceFixture fixture) =>
         Local(new BlocksUntilReleased { OccurredAt = Raised }, fixture);
 
-    // A Broker-lane builder returns with this service's first contract,
-    // together with the dispatcher test that uses it: staging that lane
-    // needs a type Common.Contracts publishes on this service's behalf,
-    // and the allow-list mapper is empty until there is one (§9.3).
+    /// <summary>
+    /// A Broker-lane row carrying a real contract, so the publish half of
+    /// <c>DeliverAsync</c> is exercised against the running broker rather than
+    /// inferred from the staging tests.
+    /// </summary>
+    /// <remarks>
+    /// <b>It arrived with PR-21, which is when it could.</b> Staging this lane
+    /// needs a type <c>Common.Contracts</c> publishes on this service's behalf
+    /// and the §9.3 allow-list mapping something to it — both true only once
+    /// the saga gave Ordering a reason to publish <c>OrderPlaced</c>. Until
+    /// then the three tests that use it would each have asserted against a row
+    /// no code here could produce.
+    /// <para>
+    /// <c>OrderPlaced</c> rather than the other two Ordering now publishes: it
+    /// is the one §9.6's saga starts on, so a payload this builder cannot
+    /// round-trip is a workflow that never begins.
+    /// </para>
+    /// </remarks>
+    public static OutboxMessage Broker(ServiceFixture fixture, Guid orderId) =>
+        OutboxMessage.Stage(
+            new OrderPlaced
+            {
+                MessageId = Guid.CreateVersion7(),
+                CorrelationId = orderId,
+                OccurredAt = Raised,
+                OrderId = orderId,
+                CustomerId = Guid.CreateVersion7(),
+                TotalAmount = 129.98m,
+                Currency = "EUR",
+                Lines = [new PlacedLine(Guid.CreateVersion7(), 2, 64.99m)]
+            },
+            OutboxLane.Broker,
+            orderId,
+            fixture.MessageTypes,
+            fixture.OutboxJson);
 
     /// <summary>A row for an event type with no handler at all.</summary>
     public static OutboxMessage Unhandled(ServiceFixture fixture) =>
