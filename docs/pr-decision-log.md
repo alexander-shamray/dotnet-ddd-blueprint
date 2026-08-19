@@ -73,7 +73,7 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 PR-22 put the three rows of [§4.2](backend-architecture/04-solution-structure.md)'s
 dependency table that had no gate behind one, split the suite on
 `Category=Integration`, added `docs/testing.md` and started reporting
-domain-layer coverage. Five of its decisions bind what comes after.
+domain-layer coverage. Six of its decisions bind what comes after.
 
 - **A gate the scaffold copies cannot be keyed on a name the scaffold
   rewrites.** The obvious instrument for "no service references another
@@ -136,15 +136,40 @@ domain-layer coverage. Five of its decisions bind what comes after.
   working one**, which is the same shape as this repository's vacuous-gate
   failures one layer out.
 
+- **Measuring a layer changes it, and the change was invisible on the machine
+  that wrote the measurement.** `coverage.runsettings` instruments the Domain
+  assemblies and nothing else — which are exactly the assemblies §4.2's Domain
+  gates read `GetReferencedAssemblies` on. On the Linux runner an instrumented
+  Domain assembly reports a `netstandard` reference no source line can produce,
+  and **both** Domain gates went red on the first CI run that collected
+  coverage. It does not reproduce on Windows: the same collector leaves
+  `Ordering.Domain.dll` byte-identical, checked by hashing it either side of a
+  run, so every local run — Debug, Release, with the collector and without —
+  was green on a defect CI found immediately. **A green local suite is a claim
+  about one machine**, and this is the sharpest instance of it the repository
+  has: not a stale artefact, but a platform where the instrumentation mode
+  differs.
+
+  The one-line fix was to admit `netstandard` to the allow-list, and it is the
+  wrong one — an architecture rule relaxed everywhere, for ever, and in every
+  service the scaffold renders, to accommodate a test tool. CI runs the gates
+  first and uninstrumented instead, and collects coverage over the complement;
+  the two filters are exhaustive and disjoint, so the counts still sum to the
+  suite. **If a change needs one of those gates relaxed, the gate is probably
+  right** — this is that rule meeting a case where relaxing it would have been
+  easier and nobody would have noticed.
+
 Two smaller things are worth carrying. **Coverage is reported and never
 gated** — §12.9 calls it a diagnostic, and a diagnostic wired to a build
 failure stops being read and starts being satisfied; the threshold is PR-25's.
 The filter is a *pattern*, `.*\.Domain\.dll$`, so every later service's Domain
 joins it the day it exists rather than waiting for someone to edit a list. And
 the collector is the one `Microsoft.NET.Test.Sdk` already carries, so the
-figure cost no package and Appendix B no entry — measured at **85.8%** across
+figure cost no package and Appendix B no entry — measured at **83.4%** across
 `Catalog.Domain`, `Ordering.Domain` and `Common.Domain` on the run that landed
-this PR.
+this PR. That is the complement run's figure and it is the right one: the
+architecture gates reach Domain types by reflection and nothing else, so
+counting them inflated both halves of the ratio for no behaviour tested.
 
 **One thing was found and deliberately not fixed.** `Catalog.Infrastructure`
 carries a `ProjectReference` to `Catalog.Application` that its own code never

@@ -2013,6 +2013,20 @@ Three things about that filter are deliberate:
   added and [Appendix B](appendix-b-licences.md) gained no entry. A coverage
   figure is not worth a new dependency.
 
+> **Measuring a layer changes it, and §4.2's gates are what noticed.** The
+> filter above instruments the Domain assemblies and nothing else — which are
+> exactly the assemblies the Domain gates read `GetReferencedAssemblies` on. On
+> the Linux runner an instrumented Domain assembly reports a `netstandard`
+> reference no source line can produce, and both gates went red on the first CI
+> run that collected coverage. It does not reproduce on Windows, where the same
+> collector leaves the file byte-identical.
+>
+> So CI runs the gates **first and uninstrumented**, and collects coverage over
+> the complement. Admitting `netstandard` to the allow-list was the one-line
+> alternative and is the wrong one: an architecture rule relaxed everywhere and
+> for ever, in every service the scaffold renders, to accommodate a test tool.
+> **If a change needs one of those gates relaxed, the gate is probably right.**
+
 `docs/testing.md` carries the commands, the categories and what needs Docker —
 the operational half of this chapter, kept separate because a runner flag goes
 stale on a different clock than a strategy does. Where the two disagree, this

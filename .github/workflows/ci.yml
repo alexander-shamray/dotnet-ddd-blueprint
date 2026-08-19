@@ -99,6 +99,29 @@ jobs:
       # halves separately here would claim a pipeline shape §15.1 does not have
       # yet, and would run the fast half twice for nothing.
       #
+      # TWO steps all the same, and the seam is instrumentation rather than
+      # category. §4.2's architecture gates read GetReferencedAssemblies on the
+      # Domain assemblies; coverage.runsettings instruments exactly those and
+      # nothing else; and on this runner an instrumented Domain assembly
+      # reports a `netstandard` reference its source cannot have. Both Domain
+      # gates went red on the run that first collected coverage here — and pass
+      # on Windows, where the same collector leaves the file byte-identical.
+      #
+      # So the gates run first and uninstrumented, where the question they ask
+      # is about the compiler's output. Weakening the allow-list to admit
+      # `netstandard` was the one-line alternative and is the wrong one: it
+      # would relax an architecture rule everywhere, for ever, and in every
+      # service the scaffold renders, to accommodate a test-tool artefact.
+      #
+      # The two filters are exhaustive and disjoint by construction, so the
+      # counts sum to the whole suite. A gate added in a class NOT named
+      # ArchitectureTests lands in the instrumented run instead — which fails
+      # loudly here rather than quietly, and is why this is a comment and not a
+      # hope.
+      - run: >
+          dotnet test Platform.slnx --no-build -c Release
+          --filter "FullyQualifiedName~ArchitectureTests"
+
       # The collector is Microsoft.CodeCoverage, which arrives with
       # Microsoft.NET.Test.Sdk and is therefore already in every test project:
       # no package added, no licence-register entry owed. It merges every test
@@ -106,6 +129,7 @@ jobs:
       # below reads a single file rather than reconciling thirteen.
       - run: >
           dotnet test Platform.slnx --no-build -c Release
+          --filter "FullyQualifiedName!~ArchitectureTests"
           --collect:"Code Coverage"
           --settings coverage.runsettings
           --results-directory ./TestResults

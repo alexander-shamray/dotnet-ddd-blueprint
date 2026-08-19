@@ -163,9 +163,29 @@ Three things about that filter are deliberate:
   ([Appendix B](backend-architecture/appendix-b-licences.md)); a coverage
   figure is not worth a new dependency.
 
-The run writes one `*.cobertura.xml` per test project under
-`TestResults/<guid>/`; the `line-rate` attribute on each `<coverage>` element
-is the figure, and `<package name="…">` names the assembly it belongs to.
+The run writes a single `*.cobertura.xml` under `TestResults/<guid>/` — the
+collector merges every test project's data into one attachment — and the
+`line-rate` attribute on its `<coverage>` element is the figure, with
+`<package name="…">` naming each assembly.
+
+> **CI runs this as a second step over the *complement* of the architecture
+> gates, and that seam is instrumentation rather than preference.** §4.2's
+> gates read `GetReferencedAssemblies` on the Domain assemblies;
+> `coverage.runsettings` instruments exactly those and nothing else; and on
+> the Linux runner an instrumented Domain assembly reports a `netstandard`
+> reference its source cannot have. Both Domain gates went red on the first CI
+> run that collected coverage.
+>
+> **It does not reproduce on Windows**, where the same collector leaves
+> `Ordering.Domain.dll` byte-identical — checked by hashing it either side of a
+> run — so a green local suite says nothing about this and the runner is the
+> only thing that can.
+>
+> Adding `netstandard` to the Domain allow-list was the one-line alternative
+> and is the wrong one: it relaxes an architecture rule everywhere, for ever,
+> and in every service the scaffold renders, to accommodate a test tool. The
+> gates run first and uninstrumented instead. The two filters are exhaustive
+> and disjoint, so the counts still sum to the whole suite — **16 and 760**.
 
 ## Where a test goes
 
