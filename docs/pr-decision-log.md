@@ -141,16 +141,41 @@ after.
   consumers is the only cheap moment a contract ever has**, and the same change
   one release later is a §9.2 version bump.
 
-**One thing is owed and is named rather than built.** §9.6's `StockTimeout`
-branch cancels the order and finalises **without releasing stock**, so a
-reservation that arrives after the timeout is stranded in Inventory with no
-saga left to compensate it — `ConfirmStockHandler` rejects it, which makes the
-event visible on `command.domain_rejected` and does not free the stock. That is
-the chapter's design and not this PR's defect, but it is the second stranded-
-reservation path in §9.6 and only the other one escalates
-(`ReviewReasons.StockNotReleased`). Closing it means either a compensating
-`ReleaseStock` on the timeout branch or a second escalation reason, and both
-are decisions §9.6 has to take rather than a saga implementation.
+**Four things are owed and are named rather than built.** Each is a §9.6 or
+§5.4 decision that PR-21 made *reachable* rather than one it introduced, and
+naming them is the alternative to a silent gap.
+
+- **A stock timeout strands the reservation.** §9.6's `StockTimeout` branch
+  cancels the order and finalises **without releasing stock**, so a reservation
+  arriving afterwards has no saga left to compensate it —
+  `ConfirmStockHandler` rejects it, which makes the event visible on
+  `command.domain_rejected` and does not free the stock. It is the second
+  stranded-reservation path in §9.6 and only the other one escalates
+  (`ReviewReasons.StockNotReleased`). Closing it means a compensating
+  `ReleaseStock` on the timeout branch or a second escalation reason.
+- **A customer cancelling mid-workflow is invisible to the saga.** §3.2 does
+  not give Ordering a subscription to its own `OrderCancelled`, and §9.6's
+  machine has no cancellation branch — so a cancellation racing `StockReserved`
+  leaves the saga reserving and authorising, `ConfirmOrder` is refused by the
+  aggregate, and three days later a false `not_despatched` review is raised.
+  Copilot found it. **The complete fix is a chapter decision, not an
+  implementation gap**: cancelling a *`Confirmed`* order needs a refund, and
+  §3.2's Accepts column for Payments is `AuthorisePayment` alone — there is no
+  refund contract to send. A partial fix covering `AwaitingStock` and
+  `AwaitingPayment` is possible and was rejected here as a state-machine change
+  §9.6 owns.
+- **The payment reference is accepted and goes nowhere.** `ConfirmOrder`
+  carries it, `Order.ConfirmPayment` puts it on `OrderConfirmedDomainEvent` and
+  stores no column, and `V1.OrderConfirmed` has no field for it — so it reaches
+  a Local outbox row only once a projection handles that event, and §6.6's
+  `OrderSummaries` is not built. Found by PR-21's own endpoint test asserting a
+  column that does not exist. `PaymentReference`'s own doc calls it "the one
+  thing that lets a support question about an order reach the provider's own
+  records", which is not true of anything today.
+- **`Unschedule` cancels nothing on ADR-021's scheduler**, so every order keeps
+  its timeouts until they fire. Recorded in the ADR rather than here, because
+  it is a property of the decision rather than of the saga — but it is the
+  fourth thing this PR knows and does not fix.
 
 ---
 

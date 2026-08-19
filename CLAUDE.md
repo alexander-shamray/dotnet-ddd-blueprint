@@ -296,7 +296,7 @@ its first command endpoint and the first thing Ordering publishes.
 **PR-22 (architecture rules and the test-strategy document) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 747 tests — so the build rules and the drift rules below
+and `dotnet test` runs 754 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly

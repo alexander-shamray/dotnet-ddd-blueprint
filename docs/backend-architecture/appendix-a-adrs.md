@@ -459,13 +459,28 @@ so**, which is why §14.1's healthcheck asserts the plugin is enabled as well as
 that the broker is running: a stock broker is *healthy* and wrong, and the only
 evidence is in a log belonging to something else.
 
-The plugin keeps its delayed messages in Mnesia, per node and unreplicated, and
-its own guidance warns against large numbers of long delays. §9.6's despatch
-timeout is three days per order, which is precisely that shape at volume. **This
-is the ADR to supersede when it bites**, and the replacement is the Quartz
-option above rather than a new one — the state machine, the four schedules and
-the tests are all unchanged by which scheduler delivers them, which is why the
-choice could be made on cost.
+**This scheduler cannot cancel, and that is the cost this ADR most understated.**
+MassTransit 8.5.3's `DelayedScheduleMessageProvider.CancelScheduledSend` returns
+`Task.CompletedTask` on both overloads — checked against the tagged source — so
+once the broker holds a delayed message nothing recalls it. Every `Unschedule`
+in §9.6's machine is a no-op here, and **every order keeps all of its timeouts
+until they fire**: five minutes and fifteen minutes on the ordinary path, and
+three days on every order that ships. The token-id columns are written and
+never read back.
+
+Correctness survives it, and by construction rather than by luck — a timeout
+arriving in a state that does not handle it is ignored, and one arriving after
+the saga finalised is discarded. Both were measured; the first has a test
+(§12.5). What does not survive is the volume argument: the plugin keeps its
+delayed messages in Mnesia, per node and unreplicated, its own guidance warns
+against large numbers of long delays, and this decision guarantees three per
+order rather than the few a cancelling scheduler would leave.
+
+**That is the trigger to supersede**, and the replacement is the Quartz option
+above rather than a new one — Quartz cancels, so the `Unschedule` calls and the
+token columns start working the day it lands, with no change to the state
+machine, the four schedules or the tests. Which is the same property that let
+the choice be made on cost.
 
 ---
 

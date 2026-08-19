@@ -2240,6 +2240,14 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
 
     // One token per schedule — Unschedule needs the specific token, so two
     // waits cannot share a field.
+    //
+    // On ADR-021's scheduler these are written and never read back: the
+    // delayed message exchange cannot cancel, so every Unschedule below is a
+    // no-op and every order keeps its timeouts until they fire. They stay
+    // because they are the scheduler's contract rather than this saga's
+    // convenience, and because Quartz — the ADR's own named successor —
+    // needs them. Correctness meanwhile is the state machine's: a timeout
+    // arriving where no transition handles it is ignored.
     public Guid? StockTimeoutTokenId { get; set; }
     public Guid? PaymentTimeoutTokenId { get; set; }
     public Guid? DespatchTimeoutTokenId { get; set; }

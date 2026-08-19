@@ -49,6 +49,21 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
 
     // One token per schedule — Unschedule needs the specific token, so two
     // waits cannot share a field.
+    //
+    // **On ADR-021's scheduler these are written and never read back**, and
+    // the honest reason is worth carrying beside them: MassTransit 8.5.3's
+    // DelayedScheduleMessageProvider.CancelScheduledSend returns
+    // Task.CompletedTask on both overloads (checked against the tagged
+    // source), so a delayed message cannot be recalled once the broker holds
+    // it. Every Unschedule in the saga is therefore a no-op, and every order
+    // keeps its timeouts until they fire.
+    //
+    // They stay because they are the scheduler's contract rather than this
+    // saga's convenience — a scheduler that DOES cancel needs them, and ADR-021
+    // names Quartz as its own successor. What carries correctness meanwhile is
+    // the state machine: a timeout arriving in a state that does not handle it
+    // is ignored, and one arriving after finalisation is discarded. Both
+    // measured, and the first has a test.
     public Guid? StockTimeoutTokenId { get; set; }
 
     public Guid? PaymentTimeoutTokenId { get; set; }

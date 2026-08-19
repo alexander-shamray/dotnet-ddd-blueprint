@@ -16,8 +16,12 @@ namespace Ordering.Infrastructure.Messaging;
 /// One record per wait rather than one <c>FulfilmentExpired(Guid OrderId,
 /// string Wait)</c>, because MassTransit correlates a schedule by message
 /// <em>type</em>: a single type would make all four schedules the same
-/// subscription, and <c>Unschedule</c> would have no way to tell which token
-/// it was cancelling.
+/// subscription, and the state machine would have no way to tell which wait a
+/// given expiry belonged to. (Not "which token <c>Unschedule</c> is
+/// cancelling": on ADR-021's scheduler it cancels nothing — see
+/// <see cref="OrderFulfilmentState"/>. The types still have to be distinct,
+/// because a stale expiry is discriminated by its <em>type</em> against the
+/// state it arrives in.)
 /// </para>
 /// </remarks>
 public sealed record StockReservationExpired(Guid OrderId);
