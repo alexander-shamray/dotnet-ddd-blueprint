@@ -230,7 +230,7 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         // cannot see and this test does not claim.
         Guid orderId = await fixture.SeedOrderAsync(Customer);
 
-        await SendAsync(new CancelOrder(orderId, "reason_from_a_newer_deployment"));
+        await SendAsync(new CancelOrder(orderId, "reason_from_a_newer_deployment"), drain: false);
         await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
 
         (await StatusAsync(orderId)).ShouldBe(
@@ -295,14 +295,36 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     /// the literal here is the same string a queue name test would assert and
     /// a rename that missed one site fails these tests rather than production.
     /// </summary>
-    private async Task SendAsync<T>(T command)
+    /// <param name="drain">
+    /// False only where no inbox row will ever be written, which is the
+    /// malformed-contract case: <c>InboxFilter</c> commits its row <em>after</em>
+    /// the consumer returns, and a mapper that throws means it never does.
+    /// Waiting for that row would spend the whole delivery budget proving
+    /// something the test already asserts.
+    /// </param>
+    /// <remarks>
+    /// <b>Every other send is drained, and it was not until Copilot counted.</b>
+    /// These tests observe the handler's own transaction — a status column, a
+    /// review row — which commits <em>before</em> the inbox row does. So a test
+    /// could see what it came for, return, and let the next test's
+    /// <c>ResetAsync</c> truncate the schema underneath a <c>SaveChangesAsync</c>
+    /// still in flight. That is precisely the flake
+    /// <see cref="CatalogEventEndpointTests"/> records, arriving in the suite
+    /// written to copy its teardown.
+    /// </remarks>
+    private async Task SendAsync<T>(T command, bool drain = true)
         where T : class
     {
         ISendEndpoint endpoint = await fixture.Factory.Services
             .GetRequiredService<IBus>()
             .GetSendEndpoint(new Uri($"queue:{DependencyInjection.CommandsQueue}"));
 
-        await endpoint.Send(command, TestContext.Current.CancellationToken);
+        var messageId = Guid.CreateVersion7();
+
+        if (drain)
+            _published.Add(messageId);
+
+        await endpoint.Send(command, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
     }
 
     private async Task<IReadOnlyList<InboxMessage>> InboxRowsAsync(Guid messageId) =>

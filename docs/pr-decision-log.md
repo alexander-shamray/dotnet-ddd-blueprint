@@ -141,15 +141,19 @@ after.
   consumers is the only cheap moment a contract ever has**, and the same change
   one release later is a §9.2 version bump.
 
-**Four things are owed and are named rather than built.** Each is a §9.6 or
-§5.4 decision that PR-21 made *reachable* rather than one it introduced, and
+**Five things are owed and are named rather than built.** Each is a §9.6, §5.4
+or §9.8 decision that PR-21 made *reachable* rather than one it introduced, and
 naming them is the alternative to a silent gap.
 
 - **A stock timeout strands the reservation.** §9.6's `StockTimeout` branch
   cancels the order and finalises **without releasing stock**, so a reservation
   arriving afterwards has no saga left to compensate it —
-  `ConfirmStockHandler` rejects it, which makes the event visible on
-  `command.domain_rejected` and does not free the stock. It is the second
+  `ConfirmStockHandler` rejects it and the stock stays held. **The rejection is
+  quieter than this entry first claimed**: `command.domain_rejected` is
+  `CommandConsumer`'s counter, and this command is dispatched in process by
+  `StockReservedHandler`, so the only record is `LoggingBehavior`'s line.
+  Copilot caught the claim; the handler's own comment had it right and this did
+  not. It is the second
   stranded-reservation path in §9.6 and only the other one escalates
   (`ReviewReasons.StockNotReleased`). Closing it means a compensating
   `ReleaseStock` on the timeout branch or a second escalation reason.
@@ -176,6 +180,18 @@ naming them is the alternative to a silent gap.
   its timeouts until they fire. Recorded in the ADR rather than here, because
   it is a property of the decision rather than of the saga — but it is the
   fourth thing this PR knows and does not fix.
+- **The saga endpoint buffers its sends in memory.** §9.8 prints
+  `UseInMemoryOutbox` there, and the saga repository commits the instance
+  *inside* the consumer — so a crash between that commit and the flush leaves
+  the saga advanced (or deleted, after `Finalize`) with a command or a schedule
+  never sent, and the redelivery finds a state where the transition no longer
+  applies. Copilot found it. **§9.4's own callout already states the
+  premise** — "the in-memory outbox defers, it does not persist… a consumer
+  whose sends must survive its own commit wants §9.4's transactional outbox" —
+  so this is the chapter disagreeing with itself rather than a new discovery.
+  Closing it means running MassTransit's transactional outbox alongside this
+  platform's hand-rolled §9.4 one, which is a §9 decision about owning two
+  outboxes and not something a saga PR settles.
 
 ---
 
