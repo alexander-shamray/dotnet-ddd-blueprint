@@ -27,9 +27,17 @@ otherwise now point at nothing; where a block stated a *live* fact that
 that drifts; and one 136-column line was rewrapped. Not one argument was
 shortened.
 
-Five lines still run one to nine columns past 80, each ending in a backticked
+A few lines still run one to nine columns past 80, each ending in a backticked
 identifier too long to break. They came across as they were, and the original
 carried them the same way.
+
+**That sentence used to carry a count, and the count was wrong.** It said five
+where six matched its own description — the sixth arrived with a later entry,
+as the next one will, because nothing recomputes it and the sentence is not
+where anybody looks. The predicate is checkable and the number was not, so the
+number is gone rather than corrected: `CLAUDE.md` makes the same argument about
+its own line count one file over, and a figure this file states about itself
+invalidates with the next PR that appends to it.
 
 **It is guidance, not specification.** Where an entry disagrees with the
 blueprint, the blueprint wins — the same rule `docs/superpowers/` carries — and
