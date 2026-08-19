@@ -313,10 +313,12 @@ public static class OrderEndpoints
                     // and an unknown value would surface as a model-binding error
                     // rather than a 400 naming the field.
                     if (!CancellationReasons.TryParse(request.Reason, out CancellationReason reason))
+                    {
                         return Results.ValidationProblem(new Dictionary<string, string[]>
                         {
                             ["reason"] = [$"Unknown cancellation reason '{request.Reason}'."]
                         });
+                    }
 
                     // CommandOrigin.User is a literal, not a bound value. The
                     // origin says which path the command arrived on, so a

@@ -206,10 +206,12 @@ public IServiceCollection AddPluggableFrom(Assembly assembly) =>
         IImplementationTypeSelector from = scan.FromAssemblies(assembly);
 
         foreach (Type contract in PluggableInterfaces.All)
+        {
             from
                 .AddClasses(c => c.AssignableTo(contract))
                 .AsImplementedInterfaces()
                 .WithScopedLifetime();
+        }
     });
 ```
 
@@ -313,9 +315,11 @@ public void Every_handler_implementation_is_registered()
                 .Select(i => (Implementation: t, Service: i)));
 
     foreach (var (implementation, service) in implementations)
+    {
         scope.ServiceProvider.GetServices(service).ShouldContain(
             s => s!.GetType() == implementation,
             $"{implementation.Name} implements {service.Name} but is not registered.");
+    }
 }
 ```
 
@@ -536,10 +540,12 @@ public sealed class TransactionBehavior<TCommand, TResult>(IUnitOfWork unitOfWor
                 // dispatch, so the staged rows of a legitimate single-root command
                 // are already in the tracker and not miscounted.
                 if (unitOfWork.ModifiedAggregateCount > 1)
+                {
                     throw new InvariantViolationException(
                         $"{typeof(TCommand).Name} modified {unitOfWork.ModifiedAggregateCount} " +
                         "aggregate roots. One transaction, one aggregate (§2.3 principle 3) — " +
                         "the second aggregate should react to a domain event after commit (§7.5).");
+                }
 
                 await unitOfWork.SaveChangesAsync(token);
 

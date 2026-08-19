@@ -20,7 +20,12 @@ namespace Catalog.TestSupport;
 /// <summary>
 /// A real SQL Server, migrated by the real migrator (ADR-010, §12.4), and a
 /// real RabbitMQ for the bus to connect to. Each image is the one §14.1's
-/// Compose file runs, so a test and a developer machine cannot disagree about
+/// Compose file runs — for the broker that means the base tag its Dockerfile
+/// builds from, since ADR-021 made §14.1 build rather than pull, and Catalog
+/// may stop at the base because it registers no message scheduler and
+/// schedules nothing; Ordering's fixture builds the Dockerfile itself, for
+/// exactly the reason this one need not. So a test and a developer machine
+/// cannot disagree about
 /// the engine. §12.4's name and §4.1's home: the fixture serves
 /// <c>Catalog.Application.Tests</c> and <c>Catalog.Api.Tests</c>, which
 /// cannot reference each other — each declares its own
@@ -41,7 +46,13 @@ public sealed class ServiceFixture : IAsyncLifetime
         .Build();
 
     private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
-        .WithImage("rabbitmq:4-management-alpine")
+        // 4.1, not a floating 4: this is the base tag §14.1's Dockerfile
+        // builds from (ADR-021 pins the minor, because the plugin refuses a
+        // broker line it was not built against). Matching it is what makes
+        // the summary above true, and it shares the pulled layers with
+        // Ordering's fixture rather than dragging a second broker image onto
+        // every runner.
+        .WithImage("rabbitmq:4.1-management-alpine")
         .Build();
 
     private Respawner? _respawner;

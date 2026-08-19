@@ -49,11 +49,13 @@ public sealed class TestAuthHandler(
         // scheme spelling its own claim name would grant nothing while looking
         // like it granted everything.
         if (Request.Headers.TryGetValue(PermissionsHeader, out StringValues granted))
+        {
             claims.AddRange(
                 granted
                     .ToString()
                     .Split(' ', StringSplitOptions.RemoveEmptyEntries)
                     .Select(p => new Claim(PermissionClaim.Type, p)));
+        }
 
         ClaimsPrincipal principal = new(new ClaimsIdentity(claims, SchemeName));
 

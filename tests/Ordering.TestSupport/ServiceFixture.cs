@@ -12,6 +12,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Images;
 using Respawn;
 using Testcontainers.MsSql;
 using Testcontainers.RabbitMq;
@@ -22,8 +24,10 @@ namespace Ordering.TestSupport;
 /// <summary>
 /// A real SQL Server, migrated by the real migrator (ADR-010, §12.4), and a
 /// real RabbitMQ for the bus to connect to. Each image is the one §14.1's
-/// Compose file runs, so a test and a developer machine cannot disagree about
-/// the engine. §12.4's name and §4.1's home: the fixture serves
+/// Compose file runs — SQL Server by tag, and the broker by <em>building the
+/// same Dockerfile</em>, because since ADR-021 §14.1 does not run a tag for it
+/// — so a test and a developer machine cannot disagree about the engine.
+/// §12.4's name and §4.1's home: the fixture serves
 /// <c>Ordering.Api.Tests</c> today, and the application suite the moment that
 /// suite gains a handler test — the two cannot reference each other, so each
 /// declares its own
@@ -43,9 +47,29 @@ public sealed class ServiceFixture : IAsyncLifetime
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
         .Build();
 
-    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
-        .WithImage("rabbitmq:4-management-alpine")
-        .Build();
+    /// <summary>
+    /// Built in <see cref="InitializeAsync"/> rather than initialised here,
+    /// because the image it runs does not exist until this fixture builds it.
+    /// </summary>
+    /// <remarks>
+    /// <b>The stock tag is not an option any more, and the failure it would
+    /// cause is the quiet kind.</b> This fixture starts the <em>production</em>
+    /// bus, which registers <c>UseDelayedMessageScheduler</c> (ADR-021). A
+    /// stock broker takes that registration, connects and reports healthy —
+    /// the delayed exchange is not declared until something schedules — so
+    /// every test here passes against <c>rabbitmq:4-management-alpine</c>
+    /// today, none of them driving the saga. The first one that did would not
+    /// fail either: ADR-021's measurement is that the scheduling call **hangs**
+    /// while MassTransit retries a declare the broker refuses, so the test
+    /// would time out with nothing on the service side naming a plugin.
+    /// <para>
+    /// So the tag was not merely stale — it made this fixture's own reason for
+    /// existing false. "A test and a developer machine cannot disagree about
+    /// the engine" is the claim, and §14.1 stopped running that tag in the
+    /// same change that made the plugin load-bearing.
+    /// </para>
+    /// </remarks>
+    private RabbitMqContainer? _rabbit;
 
     private Respawner? _respawner;
 
@@ -60,11 +84,71 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// <summary>The exit code of the first real migration run.</summary>
     public int FirstRunExitCode { get; private set; } = -1;
 
+    /// <summary>
+    /// <c>deploy/compose/rabbitmq</c>, found by walking up from the test
+    /// assembly to the directory holding <c>Platform.slnx</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>It throws rather than falling back, and that is the whole design of
+    /// this method.</b> A fixture that could not find the Dockerfile and
+    /// quietly used the stock tag instead would restore the exact defect this
+    /// change closes — and restore it invisibly, on whichever machine had the
+    /// unexpected layout. The marker is the solution file rather than
+    /// <c>.git</c>, which a worktree stores as a file rather than a directory
+    /// and a downloaded archive does not carry at all.
+    /// </remarks>
+    private static string BrokerContextPath()
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!File.Exists(Path.Combine(dir.FullName, "Platform.slnx")))
+                continue;
+
+            string context = Path.Combine(dir.FullName, "deploy", "compose", "rabbitmq");
+            if (!File.Exists(Path.Combine(context, "Dockerfile")))
+            {
+                throw new InvalidOperationException(
+                    $"Found the solution at {dir.FullName} but no Dockerfile at {context} (§14.1, ADR-021).");
+            }
+
+            return context;
+        }
+
+        throw new InvalidOperationException(
+            $"No Platform.slnx above {AppContext.BaseDirectory}; the broker image cannot be built.");
+    }
+
     // ValueTask, not Task: xUnit v3 redefined IAsyncLifetime (§12.4).
     public async ValueTask InitializeAsync()
     {
+        // The broker image §14.1 builds, built from the same Dockerfile rather
+        // than copied into a second one. Named and left behind on purpose:
+        // WithCleanUp(false) keeps Ryuk from removing it, so the plugin is
+        // downloaded once per machine rather than once per run.
+        IFutureDockerImage broker = new ImageFromDockerfileBuilder()
+            .WithDockerfileDirectory(BrokerContextPath())
+            .WithDockerfile("Dockerfile")
+            .WithName("ashamray-test-broker:4.1-delayed")
+            .WithCleanUp(false)
+            .Build();
+
+        // Constructed before the build rather than after it, so the ordinary
+        // failure — a checksum mismatch, an unreachable release — leaves a
+        // container for the teardown to dispose. That was the first fix and it
+        // was not enough on its own: BrokerContextPath() and the builder chain
+        // above both run earlier and both can throw, which is why the teardown
+        // is null-safe as well. Two guards, because the field is assigned in
+        // the middle of a method that can fail on either side of it.
+        _rabbit = new RabbitMqBuilder().WithImage(broker).Build();
+
+        await broker.CreateAsync(TestContext.Current.CancellationToken);
+
         // Together, §12.4's printed shape — the broker's start hides inside
-        // SQL Server's, which is the slower of the two by some margin.
+        // SQL Server's, which is the slower of the two by some margin. The
+        // image build above is deliberately NOT inside that overlap: a
+        // container cannot start before its image exists, and hiding the build
+        // behind SQL Server's start would only move where the wait is
+        // reported.
         await Task.WhenAll(
             _sql.StartAsync(TestContext.Current.CancellationToken),
             _rabbit.StartAsync(TestContext.Current.CancellationToken));
@@ -102,6 +186,20 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// hide transaction-related bugs. Tests that share the collection call
     /// this from <c>InitializeAsync</c>; suites asserting the migrator or the
     /// probe table arrange per-test identities instead and never need it.
+    /// <para>
+    /// <b>It resets SQL and cannot reset the broker, and one consequence is
+    /// latent rather than theoretical.</b> <c>Unschedule</c> is a no-op on
+    /// ADR-021's scheduler, so every saga test leaves its timeouts armed in
+    /// the collection-wide RabbitMQ. One landing mid-run would cross
+    /// <c>InboxFilter</c> and write a row — and <c>InboxFilterTests</c>
+    /// asserts <c>ShouldBeEmpty()</c> over the whole table, in this same
+    /// collection. What stops it is only that the shortest schedule is five
+    /// minutes and this collection runs in about eighty seconds. **A runner
+    /// four times slower makes that a flake in a test that has nothing to do
+    /// with sagas**, so read the PR-21 entry in the decision log before
+    /// chasing it. Copilot raised it; the fix is a broker per saga class and
+    /// was judged too expensive for the hazard.
+    /// </para>
     /// </summary>
     public async Task ResetAsync()
     {
@@ -386,7 +484,16 @@ public sealed class ServiceFixture : IAsyncLifetime
             }
             finally
             {
-                await _rabbit.DisposeAsync();
+                // Null when InitializeAsync threw before the container was
+                // built — a missing Dockerfile, an unreadable build context, a
+                // failed image build. xUnit disposes a fixture whose
+                // initialisation threw, so dereferencing here would replace
+                // that diagnosis with a NullReferenceException. Moving the
+                // assignment earlier was the first attempt and did not close
+                // it: BrokerContextPath() and the builder chain both run
+                // before the assignment, and both can throw.
+                if (_rabbit is not null)
+                    await _rabbit.DisposeAsync();
             }
         }
     }

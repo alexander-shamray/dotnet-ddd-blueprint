@@ -55,11 +55,13 @@ public sealed class TestAuthHandler(
         List<Claim> claims = [new(ClaimTypes.NameIdentifier, userId.ToString())];
 
         if (Request.Headers.TryGetValue(PermissionsHeader, out StringValues granted))
+        {
             claims.AddRange(
                 granted
                     .ToString()
                     .Split(' ', StringSplitOptions.RemoveEmptyEntries)
                     .Select(p => new Claim(PermissionClaim.Type, p)));
+        }
 
         ClaimsPrincipal principal = new(new ClaimsIdentity(claims, SchemeName));
 

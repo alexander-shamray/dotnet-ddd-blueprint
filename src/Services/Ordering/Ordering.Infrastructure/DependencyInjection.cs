@@ -108,11 +108,15 @@ public static class DependencyInjection
         // a row, so without that hosted service the constructor's throw would
         // land on a background thread in a host that had been ready for hours.
         // It is registered first, because hosted services start in order.
-        // IIntegrationEvent still stands in for this service's contracts,
-        // which it has none of yet; Order is the domain anchor §9.4 names,
-        // and it replaced the marker with the first aggregate exactly as the
-        // scaffold predicted — the line resolves to the same assembly it
-        // always did, and now says so by naming a type the model owns.
+        // IIntegrationEvent stood in for this service's contracts while it
+        // published none; since PR-21 it publishes three, and the line has not
+        // moved because they live in the same assembly the marker does —
+        // Common.Contracts is §4.3's one crossing assembly, so every service's
+        // contracts anchor to it. Naming OrderPlaced here instead would read
+        // as more precise and claim less: the marker says "every contract",
+        // where a contract says "this one, and whatever shares its assembly".
+        // Order is the domain anchor §9.4 names, and it replaced the marker
+        // with the first aggregate exactly as the scaffold predicted.
         services.AddSingleton(
             new MessageTypeSource(typeof(IIntegrationEvent).Assembly, typeof(Order).Assembly));
         services.AddSingleton(sp =>

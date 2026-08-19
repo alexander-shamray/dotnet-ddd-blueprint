@@ -214,6 +214,86 @@ namespace Ordering.Infrastructure.Persistence.Migrations
                     b.ToTable("OrderLines", "ordering");
                 });
 
+            modelBuilder.Entity("Ordering.Infrastructure.Messaging.OrderFulfilmentState", b =>
+                {
+                    b.Property<Guid>("CorrelationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("char(3)")
+                        .IsFixedLength();
+
+                    b.Property<string>("CurrentState")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DespatchTimeoutTokenId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PaymentTimeoutTokenId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReleaseTimeoutTokenId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("StockTimeoutTokenId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Total")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.HasKey("CorrelationId");
+
+                    b.HasIndex("StartedAt")
+                        .HasDatabaseName("IX_OrderFulfilmentStates_StartedAt");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("StartedAt"), new[] { "CurrentState" });
+
+                    b.ToTable("OrderFulfilmentStates", "ordering");
+                });
+
+            modelBuilder.Entity("Ordering.Infrastructure.Persistence.OrderReview", b =>
+                {
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTimeOffset>("RaisedAt")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.HasKey("OrderId", "Reason");
+
+                    b.HasIndex("RaisedAt")
+                        .HasDatabaseName("IX_OrderReviews_RaisedAt");
+
+                    b.ToTable("OrderReviews", "ordering");
+                });
+
             modelBuilder.Entity("Ordering.Infrastructure.Persistence.ProductPrice", b =>
                 {
                     b.Property<Guid>("ProductId")

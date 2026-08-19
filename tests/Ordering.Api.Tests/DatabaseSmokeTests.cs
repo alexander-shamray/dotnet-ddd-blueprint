@@ -45,13 +45,16 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // scaffolded service starts with — the schema, then §9.4's outbox
         // table, §9.5's inbox and the index the retention purge deletes
         // through — all of them wiring every service has rather than anything
-        // this one chose. The last two are Ordering's own: the aggregate's
+        // this one chose. The rest are Ordering's own — no count, because the
+        // sentence has outlived two of them already: the aggregate's
         // tables, §6.4's price projection — a read model whose schema landed a
         // PR ahead of its producer, because its reader needed it — and the
         // product-level withdrawal watermark that projection consults on the
-        // one branch a per-row guard cannot cover (§6.6).
+        // one branch a per-row guard cannot cover (§6.6) — and, since PR-21,
+        // §9.6's saga instance store with the operations queue its escalations
+        // land in.
         string[] applied = await fixture.AppliedMigrationsAsync();
-        applied.Length.ShouldBe(7);
+        applied.Length.ShouldBe(8);
         applied[0].ShouldEndWith("_InitialCreate");
         applied[1].ShouldEndWith("_AddOutbox");
         applied[2].ShouldEndWith("_AddInbox");
@@ -59,6 +62,7 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         applied[4].ShouldEndWith("_AddOrders");
         applied[5].ShouldEndWith("_AddProductPrices");
         applied[6].ShouldEndWith("_AddProductWithdrawals");
+        applied[7].ShouldEndWith("_AddFulfilmentSaga");
     }
 
     [Fact]

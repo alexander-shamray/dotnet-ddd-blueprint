@@ -273,10 +273,12 @@ public void Application_and_domain_do_not_reference_masstransit()
     // and it works in every test where the broker is up.
     Assembly[] assemblies = [typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly];
     foreach (Assembly assembly in assemblies)
+    {
         Types
             .InAssembly(assembly)
             .ShouldNot().HaveDependencyOn("MassTransit")
             .GetResult().IsSuccessful.ShouldBeTrue(assembly.GetName().Name);
+    }
 }
 ```
 
@@ -983,14 +985,22 @@ EF Core minor versions and behave differently under identical code.
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.1" />
     <!-- Exact major. v9 is commercially licensed — see ADR-003. The core
          package is a transitive of the transport one, pinned separately
-         because two things reference it directly: the harness smoke, since
-         the in-memory harness is core API and a test project that uses no
-         transport must not claim one, and Common.Infrastructure since PR-14,
-         for the IPublishEndpoint the outbox dispatcher publishes the Broker
-         lane through (§9.4). Same version as the transport: they ship as one
+         because five projects reference it directly: Common.Infrastructure
+         since PR-14, for the IPublishEndpoint the outbox dispatcher publishes
+         the Broker lane through (§9.4), and four test projects that drive the
+         in-memory harness — core API, which a test project using no transport
+         must not claim one for. Appendix B names them; this comment does not,
+         because a list in two places is the drift that made it say "two"
+         while five were true. Same version as the transport: they ship as one
          release. -->
     <PackageVersion Include="MassTransit" Version="8.5.3" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
+    <!-- §9.6's saga repository: EntityFrameworkRepository and
+         ConcurrencyMode.Pessimistic. Same version and same release as the two
+         rows above — a saga repository a minor behind the state machine it
+         stores is not a combination anyone tests. Referenced once, by
+         Ordering.Infrastructure, which holds the only saga. -->
+    <PackageVersion Include="MassTransit.EntityFrameworkCore" Version="8.5.3" />
     <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
     <PackageVersion Include="FluentValidation" Version="12.0.0" />
     <!-- AddValidatorsFromAssemblyContaining (§4.2's registration sample) lives

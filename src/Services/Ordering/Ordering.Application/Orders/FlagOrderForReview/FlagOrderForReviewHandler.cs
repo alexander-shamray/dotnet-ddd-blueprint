@@ -1,0 +1,58 @@
+using Common.Application;
+
+namespace Ordering.Application.Orders.FlagOrderForReview;
+
+/// <summary>
+/// §9.6's one command that changes no business state. It writes an operations
+/// row and stops — no aggregate is loaded, because nothing about the order has
+/// changed. What changed is that the process stalled, and that is not a fact
+/// the domain model should carry.
+/// </summary>
+/// <remarks>
+/// <b>Written through <see cref="IUnitOfWork"/>, not a second connection.</b>
+/// Every command runs inside <c>TransactionBehavior</c> (§6.3); a handler that
+/// opens its own connection commits outside that transaction, so its write
+/// survives a command that failed. Harmless for an idempotent escalation row,
+/// and a data-corruption bug the first time the pattern is copied to a handler
+/// that is not. <c>IDbConnectionFactory</c> belongs to queries (§6.5) and to
+/// projections, which run after commit by design (ADR-018).
+/// </remarks>
+public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork, TimeProvider clock)
+    : ICommandHandler<FlagOrderForReviewCommand, Result>
+{
+    public async Task<Result> HandleAsync(FlagOrderForReviewCommand command, CancellationToken ct)
+    {
+        // Conditional INSERT rather than §9.6's printed IF NOT EXISTS, and the
+        // chapter was amended in the same change. Both spellings read and then
+        // write, so both race — two deliveries of the same escalation can each
+        // find no row and each insert one, and the second violates the primary
+        // key rather than being absorbed. The lock hints are what make the
+        // read a range lock, so the second caller waits for the first to
+        // commit and then sees the row. That is PR-20's finding on §6.6's
+        // MERGE, one table over: a guard against duplicates that is not
+        // range-locked has the defect it was written to fix.
+        //
+        // Absorbed rather than upserted, deliberately: RaisedAt is when the
+        // process first stalled, and a second delivery must not move it
+        // forward — §13.6 alerts on how long a review has been outstanding.
+        await unitOfWork.ExecuteRawAsync(
+            """
+            INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)
+            SELECT @OrderId, @Reason, @RaisedAt
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM ordering.OrderReviews WITH (UPDLOCK, HOLDLOCK)
+                WHERE OrderId = @OrderId
+                    AND Reason = @Reason);
+            """,
+            new { command.OrderId, command.Reason, RaisedAt = clock.GetUtcNow() },
+            ct);
+
+        // The registered clock rather than SYSDATETIMEOFFSET(), which is what
+        // §9.6 printed. RetentionPurgeService already computes its cutoff from
+        // TimeProvider for the reason that applies here too: a test host
+        // substitutes the clock, and a row written on the server's wall clock
+        // is a row no substituted clock can reason about.
+        return Result.Success();
+    }
+}

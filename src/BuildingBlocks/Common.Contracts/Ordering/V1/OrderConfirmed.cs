@@ -53,5 +53,20 @@ public sealed record ConfirmedLine(Guid ProductId, int Quantity, decimal UnitPri
 /// It is a disambiguator against the three other <c>Address</c>-shaped types
 /// this platform has, and the name Appendix D.5 already gives it.
 /// </para>
+/// <para>
+/// <b><c>Line2</c> is nullable and arrived with the first producer</b>, which
+/// is PR-21's mapper. Until something populated this type the omission was
+/// invisible; the moment one did, it was a flat number dropped between an
+/// order and the parcel, and "fat enough" (§9.1) is settled by what the
+/// consumer needs to act rather than by what the shorter record looks like.
+/// Adding it costs nothing here and would have been a §9.2 version bump one
+/// release later — a contract with no consumers is the only cheap moment a
+/// contract ever has.
+/// </para>
 /// </remarks>
-public sealed record ShippingAddressV1(string Line1, string City, string PostCode, string Country);
+public sealed record ShippingAddressV1(
+    string Line1,
+    string? Line2,
+    string City,
+    string PostCode,
+    string Country);

@@ -45,12 +45,25 @@ services:
       interval: 10s
       retries: 5
 
+  # Built rather than pulled, and the ONE infrastructure service that is.
+  # rabbitmq/Dockerfile adds the delayed message exchange plugin §9.6's four
+  # saga timeouts are scheduled through (ADR-021), pinned by digest; the base
+  # image is still an official tag, one line inside it.
   rabbitmq:
-    image: rabbitmq:4-management-alpine
+    build:
+      context: rabbitmq
     ports: [ "5672:5672", "15672:15672" ]
     volumes: [ rabbit-data:/var/lib/rabbitmq ]
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      # check_running answers "is the broker up", which was the whole question
+      # while the image was stock. It is not any more: a broker missing the
+      # plugin is running and healthy while every saga schedule hangs on a
+      # declare it refuses (ADR-021).
+      #
+      # is_enabled, NOT `list -e … | grep`: that spelling matches the pattern
+      # echoed in the command's own banner and passes on a stock broker —
+      # measured. The exit status is the only part that reports the answer.
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins is_enabled rabbitmq_delayed_message_exchange"]
       interval: 10s
       retries: 5
 
@@ -425,6 +438,19 @@ var coordination = builder
     .WithDataVolume()       // locks must survive a restart
     .WithPersistence();
 
+// The stock image, and since ADR-021 that is a STATED GAP rather than a
+// parity with §14.1. Ordering's saga schedules through the delayed message
+// exchange, which is a community plugin no official image carries — so this
+// line brings up a broker that takes UseDelayedMessageScheduler, connects,
+// reports healthy, and then hangs on the first saga schedule. §14.1 builds
+// deploy/compose/rabbitmq for exactly that reason.
+//
+// It is left as the stock call because Aspire is not adopted (ADR-011) and a
+// sample nobody compiles is the wrong place to invent an image-build API.
+// **Adopting Aspire means closing this first**: point the resource at the
+// same Dockerfile, or run Ordering against Compose. Catalog's test fixture
+// may stay on the base tag and says why — it schedules nothing — and this
+// AppHost runs Ordering, so it does not have that excuse.
 var mq = builder.AddRabbitMQ("RabbitMq").WithManagementPlugin();
 
 // One database per service that this AppHost runs. Inventory, Payments,

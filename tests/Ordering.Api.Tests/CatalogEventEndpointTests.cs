@@ -81,11 +81,13 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
     public async ValueTask DisposeAsync()
     {
         foreach (Guid messageId in _published)
+        {
             await Eventually(
                 async () => (await InboxRowsAsync(messageId)).Count,
                 expected: 1,
                 because: "a delivery still running when the next test resets the schema is a flake in " +
                     "that test rather than a failure in this one");
+        }
     }
 
     [Fact]

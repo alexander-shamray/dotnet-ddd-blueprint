@@ -48,9 +48,11 @@ internal static class ProjectionInvoker
             // implemented but never registered — fail loudly rather than
             // marking the row processed having done nothing.
             if (handlers.Length == 0)
+            {
                 throw new InvalidOperationException(
                     $"No IProjectionHandler<{typeof(TEvent).Name}> is registered, " +
                     "but a Local outbox row was staged for it. Check the §6.2 scan.");
+            }
 
             // Sequential, not concurrent: two projections writing the same read
             // table in parallel is a deadlock waiting for load to find it.

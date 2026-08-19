@@ -37,9 +37,11 @@ public class ArchitectureTests
         // and it works in every test where the broker is up.
         Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(Order).Assembly];
         foreach (Assembly assembly in assemblies)
+        {
             Types
                 .InAssembly(assembly)
                 .ShouldNot().HaveDependencyOn("MassTransit")
                 .GetResult().IsSuccessful.ShouldBeTrue(assembly.GetName().Name);
+        }
     }
 }

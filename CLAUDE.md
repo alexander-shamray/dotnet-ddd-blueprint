@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..020),
+                             15-cicd-deployment, appendix A (ADR-001..021),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -91,7 +91,10 @@ Platform.slnx                thirty-three projects
 tools/new-service/           §4.5's scaffold — see the notes below
 deploy/compose/              §14.1's infrastructure, plus one application pair
                              per service and the gateway on 5000, which has no
-                             migrator beside it because the edge owns no database
+                             migrator beside it because the edge owns no database.
+                             `rabbitmq/` is the one infrastructure image that is
+                             BUILT — ADR-021's delayed-exchange plugin — so a
+                             seventh build rides on the compose smoke
 
 src/BuildingBlocks/          all five, and complete since PR-15
   Common.Domain/               Entity<TId>, AggregateRoot<TId>, IDomainEvent
@@ -126,7 +129,9 @@ src/Services/Ordering/       the same five, rendered by the scaffold rather
                              than written, then given §5's Order aggregate —
                              and, since PR-20, §6.6's price projection with its
                              withdrawal watermark, behind the solution's first
-                             receive endpoint
+                             receive endpoint. PR-21 gave it §9.6's saga, three
+                             more receive endpoints and the solution's only
+                             MassTransit EF persistence reference
 tests/                       per service: .Domain.Tests, .Application.Tests,
                              .Api.Tests and .TestSupport — the last is NOT a
                              test project (§4.1). Plus Common.*.Tests,
@@ -276,7 +281,7 @@ because a probe cannot quietly become a service later.
 
 ## Which phase are you in
 
-**PR-01 through PR-20 have landed, and PR-27 with them** — out of numerical
+**PR-01 through PR-21 have landed, and PR-27 with them** — out of numerical
 order and in sequence, because Appendix C numbers it last and makes it depend
 on PR-17 alone, so it may land at any point after the gateway. The blueprint,
 the foundation, all five building blocks, §14.1's Compose infrastructure,
@@ -284,11 +289,14 @@ Catalog and Ordering as the first two services, the scaffold, §8's Redis, all
 three of §9's instalments, PR-16's security, the gateway and the BFF are
 therefore live. PR-20 filled the `ordering.ProductPrices` table PR-18 shipped
 with its reader and no producer, and gave the platform its first receive
-endpoint and its first broker-fed read model. **PR-21 (Ordering's fulfilment
-saga) is next**, and it is the other half of the roadmap's M5.
+endpoint and its first broker-fed read model. PR-21 closed the roadmap's M5
+with §9.6's fulfilment saga — the platform's first state machine, its first
+scheduled message ([ADR-021](docs/backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
+its first command endpoint and the first thing Ordering publishes.
+**PR-22 (architecture rules and the test-strategy document) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 730 tests — so the build rules and the drift rules below
+and `dotnet test` runs 770 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -296,7 +304,9 @@ as the compose timeout is: it is restated here, and nothing recomputes it. The
 cheap check is a CI run that has already happened — `gh run view <id> --log`,
 summed over the thirteen per-project totals — which beats the arithmetic that
 would otherwise have to guess. PR-20 found the figure eight low against
-`main`'s own run and needed that command to tell which side was wrong.
+`main`'s own run and needed that command to tell which side was wrong; PR-21
+summed a local `dotnet test Platform.slnx` the same way, which is the same
+arithmetic over an artefact one machine older.
 
 Since PR-11 there is a second suite
 with a second runner: `py -3.12 -m unittest` in `tools/new-service` runs 81,
@@ -325,6 +335,15 @@ PR-16** — the gap it used to carry was JWT validation, and closing it brought
 addition is the one PR-15 suspended exactly once: a record belongs in the PR
 whose code publishes or consumes it. A sixth service's contracts arrive with
 that service.
+
+**The same rule governs a *member*, and PR-21 is where that first mattered.**
+`ShippingAddressV1` had carried four fields since PR-15 and the domain's
+`Address` has five; nothing noticed, because nothing had ever populated the
+contract. The PR that becomes a contract's first producer is the PR that finds
+out what it is missing — and it is the last cheap moment to fix it, since the
+same edit one release later is a §9.2 version bump with consumers on the other
+side. **Read a contract against the type that will fill it before writing the
+mapper, not after.**
 
 ### Lessons that travel
 
@@ -371,6 +390,12 @@ own line rather than sending a reader to a file that does not hold it.
   selects Production, where `RequireHttpsMetadata` is on and a plain-HTTP local
   authority is never reached. Containers set it, which is why the Compose path
   never shows it.
+- **A registration nothing resolves at startup fails at the first message, and
+  the suite that catches it reports the symptom.** `ValidateOnBuild` never
+  constructs an open generic and no host resolves a scheduler while it boots, so
+  the service connects, declares and reports ready. The test then times out
+  saying what did not happen, never why. Assert the registration itself where
+  the container can still be enumerated.
 - **Drive `TestServer` for what the *application* decides and a real server for
   what the *server* decides.** `ConfigureKestrel` is a silent no-op under
   `TestServer`, and the two are indistinguishable from the test.
@@ -420,7 +445,10 @@ needs a Keycloak, so the suite is fast and then pays for an identity provider
 once. `Ordering.Application.Tests` is deliberately not among them — its handler
 tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
 `HttpContextCurrentUser` and a handler resolved in a bare scope has no
-principal to bind a subject from.
+principal to bind a subject from. Since PR-21 it holds §12.5's saga suite
+instead, which is the same property from the other side: a state machine driven
+over the in-memory harness needs no infrastructure at all, and homing it in the
+API suite would have bought it a container set for nothing.
 
 Adding a migration needs the pinned tool and a startup project:
 
@@ -538,7 +566,7 @@ Run `/validate-blueprint` after any substantive edit.
   fine. Cite the section that actually states the claim; a reference to a
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
-  admonition syntax. Of the 120 in the blueprint, two forms are named and
+  admonition syntax. Of the 161 in the blueprint, two forms are named and
   recurring — `**Trap — …**` (15) for a mistake worth naming, and
   `**Decision — …**` (8), which always points at the ADR that records it:
 
@@ -549,11 +577,20 @@ Run `/validate-blueprint` after any substantive edit.
   > **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
   ```
 
-  The other 97 are a bold assertion followed by its argument —
+  The other 138 are a bold assertion followed by its argument —
   `> **Unregistered, this fails silently and completely.** …`. That is the
   default; reach for `Trap` or `Decision` only when the callout genuinely is
   one. `**Decision.** / **Why.** / **Consequences.**` are the ADR body form,
   not callouts.
+
+  **This total said 120 for eight PRs, and the two named forms did not
+  drift.** `grep -c '^> \*\*'` over the twenty chapter files reports 164 on
+  this branch and reported 160 on the `main` it was cut from — so 40 of the
+  gap predates the change that fixed it and only four are its own. That is the
+  shape a self-invalidating count actually takes: the *interesting* numbers
+  stayed right, because 15 and 8 are what a reader checks, and the residual
+  nobody looks at is the one that rots. Recount all three together or none of
+  them.
 
   **Three callouts spell the dash outside the bold and are not counted above**:
   §1.3's two glossary entries, which *define* `Trap` and `Decision` rather than
@@ -634,9 +671,33 @@ file and a reviewer are the only things that do.
 
 ### Statements and types
 
-- **A single statement may omit braces; two or more always take them.** The
-  statement goes on the following line — never beside the condition — and it may
-  wrap:
+- **A single statement may omit braces; two or more always take them — and so
+  does one that wraps.** The statement goes on the following line, never beside
+  the condition, and if it does not finish on that line the body takes braces:
+
+  ```csharp
+  // Wrong — the body wraps, so the reader has to count indentation to find
+  // where the condition's reach ends.
+  if (!Known.Contains(message.Reason))
+      throw new ContractMappingException(
+          $"Unknown review reason '{message.Reason}'.");
+
+  // Right.
+  if (!Known.Contains(message.Reason))
+  {
+      throw new ContractMappingException(
+          $"Unknown review reason '{message.Reason}'.");
+  }
+  ```
+
+  **This rule tightened in PR-21 and cost a 49-site sweep**, because the
+  sentence used to end "and it may wrap". It is *review-carried*: no analyser
+  reaches it — IDE0055 governs the indentation of whatever shape is there and
+  has no opinion on which shape it is — so the corpus is the only enforcement,
+  and a new braceless wrapped body is a review comment rather than a failed
+  build.
+
+  A single statement that fits on its line still omits them:
 
   ```csharp
   if (amount < 0)
@@ -646,7 +707,13 @@ file and a reviewer are the only things that do.
       await publisher.StageAsync(domainEvent, OutboxLane.Local, ct);
   ```
 
-  This holds across all 53 braceless bodies in the blueprint.
+  This holds across all 49 braceless bodies in the blueprint, counted over
+  ` ```csharp ` fences after PR-21 braced the 18 that wrapped. **The figure it
+  replaces was 53 and does not reconcile**: the same count run before that sweep
+  gives 67, so 53 was neither the old value nor the new one under this
+  definition. Which definition produced it is not recoverable, and inventing one
+  would be worse than saying so — the number below is the one a rerun of
+  `count-braceless` reproduces.
   `csharp_preserve_single_line_statements = false` keeps a format run from
   pulling any of them back up onto the condition's line. The one exception is a
   **wrapped** condition, which takes braces — see below.
@@ -1128,7 +1195,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-021) and keep the
+  (currently ADR-022) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

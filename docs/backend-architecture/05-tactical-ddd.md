@@ -100,8 +100,10 @@ public readonly record struct Money
     private static void EnsureSameCurrency(Money left, Money right)
     {
         if (left.Currency != right.Currency)
+        {
             throw new DomainException(
                 $"Cannot combine {left.Currency} with {right.Currency}.");
+        }
     }
 }
 ```
@@ -240,8 +242,10 @@ public sealed class Order : AggregateRoot<OrderId>
     public void Cancel(CancellationReason reason, DateTimeOffset now)
     {
         if (Status is OrderStatus.Shipped or OrderStatus.Delivered)
+        {
             throw new DomainException(
                 $"A {Status} order cannot be cancelled; raise a return instead.");
+        }
         if (Status is OrderStatus.Cancelled)
             return;   // Idempotent — cancelling twice is not an error.
 
@@ -252,8 +256,10 @@ public sealed class Order : AggregateRoot<OrderId>
     private void EnsureStatus(OrderStatus expected)
     {
         if (Status != expected)
+        {
             throw new DomainException(
                 $"Expected order to be {expected} but it is {Status}.");
+        }
     }
 }
 ```

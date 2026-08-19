@@ -64,10 +64,12 @@ internal sealed class AddressJsonConverter : JsonConverter<Address>
         // Line2 is absent from this list deliberately: it is optional on the
         // domain type, so a payload without it is complete rather than partial.
         if (line1 is null || city is null || postalCode is null || country is null)
+        {
             throw new JsonException(
                 $"An {nameof(Address)} payload needs {nameof(Address.Line1)}, {nameof(Address.City)}, " +
                 $"{nameof(Address.PostalCode)} and {nameof(Address.Country)}. A row written before a " +
                 "rename is the likely cause (§9.4).");
+        }
 
         return Address.Of(line1, line2, city, postalCode, country);
     }

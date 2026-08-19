@@ -253,9 +253,17 @@ machinery behind it now renders the second service in one command. Whether the
 calendar held is not something this file can answer — it prices ideal
 engineer-days and the *Basis* section says why that is deliberately not a date.
 
-**M3 and M5 are the two that can slip quietly.** Both are dominated by a single
-large pull request whose difficulty is invisible from outside — the outbox and
-the saga — and both are places where "nearly done" can last a week.
+**M3 and M5 were the two that could slip quietly, and both have landed.** Each
+was dominated by a single large pull request whose difficulty is invisible from
+outside — PR-14's outbox and PR-21's saga — and each was a place where "nearly
+done" can last a week. The warning is kept in the past tense rather than
+deleted, because it was right: the saga's own PR spent most of its work on
+things §9.6 did not say it needed, none of which is visible in a one-line
+milestone row.
+
+**M6 inherits the shape**, and nothing here has priced that yet: PR-23's charts
+and PR-24's twelve runbooks are the same "invisible from outside" kind, and
+they are the only large ones left.
 
 ## Critical path
 
@@ -293,12 +301,13 @@ Six things, ordered by how much of the total they can move.
 **The domain question is unsettled, and it is the largest single risk.** Both
 READMEs call the e-commerce domain "illustrative only", while
 [§4.1](backend-architecture/04-solution-structure.md) and Appendix C name six
-services concretely. PR-10, PR-18, PR-19 and PR-20 have since landed on the
-illustrative domain, so for them substitution now means reworking shipped code;
-only PR-21 is still re-specified rather than re-estimated. Together that is 21
-of the 99 days, and the five that carry the most design argument. Nothing else
-on this list is close, and the share of it that is rework rather than
-respecification has grown with every service PR that landed.
+services concretely. PR-10, PR-18, PR-19, PR-20 and now PR-21 have all landed
+on the illustrative domain, so substitution means reworking shipped code for
+every one of them — **there is no longer a service PR on this list that is
+merely re-specified**. Together that is 21 of the 99 days, and the five that
+carry the most design argument. Nothing else on this list is close, and the
+share of it that is rework rather than respecification stopped growing only
+because it has reached all of it.
 
 **This item said "settle it before M2", and M2 has now been reached with it
 still open.** That advice is spent, and what replaces it is worse rather than
@@ -307,8 +316,9 @@ a re-specification, and every service PR after this one adds to what would
 have to be reworked. **The deadline this item named was PR-18, and it has
 passed** — the second service was where a domain nobody has agreed to stopped
 being one service's problem, and it shipped with the question still open. What
-remains is not a deadline but a rising bill: PR-19 and PR-20 have landed on
-top of it, and PR-21 is next.
+remains is not a deadline but a rising bill: PR-19, PR-20 and PR-21 have all
+landed on top of it, and the saga is the heaviest deposit yet — a state
+machine whose every transition names an e-commerce fact.
 
 PR-11 and PR-12 are the delivered pull requests that do **not** move if the
 domain changes, and both were built that way deliberately: the scaffold

@@ -23,6 +23,11 @@
          package beside it: AddMassTransit registers the bus check itself,
          argued in Messaging/DependencyInjection.cs. -->
     <PackageReference Include="MassTransit.RabbitMQ" />
+    <!-- §9.6's saga repository. The only project in the solution that takes
+         it, because it is the only one with a saga — and it is referenced
+         directly rather than left to ride in, because this assembly names
+         EntityFrameworkRepository and ConcurrencyMode by hand. -->
+    <PackageReference Include="MassTransit.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
   </ItemGroup>
 

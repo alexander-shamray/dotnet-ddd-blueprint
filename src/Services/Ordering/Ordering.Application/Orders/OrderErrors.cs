@@ -25,6 +25,36 @@ public static class OrderErrors
     public static readonly Error AlreadyShipped =
         Error.Rule("order.already_shipped", "A shipped order cannot be cancelled.");
 
+    /// <summary>
+    /// The one <see cref="ErrorType.Unavailable"/> in this catalogue that is
+    /// about this service's own state rather than a dependency's, and it
+    /// earns the type on §9.8's definition rather than by analogy: a fault
+    /// that time might fix. Ordering learns that stock was reserved and that
+    /// payment was authorised on two different receive endpoints with no
+    /// ordering between them, so <c>ConfirmOrder</c> can arrive first.
+    /// Returning a <c>Rule</c> error would ack a paid order's confirmation for
+    /// good.
+    /// </summary>
+    public static readonly Error StockNotConfirmed =
+        Error.Unavailable("order.stock_not_confirmed", "Stock reservation has not been recorded yet.");
+
+    public static readonly Error NotAwaitingPayment =
+        Error.Rule("order.not_awaiting_payment", "The order is not awaiting payment.");
+
+    /// <summary>
+    /// <see cref="StockNotConfirmed"/> one state later: a despatch cannot
+    /// precede the confirmation that allowed it, so an unconfirmed order here
+    /// means the confirming command is still in flight.
+    /// </summary>
+    public static readonly Error NotConfirmed =
+        Error.Unavailable("order.not_confirmed", "The order has not been confirmed yet.");
+
+    public static readonly Error NotShippable =
+        Error.Rule("order.not_shippable", "The order is not in a state that can be shipped.");
+
+    public static readonly Error NotAwaitingStock =
+        Error.Rule("order.not_awaiting_stock", "The order is not awaiting stock.");
+
     // 422, not 400: the request was well-formed and the validator passed it.
     // The products are unpriceable, which is a fact about this service's state
     // and not something the caller phrased wrongly.

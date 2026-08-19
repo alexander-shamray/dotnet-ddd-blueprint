@@ -69,10 +69,12 @@ public static class DependencyInjection
                 IImplementationTypeSelector from = scan.FromAssemblies(assembly);
 
                 foreach (Type contract in PluggableInterfaces.All)
+                {
                     from
                         .AddClasses(c => c.AssignableTo(contract))
                         .AsImplementedInterfaces()
                         .WithScopedLifetime();
+                }
             });
     }
 }

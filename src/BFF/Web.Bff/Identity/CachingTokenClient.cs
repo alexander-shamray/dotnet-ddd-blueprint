@@ -247,8 +247,10 @@ public sealed partial class CachingTokenClient(
         // document arrived over". An HTTP authority stays HTTP and an HTTPS one
         // cannot be talked down.
         if (client.BaseAddress?.Scheme == Uri.UriSchemeHttps && parsed.Scheme != Uri.UriSchemeHttps)
+        {
             throw new InvalidOperationException(
                 Unusable(client, parsed, "downgrades the HTTPS authority to plain HTTP"));
+        }
 
         return parsed;
     }

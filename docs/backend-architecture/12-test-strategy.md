@@ -290,8 +290,20 @@ public sealed class ServiceFixture : IAsyncLifetime
         .WithCommand("--maxmemory-policy", "noeviction")
         .Build();
 
+    // 4.1 rather than a floating 4, because that is the base tag §14.1's
+    // broker Dockerfile builds from and this fixture's whole claim is that a
+    // test and a developer machine cannot disagree about the engine.
+    //
+    // A service that SCHEDULES cannot use a tag at all. Since ADR-021 §14.1
+    // builds the broker rather than pulling it, and the delayed exchange lives
+    // in a plugin no official image carries — so Ordering's fixture builds the
+    // same Dockerfile through ImageFromDockerfileBuilder and runs the result.
+    // The failure that forces it is a quiet one: a stock broker connects and
+    // reports healthy, because the exchange is not declared until something
+    // schedules, and the schedule that does then HANGS on a declare the broker
+    // refuses. ADR-021 has the measurement.
     private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
-        .WithImage("rabbitmq:4-management-alpine")
+        .WithImage("rabbitmq:4.1-management-alpine")
         .Build();
 
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
@@ -607,11 +619,13 @@ public sealed class TestAuthHandler(
         // The same claim type §11.4's policies require. A test that grants
         // itself "orders:cancel" is exercising the policy, not bypassing it.
         if (Request.Headers.TryGetValue(PermissionsHeader, out StringValues granted))
+        {
             claims.AddRange(
                 granted
                     .ToString()
                     .Split(' ', StringSplitOptions.RemoveEmptyEntries)
                     .Select(p => new Claim(PermissionClaim.Type, p)));
+        }
 
         ClaimsPrincipal principal = new(new ClaimsIdentity(claims, SchemeName));
         return Task.FromResult(
@@ -1571,10 +1585,25 @@ harness makes it testable without any infrastructure at all.
 public async Task Payment_declined_releases_stock_before_cancelling()
 {
     await using ServiceProvider provider = new ServiceCollection()
-        .AddMassTransitTestHarness(cfg => cfg
-            .SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(30), testInactivityTimeout: TimeSpan.FromSeconds(10))
-            .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
-            .InMemoryRepository())
+        .AddMassTransitTestHarness(x =>
+        {
+            x.SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(30), testInactivityTimeout: TimeSpan.FromSeconds(10));
+            // The same two lines production registers (ADR-021), and they are
+            // not optional here: §9.6's Initially arms StockTimeout, so the
+            // first OrderPlaced reaches for a scheduler. The in-memory
+            // transport implements the delay itself where RabbitMQ needs a
+            // plugin — the transports differ and the registration under test
+            // does not.
+            x.AddDelayedMessageScheduler();
+            x
+                .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
+                .InMemoryRepository();
+            x.UsingInMemory((context, cfg) =>
+            {
+                cfg.UseDelayedMessageScheduler();
+                cfg.ConfigureEndpoints(context);
+            });
+        })
         .BuildServiceProvider(true);
 
     ITestHarness harness = provider.GetRequiredService<ITestHarness>();
@@ -1634,9 +1663,11 @@ public async Task Commands_are_sent_and_events_are_published()
     // would notice.
     //
     // The shared helper registers the saga and states both harness bounds.
-    // The last assertion here is a negative, so it is the one that pays the
-    // inactivity timeout in full — and being last, it spends the shared token
-    // with nothing left to wait after it. See the traps below.
+    // The last assertion here is a negative — and the ONE negative in a saga
+    // suite that can never match, since the whole claim is that a command is
+    // not published. Left on the ordinary token it bills the inactivity
+    // timeout on every green run, so it reads the record as of the positive
+    // above it instead. See the traps below.
     ITestHarness harness = await StartHarnessAsync();
     var orderId = Guid.CreateVersion7();
 
@@ -1645,7 +1676,11 @@ public async Task Commands_are_sent_and_events_are_published()
     await harness.Bus.Publish(Contracts.OrderPlaced(orderId));
 
     (await harness.Sent.Any<ReserveStock>()).ShouldBeTrue();
-    (await harness.Published.Any<ReserveStock>()).ShouldBeFalse();
+
+    using CancellationTokenSource spent = new();
+    spent.Cancel();
+
+    (await harness.Published.Any<ReserveStock>(spent.Token)).ShouldBeFalse();
 }
 ```
 
@@ -1665,10 +1700,11 @@ public async Task Commands_are_sent_and_events_are_published()
 > that did not schedule. That costume is the danger, and it is not
 > hypothetical: the same mechanism failed CI on an in-memory harness test
 > asserting a consume, which then passed on a re-run of the same commit with no
-> changes. No saga suite exists yet to have flaked — this is the wait one will
-> inherit. State both, and keep the ceiling clear of the bound meant to fire,
-> so which one reported a failure is never a detail of how long the publish
-> took.
+> changes. That was a consume smoke rather than a saga, and PR-21's suite
+> inherited the same wait — which is why both bounds are stated in its
+> `StartHarnessAsync` rather than left to a default. State both, and keep the
+> ceiling clear of the bound meant to fire, so which one reported a failure is
+> never a detail of how long the publish took.
 
 > **A matching assertion returns at once; an unmatched one bills the timeout —
 > but only the first one does.** MassTransit shares a single inactivity token
@@ -1696,17 +1732,38 @@ public async Task Commands_are_sent_and_events_are_published()
 > shared token unspent for the assertion that follows. A *deadline* is the
 > wrong tool and fails open: a window is something a late-sending saga fits
 > inside, and the later positive would then accept the very command the
-> negative was there to forbid. A negative that is its test's last assertion,
-> as in the second sample, needs none of this and can simply wait.
+> negative was there to forbid. A negative that is its test's last assertion
+> *may* simply wait — nothing after it is poisoned — but "may" is not "should",
+> and the second sample above is the case that showed why. It used to wait for
+> a publish the test's own subject guarantees will never come, so the wait was
+> the full inactivity bound, every run, for an answer already known; it now
+> reads the record like every other negative here. **Use the cancelled token
+> for every negative and the question stops arising.** PR-21's suite reached
+> its second review still paying that ten seconds under a comment claiming it
+> never did — and removing it took the suite from twelve seconds to two, which
+> is the measurement that priced the habit.
+
+> **A missing scheduler fails this suite in the costume the traps above
+> describe, which is why the registration is spelled out rather than trimmed.**
+> The sample above carried neither scheduler line until PR-21 compiled it, and
+> the two are easy to read as ceremony. They are not: with both deleted, eleven
+> of that PR's thirteen saga tests fail, **every one of them as a timeout**,
+> each reporting the command the saga did not send. The saga's exception faults
+> onto the error queue and no assertion ever sees it. The two survivors are the
+> structural pair that construct the state machine without starting a bus,
+> which is worse than none — they leave a deleted registration looking
+> half-covered.
 
 > **Where the numbers live is the other half.** The first sample states them in
 > the registration it shows; the second gets them from `StartHarnessAsync`, the
 > shared helper these excerpts call rather than define. Either way they are
 > stated once per harness: copy them per test and one test can quietly run on a
 > different wait from its neighbour, leave them out and it is the first trap
-> rather than a saving. Only the second sample actually spends the inactivity
-> timeout — the first reads the record instead of waiting, which is the whole
-> point of the technique.
+> rather than a saving. **Neither sample spends the inactivity timeout**, which
+> is the whole point of the technique — both read the record on a cancelled
+> token instead of waiting. The bounds still have to be stated: they are what a
+> *positive* assertion waits under, and a saturated runner is exactly when one
+> takes longer than 1.2 seconds to arrive.
 
 ## 12.6 Contract tests
 

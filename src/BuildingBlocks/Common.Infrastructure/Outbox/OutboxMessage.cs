@@ -75,9 +75,11 @@ public sealed class OutboxMessage
         // is all it takes to produce one — C# does not confine an enum to its
         // declared members.
         if (lane is not (OutboxLane.Broker or OutboxLane.Local))
+        {
             throw new InvalidOperationException(
                 $"{lane} is not a lane. A row carries Broker or Local (§9.4), and one that " +
                 "carries neither can only be discovered after it is committed.");
+        }
 
         // Before either lane check, because a type that is both satisfies
         // both of them. §5.5 calls conflating the two "one of the most
@@ -87,23 +89,29 @@ public sealed class OutboxMessage
         // identity arm below then reads its envelope instead of minting a row
         // id. Neither lane is right for it, so neither is offered.
         if (message is IDomainEvent and IIntegrationEvent)
+        {
             throw new InvalidOperationException(
                 $"{message.GetType().Name} implements {nameof(IDomainEvent)} and " +
                 $"{nameof(IIntegrationEvent)}. They are different things (§5.5): one is internal " +
                 "and free to change, the other is a published contract. A type that is both can " +
                 "be staged on either lane and is correct on neither.");
+        }
 
         if (lane is OutboxLane.Broker && message is not IIntegrationEvent)
+        {
             throw new InvalidOperationException(
                 $"{message.GetType().Name} is not an {nameof(IIntegrationEvent)} and cannot be " +
                 "staged on the Broker lane. A domain event reaching the broker is the leak the " +
                 "§9.3 allow-list exists to prevent — map it to a contract first.");
+        }
 
         if (lane is OutboxLane.Local && message is not IDomainEvent)
+        {
             throw new InvalidOperationException(
                 $"{message.GetType().Name} is not an {nameof(IDomainEvent)} and cannot be staged " +
                 "on the Local lane, which carries this service's own events to its projection " +
                 "handlers (§7.5).");
+        }
 
         return new OutboxMessage
         {

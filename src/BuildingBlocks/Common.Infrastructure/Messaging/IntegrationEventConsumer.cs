@@ -51,9 +51,11 @@ public sealed class IntegrationEventConsumer<TEvent>(
         IIntegrationEventHandler<TEvent>[] resolved = [.. handlers];
 
         if (resolved.Length == 0)
+        {
             throw new InvalidOperationException(
                 $"No IIntegrationEventHandler<{typeof(TEvent).Name}> is registered, " +
                 $"but {typeof(TEvent).Name} is bound on this endpoint. Check the §6.2 scan.");
+        }
 
         // Duplicate suppression happens in the inbox filter (§9.5), configured
         // on the receive endpoint ahead of this consumer. Sequential for

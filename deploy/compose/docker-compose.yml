@@ -40,12 +40,31 @@ services:
       interval: 10s
       retries: 5
 
+  # Built rather than pulled, and the ONE infrastructure service that is
+  # (§14.1). rabbitmq/Dockerfile adds the delayed message exchange plugin
+  # §9.6's four saga timeouts are scheduled through (ADR-021); the base image
+  # is still an official tag, one line inside it.
   rabbitmq:
-    image: rabbitmq:4-management-alpine
+    build:
+      context: rabbitmq
     ports: [ "5672:5672", "15672:15672" ]
     volumes: [ rabbit-data:/var/lib/rabbitmq ]
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      # check_running answers "is the broker up", which was the whole question
+      # while the image was stock. It is not any more: a broker missing the
+      # plugin is running and healthy while every saga schedule hangs on a
+      # declare it refuses (ADR-021), so the check asserts the plugin is
+      # enabled as well. Both, not just the second — the plugin list is
+      # readable from a broker that has not finished starting.
+      #
+      # is_enabled, NOT `list -e … | grep`. That was the first spelling and it
+      # FAILED OPEN: `rabbitmq-plugins list` echoes the pattern in its own
+      # banner — "Listing plugins with pattern "…"" — so grep matches whether
+      # or not a plugin row follows. Measured against a stock broker: exit 0,
+      # healthy, no plugin. A check written to catch the stock image passed on
+      # the stock image. is_enabled reports it in its exit status instead —
+      # measured 0 enabled, 69 not.
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins is_enabled rabbitmq_delayed_message_exchange"]
       interval: 10s
       retries: 5
 
