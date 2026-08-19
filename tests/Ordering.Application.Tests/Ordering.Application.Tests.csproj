@@ -23,6 +23,11 @@
          takes an IConfiguration, and the registration tests build a real one
          rather than substitute the contract. -->
     <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <!-- AddMassTransitTestHarness and ITestHarness, for §12.5's saga suite.
+         The CORE package, not the transport: the in-memory harness is core
+         API and this project drives no broker — the same distinction
+         Appendix B's MassTransit row already draws for the harness smoke. -->
+    <PackageReference Include="MassTransit" />
     <!-- No EF Core provider package: nothing here names an EF type. The
          handler tests that would have — the ones §12.1 homes at this level —
          live in Ordering.Api.Tests instead, because ICurrentUser is

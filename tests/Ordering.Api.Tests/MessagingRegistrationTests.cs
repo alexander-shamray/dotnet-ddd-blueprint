@@ -1,5 +1,11 @@
 using Common.Contracts.Catalog.V1;
+using Common.Contracts.Inventory.V1;
+using Common.Contracts.Ordering.V1;
 using Common.Infrastructure.Messaging;
+using Ordering.Application.Orders.CancelOrder;
+using Ordering.Application.Orders.ConfirmOrder;
+using Ordering.Application.Orders.FlagOrderForReview;
+using Ordering.Application.Orders.MarkOrderShipped;
 using Ordering.Infrastructure.Messaging;
 using MassTransit;
 using MassTransit.Testing;
@@ -179,37 +185,91 @@ public class MessagingRegistrationTests
 
 
     [Fact]
-    public void Ordering_binds_a_consumer_for_every_Catalog_event_it_consumes()
+    public void Ordering_registers_exactly_the_consumers_its_chapters_grant()
     {
-        // §3.2's Consumes column, Catalog's third of it — the set, not merely
+        // §3.2's Consumes and Accepts columns, together — the set, not merely
         // its size, because a subscription that quietly loses one member is a
         // handler that keeps compiling and stops being invoked.
         //
         // This asserts the REGISTRATION and deliberately not the endpoint:
         // AddMassTransitTestHarness replaces the UsingRabbitMq callback where
-        // the receive endpoint lives, so no test in this file can see the
-        // binding. CatalogEventEndpointTests drives it over a real broker,
-        // which is where the queue name and the inbox row are asserted.
+        // the receive endpoints live, so no test in this file can see a
+        // binding. CatalogEventEndpointTests drives one over a real broker,
+        // which is where a queue name and an inbox row are asserted.
         //
         // Until PR-20 this test read the other way round — that Ordering bound
         // no consumer at all — and carried a positive control beside it,
         // because a negative assertion over a predicate that matches nothing
         // passes for the wrong reason. A set equality cannot fail open that
         // way, so the control left with the absence it was guarding.
+        //
+        // PR-21 widened its SUBJECT rather than adding a second test beside
+        // it, and that is the point worth keeping. The name said "for every
+        // Catalog event", the assertion always read the whole registered set,
+        // and the two agreed only while Catalog's three were the whole of it —
+        // so the saga's five would have had to be excluded from a gate that
+        // never excluded anything, or the gate split into a Catalog half that
+        // stops covering the newest surface. This repository's most-repeated
+        // failure is a gate that quietly narrows; the defence is a test whose
+        // subject is what the gate is looking at.
         ServiceCollection services = new();
 
         services.AddMassTransitMessaging(Configuration());
 
         ConsumerTypes(services).ShouldBe(
             [
+                // Catalog's whole Publishes column, which is Ordering's
+                // subscription to it (§3.2) — the price projection's feed.
                 typeof(IntegrationEventConsumer<ProductPublished>),
                 typeof(IntegrationEventConsumer<PriceChanged>),
-                typeof(IntegrationEventConsumer<ProductDiscontinued>)
+                typeof(IntegrationEventConsumer<ProductDiscontinued>),
+
+                // Inventory's reservation, which the ORDER reacts to as well
+                // as the saga: this consumer records it on the aggregate
+                // (§5.4's ConfirmStock), and the saga reads the same fact
+                // through its own correlation rather than through a consumer.
+                typeof(IntegrationEventConsumer<StockReserved>),
+
+                // §3.2's Accepts column, and exactly it. The saga sends four
+                // commands to ordering-commands; a type missing here is one
+                // sent into a queue that ignores it.
+                typeof(CommandConsumer<CancelOrder, CancelOrderCommand>),
+                typeof(CommandConsumer<ConfirmOrder, ConfirmOrderCommand>),
+                typeof(CommandConsumer<MarkOrderShipped, MarkOrderShippedCommand>),
+                typeof(CommandConsumer<FlagOrderForReview, FlagOrderForReviewCommand>)
             ],
             ignoreOrder: true,
-            "these three are Catalog's whole Publishes column (§3.2) and Ordering's whole subscription to " +
-            "it — a fourth here is a subscription no chapter grants, and a missing one is a projection " +
-            "that silently stops being fed");
+            "these eight are §3.2's Consumes and Accepts columns for Ordering — a ninth is a subscription " +
+            "no chapter grants, and a missing one is a handler that silently stops being invoked");
+    }
+
+    [Fact]
+    public void The_saga_is_registered_with_a_scheduler_behind_it()
+    {
+        // Two registrations that fail in the same silent way and are invisible
+        // to every other test here: the harness replaces the transport, so a
+        // saga bound to no endpoint and a scheduler never put on the pipeline
+        // both look exactly like a working host until the first OrderPlaced.
+        //
+        // ADR-021 is the scheduler's argument; this is the line that notices
+        // it leaving. IMessageScheduler is what AddDelayedMessageScheduler
+        // registers, and the transport half — cfg.UseDelayedMessageScheduler —
+        // cannot be asserted from a ServiceCollection at all, which is stated
+        // rather than papered over: the saga suite in Ordering.Application.Tests
+        // is what covers that half, by driving a state machine that arms a
+        // schedule on its first message.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        services.ShouldContain(
+            d => d.ServiceType == typeof(IMessageScheduler),
+            "§9.6's four Schedule declarations need one, and nothing resolves a scheduler at startup — " +
+            "without this line the first OrderPlaced faults onto the error queue (ADR-021)");
+
+        services.ShouldContain(
+            d => (d.ImplementationType ?? d.ServiceType) == typeof(OrderFulfilmentSaga),
+            "the state machine itself — AddSagaStateMachine registers the machine as well as its instance");
     }
 
     /// <summary>

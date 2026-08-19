@@ -49,9 +49,11 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // tables, §6.4's price projection — a read model whose schema landed a
         // PR ahead of its producer, because its reader needed it — and the
         // product-level withdrawal watermark that projection consults on the
-        // one branch a per-row guard cannot cover (§6.6).
+        // one branch a per-row guard cannot cover (§6.6) — and, since PR-21,
+        // §9.6's saga instance store with the operations queue its escalations
+        // land in.
         string[] applied = await fixture.AppliedMigrationsAsync();
-        applied.Length.ShouldBe(7);
+        applied.Length.ShouldBe(8);
         applied[0].ShouldEndWith("_InitialCreate");
         applied[1].ShouldEndWith("_AddOutbox");
         applied[2].ShouldEndWith("_AddInbox");
@@ -59,6 +61,7 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         applied[4].ShouldEndWith("_AddOrders");
         applied[5].ShouldEndWith("_AddProductPrices");
         applied[6].ShouldEndWith("_AddProductWithdrawals");
+        applied[7].ShouldEndWith("_AddFulfilmentSaga");
     }
 
     [Fact]

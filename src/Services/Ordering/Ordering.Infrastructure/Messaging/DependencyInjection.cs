@@ -1,9 +1,17 @@
+using Common.Application;
 using Common.Contracts.Catalog.V1;
+using Common.Contracts.Inventory.V1;
+using Common.Contracts.Ordering.V1;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Ordering.Application.Orders.CancelOrder;
+using Ordering.Application.Orders.ConfirmOrder;
+using Ordering.Application.Orders.FlagOrderForReview;
+using Ordering.Application.Orders.MarkOrderShipped;
+using Ordering.Infrastructure.Persistence;
 
 namespace Ordering.Infrastructure.Messaging;
 
@@ -35,6 +43,39 @@ public static class DependencyInjection
     /// name.
     /// </remarks>
     public const string CatalogEventsQueue = "ordering-catalog-events";
+
+    /// <summary>
+    /// §9.4's command endpoint — the four commands §3.2 says Ordering accepts.
+    /// The name must match <c>Endpoints.OrderingQueue</c>, or the saga sends
+    /// into a void: a command addressed to an undeclared queue is not an error.
+    /// </summary>
+    public const string CommandsQueue = "ordering-commands";
+
+    /// <summary>
+    /// §9.8's saga endpoint, which receives the fulfilment events of §9.6.
+    /// </summary>
+    public const string FulfilmentSagaQueue = "ordering-fulfilment-saga";
+
+    /// <summary>
+    /// Ordering's fourth receive endpoint, and the one §9.8 did not have.
+    /// </summary>
+    /// <remarks>
+    /// <b>It exists because <c>StockReserved</c> means two things to this
+    /// service and only one of them is the saga's.</b> The saga reads it to
+    /// decide what to ask for next; the order has to record that its stock is
+    /// held, which is <c>Order.ConfirmStock</c> (§5.4) — a transition the
+    /// blueprint documented with no caller until this PR. §3.2 already lists
+    /// <c>StockReserved</c> in Ordering's Consumes column and closes its
+    /// Accepts column at four commands, so what was missing was a consumer
+    /// rather than a contract.
+    /// <para>
+    /// It cannot share the saga endpoint below: that one deliberately carries
+    /// no inbox filter, because a state machine's state is its idempotency
+    /// check. A plain consumer there would inherit the exemption and write
+    /// nothing down, which is exactly the opt-out §9.8 forbids.
+    /// </para>
+    /// </remarks>
+    public const string StockEventsQueue = "ordering-stock-events";
 
     public static IServiceCollection AddMassTransitMessaging(
         this IServiceCollection services,
@@ -70,13 +111,60 @@ public static class DependencyInjection
             x.AddConsumer<IntegrationEventConsumer<PriceChanged>>();
             x.AddConsumer<IntegrationEventConsumer<ProductDiscontinued>>();
 
+            // Inventory's, and the reason it is not on the saga's list below:
+            // the saga consumes the same event through its own correlation.
+            // Two consumers of one fact, because it means two things here —
+            // argued at StockEventsQueue.
+            x.AddConsumer<IntegrationEventConsumer<StockReserved>>();
+
+            // §3.2's Accepts column, and exactly it. Each closed generic is a
+            // separate registration because CommandConsumer<,> is common code
+            // and the container builds the closed type (§9.4).
+            x.AddConsumer<CommandConsumer<CancelOrder, CancelOrderCommand>>();
+            x.AddConsumer<CommandConsumer<ConfirmOrder, ConfirmOrderCommand>>();
+            x.AddConsumer<CommandConsumer<MarkOrderShipped, MarkOrderShippedCommand>>();
+            x.AddConsumer<CommandConsumer<FlagOrderForReview, FlagOrderForReviewCommand>>();
+
+            // §9.6's state machine, over the service's own database. The
+            // repository is not optional: MassTransit throws at startup
+            // without one, and the in-memory repository §12.5 uses in tests
+            // discards every in-flight order on restart.
+            x
+                .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
+                .EntityFrameworkRepository(r =>
+                {
+                    r.ExistingDbContext<OrderingDbContext>();
+                    // Pessimistic: two events for the same order can arrive
+                    // concurrently — StockReserved and a timeout — and
+                    // optimistic retry on a state machine replays transitions
+                    // that already ran.
+                    r.ConcurrencyMode = ConcurrencyMode.Pessimistic;
+                });
+
+            // The scheduler §9.6's four Schedule declarations need, and the
+            // thing no chapter specified until ADR-021. This half registers
+            // IMessageScheduler; the UseDelayedMessageScheduler line inside
+            // the transport callback is what puts MessageSchedulerContext on
+            // the consume pipeline, which is where a saga activity reaches for
+            // it. Either one alone leaves .Schedule(…) throwing at the first
+            // OrderPlaced — and only at the first one, since nothing resolves
+            // a scheduler at startup.
+            x.AddDelayedMessageScheduler();
+
             x.UsingRabbitMq((context, cfg) =>
             {
                 cfg.Host(new Uri(connectionString));
 
-                // §9.8's projection endpoint, verbatim. Ordering's other two —
-                // ordering-commands and ordering-fulfilment-saga — arrive with
-                // the saga that needs them (§9.6), each with its own policy.
+                // The transport half of ADR-021's scheduler. On RabbitMQ this
+                // is the delayed message exchange, which is a PLUGIN rather
+                // than a broker feature — deploy/compose builds the image that
+                // carries it, and a broker without it accepts the publish and
+                // never delivers it. The ADR argues the choice and names what
+                // it costs.
+                cfg.UseDelayedMessageScheduler();
+
+                // §9.8's projection endpoint, verbatim. Ordering's other three
+                // follow it, each with its own policy.
                 cfg.ReceiveEndpoint(
                     CatalogEventsQueue,
                     e =>
@@ -130,6 +218,95 @@ public static class DependencyInjection
                         e.ConfigureConsumer<IntegrationEventConsumer<ProductPublished>>(context);
                         e.ConfigureConsumer<IntegrationEventConsumer<PriceChanged>>(context);
                         e.ConfigureConsumer<IntegrationEventConsumer<ProductDiscontinued>>(context);
+                    });
+
+                // §9.4's command endpoint, and the one whose retry policy is
+                // not the plain exponential five.
+                cfg.ReceiveEndpoint(
+                    CommandsQueue,
+                    e =>
+                    {
+                        e.UseMessageRetry(r =>
+                        {
+                            // A malformed contract does not parse itself on the
+                            // fourth attempt. Retrying it burns a minute of
+                            // backoff and delays every message behind it before
+                            // reaching the same error queue.
+                            //
+                            // Domain rejections are not on this list because
+                            // they never throw — CommandConsumer acks, counts
+                            // and logs them (§9.8). The list is for faults that
+                            // are terminal, not for outcomes that are not
+                            // faults at all.
+                            r.Ignore<ContractMappingException>();
+
+                            r.Exponential(
+                                retryLimit: 5,
+                                minInterval: TimeSpan.FromSeconds(1),
+                                maxInterval: TimeSpan.FromMinutes(1),
+                                intervalDelta: TimeSpan.FromSeconds(2));
+                        });
+
+                        // Inbox outside the in-memory outbox, for the reason
+                        // the projection endpoint states above: the other
+                        // nesting commits the inbox row before the buffered
+                        // sends have flushed.
+                        e.UseConsumeFilter(typeof(InboxFilter<>), context);
+                        e.UseInMemoryOutbox(context);
+
+                        // One per command in §3.2's Accepts column. The saga
+                        // sends four; a type missing here is sent into a queue
+                        // that ignores it.
+                        e.ConfigureConsumer<CommandConsumer<CancelOrder, CancelOrderCommand>>(context);
+                        e.ConfigureConsumer<CommandConsumer<ConfirmOrder, ConfirmOrderCommand>>(context);
+                        e.ConfigureConsumer<CommandConsumer<MarkOrderShipped, MarkOrderShippedCommand>>(context);
+                        e.ConfigureConsumer<CommandConsumer<FlagOrderForReview, FlagOrderForReviewCommand>>(context);
+                    });
+
+                // Ordering's own reaction to Inventory's reservation, kept off
+                // the saga endpoint below because that one carries no inbox
+                // filter. Same policy as the projection endpoint — this is a
+                // consumer like any other.
+                cfg.ReceiveEndpoint(
+                    StockEventsQueue,
+                    e =>
+                    {
+                        e.UseMessageRetry(r =>
+                            r.Exponential(
+                                retryLimit: 5,
+                                minInterval: TimeSpan.FromSeconds(1),
+                                maxInterval: TimeSpan.FromMinutes(1),
+                                intervalDelta: TimeSpan.FromSeconds(2)));
+
+                        e.UseConsumeFilter(typeof(InboxFilter<>), context);
+                        e.UseInMemoryOutbox(context);
+
+                        e.ConfigureConsumer<IntegrationEventConsumer<StockReserved>>(context);
+                    });
+
+                // §9.8's saga endpoint.
+                cfg.ReceiveEndpoint(
+                    FulfilmentSagaQueue,
+                    e =>
+                    {
+                        e.UseMessageRetry(r =>
+                            r.Exponential(
+                                retryLimit: 5,
+                                minInterval: TimeSpan.FromSeconds(1),
+                                maxInterval: TimeSpan.FromMinutes(1),
+                                intervalDelta: TimeSpan.FromSeconds(2)));
+
+                        e.UseInMemoryOutbox(context);
+
+                        // No InboxFilter here, and it is the one documented
+                        // exception to §9.8's default. The saga is idempotent
+                        // by construction: a redelivered StockReserved finds
+                        // the instance already past AwaitingStock and the
+                        // transition is simply not applicable. An inbox row
+                        // would suppress legitimate redelivery after a
+                        // mid-transition crash — which is the one delivery the
+                        // saga genuinely needs.
+                        e.ConfigureSaga<OrderFulfilmentState>(context);
                     });
 
                 // No ConfigureEndpoints, and its removal is this PR's, on a

@@ -1571,10 +1571,25 @@ harness makes it testable without any infrastructure at all.
 public async Task Payment_declined_releases_stock_before_cancelling()
 {
     await using ServiceProvider provider = new ServiceCollection()
-        .AddMassTransitTestHarness(cfg => cfg
-            .SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(30), testInactivityTimeout: TimeSpan.FromSeconds(10))
-            .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
-            .InMemoryRepository())
+        .AddMassTransitTestHarness(x =>
+        {
+            x.SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(30), testInactivityTimeout: TimeSpan.FromSeconds(10));
+            // The same two lines production registers (ADR-021), and they are
+            // not optional here: §9.6's Initially arms StockTimeout, so the
+            // first OrderPlaced reaches for a scheduler. The in-memory
+            // transport implements the delay itself where RabbitMQ needs a
+            // plugin — the transports differ and the registration under test
+            // does not.
+            x.AddDelayedMessageScheduler();
+            x
+                .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
+                .InMemoryRepository();
+            x.UsingInMemory((context, cfg) =>
+            {
+                cfg.UseDelayedMessageScheduler();
+                cfg.ConfigureEndpoints(context);
+            });
+        })
         .BuildServiceProvider(true);
 
     ITestHarness harness = provider.GetRequiredService<ITestHarness>();
@@ -1698,6 +1713,17 @@ public async Task Commands_are_sent_and_events_are_published()
 > inside, and the later positive would then accept the very command the
 > negative was there to forbid. A negative that is its test's last assertion,
 > as in the second sample, needs none of this and can simply wait.
+
+> **A missing scheduler fails this suite in the costume the traps above
+> describe, which is why the registration is spelled out rather than trimmed.**
+> The sample above carried neither scheduler line until PR-21 compiled it, and
+> the two are easy to read as ceremony. They are not: with both deleted, eleven
+> of that PR's thirteen saga tests fail, **every one of them as a timeout**,
+> each reporting the command the saga did not send. The saga's exception faults
+> onto the error queue and no assertion ever sees it. The two survivors are the
+> structural pair that construct the state machine without starting a bus,
+> which is worse than none — they leave a deleted registration looking
+> half-covered.
 
 > **Where the numbers live is the other half.** The first sample states them in
 > the registration it shows; the second gets them from `StartHarnessAsync`, the

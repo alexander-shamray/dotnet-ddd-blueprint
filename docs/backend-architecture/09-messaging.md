@@ -2123,7 +2123,7 @@ CREATE INDEX IX_OrderReviews_RaisedAt ON ordering.OrderReviews (RaisedAt);
 > document does not have and does not need for the escalation to work.
 
 ```csharp
-public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork)
+public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork, TimeProvider clock)
     : ICommandHandler<FlagOrderForReviewCommand, Result>
 {
     public async Task<Result> HandleAsync(FlagOrderForReviewCommand command, CancellationToken ct)
@@ -2134,15 +2134,33 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork)
         // write survives a command that failed. Harmless for an idempotent
         // escalation row, and a data-corruption bug the first time the pattern
         // is copied to a handler that is not.
+        //
+        // The lock hints are what make the read a RANGE lock, so a second
+        // delivery waits for the first to commit and then sees the row. This
+        // was printed as IF NOT EXISTS … INSERT until PR-21 built it: both
+        // spellings read and then write, so both race, and the loser violates
+        // the primary key rather than being absorbed. §6.6's MERGE learned the
+        // same thing one table over.
+        //
+        // Absorbed rather than upserted, deliberately: RaisedAt is when the
+        // process first stalled, and a redelivery must not move it forward —
+        // §13.6 alerts on how long a review has been outstanding.
         await unitOfWork.ExecuteRawAsync(
             """
-            IF NOT EXISTS (SELECT 1 FROM ordering.OrderReviews
-                           WHERE OrderId = @OrderId
-                               AND Reason = @Reason)
-                INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)
-                VALUES (@OrderId, @Reason, SYSDATETIMEOFFSET());
+            INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)
+            SELECT @OrderId, @Reason, @RaisedAt
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM ordering.OrderReviews WITH (UPDLOCK, HOLDLOCK)
+                WHERE OrderId = @OrderId
+                    AND Reason = @Reason);
             """,
-            new { command.OrderId, command.Reason },
+            // The registered clock, not SYSDATETIMEOFFSET(), which this sample
+            // also printed. RetentionPurgeService already computes its cutoff
+            // from TimeProvider for the reason that applies here: a test host
+            // substitutes the clock, and a row written on the server's wall
+            // clock is one no substituted clock can reason about.
+            new { command.OrderId, command.Reason, RaisedAt = clock.GetUtcNow() },
             ct);
 
         return Result.Success();
@@ -2275,6 +2293,69 @@ Because the repository shares `OrderingDbContext`, the saga table lives in the
 service's own database and its migrations travel with the service's — which is
 what "in the service's own database" above buys, and what the in-memory
 repository in §12.5 deliberately trades away for test speed.
+
+### The scheduler is a registration, and this chapter forgot it
+
+The four `Schedule` declarations above need something to deliver a message at a
+future time, and MassTransit does not supply one by default. Two lines do, and
+**both are needed** — the first registers `IMessageScheduler`, the second puts a
+`MessageSchedulerContext` on the consume pipeline, which is where a saga
+activity reaches for it:
+
+```csharp
+// Beside AddSagaStateMachine, in the AddMassTransit callback.
+x.AddDelayedMessageScheduler();
+
+// And inside UsingRabbitMq, on the bus configurator.
+cfg.UseDelayedMessageScheduler();
+```
+
+> **Neither line fails at startup, and that is why this went unnoticed until a
+> saga was compiled.** Nothing resolves a scheduler while the host is
+> building, so a registration missing both looks exactly like a working
+> service: the bus connects, the endpoints declare, readiness reports ready.
+> The first `OrderPlaced` then faults onto the error queue, and §12.5's harness
+> reports it as *the saga did not send* after waiting out its inactivity
+> bound — the assertion's own message, describing a registration rather than a
+> transition. Measured by deleting both lines: eleven of that suite's thirteen
+> tests fail, every one as a timeout, and not one of them names the cause.
+
+[ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
+records the choice and what it costs. The short of it: on RabbitMQ this
+scheduler is the delayed message exchange **plugin**, so §14.1 builds the broker
+image rather than pulling a stock one, and a broker without the plugin accepts
+the bus's connection and delivers no timeout at all.
+
+### Who moves the order while the saga coordinates it
+
+The saga sends four commands and §3.2's Accepts column lists exactly those
+four — none of which advances the order out of `AwaitingStock`. §5.4's
+`Order.ConfirmStock` is that transition, and this chapter left it with no
+caller: `ConfirmOrder` arrives after payment, `Order.ConfirmPayment` requires
+`AwaitingPayment`, and nothing in between put the order there.
+
+**The missing piece is a consumer, not a contract.** §3.2 already lists
+`StockReserved` in Ordering's Consumes column, so Ordering binds it twice — once
+for the saga, which reads it to decide what to ask for next, and once for an
+`IIntegrationEventHandler<StockReserved>` that records it on the aggregate. That
+handler **dispatches a command** rather than mutating the order itself, and the
+reason is §7.5's: work done inside an integration-event handler commits through
+the inbox filter's `SaveChangesAsync` and stages nothing, so the domain event
+would be dropped in silence. Only the command pipeline opens the transaction and
+stages what the aggregate raised.
+
+It needs a fourth receive endpoint of its own — `ordering-stock-events`, in §9.8
+below — because the saga's endpoint deliberately carries no inbox filter, and a
+plain consumer sharing it would inherit that exemption without writing anything
+down.
+
+> **The two deliveries are unordered, so `ConfirmOrder` can arrive first**, and
+> the handler's answer is `ErrorType.Unavailable` rather than a rule failure.
+> §9.8 already draws that line — retry is for faults time might fix — and this
+> is one: the confirming command is in flight on another endpoint. Returning a
+> `Rule` error instead would ack a paid order's confirmation for good. The
+> window is a local write against a payment authorisation and is therefore
+> small; that it is small is not why it is handled.
 
 ## 9.7 Synchronous calls
 
@@ -2577,8 +2658,10 @@ timeout fails the first assertion at once.
 | Broker down | Outbox holds messages; they flush on reconnect |
 
 Retry and idempotency are configured per receive endpoint, and Ordering has
-three, each with a different policy. The **projection** endpoint from §9.4,
-carrying Catalog's events into local read models:
+**four**, each declared with its own policy. It had three until PR-21, and the
+fourth is the one whose absence was a design gap rather than an omission — §9.6
+argues it where the transition it serves lives. The **projection** endpoint from
+§9.4, carrying Catalog's events into local read models:
 
 ```csharp
 cfg.ReceiveEndpoint(
@@ -2654,6 +2737,39 @@ cfg.ReceiveEndpoint(
 > The same argument is why a consumer whose sends must survive its own commit
 > wants §9.4's transactional outbox rather than the in-memory one: the in-memory
 > outbox defers, it does not persist.
+
+The **stock-events** endpoint is the fourth, and it takes the projection
+endpoint's policy unchanged — it is an ordinary consumer, and the only reason it
+is a separate queue is what it must *not* share:
+
+```csharp
+cfg.ReceiveEndpoint(
+    "ordering-stock-events",
+    e =>
+    {
+        e.UseMessageRetry(r =>
+            r.Exponential(
+                retryLimit: 5,
+                minInterval: TimeSpan.FromSeconds(1),
+                maxInterval: TimeSpan.FromMinutes(1),
+                intervalDelta: TimeSpan.FromSeconds(2)));
+
+        e.UseConsumeFilter(typeof(InboxFilter<>), context);
+        e.UseInMemoryOutbox(context);
+
+        // Ordering's own reaction to Inventory's reservation (§9.6): the order
+        // records that its stock is held. The saga reads the same event on the
+        // endpoint below, through its correlation rather than a consumer.
+        e.ConfigureConsumer<IntegrationEventConsumer<StockReserved>>(context);
+    });
+```
+
+> **Two queues bound to one event is not duplication, it is two readers.** The
+> saga endpoint below carries no inbox filter, on the exemption the callout
+> after it argues; a consumer sharing that queue would take the exemption
+> silently, and `Order.ConfirmStock` is not idempotent — it throws on the
+> second call. Putting it on its own endpoint is what gets it the filter every
+> consumer is supposed to have.
 
 And the **saga** endpoint, which receives the fulfilment events (§9.6):
 

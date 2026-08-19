@@ -20,12 +20,16 @@ public static class DependencyInjection
 
         // Explicit rather than scanned, beside the dispatcher it serves —
         // §4.2's registration sample is the shape. Order raises five domain
-        // events, so the collector no longer comes back empty — and this still
-        // stages no rows, for a different reason worth keeping straight: the
-        // Broker lane is empty because the mapper's allow-list is (§9.3), and
-        // the Local lane because no IProjectionHandler is registered (§7.5).
-        // Both are decisions about what this service publishes, not a
-        // consequence of having nothing to publish.
+        // events and, since PR-21, the mapper's allow-list carries three of
+        // them — so the Broker lane finally stages rows and this service
+        // publishes §3.2's whole Publishes column.
+        //
+        // The Local lane is still empty, and that is now the only half worth
+        // keeping straight: no IProjectionHandler is registered (§7.5),
+        // because §6.6's OrderSummaries is not built. A decision about what
+        // this service projects, not a consequence of having nothing to
+        // project — and the two lanes being empty for two different reasons
+        // is why the sentence was worth writing before either was filled.
         services.AddDomainEventDispatcher();
 
         // The allow-list of §9.3, and the one registration that decides what

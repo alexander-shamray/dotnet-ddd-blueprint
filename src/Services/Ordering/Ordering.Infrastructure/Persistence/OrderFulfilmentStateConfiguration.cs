@@ -1,0 +1,72 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Ordering.Infrastructure.Messaging;
+
+namespace Ordering.Infrastructure.Persistence;
+
+/// <summary>
+/// §9.6's saga table. Mapped on this context deliberately: the saga repository
+/// is configured with <c>ExistingDbContext&lt;OrderingDbContext&gt;()</c>, so
+/// the instance lives in the service's own database and its migrations travel
+/// with the service's.
+/// </summary>
+/// <remarks>
+/// Not for atomicity — the saga's effects reach other services as messages and
+/// never share a transaction with them (ADR-002, §9.7). The reasons are
+/// operational: one database per service to back up, one migration history, one
+/// connection pool, and the saga table sits next to the orders it coordinates
+/// when someone is debugging at 03:00.
+/// <para>
+/// <b>No <c>RowVersion</c>.</b> The repository runs
+/// <c>ConcurrencyMode.Pessimistic</c>, which takes row locks rather than
+/// comparing a version column — carrying one anyway would imply an optimistic
+/// strategy the saga does not use.
+/// </para>
+/// </remarks>
+internal sealed class OrderFulfilmentStateConfiguration : IEntityTypeConfiguration<OrderFulfilmentState>
+{
+    public void Configure(EntityTypeBuilder<OrderFulfilmentState> builder)
+    {
+        builder.ToTable("OrderFulfilmentStates", "ordering");
+
+        builder.HasKey(s => s.CorrelationId);
+
+        // The types §9.6's DDL prints, column for column, for the reason
+        // ProductPriceConfiguration gives: where the chapter states a type, the
+        // configuration emits that type rather than EF's default for the CLR
+        // one. varchar rather than nvarchar throughout — every value here is a
+        // state name or a code from a closed ASCII vocabulary.
+        builder
+            .Property(s => s.CurrentState)
+            .HasMaxLength(64)
+            .IsUnicode(false)
+            .IsRequired();
+
+        builder
+            .Property(s => s.Currency)
+            .HasMaxLength(3)
+            .IsFixedLength()
+            .IsUnicode(false)
+            .IsRequired();
+
+        builder.Property(s => s.Total).HasPrecision(19, 4);
+
+        // Nullable in the database and non-nullable on the instance, which is
+        // the one place those two disagree on purpose: a saga that never
+        // compensates stores NULL, and the state machine guarantees the
+        // property is written before either exit from Compensating reads it.
+        builder
+            .Property(s => s.CancelReason)
+            .HasMaxLength(32)
+            .IsUnicode(false)
+            .IsRequired(false);
+
+        // Backs the "unfinalised saga" alert (§13.6) and the stuck-saga
+        // runbook. Without it that alert is a query with no index — the whole
+        // table, scanned, on the schedule an alert runs at.
+        builder
+            .HasIndex(s => s.StartedAt)
+            .IncludeProperties(s => s.CurrentState)
+            .HasDatabaseName("IX_OrderFulfilmentStates_StartedAt");
+    }
+}
