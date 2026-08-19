@@ -70,8 +70,10 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ## PR-22 — the rest of §4.2, and a category that cannot drift
 
-PR-22 put the three rows of [§4.2](backend-architecture/04-solution-structure.md)'s
-dependency table that had no gate behind one, split the suite on
+PR-22 put the last of [§4.2](backend-architecture/04-solution-structure.md)'s
+dependency table behind gates — the cross-service clause three of its five
+rows carry had no test, and the Migrator row had none of any kind — split the
+suite on
 `Category=Integration`, added `docs/testing.md` and started reporting
 domain-layer coverage. Six of its decisions bind what comes after.
 

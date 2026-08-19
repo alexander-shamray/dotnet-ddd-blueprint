@@ -9,10 +9,13 @@ It does exit non-zero on a **missing or unreadable** report, which is a
 different claim: a coverage step that shrugs at no data prints nothing on the
 day the collector stops running, and nothing reads exactly like a clean result.
 
-Stdlib only, like the licence gate one directory over, and for the same reason
--- it runs in CI ahead of any restore.  That rules out `defusedxml`, which is
-the usual answer to `ElementTree`'s entity-expansion exposure; what makes the
-stdlib parser acceptable here is the input rather than the parser.  This reads
+Stdlib only, like the licence gate one directory over, though **not** for the
+licence gate's reason: that one runs ahead of the build, and this one cannot --
+it reads what the test run produced, so restore and build are behind it either
+way.  What it inherits is only the preference for adding no dependency.  That
+rules out `defusedxml`, which is the usual answer to `ElementTree`'s
+entity-expansion exposure; what makes the stdlib parser acceptable here is the
+input rather than the parser.  This reads
 one artefact that `Microsoft.CodeCoverage` wrote, on the runner, seconds
 earlier, from a path this step names -- there is no untrusted document on that
 path, and a repository that could plant one could plant the script instead.

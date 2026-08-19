@@ -152,8 +152,8 @@ command is written in full.** Without it the collector writes under each *test
 project's* own `TestResults/` — measured, one file at
 `tests/Catalog.Domain.Tests/TestResults/<guid>/` — and the reporter, which
 defaults to `./TestResults` at the repo root, then finds nothing and exits
-non-zero. The filter is the second half of the same point and is explained
-under Coverage below.
+non-zero. The filter keeps §4.2's architecture gates out of the instrumented
+run, for the reason the callout at the end of this section gives.
 
 `coverage.runsettings` filters the report to `.*\.Domain\.dll$` and emits
 Cobertura. That is §12.9's "watch coverage of the domain layer specifically —
