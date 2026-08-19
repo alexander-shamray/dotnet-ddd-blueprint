@@ -16,8 +16,10 @@ namespace Ordering.Application.Orders.ConfirmStock;
 /// because it means two things to this service.
 /// <para>
 /// It dispatches rather than mutating, for the reason
-/// <see cref="ConfirmStockCommand"/> states: the command pipeline is what
-/// opens the transaction and stages the domain event.
+/// <see cref="ConfirmStockCommand"/> states in full: the command pipeline is
+/// what opens the transaction and what the domain event would be staged from.
+/// <b>It stages nothing today</b> — the event is on neither lane's list — so
+/// this preserves the staging path rather than using it.
 /// </para>
 /// </remarks>
 public sealed class StockReservedHandler(IDispatcher dispatcher)

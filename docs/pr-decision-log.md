@@ -268,6 +268,32 @@ never watching the thing beside it. **Ask what the test does when the code is
 wrong, not what it does when the code is right** — five of these were green
 against both.
 
+**Round ten found the same shape once more, and one thing genuinely latent.**
+Three comments and a §9.6 paragraph said the command pipeline *stages*
+`OrderStockConfirmedDomainEvent`. It does not: `DomainEventDispatcher` writes a
+Local row only for an event with a registered projection handler, Ordering
+registers none, and the event is on no Broker allow-list either — so it is
+collected and cleared with **no row of either lane**. The argument the comments
+were making survives, because it is about where the handler must live for the
+row to appear once §6.6's `OrderSummaries` exists; what was wrong is the tense.
+`ConfirmStockCommand` even carried the caveat, attached to the wrong clause: it
+explained why the *bug* would be silent while the sentence above still asserted
+the staging as a present fact.
+
+**The delayed-message leak is real, unreachable today, and guarded by a
+coincidence.** `Unschedule` is a no-op on ADR-021's scheduler, so every saga
+test leaves its timeouts armed in the collection-wide broker; `ResetAsync`
+truncates SQL and cannot touch them. If one landed mid-run it would cross
+`InboxFilter` and write a row — and `Ordering.Api.Tests`' `InboxFilterTests`
+asserts `ShouldBeEmpty()` over the whole table, in that same collection. What
+stops it is only that the shortest schedule is **five minutes** and the
+collection runs in **1 m 18 s**; a runner four times slower turns it into a
+flake in a test that has nothing to do with sagas. Not fixed here: the fix is a
+broker per saga class, which buys a container set on every run (§12.4's stated
+price) against a hazard needing a fourfold slowdown to reach. **Recorded so the
+next person to see `InboxFilterTests` fail for no reason finds this paragraph
+rather than the timing.**
+
 **Two fixed sleeps became sentinel waits, and the honest limit is recorded in
 the tests themselves.** A `Task.Delay` before a negative assertion is a claim
 about the runner, not about the code; publishing a fresh message afterwards

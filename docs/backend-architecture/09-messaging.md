@@ -2371,9 +2371,17 @@ for the saga, which reads it to decide what to ask for next, and once for an
 `IIntegrationEventHandler<StockReserved>` that records it on the aggregate. That
 handler **dispatches a command** rather than mutating the order itself, and the
 reason is §7.5's: work done inside an integration-event handler commits through
-the inbox filter's `SaveChangesAsync` and stages nothing, so the domain event
-would be dropped in silence. Only the command pipeline opens the transaction and
-stages what the aggregate raised.
+the inbox filter's `SaveChangesAsync`, outside the transaction the dispatcher
+stages from. Only the command pipeline puts the aggregate's events on that path.
+
+> **Putting an event on that path is not the same as staging it, and today
+> `OrderStockConfirmedDomainEvent` is not staged at all.** §7.5's dispatcher
+> writes a Local row only for an event with a registered projection handler,
+> and this one is on no Broker allow-list either — so it is collected and
+> cleared with no row of either lane. The argument above is about where the
+> handler must live for the row to appear *when a projection is registered*,
+> which is §6.6's `OrderSummaries`. An implementation that reads this as a
+> description of what happens now will look for a row that is not there.
 
 It needs a fourth receive endpoint of its own — `ordering-stock-events`, in §9.8
 below. **The original reason was the saga endpoint's inbox exemption**, which

@@ -186,6 +186,20 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// hide transaction-related bugs. Tests that share the collection call
     /// this from <c>InitializeAsync</c>; suites asserting the migrator or the
     /// probe table arrange per-test identities instead and never need it.
+    /// <para>
+    /// <b>It resets SQL and cannot reset the broker, and one consequence is
+    /// latent rather than theoretical.</b> <c>Unschedule</c> is a no-op on
+    /// ADR-021's scheduler, so every saga test leaves its timeouts armed in
+    /// the collection-wide RabbitMQ. One landing mid-run would cross
+    /// <c>InboxFilter</c> and write a row — and <c>InboxFilterTests</c>
+    /// asserts <c>ShouldBeEmpty()</c> over the whole table, in this same
+    /// collection. What stops it is only that the shortest schedule is five
+    /// minutes and this collection runs in about eighty seconds. **A runner
+    /// four times slower makes that a flake in a test that has nothing to do
+    /// with sagas**, so read the PR-21 entry in the decision log before
+    /// chasing it. Copilot raised it; the fix is a broker per saga class and
+    /// was judged too expensive for the hazard.
+    /// </para>
     /// </summary>
     public async Task ResetAsync()
     {

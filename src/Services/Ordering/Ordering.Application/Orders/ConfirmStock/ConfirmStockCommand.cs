@@ -19,12 +19,20 @@ namespace Ordering.Application.Orders.ConfirmStock;
 /// <para>
 /// Dispatching rather than writing through the repository directly is what
 /// puts the work inside §6.3's pipeline — one transaction, and
-/// <c>OrderStockConfirmedDomainEvent</c> staged onto the outbox by
-/// <c>TransactionBehavior</c>. An integration-event handler that mutated the
-/// aggregate itself would commit through the inbox filter's
-/// <c>SaveChangesAsync</c> and stage nothing, which is a domain event dropped
-/// in silence — and silent today only because no projection subscribes to that
-/// event yet (§6.6's <c>OrderSummaries</c> is not built).
+/// <c>OrderStockConfirmedDomainEvent</c> on the path
+/// <c>TransactionBehavior</c> stages from. An integration-event handler that
+/// mutated the aggregate itself would commit through the inbox filter's
+/// <c>SaveChangesAsync</c>, off that path entirely.
+/// <para>
+/// <b>Today that path stages nothing, and the difference is latent rather
+/// than observable.</b> <c>DomainEventDispatcher</c> writes a Local row only
+/// for an event with a registered projection handler, Ordering registers
+/// none, and this event is not on §9.3's Broker allow-list either — so it is
+/// collected and cleared with no row of either lane. What dispatching buys is
+/// that the row appears the day §6.6's <c>OrderSummaries</c> is built,
+/// against a handler that would otherwise have to be found and moved. Copilot
+/// caught this claim asserting the staging as a present fact.
+/// </para>
 /// </para>
 /// </remarks>
 public sealed record ConfirmStockCommand(Guid OrderId) : ICommand<Result>;
