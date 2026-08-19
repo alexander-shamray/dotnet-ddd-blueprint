@@ -307,6 +307,16 @@ If the namespace rule proves awkward to enforce, split the host into
 (endpoints, does not) and let the project reference enforce it. That is the more
 robust option; the single-project namespace rule is the lighter one.
 
+**"Namespace rule" here is the rule, not the selector the callouts above
+abandoned**, and the two are easy to read as one thing this close together. What
+the gate stopped doing is *selecting* candidates by namespace; what it still
+does is tell the composition root from everything else by exactly that —
+`IsCompositionRoot` tests `!fullName.Contains('.')`, because top-level
+statements put `Program` in the global namespace while an endpoint keeps
+`Catalog.Api.Endpoints`. The alternative below replaces that discrimination
+with a project boundary, which is why it is the heavier option and the one a
+compiler enforces.
+
 ### The rest of the table, enforced
 
 **What the three gates above leave uncovered is a clause rather than a row**,
