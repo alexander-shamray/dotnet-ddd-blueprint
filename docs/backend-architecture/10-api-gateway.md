@@ -375,8 +375,10 @@ builder.Services.AddRateLimiter(options =>
         // RetryAfterHeader.Seconds, not a cast and not an inline ceiling —
         // see below.
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
+        {
             context.HttpContext.Response.Headers.RetryAfter =
                 RetryAfterHeader.Seconds(retryAfter).ToString(CultureInfo.InvariantCulture);
+        }
 
         // Before the write: the customisation reads the response status, and
         // the service refuses to write once the response has started.

@@ -44,8 +44,10 @@ public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, Cance
         // sibling service sending a code we do not know is a deployment
         // problem, and no amount of backoff resolves it.
         if (!CancellationReasons.TryParse(message.Reason, out CancellationReason reason))
+        {
             throw new ContractMappingException(
                 $"Unknown cancellation reason '{message.Reason}' on {nameof(CancelOrder)}.");
+        }
 
         // CommandOrigin.System, written here and nowhere else. The message
         // carries no origin field, so nothing a peer sends can forge one —
@@ -117,8 +119,10 @@ public sealed class FlagOrderForReviewMapper
     public FlagOrderForReviewCommand Map(FlagOrderForReview message)
     {
         if (!Known.Contains(message.Reason))
+        {
             throw new ContractMappingException(
                 $"Unknown review reason '{message.Reason}' on {nameof(FlagOrderForReview)}.");
+        }
 
         return new FlagOrderForReviewCommand(message.OrderId, message.Reason);
     }

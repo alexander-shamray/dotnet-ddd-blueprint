@@ -26,6 +26,7 @@ public sealed class HybridCacheRedisTests(RedisFixture fixture)
         int executions = 0;
 
         for (int i = 0; i < 2; i++)
+        {
             await cache.GetOrCreateAsync(
                 "product:1:v1",
                 (object?)null,
@@ -35,6 +36,7 @@ public sealed class HybridCacheRedisTests(RedisFixture fixture)
                     return ValueTask.FromResult("priced");
                 },
                 cancellationToken: TestContext.Current.CancellationToken);
+        }
 
         executions.ShouldBe(1);
     }
@@ -59,8 +61,10 @@ public sealed class HybridCacheRedisTests(RedisFixture fixture)
         keys.ShouldNotBeEmpty("the §8.3 prefix comes from InstanceName, and its absence " +
             "is a key outside the keyspace whose eviction policy was §8.1's whole argument");
         foreach (RedisKey key in keys)
+        {
             redis.GetDatabase().KeyTimeToLive(key).ShouldNotBeNull(
                 "every cache key has a TTL — §8.1's first enforced rule");
+        }
     }
 
     [Fact]

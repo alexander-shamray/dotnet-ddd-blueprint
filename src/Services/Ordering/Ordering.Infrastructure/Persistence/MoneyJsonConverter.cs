@@ -61,9 +61,11 @@ internal sealed class MoneyJsonConverter : JsonConverter<Money>
         }
 
         if (amount is null || currency is null)
+        {
             throw new JsonException(
                 $"A {nameof(Money)} payload needs both {nameof(Money.Amount)} and " +
                 $"{nameof(Money.Currency)}. A row written before a rename is the likely cause (§9.4).");
+        }
 
         return Money.Of(amount.Value, currency);
     }

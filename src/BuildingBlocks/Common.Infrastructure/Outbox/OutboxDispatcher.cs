@@ -234,10 +234,12 @@ public sealed class OutboxDispatcher : BackgroundService
             // line. §5.5's rule is that a domain event never goes to the bus,
             // and the last place able to enforce it is the one that publishes.
             if (payload is not IIntegrationEvent)
+            {
                 throw new InvalidOperationException(
                     $"Outbox row {message.MessageId} is on the Broker lane carrying " +
                     $"{type.Name}, which is not an {nameof(IIntegrationEvent)}. Publishing it " +
                     "would put a domain event on the bus (§5.5).");
+            }
 
             await sp.GetRequiredService<IPublishEndpoint>().Publish(
                 payload,
@@ -252,10 +254,12 @@ public sealed class OutboxDispatcher : BackgroundService
         }
 
         if (message.Lane != nameof(OutboxLane.Local))
+        {
             throw new InvalidOperationException(
                 $"Outbox row {message.MessageId} carries lane '{message.Lane}', which is neither " +
                 "Broker nor Local. The row is left for the §13.6 abandoned-row alert rather than " +
                 "guessed at.");
+        }
 
         // Local lane: this service's own projection handlers, running safely
         // outside the write transaction that produced the event (§7.5).
@@ -275,10 +279,12 @@ public sealed class OutboxDispatcher : BackgroundService
         // payload that deserialises to null reaches a handler that ignores
         // its argument and is marked processed too. Neither leaves a trace.
         if (payload is not IDomainEvent)
+        {
             throw new InvalidOperationException(
                 $"Outbox row {message.MessageId} is on the Local lane carrying {type.Name}, " +
                 $"which is not an {nameof(IDomainEvent)}. Projections run on domain events " +
                 "(§7.5).");
+        }
 
         await ProjectionInvoker.InvokeAllAsync(sp, payload, type, message.OccurredAt, ct);
     }

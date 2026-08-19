@@ -25,10 +25,12 @@ internal static partial class SqlSchema
     public static string Qualify(string schema, string table, string paramName)
     {
         if (!Identifier().IsMatch(schema))
+        {
             throw new ArgumentException(
                 $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
                 "into this service's messaging statements rather than parameterised.",
                 paramName);
+        }
 
         // Delimited, because the pattern above admits reserved words and the
         // scaffold admits a service called `User`: `FROM user.OutboxMessages`

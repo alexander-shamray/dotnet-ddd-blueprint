@@ -90,17 +90,21 @@ public sealed class MessageTypeMap
         foreach ((string Name, Type Type) pair in pairs)
         {
             if (pair.Name.Length > MaxNameLength)
+            {
                 throw new InvalidOperationException(
                     $"{pair.Type.Name}'s persisted name is {pair.Name.Length} characters and the " +
                     $"outbox column holds {MaxNameLength}. Shorten the namespace, or move the type.");
+            }
         }
 
         IGrouping<string, (string Name, Type Type)>? clash =
             pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);
         if (clash is not null)
+        {
             throw new InvalidOperationException(
                 $"Two staged types share the name '{clash.Key}'. The outbox " +
                 "column cannot distinguish them.");
+        }
 
         // An alias resolves inward: _byName carries it so a row written before
         // a rename still resolves. Outward is the separate, opt-in half below
@@ -114,14 +118,18 @@ public sealed class MessageTypeMap
             // as a resolve-only name it can never match a row, and under a
             // WriteAs it truncates at the insert.
             if (alias.Name.Length > MaxNameLength)
+            {
                 throw new InvalidOperationException(
                     $"The alias '{alias.Name}' is {alias.Name.Length} characters and the outbox " +
                     $"column holds {MaxNameLength}. No row can carry it.");
+            }
 
             if (pairs.Any(p => p.Name == alias.Name))
+            {
                 throw new InvalidOperationException(
                     $"'{alias.Name}' is an alias and also a live type name. One of them resolves " +
                     "and which is not decidable — rename the alias or drop it.");
+            }
 
             // The target has to be a type this map already carries. An alias
             // onto anything else is a name that resolves to a type Stage
@@ -130,10 +138,12 @@ public sealed class MessageTypeMap
             // domain event would publish that domain event, which is the leak
             // Stage's guards exist to close, reopened through the alias door.
             if (!pairs.Any(p => p.Type == alias.Type))
+            {
                 throw new InvalidOperationException(
                     $"'{alias.Name}' aliases {alias.Type.Name}, which this map does not carry. An " +
                     "alias names a type that is still stageable — one that is not is a row nobody " +
                     "can deliver and a guard nobody applies.");
+            }
         }
 
         _byName = pairs
@@ -147,10 +157,12 @@ public sealed class MessageTypeMap
         foreach ((Type Type, string Name) written in writtenNames.Select(w => (w.Key, w.Value)))
         {
             if (!_byName.TryGetValue(written.Name, out Type? resolves))
+            {
                 throw new InvalidOperationException(
                     $"{written.Type.Name} is written as '{written.Name}', which this map cannot " +
                     "resolve. Alias that name to the type in the same release, or the rows this " +
                     "instance stages are rows it cannot itself deliver.");
+            }
 
             // Resolving is not enough — it has to resolve back to this type.
             // A name that resolves to a different one is the worst outcome
@@ -160,10 +172,12 @@ public sealed class MessageTypeMap
             // is checked here rather than left to the one-character typo that
             // makes the two names look alike.
             if (resolves != written.Type)
+            {
                 throw new InvalidOperationException(
                     $"{written.Type.Name} is written as '{written.Name}', which resolves to " +
                     $"{resolves.Name}. Every row staged for {written.Type.Name} would be read " +
                     $"back as {resolves.Name} — a substitution, not a delivery failure.");
+            }
         }
 
         _byType = pairs.ToFrozenDictionary(

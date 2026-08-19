@@ -106,8 +106,10 @@ public sealed class ServiceFixture : IAsyncLifetime
 
             string context = Path.Combine(dir.FullName, "deploy", "compose", "rabbitmq");
             if (!File.Exists(Path.Combine(context, "Dockerfile")))
+            {
                 throw new InvalidOperationException(
                     $"Found the solution at {dir.FullName} but no Dockerfile at {context} (§14.1, ADR-021).");
+            }
 
             return context;
         }

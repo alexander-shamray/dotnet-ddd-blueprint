@@ -91,8 +91,10 @@ public static class DependencyInjection
         // same place the eager read exists to avoid.
         string? connectionString = configuration.GetConnectionString("RabbitMq");
         if (string.IsNullOrWhiteSpace(connectionString))
+        {
             throw new InvalidOperationException(
                 "ConnectionStrings:RabbitMq is not configured. The bus cannot start without it (§13.5).");
+        }
 
         services.AddMassTransit(x =>
         {

@@ -59,7 +59,9 @@ public readonly record struct Money
     private static void EnsureSameCurrency(Money left, Money right)
     {
         if (left.Currency != right.Currency)
+        {
             throw new DomainException(
                 $"Cannot combine {left.Currency} with {right.Currency}.");
+        }
     }
 }

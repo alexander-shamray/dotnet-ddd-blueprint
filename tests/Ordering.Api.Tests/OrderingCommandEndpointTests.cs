@@ -56,10 +56,12 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     public async ValueTask DisposeAsync()
     {
         foreach (Guid messageId in _published)
+        {
             await Eventually(
                 async () => (await InboxRowsAsync(messageId)).Count,
                 expected: 1,
                 because: "a delivery still running when the next test resets is a flake in that test");
+        }
     }
 
     [Fact]

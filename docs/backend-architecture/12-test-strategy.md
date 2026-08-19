@@ -619,11 +619,13 @@ public sealed class TestAuthHandler(
         // The same claim type §11.4's policies require. A test that grants
         // itself "orders:cancel" is exercising the policy, not bypassing it.
         if (Request.Headers.TryGetValue(PermissionsHeader, out StringValues granted))
+        {
             claims.AddRange(
                 granted
                     .ToString()
                     .Split(' ', StringSplitOptions.RemoveEmptyEntries)
                     .Select(p => new Claim(PermissionClaim.Type, p)));
+        }
 
         ClaimsPrincipal principal = new(new ClaimsIdentity(claims, SchemeName));
         return Task.FromResult(

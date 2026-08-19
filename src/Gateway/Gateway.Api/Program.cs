@@ -151,8 +151,10 @@ builder.Services.AddRateLimiter(options =>
         // argues why the rule earns a type of its own rather than living here
         // where nothing can reach the case it exists for.
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
+        {
             context.HttpContext.Response.Headers.RetryAfter =
                 RetryAfterHeader.Seconds(retryAfter).ToString(CultureInfo.InvariantCulture);
+        }
 
         // Set before writing: the customisation reads the response status to
         // fill in the RFC 9457 title and type when they are absent, and the

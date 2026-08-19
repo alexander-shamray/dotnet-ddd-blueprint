@@ -76,9 +76,11 @@ public class RealmImportTests
         CommerceApiScope.GetProperty("protocol").GetString().ShouldBe(Protocol);
 
         foreach (JsonElement mapper in MappersOf(CommerceApiScope))
+        {
             mapper.GetProperty("protocol").GetString().ShouldBe(
                 Protocol,
                 $"'{mapper.GetProperty("name").GetString()}' writes into a token this platform reads");
+        }
     }
 
     [Fact]
@@ -349,10 +351,12 @@ public class RealmImportTests
         string[] names = [.. ClientScopes.Select(s => s.GetProperty("name").GetString()).OfType<string>()];
 
         foreach (string builtin in builtins)
+        {
             names.ShouldContain(
                 builtin,
                 $"'{builtin}' is a Keycloak built-in; a realm that declares clientScopes " +
                 "and omits it never creates it");
+        }
 
         // Declared is not assigned, and the gap between them is the same defect
         // by a shorter route: dropping `basic` from web-app's defaultClientScopes
@@ -368,10 +372,12 @@ public class RealmImportTests
         ];
 
         foreach (string builtin in builtins)
+        {
             assigned.ShouldContain(
                 builtin,
                 $"'{TokenClient}' does not receive '{builtin}', so its tokens are missing " +
                 "what that scope carries");
+        }
 
         // And present and assigned is still not carrying: `basic` matters only
         // because of the mapper inside it. Deleting that mapper, or turning off
@@ -518,8 +524,10 @@ public class RealmImportTests
             directory = directory.Parent;
 
         if (directory is null)
+        {
             throw new InvalidOperationException(
                 $"No Platform.slnx above '{AppContext.BaseDirectory}', so '{relativePath}' cannot be located.");
+        }
 
         string path = Path.Combine(directory.FullName, relativePath);
 

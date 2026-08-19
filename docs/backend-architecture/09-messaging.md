@@ -426,14 +426,18 @@ public sealed class OutboxMessage
         // the leak §5.5 forbids, prevented by the mapper being written
         // correctly and by nothing else.
         if (lane is OutboxLane.Broker && message is not IIntegrationEvent)
+        {
             throw new InvalidOperationException(
                 $"{message.GetType().Name} is not an {nameof(IIntegrationEvent)} and cannot be " +
                 "staged on the Broker lane. Map it to a contract first.");
+        }
 
         if (lane is OutboxLane.Local && message is not IDomainEvent)
+        {
             throw new InvalidOperationException(
                 $"{message.GetType().Name} is not an {nameof(IDomainEvent)} and cannot be staged " +
                 "on the Local lane, which carries this service's own events to its handlers.");
+        }
 
         return new OutboxMessage
         {
@@ -565,9 +569,11 @@ public sealed class MessageTypeMap
         IGrouping<string, (string Name, Type Type)>? clash =
             pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);
         if (clash is not null)
+        {
             throw new InvalidOperationException(
                 $"Two staged types share the name '{clash.Key}'. The outbox " +
                 "column cannot distinguish them.");
+        }
 
         _byName = pairs.ToFrozenDictionary(p => p.Name, p => p.Type);
         _byType = pairs.ToFrozenDictionary(p => p.Type, p => p.Name);
@@ -772,10 +778,12 @@ internal static partial class SqlSchema
     public static string Qualify(string schema, string table, string paramName)
     {
         if (!Identifier().IsMatch(schema))
+        {
             throw new ArgumentException(
                 $"'{schema}' is not a SQL identifier, and the schema is interpolated " +
                 "into this service's messaging statements rather than parameterised.",
                 paramName);
+        }
 
         // Delimited: the pattern above admits reserved words and a service
         // may legitimately be called `User`, whose `FROM user.OutboxMessages`
@@ -1043,9 +1051,11 @@ public sealed class OutboxDispatcher : BackgroundService
         // writes this column, so a member renamed without a migration should
         // stop compiling here rather than silently stop matching.
         if (message.Lane != nameof(OutboxLane.Local))
+        {
             throw new InvalidOperationException(
                 $"Outbox row {message.MessageId} carries lane '{message.Lane}', which is neither " +
                 "Broker nor Local.");
+        }
 
         // Local lane: this service's own projection handlers, running safely
         // outside the write transaction that produced the event (§7.5).
@@ -1099,9 +1109,11 @@ internal static class ProjectionInvoker
             // implemented but never registered — fail loudly rather than
             // marking the row processed having done nothing.
             if (handlers.Length == 0)
+            {
                 throw new InvalidOperationException(
                     $"No IProjectionHandler<{typeof(TEvent).Name}> is registered, " +
                     "but a Local outbox row was staged for it. Check the §6.2 scan.");
+            }
 
             // Sequential, not concurrent: two projections writing the same read
             // table in parallel is a deadlock waiting for load to find it.
@@ -1276,9 +1288,11 @@ public sealed class IntegrationEventConsumer<TEvent>(
         IIntegrationEventHandler<TEvent>[] resolved = [.. handlers];
 
         if (resolved.Length == 0)
+        {
             throw new InvalidOperationException(
                 $"No IIntegrationEventHandler<{typeof(TEvent).Name}> is registered, " +
                 $"but {typeof(TEvent).Name} is bound on this endpoint. Check the §6.2 scan.");
+        }
 
         // Duplicate suppression happens in the inbox filter (§9.5), which is
         // configured on the receive endpoint ahead of this consumer.
@@ -1385,8 +1399,10 @@ public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, Cance
         // problem, so this throws and §9.4's retry policy ignores the type,
         // sending the message straight to the error queue.
         if (!CancellationReasons.TryParse(message.Reason, out CancellationReason reason))
+        {
             throw new ContractMappingException(
                 $"Unknown cancellation reason '{message.Reason}' on {nameof(CancelOrder)}.");
+        }
 
         // CommandOrigin.System, written here and nowhere else. The message
         // carries no origin field, so nothing a peer sends can forge one —

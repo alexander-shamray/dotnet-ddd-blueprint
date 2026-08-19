@@ -32,10 +32,12 @@ public sealed class TransactionBehavior<TCommand, TResult>(IUnitOfWork unitOfWor
                 // dispatch, so the staged rows of a legitimate single-root command
                 // are already in the tracker and not miscounted.
                 if (unitOfWork.ModifiedAggregateCount > 1)
+                {
                     throw new InvariantViolationException(
                         $"{typeof(TCommand).Name} modified {unitOfWork.ModifiedAggregateCount} " +
                         "aggregate roots. One transaction, one aggregate (§2.3 principle 3) — " +
                         "the second aggregate should react to a domain event after commit (§7.5).");
+                }
 
                 await unitOfWork.SaveChangesAsync(token);
 

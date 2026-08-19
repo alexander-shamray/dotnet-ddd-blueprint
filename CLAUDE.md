@@ -671,9 +671,33 @@ file and a reviewer are the only things that do.
 
 ### Statements and types
 
-- **A single statement may omit braces; two or more always take them.** The
-  statement goes on the following line — never beside the condition — and it may
-  wrap:
+- **A single statement may omit braces; two or more always take them — and so
+  does one that wraps.** The statement goes on the following line, never beside
+  the condition, and if it does not finish on that line the body takes braces:
+
+  ```csharp
+  // Wrong — the body wraps, so the reader has to count indentation to find
+  // where the condition's reach ends.
+  if (!Known.Contains(message.Reason))
+      throw new ContractMappingException(
+          $"Unknown review reason '{message.Reason}'.");
+
+  // Right.
+  if (!Known.Contains(message.Reason))
+  {
+      throw new ContractMappingException(
+          $"Unknown review reason '{message.Reason}'.");
+  }
+  ```
+
+  **This rule tightened in PR-21 and cost a 49-site sweep**, because the
+  sentence used to end "and it may wrap". It is *review-carried*: no analyser
+  reaches it — IDE0055 governs the indentation of whatever shape is there and
+  has no opinion on which shape it is — so the corpus is the only enforcement,
+  and a new braceless wrapped body is a review comment rather than a failed
+  build.
+
+  A single statement that fits on its line still omits them:
 
   ```csharp
   if (amount < 0)
@@ -683,7 +707,13 @@ file and a reviewer are the only things that do.
       await publisher.StageAsync(domainEvent, OutboxLane.Local, ct);
   ```
 
-  This holds across all 53 braceless bodies in the blueprint.
+  This holds across all 49 braceless bodies in the blueprint, counted over
+  ` ```csharp ` fences after PR-21 braced the 18 that wrapped. **The figure it
+  replaces was 53 and does not reconcile**: the same count run before that sweep
+  gives 67, so 53 was neither the old value nor the new one under this
+  definition. Which definition produced it is not recoverable, and inventing one
+  would be worse than saying so — the number below is the one a rerun of
+  `count-braceless` reproduces.
   `csharp_preserve_single_line_statements = false` keeps a format run from
   pulling any of them back up onto the condition's line. The one exception is a
   **wrapped** condition, which takes braces — see below.

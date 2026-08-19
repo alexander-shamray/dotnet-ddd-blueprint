@@ -34,9 +34,11 @@ public class RegistrationTests
                     .Select(i => (Implementation: t, Service: i)));
 
         foreach (var (implementation, service) in implementations)
+        {
             scope.ServiceProvider.GetServices(service).ShouldContain(
                 s => s!.GetType() == implementation,
                 $"{implementation.Name} implements {service.Name} but is not registered.");
+        }
     }
 
     [Fact]

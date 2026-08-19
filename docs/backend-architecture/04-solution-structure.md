@@ -273,10 +273,12 @@ public void Application_and_domain_do_not_reference_masstransit()
     // and it works in every test where the broker is up.
     Assembly[] assemblies = [typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly];
     foreach (Assembly assembly in assemblies)
+    {
         Types
             .InAssembly(assembly)
             .ShouldNot().HaveDependencyOn("MassTransit")
             .GetResult().IsSuccessful.ShouldBeTrue(assembly.GetName().Name);
+    }
 }
 ```
 

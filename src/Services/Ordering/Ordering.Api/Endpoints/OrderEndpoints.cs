@@ -64,11 +64,13 @@ public static class OrderEndpoints
                     CancellationToken ct) =>
                 {
                     if (!CancellationReasons.TryParse(request.Reason, out CancellationReason reason))
+                    {
                         return Results.ValidationProblem(
                             new Dictionary<string, string[]>
                             {
                                 [nameof(request.Reason)] = ["Not a known cancellation reason."]
                             });
+                    }
 
                     Result result = await dispatcher.SendAsync(
                         new CancelOrderCommand(id, reason, CommandOrigin.User),
