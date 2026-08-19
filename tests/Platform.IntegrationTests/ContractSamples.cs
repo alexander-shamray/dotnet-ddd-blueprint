@@ -90,11 +90,11 @@ internal static class ContractSamples
             TotalAmount = 999.98m,
             Currency = "EUR",
             Lines = [new ConfirmedLine(Product, 2, 499.99m)],
-            ShippingAddress = new ShippingAddressV1("12 Rue de la Paix", "Paris", "75002", "FR")
+            ShippingAddress = new ShippingAddressV1("12 Rue de la Paix", "Appartement 4", "Paris", "75002", "FR")
         },
         [typeof(ConfirmedLine)] = () => new ConfirmedLine(Product, 2, 499.99m),
         [typeof(ShippingAddressV1)] = () =>
-            new ShippingAddressV1("12 Rue de la Paix", "Paris", "75002", "FR"),
+            new ShippingAddressV1("12 Rue de la Paix", "Appartement 4", "Paris", "75002", "FR"),
         [typeof(OrderCancelled)] = () => new OrderCancelled
         {
             MessageId = Message,
