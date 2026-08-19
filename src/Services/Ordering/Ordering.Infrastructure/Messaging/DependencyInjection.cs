@@ -270,9 +270,12 @@ public static class DependencyInjection
                     });
 
                 // Ordering's own reaction to Inventory's reservation, kept off
-                // the saga endpoint below because that one carries no inbox
-                // filter. Same policy as the projection endpoint — this is a
-                // consumer like any other.
+                // the saga endpoint below because that one's retry policy is
+                // written for a state machine — whose failures are
+                // inapplicable transitions rather than the domain rejections
+                // Order.ConfirmStock produces. (It was originally kept off for
+                // the inbox exemption, which no longer exists.) Same policy as
+                // the projection endpoint — this is a consumer like any other.
                 cfg.ReceiveEndpoint(
                     StockEventsQueue,
                     e =>

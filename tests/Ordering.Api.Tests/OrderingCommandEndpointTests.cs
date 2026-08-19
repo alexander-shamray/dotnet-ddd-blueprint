@@ -1,8 +1,11 @@
+using Common.Application;
+using MessagingRegistration = Ordering.Infrastructure.Messaging.DependencyInjection;
 using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
 using Common.Infrastructure.Inbox;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
+using Ordering.Application.Orders.FlagOrderForReview;
 using Ordering.Infrastructure.Messaging;
 using Ordering.TestSupport;
 using Shouldly;
@@ -118,15 +121,15 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         await EventuallyStatus(orderId, "AwaitingPayment", because: "the first delivery must land");
 
         await Eventually(
-            async () => (await InboxRowsAsync(messageId, DependencyInjection.StockEventsQueue)).Count,
+            async () => (await InboxRowsAsync(messageId, MessagingRegistration.StockEventsQueue)).Count,
             expected: 1,
             because: "a delivery that leaves no inbox row reached an endpoint with no filter on it");
 
-        IReadOnlyList<InboxMessage> rows = await InboxRowsAsync(messageId, DependencyInjection.StockEventsQueue);
+        IReadOnlyList<InboxMessage> rows = await InboxRowsAsync(messageId, MessagingRegistration.StockEventsQueue);
         rows[0].Endpoint.ShouldBe(
-            DependencyInjection.StockEventsQueue,
-            "the saga binds the same event on its own queue — a row from that endpoint would mean the " +
-            "consumer was bound where §9.8's exemption applies");
+            MessagingRegistration.StockEventsQueue,
+            "the saga binds the same event on its own queue — a row from that endpoint would mean this " +
+            "consumer was bound there instead, under a retry policy written for a state machine");
 
         // The same id again. The filter drops it, so the order stays where the
         // first delivery left it rather than being refused by the aggregate.
@@ -134,7 +137,7 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
 
         (await StatusAsync(orderId)).ShouldBe("AwaitingPayment");
-        (await InboxRowsAsync(messageId, DependencyInjection.StockEventsQueue))
+        (await InboxRowsAsync(messageId, MessagingRegistration.StockEventsQueue))
             .Count
             .ShouldBe(1, "a suppressed duplicate writes no second row");
     }
@@ -240,6 +243,73 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     }
 
     [Fact]
+    public async Task Two_escalations_racing_for_one_reason_both_succeed()
+    {
+        // The range lock, and the only test that can tell it is there.
+        //
+        // The sequential test above passes with `WITH (UPDLOCK, HOLDLOCK)`
+        // deleted — Copilot's finding — because by the time the second
+        // escalation runs the first row is committed and the NOT EXISTS sees
+        // it. What the hints buy is the CONCURRENT case: without them both
+        // deliveries read no row, both insert, and the loser takes a primary
+        // key violation. The end state is still one row, which is why an
+        // assertion on the count alone proves nothing; what changes is whether
+        // a delivery faults on the way there.
+        //
+        // Dispatched directly rather than sent, because the endpoint would
+        // absorb the fault: §9.8's retry would rerun the loser, the row would
+        // exist, and the test would see one row and a green run. In process
+        // there is nothing to catch the exception but this test.
+        // **Eight racers and a gate, and both were arrived at by measuring
+        // rather than by choosing.** Two racers with no gate passed on their
+        // own without the hints and failed only alongside another test — a
+        // guard reporting the machine's load rather than the defect. Eight with
+        // no gate passed too. Eight behind the gate failed 3/3 alone, which is
+        // what makes this a test rather than a hope.
+        //
+        // The gate is the part that matters: starting eight tasks is not eight
+        // statements arriving together, because each one resolves a scope and a
+        // dispatcher first and that work is enough to serialise them.
+        Guid orderId = await fixture.SeedOrderAsync(Customer);
+
+        // A gate, because starting eight tasks is not the same as eight
+        // statements reaching SQL Server together — measured: without it they
+        // serialised and the hintless build passed every run. Each racer builds
+        // its scope, then waits here; releasing the gate is what puts the
+        // read-then-write windows on top of each other.
+        TaskCompletionSource start = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task[] racers = [.. Enumerable.Range(0, 8).Select(_ => DispatchEscalationAsync(orderId, start.Task))];
+
+        start.SetResult();
+
+        await Should.NotThrowAsync(
+            () => Task.WhenAll(racers),
+            "a concurrent duplicate must be absorbed by the range lock, not surface as a primary key " +
+            "violation — without WITH (UPDLOCK, HOLDLOCK) this throws " +
+            "\"Violation of PRIMARY KEY constraint 'PK_OrderReviews'\"");
+
+        (await ReviewCountAsync(orderId)).ShouldBe(
+            1,
+            "and the lock must absorb them rather than deadlock — eight writers, one row");
+    }
+
+    private async Task DispatchEscalationAsync(Guid orderId, Task gate)
+    {
+        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
+
+        // Everything expensive happens before the gate, so what is released is
+        // eight dispatches and not eight container resolutions.
+        IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
+
+        await gate;
+
+        await dispatcher.SendAsync(
+            new FlagOrderForReviewCommand(orderId, ReviewReasons.NotDespatched),
+            TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task A_command_this_service_cannot_parse_changes_nothing()
     {
         // §9.8's ContractMappingException path: a peer sending a code this
@@ -306,8 +376,8 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
             // Both readers of §3.2's StockReserved, because both now record it:
             // the consumer on ordering-stock-events, and the saga on its own
             // queue since that endpoint took an inbox filter.
-            _published.Add((messageId, DependencyInjection.StockEventsQueue));
-            _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
+            _published.Add((messageId, MessagingRegistration.StockEventsQueue));
+            _published.Add((messageId, MessagingRegistration.FulfilmentSagaQueue));
         }
 
         await fixture.Factory.Services
@@ -343,12 +413,12 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     {
         ISendEndpoint endpoint = await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .GetSendEndpoint(new Uri($"queue:{DependencyInjection.CommandsQueue}"));
+            .GetSendEndpoint(new Uri($"queue:{MessagingRegistration.CommandsQueue}"));
 
         var messageId = Guid.CreateVersion7();
 
         if (drain)
-            _published.Add((messageId, DependencyInjection.CommandsQueue));
+            _published.Add((messageId, MessagingRegistration.CommandsQueue));
 
         await endpoint.Send(command, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
     }

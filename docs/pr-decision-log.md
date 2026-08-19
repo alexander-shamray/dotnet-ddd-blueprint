@@ -114,9 +114,13 @@ after.
     built — which is exactly the kind of debt that is free until the PR that
     pays it cannot find it.
   - **It needs a fourth receive endpoint**, `ordering-stock-events`, because
-    the saga's endpoint carries no inbox filter by documented exemption and a
-    plain consumer sharing it would inherit that exemption without writing
-    anything down. §9.8's "Ordering has three" became four.
+    the saga's endpoint carried no inbox filter by documented exemption and a
+    plain consumer sharing it would have inherited that exemption without
+    writing anything down. §9.8's "Ordering has three" became four. **The
+    exemption is gone — see the entry below — and the separation survives on a
+    different reason**: the saga's retry policy is written for inapplicable
+    transitions rather than for the domain rejections `Order.ConfirmStock`
+    produces.
   - **The two deliveries are unordered, so `ConfirmOrder` can arrive first**,
     and the handler answers `ErrorType.Unavailable` rather than a rule failure.
     §9.8 already draws that line — retry is for faults time might fix — and a

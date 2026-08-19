@@ -2715,11 +2715,12 @@ cfg.ReceiveEndpoint(
                 maxInterval: TimeSpan.FromMinutes(1),
                 intervalDelta: TimeSpan.FromSeconds(2)));
 
-        // Duplicate suppression — §9.5. On this endpoint and on
-        // ordering-commands, and on any endpoint added later: at-least-once
-        // delivery is a property of the broker, not of the message type or of
-        // what the consumer does with it. The saga endpoint below is the one
-        // exception, and says why.
+        // Duplicate suppression — §9.5. On this endpoint, on
+        // ordering-commands, on the saga's, and on any endpoint added later:
+        // at-least-once delivery is a property of the broker, not of the
+        // message type or of what the consumer does with it. The saga was the
+        // one exception until PR-21; the callout under its block says what that
+        // exemption did not cover.
         //
         // BEFORE the in-memory outbox, so the inbox row is committed after the
         // buffered sends have flushed rather than before. The callout under
