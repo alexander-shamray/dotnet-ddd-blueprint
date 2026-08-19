@@ -334,9 +334,13 @@ and CI has a `scaffold` job for them beside `licence-gate`.
 **§4.2's architecture rules are a build failure, not a review comment.** Each
 gate was observed red against a deliberately added forbidden reference before
 it was trusted. Since PR-10 the endpoints gate judges real types rather than
-passing vacuously, and since PR-19 the selector is a *pattern* with a second
-test asserting what it selects — the `.Endpoints`-only version went vacuous the
-moment a `.Grpc` namespace existed.
+passing vacuously. **The composition-root gate has no selector at all**, and
+that is the fourth shape rather than the first: a namespace, then a namespace
+*pattern*, then two ways of excluding compiler-generated types, each of them
+selecting less than it claimed. It now judges the assembly whole and subtracts
+the composition root from the **failures**, so there is no candidate set to be
+narrow and no empty selection to pass vacuously — and its companion test's
+subject is the exemption, not the selection.
 
 **Since PR-22 all five rows of the table are gated, in two shapes.** A row
 saying what a project *may* reference gets an allow-list over

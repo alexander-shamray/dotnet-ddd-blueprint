@@ -621,9 +621,11 @@ the `web-bff` route's service — and ten of its decisions bind what comes after
 - **The `.Endpoints`-only architecture gate went vacuous the moment a second
   transport namespace existed.** `PricingService` is an endpoint in every sense
   §4.2 cares about and lived in `.Grpc`, so the gate selected none of it and
-  stayed green. The selector is a pattern now, and — this is the half worth
-  copying — a **second test asserts the selection itself**, naming both
-  adapters. A gate that silently stops covering the newest surface is this
+  stayed green. PR-19 made the selector a pattern and — this is the half worth
+  copying — added a **second test asserting the selection itself**, naming both
+  adapters. Neither survives: a later shape dropped the selector entirely and
+  moved that test's subject to the exemption, for the reason the next sentence
+  gives. A gate that silently stops covering the newest surface is this
   repository's most-repeated failure, and the only defence is a test whose
   subject is what the gate is looking at rather than what it found.
 - **The realm was built through the admin API and verified by re-importing it**,

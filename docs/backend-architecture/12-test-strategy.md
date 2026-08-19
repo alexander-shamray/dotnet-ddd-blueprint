@@ -2019,8 +2019,9 @@ follows it.
 
 The file filters the report to `.*\.Domain\.dll$` and emits Cobertura, and CI
 prints the figure to the job summary. **Reported, never gated** — a threshold
-that fails a build is [§15.1](15-cicd-deployment.md)'s quality gates, and a
-diagnostic wired to a build failure stops being read and starts being satisfied.
+that fails a build is PR-25's quality gates
+([Appendix C](appendix-c-delivery-plan.md)), and a diagnostic wired to a build
+failure stops being read and starts being satisfied.
 
 Three things about that filter are deliberate:
 
