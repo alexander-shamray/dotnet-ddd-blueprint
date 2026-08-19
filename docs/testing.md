@@ -84,9 +84,17 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
 > ten tests of the two classes in the collection and `Category!=Integration`
-> selects the other seventy-two — 82 in total, with no third state and nothing
-> counted twice. Across the solution the split is **612 and 164 of 776**, and
-> the fast half runs in about 76 seconds.
+> selects the other seventy-one — 81 in total, with no third state and nothing
+> counted twice.
+>
+> **Those are the runner's numbers, and `--list-tests` gives different ones.**
+> Discovery reports 82 for that project where execution reports 81, so a
+> partition quoted from `--list-tests` does not reconcile against anything else
+> here — the 776 is summed from `dotnet test` output, and mixing the two is how
+> this callout first came to claim 72 and 82. Quote what ran.
+>
+> Across the solution the split is **612 and 164 of 776**, and the fast half
+> runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
 > than inferring: `docker events --filter event=create` over the window

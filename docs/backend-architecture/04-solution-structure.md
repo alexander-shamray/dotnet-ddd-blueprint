@@ -313,9 +313,13 @@ the gate stopped doing is *selecting* candidates by namespace; what it still
 does is tell the composition root from everything else by exactly that —
 `IsCompositionRoot` tests `!fullName.Contains('.')`, because top-level
 statements put `Program` in the global namespace while an endpoint keeps
-`Catalog.Api.Endpoints`. The alternative below replaces that discrimination
+`Catalog.Api.Endpoints`. The alternative above replaces that discrimination
 with a project boundary, which is why it is the heavier option and the one a
 compiler enforces.
+
+**These tests are a CI gate from the first template commit**, not a later
+addition. An architecture rule introduced after the violations exist is a
+backlog item; one introduced before them is a constraint.
 
 ### The rest of the table, enforced
 
@@ -419,10 +423,6 @@ Domain" includes, to no benefit a compiler can see.
 no longer referenced is a pre-authorised hole rather than a failure, which is a
 real cost and the smaller one — the alternative fails a build for a legitimate
 *removal*, and the decision worth forcing is the one that adds a dependency.
-
-**These tests are a CI gate from the first template commit**, not a later
-addition. An architecture rule introduced after the violations exist is a
-backlog item; one introduced before them is a constraint.
 
 ### What the composition root composes
 

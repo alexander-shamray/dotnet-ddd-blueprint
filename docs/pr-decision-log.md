@@ -125,7 +125,7 @@ domain-layer coverage. Six of its decisions bind what comes after.
   therefore no reflection gate owed to check that nobody did, which is the
   first time this repo has closed one of these by construction rather than by
   adding a second test. xUnit v3's propagation was measured before the design
-  was trusted: 10 and 72 of 82 on one assembly, 612 and 164 of 776 across the
+  was trusted: 10 and 71 of 81 on one assembly, 612 and 164 of 776 across the
   solution, with no third state.
 - **"No container starts" is a claim about a run, so it was measured — and the
   first attempt to measure it proved nothing.** Pointing `DOCKER_HOST` at a

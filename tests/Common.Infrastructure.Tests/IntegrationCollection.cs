@@ -17,7 +17,7 @@ namespace Common.Infrastructure.Tests;
 /// class, and that is the whole design. xUnit v3 applies a collection's traits
 /// to every test in it — measured on this assembly, where
 /// <c>Category=Integration</c> selects all ten tests of the two member classes
-/// and <c>Category!=Integration</c> selects the other seventy-two, with no
+/// and <c>Category!=Integration</c> selects the other seventy-one, with no
 /// third state. So joining the collection <i>is</i> carrying the category, and
 /// there is no per-class attribute for a new test class to forget. See
 /// <c>docs/testing.md</c> for the filters this makes available.

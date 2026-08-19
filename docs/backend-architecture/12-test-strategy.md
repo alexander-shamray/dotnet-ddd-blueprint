@@ -1024,7 +1024,8 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > Measured rather than assumed, because that propagation is load-bearing: on
 > `Common.Infrastructure.Tests`, `Category=Integration` selects the ten tests
 > of the two classes in the collection and `Category!=Integration` selects the
-> other seventy-two, with no third state and nothing counted twice.
+> other seventy-one — 81 as the runner counts them, with no third state and
+> nothing counted twice.
 >
 > **The fast half starts no container, and that is proved rather than
 > inferred**: `docker events --filter event=create` over a solution-wide
