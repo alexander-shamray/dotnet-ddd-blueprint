@@ -341,11 +341,12 @@ public static class DependencyInjection
                 // one was configured by nobody.
                 //
                 // §9.8 is explicit that every receive endpoint applies
-                // InboxFilter<>, and that the saga is the one exception
-                // because its state is its idempotency check — "any other
-                // opt-out needs the same kind of written justification, in the
-                // endpoint that takes it". An endpoint MassTransit invents
-                // takes that opt-out and writes nothing down.
+                // InboxFilter<> — with no exception at all since PR-21, the
+                // saga's having turned out to be a defect rather than a
+                // decision. An endpoint MassTransit invents opts out of it
+                // anyway and writes nothing down, which is the whole objection:
+                // the rule is not "the inbox unless you argue otherwise", it is
+                // "the inbox", and an invented endpoint cannot argue.
                 //
                 // Measured both ways by deleting the ProductPublished line
                 // above and running CatalogEventEndpointTests. With

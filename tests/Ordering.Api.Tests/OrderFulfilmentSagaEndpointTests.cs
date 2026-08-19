@@ -1,7 +1,9 @@
 using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
+using Common.Infrastructure.Inbox;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
+using Ordering.Infrastructure.Messaging;
 using Ordering.TestSupport;
 using Shouldly;
 using Xunit;
@@ -29,9 +31,38 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
 
     private static readonly TimeSpan DeliveryBudget = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Every message this test published, so the teardown can wait for the
+    /// saga endpoint's inbox row before the next test truncates.
+    /// </summary>
+    private readonly List<Guid> _published = [];
+
     public async ValueTask InitializeAsync() => await fixture.ResetAsync();
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    /// <summary>
+    /// Drains what this test started.
+    /// </summary>
+    /// <remarks>
+    /// <b>This was a no-op, and it was the same flake the suite next door
+    /// exists to document.</b> The assertions here observe the saga
+    /// repository's commit — a row appearing or disappearing — which happens
+    /// <em>inside</em> the consumer; §9.5's filter writes its inbox row after
+    /// control returns to it. So a test could see the row go, return, and let
+    /// the next <c>ResetAsync</c> truncate the schema underneath a
+    /// <c>SaveChangesAsync</c> still in flight. Copilot caught it in the round
+    /// after the one that added the filter — the filter is what created the
+    /// second write to wait for.
+    /// </remarks>
+    public async ValueTask DisposeAsync()
+    {
+        foreach (Guid messageId in _published)
+        {
+            await Eventually(
+                async () => (await SagaInboxRowsAsync(messageId)).Count,
+                expected: 1,
+                because: "a delivery still running when the next test resets is a flake in that test");
+        }
+    }
 
     [Fact]
     public async Task The_instance_is_persisted_across_a_transition_and_deleted_on_finalise()
@@ -112,11 +143,7 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
         await PublishPlacedAsync(orderId, Guid.CreateVersion7());
         await Eventually(() => SagaRowsAsync(orderId), expected: 1, because: "the arrange half");
 
-        await fixture.Factory.Services
-            .GetRequiredService<IBus>()
-            .Publish(
-                new Ordering.Infrastructure.Messaging.StockReservationExpired(orderId),
-                TestContext.Current.CancellationToken);
+        await PublishExpiredAsync(orderId, Guid.CreateVersion7());
 
         await Eventually(
             () => SagaRowsAsync(orderId),
@@ -125,10 +152,36 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
                 "message for want of a MessageId, the row would still be there");
     }
 
+    /// <summary>
+    /// The saga endpoint's inbox rows for one message. Scoped by endpoint,
+    /// because a <c>StockReserved</c> would leave one here and one on
+    /// <c>ordering-stock-events</c> — the inbox key is message id and endpoint.
+    /// </summary>
+    private async Task<IReadOnlyList<InboxMessage>> SagaInboxRowsAsync(Guid messageId) =>
+        [.. (await fixture.InboxAsync())
+            .Where(r => r.MessageId == messageId && r.Endpoint == DependencyInjection.FulfilmentSagaQueue)];
+
     private Task<int> SagaRowsAsync(Guid orderId) =>
         fixture.ScalarAsync<int>(
             "SELECT Value = COUNT(*) FROM ordering.OrderFulfilmentStates WHERE CorrelationId = {0}",
             orderId);
+
+    /// <summary>
+    /// A scheduled expiry, published with an id of this test's choosing so the
+    /// teardown can wait for it. The scheduler assigns its own in production;
+    /// what is under test is that the type crosses the endpoint's filter.
+    /// </summary>
+    private async Task PublishExpiredAsync(Guid orderId, Guid messageId)
+    {
+        _published.Add(messageId);
+
+        await fixture.Factory.Services
+            .GetRequiredService<IBus>()
+            .Publish(
+                new StockReservationExpired(orderId),
+                c => c.MessageId = messageId,
+                TestContext.Current.CancellationToken);
+    }
 
     private async Task PublishPlacedAsync(Guid orderId, Guid messageId)
     {
@@ -143,6 +196,11 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
             Currency = "EUR",
             Lines = [new PlacedLine(Guid.CreateVersion7(), 1, 19.99m)]
         };
+
+        // Added once even when the same id is published twice: the replay is
+        // suppressed by the filter, so it writes no second row.
+        if (!_published.Contains(messageId))
+            _published.Add(messageId);
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
@@ -159,6 +217,8 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
             OrderId = orderId,
             UnavailableProductIds = [Guid.CreateVersion7()]
         };
+
+        _published.Add(messageId);
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()

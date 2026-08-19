@@ -2695,8 +2695,13 @@ timeout fails the first assertion at once.
 Retry and idempotency are configured per receive endpoint, and Ordering has
 **four**, each declared with its own policy. It had three until PR-21, and the
 fourth is the one whose absence was a design gap rather than an omission — §9.6
-argues it where the transition it serves lives. The **projection** endpoint from
-§9.4, carrying Catalog's events into local read models:
+argues it where the transition it serves lives.
+
+**Idempotency is the same on all four**: every one applies `InboxFilter<>`. The
+saga's endpoint was the exception until PR-21 found what that exemption did not
+cover, and the callout under it is the argument. Retry is where they differ.
+The **projection** endpoint from §9.4, carrying Catalog's events into local read
+models:
 
 ```csharp
 cfg.ReceiveEndpoint(
