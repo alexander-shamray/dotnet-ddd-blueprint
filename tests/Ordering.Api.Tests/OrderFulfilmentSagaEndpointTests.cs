@@ -119,12 +119,33 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
 
         // The same message, again — which is what the outbox does after a crash.
         await PublishPlacedAsync(orderId, messageId);
-        await Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Then a sentinel for an unrelated order, and the wait is on its row
+        // rather than on a clock. **Copilot's finding, and it named the second
+        // half too:** _published holds each id once, so the teardown drain was
+        // already satisfied by the *first* delivery of this id and never waited
+        // for the replay — the exact shape the drain was added to close, one
+        // level down. The sentinel is a fresh id, so it is drained on its own.
+        var sentinelOrderId = Guid.CreateVersion7();
+        await PublishPlacedAsync(sentinelOrderId, Guid.CreateVersion7());
+        await Eventually(
+            () => SagaRowsAsync(sentinelOrderId),
+            expected: 1,
+            because: "a message published after the replay has been consumed, so the endpoint has had " +
+                "the replay in front of it — five seconds was generous on this machine and a guess " +
+                "about every other one");
 
         (await SagaRowsAsync(orderId)).ShouldBe(
             0,
             "a replayed OrderPlaced must not start fulfilment again — a second ReserveStock and a second " +
             "AuthorisePayment for one order is a double charge, and the row is the observable half of it");
+
+        // **A bound, not a proof of ordering**, on the terms
+        // OrderingCommandEndpointTests states in full: nothing pins this
+        // endpoint to one message at a time, so the sentinel may overtake. What
+        // it replaces is a fixed delay that could not scale with the runner at
+        // all, and unlike that delay it fails the test rather than passing it
+        // when the broker is the thing that stalled.
     }
 
     [Fact]
@@ -150,6 +171,59 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
             expected: 0,
             because: "the stock timeout cancels the order and finalises — if the filter had rejected the " +
                 "message for want of a MessageId, the row would still be there");
+    }
+
+    [Fact]
+    public async Task Two_events_for_one_instance_arriving_together_are_both_consumed()
+    {
+        // Copilot's finding was that ConcurrencyMode.Pessimistic is justified
+        // by a race no test runs, and every other test here delivers one event
+        // at a time. This publishes two without awaiting between them, so both
+        // are on the queue before either is consumed.
+        //
+        // **It does not pin the mode, and that was measured rather than
+        // assumed.** With the registration flipped to Optimistic this passes
+        // in 915 ms — the two transitions are a few milliseconds each, so the
+        // endpoint drains them back to back and no concurrency conflict ever
+        // arises. Writing the name Two_events_..._are_serialised over that
+        // would be this round's own finding committed a second time: a test
+        // green against both sides of the thing it claims to check.
+        //
+        // What it does cover is real and was uncovered before: two events for
+        // one instance, in flight together, are both consumed without
+        // faulting and leave one instance or none. The residual — a genuine
+        // overlap, which needs a transition slow enough to hold the lock — is
+        // recorded in the decision log rather than papered over here.
+        var orderId = Guid.CreateVersion7();
+
+        await PublishPlacedAsync(orderId, Guid.CreateVersion7());
+        await Eventually(() => SagaRowsAsync(orderId), expected: 1, because: "the arrange half");
+
+        Guid reservedId = Guid.CreateVersion7();
+        Guid expiredId = Guid.CreateVersion7();
+
+        await Task.WhenAll(
+            PublishReservedAsync(orderId, reservedId),
+            PublishExpiredAsync(orderId, expiredId));
+
+        // InboxFilter records the id *after* the consumer returns — its own
+        // summary says so — so a consume that faults writes no row at all.
+        // That makes this the assertion with teeth: whatever order the two
+        // transitions run in, neither may throw.
+        await Eventually(
+            async () => (await SagaInboxRowsAsync(reservedId)).Count + (await SagaInboxRowsAsync(expiredId)).Count,
+            expected: 2,
+            because: "a row is written only once its consumer returns, so a transition that faulted on " +
+                "the instance the other one changed leaves this at one");
+
+        // Stated for what it rules out, which is less than it looks: the
+        // primary key on CorrelationId already forbids a second row. It is
+        // here because two instances is the failure a reader expects the mode
+        // to be about, and leaving it unasserted invites the next reader to
+        // add it as though it were the missing coverage.
+        (await SagaRowsAsync(orderId)).ShouldBeLessThanOrEqualTo(
+            1,
+            "one instance or none — never two for one CorrelationId");
     }
 
     /// <summary>
@@ -205,6 +279,23 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
             .Publish(placed, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+    }
+
+    private async Task PublishReservedAsync(Guid orderId, Guid messageId)
+    {
+        StockReserved reserved = new()
+        {
+            MessageId = messageId,
+            CorrelationId = orderId,
+            OccurredAt = DateTimeOffset.UtcNow,
+            OrderId = orderId
+        };
+
+        _published.Add(messageId);
+
+        await fixture.Factory.Services
+            .GetRequiredService<IBus>()
+            .Publish(reserved, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
     }
 
     private async Task PublishReservationFailedAsync(Guid orderId, Guid messageId)

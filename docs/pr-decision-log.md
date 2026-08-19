@@ -219,6 +219,63 @@ naming them is the alternative to a silent gap.
   platform's hand-rolled §9.4 one, which is a §9 decision about owning two
   outboxes and not something a saga PR settles.
 
+### What nine rounds of review moved, and the shape of the last one
+
+**Every finding that changed behaviour arrived from a review, and the last one
+to do so arrived on round nine.** That is worth recording as a fact about the
+process rather than as praise for the reviewer: the suite was green and the
+chapters reconciled after round three, and rounds four through nine still
+found a replayed `OrderPlaced` restarting a finished saga, a healthcheck that
+passed on a broker with no plugin, and three handler branches with no test
+between them and a permanently unconfirmed paid order.
+
+**Round nine's shape is the one to carry.** All eight of its findings were
+*suppressed* — none surfaced as an inline comment — and five of the eight were
+one claim: **a test that cannot fail for the reason it names.**
+
+- `ConfirmOrderHandler`'s `StockNotConfirmed` is `Unavailable` so
+  `CommandConsumer` retries it; a `Rule` error there acks a paid order's
+  confirmation for good. Nothing tested it. The same for
+  `MarkOrderShipped`'s `NotConfirmed` versus `NotShippable` and
+  `ConfirmStock`'s `NotAwaitingStock` — three branches whose whole content is
+  *which* `ErrorType` they carry, reachable only through a handler no endpoint
+  test drives off the happy path. `SagaCommandHandlerTests` is the answer, and
+  it is six tests for six branches.
+- The duplicate-suppression test asserted a status that **cannot move either
+  way**: `StockReservedHandler` drops the `Result` deliberately, so a
+  duplicate reaching the aggregate is refused and leaves exactly the state a
+  suppressed one does. The inbox row count was carrying the test the whole
+  time and the status assertion was decoration reading as proof.
+- `ConcurrencyMode.Pessimistic` was argued in a comment about two events
+  arriving together, and every test in the suite delivered one at a time.
+  **The test written for it does not pin the mode, and that is a measurement
+  rather than a caveat**: with the registration flipped to `Optimistic` it
+  passes in 915 ms. Each transition is a few milliseconds, so two messages
+  published together are drained back to back and no concurrency conflict
+  arises — publishing concurrently does not make a saga *consume*
+  concurrently. Forcing a real overlap needs a transition slow enough to hold
+  the lock while the second event arrives, which means production code written
+  to be slow for a test. So the mode stays **registered, reasoned and
+  uncovered**, and the test claims only what it demonstrates: both events are
+  consumed without faulting and leave one instance or none. The name
+  `..._are_serialised` was drafted and withdrawn — a name green against both
+  settings is this round's own finding committed a second time.
+
+**The generalisation is this repository's oldest one arriving by a new
+route.** *A gate that silently stops covering the newest surface* is usually
+about an architecture test's selector; here it is about an assertion that was
+never watching the thing beside it. **Ask what the test does when the code is
+wrong, not what it does when the code is right** — five of these were green
+against both.
+
+**Two fixed sleeps became sentinel waits, and the honest limit is recorded in
+the tests themselves.** A `Task.Delay` before a negative assertion is a claim
+about the runner, not about the code; publishing a fresh message afterwards
+and waiting for *its* effect scales with the machine. It is a bound and not a
+proof — neither endpoint sets `ConcurrentMessageLimit`, so the sentinel may
+overtake — and making it a proof would mean changing the production topology
+to suit a test, which was considered and refused.
+
 ---
 
 ## PR-20 — the first projection and the first receive endpoint

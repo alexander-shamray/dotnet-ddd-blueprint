@@ -133,15 +133,44 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
             "the saga binds the same event on its own queue — a row from that endpoint would mean this " +
             "consumer was bound there instead, under a retry policy written for a state machine");
 
-        // The same id again. The filter drops it, so the order stays where the
-        // first delivery left it rather than being refused by the aggregate.
+        // The same id again — followed by a sentinel for an unrelated order,
+        // which is what bounds the wait.
+        //
+        // **The status is not the discriminator, and asserting it alone would
+        // prove nothing** — Copilot's finding, and it is exactly right.
+        // StockReservedHandler drops the Result on purpose (§9.8), so a
+        // duplicate that reached the aggregate would be refused with
+        // NotAwaitingStock and leave the order in the same state as one that
+        // never arrived. Suppressed and rejected are indistinguishable from
+        // ordering.Orders. What does discriminate is the row count above and
+        // below: the filter *is* the row, so an endpoint without one leaves
+        // zero and fails the first assertion, and the second pins that a
+        // redelivery adds none. The status assertion stays as a regression
+        // guard on the aggregate — it is not asked to carry this test.
         await PublishStockReservedAsync(orderId, messageId, drain: false);
-        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+
+        Guid sentinelOrderId = await fixture.SeedOrderAsync(Customer);
+        await PublishStockReservedAsync(sentinelOrderId, Guid.CreateVersion7(), drain: false);
+        await EventuallyStatus(
+            sentinelOrderId,
+            "AwaitingPayment",
+            because: "a message published after the duplicate has been consumed, so the endpoint has " +
+                "had the duplicate in front of it — a wait that scales with the runner rather than a " +
+                "fixed three seconds that is generous here and short on a loaded agent");
 
         (await StatusAsync(orderId)).ShouldBe("AwaitingPayment");
         (await InboxRowsAsync(messageId, MessagingRegistration.StockEventsQueue))
             .Count
             .ShouldBe(1, "a suppressed duplicate writes no second row");
+
+        // **The sentinel bounds this wait; it does not prove delivery order.**
+        // Neither endpoint sets ConcurrentMessageLimit, so MassTransit's
+        // prefetch lets the two be in flight together and the sentinel can
+        // finish first. What it buys is a bound that tracks the machine — on a
+        // runner slow enough to make three seconds too few, the sentinel is
+        // slow by the same factor. Making it a proof would take
+        // ConcurrentMessageLimit = 1 on ordering-stock-events, which is a
+        // production topology change to suit a test and is not taken.
     }
 
     [Fact]
