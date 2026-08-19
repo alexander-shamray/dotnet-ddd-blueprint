@@ -37,13 +37,14 @@ public sealed class ConfirmOrderHandler(IOrderRepository orders, TimeProvider cl
         // The one refusal here that time fixes, and it has to be told apart
         // from the rest before the aggregate is asked. Ordering learns that
         // stock was reserved on ordering-stock-events and that payment was
-        // authorised on ordering-commands — two endpoints, two deliveries, no
-        // ordering between them — so a confirmation can arrive while the
-        // order is still AwaitingStock. §9.8's rule decides the answer:
-        // Unavailable is a fault time might fix, CommandConsumer turns it into
-        // an UnavailableResultException, and the endpoint's backoff runs it
-        // again. Returning a Rule error here would ack it, count it as a
-        // domain rejection, and leave a paid order unconfirmed for good.
+        // authorised on ordering-commands — two receive endpoints, two
+        // deliveries, no ordering between them — so a confirmation can arrive
+        // while the order is still AwaitingStock. §9.8's rule decides the
+        // answer: Unavailable is a fault that time might fix, CommandConsumer
+        // turns it into an UnavailableResultException, and the endpoint's
+        // backoff runs it again. Returning a Rule error here would ack it,
+        // count it as a domain rejection, and leave a paid order unconfirmed
+        // for good.
         //
         // The window is a local write against a payment authorisation, so it
         // is small; that it is small is not why it is handled.

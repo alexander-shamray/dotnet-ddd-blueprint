@@ -6,7 +6,7 @@ namespace Common.Application;
 /// </summary>
 /// <remarks>
 /// <b>It exists to be excluded from retry.</b> §9.8's rule is that retry is for
-/// faults time might fix: a broker blip, a deadlock, an expired token. A
+/// faults that time might fix: a broker blip, a deadlock, an expired token. A
 /// malformed contract does not parse itself on the fourth attempt, so a receive
 /// endpoint declares <c>r.Ignore&lt;ContractMappingException&gt;()</c> and the
 /// message reaches the error queue on the first attempt instead of after a

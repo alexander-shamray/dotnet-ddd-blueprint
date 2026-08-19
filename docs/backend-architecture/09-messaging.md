@@ -2386,7 +2386,7 @@ now that both carry the filter.
 
 > **The two deliveries are unordered, so `ConfirmOrder` can arrive first**, and
 > the handler's answer is `ErrorType.Unavailable` rather than a rule failure.
-> §9.8 already draws that line — retry is for faults time might fix — and this
+> §9.8 already draws that line — retry is for faults that time might fix — and this
 > is one: the confirming command is in flight on another endpoint. Returning a
 > `Rule` error instead would ack a paid order's confirmation for good. The
 > window is a local write against a payment authorisation and is therefore

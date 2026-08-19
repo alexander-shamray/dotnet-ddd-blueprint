@@ -29,10 +29,11 @@ public static class OrderErrors
     /// The one <see cref="ErrorType.Unavailable"/> in this catalogue that is
     /// about this service's own state rather than a dependency's, and it
     /// earns the type on §9.8's definition rather than by analogy: a fault
-    /// time might fix. Ordering learns that stock was reserved and that
-    /// payment was authorised on two different endpoints with no ordering
-    /// between them, so <c>ConfirmOrder</c> can arrive first. Returning a
-    /// <c>Rule</c> error would ack a paid order's confirmation for good.
+    /// that time might fix. Ordering learns that stock was reserved and that
+    /// payment was authorised on two different receive endpoints with no
+    /// ordering between them, so <c>ConfirmOrder</c> can arrive first.
+    /// Returning a <c>Rule</c> error would ack a paid order's confirmation for
+    /// good.
     /// </summary>
     public static readonly Error StockNotConfirmed =
         Error.Unavailable("order.stock_not_confirmed", "Stock reservation has not been recorded yet.");

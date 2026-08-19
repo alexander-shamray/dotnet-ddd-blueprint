@@ -1,5 +1,4 @@
 using Common.Application;
-using MessagingRegistration = Ordering.Infrastructure.Messaging.DependencyInjection;
 using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
 using Common.Infrastructure.Inbox;
@@ -10,6 +9,9 @@ using Ordering.Infrastructure.Messaging;
 using Ordering.TestSupport;
 using Shouldly;
 using Xunit;
+// Aliased because Common.Application has a DependencyInjection too, and the
+// queue names this suite asserts on are the messaging one's.
+using MessagingRegistration = Ordering.Infrastructure.Messaging.DependencyInjection;
 
 namespace Ordering.Api.Tests;
 
@@ -80,7 +82,7 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     }
 
     [Fact]
-    public async Task Inventorys_reservation_advances_the_order_over_the_broker()
+    public async Task A_reservation_from_Inventory_advances_the_order_over_the_broker()
     {
         // §9.6's fourth endpoint end to end: StockReserved on the broker →
         // ordering-stock-events → IntegrationEventConsumer → StockReservedHandler
