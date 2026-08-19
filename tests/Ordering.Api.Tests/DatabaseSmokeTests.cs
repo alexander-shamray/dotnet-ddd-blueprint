@@ -45,7 +45,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // scaffolded service starts with — the schema, then §9.4's outbox
         // table, §9.5's inbox and the index the retention purge deletes
         // through — all of them wiring every service has rather than anything
-        // this one chose. The last two are Ordering's own: the aggregate's
+        // this one chose. The rest are Ordering's own — no count, because the
+        // sentence has outlived two of them already: the aggregate's
         // tables, §6.4's price projection — a read model whose schema landed a
         // PR ahead of its producer, because its reader needed it — and the
         // product-level withdrawal watermark that projection consults on the

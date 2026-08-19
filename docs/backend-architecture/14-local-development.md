@@ -433,6 +433,19 @@ var coordination = builder
     .WithDataVolume()       // locks must survive a restart
     .WithPersistence();
 
+// The stock image, and since ADR-021 that is a STATED GAP rather than a
+// parity with §14.1. Ordering's saga schedules through the delayed message
+// exchange, which is a community plugin no official image carries — so this
+// line brings up a broker that accepts UseDelayedMessageScheduler, connects,
+// reports healthy, and drops every saga timeout. §14.1 builds
+// deploy/compose/rabbitmq for exactly that reason.
+//
+// It is left as the stock call because Aspire is not adopted (ADR-011) and a
+// sample nobody compiles is the wrong place to invent an image-build API.
+// **Adopting Aspire means closing this first**: point the resource at the
+// same Dockerfile, or run Ordering against Compose. Catalog's test fixture
+// may stay on the base tag and says why — it schedules nothing — and this
+// AppHost runs Ordering, so it does not have that excuse.
 var mq = builder.AddRabbitMQ("RabbitMq").WithManagementPlugin();
 
 // One database per service that this AppHost runs. Inventory, Payments,

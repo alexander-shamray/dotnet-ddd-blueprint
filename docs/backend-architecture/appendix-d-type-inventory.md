@@ -194,7 +194,6 @@ their declaration.
 | `AlwaysThrows`, `NoOpEvent`, `UnhandledEvent` | Test event types with throwing / no-op / no handler |
 | `IntegrationCollection` (xUnit) | The `[CollectionDefinition]` sharing one `ServiceFixture` across test classes — declared once **per test assembly** (§12.4). Named for what it groups, and deliberately not `ServiceCollection`: that name is taken by `Microsoft.Extensions.DependencyInjection`, and the local type would win in every test file that also builds a provider |
 | `ICommandMessageMapper<TMessage,TCommand>` implementations | One per command contract — e.g. `CancelOrderMapper`, which parses `CancelOrder.Reason` back to `CancellationReason` and stamps `CommandOrigin.System` (§9.4). The stamp lives here rather than on the wire contract, so nothing a peer *sends* can claim it — what earns it is arrival on the queue, which is only as strong as broker authorisation (§9.4's callout) |
-| `ConfirmOrderCommand`, `MarkOrderShippedCommand`, `FlagOrderForReviewCommand` | The other three message-borne slices — the same `CommandConsumer` and `ICommandMessageMapper` shape as `CancelOrderCommand` (§9.4, §9.6), and deliberately **not** its `CommandOrigin`. These arrive by message only, so there is no second path for an origin to tell apart; a dual-path command is what needs one (§11.4) |
 | `OrderRepository` | `IOrderRepository` over EF; also the Infrastructure assembly marker for the §6.2 scan |
 | `ContractMappingException` | Thrown by an `ICommandMessageMapper` on a value it cannot map; ignored by the retry policy so it reaches the error queue immediately (§9.4, §11.4) |
 | `StartHarnessAsync` | Test helper returning a started MassTransit harness, and where a saga suite states both harness bounds — the inactivity timeout its negative assertions wait on, and the `TestTimeout` that would otherwise cap them (§12.5) |
@@ -206,7 +205,6 @@ their declaration.
 | `ConcurrentRequestException` | Thrown when an idempotency key is claimed but unfinished (§8.5) |
 | `InProgressMarker` | The sentinel `TryClaimAsync` writes while a command is in flight; `GetAsync` reads it back as `InProgress` (§8.5) |
 | `InvariantViolationException` | Thrown when a command modifies more than one aggregate root (§6.3, principle 3) |
-| `StockReservationExpired`, `PaymentAuthorisationExpired`, `DespatchExpired`, `StockReleaseExpired` | Saga schedule messages — one per wait, and §9.6 has four (§9.6) |
 | `FlagOrderForReviewHandler` | Writes the `OrderReviews` row; loads no aggregate (§9.6) |
 | `ITokenCache`, `CachingTokenClient` | Acquires and caches the M2M access token until shortly before expiry; BFF-only (§11.5) |
 | `PriceRow` | Dapper row shape behind `ProjectedPriceReader` (§6.4) |
