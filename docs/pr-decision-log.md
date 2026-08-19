@@ -60,6 +60,100 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-21 — the saga, and the four things §9.6 did not say
+
+PR-21 landed §9.6's `OrderFulfilmentSaga` with its four compensation paths and
+four timeouts, the four command handlers those timeouts send to, §9.4's
+`ordering-commands` endpoint and §9.3's allow-list — empty since PR-18, and the
+reason the saga had nothing to start on. Five of its decisions bind what comes
+after.
+
+- **No chapter had ever named a message scheduler, and §9.6's four `Schedule`
+  declarations do not work without one.** [ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
+  settles it on MassTransit's delayed message scheduler, which on RabbitMQ is
+  the delayed message exchange **plugin** — so §14.1's broker is now the one
+  infrastructure service that is *built* rather than pulled. Quartz over an ADO
+  job store was the serious alternative and is named in the ADR as the
+  successor when the plugin's Mnesia store stops being adequate; what decided
+  against it here was cost rather than correctness — three packages, ~200 lines
+  of vendor DDL this repository would own, a `dbo` prefix cutting across §7.2's
+  per-service schema, and a second set of hand-declared receive endpoints
+  because this platform deliberately does not call `ConfigureEndpoints`.
+  **The deciding argument was the test**: the in-memory transport implements
+  the delay itself, so §12.5's harness runs the same two registration lines
+  production does, where an in-memory Quartz would be a different mechanism
+  wearing the same test.
+- **A missing registration that fails at the first message, not at startup, is
+  the shape this repository keeps meeting.** Nothing resolves a scheduler while
+  the host builds, so both lines absent leaves a service that connects,
+  declares its endpoints and reports ready — and faults its first `OrderPlaced`
+  onto the error queue. Measured by deleting them: **11 of the saga suite's 13
+  tests fail, every one as a timeout**, each reporting the command the saga did
+  not send. Not one names the cause. The two survivors are the structural pair
+  that construct the state machine without starting a bus, which is worse than
+  none — they leave a deleted registration looking half-covered. That is
+  §12.5's own trap arriving from a registration instead of from a loaded
+  runner, and it is why the lines are stated in the sample rather than
+  inherited.
+- **§5.4's `Order.ConfirmStock` had no caller, and no way to acquire one.**
+  The saga sends four commands; §3.2's Accepts column lists exactly those four;
+  none of them advances the order out of `AwaitingStock`. So `ConfirmOrder`
+  arrived at an aggregate whose `ConfirmPayment` requires `AwaitingPayment` and
+  refused every confirmation the platform could produce — a happy path that
+  could not complete, invisible until something drove it end to end. The fix is
+  a **consumer, not a contract**: §3.2 already lists `StockReserved` in
+  Ordering's Consumes column, so Ordering binds it twice — the saga to decide
+  what to ask next, and an `IIntegrationEventHandler` to record it on the
+  aggregate. A fifth wire command was the tempting alternative and would have
+  changed three chapters to add a way for a peer to drive this service.
+  - **That handler dispatches rather than mutating**, and the reason is §7.5's:
+    work done inside an integration-event handler commits through the inbox
+    filter's `SaveChangesAsync` and stages **nothing**, so the domain event is
+    dropped in silence. Silent today only because no projection subscribes to
+    `OrderStockConfirmedDomainEvent` yet — §6.6's `OrderSummaries` is not
+    built — which is exactly the kind of debt that is free until the PR that
+    pays it cannot find it.
+  - **It needs a fourth receive endpoint**, `ordering-stock-events`, because
+    the saga's endpoint carries no inbox filter by documented exemption and a
+    plain consumer sharing it would inherit that exemption without writing
+    anything down. §9.8's "Ordering has three" became four.
+  - **The two deliveries are unordered, so `ConfirmOrder` can arrive first**,
+    and the handler answers `ErrorType.Unavailable` rather than a rule failure.
+    §9.8 already draws that line — retry is for faults time might fix — and a
+    `Rule` error would ack a paid order's confirmation for good. The window is
+    a local write against a payment authorisation and is therefore small; that
+    it is small is not why it is handled.
+- **§9.6's escalation insert was a read-then-write with no range lock.** The
+  printed `IF NOT EXISTS … INSERT` and the conditional `INSERT … WHERE NOT
+  EXISTS` that replaced it both read and then write, so both race; the
+  difference is `WITH (UPDLOCK, HOLDLOCK)`, which makes the second delivery
+  wait and then see the row rather than violate the primary key. This is PR-20's
+  `MERGE`/`HOLDLOCK` finding one table over, and the third time this repository
+  has fixed a duplicate guard that had the defect it was written to prevent.
+  The same block also stopped writing `SYSDATETIMEOFFSET()`: `RetentionPurgeService`
+  already computes its cutoff from `TimeProvider`, and a row on the server's
+  wall clock is one no substituted clock can reason about.
+- **`ShippingAddressV1` silently dropped an address line.** The record carried
+  `Line1`, `City`, `PostCode` and `Country`, the domain's `Address` carries
+  `Line2`, and nothing noticed because nothing had ever populated the contract —
+  PR-21's mapper is its first producer. Added here rather than deferred, on the
+  rule this repository already states about contracts: **a contract with no
+  consumers is the only cheap moment a contract ever has**, and the same change
+  one release later is a §9.2 version bump.
+
+**One thing is owed and is named rather than built.** §9.6's `StockTimeout`
+branch cancels the order and finalises **without releasing stock**, so a
+reservation that arrives after the timeout is stranded in Inventory with no
+saga left to compensate it — `ConfirmStockHandler` rejects it, which makes the
+event visible on `command.domain_rejected` and does not free the stock. That is
+the chapter's design and not this PR's defect, but it is the second stranded-
+reservation path in §9.6 and only the other one escalates
+(`ReviewReasons.StockNotReleased`). Closing it means either a compensating
+`ReleaseStock` on the timeout branch or a second escalation reason, and both
+are decisions §9.6 has to take rather than a saga implementation.
+
+---
+
 ## PR-20 — the first projection and the first receive endpoint
 
 PR-20 landed the first projection and the first receive endpoint — §6.6's
