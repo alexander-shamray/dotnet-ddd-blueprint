@@ -1,5 +1,5 @@
 ---
-description: Multi-pass self-consistency audit of the blueprint and its roadmap, and of the code against them
+description: Multi-pass self-consistency audit of the blueprint, its roadmap and docs/testing.md, and of the code against them
 argument-hint: "[chapter file or topic to focus on — omit for a full sweep]"
 allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
 ---
@@ -123,8 +123,15 @@ not tone, not "this could be clearer". Specifically hunt for:
 ## Method
 
 Work in passes. Each pass picks one axis from the list above and traces it
-across all 21 files — the 20 under `docs/backend-architecture/` plus
-`docs/roadmap.md`. Do not read chapter-by-chapter; read claim-by-claim.
+across all 22 files — the 20 under `docs/backend-architecture/`, plus
+`docs/roadmap.md` and `docs/testing.md`. Do not read chapter-by-chapter; read
+claim-by-claim.
+
+**The last of those is named here because the scope paragraph naming it is not
+the operative procedure.** An agent works from this section, so a file admitted
+above and absent from this list is a file nobody greps — and the claims that
+live only in `docs/testing.md`, not in §12, are exactly the ones a 20-chapter
+sweep cannot see.
 
 For each candidate:
 

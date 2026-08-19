@@ -302,6 +302,11 @@ public void Application_and_domain_do_not_reference_masstransit()
 }
 ```
 
+If the namespace rule proves awkward to enforce, split the host into
+`Ordering.Host` (composition, references Infrastructure) and `Ordering.Api`
+(endpoints, does not) and let the project reference enforce it. That is the more
+robust option; the single-project namespace rule is the lighter one.
+
 ### The rest of the table, enforced
 
 **What the three gates above leave uncovered is a clause rather than a row**,
@@ -404,11 +409,6 @@ Domain" includes, to no benefit a compiler can see.
 no longer referenced is a pre-authorised hole rather than a failure, which is a
 real cost and the smaller one — the alternative fails a build for a legitimate
 *removal*, and the decision worth forcing is the one that adds a dependency.
-
-If the namespace rule proves awkward to enforce, split the host into
-`Ordering.Host` (composition, references Infrastructure) and `Ordering.Api`
-(endpoints, does not) and let the project reference enforce it. That is the more
-robust option; the single-project namespace rule is the lighter one.
 
 **These tests are a CI gate from the first template commit**, not a later
 addition. An architecture rule introduced after the violations exist is a
