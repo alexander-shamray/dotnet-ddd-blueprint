@@ -184,6 +184,15 @@ public void Domain_references_only_common_domain_and_the_framework()
     // using earns its line here on purpose — extending this list is the
     // decision the gate exists to force, and System.Text.Json is the
     // extension the table forbids by name.
+    //
+    // Two entries, because two is what an EMPTY domain references — this is
+    // the form §4.5's scaffold renders. A live one grows: Catalog's and
+    // Ordering's both carry System.Collections, earned by the first domain
+    // event, whose generated record equality goes through
+    // EqualityComparer<T>, and System.Linq, earned by the first value object
+    // doing enumerable logic over owned values. Run as printed against either
+    // of them, this list fails — which is the gate working, not the sample
+    // being wrong.
     string[] allowed = ["Common.Domain", "System.Runtime"];
 
     IEnumerable<string> referenced = typeof(Order).Assembly
@@ -1366,10 +1375,14 @@ dispatcher without its table logs a failed claim twice a second from its first
 boot. It then edits five shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, and the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
-builds and its **fifty-six** tests pass before a line of it is written,
-**thirty** of them against real SQL Server and RabbitMQ containers — counts
-measured against a rendered service by PR-18, which found them reading
-forty-one and sixteen three PRs after they stopped being true.
+builds and its **sixty** tests pass before a line of it is written, **thirty**
+of them against real SQL Server and RabbitMQ containers — counts measured
+against a rendered service, by PR-18 when they read forty-one and sixteen three
+PRs after they stopped being true, and again by PR-22 when they read fifty-six.
+**Arithmetic is not a remeasurement**: PR-22 added three tests to the template
+and the total moved by four, so whoever adds the next one renders `Yankee` and
+runs it rather than adding to the number here. The thirty is now the
+`Category=Integration` count of §12.4, which is a filter rather than a tally.
 
 **There is no template directory, and that is the design.** The script reads
 `src/Services/Catalog` at run time, so there is exactly one copy of the
