@@ -48,23 +48,28 @@ public static class OutboxRows
     /// then the three tests that use it would each have asserted against a row
     /// no code here could produce.
     /// <para>
-    /// <c>OrderPlaced</c> rather than the other two Ordering now publishes: it
-    /// is the one §9.6's saga starts on, so a payload this builder cannot
-    /// round-trip is a workflow that never begins.
+    /// <b><c>OrderCancelled</c> rather than <c>OrderPlaced</c>, and the swap is
+    /// the point.</b> This started as `OrderPlaced` on the reasoning that it is
+    /// the fact §9.6's saga begins on — which is exactly what disqualifies it.
+    /// Ordering consumes its own `OrderPlaced`, so publishing one from a
+    /// generic Broker-lane fixture starts a real workflow beside the test:
+    /// a saga row, an inbox row, a `ReserveStock` and a five-minute timeout,
+    /// all still committing when the next test truncates the schema.
+    /// `OrderCancelled` is published by Ordering and consumed by Inventory and
+    /// Payments (§3.2) — nothing here binds it, so it exercises the lane and
+    /// nothing else. Copilot found it.
     /// </para>
     /// </remarks>
     public static OutboxMessage Broker(ServiceFixture fixture, Guid orderId) =>
         OutboxMessage.Stage(
-            new OrderPlaced
+            new OrderCancelled
             {
                 MessageId = Guid.CreateVersion7(),
                 CorrelationId = orderId,
                 OccurredAt = Raised,
                 OrderId = orderId,
                 CustomerId = Guid.CreateVersion7(),
-                TotalAmount = 129.98m,
-                Currency = "EUR",
-                Lines = [new PlacedLine(Guid.CreateVersion7(), 2, 64.99m)]
+                Reason = CancelReasons.CustomerRequest
             },
             OutboxLane.Broker,
             orderId,

@@ -132,9 +132,16 @@ public sealed class ServiceFixture : IAsyncLifetime
             .WithCleanUp(false)
             .Build();
 
-        await broker.CreateAsync(TestContext.Current.CancellationToken);
-
+        // Constructed BEFORE the build, so a failed build is reported as
+        // itself. xUnit disposes a fixture whose InitializeAsync threw, and
+        // DisposeAsync dereferences this field — so assigning it after
+        // CreateAsync means a checksum mismatch or an unreachable release
+        // surfaces as a NullReferenceException in teardown with the real error
+        // nowhere in the output. Copilot found it; the container is inert until
+        // StartAsync, so building it early costs nothing.
         _rabbit = new RabbitMqBuilder().WithImage(broker).Build();
+
+        await broker.CreateAsync(TestContext.Current.CancellationToken);
 
         // Together, §12.4's printed shape — the broker's start hides inside
         // SQL Server's, which is the slower of the two by some margin. The

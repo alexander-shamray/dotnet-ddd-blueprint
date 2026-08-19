@@ -59,7 +59,11 @@ services:
       # while the image was stock. It is not any more: a broker missing the
       # plugin is running and healthy while every saga schedule hangs on a
       # declare it refuses (ADR-021).
-      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins list -e rabbitmq_delayed_message_exchange | grep -q rabbitmq_delayed_message_exchange"]
+      #
+      # is_enabled, NOT `list -e … | grep`: that spelling matches the pattern
+      # echoed in the command's own banner and passes on a stock broker —
+      # measured. The exit status is the only part that reports the answer.
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins is_enabled rabbitmq_delayed_message_exchange"]
       interval: 10s
       retries: 5
 

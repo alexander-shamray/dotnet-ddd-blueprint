@@ -56,7 +56,15 @@ services:
       # declare it refuses (ADR-021), so the check asserts the plugin is
       # enabled as well. Both, not just the second — the plugin list is
       # readable from a broker that has not finished starting.
-      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins list -e rabbitmq_delayed_message_exchange | grep -q rabbitmq_delayed_message_exchange"]
+      #
+      # is_enabled, NOT `list -e … | grep`. That was the first spelling and it
+      # FAILED OPEN: `rabbitmq-plugins list` echoes the pattern in its own
+      # banner — "Listing plugins with pattern "…"" — so grep matches whether
+      # or not a plugin row follows. Measured against a stock broker: exit 0,
+      # healthy, no plugin. A check written to catch the stock image passed on
+      # the stock image. is_enabled reports it in its exit status instead —
+      # measured 0 enabled, 69 not.
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins is_enabled rabbitmq_delayed_message_exchange"]
       interval: 10s
       retries: 5
 
