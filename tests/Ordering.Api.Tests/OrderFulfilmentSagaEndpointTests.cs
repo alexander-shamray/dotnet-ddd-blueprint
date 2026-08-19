@@ -35,7 +35,7 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     /// Every message this test published, so the teardown can wait for the
     /// saga endpoint's inbox row before the next test truncates.
     /// </summary>
-    private readonly List<Guid> _published = [];
+    private readonly List<(Guid MessageId, string Endpoint)> _published = [];
 
     public async ValueTask InitializeAsync() => await fixture.ResetAsync();
 
@@ -55,12 +55,13 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        foreach (Guid messageId in _published)
+        foreach ((Guid messageId, string endpoint) in _published)
         {
             await Eventually(
-                async () => (await SagaInboxRowsAsync(messageId)).Count,
+                async () => (await InboxRowsAsync(messageId, endpoint)).Count,
                 expected: 1,
-                because: "a delivery still running when the next test resets is a flake in that test");
+                because: $"a delivery still running when the next test resets is a flake in that test " +
+                    $"— {endpoint}, for message {messageId}");
         }
     }
 
@@ -227,13 +228,26 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     }
 
     /// <summary>
-    /// The saga endpoint's inbox rows for one message. Scoped by endpoint,
-    /// because a <c>StockReserved</c> would leave one here and one on
-    /// <c>ordering-stock-events</c> — the inbox key is message id and endpoint.
+    /// One message's inbox rows on one endpoint — the inbox key is the pair,
+    /// so a <c>StockReserved</c> leaves one row on the saga's queue and
+    /// another on <c>ordering-stock-events</c>.
     /// </summary>
-    private async Task<IReadOnlyList<InboxMessage>> SagaInboxRowsAsync(Guid messageId) =>
-        [.. (await fixture.InboxAsync())
-            .Where(r => r.MessageId == messageId && r.Endpoint == DependencyInjection.FulfilmentSagaQueue)];
+    /// <remarks>
+    /// <b>This took an endpoint after Copilot found the teardown draining
+    /// half of one.</b> `StockReserved` has two consumers by design — the saga
+    /// correlates on it and `StockReservedHandler` records it on the aggregate
+    /// — so the pair-scoped helper that made the concurrency test possible also
+    /// let its publisher register a drain for the saga alone. The saga could
+    /// then finish, the teardown pass, and the next `ResetAsync` truncate the
+    /// schema underneath a `StockReservedHandler` still committing. That is
+    /// exactly the flake this class's teardown was added to close, one
+    /// endpoint over.
+    /// </remarks>
+    private async Task<IReadOnlyList<InboxMessage>> InboxRowsAsync(Guid messageId, string endpoint) =>
+        [.. (await fixture.InboxAsync()).Where(r => r.MessageId == messageId && r.Endpoint == endpoint)];
+
+    private Task<IReadOnlyList<InboxMessage>> SagaInboxRowsAsync(Guid messageId) =>
+        InboxRowsAsync(messageId, DependencyInjection.FulfilmentSagaQueue);
 
     private Task<int> SagaRowsAsync(Guid orderId) =>
         fixture.ScalarAsync<int>(
@@ -247,7 +261,8 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     /// </summary>
     private async Task PublishExpiredAsync(Guid orderId, Guid messageId)
     {
-        _published.Add(messageId);
+        // The saga alone: nothing else binds a timeout.
+        _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
@@ -273,8 +288,8 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
 
         // Added once even when the same id is published twice: the replay is
         // suppressed by the filter, so it writes no second row.
-        if (!_published.Contains(messageId))
-            _published.Add(messageId);
+        if (!_published.Contains((messageId, DependencyInjection.FulfilmentSagaQueue)))
+            _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
@@ -291,7 +306,13 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
             OrderId = orderId
         };
 
-        _published.Add(messageId);
+        // **Both, and this is the pair the teardown was missing.** §3.2 gives
+        // StockReserved two consumers in this service — the saga correlates on
+        // it, StockReservedHandler records it on the aggregate — so a drain
+        // that waits for the saga's row alone lets the next ResetAsync
+        // truncate under the other one.
+        _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
+        _published.Add((messageId, DependencyInjection.StockEventsQueue));
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
@@ -309,7 +330,9 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
             UnavailableProductIds = [Guid.CreateVersion7()]
         };
 
-        _published.Add(messageId);
+        // The saga alone — nothing in this service consumes a failed
+        // reservation a second time.
+        _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()

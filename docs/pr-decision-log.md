@@ -294,8 +294,21 @@ price) against a hazard needing a fourfold slowdown to reach. **Recorded so the
 next person to see `InboxFilterTests` fail for no reason finds this paragraph
 rather than the timing.**
 
-**Two fixed sleeps became sentinel waits, and the honest limit is recorded in
-the tests themselves.** A `Task.Delay` before a negative assertion is a claim
+**Round twelve found a defect round nine introduced, which is the loop working
+as intended rather than a sign it should have stopped.** `StockReserved` has
+two consumers in this service by design — the saga correlates on it,
+`StockReservedHandler` records it on the aggregate — so the publish helper
+added for the concurrency test registered a teardown drain for the saga's
+inbox row alone. The saga could finish, the teardown pass, and the next
+`ResetAsync` truncate the schema underneath a `StockReservedHandler` still
+committing: **exactly the flake this class's teardown exists to close, one
+endpoint over.** Checking Copilot's cross-reference — it said the sibling suite
+already did this — turned up a second instance in the same round's work: the
+sentinel publish was marked `drain: false` when only the *duplicate* beside it
+earns that, a suppressed message writing no row where a fresh id writes two.
+
+**Three fixed sleeps became sentinel waits, and the honest limit is recorded
+in the tests themselves.** A `Task.Delay` before a negative assertion is a claim
 about the runner, not about the code; publishing a fresh message afterwards
 and waiting for *its* effect scales with the machine. It is a bound and not a
 proof — neither endpoint sets `ConcurrentMessageLimit`, so the sentinel may

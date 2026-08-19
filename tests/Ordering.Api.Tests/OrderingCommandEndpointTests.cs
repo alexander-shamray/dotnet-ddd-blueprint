@@ -149,8 +149,12 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         // guard on the aggregate — it is not asked to carry this test.
         await PublishStockReservedAsync(orderId, messageId, drain: false);
 
+        // Drained, unlike the duplicate above: this is a fresh id, so it
+        // writes a real row on each endpoint and the teardown has to wait for
+        // both. The duplicate opts out because a suppressed message writes
+        // nothing and its id was registered by the delivery that landed.
         Guid sentinelOrderId = await fixture.SeedOrderAsync(Customer);
-        await PublishStockReservedAsync(sentinelOrderId, Guid.CreateVersion7(), drain: false);
+        await PublishStockReservedAsync(sentinelOrderId, Guid.CreateVersion7());
         await EventuallyStatus(
             sentinelOrderId,
             "AwaitingPayment",
@@ -351,8 +355,24 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         // cannot see and this test does not claim.
         Guid orderId = await fixture.SeedOrderAsync(Customer);
 
+        // Undrained on purpose, and for a different reason from the duplicate
+        // above: this one faults in the mapper, so the filter never reaches
+        // its record step and no row will ever appear. Waiting for one would
+        // hang the teardown rather than protect it.
         await SendAsync(new CancelOrder(orderId, "reason_from_a_newer_deployment"), drain: false);
-        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+
+        // The third fixed sleep, converted on the same argument as the other
+        // two: a valid command for a second order, waited for by its effect.
+        // ContractMappingException is excluded from retry (§9.8), so the
+        // unmappable message is on its way to the error queue and not being
+        // redelivered behind this.
+        Guid sentinelOrderId = await fixture.SeedOrderAsync(Customer);
+        await SendAsync(new CancelOrder(sentinelOrderId, CancelReasons.OutOfStock));
+        await EventuallyStatus(
+            sentinelOrderId,
+            "Cancelled",
+            because: "a command sent after the unmappable one has been handled, so the endpoint has " +
+                "had the unmappable one in front of it");
 
         (await StatusAsync(orderId)).ShouldBe(
             "AwaitingStock",
