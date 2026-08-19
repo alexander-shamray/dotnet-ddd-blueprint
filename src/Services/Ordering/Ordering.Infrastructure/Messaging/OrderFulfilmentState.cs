@@ -18,9 +18,14 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
 
     /// <summary>
     /// Same value as <see cref="CorrelationId"/>, kept as a named property
-    /// because eight call sites read better as <c>ctx.Saga.OrderId</c> than as
+    /// because the transitions read better as <c>ctx.Saga.OrderId</c> than as
     /// <c>ctx.Saga.CorrelationId</c>. Assigned once in <c>Initially</c>; never
     /// written again.
+    /// <para>
+    /// <b>No count here on purpose.</b> §9.6 said "eight call sites" and the
+    /// saga has seventeen reads — a number that was wrong before the machine
+    /// was finished, and one every new transition falsifies again.
+    /// </para>
     /// </summary>
     public Guid OrderId { get; set; }
 

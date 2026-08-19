@@ -100,8 +100,9 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
 
     // A value object decomposed into primitives, which is the whole of what
     // §9.1 asks of a contract. ShippingAddressV1 is Common.Contracts' own type
-    // and unrelated to Ordering.Domain's Address beyond having the same four
-    // fields today — a resemblance that is allowed to end at the next version.
+    // and unrelated to Ordering.Domain's Address beyond the resemblance the
+    // two happen to have today — which this PR made closer by adding Line2,
+    // and which is allowed to end at the next version of either.
     private static ShippingAddressV1 ToContract(Address address) =>
         new(address.Line1, address.Line2, address.City, address.PostalCode, address.Country);
 }

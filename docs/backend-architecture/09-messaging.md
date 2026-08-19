@@ -2217,9 +2217,13 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
 
     public string CurrentState { get; set; } = null!;
 
-    // Same value as CorrelationId, kept as a named property because eight call
-    // sites read better as ctx.Saga.OrderId than as ctx.Saga.CorrelationId.
-    // Assigned once in Initially; never written again.
+    // Same value as CorrelationId, kept as a named property because the
+    // transitions read better as ctx.Saga.OrderId than as
+    // ctx.Saga.CorrelationId. Assigned once in Initially; never written again.
+    //
+    // No count here on purpose: this said "eight call sites" and the compiled
+    // machine has seventeen reads — wrong before the state machine above it
+    // was finished, and wrong again after every transition added since.
     public Guid OrderId { get; set; }
 
     public Guid CustomerId { get; set; }

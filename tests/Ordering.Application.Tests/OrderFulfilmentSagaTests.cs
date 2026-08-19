@@ -102,15 +102,21 @@ public class OrderFulfilmentSagaTests
     }
 
     /// <summary>
-    /// The four helpers below exist to carry one argument, and it is the one
+    /// The helpers below exist to carry one argument, and it is the one
     /// xUnit1051 requires on every call that accepts a token — spelled out at
     /// each of the forty call sites it would bury the assertions.
     /// </summary>
     /// <remarks>
     /// They also keep §9.6's distinction visible at the call site: a command is
-    /// <see cref="Sent"/> and an event is <see cref="Published"/>, the harness
-    /// records the two separately, and a test that asks the wrong list fails
-    /// while looking like a saga defect.
+    /// <see cref="Sent"/> and an event is published, the harness records the
+    /// two separately, and a test that asks the wrong list fails while looking
+    /// like a saga defect.
+    /// <para>
+    /// There is no waiting <c>Published</c> sibling of <see cref="Sent"/>,
+    /// because nothing here asserts a publish positively: every message this
+    /// saga emits is a command, and the one published assertion in the suite is
+    /// the negative that proves it. <see cref="NotYetPublished"/> is that one.
+    /// </para>
     /// </remarks>
     private static Task Publish<T>(ITestHarness harness, T message)
         where T : class =>
@@ -119,10 +125,6 @@ public class OrderFulfilmentSagaTests
     private static Task<bool> Sent<T>(ITestHarness harness, Func<T, bool> match)
         where T : class =>
         harness.Sent.Any<T>(m => match(m.Context.Message), TestContext.Current.CancellationToken);
-
-    private static Task<bool> Published<T>(ITestHarness harness, Func<T, bool> match)
-        where T : class =>
-        harness.Published.Any<T>(m => match(m.Context.Message), TestContext.Current.CancellationToken);
 
     private static Task<bool> Consumed<T>(ITestHarness harness, Func<T, bool> match)
         where T : class =>
@@ -138,7 +140,12 @@ public class OrderFulfilmentSagaTests
     /// that end their test.</b> §12.5 permits a trailing negative to simply
     /// wait, and waiting costs the full inactivity timeout for an answer that
     /// is already knowable — so the technique is applied uniformly and this
-    /// file never spends that bound.
+    /// file never spends that bound. <b>It did until a review counted</b>: the
+    /// commands-are-sent test ended on a published negative that took the
+    /// ordinary token, so the one assertion guaranteed never to match was
+    /// billing ten seconds on every green run, underneath this sentence.
+    /// "Every negative" has to include the published list, which is why
+    /// <see cref="NotYetPublished"/> exists.
     /// <para>
     /// A <em>deadline</em> would be the wrong tool and fails open: a window is
     /// something a late-sending saga fits inside, and a later positive would
@@ -148,13 +155,41 @@ public class OrderFulfilmentSagaTests
     /// </para>
     /// </remarks>
     private static Task<bool> NotYetSent<T>(ITestHarness harness, Func<T, bool> match)
-        where T : class
-    {
-        using CancellationTokenSource spent = new();
-        spent.Cancel();
+        where T : class =>
+        harness.Sent.Any<T>(m => match(m.Context.Message), Spent());
 
-        return harness.Sent.Any<T>(m => match(m.Context.Message), spent.Token);
-    }
+    /// <summary>
+    /// <see cref="NotYetSent"/>'s sibling over the <em>published</em> list, and
+    /// it exists because the claim above was false without it.
+    /// </summary>
+    /// <remarks>
+    /// The commands-are-sent test ends on a published negative, and a published
+    /// negative is the one this suite is guaranteed never to match — the whole
+    /// point of that test is that a command is not published. So it was the one
+    /// assertion here billing the full inactivity bound, on every green run,
+    /// under a comment saying this file never spends it. One helper short of
+    /// true.
+    /// </remarks>
+    private static Task<bool> NotYetPublished<T>(ITestHarness harness, Func<T, bool> match)
+        where T : class =>
+        harness.Published.Any<T>(m => match(m.Context.Message), Spent());
+
+    /// <summary>
+    /// An already-cancelled token, so an assertion reads the record as of now
+    /// rather than waiting for something the test has just proved will not
+    /// come.
+    /// </summary>
+    /// <remarks>
+    /// <b>The constructor, not a cancelled <c>CancellationTokenSource</c>.</b>
+    /// §12.5 prints the source form because it is written inside the test that
+    /// uses it, where the <c>using</c> scope outlives the assertion. Behind a
+    /// helper it does not: the source is disposed on return, and a token whose
+    /// source has been disposed still reports <c>IsCancellationRequested</c>
+    /// while throwing <c>ObjectDisposedException</c> from <c>Register</c> —
+    /// which is what a consumer of the token does. Cancelled-on-construction
+    /// owns nothing and cannot be disposed out from under a caller.
+    /// </remarks>
+    private static CancellationToken Spent() => new(canceled: true);
 
     [Fact]
     public async Task Commands_are_sent_and_events_are_published()
@@ -169,8 +204,10 @@ public class OrderFulfilmentSagaTests
 
             await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
 
+            // The positive first, which is what gives the negative below a
+            // point in time to be false at.
             (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
-            (await Published<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+            (await NotYetPublished<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
         }
     }
 

@@ -423,11 +423,24 @@ whole of the cost. It is pinned to a **minor** (`rabbitmq:4.1-management-alpine`
 because the plugin is built against a broker line and `rabbitmq-plugins enable`
 refuses one it does not match — a floating `4` would enable cleanly today and
 fail the image build on whatever Tuesday 4.2 becomes latest. The plugin is
-fetched by digest with `ADD --checksum`, so a substituted asset fails the build
-rather than reaching a broker, and it is written `--chmod=644`: `ADD` from a URL
-lands 0600 and root-owned, `enable --offline` never opens the archive, and the
-image therefore **builds cleanly and dies at start** with an Erlang `eacces`.
-That was measured, not reasoned.
+`ADD`ed by URL and then checked in the following `RUN` — `sha256sum -c` against
+the pinned digest, then `chmod 644` — so a substituted asset fails the build
+rather than reaching a broker, and a plugin the broker cannot read fails it too:
+`ADD` from a URL lands 0600 and root-owned, `enable --offline` never opens the
+archive, and the image therefore **builds cleanly and dies at start** with an
+Erlang `eacces`. That was measured, not reasoned.
+
+**Both of those belong on `ADD` and cannot go there**, which is the constraint
+worth recording rather than the syntax. `ADD --checksum=` and `--chmod=` are
+**BuildKit-only**, and this image is built by two builders: Compose uses
+BuildKit, and §12.4's Testcontainers fixture uses the classic `/build` API,
+which refuses them outright — *the --chmod option requires BuildKit*. A
+Dockerfile only one of the two can build is a fixture that silently falls back
+to a stock broker, which is the failure this whole decision exists to prevent.
+The digest is therefore verified one layer later, after the file is written
+rather than before; nothing reaches a running broker either way. **Do not
+"tidy" these back onto the `ADD`** — that re-arms the fallback, and it is the
+kind of edit that looks like a simplification.
 
 A broker without the plugin is the failure mode worth naming, because it is
 quiet: the exchange declaration fails at bus start and every saga timeout

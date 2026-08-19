@@ -187,9 +187,17 @@ public class MessagingRegistrationTests
     [Fact]
     public void Ordering_registers_exactly_the_consumers_its_chapters_grant()
     {
-        // §3.2's Consumes and Accepts columns, together — the set, not merely
-        // its size, because a subscription that quietly loses one member is a
-        // handler that keeps compiling and stops being invoked.
+        // Every event and command §3.2 gives Ordering a CONSUMER for — the
+        // set, not merely its size, because a subscription that quietly loses
+        // one member is a handler that keeps compiling and stops being
+        // invoked.
+        //
+        // Not the whole of §3.2's Consumes column, and the difference is the
+        // saga: six of the ten events it lists reach Ordering through the
+        // state machine's own correlation, which registers no IConsumer<> at
+        // all. Naming this "Consumes and Accepts" stated a set equality the
+        // list does not satisfy — a message that would have sent whoever read
+        // it looking for six missing registrations.
         //
         // This asserts the REGISTRATION and deliberately not the endpoint:
         // AddMassTransitTestHarness replaces the UsingRabbitMq callback where
@@ -239,8 +247,11 @@ public class MessagingRegistrationTests
                 typeof(CommandConsumer<FlagOrderForReview, FlagOrderForReviewCommand>)
             ],
             ignoreOrder: true,
-            "these eight are §3.2's Consumes and Accepts columns for Ordering — a ninth is a subscription " +
-            "no chapter grants, and a missing one is a handler that silently stops being invoked");
+            "these eight are every event and command §3.2 gives Ordering a CONSUMER for — a ninth is a " +
+            "subscription no chapter grants, and a missing one is a handler that silently stops being " +
+            "invoked. §3.2's Consumes column is longer: the six fulfilment events reach the saga through " +
+            "its own correlation rather than through an IConsumer<>, which is why they are absent here " +
+            "and asserted by the harness suite instead");
     }
 
     [Fact]

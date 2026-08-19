@@ -1660,9 +1660,11 @@ public async Task Commands_are_sent_and_events_are_published()
     // would notice.
     //
     // The shared helper registers the saga and states both harness bounds.
-    // The last assertion here is a negative, so it is the one that pays the
-    // inactivity timeout in full — and being last, it spends the shared token
-    // with nothing left to wait after it. See the traps below.
+    // The last assertion here is a negative — and the ONE negative in a saga
+    // suite that can never match, since the whole claim is that a command is
+    // not published. Left on the ordinary token it bills the inactivity
+    // timeout on every green run, so it reads the record as of the positive
+    // above it instead. See the traps below.
     ITestHarness harness = await StartHarnessAsync();
     var orderId = Guid.CreateVersion7();
 
@@ -1671,7 +1673,11 @@ public async Task Commands_are_sent_and_events_are_published()
     await harness.Bus.Publish(Contracts.OrderPlaced(orderId));
 
     (await harness.Sent.Any<ReserveStock>()).ShouldBeTrue();
-    (await harness.Published.Any<ReserveStock>()).ShouldBeFalse();
+
+    using CancellationTokenSource spent = new();
+    spent.Cancel();
+
+    (await harness.Published.Any<ReserveStock>(spent.Token)).ShouldBeFalse();
 }
 ```
 
@@ -1691,10 +1697,11 @@ public async Task Commands_are_sent_and_events_are_published()
 > that did not schedule. That costume is the danger, and it is not
 > hypothetical: the same mechanism failed CI on an in-memory harness test
 > asserting a consume, which then passed on a re-run of the same commit with no
-> changes. No saga suite exists yet to have flaked — this is the wait one will
-> inherit. State both, and keep the ceiling clear of the bound meant to fire,
-> so which one reported a failure is never a detail of how long the publish
-> took.
+> changes. That was a consume smoke rather than a saga, and PR-21's suite
+> inherited the same wait — which is why both bounds are stated in its
+> `StartHarnessAsync` rather than left to a default. State both, and keep the
+> ceiling clear of the bound meant to fire, so which one reported a failure is
+> never a detail of how long the publish took.
 
 > **A matching assertion returns at once; an unmatched one bills the timeout —
 > but only the first one does.** MassTransit shares a single inactivity token
@@ -1722,8 +1729,14 @@ public async Task Commands_are_sent_and_events_are_published()
 > shared token unspent for the assertion that follows. A *deadline* is the
 > wrong tool and fails open: a window is something a late-sending saga fits
 > inside, and the later positive would then accept the very command the
-> negative was there to forbid. A negative that is its test's last assertion,
-> as in the second sample, needs none of this and can simply wait.
+> negative was there to forbid. A negative that is its test's last assertion
+> *may* simply wait — nothing after it is poisoned — but "may" is not "should",
+> and the second sample above is the case that shows why. It waits for a
+> publish that the test's own subject guarantees will never come, so the wait
+> is the full inactivity bound, every run, for an answer already known. **Use
+> the cancelled token for every negative and the question stops arising**;
+> PR-21's suite reached its second review still paying that ten seconds under
+> a comment claiming it never did.
 
 > **A missing scheduler fails this suite in the costume the traps above
 > describe, which is why the registration is spelled out rather than trimmed.**
