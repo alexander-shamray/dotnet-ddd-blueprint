@@ -342,7 +342,8 @@ public class OrderFulfilmentSagaTests
     [Fact]
     public async Task A_timeout_that_arrives_after_its_wait_has_ended_changes_nothing()
     {
-        // §9.8's stated reason for the saga endpoint carrying no inbox filter:
+        // §9.8's old reason for the saga endpoint carrying no inbox filter, and
+        // the half of it that survived PR-21 removing that exemption:
         // a state machine is idempotent by construction, because a transition
         // that does not apply in the current state is simply not applicable.
         // This is that claim, measured — the stock timeout is unscheduled on

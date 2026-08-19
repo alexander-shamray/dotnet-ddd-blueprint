@@ -2376,9 +2376,13 @@ would be dropped in silence. Only the command pipeline opens the transaction and
 stages what the aggregate raised.
 
 It needs a fourth receive endpoint of its own — `ordering-stock-events`, in §9.8
-below — because the saga's endpoint deliberately carries no inbox filter, and a
-plain consumer sharing it would inherit that exemption without writing anything
-down.
+below. **The original reason was the saga endpoint's inbox exemption**, which
+that endpoint no longer has; what remains is retry. A consumer sharing the saga's
+queue would take the saga's retry policy and its error-queue behaviour, and
+`Order.ConfirmStock` fails in ways a state machine's transitions do not — a
+domain rejection rather than an inapplicable transition. Separate queues keep
+those two failure vocabularies apart, which is worth an endpoint on its own even
+now that both carry the filter.
 
 > **The two deliveries are unordered, so `ConfirmOrder` can arrive first**, and
 > the handler's answer is `ErrorType.Unavailable` rather than a rule failure.
@@ -2737,8 +2741,8 @@ cfg.ReceiveEndpoint(
 > binding a receive endpoint named after its type — and such an endpoint
 > carries neither the retry policy above nor the inbox filter, because both are
 > per-endpoint configuration that an invented endpoint never receives. This
-> section's own rule is that the inbox is the default and the saga is the one
-> written-down exception; an endpoint MassTransit creates takes that exemption
+> section's own rule is that the inbox is the default and, since PR-21, that
+> there is no exception to it; an endpoint MassTransit creates opts out anyway
 > and writes nothing down. Measured while building PR-20: with
 > `ConfigureEndpoints` present and one `ConfigureConsumer` line deleted, the
 > event was still consumed and no inbox row was written. The cost of leaving it
@@ -2795,12 +2799,12 @@ cfg.ReceiveEndpoint(
     });
 ```
 
-> **Two queues bound to one event is not duplication, it is two readers.** The
-> saga endpoint below carries no inbox filter, on the exemption the callout
-> after it argues; a consumer sharing that queue would take the exemption
-> silently, and `Order.ConfirmStock` is not idempotent — it throws on the
-> second call. Putting it on its own endpoint is what gets it the filter every
-> consumer is supposed to have.
+> **Two queues bound to one event is not duplication, it is two readers.**
+> Each records its own delivery, because the inbox is keyed on message id *and*
+> endpoint — so one `StockReserved` leaves two rows and neither reader
+> suppresses the other's. Separating them also keeps `Order.ConfirmStock`'s
+> failures, which are domain rejections, out of a queue whose retry policy is
+> written for a state machine's.
 
 And the **saga** endpoint, which receives the fulfilment events (§9.6):
 
@@ -2816,24 +2820,51 @@ cfg.ReceiveEndpoint(
                 maxInterval: TimeSpan.FromMinutes(1),
                 intervalDelta: TimeSpan.FromSeconds(2)));
 
+        // The inbox is here too, and this endpoint used to be the one
+        // exception. The callout below is why it stopped being one.
+        e.UseConsumeFilter(typeof(InboxFilter<>), context);
         e.UseInMemoryOutbox(context);
 
-        // No InboxFilter here. The saga is idempotent by construction: a
-        // redelivered StockReserved finds the instance already past
-        // AwaitingStock and the transition is simply not applicable. Adding an
-        // inbox row would suppress legitimate redelivery after a
-        // mid-transition crash.
         e.ConfigureSaga<OrderFulfilmentState>(context);
     });
 ```
 
-> **The inbox is the default; the saga is the documented exception.** Every
-> receive endpoint applies `InboxFilter<>` — the projection endpoint above and
-> `ordering-commands` (§9.4) both do, and what the consumer dispatches to is not
-> the criterion: a redelivered command is as duplicable as a redelivered event.
-> State machines opt out because their state *is* the idempotency check. Any
-> other opt-out needs the same kind of written justification, in the endpoint
-> that takes it.
+> **The inbox is the default and there is no longer an exception.** Every
+> receive endpoint applies `InboxFilter<>`, and what the consumer dispatches to
+> is not the criterion: a redelivered command is as duplicable as a redelivered
+> event, and so is a redelivered event that *starts* a saga.
+
+> **The saga's exemption was wrong in both halves, and PR-21 removed it.** It
+> read: no `InboxFilter` here, because a state machine's state is its
+> idempotency check — a redelivered `StockReserved` finds the instance already
+> past `AwaitingStock` and the transition is not applicable — and because an
+> inbox row would suppress legitimate redelivery after a mid-transition crash.
+>
+> **The first half is an argument about non-initial events only.**
+> `OrderPlaced` is handled in `Initially`, and `SetCompletedWhenFinalized()`
+> deletes the instance, so MassTransit's initial-event policy creates a *new*
+> saga whenever none exists. §9.4 guarantees at-least-once — a crash between
+> publishing and marking the outbox row processed republishes it — so a
+> duplicate arriving after the workflow finished starts fulfilment again:
+> another `ReserveStock`, another `AuthorisePayment`. A second reservation and
+> a second charge for one order. Reproduced against a real broker as a failing
+> test before the filter was added.
+>
+> **The second half describes something the filter does not do.**
+> `InboxFilter` records its row *after* the inner pipe returns (§9.5), so a
+> crash mid-transition leaves no row and the redelivery does the work again —
+> which is the delivery the exemption was written to protect. It was protecting
+> it from a mechanism that was never a threat to it.
+>
+> What survives is the original observation, now doing less work: a state
+> machine really is idempotent against redelivered *non-initial* events, and
+> that is what keeps a stale timeout harmless (ADR-021 leans on it). It was
+> never enough on its own.
+
+> **One message can leave two inbox rows, and that is the key working.** A
+> published `StockReserved` reaches both `ordering-stock-events` and the saga's
+> queue, and the inbox is keyed on message id *and* endpoint — so each reader
+> records its own delivery and neither suppresses the other's.
 
 And the **command** endpoint, `ordering-commands` (§9.4), which is the one whose
 retry policy is not the plain exponential five:

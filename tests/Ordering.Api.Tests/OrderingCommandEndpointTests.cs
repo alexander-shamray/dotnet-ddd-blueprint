@@ -43,7 +43,19 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     /// </summary>
     private static readonly TimeSpan DeliveryBudget = TimeSpan.FromSeconds(30);
 
-    private readonly List<Guid> _published = [];
+    /// <summary>
+    /// Every delivery this test started, as (message id, the endpoint that
+    /// will record it).
+    /// </summary>
+    /// <remarks>
+    /// <b>The endpoint is half the key, and it stopped being optional when the
+    /// saga endpoint took an inbox filter.</b> A published <c>StockReserved</c>
+    /// reaches <em>two</em> of Ordering's queues — the consumer's and the
+    /// saga's — so it now leaves two rows, and a drain counting rows by message
+    /// id alone waits for one, sees two, and fails in teardown. Which is how
+    /// this list found out.
+    /// </remarks>
+    private readonly List<(Guid MessageId, string Endpoint)> _published = [];
 
     public async ValueTask InitializeAsync() => await fixture.ResetAsync();
 
@@ -55,10 +67,10 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        foreach (Guid messageId in _published)
+        foreach ((Guid messageId, string endpoint) in _published)
         {
             await Eventually(
-                async () => (await InboxRowsAsync(messageId)).Count,
+                async () => (await InboxRowsAsync(messageId, endpoint)).Count,
                 expected: 1,
                 because: "a delivery still running when the next test resets is a flake in that test");
         }
@@ -90,11 +102,15 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     [Fact]
     public async Task A_redelivered_reservation_is_suppressed_by_the_inbox()
     {
-        // §9.8 requires the inbox on every endpoint but the saga's, and
-        // ConfirmStock is NOT idempotent — the aggregate throws on the second
-        // call. So without the filter a redelivery is a domain rejection
-        // counted against a healthy order, and with it the message is dropped
-        // before the handler runs.
+        // §9.8 requires the inbox on every endpoint — the saga's exemption went
+        // with the replay finding — and ConfirmStock is NOT idempotent: the
+        // aggregate throws on the second call. So without the filter a
+        // redelivery is a domain rejection counted against a healthy order, and
+        // with it the message is dropped before the handler runs.
+        //
+        // Scoped to this endpoint, because the same message id also lands on
+        // the saga's queue and leaves a row there. Two readers, two rows, one
+        // message — which is what (message id, endpoint) is the inbox key for.
         Guid orderId = await fixture.SeedOrderAsync(Customer);
         var messageId = Guid.CreateVersion7();
 
@@ -102,11 +118,11 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         await EventuallyStatus(orderId, "AwaitingPayment", because: "the first delivery must land");
 
         await Eventually(
-            async () => (await InboxRowsAsync(messageId)).Count,
+            async () => (await InboxRowsAsync(messageId, DependencyInjection.StockEventsQueue)).Count,
             expected: 1,
             because: "a delivery that leaves no inbox row reached an endpoint with no filter on it");
 
-        IReadOnlyList<InboxMessage> rows = await InboxRowsAsync(messageId);
+        IReadOnlyList<InboxMessage> rows = await InboxRowsAsync(messageId, DependencyInjection.StockEventsQueue);
         rows[0].Endpoint.ShouldBe(
             DependencyInjection.StockEventsQueue,
             "the saga binds the same event on its own queue — a row from that endpoint would mean the " +
@@ -118,7 +134,9 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
 
         (await StatusAsync(orderId)).ShouldBe("AwaitingPayment");
-        (await InboxRowsAsync(messageId)).Count.ShouldBe(1, "a suppressed duplicate writes no second row");
+        (await InboxRowsAsync(messageId, DependencyInjection.StockEventsQueue))
+            .Count
+            .ShouldBe(1, "a suppressed duplicate writes no second row");
     }
 
     [Fact]
@@ -284,7 +302,13 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         };
 
         if (drain)
-            _published.Add(messageId);
+        {
+            // Both readers of §3.2's StockReserved, because both now record it:
+            // the consumer on ordering-stock-events, and the saga on its own
+            // queue since that endpoint took an inbox filter.
+            _published.Add((messageId, DependencyInjection.StockEventsQueue));
+            _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
+        }
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
@@ -324,13 +348,13 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
         var messageId = Guid.CreateVersion7();
 
         if (drain)
-            _published.Add(messageId);
+            _published.Add((messageId, DependencyInjection.CommandsQueue));
 
         await endpoint.Send(command, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
     }
 
-    private async Task<IReadOnlyList<InboxMessage>> InboxRowsAsync(Guid messageId) =>
-        [.. (await fixture.InboxAsync()).Where(r => r.MessageId == messageId)];
+    private async Task<IReadOnlyList<InboxMessage>> InboxRowsAsync(Guid messageId, string endpoint) =>
+        [.. (await fixture.InboxAsync()).Where(r => r.MessageId == messageId && r.Endpoint == endpoint)];
 
     private static async Task Eventually(Func<Task<int>> read, int expected, string because)
     {

@@ -141,6 +141,28 @@ after.
   consumers is the only cheap moment a contract ever has**, and the same change
   one release later is a §9.2 version bump.
 
+- **§9.8's saga inbox exemption was wrong in both halves, and it is gone.** The
+  chapter said a state machine needs no `InboxFilter` because its state is its
+  idempotency check, and that an inbox row would suppress legitimate redelivery
+  after a mid-transition crash. The first is an argument about **non-initial**
+  events: `OrderPlaced` is handled in `Initially` and
+  `SetCompletedWhenFinalized()` deletes the row, so MassTransit creates a new
+  saga whenever none exists — and §9.4 guarantees at-least-once, so a duplicate
+  arriving after the workflow finished reserves stock and authorises payment
+  **a second time**. The second describes something the filter does not do:
+  `InboxFilter` records after the inner pipe returns, so a mid-transition crash
+  leaves no row and the redelivery does the work again. It was protecting that
+  delivery from a mechanism that was never a threat to it.
+  - Copilot found it, on the third round, in a suppressed-adjacent inline
+    comment. It is the only **correctness** defect either review loop found in
+    this PR's own code; everything else was a claim, a count or a missing test.
+  - Reproduced first: a real-broker test that starts the saga, finalises it,
+    republishes the same `OrderPlaced`, and asserts no instance returns. Red
+    before the filter, green after.
+  - The endpoint separation §9.6 argues for `ordering-stock-events` survives on
+    a different reason — retry policy, not the inbox — and both chapters now
+    say so.
+
 **Five things are owed and are named rather than built.** Each is a §9.6, §5.4
 or §9.8 decision that PR-21 made *reachable* rather than one it introduced, and
 naming them is the alternative to a silent gap.

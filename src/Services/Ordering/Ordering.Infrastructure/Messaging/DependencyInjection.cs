@@ -69,10 +69,12 @@ public static class DependencyInjection
     /// Accepts column at four commands, so what was missing was a consumer
     /// rather than a contract.
     /// <para>
-    /// It cannot share the saga endpoint below: that one deliberately carries
-    /// no inbox filter, because a state machine's state is its idempotency
-    /// check. A plain consumer there would inherit the exemption and write
-    /// nothing down, which is exactly the opt-out §9.8 forbids.
+    /// It does not share the saga endpoint below. That was originally because
+    /// the saga endpoint carried no inbox filter — an exemption PR-21 removed —
+    /// and what remains is the retry policy: a consumer there would inherit one
+    /// written for a state machine, whose failures are inapplicable transitions
+    /// rather than the domain rejections <c>Order.ConfirmStock</c> produces.
+    /// Two failure vocabularies, two queues.
     /// </para>
     /// </remarks>
     public const string StockEventsQueue = "ordering-stock-events";
@@ -300,16 +302,31 @@ public static class DependencyInjection
                                 maxInterval: TimeSpan.FromMinutes(1),
                                 intervalDelta: TimeSpan.FromSeconds(2)));
 
+                        // **The inbox is here, and §9.8's exemption is gone.**
+                        // That exemption said a saga is idempotent by
+                        // construction — a redelivered StockReserved finds the
+                        // instance already past AwaitingStock and the
+                        // transition is not applicable. True, and an argument
+                        // about NON-INITIAL events only.
+                        //
+                        // OrderPlaced is handled in Initially, and
+                        // SetCompletedWhenFinalized deletes the row — so
+                        // MassTransit's initial-event policy creates a NEW
+                        // instance whenever none exists. §9.4 guarantees
+                        // at-least-once, so a duplicate arriving after the
+                        // workflow finished reserves stock and authorises
+                        // payment a second time. Reproduced as a failing test
+                        // against the real broker before this line was added.
+                        //
+                        // The exemption's stated cost was wrong too: an inbox
+                        // row does NOT suppress redelivery after a
+                        // mid-transition crash, because InboxFilter writes its
+                        // row after the inner pipe returns (§9.5). A crash
+                        // mid-transition leaves no row, and the redelivery
+                        // does the work again.
+                        e.UseConsumeFilter(typeof(InboxFilter<>), context);
                         e.UseInMemoryOutbox(context);
 
-                        // No InboxFilter here, and it is the one documented
-                        // exception to §9.8's default. The saga is idempotent
-                        // by construction: a redelivered StockReserved finds
-                        // the instance already past AwaitingStock and the
-                        // transition is simply not applicable. An inbox row
-                        // would suppress legitimate redelivery after a
-                        // mid-transition crash — which is the one delivery the
-                        // saga genuinely needs.
                         e.ConfigureSaga<OrderFulfilmentState>(context);
                     });
 
