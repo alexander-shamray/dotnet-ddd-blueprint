@@ -353,9 +353,11 @@ fences below show.
 labelled with a path and then disagreeing with the file at that path is the
 drift the one rule exists to close — a later edit to either side has nothing to
 grep against. So each carries the keys the surrounding argument turns on and
-names what it leaves out; the files themselves are the four `values.yaml` under
-`deploy/helm/`, and `deploy/helm/smoke.sh` is what holds them to the claims
-made here.
+names what it leaves out; the files themselves are the one `values.yaml` per
+deployable chart, and `deploy/helm/smoke.sh` is what holds them to the claims
+made here. `platform/values.yaml` is the fifth file in that tree and is
+deliberately not one of them — it holds `{}`, and says at length why a value
+there would silently win over the subchart that owns it.
 
 The cost is one command: `file://` dependencies resolve from disk, but they
 must be resolved before `helm lint` or `helm template` will run. `charts/` and
@@ -492,9 +494,11 @@ saying so.
 **A key joins a chart when a host's code reads it, and not before.** That is
 §14.1's rule for Compose blocks — an environment variable nothing reads is the
 container form of an unused registration — and it is why no chart carries the
-two Redis connection strings §15.4 marks required: no host calls
-`AddRedisConnections` yet, and a `secretKeyRef` to a Secret nobody has created
-is a pod that never starts. They join with the PR whose code reads them.
+two Redis connection strings, which §15.4 marks required **only once a host
+reads a cache**. None does: nothing calls `AddRedisConnections` yet, and a
+`secretKeyRef` to a Secret nobody has created is a pod that never starts. They
+join with the PR whose code reads them, and the inventory's column becomes
+unconditional in the same change.
 
 **Shipping and Notifications get the same chart minus the Service and the
 Ingress.** They consume from the broker and expose no API, so their only

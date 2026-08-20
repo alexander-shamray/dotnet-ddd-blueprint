@@ -85,10 +85,11 @@ helm upgrade --install platform deploy/helm/platform \
 - **`Namespace` objects.** `--namespace` and `--create-namespace` are the
   installer's decision, and a chart that created one would fight whatever
   manages the cluster's namespaces.
-- **Redis connection strings.** §15.4's inventory marks them required and no
-  host calls `AddRedisConnections` yet. A `secretKeyRef` to a Secret that does
-  not exist is a pod that never starts, so they join with the PR whose code
-  reads them — the rule §14.1's Compose blocks already state.
+- **Redis connection strings.** §15.4's inventory requires them once a host
+  reads a cache, and none does — nothing calls `AddRedisConnections` yet. A
+  `secretKeyRef` to a Secret that does not exist is a pod that never starts, so
+  they join with the PR whose code reads them, which is the rule §14.1's
+  Compose blocks already state.
 - **`readOnlyRootFilesystem`.** The right posture, and a decision no chapter
   has taken. Asserting it untested against the chiselled runtime images would
   trade a review question for a CrashLoop. `runAsNonRoot` IS set, because it

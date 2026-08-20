@@ -333,9 +333,29 @@ else
 fi
 
 # The ports are literals in the same two files, so they are asserted the same
-# way rather than trusted.
-check 'catalog answers the pricing hop on 8081' \
-    grep -q 'containerPort: 8081' "$OUT/catalog.yaml"
+# way rather than trusted — which means the SERVICE port, not the container
+# port. `PricingHop.cs` dials `http://catalog-api:8081`, and what answers that
+# is `spec.ports[].port` on the Service; `containerPort` is the Deployment's
+# and is not what the BFF resolves. This check read the Deployment's until
+# round 3 said so, and a `_service.tpl` that ranged only the `http` port would
+# have passed it while the hop 502'd — the same shape as the migration-Job
+# assertion two sections up, and found the same way.
+service_port() {
+    # <file> <service name> <port> -> exit 0 when that Service publishes it
+    awk -v want="$2" -v port="$3" '
+        /^kind: Service$/ { in_svc = 1; named = 0; next }
+        /^---$/ { in_svc = 0; named = 0; next }
+        in_svc && $0 ~ ("^  name: " want "$") { named = 1 }
+        named && $0 ~ ("^ *- port: " port "$") { found = 1 }
+        named && $0 ~ ("^ *port: " port "$") { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "$1"
+}
+
+check 'catalog-api answers the pricing hop on Service port 8081' \
+    service_port "$OUT/catalog.yaml" catalog-api 8081
+check 'and the gateway reaches catalog-api on Service port 8080' \
+    service_port "$OUT/catalog.yaml" catalog-api 8080
 
 # --------------------------------------------------------------------------
 section 'Values that must agree across charts'
@@ -359,8 +379,13 @@ section 'Branches no chart takes yet, exercised anyway'
     --set service.enabled=false >"$OUT/worker.yaml"
 check 'service.enabled=false renders no Service' \
     test "$(count '^kind: Service$' "$OUT/worker.yaml")" -eq 0
-check 'and the workload, its probes and its migration hook survive' \
+check 'and the workload survives' \
     test "$(count '^kind: Deployment$' "$OUT/worker.yaml")" -eq 1
+# Named separately rather than folded into the line above, which used to say
+# "and its migration hook survive" while counting Deployments alone. A
+# description is a claim about what the command looks at.
+check 'and so does its migration hook' \
+    test "$(count '^kind: Job$' "$OUT/worker.yaml")" -eq 1
 check 'and the probes still address the container port directly' \
     test "$(count 'path: /health/ready$' "$OUT/worker.yaml")" -eq 1
 

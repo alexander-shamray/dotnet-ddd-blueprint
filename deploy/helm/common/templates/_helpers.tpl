@@ -102,10 +102,11 @@ a variable joins when a host's code READS it, and not before.
 That is the rule §14.1's Compose blocks already state — "an env var nothing
 reads is the container form of an unused registration" — and it is why there
 are no Redis keys here. §15.4's inventory marks `ConnectionStrings__RedisCache`
-and `ConnectionStrings__RedisCoordination` required, and no host calls
-`AddRedisConnections` yet; supplying them would demand two Secrets exist before
-any pod can start, for values nothing reads. They join with the PR whose code
-reads them, exactly as `Identity__Authority` joined with PR-16.
+and `ConnectionStrings__RedisCoordination` required *once a host reads a cache*,
+and none does — nothing calls `AddRedisConnections` yet. Supplying them anyway
+would demand two Secrets exist before any pod can start, for values nothing
+reads. They join with the PR whose code reads them, exactly as
+`Identity__Authority` joined with PR-16.
 
 Secrets are REFERENCED, never rendered. External Secrets Operator owns the
 Secret objects (§15.4); a chart that templated a connection string would put a
