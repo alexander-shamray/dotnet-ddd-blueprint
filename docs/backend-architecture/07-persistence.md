@@ -320,7 +320,10 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-5"
-    "helm.sh/hook-delete-policy": before-hook-creation
+    # hook-succeeded as well, or these accumulate: before-hook-creation
+    # matches on NAME, and the name above embeds the tag. Failures are left
+    # behind on purpose — the runbook needs the failed Job.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 2
   template:

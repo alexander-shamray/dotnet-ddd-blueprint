@@ -83,12 +83,22 @@ ingress:
   tls:
     secretName: gateway-tls
   annotations: {}
-  # Mandatory once enabled — GetRequiredSection, so a missing value is a
-  # refusal to boot rather than a rate limiter that meters the ingress
-  # controller as its only client. These are the ingress controller's pod
-  # CIDRs, not the cluster's: anything trusted here can set X-Forwarded-For.
-  trustedNetworks:
-    - 10.42.0.0/16
+  # EMPTY, and required — the same shape as image.tag above and for a sharper
+  # reason. These are the ingress controller's pod CIDRs, not the cluster's,
+  # and anything trusted here can set X-Forwarded-For.
+  #
+  # A plausible-looking default is an active security decision taken on behalf
+  # of a cluster nobody has seen. Wrong low, the real ingress is untrusted, its
+  # forwarded header is ignored, and §10.3's per-client rate limit degrades to
+  # one global bucket — a denial of service against legitimate users, wearing
+  # the name of a defence. Wrong high, any pod that happens to sit in the
+  # trusted range picks its own rate-limit partition, and its own client IP in
+  # every log line §13.4 writes.
+  #
+  # Neither failure is visible in a render or a rollout, so the value has to
+  # come from whoever knows the cluster. Empty means the chart refuses to
+  # template until an overlay supplies it; §15.3 shows the shape.
+  trustedNetworks: []
 
 cors:
   # Off. Browsers reach the platform through the CDN on the same origin

@@ -661,19 +661,28 @@ ingress:
   # gateway there IS the edge.
   enabled: true
   # An Ingress with no class is picked up by whichever controller claims the
-  # default, which is not a deployment decision to leave to a cluster. TLS
-  # terminates here, so this object owns the certificate — and every hop past
-  # it is plain http, which is the premise §9.7's pricing hop states.
+  # default, which is not a deployment decision to leave to a cluster.
   className: nginx
   host: api.example.com
+  # REQUIRED, not optional, and the chart refuses to render without it. TLS
+  # terminates here (§10.1) and three separate arguments rest on that: the
+  # gateway rewrites Request.Scheme from this hop's header, ADR-020's
+  # compression decision reads that scheme, and §9.7's pricing hop uses plain
+  # `http://` *because* the encrypted hop ended at this object. An overlay
+  # clearing this key renders a valid plaintext Ingress and falsifies all
+  # three silently, which is the one failure mode a template can refuse.
   tls:
     secretName: gateway-tls
-  # Mandatory once enabled — GetRequiredSection, so a missing value is a
-  # refusal to boot rather than a rate limiter that meters the ingress
-  # controller as its only client. These are the ingress controller's pod
+  # Mandatory once enabled, and shipped EMPTY so the chart refuses to render
+  # until an overlay supplies it. These are the ingress controller's pod
   # CIDRs, not the cluster's: anything trusted here can set X-Forwarded-For.
-  trustedNetworks:
-    - 10.42.0.0/16
+  #
+  # A plausible default is worse than none. Too narrow and the real ingress is
+  # untrusted, its forwarded header ignored, and §10.3's per-client limit
+  # collapses into one global bucket; too broad and any pod in the range picks
+  # its own rate-limit partition and its own client IP in the logs. Neither
+  # shows up in a render or a rollout.
+  trustedNetworks: []          # e.g. [ "10.42.0.0/16" ] — per environment
 
 cors:
   # Off. Browsers reach the platform through the CDN on the same origin
@@ -699,6 +708,20 @@ host's own guards already refuse an empty one — but `GetRequiredSection` prove
 a section exists and nothing more, so the failure arrives at startup naming a
 key nobody set. The chart refuses to template instead, and says which chart
 value is missing. `helm upgrade` never runs; nothing rolls.
+
+**And blank counts as missing here too**, which an emptiness check does not
+see: a list holding `" "` is truthy in a template, so it renders a blank value
+and the host throws at startup — after the rollout has begun, which is exactly
+what the render-time guard exists to prevent. That lesson was already recorded
+against `Identity__Authority` and again against `Cors__Origins`, and it still
+had to be applied a third time here. Each entry is checked, not just the list.
+
+**Two more pairs cannot be set independently, and the chart says so.** An
+Ingress needs `service.enabled`, because its backend *is* this workload's
+Service — without one the release installs cleanly and the controller answers
+503 for every request. And an Ingress needs `tls`, for the reason its fence
+gives above. Both are the shape of a values file copied from a chart that meant
+something different, which is the failure §15.3 opens by naming.
 
 `ingress.enabled: true` in Kubernetes and `Ingress__Enabled: "false"` in Compose
 ([§14.1](14-local-development.md)) are not an inconsistency to reconcile — they are the same setting

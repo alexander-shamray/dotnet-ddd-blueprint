@@ -27,9 +27,39 @@ trap 'rm -rf "$OUT"' EXIT
 # interesting half.
 TAG="0000000000000000000000000000000000000000"
 
+# The gateway's chart ships `ingress.trustedNetworks: []` on purpose: a
+# plausible CIDR is an active security decision taken on behalf of a cluster
+# nobody has seen (§15.3). Every render here therefore plays the part of the
+# environment overlay, and each of the negative tests below supplies it too —
+# so that a test asserting "no tag is refused" fails on the tag and not on
+# something else it forgot to set. An assertion that passes for the wrong
+# reason is the failure this file keeps finding in itself.
+CIDR='{10.42.0.0/16}'
+GATEWAY_OVERLAY="--set ingress.trustedNetworks=$CIDR"
+PLATFORM_OVERLAY="--set gateway.ingress.trustedNetworks=$CIDR"
+
 SERVICE_CHARTS="catalog ordering gateway web-bff"
 MIGRATOR_CHARTS="catalog ordering"
 DATABASELESS_CHARTS="gateway web-bff"
+
+# The lists above are classifications and stay written down — which chart owns
+# a database is a fact about the platform, not something to infer. What must
+# NOT be written down is the membership, and until Copilot said so it was: a
+# fifth chart directory could be added and every check in this file would skip
+# it silently while the run still said "all assertions passed".
+#
+# That is this repository's most-repeated failure and this branch's own lesson
+# for the fourth time — a gate that quietly stops covering the newest surface.
+# So the directory is the authority and the lists are reconciled against it
+# below, before anything is rendered.
+discovered_charts() {
+    for d in "$CHARTS_DIR"/*/; do
+        name="$(basename "$d")"
+        [ "$name" = common ] && continue      # the library chart renders nothing
+        [ "$name" = platform ] && continue    # the umbrella has no templates
+        [ -f "$d/Chart.yaml" ] && echo "$name"
+    done | sort
+}
 
 failures=0
 
@@ -58,6 +88,30 @@ count() { grep -c "$1" "$2" 2>/dev/null || true; }
 section() { printf '\n%s\n' "$1"; }
 
 # --------------------------------------------------------------------------
+section 'The gate covers every chart on disk'
+# --------------------------------------------------------------------------
+# First, because every section below iterates SERVICE_CHARTS: a chart missing
+# from that list is not a weaker run, it is an unrun one that still reports
+# success.
+found="$(discovered_charts | tr '\n' ' ' | sed 's/ *$//')"
+listed="$(printf '%s\n' $SERVICE_CHARTS | sort | tr '\n' ' ' | sed 's/ *$//')"
+if [ "$found" = "$listed" ]; then
+    pass "SERVICE_CHARTS is every deployable chart on disk ($found)"
+else
+    fail "SERVICE_CHARTS ($listed) does not match the chart directories ($found)"
+fi
+
+# And the two sub-classifications partition it, so a chart cannot be in the
+# suite while belonging to neither — which is how it would reach the migration
+# section and be checked by nothing there.
+both="$(printf '%s\n' $MIGRATOR_CHARTS $DATABASELESS_CHARTS | sort | tr '\n' ' ' | sed 's/ *$//')"
+if [ "$both" = "$listed" ]; then
+    pass 'every chart is classified as owning a database or not'
+else
+    fail "MIGRATOR_CHARTS + DATABASELESS_CHARTS ($both) do not partition SERVICE_CHARTS ($listed)"
+fi
+
+# --------------------------------------------------------------------------
 section 'Resolving dependencies'
 # --------------------------------------------------------------------------
 # file:// dependencies resolve from disk, so this needs no network and no repo
@@ -79,7 +133,8 @@ for chart in $SERVICE_CHARTS platform; do
         --set-string "catalog.image.tag=$TAG" \
         --set-string "ordering.image.tag=$TAG" \
         --set-string "gateway.image.tag=$TAG" \
-        --set-string "web-bff.image.tag=$TAG"
+        --set-string "web-bff.image.tag=$TAG" \
+        $GATEWAY_OVERLAY $PLATFORM_OVERLAY
 done
 
 # --------------------------------------------------------------------------
@@ -90,7 +145,8 @@ section 'A deploy that cannot name its tag fails (§15.3)'
 # the one tag §15.3 forbids by name. This is the assertion that the empty
 # default is a refusal rather than a hole.
 for chart in $SERVICE_CHARTS; do
-    if "$HELM" template "$chart" "$CHARTS_DIR/$chart" >"$OUT/untagged-$chart.txt" 2>&1; then
+    if "$HELM" template "$chart" "$CHARTS_DIR/$chart" $GATEWAY_OVERLAY \
+        >"$OUT/untagged-$chart.txt" 2>&1; then
         fail "$chart renders WITHOUT a tag — it must not"
     elif grep -q 'image.tag is required' "$OUT/untagged-$chart.txt"; then
         pass "$chart refuses to render without a tag, and says which value is missing"
@@ -103,14 +159,16 @@ done
 section 'Rendering'
 # --------------------------------------------------------------------------
 for chart in $SERVICE_CHARTS; do
-    "$HELM" template "$chart" "$CHARTS_DIR/$chart" --set-string "image.tag=$TAG" >"$OUT/$chart.yaml"
+    "$HELM" template "$chart" "$CHARTS_DIR/$chart" --set-string "image.tag=$TAG" \
+        $GATEWAY_OVERLAY >"$OUT/$chart.yaml"
     pass "$chart renders"
 done
 "$HELM" template platform "$CHARTS_DIR/platform" \
     --set-string "catalog.image.tag=$TAG" \
     --set-string "ordering.image.tag=$TAG" \
     --set-string "gateway.image.tag=$TAG" \
-    --set-string "web-bff.image.tag=$TAG" >"$OUT/platform.yaml"
+    --set-string "web-bff.image.tag=$TAG" \
+    $PLATFORM_OVERLAY >"$OUT/platform.yaml"
 pass 'platform renders'
 
 # --------------------------------------------------------------------------
@@ -189,8 +247,15 @@ for chart in $MIGRATOR_CHARTS; do
         grep -q '"helm.sh/hook": pre-install,pre-upgrade' "$OUT/$chart.yaml"
     check "$chart weights the hook ahead of any other" \
         grep -q '"helm.sh/hook-weight": "-5"' "$OUT/$chart.yaml"
+    # BOTH policies. `before-hook-creation` matches on NAME and the name embeds
+    # the tag, so on its own every new SHA leaves its completed Job behind for
+    # ever — and §13.6's runbook then looks for the failed one in a list of
+    # every migration that ever succeeded. `hook-failed` is deliberately absent:
+    # the failed Job is the artefact that runbook needs.
     check "$chart deletes the previous hook rather than accumulating them" \
-        grep -q '"helm.sh/hook-delete-policy": before-hook-creation' "$OUT/$chart.yaml"
+        grep -q '"helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded' "$OUT/$chart.yaml"
+    check "$chart keeps a FAILED migration Job for the runbook" \
+        test "$(count 'hook-failed' "$OUT/$chart.yaml")" -eq 0
     check "$chart mounts the MIGRATOR connection string, not the runtime one" \
         grep -qE '^ *- name: ConnectionStrings__[A-Za-z]+Migrator$' "$OUT/$chart.yaml"
 done
@@ -295,7 +360,8 @@ check 'every mounted ConfigMap exists in the render' \
 # `cors.origins` rewrote a mounted ConfigMap and left the pod template
 # byte-identical — a deploy that reports success and changes nothing.
 gateway_checksum() {
-    "$HELM" template gateway "$CHARTS_DIR/gateway" --set-string "image.tag=$TAG" "$@" |
+    "$HELM" template gateway "$CHARTS_DIR/gateway" --set-string "image.tag=$TAG" \
+        $GATEWAY_OVERLAY "$@" |
         awk '/checksum\/values:/ { print $2; exit }'
 }
 before="$(gateway_checksum)"
@@ -420,12 +486,66 @@ else
 fi
 
 if "$HELM" template gateway "$CHARTS_DIR/gateway" --set-string "image.tag=$TAG" \
-    --set cors.enabled=true >"$OUT/uncorsed.txt" 2>&1; then
+    $GATEWAY_OVERLAY --set cors.enabled=true >"$OUT/uncorsed.txt" 2>&1; then
     fail 'cors.enabled with no origins renders — it must not'
 else
     check 'cors.enabled with no origins fails the render' \
         grep -q 'cors.origins must hold at least one origin' "$OUT/uncorsed.txt"
 fi
+
+# BLANK COUNTS AS MISSING, and an emptiness check does not see it. A list
+# holding `" "` is truthy in a template, so both guards above passed it
+# through, the value was rendered blank, and the host threw at startup — after
+# the rollout had begun. This repository learned that against
+# `Identity__Authority` and again against `Cors__Origins`; these two are the
+# assertions that keep it learned.
+refuses() {
+    # refuses <label> <needle> <helm args...>
+    local label="$1" needle="$2"
+    shift 2
+    if "$HELM" template gateway "$CHARTS_DIR/gateway" --set-string "image.tag=$TAG" \
+        "$@" >"$OUT/blank.txt" 2>&1; then
+        fail "$label — it rendered instead"
+    else
+        check "$label" grep -q "$needle" "$OUT/blank.txt"
+    fi
+}
+
+refuses 'a blank trusted network fails the render' 'is blank' \
+    --set 'ingress.trustedNetworks={ }'
+refuses 'a blank CORS origin fails the render' 'is blank' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={ }'
+refuses 'a CORS origin with a trailing path fails the render' 'is not a browser origin' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com/app}'
+
+# The Ingress backend is this workload's Service, so the two keys are not
+# independent — and the inconsistent pair is what a copied values file
+# produces when a worker's Service is turned off and the edge's Ingress is
+# left on. It installs cleanly and answers 503 for every request.
+refuses 'an Ingress with no Service fails the render' 'ingress.enabled requires service.enabled' \
+    $GATEWAY_OVERLAY --set service.enabled=false
+
+# TLS terminates at the Ingress (§10.1) and every hop past it is plain http on
+# that premise — including §9.7's. An overlay clearing it rendered a valid
+# plaintext Ingress and falsified the premise silently.
+refuses 'an Ingress with no TLS fails the render' 'ingress.tls is required' \
+    $GATEWAY_OVERLAY --set 'ingress.tls=null'
+
+# --------------------------------------------------------------------------
+section 'Defaults that must stay absent'
+# --------------------------------------------------------------------------
+# Every guard above is a property of the RENDER, and this one cannot be: a
+# chart shipping a plausible `trustedNetworks` renders perfectly well, which is
+# precisely why the value is dangerous. Restoring the default was the one
+# deliberate defect of this round that no assertion caught, so the assertion is
+# about the values file itself.
+#
+# Wrong low, the real ingress is untrusted and §10.3's per-client rate limit
+# collapses into one global bucket. Wrong high, any pod in the range picks its
+# own partition and its own client IP in the logs. Neither shows up in a
+# rollout, so the only safe default is none.
+check 'the gateway ships no default trusted network' \
+    grep -qE '^  trustedNetworks: \[\]' "$CHARTS_DIR/gateway/values.yaml"
 
 # --------------------------------------------------------------------------
 section 'Result'

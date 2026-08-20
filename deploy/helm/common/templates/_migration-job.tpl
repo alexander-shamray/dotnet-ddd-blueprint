@@ -44,7 +44,24 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-5"
-    "helm.sh/hook-delete-policy": before-hook-creation
+    {{- /*
+    `hook-succeeded` as well as `before-hook-creation`, and without it these
+    Jobs accumulate for ever.
+
+    `before-hook-creation` deletes the previous resource of the SAME NAME, and
+    the name above embeds the tag — so every new SHA is a differently named Job
+    and nothing ever collects the last one. A namespace would carry one
+    completed migration Job per release it has ever seen. That is not
+    theoretical tidiness: the runbook (§13.6) looks for the failed Job, and it
+    is looking in a list of every migration that has ever succeeded.
+
+    Failures are deliberately NOT collected. `hook-failed` would delete the one
+    artefact `migration-failure.md` needs, so a failed migration stays until
+    somebody has read it — which is also why there is no
+    `ttlSecondsAfterFinished` here: the TTL controller does not distinguish
+    Complete from Failed.
+    */}}
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 2
   template:

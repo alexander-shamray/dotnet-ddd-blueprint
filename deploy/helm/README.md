@@ -104,13 +104,14 @@ helm upgrade --install platform deploy/helm/platform \
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Twenty-three deliberate defects have been run through it and twenty-two
-turned a green run red** — a renamed Service, a CPU limit, a grace period back
-at the Kubernetes default, a dropped hook annotation, a connection string moved
-into a ConfigMap, a second chart growing client credentials, an `envFrom`
-naming a ConfigMap nothing renders, a rollout checksum that missed the
-gateway's own, a Service publishing only its first port, a chart renumbering
-the port its callers dial.
+**Thirty-two deliberate defects have been run through it and thirty-one turned
+a green run red** — a renamed Service, a CPU limit, a grace period back at the
+Kubernetes default, a dropped hook annotation, a connection string moved into a
+ConfigMap, a second chart growing client credentials, an `envFrom` naming a
+ConfigMap nothing renders, a rollout checksum that missed the gateway's own, a
+Service publishing only its first port, a chart renumbering the port its
+callers dial, a fifth chart the gate never looked at, an Ingress with no
+backend, an Ingress with no TLS, a blank CIDR, a blank origin.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,
@@ -123,7 +124,14 @@ fail, and the values comment crediting the missing key was describing a
 mechanism nothing consulted. It is now an assertion about the agreement between
 the two halves, and it fails from either side.
 
-**One of them found a defect in the charts rather than in the harness**, and it
+**One deliberate defect went uncaught by any render-time assertion, and the
+fix was not another render check.** Restoring a plausible
+`ingress.trustedNetworks` default renders perfectly well — which is exactly
+why the value is dangerous — so the gate now asserts against the *values file*
+that the default stays absent. A property the render cannot have is a property
+the render cannot check.
+
+**Several found defects in the charts rather than in the harness**, and each
 was found by writing the assertion rather than by reading the template:
 the rollout checksum hashed only the ConfigMap the library renders, so editing
 `cors.origins` changed a mounted ConfigMap and left the pod template
