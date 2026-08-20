@@ -46,10 +46,18 @@ metadata and counts — they do not return a message body or a header, which is
 everything the steps below need. Use the Management API's `get` with
 `ackmode=ack_requeue_true`, which reads the message and puts it back:
 
+**The credentials are not `guest/guest`.** That is §14.1's Compose default; a
+deployed broker's are supplied by External Secrets
+([§15.4](../backend-architecture/15-cicd-deployment.md)), and reaching for the
+local default here authenticates as an account that does not exist. Take an
+authorised management credential from the incident context and export it:
+
 ```bash
 kubectl -n <ns> port-forward svc/rabbitmq 15672:15672 &
 
-curl -su guest:guest -X POST \
+export RABBIT_USER=... RABBIT_PASSWORD=...   # from the vault, not from §14.1
+
+curl -su "$RABBIT_USER:$RABBIT_PASSWORD" -X POST \
   -H 'content-type: application/json' \
   -d '{"count":5,"ackmode":"ack_requeue_true","encoding":"auto"}' \
   http://localhost:15672/api/queues/%2F/<endpoint>_error/get
@@ -76,27 +84,31 @@ What you want off the result:
 A dependency that was down, a database that was failing over, a deploy mid-roll.
 The payload is valid and the consumer would now succeed.
 
-Move it back to the main queue with the MassTransit CLI, or the Management UI's
-shovel:
-
-The Management API's shovel, declared as a one-shot parameter. It moves every
-message on the error queue back to the endpoint and deletes itself when the
-queue is empty:
+Move it back with the Management API's shovel, declared as a one-shot
+parameter. It moves every message on the error queue back to the endpoint and
+deletes itself when the queue is empty:
 
 ```bash
 kubectl -n <ns> port-forward svc/rabbitmq 15672:15672 &
 
-curl -su guest:guest -X PUT \
+curl -su "$RABBIT_USER:$RABBIT_PASSWORD" -X PUT \
   -H 'content-type: application/json' \
   -d '{"value":{
-        "src-protocol":"amqp091","src-uri":"amqp://","src-queue":"<endpoint>_error",
-        "dest-protocol":"amqp091","dest-uri":"amqp://","dest-queue":"<endpoint>",
+        "src-protocol":"amqp091","src-uri":"'"$AMQP_URI"'","src-queue":"<endpoint>_error",
+        "dest-protocol":"amqp091","dest-uri":"'"$AMQP_URI"'","dest-queue":"<endpoint>",
         "src-delete-after":"queue-length","ack-mode":"on-confirm"}}' \
   http://localhost:15672/api/parameters/shovel/%2F/replay-<endpoint>
 
 # Watch it drain, then confirm the shovel removed itself.
-curl -su guest:guest http://localhost:15672/api/shovels/%2F
+curl -su "$RABBIT_USER:$RABBIT_PASSWORD" http://localhost:15672/api/shovels/%2F
 ```
+
+**Both URIs are explicit, and a bare `amqp://` is the trap.** The shovel runs
+*inside* the broker and connects with its own credentials, so an unqualified
+URI means `guest`, which on a deployed broker is not a user — the API accepts
+the parameter and the shovel then fails to connect at both ends. Set
+`AMQP_URI` to the authorised value (`amqp://user:password@localhost:5672/%2F`)
+so the API call and the shovel's own connections use the same account.
 
 `src-delete-after: queue-length` is what makes this one-shot: the shovel stops
 after the messages present when it started, so a consumer that fails again does

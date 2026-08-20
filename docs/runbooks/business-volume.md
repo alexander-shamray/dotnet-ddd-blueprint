@@ -77,7 +77,9 @@ validator passed it, so a 400 dashboard shows a path this request never took.
 If 422s are up, go to the projection:
 
 ```sql
-SELECT COUNT(*) AS Prices, MAX(UpdatedAt) AS LastUpdate
+SELECT
+    Prices     = COUNT(*),
+    LastUpdate = MAX(UpdatedAt)
 FROM ordering.ProductPrices;
 ```
 

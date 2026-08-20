@@ -99,9 +99,17 @@ groups:
       # hop, so 30 seconds of lag already means something is wrong, while the
       # broker lane should absorb a short RabbitMQ blip or a rolling restart
       # without paging anyone.
+      # NO `for` ON EITHER LANE, and that is a correction rather than an
+      # omission. These gauges are *ages*: the expression only becomes true once
+      # a row has already been unprocessed for the threshold, so a `for` adds to
+      # it rather than debouncing it. `> 120` with `for: 2m` fires at FOUR
+      # minutes, and `> 30` with the same `for` at two and a half — against §13.6
+      # thresholds of two minutes and thirty seconds. The wait is the metric.
+      #
+      # The rules that keep a `for` are the ones whose expression can be true
+      # instantaneously: a ratio, a rate, a backlog depth.
       - alert: OutboxBrokerLaneStalled
         expr: max by (service_name) (outbox_oldest_age_seconds{lane="Broker"}) > 120
-        for: 2m
         labels:
           severity: page
           owner: platform
@@ -114,7 +122,6 @@ groups:
 
       - alert: OutboxLocalLaneStalled
         expr: max by (service_name) (outbox_oldest_age_seconds{lane="Local"}) > 30
-        for: 2m
         labels:
           severity: page
           owner: service

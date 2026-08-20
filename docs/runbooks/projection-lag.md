@@ -49,7 +49,13 @@ Then read the row's own record of it — `LastError` is the first 2000 character
 of the exception:
 
 ```sql
-SELECT TOP 10 Id, MessageId, MessageType, Attempts, LockedUntil, LEFT(LastError, 2000) AS LastError
+SELECT TOP 10
+    Id,
+    MessageId,
+    MessageType,
+    Attempts,
+    LockedUntil,
+    LastError = LEFT(LastError, 2000)
 FROM ordering.OutboxMessages
 WHERE ProcessedAt IS NULL
     AND Lane = 'Local'
@@ -76,7 +82,11 @@ If `LastError` is null and `Attempts` is 0 while the age climbs, the dispatcher
 is not getting to the row at all:
 
 ```sql
-SELECT Lane, COUNT(*) AS Pending, MIN(OccurredAt) AS Oldest, MIN(LockedUntil) AS NextLease
+SELECT
+    Lane,
+    Pending   = COUNT(*),
+    Oldest    = MIN(OccurredAt),
+    NextLease = MIN(LockedUntil)
 FROM ordering.OutboxMessages
 WHERE ProcessedAt IS NULL
 GROUP BY Lane;
@@ -107,9 +117,10 @@ republish — reset the rows and let the dispatcher redeliver:
 -- One MessageId at a time while diagnosing; the whole lane only when the
 -- handler is fixed and you have read what you are about to replay.
 UPDATE ordering.OutboxMessages
-SET Attempts = 0,
+SET
+    Attempts    = 0,
     LockedUntil = NULL,
-    LastError = NULL
+    LastError   = NULL
 WHERE ProcessedAt IS NULL
     AND Lane = 'Local'
     AND MessageId = @MessageId;

@@ -92,7 +92,13 @@ failing while newer ones succeed — that is a poison message, and it is
 rather than waiting:
 
 ```sql
-SELECT TOP 10 Id, MessageId, MessageType, Attempts, LockedUntil, LEFT(LastError, 500) AS LastError
+SELECT TOP 10
+    Id,
+    MessageId,
+    MessageType,
+    Attempts,
+    LockedUntil,
+    LastError = LEFT(LastError, 500)
 FROM ordering.OutboxMessages
 WHERE ProcessedAt IS NULL
     AND Lane = 'Broker'

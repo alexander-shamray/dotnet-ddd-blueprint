@@ -114,7 +114,13 @@ waiting and there is nothing wrong yet. If it is *older* and the timeout fired
 but the state did not change, look for the command that was sent:
 
 ```sql
-SELECT MessageId, MessageType, Lane, Attempts, ProcessedAt, LEFT(LastError, 500) AS LastError
+SELECT
+    MessageId,
+    MessageType,
+    Lane,
+    Attempts,
+    ProcessedAt,
+    LastError = LEFT(LastError, 500)
 FROM ordering.OutboxMessages
 WHERE CorrelationId = @OrderId
 ORDER BY OccurredAt;

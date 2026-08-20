@@ -42,7 +42,12 @@ rather than typing it:
 
 ```bash
 kubectl -n <ns> get jobs -l app.kubernetes.io/component=migrator
+
+# --sort-by, because the API guarantees no list order: `.items[-1]` off an
+# unsorted list is whichever Job the server happened to return last, which
+# during a failed upgrade is as likely to be the previous release's.
 job=$(kubectl -n <ns> get jobs -l app.kubernetes.io/component=migrator \
+        --sort-by=.metadata.creationTimestamp \
         -o jsonpath='{.items[-1].metadata.name}')
 
 kubectl -n <ns> logs job/"$job"

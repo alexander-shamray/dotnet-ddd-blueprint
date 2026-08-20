@@ -115,7 +115,8 @@ manual action taken outside the system is not covered by it.
 -- One row at a time. Named by MessageId, never by a bare predicate over the
 -- whole abandoned set: the set may hold rows in all three categories above.
 UPDATE ordering.OutboxMessages
-SET Attempts = 0,
+SET
+    Attempts    = 0,
     LockedUntil = NULL
 WHERE MessageId = @MessageId
     AND ProcessedAt IS NULL;
@@ -124,7 +125,11 @@ WHERE MessageId = @MessageId
 The dispatcher picks it up on the next tick. Watch it rather than assuming:
 
 ```sql
-SELECT MessageId, Attempts, ProcessedAt, LEFT(LastError, 500) AS LastError
+SELECT
+    MessageId,
+    Attempts,
+    ProcessedAt,
+    LastError = LEFT(LastError, 500)
 FROM ordering.OutboxMessages
 WHERE MessageId = @MessageId;
 ```
