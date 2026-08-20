@@ -143,16 +143,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Restoring the autoscaler's floor is owed on BOTH exits — a promote
-          # and a rollback alike — so it is one function rather than two copies
-          # that drift. A service left at minReplicas 19 is a rollout that
-          # silently resized production and reported success.
+          # Restoring the autoscaler's floor is owed on EVERY exit, and a
+          # `trap` rather than a call at each one is the difference between
+          # "owed on both outcomes" and "owed however this step ends".
+          #
+          # The two outcomes are the easy half — promote and rollback both
+          # reach a line that could call this. The half that gets missed is
+          # `set -e`: a `helm upgrade` that fails mid-ladder, a Prometheus that
+          # cannot be reached, a `kubectl` that times out. Each of those aborts
+          # the step between the scale-up and either exit, and a service left
+          # at minReplicas 19 is a rollout that silently resized production and
+          # then reported a failure about something else entirely.
           restore_floor() {
             if [ -n "${HPA_FLOOR:-}" ]; then
               kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
-                --type=merge -p "{\"spec\":{\"minReplicas\":$HPA_FLOOR}}"
+                --type=merge -p "{\"spec\":{\"minReplicas\":$HPA_FLOOR}}" || true
             fi
           }
+          trap restore_floor EXIT
 
           STEPS=$(python deploy/canary/canary.py steps)
           STABLE=$(kubectl get deployment "$WORKLOAD" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
@@ -205,7 +213,6 @@ jobs:
               helm upgrade "$WORKLOAD" -n "$NAMESPACE" \
                 --reuse-values --set image.tag="$TAG" --wait
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
-              restore_floor
               break
             fi
 
@@ -220,7 +227,6 @@ jobs:
             if ! python deploy/canary/canary.py analyse --readings readings.json; then
               echo "::error::Rolling back at step $STEP."
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
-              restore_floor
               exit 1
             fi
           done
