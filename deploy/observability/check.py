@@ -198,6 +198,91 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def strip_comments(text: str) -> str:
+    """C# source with every comment blanked out and every string left intact.
+
+    **A regex over raw source counts a commented-out instrument as a live
+    publisher**, and that is the one direction check 4 must not fail in: it
+    would certify a loaded alert whose instrument does not exist at runtime,
+    which is the silent gap this whole file exists to close. So comments go
+    before the scan — and only comments, because an instrument's name is a
+    string literal and blanking strings would leave nothing to find.
+
+    Whitespace replaces each comment character rather than nothing, so a `;`
+    inside a comment cannot join two statements INSTRUMENT then reads as one.
+
+    **`#if false` is NOT covered, and is named here rather than half-handled.**
+    Excluding a disabled region means evaluating C# preprocessor conditionals —
+    defined symbols, `#elif`, nesting — which is a compiler and not a scanner.
+    `src/` contains no `#if` today, so the residual is a shape nobody has yet
+    written; a `Create` call inside one would still be counted.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+
+        if text.startswith("//", i):
+            while i < n and text[i] != "\n":
+                out.append(" ")
+                i += 1
+            continue
+
+        if text.startswith("/*", i):
+            close = text.find("*/", i + 2)
+            end = n if close < 0 else close + 2
+            out.append("".join(c if c == "\n" else " " for c in text[i:end]))
+            i = end
+            continue
+
+        # A raw string literal closes on a quote run of its own length, so the
+        # opening run is measured rather than assumed to be three. OutboxStats
+        # composes its SQL in one, and an unmeasured fence would swallow the
+        # rest of that file.
+        if text.startswith('"""', i):
+            fence = 0
+            while i + fence < n and text[i + fence] == '"':
+                fence += 1
+            close = text.find('"' * fence, i + fence)
+            end = n if close < 0 else close + fence
+            out.append(text[i:end])
+            i = end
+            continue
+
+        if text.startswith('@"', i):
+            j = i + 2
+            while j < n:
+                if text[j] != '"':
+                    j += 1
+                elif text.startswith('""', j):
+                    j += 2
+                else:
+                    j += 1
+                    break
+            out.append(text[i:j])
+            i = j
+            continue
+
+        if ch in ('"', "'"):
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                elif text[j] == ch:
+                    j += 1
+                    break
+                else:
+                    j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
 def parse_rules(path: Path) -> list[dict[str, object]]:
     """Extract alert name, expression and runbook from a Prometheus rules file.
 
@@ -320,7 +405,7 @@ def declared_instruments() -> set[str]:
     for source in (ROOT / "src").rglob("*.cs"):
         if "/obj/" in source.as_posix() or "/bin/" in source.as_posix():
             continue
-        for match in INSTRUMENT.finditer(read(source)):
+        for match in INSTRUMENT.finditer(strip_comments(read(source))):
             observable, kind, name, rest = match.groups()
             unit_match = UNIT_ARGUMENT.search(rest or "")
             unit = unit_match.group(1) if unit_match else ""
@@ -378,6 +463,28 @@ def main() -> int:
         fail("found no runbooks in docs/runbooks")
     if not instruments:
         fail("found no instruments in src/**/*.cs — the INSTRUMENT pattern matched nothing")
+
+    #    strip_comments is part of that subject, and it needs its own probe
+    #    because only one of its two failure directions is caught above. A
+    #    stripper that removed everything would empty `instruments` and fail
+    #    there; a stripper that removed NOTHING restores the defect it was
+    #    written for and leaves every check green. So both directions are
+    #    asserted, on a sample rather than on the tree.
+    #
+    #    The sample is the shape that actually bit. Commenting a declaration out
+    #    line-by-line is already invisible to INSTRUMENT — a `// ` at the head of
+    #    the continuation lines breaks `\s*\(\s*"` — so the first probe tried
+    #    reported the defect as absent. A block comment, and a whole call on one
+    #    commented line, are the two that match and were counted.
+    probe = strip_comments(
+        'var a = "http://x/y";  // CreateCounter<long>("ghost.one");\n'
+        '/* CreateCounter<long>("ghost.two"); */\n'
+        'CreateCounter<long>("real.one");\n')
+    stripped = {match.group(3) for match in INSTRUMENT.finditer(probe)}
+    if stripped != {"real.one"}:
+        fail(f"strip_comments: expected only the live instrument, found {sorted(stripped)}")
+    if "http://x/y" not in probe:
+        fail("strip_comments: a `//` inside a string literal was read as a comment")
 
     for rule in every_rule:
         if not rule["expr"]:

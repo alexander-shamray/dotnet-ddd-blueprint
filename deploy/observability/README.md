@@ -55,11 +55,27 @@ it, which is a larger decision. It is on the exemption list with that reason,
 and the check fails in **both** directions: a new unexempted service, and a
 stale exemption for one that no longer needs it.
 
+**Checks 4, 5 and 6 read C# with comments removed first, and the direction of
+that failure is why.** The instrument scan is a regex over source, so a
+commented-out `CreateCounter(…)` was counted as a live publisher — which meant
+check 4 could certify a loaded alert whose instrument does not exist at
+runtime, the one silent gap this gate exists to close. Measured before it was
+fixed: block-commenting Ordering's `outbox.oldest.age` gauge left the gate
+reporting **OK** with two loaded alerts and two dashboard panels reading a
+metric nothing published.
+
+Only comments are removed. An instrument's name is a string literal, so
+blanking strings as well would find nothing at all — and a `//` inside a string
+is not a comment, which the gate's own probe asserts in both directions.
+
 **What it does not do.** It reaches no Prometheus, no Grafana and no cluster,
 and it does **not** check that a rules file is syntactically valid to
 Prometheus — `promtool` would be the tool for that, and adding it is a decision
-no chapter has taken. Named here as not covered rather than implied, on
-`deploy/helm/smoke.sh`'s terms.
+no chapter has taken. It does not evaluate C# preprocessor conditionals either:
+a `Create` call inside `#if false` would still count as published, because
+excluding one means implementing defined symbols, `#elif` and nesting — a
+compiler rather than a scanner. `src/` contains no `#if` today. Named here as
+not covered rather than implied, on `deploy/helm/smoke.sh`'s terms.
 
 ## Why there are two rule files
 
