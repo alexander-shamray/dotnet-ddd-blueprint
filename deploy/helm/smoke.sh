@@ -316,10 +316,16 @@ section 'Service names are routing configuration (§10.2, §9.7)'
 # because §10.2's route file deliberately names inventory ahead of the service
 # that will answer it, and a gate demanding a chart per destination would fail
 # on a route the blueprint means to be there.
+# The host AND the port, because both are literals and both are dialled. An
+# earlier version stripped the port here and then hard-coded Catalog's two
+# below, which asserted one destination of three and read as though it covered
+# them all.
 grep -ohE 'http://[a-z0-9-]+:[0-9]+' \
     "$ROOT/src/Gateway/Gateway.Api/appsettings.json" \
     "$ROOT/src/BFF/Web.Bff/PricingHop.cs" |
-    sed -E 's|http://([a-z0-9-]+):[0-9]+|\1|' | sort -u >"$OUT/dialled.txt"
+    sed -E 's|http://([a-z0-9-]+):([0-9]+)|\1 \2|' | sort -u >"$OUT/pairs.txt"
+
+cut -d' ' -f1 "$OUT/pairs.txt" | sort -u >"$OUT/dialled.txt"
 echo gateway >>"$OUT/dialled.txt"
 sort -u -o "$OUT/dialled.txt" "$OUT/dialled.txt"
 
@@ -336,10 +342,15 @@ fi
 # way rather than trusted — which means the SERVICE port, not the container
 # port. `PricingHop.cs` dials `http://catalog-api:8081`, and what answers that
 # is `spec.ports[].port` on the Service; `containerPort` is the Deployment's
-# and is not what the BFF resolves. This check read the Deployment's until
-# round 3 said so, and a `_service.tpl` that ranged only the `http` port would
-# have passed it while the hop 502'd — the same shape as the migration-Job
-# assertion two sections up, and found the same way.
+# and is not what the BFF resolves.
+#
+# TWO ROUNDS OF THE SAME HOLE, and the second is why this is a loop. Round 3
+# found the check reading `containerPort`, so a `_service.tpl` publishing only
+# the `http` port would pass while the hop 502'd. Round 5 found the fix
+# hard-coded to `catalog-api`: `_service.tpl` takes `port` from PER-CHART
+# values, so an `ordering/values.yaml` renumbering its port failed nothing —
+# one destination of three asserted, by a comment that read as though it
+# covered them all. Every pair the name gate parses is now a row.
 service_port() {
     # <file> <service name> <port> -> exit 0 when that Service publishes it
     awk -v want="$2" -v port="$3" '
@@ -352,10 +363,18 @@ service_port() {
     ' "$1"
 }
 
-check 'catalog-api answers the pricing hop on Service port 8081' \
-    service_port "$OUT/catalog.yaml" catalog-api 8081
-check 'and the gateway reaches catalog-api on Service port 8080' \
-    service_port "$OUT/catalog.yaml" catalog-api 8080
+while read -r host port; do
+    if grep -qx "$host" "$OUT/services.txt"; then
+        check "$host answers on Service port $port" \
+            service_port "$OUT/platform.yaml" "$host" "$port"
+    else
+        # Not a silent cap: §10.2's route file deliberately names a
+        # destination ahead of the service that will answer it, so a host with
+        # no chart is expected — and saying which one keeps that expectation
+        # from quietly absorbing a chart somebody forgot to add.
+        pass "$host:$port dialled by src/, no chart yet — not asserted"
+    fi
+done <"$OUT/pairs.txt"
 
 # --------------------------------------------------------------------------
 section 'Values that must agree across charts'

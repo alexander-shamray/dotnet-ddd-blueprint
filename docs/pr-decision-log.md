@@ -103,8 +103,9 @@ of its decisions bind what comes after.
   that stopped covering a surface; it is one whose subject never existed. The
   assertion is now about the **agreement** between the two halves — a chart has
   a migration template exactly when its values name a migrator image — which
-  fails from either side. It was the one of twenty deliberate defects that
-  failed to turn a green run red, and it was found by running them.
+  fails from either side. Of every deliberate defect run through that gate it
+  is the **one** that failed to turn a green run red, and it was found by
+  running them rather than by reading it again.
 - **§15.4's two Redis rows were required against a solution where nothing
   reads them**, and the consequence is worse than the over-supply that table
   already warns about. Supplying credentials no code path sends merely

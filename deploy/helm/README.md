@@ -104,14 +104,19 @@ helm upgrade --install platform deploy/helm/platform \
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Twenty deliberate defects were run through it, and nineteen turned a green
-run red** — a renamed Service, a CPU limit, a grace period back at the
-Kubernetes default, a dropped hook annotation, a connection string moved into a
-ConfigMap, a second chart growing client credentials, an `envFrom` naming a
-ConfigMap nothing renders, a rollout checksum that missed the gateway's own
-ConfigMap.
+**Twenty-three deliberate defects have been run through it and twenty-two
+turned a green run red** — a renamed Service, a CPU limit, a grace period back
+at the Kubernetes default, a dropped hook annotation, a connection string moved
+into a ConfigMap, a second chart growing client credentials, an `envFrom`
+naming a ConfigMap nothing renders, a rollout checksum that missed the
+gateway's own, a Service publishing only its first port, a chart renumbering
+the port its callers dial.
 
-The twentieth is the reason this paragraph exists. "The gateway renders no
+**The tally is this branch's and it grows**; what does not grow is the count of
+defects that got past the gate, which is one. That is the number worth reading,
+and it is why the sentence below has its own paragraph.
+
+The one is the reason this paragraph exists. "The gateway renders no
 migration Job" passed against a gateway that declared `image.migrator`, because
 that chart carries no migration template at all — so the assertion could not
 fail, and the values comment crediting the missing key was describing a
