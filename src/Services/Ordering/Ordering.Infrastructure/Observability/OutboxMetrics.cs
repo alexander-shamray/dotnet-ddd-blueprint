@@ -70,11 +70,53 @@ public sealed class OutboxMetrics
     /// at one of three call sites would be a lane with no gauge and therefore
     /// no alert, which is the silent gap §13.6 spends a callout on.
     /// </summary>
-    private static IEnumerable<Measurement<double>> PerLane(Func<OutboxLane, double> read) =>
-    [
-        .. Enum.GetValues<OutboxLane>()
-            .Select(lane => new Measurement<double>(read(lane), Tag(lane)))
-    ];
+    /// <remarks>
+    /// <b>The read is contained, because an observable callback that throws
+    /// does not fail alone.</b> <c>MeterListener.RecordObservableInstruments</c>
+    /// propagates the exception and abandons the rest of the pass, so a
+    /// <c>SqlException</c> from one lane can stop <em>unrelated</em> observable
+    /// instruments being collected — a database outage taking telemetry with
+    /// it that has nothing to do with the database.
+    /// <para>
+    /// This repository proved that on itself:
+    /// <c>A_foreign_meter_of_the_same_name_is_not_collected</c> only avoids a
+    /// <c>SqlException</c> by never enabling the foreign callback, which is a
+    /// demonstration that enabling it would have thrown through the collector.
+    /// An earlier comment on <c>OutboxStats</c> claimed the SDK swallowed it;
+    /// that was an assumption, and this makes it true by construction instead.
+    /// </para>
+    /// <para>
+    /// Returning no measurements is the right failure: the series goes absent
+    /// for that interval, which §13.5's readiness already reports properly, and
+    /// an outbox alert firing because SQL Server is unreachable would page the
+    /// wrong person with the wrong runbook.
+    /// </para>
+    /// </remarks>
+    private static List<Measurement<double>> PerLane(Func<OutboxLane, double> read)
+    {
+        List<Measurement<double>> measurements = [];
+
+        foreach (OutboxLane lane in Enum.GetValues<OutboxLane>())
+        {
+            double value;
+
+            try
+            {
+                value = read(lane);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // Every lane is dropped, not just this one: half a reading is
+                // worse than none, because a lane missing from a `max by (lane)`
+                // reads as a healthy zero rather than as no data.
+                return [];
+            }
+
+            measurements.Add(new Measurement<double>(value, Tag(lane)));
+        }
+
+        return measurements;
+    }
 
     /// <summary>
     /// The tag value is the enum's own name, never a hand-written string. The

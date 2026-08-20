@@ -370,7 +370,7 @@ a gate keeps the list honest.
 **PR-25 (integration categories, canary deploy, quality gates) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 790 tests — so the build rules and the drift rules below
+and `dotnet test` runs 791 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -582,7 +582,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 619 of 790, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 620 of 791, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -635,8 +635,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 619 of
-the 790 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 620 of
+the 791 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 171, needing the daemon exactly as
 before. PR-25 runs them as separate CI stages; today CI runs one pass over
 both, because staging a split §15.1 has not grown yet would claim a pipeline

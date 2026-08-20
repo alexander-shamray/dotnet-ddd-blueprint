@@ -189,9 +189,26 @@ the only record is whatever you saved.
 kubectl -n <ns> exec deploy/rabbitmq -- rabbitmqctl purge_queue <endpoint>_error
 ```
 
-**`purge_queue` takes the whole queue.** If it holds a mix of replayable and
-unreplayable messages, shovel the replayable ones back first, then purge — or
-you have discarded the good ones with the bad.
+**`purge_queue` takes the whole queue, and the shovel above takes the whole
+queue too.** Neither filters, so on a **mixed** queue there is no order of the
+two that is safe: shovel first and the unreplayable messages go back to a
+consumer that will refuse them again; purge first and the replayable ones are
+gone.
+
+**So do not purge a mixed queue.** Empty it one way or the other instead:
+
+1. **Replay everything**, then work whatever returns to the error queue as a
+   smaller, uniform problem. Poison messages simply come back, which costs a
+   round trip and loses nothing.
+2. Or **move the unreplayable ones out by hand first** — `get` with
+   `ackmode=ack_requeue_false` consumes exactly the messages it returns, so
+   with `count` set to the number you have identified and confirmed at the head
+   of the queue, that is a selective removal. Record each body before it goes.
+
+The first is almost always right. Reach for the second only when replaying
+would cause a side effect the inbox filter does not cover — §9.5 makes
+redelivery of the same `MessageId` a no-op *inside* the handler's transaction,
+and says nothing about what a handler did outside the database.
 
 ### Fix first — the consumer has a bug
 

@@ -203,9 +203,15 @@ groups:
       # at zero for ever, so the deploy hangs and nothing pages. The second
       # branch is an *active* Job older than fifteen minutes — well past any
       # migration this platform has, and the shape a stuck release takes.
+      # `kube_job_failed{condition="true"}`, NOT `kube_job_status_failed`. The
+      # latter counts failed *pods*, and §15.3's hook sets `backoffLimit: 2` —
+      # so one transient attempt puts it above zero while a retry is still
+      # running, and this rule would page on a deploy that then succeeds. The
+      # Job's Failed *condition* is the thing that means "retries exhausted",
+      # which is the event a human is needed for.
       - alert: MigrationJobFailed
         expr: |
-          max by (namespace, job_name) (kube_job_status_failed{job_name=~".+-migrate.*"}) > 0
+          max by (namespace, job_name) (kube_job_failed{job_name=~".+-migrate.*", condition="true"}) > 0
           or
           (
             max by (namespace, job_name) (kube_job_status_active{job_name=~".+-migrate.*"}) > 0

@@ -247,6 +247,47 @@ public class MetricsRegistrationTests
         collected.ShouldAllBe(v => v == 11 || v == 12 || v == 41 || v == 42 || v == 61 || v == 62);
     }
 
+    /// <summary>
+    /// A failing stats read drops this meter's series and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <c>MeterListener.RecordObservableInstruments</c> propagates an exception
+    /// out of an observable callback and abandons the rest of the pass, so an
+    /// unhandled <c>SqlException</c> here would stop <em>unrelated</em>
+    /// instruments being collected — a database outage taking telemetry with it
+    /// that has nothing to do with the database. <c>OutboxMetrics</c> contains
+    /// the read for that reason, and this is the assertion that it does.
+    /// </remarks>
+    [Fact]
+    public void A_failing_stats_read_yields_no_measurements_rather_than_throwing()
+    {
+        using IMeterFactory factory = new ServiceCollection()
+            .AddMetrics()
+            .BuildServiceProvider()
+            .GetRequiredService<IMeterFactory>();
+
+        OutboxMetrics metrics = new(factory, new ThrowingOutboxStats());
+        metrics.ShouldNotBeNull();
+        Meter mine = factory.Create(OutboxMetrics.MeterName);
+
+        List<double> collected = [];
+        using MeterListener listener = new();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (ReferenceEquals(instrument.Meter, mine))
+                l.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((_, value, _, _) => collected.Add(value));
+
+        listener.Start();
+
+        // Enabled, unlike the foreign meter one file down — the whole point is
+        // that recording it is safe.
+        Should.NotThrow(() => listener.RecordObservableInstruments());
+
+        collected.ShouldBeEmpty("a failing read must drop the series, not report one");
+    }
+
     private static string LaneOf(ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
         foreach (KeyValuePair<string, object?> tag in tags)
@@ -284,6 +325,19 @@ public class MetricsRegistrationTests
     /// A distinct number per lane and per question, so an assertion cannot pass
     /// by reading the right value off the wrong call.
     /// </summary>
+    /// <summary>
+    /// Stands in for an unreachable database: the shape a `SqlException` from
+    /// a timed-out connect or command arrives in.
+    /// </summary>
+    private sealed class ThrowingOutboxStats : IOutboxStats
+    {
+        public double OldestAgeSeconds(OutboxLane lane) => throw new InvalidOperationException("database unreachable");
+
+        public int PendingCount(OutboxLane lane) => throw new InvalidOperationException("database unreachable");
+
+        public int AbandonedCount(OutboxLane lane) => throw new InvalidOperationException("database unreachable");
+    }
+
     private sealed class StubOutboxStats : IOutboxStats
     {
         public double OldestAgeSeconds(OutboxLane lane) => lane == OutboxLane.Broker ? 11 : 12;

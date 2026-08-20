@@ -4,7 +4,7 @@
 |---|---|
 | Alert | `MigrationJobFailed`, in `deploy/observability/alerts/platform-alerts.yaml` |
 | Condition | A `pre-install,pre-upgrade` hook Job non-zero, or a release stuck pending |
-| Signal | `kube_job_status_failed`, plus `kube_job_status_active` and `kube_job_status_start_time` for the stuck-pending branch — kube-state-metrics, not solution instruments |
+| Signal | `kube_job_failed{condition="true"}` — the Job's Failed *condition*, meaning retries exhausted — plus `kube_job_status_active` and `kube_job_status_start_time` for the stuck-pending branch. kube-state-metrics, not solution instruments |
 | Owner | Platform ([§13.8](../backend-architecture/13-observability.md)) |
 
 ## What it means

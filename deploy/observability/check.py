@@ -93,8 +93,10 @@ EXTERNAL_METRICS = {
         "Histogram", "ASP.NET Core instrumentation, enabled in §13.2"),
     "rabbitmq_queue_messages": (
         "Gauge", "the RabbitMQ exporter — §14.1's broker, §13.6's error-queue alert"),
-    "kube_job_status_failed": (
-        "Gauge", "kube-state-metrics — §7.4's migration hook Job"),
+    "kube_job_failed": (
+        "Gauge", "kube-state-metrics — the Job's Failed CONDITION, which is "
+                 "retries exhausted. `kube_job_status_failed` counts failed "
+                 "pods and goes above zero mid-retry under `backoffLimit: 2`"),
     "kube_job_status_active": (
         "Gauge", "kube-state-metrics — the stuck-pending half of §13.6's migration alert"),
     "kube_job_status_start_time": (

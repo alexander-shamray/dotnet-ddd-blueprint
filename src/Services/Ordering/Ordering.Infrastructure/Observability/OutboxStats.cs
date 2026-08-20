@@ -24,10 +24,14 @@ namespace Ordering.Infrastructure.Observability;
 /// is a monitor that causes the symptom.
 /// </para>
 /// <para>
-/// <b>Failure is an absent series, never a thrown exception.</b> A gauge
-/// callback that throws is swallowed by the SDK and the measurement is simply
-/// not exported, so nothing here tries to be clever about a database that is
-/// down: readiness (§13.5) already covers that, and an outbox alert firing
+/// <b>Failure surfaces as an absent series, and <see cref="OutboxMetrics"/> is
+/// what makes that true.</b> This type throws — a timeout or an unreachable
+/// server is a <c>SqlException</c> like any other. An earlier comment here
+/// claimed the SDK swallowed it; it does not, and
+/// <c>MeterListener.RecordObservableInstruments</c> abandons the rest of the
+/// pass, so the containment lives in the callback rather than in an assumption
+/// about the collector. Nothing here tries to be clever about a database that
+/// is down: readiness (§13.5) already covers that, and an outbox alert firing
 /// because SQL Server is unreachable would page the wrong person with the
 /// wrong runbook.
 /// </para>
