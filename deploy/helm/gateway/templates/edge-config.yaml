@@ -46,6 +46,30 @@ data:
   {{- if not $n }}
   {{- fail (printf "ingress.trustedNetworks[%d] is blank. IPNetwork.Parse throws on it at startup, so the pod dies after the rollout begins rather than before it (§15.4)." $i) }}
   {{- end }}
+  {{- /*
+  And the shape, because blank was only the emptiest way to be wrong.
+  `not-a-network` rendered, began a rollout and threw out of
+  `IPNetwork.Parse` — a case `ConditionalBlockTests` covers on the host side,
+  which is exactly the failure this guard exists to move earlier.
+
+  IPv4 only, deliberately and stated: an IPv6 CIDR is refused here rather than
+  half-validated, on the same terms as the IPv6 origin above. Nothing in this
+  platform's ingress documentation uses one, and a guard that half-checks a
+  shape is the thing this branch keeps having to fix.
+  */}}
+  {{- if not (regexMatch "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$" $n) }}
+  {{- fail (printf "ingress.trustedNetworks[%d] is not an IPv4 CIDR. IPNetwork.Parse throws on it at startup, after the rollout has begun (§15.4). IPv6 is refused here rather than half-checked." $i) }}
+  {{- end }}
+  {{- $addr := first (splitList "/" $n) }}
+  {{- $prefix := atoi (last (splitList "/" $n)) }}
+  {{- if gt $prefix 32 }}
+  {{- fail (printf "ingress.trustedNetworks[%d] has a prefix length above 32." $i) }}
+  {{- end }}
+  {{- range $octet := splitList "." $addr }}
+  {{- if gt (atoi $octet) 255 }}
+  {{- fail (printf "ingress.trustedNetworks[%d] has an octet above 255." $i) }}
+  {{- end }}
+  {{- end }}
   {{- /* The trimmed value, for the reason the origins list gives below. */}}
   Ingress__TrustedNetworks__{{ $i }}: {{ $n | quote }}
   {{- end }}
@@ -109,6 +133,17 @@ data:
   {{- if or (and (hasPrefix "https://" $o) (eq $n 443)) (and (hasPrefix "http://" $o) (eq $n 80)) }}
   {{- fail (printf "cors.origins[%d] names the scheme's default port. A browser serialises an origin without it, and WithOrigins compares the configured text — so this matches nothing while looking correct (§10.2)." $i) }}
   {{- end }}
+  {{- end }}
+  {{- /*
+  Case, which the shape test above does not see. `GetLeftPart(UriPartial.Authority)`
+  canonicalises scheme and host to lowercase and `WithOrigins` compares
+  ordinally, so `https://SPA.example` is refused by the host —
+  `ConditionalBlockTests` covers exactly that value. Everything in an origin is
+  case-insensitive and canonicalises down, so the whole string must already
+  equal its lowercase form.
+  */}}
+  {{- if ne $o (lower $o) }}
+  {{- fail (printf "cors.origins[%d] is not lowercase. The canonical origin lowercases scheme and host and WithOrigins compares ordinally, so a capital letter matches nothing while looking correct (§10.2)." $i) }}
   {{- end }}
   {{- /*
   The TRIMMED value, not the original. Validating `$o` and emitting `$origin`

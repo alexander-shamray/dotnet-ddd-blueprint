@@ -150,13 +150,24 @@ hook annotations of [§7.4](07-persistence.md), the ConfigMap/Secret split of
 cluster is reached, so schema validation against a live API server stays a
 deploy-time gate and is named in the script as not covered.
 
-**That filter also names two files under `src/`**, which is the one place a
-`deploy/**` workflow reaches outside its own tree and is not an oversight. The
-script asserts that every Service the charts render is a name something dials —
-§10.2's route file and `PricingHop.cs` both hold their destination hosts as
-literals, on the stated grounds that "the host is the Kubernetes Service name".
-Without those two lines, renaming a destination is a green pull request that
-breaks the next deploy.
+**That filter also names files outside `deploy/helm/`**, which is the one
+place a `deploy/**` workflow reaches outside its own tree and is not an
+oversight. Each is an input the script actually reads:
+
+- §10.2's route file and `PricingHop.cs`, which hold their destination hosts as
+  literals on the stated grounds that "the host is the Kubernetes Service
+  name" — so renaming a destination without them is a green pull request that
+  breaks the next deploy;
+- Catalog's `appsettings.json`, which declares the Kestrel endpoints those
+  Services forward to, so moving the h2c listener off 8081 would otherwise
+  leave a Service pointing at a closed port with every assertion still passing;
+- `.gitattributes`, which pins this tree to LF — without it a CRLF template
+  renders a CR onto every line and the script's anchored greps match nothing on
+  a Linux runner.
+
+**The list is written out rather than counted**, and that is this branch's
+experience rather than a preference: the sentence here said "two files" and was
+made wrong by the change that added the third.
 
 `BuildingBlocks` appears under every service, so a change there rebuilds
 everything. That is correct, and it is also the reason to keep those projects

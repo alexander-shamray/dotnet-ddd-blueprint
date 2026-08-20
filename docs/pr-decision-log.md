@@ -88,13 +88,19 @@ of its decisions bind what comes after.
   sentence false the moment the umbrella installs the same workload under its
   own release, and the failure is a 502 at run time rather than a template
   error. So `workload.name` is a required value, the Service takes it verbatim,
-  and **the selector carries nothing release-scoped** — a Deployment's
-  `.spec.selector` is immutable, so a release-derived one is rejected by the
-  API server on exactly the standalone-to-umbrella migration an umbrella chart
-  exists to perform. The gate that keeps this true reads the two source files
-  and asserts every rendered Service is a name one of them dials; the CI filter
-  therefore names two paths under `src/`, which is the one place a `deploy/**`
-  workflow reaches outside its own tree.
+  and **the selector carries nothing release-scoped**, because a selector is
+  workload identity rather than release bookkeeping: these pods are found by
+  the same name their callers dial, and a Deployment will never let that field
+  change afterwards. The first justification here was the
+  standalone-to-umbrella migration, and Copilot killed it — Helm rejects that
+  adoption on ownership before the API server's immutable-selector check is
+  reached. The conclusion outlived its argument, which is worth recording
+  rather than quietly keeping. The gate that keeps this true reads the source
+  files that hold those literals and asserts every rendered Service is a name
+  one of them dials — and, since Copilot's third round, that Catalog is
+  listening on the ports its own Service forwards to. The CI filter names each
+  of those paths, which is the one place a `deploy/**` workflow reaches outside
+  its own tree.
 - **A gate cannot fail on a file that is not there, and this is that lesson at
   its earliest point.** "The gateway renders no migration Job" passed against a
   gateway that declared `image.migrator: gateway-migrator` — because the

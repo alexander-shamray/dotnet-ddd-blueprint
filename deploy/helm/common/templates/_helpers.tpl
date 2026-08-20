@@ -59,12 +59,18 @@ kubelet resolves that to `:latest`, which is the one tag §15.3 forbids by name.
 {{- /*
 The selector, which carries the workload name and NOTHING release-derived.
 
-A Deployment's `.spec.selector` is immutable after creation, and the same
-workload is installed two ways: standalone (`helm install catalog-api
-deploy/helm/catalog`) and as a subchart of the umbrella, where `.Release.Name`
-is `platform`. A selector holding the release name is therefore a field that
-changes on exactly the migration an umbrella chart exists to perform, and the
-error arrives from the API server as a rejected update rather than from helm.
+**Because the selector is workload identity, not release bookkeeping.** These
+pods are found by their name: the Service selects them, and that name is the
+string §10.2's route file and §9.7's pricing hop dial. Putting the release into
+the selector would make a pod's identity depend on which command installed it,
+for a field a Deployment will never let you change afterwards.
+
+This comment used to justify it by the standalone-to-umbrella migration, and
+that justification is dead — §15.3 and `platform/values.yaml` now record that
+Helm rejects the adoption outright on ownership, so the migration never reaches
+the API server's immutable-selector check. The conclusion survives its original
+argument, which is worth saying rather than quietly keeping: a release-scoped
+selector would still be wrong, and the reason is now the one above.
 */}}
 {{- define "commerce.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "commerce.name" . }}

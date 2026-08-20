@@ -134,7 +134,7 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Forty-three deliberate defects have been run through it and forty-two turned
+**Forty-seven deliberate defects have been run through it and forty-six turned
 a green run red** — a renamed Service, a CPU limit, a grace period back at the
 Kubernetes default, a dropped hook annotation, a connection string moved into a
 ConfigMap, a second chart growing client credentials, an `envFrom` naming a
@@ -144,7 +144,8 @@ callers dial, a fifth chart the gate never looked at, an Ingress with no
 backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
 whitespace-only authority, an origin carrying credentials, a pod remounting the
 service-account token, a listener moved out from under its own Service, a
-validator that checked one string and shipped another.
+validator that checked one string and shipped another, an uppercase host, a
+CIDR that is not one.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,
@@ -172,7 +173,9 @@ byte-identical — a deploy that reports success and rolls nothing. The
 annotation now hashes the whole of `.Values`, which over-triggers on a few keys
 the container never sees and is the safe direction.
 
-CI runs the same script, path-filtered to this tree **and to the two source
-files it reads** — the gateway's route file and `PricingHop.cs`, because
-renaming a destination there is what would otherwise break a deploy from a
-green PR.
+CI runs the same script, path-filtered to this tree **and to every input it
+reads outside it**: the gateway's route file and `PricingHop.cs` (renaming a
+destination there would otherwise break a deploy from a green PR), Catalog's
+`appsettings.json` (which declares the listeners those Services forward to),
+and `.gitattributes` (which pins this tree to LF, without which the anchored
+greps match nothing on a Linux runner).

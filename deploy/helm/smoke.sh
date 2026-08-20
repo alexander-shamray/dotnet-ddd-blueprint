@@ -583,6 +583,21 @@ refuses 'an origin naming the default port fails the render' 'default port' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:443}'
 refuses 'an origin with a non-numeric port fails the render' 'is not a browser origin' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:notaport}'
+# Case, which the shape test cannot see: the canonical origin lowercases scheme
+# and host and WithOrigins compares ordinally, so `https://SPA.example` is
+# refused by the host — `ConditionalBlockTests` covers that exact value.
+refuses 'a non-lowercase origin fails the render' 'is not lowercase' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://SPA.example}'
+
+# And the CIDR list, where blank was only the emptiest way to be wrong.
+# `not-a-network` rendered and threw out of IPNetwork.Parse at startup — again
+# a case the host's own suite covers.
+refuses 'a malformed trusted network fails the render' 'is not an IPv4 CIDR' \
+    --set 'ingress.trustedNetworks={not-a-network}'
+refuses 'a trusted network with a bad octet fails the render' 'octet above 255' \
+    --set 'ingress.trustedNetworks={10.0.300.0/8}'
+refuses 'a trusted network with a bad prefix fails the render' 'prefix length above 32' \
+    --set 'ingress.trustedNetworks={10.0.0.0/64}'
 
 # The guard checked `$o` and the ConfigMap emitted `$origin`, so a trailing
 # space passed every test above and then failed the host's exact text

@@ -60,7 +60,7 @@ identity:
   # YARP forwards the caller's token — so there is no clientSecretRef here
   # and no gateway entry in External Secrets (§11.5, §15.4).
   authority: https://id.example.com/realms/commerce
-  # False, and written down rather than absent: §15.4'''s
+  # False, and written down rather than absent: §15.4's
   # required-for-some-hosts category is a claim a chart has to make, not one to
   # infer from a missing key. Exactly one chart in the platform sets it true.
   clientCredentials: false
