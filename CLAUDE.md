@@ -370,7 +370,7 @@ a gate keeps the list honest.
 **PR-25 (integration categories, canary deploy, quality gates) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 791 tests — so the build rules and the drift rules below
+and `dotnet test` runs 794 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -565,6 +565,16 @@ own line rather than sending a reader to a file that does not hold it.
   the state is called `Confirmed`, so `state!="AwaitingDespatch"` would have
   paged on every healthy confirmed order. Prose describing a state and code
   selecting one are different acts — **read the enum, not the sentence.**
+- **A test that asserts on which exception wins a race is a test that fails on
+  a loaded runner and nowhere else.** `WebApplicationFactory` drives a
+  top-level-statements `Program` through `DeferredHostBuilder`, so when
+  `ValidateOnStart` throws, `app.Run()` disposes the host while the deferred
+  host is still resolving from it — and the loser gets `ObjectDisposedException`
+  with the real exception **destroyed rather than wrapped**. No assertion can
+  recover it afterwards. Split the claim instead: the host-level test asserts
+  that it refused, and a second test asserts *why*, against the options
+  pipeline where nothing races. Measured on this repository: intermittent on a
+  two-core CI runner, never once locally.
 - **A pattern that is one token too strict silently covers less than it
   claims.** The observability gate's instrument reader required `Create…<T>(`
   and found every histogram and counter while missing all three observable
@@ -582,7 +592,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 620 of 791, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 623 of 794, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -635,8 +645,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 620 of
-the 791 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 623 of
+the 794 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 171, needing the daemon exactly as
 before. PR-25 runs them as separate CI stages; today CI runs one pass over
 both, because staging a split §15.1 has not grown yet would claim a pipeline

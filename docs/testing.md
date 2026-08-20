@@ -109,10 +109,10 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Those are the runner's numbers, and `--list-tests` gives different ones.**
 > Discovery reports 82 for that project where execution reports 81, so a
 > partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 791 is summed from `dotnet test` output, and mixing the two is how
+> here — the 794 is summed from `dotnet test` output, and mixing the two is how
 > this callout first came to claim 72 and 82. Quote what ran.
 >
-> Across the solution the split is **620 and 171 of 791**, and the fast half
+> Across the solution the split is **623 and 171 of 794**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -133,7 +133,7 @@ The five declarations are in `Catalog.Api.Tests`,
 `Catalog.Application.Tests`, `Common.Infrastructure.Tests`,
 `Ordering.Api.Tests` and — as `KeycloakCollection` — `Web.Bff.Tests`. That last
 is the clearest case for categorising a **collection** rather than a project:
-59 of its 63 tests never needed a container and 4 need an identity provider, so
+62 of its 66 tests never needed a container and 4 need an identity provider, so
 a project-level split would have had nothing to split. What it buys there is a
 container start rather than a fast suite — the BFF's fast half still takes
 about a minute, because §9.7's resilience tests wait on real timeouts.
@@ -154,8 +154,8 @@ the instrumentation reason under Coverage below.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 620 and 171 summing to
-> 791 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 623 and 171 summing to
+> 794 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.
