@@ -314,8 +314,13 @@ kind: Job
 metadata:
   # The workload's name (§15.3) plus the tag — one name per deployable rather
   # than three, because that name is already a contract the route file and the
-  # pricing hop both spell. Truncated to 63 by the chart: Kubernetes stamps
-  # `job-name` onto the pods it creates, and a label value may not exceed it.
+  # pricing hop both spell.
+  #
+  # The chart VALIDATES this length rather than truncating it: Kubernetes
+  # stamps `job-name` onto the pods it creates and a label value may not
+  # exceed 63, and a cut can land mid-tag — on a dot, which trimming a trailing
+  # hyphen never touched — or make two tags collide on one Job. A tag that does
+  # not fit is a deploy that must fail, not a name to mangle.
   name: ordering-api-migrate-{{ .Values.image.tag }}
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade

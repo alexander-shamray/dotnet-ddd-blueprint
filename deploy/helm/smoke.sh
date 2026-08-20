@@ -122,6 +122,47 @@ credentialed="$(grep -l 'clientCredentials: true' "$CHARTS_DIR"/*/values.yaml | 
 check "exactly one chart declares client credentials (found $credentialed)" \
     test "$credentialed" -eq 1
 
+# EACH CHART MUST DECLARE WHAT ITS CODE REQUIRES, read from src/ rather than
+# trusted. The render-time coherence guards refuse a HALF override — disabling
+# a capability whose settings are still present — and Copilot is right that a
+# whole one slips through: clearing `broker.enabled` AND `broker.secretRef`
+# together omits RabbitMQ from a host that always registers MassTransit.
+#
+# Nothing in a template can close that, because both halves are values. What
+# can is this: the committed chart is checked against the code it deploys, so a
+# whole override has to be committed to reach anyone, and then it fails here.
+# An ad-hoc `--set` at deploy time remains outside a render-time gate's reach,
+# and `deploy/helm/README.md` says so rather than implying otherwise.
+#
+# The real fix is a `chart:` capability block — one key per capability, named
+# for what it is — and it is deferred to its own change rather than taken at
+# round nine of a review loop.
+declares() {
+    # declares <chart> <key> -> exit 0 when the chart's values set it true
+    grep -qE "^ +$2: true" "$CHARTS_DIR/$1/values.yaml"
+}
+
+for chart in $MIGRATOR_CHARTS; do
+    svc="$(awk '/^workload:/ { w = 1 } w && /^  name: / { sub(/^  name: /, ""); print; exit }' \
+        "$CHARTS_DIR/$chart/values.yaml")"
+    src="$ROOT/src/Services/$(echo "${chart:0:1}" | tr '[:lower:]' '[:upper:]')${chart:1}"
+    if [ -d "$src" ]; then
+        if grep -rq 'GetConnectionString("RabbitMq")' "$src"; then
+            check "$chart reads RabbitMq in src/, so its chart declares a broker" \
+                declares "$chart" 'enabled'
+        fi
+        if grep -rqE 'GetConnectionString\("[A-Za-z]+"\)' "$src"; then
+            check "$chart resolves a connection string in src/, so its chart names one" \
+                grep -qE '^  connectionName: ' "$CHARTS_DIR/$chart/values.yaml"
+        fi
+    else
+        fail "no source tree found at $src for chart $chart — the mapping, not the chart, is wrong"
+    fi
+done
+
+check 'the BFF binds ServiceIdentityOptions in src/, so its chart declares credentials' \
+    grep -rq 'ServiceIdentityOptions' "$ROOT/src/BFF/Web.Bff"
+
 # --------------------------------------------------------------------------
 section 'Resolving dependencies'
 # --------------------------------------------------------------------------
@@ -538,7 +579,7 @@ section 'Branches no chart takes yet, exercised anyway'
 # Ordering is a routed destination; the check above now forbids exactly that,
 # and this test used to establish it as valid one section earlier.
 "$HELM" template shipping "$CHARTS_DIR/ordering" --set-string "image.tag=$TAG" \
-    --set-string "workload.name=shipping-worker" \
+    --set-string "workload.name=shipping" \
     --set service.enabled=false >"$OUT/worker.yaml"
 check 'service.enabled=false renders no Service' \
     test "$(count '^kind: Service$' "$OUT/worker.yaml")" -eq 0
@@ -696,6 +737,25 @@ for good in 1.2.3 0000000000000000000000000000000000000000 v1-2-3; do
     check "image.tag=$good still renders" \
         "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string "image.tag=$good"
 done
+
+# The name budget, which the per-segment check cannot see. `trunc 63` used to
+# stand here and was a defect of its own: 42 `a`s then `.b` cut immediately
+# after the dot, and trimming a trailing hyphen never touched a trailing dot.
+long_tag="$(printf 'a%.0s' $(seq 1 42)).b"
+if "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string "image.tag=$long_tag" \
+    >"$OUT/longtag.txt" 2>&1; then
+    fail 'a tag that overruns the Job-name budget renders — it must not'
+else
+    check 'a tag that overruns the Job-name budget fails the render' \
+        grep -q 'may not exceed 63' "$OUT/longtag.txt"
+fi
+
+# And the image reference's other two components, which were plain
+# interpolations while the tag was guarded.
+refuses_chart catalog 'clearing image.registry fails the render' \
+    'image.registry is required' --set-string 'image.registry='
+refuses_chart catalog 'clearing image.api fails the render' \
+    'image.api is required' --set-string 'image.api='
 refuses 'an origin with a non-numeric port fails the render' 'is not a browser origin' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:notaport}'
 # Case, which the shape test cannot see: the canonical origin lowercases scheme

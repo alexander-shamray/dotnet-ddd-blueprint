@@ -43,16 +43,27 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   {{- /*
-  The tag is in the name because the Job is per-release-image, and truncation
-  is a guard rather than a nicety: Kubernetes stamps `job-name` onto the pods
-  it creates and a label value may not exceed 63 characters, so a long tag
-  would fail at the API server rather than here. The budget is comfortable for
-  what CI actually supplies — `ordering-api-migrate-` is 21 characters and a
-  40-character commit SHA lands on 61 — and a tag long enough to truncate would
-  collide with its neighbours, which is why the shape of the tag is worth
-  keeping boring.
+  VALIDATED, not truncated, and the truncation was a defect of its own.
+  Kubernetes stamps `job-name` onto the pods this Job creates and a label value
+  may not exceed 63 characters, so the name has a budget. `trunc 63 | trimSuffix
+  "-"` looked like the guard and cut in the middle of the tag: 42 `a`s followed
+  by `.b` truncates immediately after the dot, `trimSuffix "-"` does not touch a
+  trailing `.`, and the API server rejects the hook — after `helm upgrade` has
+  started.
+
+  A truncated name is also a name that can collide, which is the quieter half:
+  two tags sharing a 63-character prefix would produce one Job.
+
+  So the derived name is checked whole and a tag that does not fit is refused.
+  The budget is comfortable for what CI supplies — `ordering-api-migrate-` is 21
+  characters and a 40-character commit SHA lands on 61 — and a tag that
+  overruns it is a deploy that must fail rather than one that mangles a name.
   */}}
-  name: {{ printf "%s-migrate-%s" (include "commerce.name" .) $tag | trunc 63 | trimSuffix "-" }}
+  {{- $jobName := printf "%s-migrate-%s" (include "commerce.name" .) $tag }}
+  {{- if gt (len $jobName) 63 }}
+  {{- fail (printf "the migration Job would be named %q, which is %d characters. Kubernetes copies that onto every pod as the `job-name` label and a label value may not exceed 63, so this is refused here rather than by the API server mid-upgrade. Shorten image.tag: the workload name and `-migrate-` cost %d, leaving %d." $jobName (len $jobName) (sub (len $jobName) (len $tag)) (sub 63 (sub (len $jobName) (len $tag)))) }}
+  {{- end }}
+  name: {{ $jobName }}
   labels:
     {{- include "commerce.labels" . | nindent 4 }}
   annotations:
@@ -101,7 +112,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: migrate
-          image: "{{ .Values.image.registry }}/{{ $migrator }}:{{ $tag }}"
+          image: "{{ include "commerce.require" (list .Values.image.registry "image.registry is required: cleared, the hook image has no host and the migration never runs (§7.4).") }}/{{ $migrator }}:{{ $tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false

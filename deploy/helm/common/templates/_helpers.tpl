@@ -82,6 +82,16 @@ no registry has.
 {{- fail (printf "image.tag %q is not usable as Kubernetes metadata: the segment %q is not a DNS-1123 label. The tag becomes the migration Job's name and app.kubernetes.io/version, so each dot-separated segment must be lowercase alphanumerics and dashes, starting and ending alphanumeric — which every commit SHA and ordinary semver already is (§15.3)." $tag $segment) }}
 {{- end }}
 {{- end }}
+{{- /*
+And the length, because `app.kubernetes.io/version` carries the tag on every
+chart — including the two with no migration Job, where the Job-name budget
+never applies. A label value may not exceed 63 characters, and this used to be
+handled by truncating, which produced a version label naming a tag no registry
+has.
+*/}}
+{{- if gt (len $tag) 63 }}
+{{- fail (printf "image.tag is %d characters. It becomes app.kubernetes.io/version, and a label value may not exceed 63 (§15.3)." (len $tag)) }}
+{{- end }}
 {{- $tag -}}
 {{- end -}}
 
@@ -130,7 +140,7 @@ app.kubernetes.io/name: {{ include "commerce.name" . }}-migrate
 app.kubernetes.io/part-of: commerce
 app.kubernetes.io/component: migrator
 app.kubernetes.io/instance: {{ .Release.Name }}
-app.kubernetes.io/version: {{ include "commerce.tag" . | trunc 63 | trimSuffix "-" | quote }}
+app.kubernetes.io/version: {{ include "commerce.tag" . | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end -}}
@@ -144,13 +154,12 @@ immutable.
 {{ include "commerce.selectorLabels" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- /*
-Truncated for the reason the Job name is (see _migration-job.tpl): a label
-value may not exceed 63 characters, and the API server rejects the whole object
-rather than the label. A commit SHA is 40 and never reaches it — this is the
-guard for the day somebody tags a release something long, not an expectation
-that they will.
+Not truncated:  refuses a tag longer than 63 outright, for the
+reason _migration-job.tpl gives about its own name. Truncating produced a
+version label naming a tag no registry has, and could not be made safe — a cut
+can land on a dot, which  never touched.
 */}}
-app.kubernetes.io/version: {{ include "commerce.tag" . | trunc 63 | trimSuffix "-" | quote }}
+app.kubernetes.io/version: {{ include "commerce.tag" . | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end -}}

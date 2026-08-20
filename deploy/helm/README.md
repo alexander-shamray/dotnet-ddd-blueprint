@@ -124,6 +124,13 @@ gateway:
     per-service pipeline is what production uses; the umbrella stands an
     environment up whole. The conflict is an API-server error at install
     time.
+  - **A whole capability override at deploy time.** The templates refuse a
+    HALF override — disabling a capability whose settings are still present —
+    and clearing both together is two values, which no template can tell from a
+    chart that never had them. The gate closes the committed path by checking
+    each chart against the code it deploys; an ad-hoc `--set` on the command
+    line is outside a render-time gate's reach. A `chart:` capability block is
+    the real fix and is deferred to its own change.
   - **Secret rotation does not roll pods.** `secretKeyRef` values are
     snapshotted when a container starts, and External Secrets rotating the
     underlying Secret changes no chart value — so the checksum is unchanged
@@ -137,10 +144,11 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Sixty-four deliberate defects have been run through it and sixty-three turned
-a green run red** — a renamed Service, a CPU limit, a grace period back at the
-Kubernetes default, a dropped hook annotation, a connection string moved into a
-ConfigMap, a second chart growing client credentials, an `envFrom` naming a
+**Sixty-eight deliberate defects have been run through it and sixty-seven
+turned a green run red** — a renamed Service, a CPU limit, a grace period
+back at the Kubernetes default, a dropped hook annotation, a connection string
+moved into a ConfigMap, a second chart growing client credentials, an `envFrom`
+naming a
 ConfigMap nothing renders, a rollout checksum that missed the gateway's own, a
 Service publishing only its first port, a chart renumbering the port its
 callers dial, a fifth chart the gate never looked at, an Ingress with no
@@ -151,7 +159,8 @@ validator that checked one string and shipped another, an uppercase host, a
 CIDR that is not one, a migrator pod answering its own service's traffic, a
 routed service switching its own Service off, a capability cleared by an
 overlay, a health route renamed in the source that maps it, a tag that is legal
-for a registry and illegal for Kubernetes, in six spellings.
+for a registry and illegal for Kubernetes, in six spellings, a tag that overruns
+the name it derives, an image reference missing its registry.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,

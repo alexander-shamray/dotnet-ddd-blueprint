@@ -100,7 +100,13 @@ spec:
         runAsNonRoot: true
       containers:
         - name: {{ include "commerce.name" . }}
-          image: "{{ .Values.image.registry }}/{{ .Values.image.api }}:{{ include "commerce.tag" . }}"
+          {{- /*
+          Both halves required, like the tag. They were plain interpolations:
+          clearing either rendered "/api:sha" or "registry/:sha", which is a
+          valid string, an invalid image reference, and a Deployment that never
+          pulls. The guard that already covered the tag covers its neighbours.
+          */}}
+          image: "{{ include "commerce.require" (list .Values.image.registry "image.registry is required: cleared, the image reference has no host and the Deployment never pulls (§15.3).") }}/{{ include "commerce.require" (list .Values.image.api "image.api is required: cleared, the image reference names no repository (§15.3).") }}:{{ include "commerce.tag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
