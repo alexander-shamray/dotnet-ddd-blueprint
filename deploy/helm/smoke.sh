@@ -189,9 +189,40 @@ for chart in $SERVICE_CHARTS; do
     for probe in livenessProbe readinessProbe startupProbe; do
         check "$chart declares $probe" test "$(count "^ *$probe:" "$OUT/$chart.yaml")" -eq 1
     done
-    for path in /health/live /health/ready /health/startup; do
-        check "$chart probes $path" test "$(count "path: $path$" "$OUT/$chart.yaml")" -eq 1
-    done
+done
+
+# THE PATHS COME FROM THE SOURCE THAT MAPS THEM, not from literals repeated
+# here. `HealthEndpointTests` says in its own comment that the kubelet's probe
+# "holds its own copy of /health/startup in a manifest no compiler reads" — and
+# this PR shipped that manifest. A gate holding a fourth copy would close
+# nothing: rename the route and the suite stays green, the chart stays green,
+# and a slow-starting pod 404s and is killed mid-boot.
+grep -ohE 'MapHealthChecks\("/health/[a-z]+"' "$ROOT/src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs" |
+    sed -E 's|.*"(/health/[a-z]+)"|\1|' | sort -u >"$OUT/mapped-probes.txt"
+
+mapped_count="$(wc -l <"$OUT/mapped-probes.txt" | tr -d ' ')"
+if [ "$mapped_count" -eq 0 ]; then
+    fail 'no health endpoints found in HealthCheckExtensions.cs — the parse, not the chart, is wrong'
+else
+    pass "MapCommonHealthEndpoints maps $mapped_count paths, read from source"
+fi
+
+for chart in $SERVICE_CHARTS; do
+    while read -r path; do
+        check "$chart probes $path, the path Common.Web maps" \
+            test "$(count "path: $path$" "$OUT/$chart.yaml")" -eq 1
+    done <"$OUT/mapped-probes.txt"
+
+    # And no probe pointing at a path nothing maps, which is the direction a
+    # renamed route breaks.
+    awk '/path: \/health\// { sub(/.*path: /, ""); print }' "$OUT/$chart.yaml" |
+        sort -u >"$OUT/probed-$chart.txt"
+    stray="$(comm -23 "$OUT/probed-$chart.txt" "$OUT/mapped-probes.txt")"
+    if [ -z "$stray" ]; then
+        pass "$chart probes nothing Common.Web does not map"
+    else
+        fail "$chart probes path(s) nothing maps: $(echo "$stray" | tr '\n' ' ')"
+    fi
 done
 
 # --------------------------------------------------------------------------
@@ -370,7 +401,8 @@ check 'and it routes to the gateway Service' \
 section 'Every ConfigMap an envFrom names is rendered by the same release'
 # --------------------------------------------------------------------------
 # The gateway mounts a second ConfigMap it renders itself, and the name is
-# written in two places — values.yaml's extraEnvFrom and edge-config.yaml's
+# derived in two places — values.yaml's extraConfigMaps suffix and
+# edge-config.yaml's
 # metadata. This is the assertion that they agree; without it a rename in one
 # is a pod stuck in CreateContainerConfigError.
 awk '/configMapRef:/ { want = 1; next } want && /name:/ { sub(/^ *name: /, ""); print; want = 0 }' \
@@ -642,6 +674,19 @@ refuses_chart catalog 'disabling a broker the chart is configured for fails the 
     'broker.enabled is false' --set broker.enabled=false
 refuses_chart catalog 'clearing the migrator image fails the render' \
     'image.migrator is required' --set-string 'image.migrator='
+
+# A tag is three things with three alphabets: an image reference, a Job name
+# (DNS-1123 subdomain) and a label value. `Release_1` is legal for a registry
+# and illegal for Kubernetes, and the SHA-only cases above never saw it.
+if "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string 'image.tag=Release_1' \
+    >"$OUT/badtag.txt" 2>&1; then
+    fail 'an uppercase image tag renders — it must not'
+else
+    check 'a tag that is legal for a registry and illegal for Kubernetes fails the render' \
+        grep -q 'not usable as Kubernetes metadata' "$OUT/badtag.txt"
+fi
+check 'and ordinary semver still renders' \
+    "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string 'image.tag=1.2.3'
 refuses 'an origin with a non-numeric port fails the render' 'is not a browser origin' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:notaport}'
 # Case, which the shape test cannot see: the canonical origin lowercases scheme

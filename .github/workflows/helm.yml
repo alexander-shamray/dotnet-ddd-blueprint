@@ -20,6 +20,12 @@ name: Helm
 #   - Catalog's appsettings.json declares the Kestrel endpoints those Services
 #     forward to, so moving the h2c listener off 8081 would leave a Service
 #     pointing at a closed port with every assertion still passing;
+#   - HealthCheckExtensions.cs maps the three probe paths, and the charts are
+#     the manifest HealthEndpointTests warns about by name: "the kubelet's
+#     startupProbe holds its own copy of /health/startup in a manifest no
+#     compiler reads". The gate reads the routes from that file rather than
+#     repeating them, so renaming one turns the charts red instead of killing
+#     slow-starting pods;
 #   - .gitattributes pins this tree to LF, and without it a CRLF template
 #     renders a CR onto every line and the anchored greps below match nothing
 #     on a Linux runner. A change removing that rule must run this gate.
@@ -32,6 +38,7 @@ on:
       - 'src/Gateway/Gateway.Api/appsettings.json'
       - 'src/BFF/Web.Bff/PricingHop.cs'
       - 'src/Services/Catalog/Catalog.Api/appsettings.json'
+      - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
   push:
     branches: [main]
     paths:
@@ -41,6 +48,7 @@ on:
       - 'src/Gateway/Gateway.Api/appsettings.json'
       - 'src/BFF/Web.Bff/PricingHop.cs'
       - 'src/Services/Catalog/Catalog.Api/appsettings.json'
+      - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
 
 permissions:
   contents: read

@@ -53,7 +53,26 @@ refusal — without it the empty string renders `image: registry/api:` and the
 kubelet resolves that to `:latest`, which is the one tag §15.3 forbids by name.
 */}}
 {{- define "commerce.tag" -}}
-{{- include "commerce.require" (list .Values.image.tag "image.tag is required and values.yaml leaves it empty on purpose: a deploy that cannot name its image must fail rather than roll something nobody chose (§15.3). CI supplies it; a config-only deploy resolves the running tag first (§15.1).") -}}
+{{- $tag := include "commerce.require" (list .Values.image.tag "image.tag is required and values.yaml leaves it empty on purpose: a deploy that cannot name its image must fail rather than roll something nobody chose (§15.3). CI supplies it; a config-only deploy resolves the running tag first (§15.1).") -}}
+{{- /*
+The tag is not only an image reference here: it goes into the migration Job's
+NAME and into `app.kubernetes.io/version`, and the three have different
+alphabets. `Release_1` is a perfectly valid OCI tag, an invalid DNS-1123
+subdomain (uppercase), and therefore a Job the API server refuses — after
+`helm upgrade` has started. The render gate exercised commit SHAs and never
+saw it.
+
+So the accepted shape is the intersection: lowercase alphanumerics, dots,
+dashes and underscores, starting and ending alphanumeric. That admits every
+commit SHA and ordinary semver, and refuses the tags that are legal for a
+registry and illegal for Kubernetes. Validating is preferred to sanitising: a
+derived metadata value that differs from the image tag makes
+`app.kubernetes.io/version` a label that names something no registry has.
+*/}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$" $tag) }}
+{{- fail (printf "image.tag %q is not usable as Kubernetes metadata. It becomes the migration Job's name (a DNS-1123 subdomain) and app.kubernetes.io/version, so it must be lowercase alphanumerics, dots, dashes or underscores, starting and ending alphanumeric — which every commit SHA and ordinary semver already is (§15.3)." $tag) }}
+{{- end }}
+{{- $tag -}}
 {{- end -}}
 
 {{- /*

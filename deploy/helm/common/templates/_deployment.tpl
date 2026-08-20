@@ -109,9 +109,20 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "commerce.name" . }}-config
-            {{- range .Values.extraEnvFrom }}
+            {{- /*
+            SUFFIXES, not names. This list held full ConfigMap names, and
+            `edge-config.yaml` builds its own from `commerce.name` — so the two
+            agreed only while `workload.name` was `gateway`. An overlay setting
+            it to `edge` rendered `edge-edge` in one place and mounted
+            `gateway-edge` in the other, and the pod sat in
+            CreateContainerConfigError.
+
+            One value, two derivations, is the fix: both ends now start from
+            `commerce.name`, so there is nothing left to disagree.
+            */}}
+            {{- range .Values.extraConfigMaps }}
             - configMapRef:
-                name: {{ . }}
+                name: {{ printf "%s-%s" (include "commerce.name" $) . }}
             {{- end }}
           {{- /*
           `with`, not a bare include: the gateway owns no database, no broker

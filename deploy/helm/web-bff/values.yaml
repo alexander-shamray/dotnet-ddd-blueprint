@@ -81,4 +81,4 @@ broker:
 observability:
   otlpEndpoint: http://otel-collector.observability:4317
 
-extraEnvFrom: []
+extraConfigMaps: []

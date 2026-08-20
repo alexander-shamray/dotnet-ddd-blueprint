@@ -437,7 +437,7 @@ must be resolved before `helm lint` or `helm template` will run. `charts/` and
 
 ```yaml
 # deploy/helm/ordering/values.yaml — an excerpt. The file also carries `ports`,
-# `migrationJob.resources` and `extraEnvFrom: []`, none of which this section
+# `migrationJob.resources` and `extraConfigMaps: []`, none of which this section
 # argues about.
 workload:
   # The Service's name, and therefore the string its callers already spell.
@@ -753,8 +753,12 @@ cors:
 # two keys above are read by Gateway.Api and by nothing else in the platform,
 # so a shared template carrying them would put a conditional in every chart to
 # describe one — which is this section's opening sentence, in YAML.
-extraEnvFrom:
-  - gateway-edge
+#
+# A SUFFIX rather than a name: the mount and the ConfigMap's own metadata both
+# derive from workload.name, so a renamed workload cannot mount one ConfigMap
+# while rendering another.
+extraConfigMaps:
+  - edge
 ```
 
 **Both flags fail the render rather than the pod.** `Ingress__TrustedNetworks`

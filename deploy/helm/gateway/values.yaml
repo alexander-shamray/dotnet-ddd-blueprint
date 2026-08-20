@@ -115,7 +115,11 @@ cors:
   origins: []
 
 # The gateway's own ConfigMap, rendered by templates/edge-config.yaml — the two
-# keys no service has. Named here rather than derived, so the Deployment mounts
-# exactly what this chart renders.
-extraEnvFrom:
-  - gateway-edge
+# keys no service has.
+#
+# A SUFFIX, not a name: the mounted reference and the ConfigMap's own metadata
+# both derive from workload.name, so they cannot disagree. This held the full
+# name "gateway-edge" and matched only while workload.name was "gateway" —
+# an overlay renaming the workload mounted one ConfigMap and rendered another.
+extraConfigMaps:
+  - edge

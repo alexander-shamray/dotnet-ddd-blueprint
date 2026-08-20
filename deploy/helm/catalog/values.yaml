@@ -120,4 +120,4 @@ observability:
 
 # ConfigMaps to mount beyond this chart's own. Empty for every chart but the
 # gateway, which renders a second one for the two keys no service has (§15.3).
-extraEnvFrom: []
+extraConfigMaps: []
