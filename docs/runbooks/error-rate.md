@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Alert | `ErrorRate`, in `deploy/observability/alerts/platform-alerts.yaml` |
+| Alerts | `ErrorRateGateway` and `ErrorRateService`, in `deploy/observability/alerts/platform-alerts.yaml` — one condition, split by §13.8's ownership |
 | Condition | 5xx > 1% of requests over 5 minutes, per service |
 | Signal | `http.server.request.duration`, ASP.NET Core instrumentation ([§13.2](../backend-architecture/13-observability.md)) |
 | Owner | Platform for the gateway, the service team for a service ([§13.8](../backend-architecture/13-observability.md)) |

@@ -79,11 +79,42 @@ The payload is valid and the consumer would now succeed.
 Move it back to the main queue with the MassTransit CLI, or the Management UI's
 shovel:
 
+The Management API's shovel, declared as a one-shot parameter. It moves every
+message on the error queue back to the endpoint and deletes itself when the
+queue is empty:
+
 ```bash
-# Shovel from <endpoint>_error back to <endpoint>.
-kubectl -n <ns> exec deploy/rabbitmq -- rabbitmqctl eval \
-  'rabbit_shovel_util:...'   # or configure a shovel in the Management UI
+kubectl -n <ns> port-forward svc/rabbitmq 15672:15672 &
+
+curl -su guest:guest -X PUT \
+  -H 'content-type: application/json' \
+  -d '{"value":{
+        "src-protocol":"amqp091","src-uri":"amqp://","src-queue":"<endpoint>_error",
+        "dest-protocol":"amqp091","dest-uri":"amqp://","dest-queue":"<endpoint>",
+        "src-delete-after":"queue-length","ack-mode":"on-confirm"}}' \
+  http://localhost:15672/api/parameters/shovel/%2F/replay-<endpoint>
+
+# Watch it drain, then confirm the shovel removed itself.
+curl -su guest:guest http://localhost:15672/api/shovels/%2F
 ```
+
+`src-delete-after: queue-length` is what makes this one-shot: the shovel stops
+after the messages present when it started, so a consumer that fails again does
+not get replayed in a loop. `ack-mode: on-confirm` is what makes it safe — a
+message is removed from the error queue only once the destination has confirmed
+it.
+
+**Requires the `rabbitmq_shovel` and `rabbitmq_shovel_management` plugins.**
+§14.1's image builds in the delayed-exchange plugin and not these, so check
+before reaching for this during an incident:
+
+```bash
+kubectl -n <ns> exec deploy/rabbitmq -- rabbitmq-plugins list | grep shovel
+```
+
+Without them, the Management UI's *Move messages* is unavailable too, and the
+fallback is to consume and republish with a short script — which is worth
+knowing *before* 03:00 rather than discovering then.
 
 **Replay is safe by design and it is worth knowing why.** §9.5's inbox filter
 records `MessageId` and makes a second delivery of the same message a no-op

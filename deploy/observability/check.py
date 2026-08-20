@@ -45,7 +45,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OBSERVABILITY = ROOT / "deploy" / "observability"
 RUNBOOKS = ROOT / "docs" / "runbooks"
-WORKFLOW = ROOT / ".github" / "workflows" / "observability.yml"
+WORKFLOW_PATH = ".github/workflows/observability.yml"
+WORKFLOW = ROOT / WORKFLOW_PATH
 
 LOADED_RULES = OBSERVABILITY / "alerts" / "platform-alerts.yaml"
 AWAITING_RULES = OBSERVABILITY / "alerts" / "awaiting-signal.yaml"
@@ -545,6 +546,33 @@ def trigger_paths(text: str, trigger: str) -> list[str] | None:
     return None
 
 
+def covers(path: str, entry: str) -> bool:
+    """Does one `paths:` glob cover the WHOLE of an input this gate reads?
+
+    The direction matters and an earlier version had it backwards: it accepted
+    any path *under* the entry, so `src/Services/Ordering/**` was read as
+    covering `src`. That approves a filter which skips every source change
+    outside one service — precisely the drift check 7 exists to catch, waved
+    through by check 7.
+
+    Coverage runs the other way. A glob covers an entry when the glob's literal
+    prefix is the entry or an ancestor of it: `src/**` covers `src`, and
+    `docs/runbooks/**` covers `docs/runbooks` but not `docs`.
+    """
+    prefix = path
+    for suffix in ("/**", "/*", "**", "*"):
+        if prefix.endswith(suffix):
+            prefix = prefix[: -len(suffix)]
+            break
+
+    prefix = prefix.rstrip("/")
+
+    if not prefix:                       # a bare `**` covers the repository
+        return True
+
+    return entry == prefix or entry.startswith(prefix + "/")
+
+
 def check_workflow_covers_inputs() -> None:
     text = read(WORKFLOW)
 
@@ -562,8 +590,13 @@ def check_workflow_covers_inputs() -> None:
             fail(f"{WORKFLOW.name}: the `{name}` trigger lists no paths — the parser, or the file")
             continue
 
-        for entry in SOURCE_INPUTS + ["deploy/observability"]:
-            if not any(path == entry or path.startswith(entry + "/") for path in paths):
+        # The workflow itself is on the list because the gate READS it — check 7
+        # is an assertion about this file, so a filter that does not rebuild on
+        # a change to it can let the filter rot untested.
+        required = SOURCE_INPUTS + ["deploy/observability", WORKFLOW_PATH]
+
+        for entry in required:
+            if not any(covers(path, entry) for path in paths):
                 fail(
                     f"{WORKFLOW.name}: the `{name}` trigger does not cover `{entry}`, "
                     f"which check.py reads. A change to it would skip this gate")

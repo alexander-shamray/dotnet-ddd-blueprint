@@ -4,7 +4,7 @@
 |---|---|
 | Alert | `MigrationJobFailed`, in `deploy/observability/alerts/platform-alerts.yaml` |
 | Condition | A `pre-install,pre-upgrade` hook Job non-zero, or a release stuck pending |
-| Signal | `kube_job_status_failed`, from kube-state-metrics — not a solution instrument |
+| Signal | `kube_job_status_failed`, plus `kube_job_status_active` and `kube_job_status_start_time` for the stuck-pending branch — kube-state-metrics, not solution instruments |
 | Owner | Platform ([§13.8](../backend-architecture/13-observability.md)) |
 
 ## What it means
@@ -35,11 +35,24 @@ availability until you have looked.
 The migrator is its own host and its own image (§15.2) — a generic host with no
 listener, running `Database.MigrateAsync` and exiting.
 
+**The Job's name carries the image tag and no release prefix.** §15.3's template
+builds it as `<workload>-migrate-<image.tag>` — so it changes every deploy, and
+a name guessed from the release will not resolve. Take it from the first command
+rather than typing it:
+
 ```bash
 kubectl -n <ns> get jobs -l app.kubernetes.io/component=migrator
-kubectl -n <ns> logs job/<release>-<service>-migrate
-kubectl -n <ns> describe job/<release>-<service>-migrate
+job=$(kubectl -n <ns> get jobs -l app.kubernetes.io/component=migrator \
+        -o jsonpath='{.items[-1].metadata.name}')
+
+kubectl -n <ns> logs job/"$job"
+kubectl -n <ns> describe job/"$job"
 ```
+
+That the name embeds the tag is deliberate — it is what lets a re-deploy of the
+same chart run a *new* Job rather than colliding with the finished one — and it
+is also why the chart refuses a tag long enough to push the name past 63
+characters, which is a `job-name` label the API server would reject mid-upgrade.
 
 The usual failures, in the order they happen:
 
@@ -85,7 +98,7 @@ failed.
 
 ```bash
 helm -n <ns> status <release>
-kubectl -n <ns> get job/<release>-<service>-migrate -o jsonpath='{.status}'
+kubectl -n <ns> get job/"$job" -o jsonpath='{.status}'
 ```
 
 A pending release blocks the next deploy. Once the Job's outcome is understood,

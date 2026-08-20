@@ -44,18 +44,38 @@ groups:
       # no series, exclude nothing, and page on every confirmed order an hour
       # after payment — a filter that reads as a safeguard and behaves as a
       # pager.
+      # TWO BRANCHES, because excluding `Confirmed` outright leaves a permanent
+      # blind spot — and it is the blind spot this runbook's own worst case
+      # falls into. If the three-day DespatchTimeout is never delivered (the
+      # scheduler failures stuck-saga.md spends half its length on), the saga
+      # sits in `Confirmed` for ever: the first branch excludes it, and
+      # OrdersAwaitingReview below cannot fire either, because the review row is
+      # created BY that timeout. Nothing pages, and the order is stuck.
+      #
+      # So the second branch watches `Confirmed` against a threshold past the
+      # deadline itself — four days against a three-day wait. It is not a
+      # duplicate of the first: one asks "is a short wait taking an hour", the
+      # other "did the long wait's own timeout arrive at all".
       - alert: StuckSaga
         expr: |
           max by (service_name) (
             ordering_saga_oldest_unfinalised_age_seconds{state!="Confirmed"}
           ) > 3600
+          or
+          max by (service_name) (
+            ordering_saga_oldest_unfinalised_age_seconds{state="Confirmed"}
+          ) > 345600
         for: 5m
         labels:
           severity: page
           owner: service
         annotations:
-          summary: "A saga has been unfinalised for over an hour"
-          description: "Orders are stuck. Excludes the three-day despatch wait."
+          summary: "A saga has been unfinalised past its wait"
+          description: >-
+            Orders are stuck. An hour for the short waits; four days for
+            `Confirmed`, which is past the three-day despatch deadline — a
+            saga still there has lost its own timeout, and no review row
+            exists because that timeout is what creates one.
           runbook_url: docs/runbooks/stuck-saga.md
 
       # Owed: ordering.order_reviews.oldest.age, over ordering.OrderReviews.

@@ -26,13 +26,23 @@ groups:
       # wrong team is the escalation path documented in one place and
       # implemented in another. The condition is identical; only the selector
       # and the owner differ.
+      #
+      # `Gateway.Api`, NOT `gateway`. §13.2's AddObservability sets the
+      # resource's service.name from `builder.Environment.ApplicationName`,
+      # which defaults to the assembly name — so the edge emits `Gateway.Api`
+      # and the chart's `workload.name` never reaches this label. Spelled
+      # `gateway`, the first rule matches no series at all and the second's
+      # exclusion excludes nothing, so the gateway's 5xx would route to the
+      # service team: the exact mis-routing this split exists to fix, restored
+      # by the fix. A selector has to be spelled from the value the system
+      # emits, never from the name the deployment uses for the same thing.
       - alert: ErrorRateGateway
         expr: |
           sum by (service_name) (
-            rate(http_server_request_duration_seconds_count{service_name="gateway", http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_seconds_count{service_name="Gateway.Api", http_response_status_code=~"5.."}[5m])
           )
           /
-          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name="gateway"}[5m]))
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name="Gateway.Api"}[5m]))
           > 0.01
         for: 5m
         labels:
@@ -49,10 +59,10 @@ groups:
       - alert: ErrorRateService
         expr: |
           sum by (service_name) (
-            rate(http_server_request_duration_seconds_count{service_name!="gateway", http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_seconds_count{service_name!="Gateway.Api", http_response_status_code=~"5.."}[5m])
           )
           /
-          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name!="gateway"}[5m]))
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name!="Gateway.Api"}[5m]))
           > 0.01
         for: 5m
         labels:

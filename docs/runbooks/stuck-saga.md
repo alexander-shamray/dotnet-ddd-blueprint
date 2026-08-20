@@ -74,11 +74,21 @@ schedules every saga timeout on RabbitMQ's **delayed message exchange**, which
 is why §14.1's RabbitMQ is the one infrastructure image that is *built* rather
 than pulled. Three ways that breaks, all of which look like a hung saga:
 
-1. **The plugin is missing.** A broker replaced with a stock image accepts
-   ordinary publishes and silently drops scheduled ones. Check it:
+1. **The plugin is missing.** A broker replaced with a stock image does **not**
+   silently drop the scheduled message — measured, and recorded in
+   `deploy/compose/rabbitmq/Dockerfile`. The bus starts clean; the first
+   `.Schedule(…)` fails `exchange.declare` with `precondition_failed: unknown
+   exchange type 'x-delayed-message'`, and **MassTransit then retries the
+   topology for ever**. The call never returns, the transition never completes,
+   and the only trace is a channel error in the **broker's** log every few
+   seconds while the service stays healthy and quiet.
+
+   That distinction is what you look for: not a missing message, but a
+   repeating channel error on RabbitMQ and a saga frozen mid-transition.
 
    ```bash
    kubectl -n <ns> exec deploy/rabbitmq -- rabbitmq-plugins list | grep delayed
+   kubectl -n <ns> logs deploy/rabbitmq --since=10m | grep -i 'precondition_failed\|x-delayed-message'
    ```
 
 2. **The scheduler is not registered.** A registration nothing resolves at

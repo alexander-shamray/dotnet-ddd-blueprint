@@ -15,7 +15,7 @@ rather than added.
 
 | Runbook | Alert | Loaded? |
 |---|---|---|
-| [`error-rate.md`](error-rate.md) | `ErrorRate` | yes |
+| [`error-rate.md`](error-rate.md) | `ErrorRateGateway`, `ErrorRateService` | yes |
 | [`latency.md`](latency.md) | `Latency` | yes |
 | [`outbox-broker.md`](outbox-broker.md) | `OutboxBrokerLaneStalled` | yes |
 | [`projection-lag.md`](projection-lag.md) | `OutboxLocalLaneStalled` | yes |
