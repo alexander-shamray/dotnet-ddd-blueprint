@@ -100,18 +100,26 @@ Move it back with the Management API's shovel, declared as a one-shot
 parameter. It moves every message on the error queue back to the endpoint and
 deletes itself when the queue is empty:
 
-The body carries an AMQP URI with a password in it, so it goes in through stdin
-for the same reason and never on the command line:
+**Percent-encode the credential before it goes in the URI.** A generated
+password containing `@`, `:`, `/`, `#` or `%` — which a vault-issued one often
+is — gets parsed as URI structure rather than as the credential, so the shovel
+is created and then fails to connect. During an incident that reads as "the
+replay did nothing".
+
+The body carries that URI, so it goes in through stdin for the same reason the
+first request did, and never on the command line:
 
 ```bash
+enc() { python3 -c 'import sys,urllib.parse as u; print(u.quote(sys.argv[1], safe=""))' "$1"; }
+uri="amqp://$(enc "$OPERATOR"):$(enc "$OPERATOR_PASSWORD")@localhost:5672/%2F"
+
+# Unquoted heredoc, so $uri expands. Everything else here is literal.
 curl -sS --config "$HOME/.rabbit.curl" -X PUT \
   -H 'content-type: application/json' \
-  -d @- http://localhost:15672/api/parameters/shovel/%2F/replay-<endpoint> <<'EOF'
+  -d @- http://localhost:15672/api/parameters/shovel/%2F/replay-ENDPOINT <<EOF
 {"value":{
-  "src-protocol":"amqp091","src-uri":"amqp://OPERATOR:PASSWORD@localhost:5672/%2F",
-  "src-queue":"<endpoint>_error",
-  "dest-protocol":"amqp091","dest-uri":"amqp://OPERATOR:PASSWORD@localhost:5672/%2F",
-  "dest-queue":"<endpoint>",
+  "src-protocol":"amqp091","src-uri":"$uri","src-queue":"ENDPOINT_error",
+  "dest-protocol":"amqp091","dest-uri":"$uri","dest-queue":"ENDPOINT",
   "src-delete-after":"queue-length","ack-mode":"on-confirm"}}
 EOF
 
@@ -123,7 +131,8 @@ curl -sS --config "$HOME/.rabbit.curl" http://localhost:15672/api/shovels/%2F
 *inside* the broker and connects with its own credentials, so an unqualified URI
 means `guest` — which on a deployed broker is not a user. The API accepts the
 parameter and the shovel then fails to connect at both ends, which is a worse
-outcome than a rejected request because it looks like it worked.
+outcome than a rejected request because it looks like it worked. Both failure
+modes present identically, and both are silent.
 
 **The shovel definition persists with the password in it** until it deletes
 itself or you remove it. `DELETE /api/parameters/shovel/%2F/replay-<endpoint>`

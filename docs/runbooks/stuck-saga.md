@@ -51,10 +51,17 @@ SELECT
     AgeMinutes   = DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()),
     CancelReason
 FROM ordering.OrderFulfilmentStates
-WHERE CurrentState <> 'Confirmed'
-    AND DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()) > 60
+WHERE (CurrentState <> 'Confirmed'
+        AND DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()) > 60)
+    OR (CurrentState = 'Confirmed'
+        AND DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()) > 5760)
 ORDER BY StartedAt;
 ```
+
+**Both branches, because the alert has both.** An earlier version of this query
+excluded `Confirmed` outright — so when the four-day branch paged, the first
+diagnostic a responder ran returned no rows at all and the saga that caused the
+page was the one row it could not show. 5760 minutes is the four days.
 
 **A finalised saga has no row.** MassTransit deletes the instance on
 `Finalize`, so anything this returns is by definition unfinalised and the query

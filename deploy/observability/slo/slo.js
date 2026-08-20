@@ -7,11 +7,17 @@
 // catches the regression where a query loses its index and goes from 40 ms to
 // 4 s, which no unit test will find.
 //
+//   # CLIENT_SECRET comes from the runner's MASKED environment and never from
+//   # `-e`: a `-e CLIENT_SECRET=…` puts the real value in k6's process
+//   # arguments, and CI logs the command line. k6 exposes system environment
+//   # variables through __ENV by default, so inheriting it needs no flag.
+//   export CLIENT_SECRET="$SLO_RUN_CLIENT_SECRET"
+//
 //   k6 run \
 //     -e BASE_URL=https://staging.example.com \
 //     -e PROM_URL=http://prometheus.observability:9090 \
 //     -e TOKEN_URL=https://id.staging.example.com/realms/commerce/protocol/openid-connect/token \
-//     -e CLIENT_ID=slo-run -e CLIENT_SECRET=... \
+//     -e CLIENT_ID=slo-run \
 //     -e SLO_PRODUCT_ID=<a product with a row in ordering.ProductPrices> \
 //     deploy/observability/slo/slo.js
 //
