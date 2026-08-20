@@ -108,11 +108,13 @@ deploy/compose/              §14.1's infrastructure, plus one application pair
                              BUILT — ADR-021's delayed-exchange plugin — so a
                              seventh build rides on the compose smoke
 deploy/helm/                 §15.3's charts since PR-23. `common/` is a LIBRARY
-                             chart holding every template once; the four
-                             deployables are values plus one-line includes, and
-                             `platform/` is the umbrella. `smoke.sh` renders all
-                             five and asserts what comes out — it reaches no
-                             cluster, and says so
+                             chart holding every template once; Catalog,
+                             Ordering and the BFF are values plus one-line
+                             includes, the gateway adds `edge-config.yaml` for
+                             the two keys no service has, and `platform/` is
+                             the umbrella. `smoke.sh` renders all five and
+                             asserts what comes out — it reaches no cluster,
+                             and says so
 
 src/BuildingBlocks/          all five, and complete since PR-15
   Common.Domain/               Entity<TId>, AggregateRoot<TId>, IDomainEvent

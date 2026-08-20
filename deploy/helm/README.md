@@ -11,8 +11,9 @@ produce — and an environment can be stood up whole.
 common/      the library chart: every template, once
 catalog/     ┐
 ordering/    │ Chart.yaml + values.yaml + one-line templates that include
-gateway/     │ the library's. The values ARE the per-service decisions.
-web-bff/     ┘
+web-bff/     ┘ the library's. The values ARE the per-service decisions.
+gateway/     the same, plus edge-config.yaml — the two keys no service has
+             (§15.3), in a template only this chart carries
 platform/    the umbrella — four dependencies and no values of its own
 smoke.sh     renders all five and asserts what comes out
 ```

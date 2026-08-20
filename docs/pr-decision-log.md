@@ -71,8 +71,9 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 ## PR-23 — the charts, and a name the platform already depended on
 
 PR-23 shipped [§15.3](backend-architecture/15-cicd-deployment.md)'s charts: a
-library chart holding every template once, four deployables that are values
-plus one-line includes, an umbrella,
+library chart holding every template once, three deployables that are values
+plus one-line includes and a fourth — the gateway — that adds one template of
+its own, an umbrella,
 [§7.4](backend-architecture/07-persistence.md)'s migration hook, and
 `deploy/helm/smoke.sh` behind the second path-filtered workflow of §15.1. Seven
 of its decisions bind what comes after.

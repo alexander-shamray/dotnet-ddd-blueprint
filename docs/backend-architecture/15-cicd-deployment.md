@@ -346,8 +346,16 @@ each service chart's templates are one-line includes of it. That is the same
 decision §4.5's scaffold takes for the solution — Catalog is read at run time
 so there is one copy of the wiring rather than two that drift — arrived at from
 the other side: five charts of near-identical YAML is five places to fix a
-probe. What differs per deployable is the values file below, which is exactly
-what this section shows.
+probe. What differs per deployable is its values file, and that is what the
+fences below show.
+
+**They are excerpts, and the comment at the top of each says so.** A fence
+labelled with a path and then disagreeing with the file at that path is the
+drift the one rule exists to close — a later edit to either side has nothing to
+grep against. So each carries the keys the surrounding argument turns on and
+names what it leaves out; the files themselves are the four `values.yaml` under
+`deploy/helm/`, and `deploy/helm/smoke.sh` is what holds them to the claims
+made here.
 
 The cost is one command: `file://` dependencies resolve from disk, but they
 must be resolved before `helm lint` or `helm template` will run. `charts/` and
@@ -368,7 +376,9 @@ must be resolved before `helm lint` or `helm template` will run. `charts/` and
 > exists to perform.
 
 ```yaml
-# deploy/helm/ordering/values.yaml
+# deploy/helm/ordering/values.yaml — an excerpt. The file also carries `ports`,
+# `migrationJob.resources` and `extraEnvFrom: []`, none of which this section
+# argues about.
 workload:
   # The Service's name, and therefore the string its callers already spell.
   name: ordering-api
@@ -440,6 +450,17 @@ broker:
 
 observability:
   otlpEndpoint: http://otel-collector.observability:4317
+
+service:
+  # True: something dials this workload by name. False is the worker case
+  # below, and it is the ONE key that separates Shipping's chart from this one.
+  enabled: true
+
+ingress:
+  # False, and written down rather than omitted. Ordering is reached through
+  # the gateway (§10.2); an Ingress here would be a second door past the edge's
+  # rate limiting, CORS policy and forwarded-header handling.
+  enabled: false
 ```
 
 **The Kind column of §15.4 is the template, read down.** Everything it marks
@@ -484,24 +505,40 @@ of it, and telemetry is pushed to the collector rather than scraped (§13.2), so
 nothing else needs a stable name for these pods either:
 
 ```yaml
-# deploy/helm/shipping/values.yaml — the two keys that are the whole difference
+# deploy/helm/shipping/values.yaml — both written down, one of them the
+# difference from Ordering
 service:
   enabled: false
 ingress:
   enabled: false
 ```
 
-Both are `false` rather than absent, so the diff against Ordering's chart shows
-the decision instead of hiding it in what was deleted.
+**This paragraph said "the two keys that are the whole difference" and it is
+one**, which PR-23 settled by shipping the charts rather than by arguing. Only
+the gateway has `ingress.enabled: true`: Catalog, Ordering and the BFF are all
+reached *through* the edge (§10.1, §10.2), so an Ingress on any of them would
+publish a second door past the rate limiting, the CORS policy and the
+forwarded-header handling that live there. Against Ordering, a worker differs
+by `service.enabled` alone.
+
+Both keys are still written down rather than left absent, and that half was
+never about the diff. A key that is missing looks the same whether it was
+considered or forgotten.
 
 > The failure to design against is not an attacker finding a worker's `/health`.
 > It is a well-meaning `helm` values copy that keeps `ingress.enabled: true`
-> because it came from Ordering's chart, and publishes a host with no
-> authentication middleware in front of it — because a service with no public
-> API never needed any. **A worker's safety comes from having no route, so the
-> absence of a route is the thing to assert** — which is why it is written down
-> as `false` above rather than left out. A key that is missing looks the same
-> whether it was considered or forgotten.
+> because it came from **the gateway's** chart — the one chart that has it, and
+> the obvious thing to copy from when a new deployable needs an entry in
+> `deploy/helm/` — and publishes a host with no authentication middleware in
+> front of it, because a service with no public API never needed any. **A
+> worker's safety comes from having no route, so the absence of a route is the
+> thing to assert.**
+>
+> **This callout named Ordering until the charts existed, and the charts are
+> what falsified it.** Copying a `true` out of a file that has `false` is not a
+> mistake anybody can make; copying it out of the gateway's is the one they
+> can. A safety argument aimed at a copy nobody would perform protects nothing,
+> and reads as though it does.
 
 Exactly one chart in the platform carries client credentials, and the asymmetry
 is the design rather than an oversight:
@@ -530,7 +567,11 @@ one of those differences is something it will not start without, or will start
 wrongly without:
 
 ```yaml
-# deploy/helm/gateway/values.yaml
+# deploy/helm/gateway/values.yaml — an excerpt, on the same terms as Ordering's
+# above. The keys every chart shares are omitted here rather than repeated:
+# `workload.name` (required, and `gateway`), `ports`, `probes.probePort`,
+# `terminationGracePeriodSeconds`, `observability`, and `database.enabled` /
+# `broker.enabled`, both `false` because this host owns neither.
 replicaCount: 3
 
 image:
@@ -682,6 +723,18 @@ mount, all of which must be rotated and audited, for credentials no code path
 ever sends. Over-supply has no failing test to catch it, which is why it
 survives longer than under-supply does.
 
+**`OTEL_EXPORTER_OTLP_ENDPOINT` read `— defaults` and the chart refuses to
+render without it**, and only one of those can describe a deployment
+obligation. The SDK's default is the reason, not the exemption: unset,
+`UseOtlpExporter` exports to `localhost:4317`, where nothing listens in a pod —
+so the failure is a host that starts clean, reports healthy and emits its
+telemetry into the loopback interface for as long as nobody looks at a
+dashboard. That is the same shape as `WithOrigins([])` two paragraphs up, and
+the same shape the Ingress and CORS flags were given a render-time failure for
+in the PR that shipped the charts. A default that turns a missing value into
+silence is worse than one that turns it into a refusal, which is why the column
+now says required and the default is recorded here instead.
+
 **The two Redis rows are a fourth category and it is the one the table used to
 get wrong.** They were marked required outright, and no host in the solution
 calls `AddRedisConnections` — so a chart honouring the table would mount two
@@ -713,7 +766,7 @@ namespace read access and unencrypted at rest.
 | `Cors__Origins__0…n` | Config | Helm `cors.origins` → ConfigMap — **gateway only** | ✓ **when `Cors__Enabled`** |
 | `Ingress__Enabled` | Config | Helm `ingress.enabled` → ConfigMap — **gateway only** | ✓ — true in Kubernetes, false only where the gateway is the edge (Compose) |
 | `Ingress__TrustedNetworks__0…n` | Config | Helm `ingress.trustedNetworks` → ConfigMap — **gateway only** | ✓ **when `Ingress__Enabled`**; CIDRs of the LB/Ingress, without which the rate limiter partitions everyone together |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Config | ConfigMap | — defaults |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Config | Helm `observability.otlpEndpoint` → ConfigMap | ✓ — **every host**. The SDK does default, which is the argument for requiring it rather than against — see below |
 
 | Kind | Source | Example |
 |---|---|---|

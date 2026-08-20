@@ -58,11 +58,16 @@ probes:
   startup:   { path: /health/startup, failureThreshold: 30,  periodSeconds: 2 }
 
 service:
+  # True: the gateway dials this workload by name. False is the worker case
+  # (§15.3), and it is the ONE key separating Shipping's chart from this one —
+  # the chapter said two until the charts were written, because it assumed a
+  # service behind the edge would carry an Ingress of its own.
   enabled: true
 
 ingress:
   # False, and written down rather than omitted (§15.3). Ordering is reached
-  # through the gateway.
+  # through the gateway (§10.2); an Ingress here would be a second door past
+  # the edge's rate limiting, CORS policy and forwarded-header handling.
   enabled: false
 
 identity:
