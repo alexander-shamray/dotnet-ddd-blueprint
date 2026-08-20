@@ -30,7 +30,7 @@ Stdlib Python, no dependencies, no restore — the licence gate's terms, and for
 the same reason: it reads text, so it can run before anything is built. CI runs
 it in `.github/workflows/observability.yml`, path-filtered.
 
-It asserts seven things. The first two are §13.9's pairing in both directions;
+It asserts the following. The first two are §13.9's pairing in both directions;
 the middle ones are §13.6's third leg — *"an alert has three parts: a condition,
 a signal and a procedure"* — and the last is the gate watching its own inputs.
 

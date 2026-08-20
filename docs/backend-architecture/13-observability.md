@@ -363,7 +363,9 @@ it is said here rather than left to be noticed.
 
 ```csharp
 // Common.Application — registered by AddOrderingApplication (§4.2) and forced
-// at startup like every other metrics type (§13.6): "a behaviour injects it"
+// at startup wherever a MetricsInitialiser exists (§13.6) — Ordering has one
+// and Catalog does not, which §13.6 records as a gap and check.py asserts:
+// "a behaviour injects it"
 // is not the same as "something has constructed it".
 public sealed class RequestMetrics
 {
@@ -1154,7 +1156,8 @@ services.AddSingleton<OutboxMetrics>();
 services.AddSingleton<MessagingMetrics>();
 
 // OrderMetrics and RequestMetrics are NOT registered here — they are
-// Application types and AddOrderingApplication already registers them (§4.2).
+// Application types, and AddOrderingApplication registers the one that exists
+// (§4.2). OrderMetrics arrives with §6.6's OrderSummaries projection.
 // A second AddSingleton would not fail: the container keeps both and resolves
 // the last, which is the trap. Two instances mean two sets of instruments on
 // one meter, and the one MetricsInitialiser forces need not be the one the
@@ -1458,17 +1461,25 @@ client, which includes the edge, TLS and the network; the first two rows read
 `request.duration`, which is dispatcher entry to result. Asserting only the
 client's number would fail a healthy service on a slow link, and asserting only
 the server's would pass a broken edge with perfect handler timings — so k6's own
-thresholds are a coarse guard and every row above is checked by querying its
-named instrument after the run.
+thresholds are a coarse guard and every row it *can* evaluate is checked by
+querying that row's named instrument after the run.
 
 **An absent series fails that run.** It is not read as "no problem observed",
 for the reason §13.6 gives one section up: empty and healthy look identical.
 
-**The availability row is the exception and is deliberately not evaluated
-there.** It is a monthly objective and a three-minute run cannot compute one;
-the run bounds its own error rate instead, says so, and does not report a pass
-for the row. Cutting a row rather than pretending is this table's own rule,
-applied to the gate that reads it. Not a "smoke test": §15.1 declines to have
+**Three of the seven are not evaluated there, and each is named in the script
+rather than quietly dropped.** Cutting a row rather than pretending is this
+table's own rule, applied to the gate that reads it — and a gate that fails on
+a healthy platform is a gate that gets switched off:
+
+| Row | Why the run cannot evaluate it |
+|---|---|
+| Availability | A **monthly** objective; a three-minute run cannot compute one. The run bounds its own error rate instead, says so, and reports no pass for the row |
+| Read-model staleness, own events | `projection.lag` has **no producer** — nothing registers an `IProjectionHandler<T>`, per the callout above |
+| Event end-to-end | `messaging.delivery.lag` is recorded by `IntegrationEventConsumer<T>`; the run places orders, and the consumer that records it handles Catalog's product events, which neither scenario produces |
+
+The remaining four — the two request rows and the two outbox lanes — are what
+the run actually asserts. Not a "smoke test": §15.1 declines to have
 one and §12.1 gives the reason, which is that a stage named for what it actually
 does gets maintained. This is also not a capacity test — it catches the
 regression where a query loses its index and goes from 40 ms to 4 s, which no

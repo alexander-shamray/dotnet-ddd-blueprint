@@ -12,7 +12,19 @@
 //     -e PROM_URL=http://prometheus.observability:9090 \
 //     -e TOKEN_URL=https://id.staging.example.com/realms/commerce/protocol/openid-connect/token \
 //     -e CLIENT_ID=slo-run -e CLIENT_SECRET=... \
+//     -e SLO_PRODUCT_ID=<a product with a row in ordering.ProductPrices> \
 //     deploy/observability/slo/slo.js
+//
+// WHAT THE SLO CLIENT MUST BE GRANTED, because nothing in this repository
+// creates it: the token needs `orders:write` (§11.4's permission claim) and a
+// `sub` that parses as a GUID — `HttpContextCurrentUser.Id` calls
+// `Guid.Parse` on it, and an order's owner is bound from the principal rather
+// than from the request. §14.1's Compose realm has no such client; it grants
+// `orders:write` to `demo` only. A staging realm has to add one, and that is a
+// deployment obligation this file states rather than assumes.
+//
+// SLO_PRODUCT_ID must have a row in `ordering.ProductPrices` for the run's
+// currency, or §6.6's worked case applies and every order is refused with 422.
 //
 // TWO INSTRUMENTS, DELIBERATELY. k6 measures wall-clock at the client, which
 // includes the edge, TLS and the network; §13.7's command and query rows read
@@ -124,9 +136,23 @@ export function browseCatalog() {
 }
 
 export function placeOrder(data) {
+    // THE WIRE SHAPE PlaceOrderCommand BINDS, and nothing else. It is
+    // `(Items, ShippingAddress, Currency)`; an earlier draft of this file sent
+    // `lines` and no address, which binds to nothing, fails PlaceOrderValidator
+    // and returns 400 before the domain runs — so the "422 storm" the check
+    // below guards against would have been a 400 storm that never reached it.
+    // PlaceOrderTests.PlaceAsync is the working request; read it before
+    // editing this.
     const body = JSON.stringify({
+        items: [{ productId: __ENV.SLO_PRODUCT_ID, quantity: 1 }],
+        shippingAddress: {
+            line1: '1 Example Street',
+            line2: null,
+            city: 'London',
+            postalCode: 'EC1A 1BB',
+            country: 'GB',
+        },
         currency: 'GBP',
-        lines: [{ productId: __ENV.SLO_PRODUCT_ID, quantity: 1 }],
     });
 
     const response = http.post(`${BASE_URL}/api/v1/orders`, body, {
@@ -139,14 +165,22 @@ export function placeOrder(data) {
 
     commandDuration.add(response.timings.duration);
 
-    // 201 is the success. 422 is the domain refusing — §10.5 maps Error.Rule
-    // there — and it is checked separately rather than folded into a
-    // status-class assertion, because a run whose product has no price row
-    // returns 422 for every request and would otherwise look like a clean
-    // load test with a suspiciously fast write path. That is §6.6's worked
-    // case, and docs/runbooks/business-volume.md is the procedure for it.
+    // 200 IS THE SUCCESS, not 201: ToHttpResult maps a successful Result<T> to
+    // Results.Ok (§10.5), which is what Catalog's POST returns too, and
+    // PlaceOrderTests pins it deliberately. Asserting 201 would have failed
+    // every accepted order — and with `checks: ['rate==1']` below, every
+    // healthy run. A gate that fails on a healthy platform is a gate that gets
+    // switched off, which is the reason three §13.7 rows are named as not
+    // evaluated rather than asserted.
+    //
+    // 422 is the domain refusing — §10.5 maps Error.Rule there — and it is
+    // checked separately rather than folded into a status class, because a run
+    // whose product has no price row returns 422 for every request and would
+    // otherwise look like a clean load test with a suspiciously fast write
+    // path. That is §6.6's worked case, and docs/runbooks/business-volume.md
+    // is the procedure for it.
     check(response, {
-        'order accepted': (r) => r.status === 201,
+        'order accepted': (r) => r.status === 200,
         'order not refused by the domain': (r) => r.status !== 422,
     });
 }

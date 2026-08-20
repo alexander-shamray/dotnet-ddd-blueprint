@@ -114,15 +114,6 @@ public class MetricsRegistrationTests
         StubOutboxStats stats = new();
         List<(string Instrument, double Value, string Lane)> collected = [];
 
-        using MeterListener listener = new();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == OutboxMetrics.MeterName)
-                l.EnableMeasurementEvents(instrument);
-        };
-        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
-            collected.Add((instrument.Name, value, LaneOf(tags))));
-
         // The factory has to outlive the collection: a Meter disposed with its
         // factory publishes nothing.
         using IMeterFactory factory = new ServiceCollection()
@@ -132,8 +123,38 @@ public class MetricsRegistrationTests
 
         OutboxMetrics metrics = new(factory, stats);
         metrics.ShouldNotBeNull();
+
+        // The SAME Meter instance the constructor above used — IMeterFactory
+        // caches by name, so this is a handle on it rather than a second meter.
+        Meter mine = factory.Create(OutboxMetrics.MeterName);
+
+        using MeterListener listener = new();
+
+        // Filter on the meter INSTANCE, never on its name. A MeterListener is
+        // process-wide and RecordObservableInstruments() invokes every
+        // instrument this listener has enabled — so matching `Meter.Name ==
+        // "Ordering.Outbox"` also enables the gauges of any OutboxMetrics some
+        // other test built, and those are wired to a REAL OutboxStats against a
+        // container that may be gone. CI found this as a SqlException thrown
+        // out of a test that constructs no database at all; it passed locally,
+        // because whether a host had started in the same process first is a
+        // matter of ordering. Same shape as Common.Web.Tests' process-wide
+        // DiagnosticListener, which is why that project disables parallelism.
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (ReferenceEquals(instrument.Meter, mine))
+                l.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+            collected.Add((instrument.Name, value, LaneOf(tags))));
+
         listener.Start();
         listener.RecordObservableInstruments();
+
+        // Fails closed: if the handle above were ever a different instance,
+        // nothing is enabled, nothing is collected, and the assertions below
+        // fail rather than passing vacuously.
+        collected.ShouldNotBeEmpty("the listener enabled none of this meter's instruments");
 
         // Three instruments, two lanes, and the tag spelled the way the Lane
         // column stores it — §9.4's dispatcher compares against "Broker", so a
@@ -160,6 +181,70 @@ public class MetricsRegistrationTests
         collected
             .Single(m => m.Instrument == "outbox.abandoned.count" && m.Lane == nameof(OutboxLane.Local))
             .Value.ShouldBe(62);
+    }
+
+    /// <summary>
+    /// The regression test for the defect CI found and this machine did not.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="MeterListener"/> is process-wide, and
+    /// <c>RecordObservableInstruments()</c> invokes every instrument the
+    /// listener has enabled — not the ones the test created. A filter on
+    /// <c>Meter.Name</c> therefore also enables the gauges of any
+    /// <see cref="OutboxMetrics"/> another test built, and those read a REAL
+    /// <c>OutboxStats</c> against a database that may be unreachable or gone.
+    /// <para>
+    /// This reproduces that deterministically: a second <c>OutboxMetrics</c> on
+    /// the same meter <i>name</i>, resolved from a container whose connection
+    /// string points nowhere. Under a name filter its callbacks run and throw
+    /// <c>SqlException</c>; under the instance filter they are never enabled.
+    /// The test that found this constructs no database at all, which is what
+    /// made the failure so confusing to read.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_foreign_meter_of_the_same_name_is_not_collected()
+    {
+        // AddMetrics() because a host adds it, not AddOrderingInfrastructure —
+        // OutboxMetrics takes IMeterFactory and nothing in the service's own
+        // registration supplies one.
+        ServiceCollection services = BuildServices();
+        services.AddMetrics();
+
+        using ServiceProvider foreign = services.BuildServiceProvider();
+
+        // Constructing it registers three observable gauges named exactly like
+        // this test's, on a meter with exactly the same name, wired to a stats
+        // type that will fail the moment anything reads it.
+        foreign.GetRequiredService<OutboxMetrics>().ShouldNotBeNull();
+
+        using IMeterFactory factory = new ServiceCollection()
+            .AddMetrics()
+            .BuildServiceProvider()
+            .GetRequiredService<IMeterFactory>();
+
+        OutboxMetrics mineMetrics = new(factory, new StubOutboxStats());
+        mineMetrics.ShouldNotBeNull();
+        Meter mine = factory.Create(OutboxMetrics.MeterName);
+
+        List<double> collected = [];
+        using MeterListener listener = new();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (ReferenceEquals(instrument.Meter, mine))
+                l.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((_, value, _, _) => collected.Add(value));
+
+        listener.Start();
+
+        // The assertion is that this does not throw. Six measurements, all from
+        // the stub: three instruments, two lanes, and nothing from the foreign
+        // meter — whose gauges would have gone to SQL Server.
+        Should.NotThrow(() => listener.RecordObservableInstruments());
+
+        collected.Count.ShouldBe(6);
+        collected.ShouldAllBe(v => v == 11 || v == 12 || v == 41 || v == 42 || v == 61 || v == 62);
     }
 
     private static string LaneOf(ReadOnlySpan<KeyValuePair<string, object?>> tags)

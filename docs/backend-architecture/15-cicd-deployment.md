@@ -158,10 +158,12 @@ The third is the observability tree (PR-24). A workflow path-filtered to
 `deploy/observability/**` runs `deploy/observability/check.py`, which pairs
 [§13.9](13-observability.md)'s runbooks with §13.6's alerts in **both**
 directions, asserts that every metric a loaded rule or a dashboard panel reads
-is one this platform actually publishes, and asserts that every metric in the
+is one this platform actually publishes, asserts that every metric in the
 *awaiting-signal* file is published by nothing — the check that makes that file
-self-clearing. Stdlib Python over text, so it needs no restore and runs on the
-licence gate's terms. It reaches no Prometheus and no Grafana, and it does not
+self-clearing — and asserts that every service hosting §9.4's dispatcher either
+publishes the outbox gauges or carries a stated exemption, which is the one
+gap the metric-name checks structurally cannot see. Stdlib Python over text, so
+it needs no restore and runs on the licence gate's terms. It reaches no Prometheus and no Grafana, and it does not
 validate rule syntax: `promtool` would be the tool for that, and adding it is a
 decision no chapter has taken.
 

@@ -370,7 +370,7 @@ a gate keeps the list honest.
 **PR-25 (integration categories, canary deploy, quality gates) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 789 tests — so the build rules and the drift rules below
+and `dotnet test` runs 790 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -573,7 +573,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 618 of 789, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 619 of 790, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -601,13 +601,15 @@ operational reference.
 
 The observability gate needs nothing at all — it reads text, like the licence
 gate, which is why it can run before a restore. `deploy/observability/README.md`
-lists the seven things it asserts and, more usefully, the two it does not: it
+lists what it asserts and, more usefully, the two things it does not: it
 reaches no Prometheus and does not validate rule syntax.
 
 **`py -3.12`, not `python`, and the block above is written that way on
-purpose.** Every CI job that runs Python pins 3.12 — three of them since
-PR-22 gave the build job a coverage reporter — and the default interpreter here
-is 3.14.
+purpose.** Every CI job that runs Python pins 3.12 — **every one, without
+counting them here**, which is `docs/testing.md`'s form and is the fix for a
+number that had already gone stale twice: PR-22 made it three and PR-24's
+observability gate made it four. The predicate is checkable and the count was
+not. The default interpreter here is 3.14.
 A newer one is the hazard, not an older one — it accepts APIs 3.12 does not, so
 the local suite goes green on code the runner cannot execute.
 `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly that way. The
@@ -624,8 +626,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 618 of
-the 789 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 619 of
+the 790 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 171, needing the daemon exactly as
 before. PR-25 runs them as separate CI stages; today CI runs one pass over
 both, because staging a split §15.1 has not grown yet would claim a pipeline
