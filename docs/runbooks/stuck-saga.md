@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Alert | `StuckSaga`, in `deploy/observability/alerts/awaiting-signal.yaml` — **not loaded yet** |
-| Condition | Any saga unfinalised for over an hour, excluding one in `Confirmed` |
+| Condition | Unfinalised over an hour outside `Confirmed`, **or over four days in it** |
 | Signal | **Owed.** `ordering.saga.oldest_unfinalised.age` does not exist ([§13.6](../backend-architecture/13-observability.md)) |
 | Owner | The service team ([§13.8](../backend-architecture/13-observability.md)) |
 
@@ -18,12 +18,25 @@
 An order has entered §9.6's fulfilment saga and stopped advancing. Payment may
 be taken, stock may be reserved, and nothing is moving it forward.
 
-**Why `Confirmed` is excluded.** The saga has four states and three of them are
-short: `AwaitingStock` times out in 5 minutes, `Compensating` in 10 and
-`AwaitingPayment` in 15. `Confirmed` is the wait on Shipping, and its timeout is
-**three days** by design — an hour-old saga in `Confirmed` is the healthy path.
-A despatch that genuinely expires escalates to
+**Why `Confirmed` has its own threshold rather than the hour.** The saga has
+four states and three of them are short: `AwaitingStock` times out in 5 minutes,
+`Compensating` in 10 and `AwaitingPayment` in 15. `Confirmed` is the wait on
+Shipping, and its timeout is **three days** by design — so an hour-old saga
+there is the healthy path, and the alert excludes it from the hourly branch. A
+despatch that genuinely expires escalates to
 [`order-review.md`](order-review.md), never here.
+
+**The four-day branch is what catches a lost timeout**, and it exists because
+excluding `Confirmed` outright left a hole with nothing on the other side of
+it. If the `DespatchTimeout` is never delivered — the scheduler failures below —
+the saga sits in `Confirmed` for ever, and `OrdersAwaitingReview` cannot fire
+either, because that timeout is what creates the review row. So:
+
+- **Fired on the hourly branch** → a short wait is overdue. Read the table
+  below for which peer owes an answer.
+- **Fired on the four-day branch** → the despatch deadline itself passed
+  without escalating. Go straight to the scheduler section; this is a lost
+  timeout, not a slow shipper.
 
 ## Find them
 

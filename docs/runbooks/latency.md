@@ -92,12 +92,30 @@ Check, in this order:
 
 ```bash
 kubectl -n <ns> top pods
-kubectl -n <ns> describe pod <pod> | grep -A5 -i throttl
+kubectl -n <ns> top nodes
+kubectl -n <ns> get pod <pod> -o jsonpath='{.spec.containers[*].resources}'
 ```
 
-- **CPU throttling** against the §15.3 resource shape. The charts set a memory
-  limit and deliberately no CPU limit, so throttling here means the *request* is
-  too low for the node's contention, not that a limit is biting.
+- **CPU starvation, and *not* CFS throttling.** §15.3's charts set a memory
+  limit and deliberately **no CPU limit** — and throttling is a property of a
+  *limit*, so with none set the kernel cannot throttle this container at all.
+  A request affects scheduling and the proportional share under contention,
+  which is starvation rather than throttling and looks different: the pod gets
+  less CPU than it wants while `container_cpu_cfs_throttled_seconds_total`
+  stays flat.
+
+  An earlier version of this file said to `kubectl describe pod | grep throttl`,
+  which reports nothing of the kind — `describe` has no runtime throttling
+  field — so it would have read as "not throttled" whatever was happening.
+  Check the node's own saturation and the pod's actual resources instead, and
+  confirm from the metric if one is exported:
+
+  ```promql
+  rate(container_cpu_cfs_throttled_seconds_total{pod=~"<pod>.*"}[5m])
+  ```
+
+  A non-zero reading there means a CPU limit exists that these charts did not
+  set, which is its own finding.
 - **Connection pool exhaustion.** A dependency that got slower turns into a pool
   that is empty, which makes every unrelated query slow. The tell is that
   latency rose everywhere at once, a few seconds after one thing got slower.

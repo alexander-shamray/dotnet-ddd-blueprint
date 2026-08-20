@@ -217,9 +217,13 @@ groups:
           severity: page
           owner: platform
         annotations:
-          summary: "Migration job {{ $labels.job_name }} failed"
+          summary: "Migration job {{ $labels.job_name }} failed or is stuck"
           description: >-
-            The deploy stopped before any pod rolled (§7.4). On an upgrade the
+            The deploy stopped before any pod rolled (§7.4). **Which branch
+            fired decides where to look**: a non-zero failed count is a Job that
+            ran and exited, with a log to read; an active Job past fifteen
+            minutes is one that has not finished, where the pod may never have
+            started at all. The runbook separates them. On an upgrade the
             previous version is still serving, which is why nothing else fires;
             on a first install there is no previous version and nothing else
             fires for the opposite reason. Check which before promising

@@ -56,6 +56,28 @@ internal sealed class OutboxStats : IOutboxStats, IDisposable
     /// </remarks>
     private static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// A bound on each statement, because these run <b>inside observable gauge
+    /// callbacks</b> and the metric reader invokes them on its own thread.
+    /// </summary>
+    /// <remarks>
+    /// <b>Two seconds, not SqlClient's default of thirty.</b> Collection drives
+    /// six callbacks; against a black-holed database — a dropped route or a
+    /// NetworkPolicy change, where connections hang rather than refuse — the
+    /// default would let those waits serialise into minutes and stall the
+    /// reader, taking down <em>unrelated</em> telemetry with these gauges. That
+    /// is a monitor causing an outage in the signal it exists to provide.
+    /// <para>
+    /// A timeout here fails the callback, and a callback that throws is
+    /// swallowed by the SDK: the measurement is skipped and the series is
+    /// absent for that interval. Absent is the correct reading — readiness
+    /// (§13.5) is what reports a database that is gone, and an outbox alert
+    /// firing because SQL Server is unreachable would page the wrong person
+    /// with the wrong runbook.
+    /// </para>
+    /// </remarks>
+    private const int CommandTimeoutSeconds = 2;
+
     private readonly IDbConnectionFactory _connections;
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
     private readonly string _oldestSql;
@@ -127,6 +149,10 @@ internal sealed class OutboxStats : IOutboxStats, IDisposable
             // query — MIN over no rows — and COUNT never returns it. One
             // coalesce covers both because the alternative is two helpers that
             // differ in a `??`.
-            return connection.ExecuteScalar<double?>(sql, new { lane = lane.ToString() }) ?? 0;
+            return connection.ExecuteScalar<double?>(
+                new CommandDefinition(
+                    sql,
+                    new { lane = lane.ToString() },
+                    commandTimeout: CommandTimeoutSeconds)) ?? 0;
         });
 }

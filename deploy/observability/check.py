@@ -559,18 +559,22 @@ def covers(path: str, entry: str) -> bool:
     prefix is the entry or an ancestor of it: `src/**` covers `src`, and
     `docs/runbooks/**` covers `docs/runbooks` but not `docs`.
     """
-    prefix = path
-    for suffix in ("/**", "/*", "**", "*"):
-        if prefix.endswith(suffix):
-            prefix = prefix[: -len(suffix)]
-            break
-
-    prefix = prefix.rstrip("/")
-
-    if not prefix:                       # a bare `**` covers the repository
+    # ONLY `/**` COVERS A DIRECTORY. GitHub's `*` does not cross a separator, so
+    # `src/*` matches the files directly under `src` and none of the C# beneath
+    # them — a filter narrowed that way would skip every source change while
+    # this check called it covered. `**` is the only recursive form, and an
+    # exact literal covers exactly itself.
+    if path == "**":                     # the whole repository
         return True
 
-    return entry == prefix or entry.startswith(prefix + "/")
+    if path.endswith("/**"):
+        prefix = path[: -len("/**")].rstrip("/")
+        return bool(prefix) and (entry == prefix or entry.startswith(prefix + "/"))
+
+    if "*" in path:                      # `src/*`, `*.md`, anything non-recursive
+        return False
+
+    return entry == path
 
 
 def check_workflow_covers_inputs() -> None:

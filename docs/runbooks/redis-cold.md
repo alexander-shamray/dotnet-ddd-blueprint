@@ -49,11 +49,27 @@ Expect this alert to arrive with, or just before,
 
 Three different faults produce a low ratio and they need different responses.
 
+**Name the instance and authenticate.** §8.1 runs **two** Redis deployments —
+an `allkeys-lru` cache and a `noeviction` coordination instance — and every
+connection carries a per-service ACL user, so an unqualified `deploy/redis`
+with no credentials either reaches the wrong instance or answers `NOAUTH`.
+Take an operational credential from the vault (§15.4), not the §14.1 Compose
+default:
+
 ```bash
-kubectl -n <ns> exec deploy/redis -- redis-cli info stats | grep keyspace
-kubectl -n <ns> exec deploy/redis -- redis-cli info memory | grep -E 'used_memory_human|maxmemory'
-kubectl -n <ns> exec deploy/redis -- redis-cli info replication
+export REDIS_DEPLOY=redis-cache          # the allkeys-lru instance, not coordination
+export REDISCLI_AUTH=...                 # an authorised operator ACL, from the vault
+
+kubectl -n <ns> exec deploy/"$REDIS_DEPLOY" -- \
+  redis-cli --user <operator> --no-auth-warning info stats | grep -E 'keyspace|evicted'
+kubectl -n <ns> exec deploy/"$REDIS_DEPLOY" -- \
+  redis-cli --user <operator> --no-auth-warning info memory | grep -E 'used_memory_human|maxmemory'
+kubectl -n <ns> exec deploy/"$REDIS_DEPLOY" -- \
+  redis-cli --user <operator> --no-auth-warning info replication
 ```
+
+`REDISCLI_AUTH` keeps the password off the process list, which `redis-cli -a`
+does not.
 
 - **Redis restarted or failed over.** Keyspace near zero, uptime low. The cache
   is cold and will warm; the job is to survive the warming.
