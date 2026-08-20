@@ -127,11 +127,11 @@ structurally always null on one path.
 | `GatewayLimits` | [§10.1](10-api-gateway.md), [ADR-020](appendix-a-adrs.md#adr-020--the-edge-compresses-over-tls-and-says-so) | `MaxRequestBodyBytes` — one mebibyte, and the platform's only body ceiling. A constant rather than configuration because it does not vary between environments (§15.4), and a named one rather than a literal in `Program.cs` because the tests either side of the boundary spend it — which is what lets them assert the boundary's semantics rather than a value, so the number can move without touching them |
 | `GatewayRateLimiterPolicies` | [§10.3](10-api-gateway.md) | `Anonymous`, `Authenticated` and the `All` list beside them. Not the authorization policy of the same name — §10.2 keeps two registries apart under one word. The list exists because the limiter's policy map is internal to the framework, so nothing can ask a built host what it registered: YARP refuses to load a route naming a policy that is absent, and `All` is what catches the other direction, a policy registered and named by nothing |
 | `SensitiveDataRedactor` | §13.4 | `BaseProcessor<LogRecord>`; enforces the never-log list on the pipeline §13.2 builds |
-| `OutboxMetrics` | §13.6 | Observable gauges on the `Ordering.Outbox` meter; singleton, eagerly constructed |
+| `OutboxMetrics` | §13.6 | Three observable gauges on the `Ordering.Outbox` meter, one measurement per lane; singleton, eagerly constructed. The per-lane measurements are read from `Enum.GetValues<OutboxLane>()` rather than written out at each of the three call sites, so a lane added and forgotten cannot become a lane with no gauge and therefore no alert |
 | `RequestMetrics` | §13.3 | `request.duration` on `Commerce.Requests`; injected by `LoggingBehavior` and still forced by `MetricsInitialiser` (§13.6) — a health probe never enters the pipeline |
 | `MessagingMetrics` | §13.3 | Three instruments on `Commerce.Messaging`: `messaging.delivery.lag` and `projection.lag` histograms, and the `command.domain_rejected` counter `Rejected` writes (§9.8). Injected by `IntegrationEventConsumer<T>` and `CommandConsumer<,>`; resolved from the provider by the static `ProjectionInvoker`. **The class grew in instalments** — `Projected` landed with the outbox, the other two with the consumers that record them, on `PluggableInterfaces.All`'s terms — and is complete |
-| `IOutboxStats`, `OutboxStats` | §13.6 | Backlog age and abandoned count, read per-scope from a singleton |
-| `MetricsInitialiser` | §13.6 | `IHostedService` whose only job is forcing the metrics singletons to be constructed |
+| `IOutboxStats`, `OutboxStats` | §13.6 | Backlog age, pending count and abandoned count, each per lane. **No scope**: §6.5's `IDbConnectionFactory` is a singleton holding a string, so it is injected directly and the reads are Dapper on a connection the caller disposes — §13.6 reached for an `IServiceScopeFactory` until PR-24 measured what it was resolving. Cached five seconds, because an observable gauge is read once per export interval per instrument and a metrics type that loads the database it measures is a monitor causing the symptom. The abandoned query reads `OutboxDispatcher.MaxAttempts` rather than repeating the number |
+| `MetricsInitialiser` | §13.6 | `IHostedService` whose only job is forcing the metrics singletons to be constructed. Three parameters, not four — `OrderMetrics` joins with §6.6's `OrderSummaries` projection — and each is passed to `ArgumentNullException.ThrowIfNull`, because an unread primary-constructor parameter is CS9113 and ADR-019 makes it an error |
 | `OrderFulfilmentState` | §9.6 | `SagaStateMachineInstance`; persisted to `ordering.OrderFulfilmentStates` |
 | `ProductPriceProjection` | §6.6 | Writes `ordering.ProductPrices` and `ordering.ProductWithdrawals` from Catalog's three product events, on the `ordering-catalog-events` endpoint (§9.8). **Public**, because §6.2's scan is public-only and an internal handler registers as nothing while the endpoint stays bound. Its `MERGE` carries `WITH (HOLDLOCK)`: without it two concurrent deliveries for one key can both insert, which the endpoint's retry would absorb rather than surface |
 | `ProductWithdrawal` | §6.6 | The product-level watermark the upsert consults on its `NOT MATCHED` branch. Exists because `ProductDiscontinued` carries no currency and `ProductPrices` is keyed by one, so a withdrawal cannot reach a row that does not exist yet — and §9.4 guarantees no ordering. A **watermark**, not a flag: a later republish re-lists the product |
@@ -240,6 +240,15 @@ and Aspire types are assumed — including the ones the samples name outright,
 such as `TestResult` (§4.2), `IProxyStateLookup` ([§12.4](12-test-strategy.md))
 and `IResourceBuilder<ProjectResource>` (§14.2). Licences in
 [Appendix B](appendix-b-licences.md).
+
+**The base class library and `Microsoft.Extensions.*` are assumed on the same
+terms**, and the family is named here rather than left implicit because a rule
+that lists fifteen library names reads as exhaustive. `IServiceCollection`,
+`IHostedService`, `IOptions<T>`, `ILogger<T>`, `Meter` and `IMeterFactory`
+(§13.3), and `MemoryCache` (§13.6) are all in it. Naming the family was owed
+before PR-24 and became visible with it: `Microsoft.Extensions.Caching.Memory`
+is now a direct pin with an Appendix B row, which is the half this appendix
+does not cover.
 
 One of those names collides: xunit.v3 declares its own `Xunit.TestResult`, so
 a test file holding §4.2's gates aliases the one it means —

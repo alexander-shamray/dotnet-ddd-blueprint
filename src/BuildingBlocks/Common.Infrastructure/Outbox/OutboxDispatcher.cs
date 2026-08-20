@@ -25,7 +25,13 @@ namespace Common.Infrastructure.Outbox;
 /// </remarks>
 public sealed class OutboxDispatcher : BackgroundService
 {
-    private const int MaxAttempts = 10;
+    /// <summary>
+    /// §9.4's attempt cap. Public because §13.6's abandoned-rows gauge counts
+    /// exactly the rows this claim skips, and a second copy of the number is a
+    /// gauge that stops agreeing with the loop it describes on the day somebody
+    /// tunes one of them.
+    /// </summary>
+    public const int MaxAttempts = 10;
 
     // Compiled once rather than parsed per call. CA1848 is enforced by ADR-019
     // and this loop runs twice a second — see §13.3's LoggingBehavior, which

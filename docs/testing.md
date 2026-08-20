@@ -18,9 +18,10 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 > `/validate-blueprint` reaches it only because it is named in that command's
 > scope. The one rule in `CLAUDE.md` covers it, and that is all that does.
 
-## The three suites
+## The four suites
 
-Three runners, and `dotnet test` says nothing about the other two:
+Four of them, three runners, and `dotnet test` says nothing about the other
+three:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -31,16 +32,23 @@ dotnet test  Platform.slnx         # needs a running Docker daemon
 (cd tools/new-service && py -3.12 -m unittest)  # no Docker, no SDK
 
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
+
+py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
 ```
 
-**Only the first is a §12 suite, and the other two are here anyway**, because
+**Only the first is a §12 suite, and the other three are here anyway**, because
 this file is written for someone with a checkout rather than for someone
-deciding what to test. The scaffold's tests exercise a developer tool and the
-chart gate renders `deploy/helm/` and asserts what comes out (§15.3); neither
-is in `Platform.slnx`, so a green solution says nothing about either, which is
-exactly why a person needs to be told they exist. `deploy/helm/README.md` is
-the chart gate's own reference — what it asserts and what it deliberately does
-not, since it reaches no cluster.
+deciding what to test. The scaffold's tests exercise a developer tool; the
+chart gate renders `deploy/helm/` and asserts what comes out (§15.3); and the
+observability gate pairs §13.6's alerts with §13.9's runbooks both ways and
+checks that every metric a loaded rule reads is one something publishes. None
+is in `Platform.slnx`, so a green solution says nothing about any of them,
+which is exactly why a person needs to be told they exist.
+
+Each has its own reference for what it asserts and — more usefully — what it
+does not: `deploy/helm/README.md`, since that gate reaches no cluster, and
+`deploy/observability/README.md`, since that one reaches no Prometheus and does
+not validate rule syntax.
 
 **`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12, and a
 newer interpreter is the hazard — it accepts APIs 3.12 does not, so the local
@@ -101,10 +109,10 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Those are the runner's numbers, and `--list-tests` gives different ones.**
 > Discovery reports 82 for that project where execution reports 81, so a
 > partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 778 is summed from `dotnet test` output, and mixing the two is how
+> here — the 794 is summed from `dotnet test` output, and mixing the two is how
 > this callout first came to claim 72 and 82. Quote what ran.
 >
-> Across the solution the split is **614 and 164 of 778**, and the fast half
+> Across the solution the split is **623 and 171 of 794**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -125,7 +133,7 @@ The five declarations are in `Catalog.Api.Tests`,
 `Catalog.Application.Tests`, `Common.Infrastructure.Tests`,
 `Ordering.Api.Tests` and — as `KeycloakCollection` — `Web.Bff.Tests`. That last
 is the clearest case for categorising a **collection** rather than a project:
-59 of its 63 tests never needed a container and 4 need an identity provider, so
+62 of its 66 tests never needed a container and 4 need an identity provider, so
 a project-level split would have had nothing to split. What it buys there is a
 container start rather than a fast suite — the BFF's fast half still takes
 about a minute, because §9.7's resilience tests wait on real timeouts.
@@ -146,8 +154,8 @@ the instrumentation reason under Coverage below.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 614 and 164 summing to
-> 778 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 623 and 171 summing to
+> 794 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

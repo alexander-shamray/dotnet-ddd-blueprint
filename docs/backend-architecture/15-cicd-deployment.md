@@ -127,12 +127,16 @@ The readiness probes ([§13.5](13-observability.md)) already gate the rollout �
 `/health/ready` never takes traffic — so a separate "smoke test" step would
 re-assert what Kubernetes has already enforced, or assert something nobody has
 written down. The first real gate after dev is the k6 SLO run against staging,
-which names its tool, its target and its assertions (§13.7).
+which names its tool, its target and its assertions (§13.7): it is
+`deploy/observability/slo/slo.js` since PR-24, and it fails on an **absent**
+series as well as on a breached one — a target with no data is the same silence
+§13.6 spends a callout on, and reading it as "nothing wrong" would turn this
+stage into the gate configured to pass that the paragraph above rules out.
 
-Two `deploy/**` artefacts are exercised by CI directly rather than deployed,
-one per subtree, each in its own path-filtered workflow. **Neither is the smoke
-stage ruled out above**: both deploy nothing and assert only what a chapter
-already defines.
+**Three** `deploy/**` artefacts are exercised by CI directly rather than
+deployed, one per subtree, each in its own path-filtered workflow. **None is the
+smoke stage ruled out above**: all three deploy nothing and assert only what a
+chapter already defines.
 
 The first is the Compose file. A workflow path-filtered to
 `deploy/compose/**` and to itself runs `docker compose config -q`, then
@@ -150,9 +154,32 @@ hook annotations of [§7.4](07-persistence.md), the ConfigMap/Secret split of
 cluster is reached, so schema validation against a live API server stays a
 deploy-time gate and is named in the script as not covered.
 
-**That filter also names files outside `deploy/helm/`**, which is the one
-place a `deploy/**` workflow reaches outside its own tree and is not an
-oversight. Each is an input the script actually reads:
+The third is the observability tree (PR-24). A workflow path-filtered to
+`deploy/observability/**` runs `deploy/observability/check.py`, which pairs
+[§13.9](13-observability.md)'s runbooks with §13.6's alerts in **both**
+directions, asserts that every metric a loaded rule or a dashboard panel reads
+is one this platform actually publishes, asserts that every metric in the
+*awaiting-signal* file is published by nothing — the check that makes that file
+self-clearing — and asserts that every service hosting §9.4's dispatcher either
+publishes the outbox gauges or carries a stated exemption, which is the one
+gap the metric-name checks structurally cannot see. Stdlib Python over text, so
+it needs no restore and runs on the licence gate's terms. It reaches no Prometheus and no Grafana, and it does not
+validate rule syntax: `promtool` would be the tool for that, and adding it is a
+decision no chapter has taken.
+
+**Two of the three filters name files outside their own tree**, and neither is
+an oversight — each names an input its gate actually reads. The Helm one is
+below; the observability one names `src/**`, because deciding whether an alert's
+signal exists means reading every instrument declaration in C#, and
+`docs/runbooks/**`, because a renamed runbook is an alert with no procedure
+behind it. **Neither workflow keeps that list in its own YAML.** `smoke.sh`
+declares `SOURCE_INPUTS` and `check.py` declares its own, each beside the reads,
+and each asserts that both of its workflow's triggers cover every entry — a
+copy of a list drifts exactly as a copy of a number does, which the Helm tree
+established at a cost of three findings and the observability tree adopted
+before paying it once.
+
+Each of the Helm filter's outside paths is an input `smoke.sh` actually reads:
 
 - §10.2's route file and `PricingHop.cs`, which hold their destination hosts as
   literals on the stated grounds that "the host is the Kubernetes Service
@@ -309,6 +336,16 @@ hook registered for the second alone is skipped on the release that creates the
 namespace, and the first pods start against a database with no schema. That is
 the exact moment §7.4's hook exists for, and the failure is silent in the
 deploy log: no hook ran, so no hook failed.
+
+> **The deploy command carries a `--timeout`, and the number is owed to §13.6
+> rather than chosen here.** Helm blocks on a hook whatever `--wait` says, so
+> the migration Job gets whatever `--timeout` allows and the default is five
+> minutes. §13.6's `MigrationJobFailed` pages on a Job still active past 900
+> seconds, plus `for: 1m` — sixteen minutes — so at the default Helm gives up
+> first and a Job that finishes after it takes the gauge back to zero with
+> nothing having fired: a failed release and no alert. `deploy/helm/README.md`
+> sets `--timeout 20m` on both documented commands, and **20m > 16m is the
+> constraint**; move either number and the other follows.
 
 ```dockerfile
 # src/Services/Ordering/Ordering.Migrator/Dockerfile
@@ -828,6 +865,13 @@ Every key a service requires, and where each comes from. **This table is the
 inventory `ValidateOnStart` enforces** — a `[Required]` option missing from it
 is a service that will not boot.
 
+**`docs/secrets.md` is the operational half of this section**, on the terms
+`docs/testing.md` holds for [§12](12-test-strategy.md): how a secret travels
+from a vault into a pod, how each kind is rotated, and what the five places are
+that a new required key has to reach. It carries the procedure and **not** the
+inventory — the table below is the inventory, and a second copy would be a
+second thing to reconcile. Where the two disagree, this section wins.
+
 **Conditionally required is a real category, and it is not the same as
 optional.** `Cors__Origins` is not needed when `Cors__Enabled` is false and is
 mandatory when it is true — enabling a feature without configuring it is a
@@ -873,7 +917,18 @@ The rule for the Kind column is mechanical: **if the value contains a
 credential, it is a Secret.** Every connection string here does — SQL Server
 carries a login, RabbitMQ a user, and Redis the per-service ACL user from [§8.1](08-caching-redis.md).
 A connection string in a ConfigMap is a password readable by anyone with
-namespace read access and unencrypted at rest.
+namespace read access.
+
+> **The Kind buys RBAC, and it does not buy encryption.** A Secret is a
+> *separate resource*, so `get configmaps` and `get secrets` are separate verbs
+> and the usual read-only role grants only the first — that separation is the
+> whole reason the column exists. What it does **not** do is encrypt anything:
+> a Secret's value is base64, which is an encoding, and Kubernetes stores it in
+> etcd unencrypted unless an `EncryptionConfiguration` is enabled on the API
+> server. **Encryption at rest is a cluster setting this platform depends on
+> and does not configure**, and stating it as a property of the Kind is how a
+> team ends up believing it is already on. See [`docs/secrets.md`](../secrets.md),
+> which carries the operational half of this section.
 
 | Key | Kind | Source | Required |
 |---|---|---|---|

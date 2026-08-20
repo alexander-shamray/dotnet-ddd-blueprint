@@ -102,11 +102,21 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 ├── deploy/
 │   ├── compose/                        docker-compose.yml + overrides
 │   ├── helm/                           Chart per service + umbrella chart
+│   ├── observability/                  §13.8's dashboards, §13.6's alert rules
+│   │                                   and §13.7's k6 SLO run, as code — plus
+│   │                                   check.py, which pairs the alerts with
+│   │                                   §13.9's runbooks both ways
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/
 │   ├── backend-architecture/           This document, one file
 │   │                                   per chapter; ADRs in Appendix A
+│   ├── runbooks/                       One per alert (§13.9), plus a README
+│   │                                   that is excluded from the pairing by
+│   │                                   name
+│   ├── secrets.md                      How a secret reaches a pod and how each
+│   │                                   kind is rotated — the operational half
+│   │                                   of §15.4, which keeps the inventory
 │   └── testing.md                      How to run the suites, what needs
 │                                       Docker, and the categories of §12.4 —
 │                                       the operational half of §12, which
@@ -496,7 +506,15 @@ public static IServiceCollection AddOrderingApplication(this IServiceCollection 
     // RequestMetrics for a dispatched request — which a health probe is not.
     // MetricsInitialiser (§13.6) forces both, and a test there asserts that
     // every registered *Metrics type is on its parameter list.
-    services.AddSingleton<OrderMetrics>();
+    //
+    // ONLY THE SECOND LINE IS BUILT TODAY, and the first is here on
+    // IdempotencyBehavior's terms below — the specified shape, not the shipped
+    // one. OrderMetrics arrives with §6.6's OrderSummaries projection, its only
+    // call site. Copying this block as it stands FAILS THE BUILD, and by
+    // design: the convention test §13.6 describes asserts every registered
+    // *Metrics type is a MetricsInitialiser parameter, so registering a type
+    // the initialiser does not take is exactly what it exists to catch.
+    services.AddSingleton<OrderMetrics>();                               // with §6.6
     services.AddSingleton<RequestMetrics>();                             // §13.3
 
     // Not AddScoped<IDispatcher, Dispatcher>: Dispatcher is internal to
@@ -1125,6 +1143,12 @@ EF Core minor versions and behave differently under identical code.
          StackExchange.Redis — a separate package from both, and the one that
          actually stores an entry in Redis. -->
     <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
+    <!-- The in-process cache §13.6's OutboxStats holds its five-second
+         snapshot in. HybridCache above carries it transitively; the direct pin
+         states the direct use, and central package management requires one for
+         a direct PackageReference either way. Not a second cache in the sense
+         §8 argues about — it stores no domain data and crosses no process. -->
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
     <!-- The container and logging contracts Common.Application compiles
          against (§6.2, §13.3). ASP.NET Core's shared framework carries both,

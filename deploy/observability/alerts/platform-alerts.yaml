@@ -1,0 +1,246 @@
+# §13.6's alerts, for every condition whose signal this platform actually
+# publishes today. The four that read an instrument nothing creates yet live in
+# awaiting-signal.yaml and are NOT loaded — see the README beside this file, and
+# check.py, which asserts the split rather than trusting it.
+#
+# Metric names are the OpenTelemetry-to-Prometheus spelling, not the C# one:
+# dots become underscores and a UCUM unit becomes a suffix, so `outbox.oldest.age`
+# with unit `s` is `outbox_oldest_age_seconds`, while the annotation unit
+# `{message}` is dropped and `outbox.pending.count` stays `outbox_pending_count`.
+# check.py applies that same transformation when it matches these expressions
+# against the instruments declared in C#, so the two cannot drift apart in
+# silence.
+#
+# `service_name` assumes the collector promotes the `service.name` resource
+# attribute to a label. That is a collector-config decision rather than
+# something this repository can assert, and it is named here rather than
+# assumed: without the promotion every `by (service_name)` below groups
+# everything into one series and the per-service alerts stop discriminating.
+groups:
+  - name: platform-golden-signals
+    rules:
+      # TWO RULES FOR ONE CONDITION, because §13.8 splits the ownership:
+      # "Gateway 5xx, infrastructure alerts … Platform" against "Own p95 …
+      # the service team". A single rule with a static `owner` label routes
+      # every service's 5xx to whoever it names, and a pager that reaches the
+      # wrong team is the escalation path documented in one place and
+      # implemented in another. The condition is identical; only the selector
+      # and the owner differ.
+      #
+      # `Gateway.Api`, NOT `gateway`. §13.2's AddObservability sets the
+      # resource's service.name from `builder.Environment.ApplicationName`,
+      # which defaults to the assembly name — so the edge emits `Gateway.Api`
+      # and the chart's `workload.name` never reaches this label. Spelled
+      # `gateway`, the first rule matches no series at all and the second's
+      # exclusion excludes nothing, so the gateway's 5xx would route to the
+      # service team: the exact mis-routing this split exists to fix, restored
+      # by the fix. A selector has to be spelled from the value the system
+      # emits, never from the name the deployment uses for the same thing.
+      - alert: ErrorRateGateway
+        expr: |
+          sum by (service_name) (
+            rate(http_server_request_duration_seconds_count{service_name="Gateway.Api", http_response_status_code=~"5.."}[5m])
+          )
+          /
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name="Gateway.Api"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: page
+          owner: platform
+        annotations:
+          summary: "5xx rate above 1% at the edge"
+          description: >-
+            More than one request in a hundred is failing at the gateway. The
+            edge has no domain and no database (§10.1), so this is routing,
+            auth, or a backend that is not answering.
+          runbook_url: docs/runbooks/error-rate.md
+
+      - alert: ErrorRateService
+        expr: |
+          sum by (service_name) (
+            rate(http_server_request_duration_seconds_count{service_name!="Gateway.Api", http_response_status_code=~"5.."}[5m])
+          )
+          /
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name!="Gateway.Api"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "5xx rate above 1% on {{ $labels.service_name }}"
+          description: >-
+            More than one request in a hundred is failing. Users are seeing
+            errors now.
+          runbook_url: docs/runbooks/error-rate.md
+
+      - alert: Latency
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (service_name, le) (rate(http_server_request_duration_seconds_bucket[10m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "p99 above 1s on {{ $labels.service_name }}"
+          description: >-
+            The slowest one per cent of requests are taking over a second.
+            Users are waiting.
+          runbook_url: docs/runbooks/latency.md
+
+  - name: platform-messaging
+    rules:
+      # §13.6 gives the two lanes thresholds an order of magnitude apart because
+      # they have different floors: the local lane is in-process with no network
+      # hop, so 30 seconds of lag already means something is wrong, while the
+      # broker lane should absorb a short RabbitMQ blip or a rolling restart
+      # without paging anyone.
+      # NO `for` ON EITHER LANE, and that is a correction rather than an
+      # omission. These gauges are *ages*: the expression only becomes true once
+      # a row has already been unprocessed for the threshold, so a `for` adds to
+      # it rather than debouncing it. `> 120` with `for: 2m` fires at FOUR
+      # minutes, and `> 30` with the same `for` at two and a half — against §13.6
+      # thresholds of two minutes and thirty seconds. The wait is the metric.
+      #
+      # The rules that keep a `for` are the ones whose expression can be true
+      # instantaneously: a ratio, a rate, a backlog depth.
+      - alert: OutboxBrokerLaneStalled
+        expr: max by (service_name) (outbox_oldest_age_seconds{lane="Broker"}) > 120
+        labels:
+          severity: page
+          owner: platform
+        annotations:
+          summary: "Broker outbox lane stalled on {{ $labels.service_name }}"
+          description: >-
+            Other services are working from stale data and sagas will stop
+            advancing.
+          runbook_url: docs/runbooks/outbox-broker.md
+
+      - alert: OutboxLocalLaneStalled
+        expr: max by (service_name) (outbox_oldest_age_seconds{lane="Local"}) > 30
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Local outbox lane stalled on {{ $labels.service_name }}"
+          description: >-
+            Read models this service feeds from its own events are stale. Not
+            the ones another service's contract feeds — those never touch this
+            lane, and §13.7 records that their staleness has no signal yet.
+          runbook_url: docs/runbooks/projection-lag.md
+
+      # `max by (…, lane)` INSIDE, then sum the two lanes. Every replica reads
+      # the same table and exports the same database-wide number, so a plain
+      # `sum` multiplies the backlog by the replica count — Ordering's chart
+      # sets `replicaCount: 3`, which would fire this at about 334 real rows
+      # instead of 1000. The gauge is a property of the database, not of the
+      # pod, and the aggregation has to say so.
+      - alert: OutboxGrowth
+        expr: |
+          sum by (service_name) (max by (service_name, lane) (outbox_pending_count)) > 1000
+          and
+          deriv(sum by (service_name) (max by (service_name, lane) (outbox_pending_count))[10m:]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          owner: service
+        annotations:
+          summary: "Outbox backlog above 1000 and rising on {{ $labels.service_name }}"
+          description: >-
+            Either lane, not keeping up. Both halves are required: a large
+            backlog that is draining needs no page.
+          runbook_url: docs/runbooks/outbox-growth.md
+
+      # No `for`, deliberately. Every other rule here waits out a transient;
+      # an abandoned row is already permanent by the time it is counted, so a
+      # wait would only delay the page.
+      #
+      # `max`, not `sum`, for the reason the growth rule gives: the count is
+      # database-wide and every replica exports it.
+      - alert: OutboxAbandonedRows
+        expr: max by (service_name, lane) (outbox_abandoned_count) > 0
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Abandoned outbox rows on {{ $labels.service_name }} ({{ $labels.lane }} lane)"
+          description: >-
+            Permanent data loss: a message past §9.4's attempt cap is skipped
+            for ever. It stays counted as pending and keeps the oldest-age
+            gauge up, so this looks like an ordinary stall on every other
+            graph — which is exactly why this gauge exists, to tell a row
+            nothing will retry from one that is merely waiting. The lane says
+            whose loss it is.
+          runbook_url: docs/runbooks/outbox-abandoned.md
+
+  - name: platform-infrastructure
+    rules:
+      # The two rules whose signal comes from an exporter rather than from this
+      # platform's own meters. They are live because those exporters are part of
+      # the target deployment (§15.3), and check.py holds their metric names in
+      # its declared external list for exactly that reason — a name it cannot
+      # find in C# is either external and declared, or a typo.
+      - alert: ErrorQueueDepth
+        expr: sum by (queue) (rabbitmq_queue_messages{queue=~".+_error"}) > 0
+        for: 1m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Messages in error queue {{ $labels.queue }}"
+          description: >-
+            A business process has stopped. Something was retried to exhaustion
+            and parked.
+          runbook_url: docs/runbooks/error-queue.md
+
+      # TWO BRANCHES, because §13.6's condition is "non-zero, OR a release stuck
+      # pending". A failed-count-only rule catches the first and is blind to the
+      # second: a hook Job that never completes keeps `kube_job_status_failed`
+      # at zero for ever, so the deploy hangs and nothing pages. The second
+      # branch is an *active* Job older than fifteen minutes — well past any
+      # migration this platform has, and the shape a stuck release takes.
+      # 900 + `for: 1m` is SIXTEEN MINUTES, and the deploy has to outlive it or
+      # this branch watches a window that is already closed. Helm blocks on a
+      # hook whatever `--wait` says, and its default timeout is five minutes —
+      # so it would give up first, and a Job finishing at eight minutes takes
+      # `kube_job_status_active` back to zero with nothing fired: a failed
+      # release and no page. deploy/helm/README.md pins `--timeout 20m` on both
+      # documented commands for exactly this, and 20m > 16m is the constraint
+      # between them. Move either number and the other follows.
+      #
+      # `kube_job_failed{condition="true"}`, NOT `kube_job_status_failed`. The
+      # latter counts failed *pods*, and §15.3's hook sets `backoffLimit: 2` —
+      # so one transient attempt puts it above zero while a retry is still
+      # running, and this rule would page on a deploy that then succeeds. The
+      # Job's Failed *condition* is the thing that means "retries exhausted",
+      # which is the event a human is needed for.
+      - alert: MigrationJobFailed
+        expr: |
+          max by (namespace, job_name) (kube_job_failed{job_name=~".+-migrate.*", condition="true"}) > 0
+          or
+          (
+            max by (namespace, job_name) (kube_job_status_active{job_name=~".+-migrate.*"}) > 0
+            and
+            (time() - max by (namespace, job_name) (kube_job_status_start_time{job_name=~".+-migrate.*"})) > 900
+          )
+        for: 1m
+        labels:
+          severity: page
+          owner: platform
+        annotations:
+          summary: "Migration job {{ $labels.job_name }} failed or is stuck"
+          description: >-
+            The deploy stopped before any pod rolled (§7.4). **Which branch
+            fired decides where to look**: a non-zero failed count is a Job that
+            ran and exited, with a log to read; an active Job past fifteen
+            minutes is one that has not finished, where the pod may never have
+            started at all. The runbook separates them. On an upgrade the
+            previous version is still serving, which is why nothing else fires;
+            on a first install there is no previous version and nothing else
+            fires for the opposite reason. Check which before promising
+            availability.
+          runbook_url: docs/runbooks/migration-failure.md

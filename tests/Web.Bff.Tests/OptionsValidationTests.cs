@@ -1,4 +1,6 @@
 using Common.Web;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Web.Bff.Identity;
@@ -29,6 +31,35 @@ public class OptionsValidationTests
     /// </summary>
     private static readonly string[] Members = ["ClientId", "ClientSecret", "Scope"];
 
+    /// <summary>
+    /// The host half: with a credential blank, it does not come up.
+    /// </summary>
+    /// <remarks>
+    /// <b>The exception TYPE is deliberately not asserted here, and that is a
+    /// fix rather than a weakening.</b> This used to require
+    /// <see cref="OptionsValidationException"/> and failed intermittently on
+    /// CI with <c>ObjectDisposedException</c> instead — a race inside
+    /// <c>WebApplicationFactory</c> rather than anything about this host.
+    /// <para>
+    /// <c>Program</c> is top-level statements, so the factory drives it through
+    /// <c>DeferredHostBuilder</c>: the entry point runs on another thread and
+    /// <c>DeferredHost.StartAsync</c> then resolves services from the host it
+    /// built. When <c>ValidateOnStart</c> throws — which is the whole point of
+    /// this test — <c>app.Run()</c> **disposes that host on its way out**, and
+    /// two things race: the entry point's exception being observed and
+    /// rethrown, against the deferred host resolving from a provider that is
+    /// now disposed. Lose it and the real exception is **destroyed rather than
+    /// wrapped** — it is nowhere in the chain, so no assertion can recover it.
+    /// </para>
+    /// <para>
+    /// Which row loses varies run to run, and a loaded two-core runner loses
+    /// far more often than a developer's machine. So the claim this test can
+    /// make honestly is "the host refused to start"; the claim that it refused
+    /// **naming the missing member** is proven deterministically by
+    /// <see cref="Each_credential_is_required_and_named_in_the_failure"/>
+    /// below. Two assertions, neither depending on who wins a disposal race.
+    /// </para>
+    /// </remarks>
     [Theory]
     [InlineData("ClientId")]
     [InlineData("ClientSecret")]
@@ -39,8 +70,45 @@ public class OptionsValidationTests
 
         // The factory builds the host on first use, so the throw arrives here
         // rather than at construction.
-        OptionsValidationException thrown =
-            Should.Throw<OptionsValidationException>(() => factory.CreateClient());
+        Should.Throw<Exception>(() => factory.CreateClient());
+    }
+
+    /// <summary>
+    /// The validation half, run directly against the options pipeline so no
+    /// host is started and nothing can race.
+    /// </summary>
+    /// <remarks>
+    /// <c>ValidateOnStart</c> registers an <c>IStartupValidator</c>, and
+    /// invoking it is exactly what the host does while starting — so this
+    /// exercises the same code path the host would, and gets the exception
+    /// undisturbed. It duplicates <c>Program</c>'s four registration lines on
+    /// purpose: the pairing of <c>[Required]</c> with
+    /// <c>ValidateDataAnnotations</c> is what is under test, and the theory
+    /// above is what still fails if <c>Program</c> ever drops the block.
+    /// </remarks>
+    [Theory]
+    [InlineData("ClientId")]
+    [InlineData("ClientSecret")]
+    [InlineData("Scope")]
+    public void Each_credential_is_required_and_named_in_the_failure(string member)
+    {
+        ServiceCollection services = new();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(Members.Select(name => new KeyValuePair<string, string?>(
+                $"{ServiceIdentityOptions.SectionName}:{name}",
+                string.Equals(name, member, StringComparison.Ordinal) ? "" : "supplied")))
+            .Build());
+
+        services
+            .AddOptions<ServiceIdentityOptions>()
+            .BindConfiguration(ServiceIdentityOptions.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        OptionsValidationException thrown = Should.Throw<OptionsValidationException>(
+            () => provider.GetRequiredService<IStartupValidator>().Validate());
 
         thrown.Message.ShouldContain(member);
     }

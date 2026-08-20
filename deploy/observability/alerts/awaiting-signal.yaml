@@ -1,0 +1,196 @@
+# §13.6's remaining four alerts, written out and DELIBERATELY NOT LOADED.
+#
+# Each one reads an instrument this platform does not publish yet. Loading them
+# would be the exact defect §13.6 spends a callout on: "Two of the alerts in
+# this document were written against signals that did not exist, and both looked
+# correct: the dashboard is empty either way, whether the system is healthy or
+# the metric was never published." A rule that cannot fire is not a weak alert,
+# it is a silent one — and silence reads as health.
+#
+# So they live here instead, where they are visible, reviewable, and checked.
+# check.py asserts three things about this file, and the third is the one that
+# makes it self-clearing:
+#
+#   1. every rule here has a runbook, exactly as a loaded one does;
+#   2. no rule here also appears in platform-alerts.yaml;
+#   3. every metric named here is one that NOTHING publishes.
+#
+# The third means the day somebody ships the missing instrument, this gate goes
+# red and names the rule to move. An "awaiting signal" list that nothing
+# re-checks would quietly become a list of alerts nobody ever turned on.
+#
+# Naming what is owed rather than shipping a rule that cannot fire is the same
+# move §13.7 makes for broker-fed read-model staleness: "an SLO nobody can
+# compute is worse than an absence somebody has written down".
+groups:
+  - name: awaiting-signal
+    rules:
+      # Owed: ordering.saga.oldest_unfinalised.age, an observable gauge over
+      # OrderFulfilmentState. §9.6's state machine persists every saga, so the
+      # reading is a query away — there is simply no instrument over it.
+      #
+      # The state exclusion is not a refinement, it is the alert: AwaitingStock
+      # times out in 5 minutes, Compensating in 10 and AwaitingPayment in 15,
+      # but the despatch wait is THREE DAYS by design. An unqualified hour would
+      # page on the healthy path for most of a saga's real lifetime, and a
+      # despatch that genuinely expires escalates to OrdersAwaitingReview below
+      # rather than to this rule.
+      #
+      # The excluded state is `Confirmed`, and §13.6's prose — "excluding one
+      # awaiting despatch" — describes it rather than naming it. There is no
+      # `AwaitingDespatch` state: OrderFulfilmentSaga arms DespatchTimeout on
+      # the transition INTO Confirmed, because the order is confirmed and now
+      # waiting on Shipping. A selector spelled `AwaitingDespatch` would match
+      # no series, exclude nothing, and page on every confirmed order an hour
+      # after payment — a filter that reads as a safeguard and behaves as a
+      # pager.
+      # TWO BRANCHES, because excluding `Confirmed` outright leaves a permanent
+      # blind spot — and it is the blind spot this runbook's own worst case
+      # falls into. If the three-day DespatchTimeout is never delivered (the
+      # scheduler failures stuck-saga.md spends half its length on), the saga
+      # sits in `Confirmed` for ever: the first branch excludes it, and
+      # OrdersAwaitingReview below cannot fire either, because the review row is
+      # created BY that timeout. Nothing pages, and the order is stuck.
+      #
+      # So the second branch watches `Confirmed` against a threshold past the
+      # deadline itself — four days against a three-day wait. It is not a
+      # duplicate of the first: one asks "is a short wait taking an hour", the
+      # other "did the long wait's own timeout arrive at all".
+      - alert: StuckSaga
+        expr: |
+          max by (service_name) (
+            ordering_saga_oldest_unfinalised_age_seconds{state!="Confirmed"}
+          ) > 3600
+          or
+          max by (service_name) (
+            ordering_saga_oldest_unfinalised_age_seconds{state="Confirmed"}
+          ) > 345600
+        for: 5m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "A saga has been unfinalised past its wait"
+          description: >-
+            Orders are stuck. An hour for the short waits; four days for
+            `Confirmed`, which is past the three-day despatch deadline — a
+            saga still there has lost its own timeout, and no review row
+            exists because that timeout is what creates one.
+          runbook_url: docs/runbooks/stuck-saga.md
+
+      # Owed: ordering.order_reviews.oldest.age, over ordering.OrderReviews.
+      # A saga that escalated has already FINALISED, so StuckSaga above will
+      # never catch this — which is why §13.6 gives it a row of its own.
+      - alert: OrdersAwaitingReview
+        expr: max by (service_name) (ordering_order_reviews_oldest_age_seconds) > 3600
+        for: 5m
+        labels:
+          severity: ticket
+          owner: service
+        annotations:
+          summary: "An order has been awaiting manual review for over an hour"
+          description: >-
+            A saga hit a wait it could not compensate and escalated (§9.6).
+            It has already finalised, so the saga-age alert will not catch it.
+          runbook_url: docs/runbooks/order-review.md
+
+      # OWED TWICE OVER, AND THE SECOND IS THE ONE NO GATE HERE CAN WATCH.
+      #
+      # First: no host calls AddRedisConnections, so nothing constructs a
+      # HybridCache. §15.4 records that absence from the secrets side, where the
+      # two Redis rows are conditional on a consumer existing.
+      #
+      # Second, and measured against the pinned package rather than assumed:
+      # Microsoft.Extensions.Caching.Hybrid 10.0.0 references
+      # System.Diagnostics.Tracing and NOT System.Diagnostics.Metrics. It
+      # reports through HybridCacheEventSource with PollingCounter — that is
+      # EventCounters, not a Meter. §13.2's AddMeter for this name therefore
+      # collects nothing, and wiring Redis would not change that. A registered
+      # meter with no publisher is precisely the trap this file exists for, and
+      # the AddMeter line is what makes it look wired.
+      #
+      # So the metric names below are what an EventCounters-to-OTel bridge would
+      # plausibly export, and NOT names read off a running system. They are here
+      # to keep the rule reviewable; whoever lands the bridge owns confirming
+      # them, and check 5 will go red on the instrument arriving.
+      #
+      # The expression is derived rather than measured, per §13.6: a ratio is
+      # computed from the hit and miss counters and is not published as one, so
+      # what is written here is the expression and never an invented ratio name.
+      - alert: CacheHitRatioCollapse
+        # THE DENOMINATOR IS UNCLAMPED, and that is the whole of the
+        # correctness here. An earlier draft wrapped it in `clamp_min(…, 1)` to
+        # avoid dividing by zero — which turns an IDLE cache into a firing
+        # alert: no hits and no misses gives 0 / 1 = 0, which is below 0.5.
+        # Unclamped, 0 / 0 is NaN, the series drops out, and the rule stays
+        # quiet until there is traffic to judge. Prometheus's own idiom, and
+        # the reason it is the idiom.
+        # EACH COUNTER DEFAULTS TO ZERO; THE DENOMINATOR STAYS UNCLAMPED. Two
+        # separate traps, and the fixes pull in opposite directions.
+        #
+        # A cold cache can have misses and no hit series at all — the all-miss
+        # case this rule is *for*. `sum()` over an absent vector is absent, so
+        # the division produces nothing and the alert stays silent at a hit
+        # ratio of zero. `or vector(0)` on each sum fixes that.
+        #
+        # But an earlier draft wrapped the denominator in `clamp_min(…, 1)` to
+        # avoid dividing by zero, which fires on an IDLE cache: 0 / 1 = 0, below
+        # 0.5. Unclamped, an idle cache gives 0 / 0 = NaN, the series drops out,
+        # and the rule waits for traffic. Both properties hold together: with
+        # misses and no hits it evaluates 0 / n; with neither it evaluates
+        # 0 / 0 and stays quiet.
+        expr: |
+          (sum(rate(hybrid_cache_hits_total[10m])) or vector(0))
+          /
+          (
+            (sum(rate(hybrid_cache_hits_total[10m])) or vector(0))
+            +
+            (sum(rate(hybrid_cache_misses_total[10m])) or vector(0))
+          )
+          < 0.5
+        for: 10m
+        labels:
+          severity: page
+          owner: platform
+        annotations:
+          summary: "Cache hit ratio below 50%"
+          description: >-
+            Redis lost its working set. Every miss becomes a database read, and
+            the databases are sized for a warm cache (ADR-006).
+          runbook_url: docs/runbooks/redis-cold.md
+
+      # Owed: orders.placed, on OrderMetrics. §13.3 puts that type in
+      # Ordering.Application with OrderSummaryProjection as its only call site,
+      # and §6.6's OrderSummaries projection has not been built — PR-20 deferred
+      # it by name. MetricsInitialiser carries the same note from the other end.
+      #
+      # Week-over-week rather than a fixed floor, because a volume alert with no
+      # seasonality model is the first pager people mute.
+      - alert: BusinessVolumeDrop
+        # `or vector(0)` ON THE CURRENT SIDE ONLY, and the asymmetry is the
+        # alert. If orders stop completely — a restarted instance, or the total
+        # halt this rule exists for — the counter series is *absent* rather than
+        # a sampled zero, `sum()` over an absent vector is absent too, and the
+        # comparison yields nothing. The alert would go quiet in exactly the
+        # scenario its runbook opens with.
+        #
+        # The baseline keeps no default deliberately: without a week-old series
+        # there is nothing to compare against, and firing on that would page
+        # every new deployment for its first week.
+        expr: |
+          (sum(rate(orders_placed_total[1h])) or vector(0))
+          <
+          0.5 * sum(rate(orders_placed_total[1h] offset 1w))
+        for: 30m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Orders placed down more than 50% week over week"
+          description: >-
+            The most valuable alert here — it catches failures no technical
+            metric detects. §6.6's worked case: ordering.ProductPrices has no
+            row for a product, every order containing it is refused by the
+            domain, and the customer sees a 422 with no exception, no 5xx and no
+            lag anywhere.
+          runbook_url: docs/runbooks/business-volume.md

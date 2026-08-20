@@ -2,12 +2,14 @@ using System.Text.Json.Serialization;
 using Ordering.Application.Orders;
 using Ordering.Domain.Orders;
 using Ordering.Infrastructure.Messaging;
+using Ordering.Infrastructure.Observability;
 using Ordering.Infrastructure.Persistence;
 using Common.Application;
 using Common.Contracts;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -149,6 +151,48 @@ public static class DependencyInjection
         // §13.3's projection lag, on the Commerce.Messaging meter
         // AddObservability already collects.
         services.AddSingleton<MessagingMetrics>();
+
+        // §13.6's per-lane outbox gauges, and the stats type behind them. Both
+        // singletons: the gauges are callbacks the Meter holds, and the stats
+        // cache would be pointless per scope. OrderMetrics and RequestMetrics
+        // are NOT registered here — they are Application types and
+        // AddOrderingApplication already registers the one that exists. A
+        // second AddSingleton would not fail: the container keeps both and
+        // resolves the last, so two instances would mean two sets of
+        // instruments on one meter, and the one MetricsInitialiser forces need
+        // not be the one the pipeline injects.
+        // ITS OWN CONNECTION FACTORY, with a bounded connect timeout, and that
+        // is not tidiness. OutboxStats runs inside observable gauge callbacks,
+        // and a `commandTimeout` bounds only the statement — SqlClient's
+        // default `Connect Timeout` is fifteen seconds, so against a
+        // black-holed database (a dropped route, a NetworkPolicy change, where
+        // connections hang rather than refuse) the open blocks before the
+        // command timer ever starts. Six callbacks would serialise into a
+        // minute and a half of stalled metric reader, taking unrelated
+        // telemetry down with these gauges.
+        //
+        // The runtime key, deliberately — this reads the same data plane the
+        // service does (§7.1) — and only the timeout differs, so no query path
+        // inherits a bound chosen for a metrics callback.
+        string metricsConnectionString =
+            new SqlConnectionStringBuilder(configuration.GetConnectionString("Ordering"))
+            {
+                ConnectTimeout = OutboxStats.ConnectTimeoutSeconds
+            }.ConnectionString;
+
+        services.AddSingleton<IOutboxStats>(sp => new OutboxStats(
+            new SqlConnectionFactory(metricsConnectionString),
+            sp.GetRequiredService<OutboxTable>()));
+        services.AddSingleton<OutboxMetrics>();
+
+        // Singleton registration alone is lazy — the instruments appear on
+        // first resolve, which for a class nothing injects is never. This is
+        // the step ValidateOnBuild cannot check, because nothing depends on a
+        // metrics class and the container is perfectly happy without it (§6.2).
+        //
+        // Registered before the bus and the dispatcher, so the instruments
+        // exist before the first message can be delivered against them.
+        services.AddHostedService<MetricsInitialiser>();
 
         // The bus (§9). Its readiness needs no line below: AddMassTransit
         // registers the bus health check itself — "masstransit-bus", tagged

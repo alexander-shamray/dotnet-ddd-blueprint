@@ -215,6 +215,16 @@ compensation path per failure, and each of those is a harness test. PR-24 is
 six days of writing: twelve runbooks, one per alert, each checked from the
 alert to the procedure and from the procedure back to the alert.
 
+**PR-24 has landed, and the estimate was right about the size for the wrong
+reason.** Six days of writing was the guess; what it actually cost was the
+writing *plus* the code the alerts turned out to need — §13.6's `OutboxMetrics`
+had never been built, so four of the twelve alerts had no signal and four more
+were found to have none either. **An estimate that prices a documentation PR as
+documentation is an estimate that has not asked what the documents point at.**
+The same reading applies to PR-25 below, which is priced as pipeline work and
+inherits whatever the SLO run turns out to need from a staging environment that
+does not exist yet.
+
 ### Optional
 
 | PR | Title | Est. | Cum. | Week |
@@ -265,8 +275,11 @@ milestone row.
 "invisible from outside" kind, and most of that PR's work went on things §15.3
 did not say it needed — a naming rule the platform's own routing already
 depended on, a grace period whose number had to be measured, and a render-time
-gate to keep any of it from drifting. PR-24's twelve runbooks are the last
-large one.
+gate to keep any of it from drifting. PR-24 has since done the same thing
+again — twelve runbooks, and beside them the metrics type §13.6 had specified
+and nobody had built, plus a second render-time gate — which leaves **PR-25 as
+M6's only outstanding item**, and the one whose "invisible from outside" work
+is a canary nobody has run.
 
 ## Critical path
 

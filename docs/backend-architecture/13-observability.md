@@ -115,7 +115,14 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
             .AddMeter("Commerce.Requests")                     // §13.3, §13.7
             .AddMeter("Commerce.Messaging")                    // §13.3, §13.7
             .AddMeter("MassTransit")
-            .AddMeter("Microsoft.Extensions.Caching.Hybrid")   // cache hit ratio
+            // §13.6's cache-hit-ratio alert, and it COLLECTS NOTHING at the
+            // pinned version: Microsoft.Extensions.Caching.Hybrid 10.0.0
+            // references System.Diagnostics.Tracing and not
+            // System.Diagnostics.Metrics, reporting through
+            // HybridCacheEventSource with PollingCounter. Measured against the
+            // package. The line stays, with this comment, because deleting it
+            // hides the obligation where naming it records one — see §13.6.
+            .AddMeter("Microsoft.Extensions.Caching.Hybrid")
             .AddMeter("StackExchange.Redis"))
         .WithTracing(t => t
             .AddAspNetCoreInstrumentation(o =>
@@ -363,7 +370,9 @@ it is said here rather than left to be noticed.
 
 ```csharp
 // Common.Application — registered by AddOrderingApplication (§4.2) and forced
-// at startup like every other metrics type (§13.6): "a behaviour injects it"
+// at startup wherever a MetricsInitialiser exists (§13.6) — Ordering has one
+// and Catalog does not, which §13.6 records as a gap and check.py asserts:
+// "a behaviour injects it"
 // is not the same as "something has constructed it".
 public sealed class RequestMetrics
 {
@@ -957,10 +966,10 @@ actionable — if the response is "acknowledge and ignore", delete it.
 | Error rate | 5xx > 1% over 5 min | Users are seeing failures | `error-rate.md` |
 | Latency | p99 > 1 s over 10 min | Users are waiting | `latency.md` |
 | Error queue depth | > 0 | A business process has stopped | `error-queue.md` |
-| Saga age | any saga unfinalised > 1 h, **excluding one awaiting despatch** | Orders are stuck. Every other wait state in §9.6 times out in 5, 10 or 15 minutes, so an hour is a sane margin above all of them — but the despatch wait is **three days** by design, three orders of magnitude further out, and an unqualified hour would page on the healthy path for most of a saga's real lifetime. A despatch that genuinely expires escalates to the row below, not to this one | `stuck-saga.md` |
+| Saga age | any saga unfinalised > 1 h **outside `Confirmed`**, or > 4 days **in** it | Orders are stuck. Every other wait state in §9.6 times out in 5, 10 or 15 minutes, so an hour is a sane margin above all of them — but the despatch wait is **three days** by design, three orders of magnitude further out, and an unqualified hour would page on the healthy path for most of a saga's real lifetime. A despatch that genuinely expires escalates to the row below, not to this one. **The state is named rather than described, and this row used to describe it**: §9.6 has no `AwaitingDespatch`, because the saga arms `DespatchTimeout` on the transition *into* `Confirmed` — the order is confirmed and now waiting on Shipping. A selector spelled the way the description reads would match no series, exclude nothing, and page on every healthy confirmed order. **The four-day branch is not a refinement but the other half of the alert**: excluded outright, a `Confirmed` saga whose three-day timeout was never delivered is invisible here *and* to the row below, because that timeout is what creates the review row. Nothing would page at all | `stuck-saga.md` |
 | Orders awaiting review | any row in `ordering.OrderReviews` older than 1 h | A saga hit a wait it could not compensate and escalated (§9.6). It has already finalised, so the saga-age alert above will *not* catch this | `order-review.md` |
 | Migration job failed | Helm `pre-install,pre-upgrade` hook non-zero, or a release stuck pending | The deploy stopped before any pod rolled ([§7.4](07-persistence.md)). On an **upgrade** the previous version is still serving, which is why nothing else fires — so this alert is the only signal. On a first **install** there is no previous version and no pod at all, so nothing else fires for the opposite reason: check which before promising availability | `migration-failure.md` |
-| Cache hit ratio collapse | `rate(cache_hits) / rate(cache_hits + cache_misses)` < 50% over 10 min, from `Microsoft.Extensions.Caching.Hybrid` | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |
+| Cache hit ratio collapse | hits ÷ (hits + misses) < 50% over 10 min. **The expression lives in the rule file, not here** — see below | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |
 | Business volume | `orders.placed` per hour drops > 50% vs the same hour last week | The most valuable alert here — it catches failures no technical metric detects. §6.6's worked case: `ordering.ProductPrices` has no row for a product, every order containing it is **refused by the domain**, and the result is a 422 `order.products_unavailable` the customer sees, no exception, no 5xx and no lag. **Not a 400, and the difference is where the on-call looks**: the request is well-formed and the validator passed it (§10.5 maps `Error.Rule` to 422, `ValidationException` to 400), so a 400 dashboard shows a path this request never took. Week-over-week rather than a fixed floor, because a volume alert without a seasonality model is the first pager people mute | `business-volume.md` |
 
 ### Outbox alerts are per lane
@@ -978,8 +987,8 @@ nobody will be told to follow.
 |---|---|---|---|---|
 | **Broker lane stalled** | `outbox.oldest.age{lane="Broker"}` > 2 min | *Other services* are working from stale data; sagas stop advancing | Broker unreachable, credentials expired, queue at its length limit, network policy change | `outbox-broker.md` |
 | **Local lane stalled** | `outbox.oldest.age{lane="Local"}` > 30 s | The read models this service feeds from its **own** events are stale — users see missing or outdated list data. Not the ones another service's contract feeds: those never touch this lane, and §13.7 records that their staleness has no direct signal yet | A projection handler throwing, read-model deadlock, schema drift after a migration | `projection-lag.md` |
-| **Outbox growth** | `sum(outbox.pending.count)` > 1000 and rising over 10 min | Either lane, not keeping up | Dispatcher not running, batch size too small for load, purge job failed | `outbox-growth.md` |
-| **Abandoned rows** | `sum(outbox.abandoned.count)` > 0 | Silent permanent data loss | A message that will never be delivered and is no longer being retried. The `lane` tag says whose loss: `Broker`, and other services never learned something; `Local`, and this service's read model is permanently wrong | `outbox-abandoned.md` |
+| **Outbox growth** | `outbox.pending.count` > 1000 and rising over 10 min, replicas deduplicated | Either lane, not keeping up | Dispatcher not running, batch size too small for load, a slow deliverer. **Not a failed purge** — this gauge counts `ProcessedAt IS NULL` and the purge deletes *processed* rows, so a stopped purge grows the table without moving this number. It was listed here until the runbook was written and said the opposite | `outbox-growth.md` |
+| **Abandoned rows** | `outbox.abandoned.count` > 0, per lane | Permanent data loss, disguised as an ordinary stall | A message that will never be delivered and is no longer being retried. The `lane` tag says whose loss: `Broker`, and other services never learned something; `Local`, and this service's read model is permanently wrong | `outbox-abandoned.md` |
 
 Thresholds differ by an order of magnitude because the lanes have different
 floors. The local lane is in-process with no network hop, so 30 seconds of lag
@@ -988,9 +997,34 @@ absorb a short RabbitMQ blip or a rolling broker restart without paging anyone.
 
 > **Alert on abandoned rows specifically.** The dispatcher claims rows `WHERE
 > Attempts < 10` (§9.4), so a row that exceeds the cap is silently skipped
-> forever. Without this alert, permanent loss of a business event looks
-> identical to a healthy, empty backlog — the queue drains and the graph goes
-> green precisely because the message was given up on.
+> forever, and without this alert permanent loss of a business event has no
+> signal of its own.
+>
+> **What that looks like depends on how the other two gauges count, and this
+> platform's count it in.** The classic failure is the one this callout used to
+> describe: a backlog that excludes abandoned rows drains to zero and the graph
+> goes green *precisely because* the message was given up on.
+> `OutboxStats.PendingCount` and `OldestAgeSeconds` filter on `ProcessedAt IS
+> NULL` alone, so an abandoned row keeps both non-zero instead — which trades
+> that failure for a quieter one: permanent loss then looks exactly like an
+> ordinary stall, and the on-call works `outbox-broker.md` for ever. **Either
+> way the abandoned gauge is what tells the two apart**, which is the point;
+> only the disguise changes.
+
+**These three gauges read the database, not the pod, so aggregate with `max`
+and never `sum`.** Every replica of a service exports the same table-wide
+number — §15.3's Ordering chart runs three — so `sum` reports three times the
+backlog and trips a thousand-row threshold at about 334 real rows. Sum *across
+lanes* if a total is wanted, but deduplicate replicas first:
+
+```promql
+sum by (service_name) (max by (service_name, lane) (outbox_pending_count))
+```
+
+This is the one aggregation rule in this chapter that a reader will get wrong
+from habit, because summing a counter across replicas is right almost
+everywhere else. A gauge whose value is a property of a shared resource is the
+exception.
 
 All three gauges carry `lane`, so one query serves both lanes and every alert
 above can say which one it is talking about:
@@ -1013,30 +1047,35 @@ public sealed class OutboxMetrics
     private static KeyValuePair<string, object?> Tag(OutboxLane lane) =>
         new("lane", lane.ToString());
 
-    public OutboxMetrics(IMeterFactory factory, IOutboxStats stats)
+    // The only thing that separates a contained failure from a healthy quiet
+    // lane, because both are an absent series. LoggerMessage.Define on ADR-019's
+    // terms: CA1848 is an error, and this runs once per export interval for as
+    // long as the failure lasts.
+    private static readonly Action<ILogger, Exception?> GaugeReadFailed =
+        LoggerMessage.Define(
+            LogLevel.Error,
+            new EventId(1, nameof(GaugeReadFailed)),
+            "Outbox gauge read failed. This interval's measurements are omitted, so "
+            + "every outbox series is absent rather than wrong — see OutboxMetrics.");
+
+    public OutboxMetrics(IMeterFactory factory, IOutboxStats stats, ILogger<OutboxMetrics> logger)
     {
         Meter meter = factory.Create(MeterName);
 
         meter.CreateObservableGauge(
             "outbox.oldest.age",
-            () => new[]
-            {
-                new Measurement<double>(stats.OldestAgeSeconds(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<double>(stats.OldestAgeSeconds(OutboxLane.Local), Tag(OutboxLane.Local))
-            },
-            unit: "s");
+            () => PerLane(stats.OldestAgeSeconds, logger),
+            unit: "s",
+            description: "Age of the oldest unprocessed row, per lane.");
 
         // Depth, per lane. The growth alert needs a count and the age gauge
         // cannot supply one: a single very old row and a backlog of ten
         // thousand recent ones read identically on oldest-age.
         meter.CreateObservableGauge(
             "outbox.pending.count",
-            () => new[]
-            {
-                new Measurement<int>(stats.PendingCount(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<int>(stats.PendingCount(OutboxLane.Local), Tag(OutboxLane.Local))
-            },
-            unit: "{message}");
+            () => PerLane(lane => stats.PendingCount(lane), logger),
+            unit: "{message}",
+            description: "Unprocessed rows, per lane.");
 
         // Also per lane, and this is the one where it matters most: a Broker
         // abandonment means other services never learned something, a Local one
@@ -1045,18 +1084,77 @@ public sealed class OutboxMetrics
         // one first.
         meter.CreateObservableGauge(
             "outbox.abandoned.count",
-            () => new[]
+            () => PerLane(lane => stats.AbandonedCount(lane), logger),
+            unit: "{message}",
+            description: "Rows past the attempt cap, per lane.");
+    }
+
+    // One measurement per lane, read from the enum rather than from a list
+    // written out at each of three call sites. A lane added to OutboxLane and
+    // forgotten at one of them would be a lane with no gauge and therefore no
+    // alert — the silent gap this section spends a callout on, arriving through
+    // the instrument instead of through the query.
+    //
+    // THE READ IS CONTAINED, and the loop is what contains it. An observable
+    // callback that throws does not fail alone: RecordObservableInstruments
+    // propagates and abandons the rest of the pass, so a SqlException here can
+    // stop unrelated observable instruments being collected. Every lane is
+    // dropped rather than the failing one, because a lane missing from a
+    // `max by (lane)` reads as a healthy zero rather than as no data.
+    private static List<Measurement<double>> PerLane(
+        Func<OutboxLane, double> read,
+        ILogger logger)
+    {
+        List<Measurement<double>> measurements = [];
+
+        foreach (OutboxLane lane in Enum.GetValues<OutboxLane>())
+        {
+            double value;
+
+            try
             {
-                new Measurement<int>(stats.AbandonedCount(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<int>(stats.AbandonedCount(OutboxLane.Local), Tag(OutboxLane.Local))
-            },
-            unit: "{message}");
+                value = read(lane);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                GaugeReadFailed(logger, exception);
+                return [];
+            }
+
+            measurements.Add(new Measurement<double>(value, Tag(lane)));
+        }
+
+        return measurements;
     }
 }
 ```
 
-`IOutboxStats` is read from a singleton on the collector's schedule, so it owns
-a scope per call rather than holding a `DbContext`:
+> **Containment answers a transient outage; the log is what answers a permanent
+> one.** An absent series is the right reading of a database that is briefly
+> unreachable — an outbox alert firing for that would page the wrong person
+> with the wrong runbook. It is the *wrong* reading of schema drift or a
+> revoked grant, where every read fails for ever, all four outbox alerts go
+> quiet, and the service stays ready: §13.5's check proves the connection opens
+> and nothing about this table. An empty outbox dashboard is then
+> indistinguishable from a healthy one, which is this section's own callout
+> arriving through the instrument. **An alert on the absence itself is what
+> would close it, and is owed** — a thirteenth alert, a thirteenth runbook and
+> a row in §13.6's table, on the same terms as the four this chapter already
+> ships unloaded.
+
+`IOutboxStats` is read from a singleton on the collector's schedule, so it must
+not hold a `DbContext` — and it satisfies that by never asking for one. §6.5's
+`IDbConnectionFactory` is itself a singleton holding a connection string, so it
+is injected directly and the reads are Dapper on a connection the caller
+disposes:
+
+> **This used to reach for an `IServiceScopeFactory`, and PR-24 removed it.**
+> The stated reason was the right one — a metrics singleton that captured a
+> scoped `DbContext` would hold a connection open for the life of the process —
+> but the remedy assumed the port it wanted was scoped. It is not, and
+> §4.2's own sample says so, so the scope was ceremony around a resolution that
+> returns the same instance either way. **A guard against the wrong dependency
+> shape is not evidence about which shape you have.**
 
 ```csharp
 // Every member takes the lane. Three questions about one table, each of which
@@ -1068,36 +1166,68 @@ public interface IOutboxStats
     int AbandonedCount(OutboxLane lane);
 }
 
-internal sealed class OutboxStats(IServiceScopeFactory scopes) : IOutboxStats
+internal sealed class OutboxStats : IOutboxStats, IDisposable
 {
     // Cached briefly: the collector polls every few seconds and these are
-    // aggregate queries over a filtered index, not free.
+    // aggregate queries over a filtered index, not free. A metrics type that
+    // loads the database it is measuring is a monitor causing the symptom.
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
+    private readonly IDbConnectionFactory _connections;
+    private readonly string _oldestSql;
+
+    public OutboxStats(IDbConnectionFactory connections, OutboxTable table)
+    {
+        _connections = connections;
+
+        // Composed from the registered table rather than written literally,
+        // for the reason OutboxTable itself gives: this chapter writes
+        // `ordering.OutboxMessages` because it is a chapter about Ordering, and
+        // a second literal in code is a second place the schema has to be right.
+        _oldestSql =
+            $"""
+            SELECT DATEDIFF(second, MIN(OccurredAt), SYSDATETIMEOFFSET())
+            FROM {table.QualifiedName}
+            WHERE ProcessedAt IS NULL
+                AND Lane = @lane;
+            """;
+    }
 
     public double OldestAgeSeconds(OutboxLane lane) => _cache.GetOrCreate(
         $"oldest:{lane}",
         e =>
         {
             e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5);
-            using IServiceScope scope = scopes.CreateScope();
-            using IDbConnection connection =
-                scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
+            using IDbConnection connection = _connections.Create();
 
+            // NULL rather than zero is what an empty lane returns — MIN over no
+            // rows — and COUNT never returns it. One coalesce covers both.
+            //
+            // BOTH TIMEOUTS ARE BOUNDED, and neither is optional. These run
+            // inside observable gauge callbacks on the metric reader's own
+            // thread, so an unbounded wait stalls the reader and takes
+            // UNRELATED telemetry down with these gauges. `commandTimeout`
+            // bounds the statement; the connection string this type is built
+            // with bounds `ConnectTimeout`, because a command timer does not
+            // start until a connection is open and SqlClient waits fifteen
+            // seconds for that by default. One without the other is a
+            // safeguard that is stated and absent.
             return connection.ExecuteScalar<double?>(
-                """
-                SELECT DATEDIFF(second, MIN(OccurredAt), SYSDATETIMEOFFSET())
-                FROM ordering.OutboxMessages
-                WHERE ProcessedAt IS NULL
-                    AND Lane = @lane;
-                """,
-                new { lane = lane.ToString() }) ?? 0;
+                new CommandDefinition(
+                    _oldestSql,
+                    new { lane = lane.ToString() },
+                    commandTimeout: 2)) ?? 0;
         });
 
     // PendingCount and AbandonedCount follow the same shape — same cache, same
-    // scope-per-call, same @lane parameter — over COUNT(*) with
-    // `ProcessedAt IS NULL AND Lane = @lane`, plus `AND Attempts >= 10` for the
-    // second. The lane predicate is not optional on any of the three: an
-    // untagged gauge cannot answer the first question its runbook asks.
+    // connection per call, same @lane parameter — over COUNT(*) with
+    // `ProcessedAt IS NULL AND Lane = @lane`, plus
+    // `AND Attempts >= OutboxDispatcher.MaxAttempts` for the second. That cap is
+    // READ rather than written again: §9.4 claims rows below it, this counts the
+    // rows above it, and two copies of one number stop agreeing on the day
+    // somebody tunes it.
+    //
+    // The lane predicate is not optional on any of the three: an untagged gauge
+    // cannot answer the first question its runbook asks.
 }
 ```
 
@@ -1116,12 +1246,26 @@ container is happy without it (§6.2):
 // In AddOrderingInfrastructure (§4.2). Both of Infrastructure's metrics types:
 // OutboxMetrics reads the database, MessagingMetrics is injected by the two
 // consumers and resolved by the outbox invoker (§13.3).
-services.AddSingleton<IOutboxStats, OutboxStats>();
+// ITS OWN connection factory, with the bounded ConnectTimeout the callbacks
+// need. Resolving the shared IDbConnectionFactory here would leave SqlClient's
+// fifteen-second default on the open, and the commandTimeout above never gets
+// to run — the two bounds only work together.
+string metricsConnectionString =
+    new SqlConnectionStringBuilder(configuration.GetConnectionString("Ordering"))
+    {
+        ConnectTimeout = 2
+    }.ConnectionString;
+
+services.AddSingleton<IOutboxStats>(sp => new OutboxStats(
+    new SqlConnectionFactory(metricsConnectionString),
+    sp.GetRequiredService<OutboxTable>()));
 services.AddSingleton<OutboxMetrics>();
 services.AddSingleton<MessagingMetrics>();
 
 // OrderMetrics and RequestMetrics are NOT registered here — they are
-// Application types and AddOrderingApplication already registers them (§4.2).
+// Application types, and AddOrderingApplication registers them (§4.2, where
+// OrderMetrics is shown as the specified shape rather than the shipped one).
+// OrderMetrics arrives with §6.6's OrderSummaries projection.
 // A second AddSingleton would not fail: the container keeps both and resolves
 // the last, which is the trap. Two instances mean two sets of instruments on
 // one meter, and the one MetricsInitialiser forces need not be the one the
@@ -1130,8 +1274,9 @@ services.AddSingleton<MessagingMetrics>();
 
 // Singleton registration alone is lazy — the instruments appear on first
 // resolve, which for a class nothing injects is never. Force construction at
-// startup, for all four. MetricsInitialiser is registered by Infrastructure,
-// which may reference Application; the reverse would not compile.
+// startup, for every one that exists. MetricsInitialiser is registered by
+// Infrastructure, which may reference Application; the reverse would not
+// compile.
 services.AddHostedService<MetricsInitialiser>();
 ```
 
@@ -1139,22 +1284,53 @@ services.AddHostedService<MetricsInitialiser>();
 // Public, not internal, for the same reason `Program` is (§4.2): the test
 // below names the type from another assembly, and one access modifier is a
 // smaller commitment than an InternalsVisibleTo that has to name the consumer.
-public sealed class MetricsInitialiser(
-    OutboxMetrics _,
-    OrderMetrics __,
-    MessagingMetrics ___,
-    RequestMetrics ____) : IHostedService
+public sealed class MetricsInitialiser : IHostedService
 {
     // Resolving the parameters is the entire job: constructing them registers
-    // the instruments with their meters.
-    public Task StartAsync(CancellationToken ct) => Task.CompletedTask;
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    // the instruments with their meters, and nothing here needs to keep them.
+    // The guards are what make them READ — see below.
+    public MetricsInitialiser(OutboxMetrics outbox, MessagingMetrics messaging, RequestMetrics requests)
+    {
+        ArgumentNullException.ThrowIfNull(outbox);
+        ArgumentNullException.ThrowIfNull(messaging);
+        ArgumentNullException.ThrowIfNull(requests);
+    }
+
+    // `cancellationToken`, not this blueprint's usual `ct`: CA1725 requires an
+    // implementation's parameter name to match the interface it implements.
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 ```
 
+> **This sample was written as a primary constructor whose parameters were
+> named `_`, `__` and `___`, and it did not compile.** Two rules, both made
+> errors by [ADR-019](appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input),
+> and PR-24 met each by changing the code rather than waiving anything.
+> **CS9113** — *parameter is unread* — fires three times, and the
+> discard-looking names do not escape it: `_` in a primary constructor is an
+> ordinary parameter, not a discard. **CA1725** rejects `ct` against
+> `IHostedService`'s `cancellationToken`. Measured rather than reasoned about,
+> which is worth recording because the rule a reader expects to fire on those
+> names — CA1707, on underscores in identifiers — does **not**.
+>
+> The guards are not ceremony bought to satisfy a compiler. A null here would
+> mean the container resolved a metrics type to nothing, which is precisely the
+> silent-instrument failure this class exists to prevent.
+
+**`OrderMetrics` is not in that constructor, and its absence is a schedule
+rather than an exemption.** §13.3 puts it in `Ordering.Application` with
+`OrderSummaryProjection` as its only call site, and §6.6's `OrderSummaries`
+projection has not been built. It joins in the pull request that adds that
+projection — and nobody has to remember, because the test below reads the
+container's registrations rather than this list, so an unforced metrics type
+fails a build the day it is registered.
+
 **The test for membership is not "is it a gauge".** It is *"can this service run
 for an hour without constructing it"* — and for every metrics type in this
-document the answer is yes, which is why all four are here.
+document the answer is yes, which is why each belongs in that constructor as it
+comes to exist. **Three are there today**; `OrderMetrics` is the fourth and
+joins with the projection that is its only call site, per the paragraph above.
 
 That includes `RequestMetrics`, and the reasoning that nearly excluded it is
 worth keeping as the worked example. `LoggingBehavior` injects it, a behaviour
@@ -1191,12 +1367,12 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
     // provider for one throws — registrations cannot be enumerated after the
     // build. BuildServices() stops one step earlier than BuildProvider().
     //
-    // It runs BOTH helpers, which matters here and nowhere else: the four
-    // types are split across AddOrderingApplication (OrderMetrics,
-    // RequestMetrics) and AddOrderingInfrastructure (OutboxMetrics,
-    // MessagingMetrics). A helper that ran only the Application half would see
-    // two of four and fail against a correct MetricsInitialiser — the test
-    // reporting a defect in the thing it is guarding.
+    // It runs BOTH helpers, which matters here and nowhere else: the types are
+    // split across AddOrderingApplication (RequestMetrics today, OrderMetrics
+    // when it exists) and AddOrderingInfrastructure (OutboxMetrics,
+    // MessagingMetrics). A helper that ran only one half would see a subset and
+    // fail against a correct MetricsInitialiser — the test reporting a defect
+    // in the thing it is guarding.
     IEnumerable<Type> registered = BuildServices()
         .Select(d => d.ServiceType)
         .Where(t => t.Name.EndsWith("Metrics"))
@@ -1246,6 +1422,80 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
 > ratio — write the expression, not an invented metric name. A name that looks
 > like an instrument and is not is the hardest version of this to spot.
 
+### Four of the twelve have no signal yet
+
+PR-24 wrote all twelve conditions out as Prometheus rules and found that **four
+of them read an instrument nothing publishes**. That is this section's own
+callout coming true, at the moment the alerts stopped being a table and became
+files — and it is recorded here rather than resolved by quietly shipping rules
+that cannot fire.
+
+| Alert | What is owed |
+|---|---|
+| Saga age | A gauge over `ordering.OrderFulfilmentStates`. §9.6 persists every saga, so the reading is a query away — there is simply no instrument over it |
+| Orders awaiting review | A gauge over `ordering.OrderReviews`, which the `IX_OrderReviews_RaisedAt` index already exists for |
+| Cache hit ratio collapse | **An instrument *and* a consumer — see the callout below.** §13.2 registers the `Microsoft.Extensions.Caching.Hybrid` meter and the package publishes no meter at all; no host calls `AddRedisConnections` either. §15.4 records the second absence from the secrets side |
+| Business volume | `OrderMetrics`, which arrives with §6.6's `OrderSummaries` projection |
+
+**The third row is the one worth pausing on**, because it is the failure mode
+this section warns about wearing its best disguise: the `AddMeter` line makes
+the signal look wired, and a reviewer checking "is the meter registered" gets a
+yes. A registered meter with no publisher is as silent as an unregistered one.
+
+Their rules live in `deploy/observability/alerts/awaiting-signal.yaml`, which is
+**not loaded**, and `deploy/observability/check.py` asserts in both directions:
+every loaded rule's metric is published, and every awaiting rule's metric is
+published by *nothing*. The second is what makes the list self-clearing — the
+day one of these instruments lands, the gate goes red and names the rule to
+move. All twelve runbooks exist regardless, per §13.9.
+
+> **The cache row is the one the self-clearing claim does not cover, and only
+> reading the package settled why.** The other three are owed a `Create*` call
+> the gate can see in `src/`. This one was first taken to be owed a
+> **consumer** — nothing calls `AddRedisConnections`, so nothing constructs a
+> `HybridCache` — and gating on that call was written, tested red, and then
+> removed, because the premise is false.
+>
+> **`Microsoft.Extensions.Caching.Hybrid` 10.0.0 publishes no `Meter`.** The
+> assembly references `System.Diagnostics.Tracing` and not
+> `System.Diagnostics.Metrics`: it reports through `HybridCacheEventSource`
+> with `PollingCounter`, which is EventCounters. So the `AddMeter` line in
+> §13.2 collects nothing today and would still collect nothing with Redis
+> wired — **the registered-name trap this section warns about, in this
+> platform's own configuration**, and it survived being written, reviewed and
+> quoted because the name looks exactly like an instrument.
+>
+> A consumer is therefore necessary and not sufficient, and gating on one would
+> have been worse than the gap: the gate would go red the day Redis was wired,
+> somebody would move the rule into the loaded file, and it would sit there
+> silent. What the row is owed is an **instrument** — an EventCounters bridge
+> written here, which check 5 would see, or a package that publishes a meter,
+> **which no gate in this repository can observe.** That second half is a
+> residual, named rather than implied.
+
+### The gap is per service as well as per metric
+
+A fifth absence sits underneath all of this and is invisible to the checks
+above, because they are about metric *names*. **The four loaded outbox alerts
+group `by (service_name)`, and only Ordering publishes those gauges.** Catalog
+hosts §9.4's dispatcher and registers no `OutboxMetrics`, so a stalled Catalog
+lane is precisely the silent case this section exists to prevent — arriving
+through a service missing from a series rather than through a metric nobody
+declared.
+
+It is not closed here because §13.3 places `OutboxMetrics` in
+`Ordering.Infrastructure`, and moving it is a decision about **the template**:
+Catalog is what §4.5's scaffold renders, so every new service inherits the gap
+until the type is common and the scaffold emits it. Ordering is the one-off
+that closed it for itself.
+
+What this pull request does instead is refuse to let the absence be quiet.
+`check.py` requires every service hosting the dispatcher to publish the gauges
+**or** to be on a declared exemption with a reason, and it fails in both
+directions — a new unexempted service, and a stale exemption for one that no
+longer needs it. **A gap somebody argued is not the same as a dashboard nobody
+noticed was empty**, and that distinction is the whole of what is being bought.
+
 ## 13.7 Starting SLOs
 
 Alert thresholds without targets are arbitrary. These are **starting points** to
@@ -1273,6 +1523,21 @@ row, so it only ever measures a read model this service feeds from its own
 domain events (§7.5). A read model fed by *another* service's contract never
 touches the outbox at all — Ordering's `ordering.ProductPrices` is the worked
 case (§6.6) — so `projection.lag` is empty for it.
+
+> **And today that row has no producer either, which is a second gap and a
+> sharper one.** `MessagingMetrics.Projected` exists and `ProjectionInvoker`
+> calls it — after a registered `IProjectionHandler<T>` succeeds. **No service
+> registers one**: §6.6's `OrderSummaries` is not built, and Ordering's
+> composition root says so in as many words. So the instrument is declared, the
+> meter is collected, and nothing ever writes to it.
+>
+> That is the same shape §13.6 records for the HybridCache meter one section
+> up — **a registered name is not a live signal** — and it is why
+> `deploy/observability/slo/slo.js` names this row as not evaluated instead of
+> asserting it. Asserting a row nothing can satisfy would fail every run on a
+> healthy platform, which is how a gate gets switched off. The row stays in
+> this table because it states the target the projection will be held to; what
+> it does not yet do is measure anything.
 
 **Broker-fed read-model staleness therefore has no SLO here, and the honest
 move is to say so rather than to point at a row that nearly fits.** The
@@ -1305,9 +1570,39 @@ Cutting a row is the honest move when the alternative is a target nobody can
 compute. An SLO that cannot be evaluated is not a weak SLO — it is a claim that
 the service is meeting a bar nobody is checking.
 
-Verify order-of-magnitude with the **k6 or NBomber SLO run against staging**
-([§15.1](15-cicd-deployment.md)) — the load run in CD, which asserts the targets in this table and is the
-first real gate after the dev deploy. Not a "smoke test": §15.1 declines to have
+Verify order-of-magnitude with the **k6 SLO run against staging**
+([§15.1](15-cicd-deployment.md)) — `deploy/observability/slo/slo.js`, the load
+run in CD, which asserts the four rows of this table it can evaluate — the two
+request rows and the two outbox lanes, with the other three named below — and is
+the
+first real gate after the dev deploy. (NBomber was the stated alternative until
+PR-24 picked one; a stage that names two tools names none.)
+
+**It drives with k6 and adjudicates with Prometheus**, and the split is forced
+by this table rather than chosen. A load generator measures wall-clock at the
+client, which includes the edge, TLS and the network; the first two rows read
+`request.duration`, which is dispatcher entry to result. Asserting only the
+client's number would fail a healthy service on a slow link, and asserting only
+the server's would pass a broken edge with perfect handler timings — so k6's own
+thresholds are a coarse guard and every row it *can* evaluate is checked by
+querying that row's named instrument after the run.
+
+**An absent series fails that run.** It is not read as "no problem observed",
+for the reason §13.6 gives one section up: empty and healthy look identical.
+
+**Three of the seven are not evaluated there, and each is named in the script
+rather than quietly dropped.** Cutting a row rather than pretending is this
+table's own rule, applied to the gate that reads it — and a gate that fails on
+a healthy platform is a gate that gets switched off:
+
+| Row | Why the run cannot evaluate it |
+|---|---|
+| Availability | A **monthly** objective; a three-minute run cannot compute one. The run bounds its own error rate instead, says so, and reports no pass for the row |
+| Read-model staleness, own events | `projection.lag` has **no producer** — nothing registers an `IProjectionHandler<T>`, per the callout above |
+| Event end-to-end | `messaging.delivery.lag` is recorded by `IntegrationEventConsumer<T>`; the run places orders, and the consumer that records it handles Catalog's product events, which neither scenario produces |
+
+The remaining four — the two request rows and the two outbox lanes — are what
+the run actually asserts. Not a "smoke test": §15.1 declines to have
 one and §12.1 gives the reason, which is that a stage named for what it actually
 does gets maintained. This is also not a capacity test — it catches the
 regression where a query loses its index and goes from 40 ms to 4 s, which no
@@ -1320,11 +1615,42 @@ unit test will find.
 | Golden-signal dashboards (RED, saturation) | Platform |
 | Business metric dashboards | The service team |
 | Gateway 5xx, infrastructure alerts, **broker-lane** outbox stalls (usually a shared-broker fault) | Platform |
+| *(the same 5xx condition on any other service)* | The service team — see below |
 | Own p95, **local-lane** outbox stalls and projection lag, abandoned rows, consumer failures | The service team |
 
 Dashboards are **code**, checked into `deploy/observability/` as Grafana JSON or
 equivalent. A dashboard clicked together in a UI is lost with the instance and
 cannot be reviewed.
+
+**The 5xx row splits by service, and a single rule cannot carry that.** An
+alert's owner travels as a label, and Alertmanager routes on labels — so one
+rule with `owner: platform` sends every service's 5xx to Platform, which is this
+table implemented as the opposite of what it says. `platform-alerts.yaml`
+therefore ships `ErrorRateGateway` and `ErrorRateService`: one condition, two
+selectors, two owners, one runbook between them. A rule *set* is the unit that
+has to match this table, not a rule.
+
+Since PR-24 that directory holds the alert rules and the SLO run on the same
+argument, and a gate over all three:
+
+```
+deploy/observability/
+  alerts/       platform-alerts.yaml (loaded) and awaiting-signal.yaml (not)
+  dashboards/   golden-signals.json, outbox.json
+  slo/          slo.js — the k6 run of §13.7 and §15.1
+  check.py      the gate; see deploy/observability/README.md
+```
+
+**Nothing here deploys Prometheus or Grafana.** §15.3's charts cover this
+platform's own workloads, so how these files reach a running stack — a
+`PrometheusRule`, a ConfigMap, a sidecar-discovered folder — is a decision no
+chapter has taken. What the directory guarantees is that the content is
+reviewed, versioned and internally consistent, which is the half a UI loses.
+
+The two dashboards follow the ownership split in the table above rather than
+cutting across it: golden signals are Platform's, and the outbox dashboard
+keeps the two lanes apart because averaging them produces a panel nobody can
+act on.
 
 ## 13.9 Runbooks
 
@@ -1339,7 +1665,7 @@ attached is a page to somebody who will have to reason from scratch.
 | `docs/runbooks/error-queue.md` | Inspecting a poison message, deciding replay vs discard, replaying safely |
 | `docs/runbooks/outbox-broker.md` | Broker lane stalled: checking RabbitMQ reachability, credentials, queue limits; what downstream services are missing while it is stopped |
 | `docs/runbooks/projection-lag.md` | Local lane stalled: finding the throwing handler, deciding whether to serve from the write model meanwhile, replaying a projection from scratch |
-| `docs/runbooks/outbox-growth.md` | Total backlog rising: dispatcher liveness, batch sizing, retention purge failure |
+| `docs/runbooks/outbox-growth.md` | Total backlog rising: dispatcher liveness, batch sizing, and the retention purge as a *diagnostic* rather than a cause — a stopped purge deletes nothing and this gauge counts only unprocessed rows, so it cannot have moved it |
 | `docs/runbooks/outbox-abandoned.md` | Rows past the attempt cap: reading the payload and `LastError`, deciding repair vs discard, resetting `Attempts` to replay |
 | `docs/runbooks/stuck-saga.md` | Finding unfinalised sagas, reading their state, manual compensation |
 | `docs/runbooks/order-review.md` | Working the `OrderReviews` queue: what each reason code means, how to resolve it, and deleting the row when done |
@@ -1347,7 +1673,20 @@ attached is a page to somebody who will have to reason from scratch.
 | `docs/runbooks/redis-cold.md` | Cache-loss load spike on the databases, and how to shed load while it warms |
 
 Write each one when the corresponding alert is created, not after it first
-fires.
+fires. All twelve landed with PR-24 — including the four whose alert cannot fire
+yet, because a procedure whose queries read tables that already exist is useful
+before its pager is.
+
+**The pairing is a gate, not a convention.** `deploy/observability/check.py`
+fails the build on an alert whose `runbook_url` names a file that is not there,
+on a runbook no alert points at, and on a runbook claimed by two alerts. Both
+directions were observed red before the gate was trusted, which is this
+repository's rule for any gate: the failure it exists to catch has to have been
+seen.
+
+`docs/runbooks/README.md` is the index and is excluded from the pairing by
+name — one declared exception, so a second non-runbook file in that directory
+has to be argued for rather than added.
 
 ---
 

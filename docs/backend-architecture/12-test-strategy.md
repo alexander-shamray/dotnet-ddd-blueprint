@@ -46,11 +46,15 @@ genuinely between services, which is why `Platform.IntegrationTests` exists
 and holds nothing else.
 
 What no level above covers is whether the *deployed* system responds under load
-and against real infrastructure. That is a **k6 or NBomber run against
-staging** ([§13.7](13-observability.md)), asserting the SLOs — not a test suite, and [§15.1](15-cicd-deployment.md) stages it as
-what it is. Naming it accurately is the point: a load run that is honestly a
-load run gets maintained; an "E2E suite" that is actually three fragile scripts
-gets disabled after the second flake and stays green forever.
+and against real infrastructure. That is the **k6 run against staging**
+([§13.7](13-observability.md)) — `deploy/observability/slo/slo.js` — asserting
+the SLO rows it can evaluate; not a test suite, and [§15.1](15-cicd-deployment.md) stages it as
+what it is. **One tool, named**: this said "k6 or NBomber" until §13.7 picked
+one, on the grounds that a stage naming two tools names none.
+
+Naming it accurately is the point: a load run that is honestly a load run gets
+maintained; an "E2E suite" that is actually three fragile scripts gets disabled
+after the second flake and stays green forever.
 
 Every row above names a project **and has an example in this section**. Both
 halves are the rule: a level with no home is a level nobody writes, and a level
