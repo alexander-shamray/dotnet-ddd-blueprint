@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Ordering.Application.Orders;
 using Ordering.Domain.Orders;
 using Ordering.Infrastructure.Messaging;
+using Ordering.Infrastructure.Observability;
 using Ordering.Infrastructure.Persistence;
 using Common.Application;
 using Common.Contracts;
@@ -149,6 +150,27 @@ public static class DependencyInjection
         // §13.3's projection lag, on the Commerce.Messaging meter
         // AddObservability already collects.
         services.AddSingleton<MessagingMetrics>();
+
+        // §13.6's per-lane outbox gauges, and the stats type behind them. Both
+        // singletons: the gauges are callbacks the Meter holds, and the stats
+        // cache would be pointless per scope. OrderMetrics and RequestMetrics
+        // are NOT registered here — they are Application types and
+        // AddOrderingApplication already registers the one that exists. A
+        // second AddSingleton would not fail: the container keeps both and
+        // resolves the last, so two instances would mean two sets of
+        // instruments on one meter, and the one MetricsInitialiser forces need
+        // not be the one the pipeline injects.
+        services.AddSingleton<IOutboxStats, OutboxStats>();
+        services.AddSingleton<OutboxMetrics>();
+
+        // Singleton registration alone is lazy — the instruments appear on
+        // first resolve, which for a class nothing injects is never. This is
+        // the step ValidateOnBuild cannot check, because nothing depends on a
+        // metrics class and the container is perfectly happy without it (§6.2).
+        //
+        // Registered before the bus and the dispatcher, so the instruments
+        // exist before the first message can be delivered against them.
+        services.AddHostedService<MetricsInitialiser>();
 
         // The bus (§9). Its readiness needs no line below: AddMassTransit
         // registers the bus health check itself — "masstransit-bus", tagged

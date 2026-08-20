@@ -29,6 +29,12 @@
          StackExchange.Redis — a separate package from both, and the one that
          actually stores an entry in Redis. -->
     <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
+    <!-- The in-process cache §13.6's OutboxStats holds its five-second
+         snapshot in. HybridCache above carries it transitively; the direct pin
+         states the direct use, and central package management requires one for
+         a direct PackageReference either way. Not a second cache in the sense
+         §8 argues about — it stores no domain data and crosses no process. -->
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
     <!-- The container and logging contracts Common.Application compiles
          against (§6.2, §13.3). ASP.NET Core's shared framework carries both,
