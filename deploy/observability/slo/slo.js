@@ -238,12 +238,16 @@ export function teardown(data) {
         },
         {
             name: 'Outbox oldest, broker lane, p99 < 5 s',
-            query: `quantile_over_time(0.99, outbox_oldest_age_seconds{lane="Broker"}[${window}])`,
+            // `max(…)` collapses to ONE series. Every replica exports the same
+            // database-wide gauge, so this returns three vectors on Ordering's
+            // chart — and instantQuery reads result[0], which would silently
+            // ignore a breach on either of the others.
+            query: `max(quantile_over_time(0.99, outbox_oldest_age_seconds{lane="Broker"}[${window}]))`,
             limit: 5,
         },
         {
             name: 'Outbox oldest, local lane, p99 < 1 s',
-            query: `quantile_over_time(0.99, outbox_oldest_age_seconds{lane="Local"}[${window}])`,
+            query: `max(quantile_over_time(0.99, outbox_oldest_age_seconds{lane="Local"}[${window}]))`,
             limit: 1,
         },
     ];

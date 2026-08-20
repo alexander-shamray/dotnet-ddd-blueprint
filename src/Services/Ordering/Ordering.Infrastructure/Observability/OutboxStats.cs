@@ -36,8 +36,24 @@ internal sealed class OutboxStats : IOutboxStats, IDisposable
 {
     /// <summary>
     /// Short enough that a stalled lane is visible within one export interval,
-    /// long enough that the three instruments share one round trip per lane.
+    /// long enough that a burst of scrapes does not become a burst of queries.
     /// </summary>
+    /// <remarks>
+    /// <b>Each instrument is cached under its own key, so this is three
+    /// statements per lane and six per collection — not one shared snapshot.</b>
+    /// An earlier comment here claimed the three shared a round trip; they do
+    /// not, and the entry is per <c>(question, lane)</c> because that is the
+    /// shape §13.6 specifies. The cost is six aggregate queries over a filtered
+    /// index per export interval, which at the SDK's default of sixty seconds
+    /// is six a minute — small enough that collapsing them into one grouped
+    /// query would be an optimisation rather than a fix, and large enough that
+    /// removing the cache would not be.
+    /// <para>
+    /// <c>GetOrCreate</c> takes no lock, so two concurrent scrapes can both
+    /// miss and both query. Harmless for a read, and worth knowing before
+    /// anyone reads this cache as a guarantee rather than a damper.
+    /// </para>
+    /// </remarks>
     private static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(5);
 
     private readonly IDbConnectionFactory _connections;

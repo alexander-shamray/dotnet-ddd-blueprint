@@ -98,12 +98,18 @@ groups:
       # computed from the hit and miss counters and is not published as one, so
       # what is written here is the expression and never an invented ratio name.
       - alert: CacheHitRatioCollapse
+        # THE DENOMINATOR IS UNCLAMPED, and that is the whole of the
+        # correctness here. An earlier draft wrapped it in `clamp_min(…, 1)` to
+        # avoid dividing by zero — which turns an IDLE cache into a firing
+        # alert: no hits and no misses gives 0 / 1 = 0, which is below 0.5.
+        # Unclamped, 0 / 0 is NaN, the series drops out, and the rule stays
+        # quiet until there is traffic to judge. Prometheus's own idiom, and
+        # the reason it is the idiom.
         expr: |
           sum(rate(hybrid_cache_hits_total[10m]))
           /
-          clamp_min(
-            sum(rate(hybrid_cache_hits_total[10m])) + sum(rate(hybrid_cache_misses_total[10m])),
-            1
+          (
+            sum(rate(hybrid_cache_hits_total[10m])) + sum(rate(hybrid_cache_misses_total[10m]))
           )
           < 0.5
         for: 10m

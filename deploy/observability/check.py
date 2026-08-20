@@ -65,6 +65,21 @@ SOURCE_INPUTS = [
 # pattern-matched, so a second non-runbook file has to be argued for.
 NOT_A_RUNBOOK = {"README.md"}
 
+# Runbooks a MORE THAN ONE rule may name, each with the reason. §13.9 requires
+# every alert to have a runbook and every runbook an alert; it does not require
+# one-to-one, and "exactly one" was this gate's own invention.
+#
+# The allowance is declared rather than dropped, because the usual cause of two
+# rules sharing a runbook is a copy-paste that wanted a second procedure — and
+# a check that silently permits it is one fewer place that notices.
+SHARED_RUNBOOKS = {
+    "error-rate.md":
+        "ErrorRateGateway and ErrorRateService are one condition split by "
+        "§13.8's ownership — gateway 5xx is Platform's, a service's is its "
+        "team's, and a static owner label on one rule routes both to whoever "
+        "it names. The procedure is the same, and it branches on which fired.",
+}
+
 # Metrics that no C# file declares because nothing in this solution declares
 # them — each is published by an exporter or an instrumentation package that is
 # part of the target deployment. A name that is neither found in C# nor listed
@@ -76,6 +91,10 @@ EXTERNAL_METRICS = {
         "the RabbitMQ exporter — §14.1's broker, §13.6's error-queue alert",
     "kube_job_status_failed":
         "kube-state-metrics — §7.4's migration hook Job",
+    "kube_job_status_active":
+        "kube-state-metrics — the stuck-pending half of §13.6's migration alert",
+    "kube_job_status_start_time":
+        "kube-state-metrics — how long that Job has been active",
 }
 
 # THE CACHE ROW HAS NO PREDICATE HERE, AND THAT IS A MEASUREMENT RATHER THAN A
@@ -350,8 +369,15 @@ def main() -> int:
         fail(f"docs/runbooks/{name}: no alert points at it (§13.9)")
 
     for name, alerts in sorted(claimed.items()):
-        if len(alerts) > 1:
-            fail(f"docs/runbooks/{name}: claimed by more than one alert — {', '.join(alerts)}")
+        if len(alerts) > 1 and name not in SHARED_RUNBOOKS:
+            fail(
+                f"docs/runbooks/{name}: claimed by more than one alert — "
+                f"{', '.join(alerts)}. Add it to SHARED_RUNBOOKS with a reason, or "
+                f"give one of them its own procedure")
+
+    # The other direction, so the allowance cannot outlive what it allows.
+    for name in sorted(SHARED_RUNBOOKS.keys() - {k for k, v in claimed.items() if len(v) > 1}):
+        fail(f"docs/runbooks/{name}: in SHARED_RUNBOOKS but no longer shared. Remove the entry")
 
     # 3. No alert is in both files.
     both = {str(r["alert"]) for r in loaded} & {str(r["alert"]) for r in awaiting}
@@ -479,22 +505,65 @@ def check_outbox_metrics_per_service() -> None:
             f"either publishes outbox gauges now or hosts no dispatcher. Remove the entry")
 
 
+def trigger_paths(text: str, trigger: str) -> list[str] | None:
+    """The `paths:` entries of one trigger, and nothing else in the workflow.
+
+    Reading the trigger's whole remaining text instead — which an earlier
+    version did — lets the gate certify a filter that skips it: `push` is the
+    last trigger, so its "body" ran to the end of the file and included the
+    `python deploy/observability/check.py` run step. Deleting
+    `deploy/observability/**` from `paths` left that substring behind and the
+    check stayed green. **A gate that reads more than the thing it is judging
+    can be satisfied by something that is not the thing.**
+    """
+    lines = text.splitlines()
+
+    for index, line in enumerate(lines):
+        if line.rstrip() != f"  {trigger}:":
+            continue
+
+        paths: list[str] = []
+        in_paths = False
+        for following in lines[index + 1:]:
+            stripped = following.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(following) - len(following.lstrip())
+            if indent <= 2:                      # the next trigger, or `jobs:`
+                break
+            if stripped.startswith("paths:"):
+                in_paths = True
+                continue
+            if in_paths and stripped.startswith("- "):
+                paths.append(stripped[2:].strip().strip("'\""))
+                continue
+            if in_paths:                         # a sibling key ends the list
+                in_paths = False
+
+        return paths
+
+    return None
+
+
 def check_workflow_covers_inputs() -> None:
     text = read(WORKFLOW)
-    blocks = re.split(r"^\s{2}(push|pull_request):\s*$", text, flags=re.MULTILINE)
-
-    triggers = {}
-    for index in range(1, len(blocks) - 1, 2):
-        triggers[blocks[index]] = blocks[index + 1]
 
     for name in ("push", "pull_request"):
-        if name not in triggers:
+        paths = trigger_paths(text, name)
+
+        if paths is None:
             fail(f"{WORKFLOW.name}: no `{name}` trigger — the gate must run on both")
             continue
 
-        body = triggers[name]
+        # Subject: a parser that returned an empty list would pass nothing and
+        # fail everything, which is safe — but one that returned entries for
+        # the wrong trigger would not. Both triggers must actually list paths.
+        if not paths:
+            fail(f"{WORKFLOW.name}: the `{name}` trigger lists no paths — the parser, or the file")
+            continue
+
         for entry in SOURCE_INPUTS + ["deploy/observability"]:
-            if entry not in body:
+            if not any(path == entry or path.startswith(entry + "/") for path in paths):
                 fail(
                     f"{WORKFLOW.name}: the `{name}` trigger does not cover `{entry}`, "
                     f"which check.py reads. A change to it would skip this gate")

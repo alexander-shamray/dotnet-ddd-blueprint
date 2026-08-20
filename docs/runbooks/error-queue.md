@@ -41,14 +41,25 @@ kubectl -n <ns> exec deploy/rabbitmq -- \
 
 ## Read the message before deciding anything
 
+**`rabbitmqctl` will not do this.** `list_queues` and `info_all` return queue
+metadata and counts — they do not return a message body or a header, which is
+everything the steps below need. Use the Management API's `get` with
+`ackmode=ack_requeue_true`, which reads the message and puts it back:
+
 ```bash
-# Read WITHOUT removing: ack_requeue_true puts it back.
-kubectl -n <ns> exec deploy/rabbitmq -- \
-  rabbitmqctl eval 'rabbit_amqqueue:info_all([name, messages]).'
+kubectl -n <ns> port-forward svc/rabbitmq 15672:15672 &
+
+curl -su guest:guest -X POST \
+  -H 'content-type: application/json' \
+  -d '{"count":5,"ackmode":"ack_requeue_true","encoding":"auto"}' \
+  http://localhost:15672/api/queues/%2F/<endpoint>_error/get
 ```
 
-In practice the Management UI's *Get messages* with **Requeue: yes** is the
-usable form. What you want off it:
+`ackmode=ack_requeue_true` is the load-bearing part: **`ack_requeue_false`
+consumes the message and it is gone.** The Management UI's *Get messages* with
+**Requeue: yes** is the same call behind a form, and is the usual way to do it.
+
+What you want off the result:
 
 - **`MessageId`** — ties to the outbox row that published it, and to §9.5's
   inbox.

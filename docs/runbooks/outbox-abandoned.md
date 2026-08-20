@@ -3,18 +3,31 @@
 | | |
 |---|---|
 | Alert | `OutboxAbandonedRows`, in `deploy/observability/alerts/platform-alerts.yaml` |
-| Condition | `sum(outbox.abandoned.count)` > 0 |
+| Condition | `max(outbox.abandoned.count)` > 0, per lane |
 | Signal | `OutboxMetrics`, `Ordering.Infrastructure/Observability` ([§13.6](../backend-architecture/13-observability.md)) |
 | Owner | The service team ([§13.8](../backend-architecture/13-observability.md)) |
 
 ## What it means
 
-**Silent, permanent data loss.** A message has exceeded §9.4's attempt cap of
-ten, so the dispatcher's claim — `WHERE Attempts < @MaxAttempts` — skips it for
-ever. Nothing will retry it, nothing else will notice, and the backlog graph
-goes *green* precisely because the message was given up on.
+**Permanent data loss.** A message has exceeded §9.4's attempt cap of ten, so
+the dispatcher's claim — `WHERE Attempts < @MaxAttempts` — skips it for ever.
+Nothing will retry it.
 
-This is why the alert has no `for` clause. Every other rule waits out a
+**What it does *not* look like here is a green graph**, and that is worth
+knowing before you go looking for one. §13.6 warns that permanent loss can look
+identical to a healthy empty backlog; **this platform's gauges are built so it
+does not.** `PendingCount` and `OldestAgeSeconds` both count every unprocessed
+row, abandoned ones included, so an abandoned row keeps the backlog non-zero and
+pins the age gauge — indefinitely.
+
+So the failure mode here is the *other* one: an abandoned row looks exactly like
+an ordinary stall on every other panel, and you would work
+[`outbox-broker.md`](outbox-broker.md) or
+[`projection-lag.md`](projection-lag.md) for ever without fixing it. **That is
+what this gauge is for** — it separates a row nothing will retry from one that
+is merely waiting.
+
+This is also why the alert has no `for` clause. Every other rule waits out a
 transient; an abandoned row is already permanent by the time it is counted, so
 waiting only delays the page.
 
@@ -30,8 +43,13 @@ are different:
   looking at a listing that is missing a row and will stay missing.
 
 ```promql
-sum by (service_name, lane) (outbox_abandoned_count)
+max by (service_name, lane) (outbox_abandoned_count)
 ```
+
+**`max`, never `sum`.** The gauge reads the database, so every replica of the
+service exports the same number — Ordering's chart runs three. Summing reports
+three times the real count, and the alerts, dashboards and this file all
+deduplicate the same way.
 
 ## Read the rows before touching them
 

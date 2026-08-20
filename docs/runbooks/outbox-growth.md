@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Alert | `OutboxGrowth`, in `deploy/observability/alerts/platform-alerts.yaml` |
-| Condition | `sum(outbox.pending.count)` > 1000 **and rising** over 10 minutes |
+| Condition | pending rows > 1000 **and rising** over 10 minutes, replicas deduplicated |
 | Signal | `OutboxMetrics`, `Ordering.Infrastructure/Observability` ([§13.6](../backend-architecture/13-observability.md)) |
 | Owner | The service team ([§13.8](../backend-architecture/13-observability.md)) |
 
@@ -33,10 +33,17 @@ So check the age gauge first — if it is also high, this is a stall and you wan
 
 ```promql
 max by (service_name, lane) (outbox_oldest_age_seconds)
-sum by (service_name, lane) (outbox_pending_count)
+max by (service_name, lane) (outbox_pending_count)
 ```
 
 The `lane` label says which side is growing, and they have different answers.
+
+**`max` per lane, then sum the lanes — never `sum` over the raw series.** These
+gauges read the database, so every replica exports the same number and Ordering
+runs three; a plain sum reports three times the backlog and would trip a
+thousand-row threshold at about 334 real rows. The alert aggregates the same
+way, which is why its condition above is written in words rather than copied
+from the rule.
 
 ## Is the dispatcher alive and claiming?
 
@@ -57,7 +64,7 @@ replica's ceiling is roughly 200 rows a second **if every delivery succeeds
 immediately**. Compare that with what is arriving:
 
 ```promql
-sum by (service_name) (rate(outbox_pending_count[10m]))
+deriv(sum by (service_name) (max by (service_name, lane) (outbox_pending_count))[10m:])
 ```
 
 If arrivals genuinely exceed the drain rate, the fixes in order of preference

@@ -82,7 +82,7 @@ Once the broker is back, watch the gauge fall rather than assuming:
 
 ```promql
 max by (service_name) (outbox_oldest_age_seconds{lane="Broker"})
-sum by (service_name) (outbox_pending_count{lane="Broker"})
+max by (service_name) (outbox_pending_count{lane="Broker"})
 ```
 
 The age gauge should drop to near zero within a minute or two of the backlog

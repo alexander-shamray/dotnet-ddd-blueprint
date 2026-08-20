@@ -987,8 +987,8 @@ nobody will be told to follow.
 |---|---|---|---|---|
 | **Broker lane stalled** | `outbox.oldest.age{lane="Broker"}` > 2 min | *Other services* are working from stale data; sagas stop advancing | Broker unreachable, credentials expired, queue at its length limit, network policy change | `outbox-broker.md` |
 | **Local lane stalled** | `outbox.oldest.age{lane="Local"}` > 30 s | The read models this service feeds from its **own** events are stale — users see missing or outdated list data. Not the ones another service's contract feeds: those never touch this lane, and §13.7 records that their staleness has no direct signal yet | A projection handler throwing, read-model deadlock, schema drift after a migration | `projection-lag.md` |
-| **Outbox growth** | `sum(outbox.pending.count)` > 1000 and rising over 10 min | Either lane, not keeping up | Dispatcher not running, batch size too small for load, purge job failed | `outbox-growth.md` |
-| **Abandoned rows** | `sum(outbox.abandoned.count)` > 0 | Silent permanent data loss | A message that will never be delivered and is no longer being retried. The `lane` tag says whose loss: `Broker`, and other services never learned something; `Local`, and this service's read model is permanently wrong | `outbox-abandoned.md` |
+| **Outbox growth** | `outbox.pending.count` > 1000 and rising over 10 min, replicas deduplicated | Either lane, not keeping up | Dispatcher not running, batch size too small for load, purge job failed | `outbox-growth.md` |
+| **Abandoned rows** | `outbox.abandoned.count` > 0, per lane | Permanent data loss, disguised as an ordinary stall | A message that will never be delivered and is no longer being retried. The `lane` tag says whose loss: `Broker`, and other services never learned something; `Local`, and this service's read model is permanently wrong | `outbox-abandoned.md` |
 
 Thresholds differ by an order of magnitude because the lanes have different
 floors. The local lane is in-process with no network hop, so 30 seconds of lag
@@ -997,9 +997,34 @@ absorb a short RabbitMQ blip or a rolling broker restart without paging anyone.
 
 > **Alert on abandoned rows specifically.** The dispatcher claims rows `WHERE
 > Attempts < 10` (§9.4), so a row that exceeds the cap is silently skipped
-> forever. Without this alert, permanent loss of a business event looks
-> identical to a healthy, empty backlog — the queue drains and the graph goes
-> green precisely because the message was given up on.
+> forever, and without this alert permanent loss of a business event has no
+> signal of its own.
+>
+> **What that looks like depends on how the other two gauges count, and this
+> platform's count it in.** The classic failure is the one this callout used to
+> describe: a backlog that excludes abandoned rows drains to zero and the graph
+> goes green *precisely because* the message was given up on.
+> `OutboxStats.PendingCount` and `OldestAgeSeconds` filter on `ProcessedAt IS
+> NULL` alone, so an abandoned row keeps both non-zero instead — which trades
+> that failure for a quieter one: permanent loss then looks exactly like an
+> ordinary stall, and the on-call works `outbox-broker.md` for ever. **Either
+> way the abandoned gauge is what tells the two apart**, which is the point;
+> only the disguise changes.
+
+**These three gauges read the database, not the pod, so aggregate with `max`
+and never `sum`.** Every replica of a service exports the same table-wide
+number — §15.3's Ordering chart runs three — so `sum` reports three times the
+backlog and trips a thousand-row threshold at about 334 real rows. Sum *across
+lanes* if a total is wanted, but deduplicate replicas first:
+
+```promql
+sum by (service_name) (max by (service_name, lane) (outbox_pending_count))
+```
+
+This is the one aggregation rule in this chapter that a reader will get wrong
+from habit, because summing a counter across replicas is right almost
+everywhere else. A gauge whose value is a property of a shared resource is the
+exception.
 
 All three gauges carry `lane`, so one query serves both lanes and every alert
 above can say which one it is talking about:
@@ -1515,11 +1540,20 @@ unit test will find.
 | Golden-signal dashboards (RED, saturation) | Platform |
 | Business metric dashboards | The service team |
 | Gateway 5xx, infrastructure alerts, **broker-lane** outbox stalls (usually a shared-broker fault) | Platform |
+| *(the same 5xx condition on any other service)* | The service team — see below |
 | Own p95, **local-lane** outbox stalls and projection lag, abandoned rows, consumer failures | The service team |
 
 Dashboards are **code**, checked into `deploy/observability/` as Grafana JSON or
 equivalent. A dashboard clicked together in a UI is lost with the instance and
 cannot be reviewed.
+
+**The 5xx row splits by service, and a single rule cannot carry that.** An
+alert's owner travels as a label, and Alertmanager routes on labels — so one
+rule with `owner: platform` sends every service's 5xx to Platform, which is this
+table implemented as the opposite of what it says. `platform-alerts.yaml`
+therefore ships `ErrorRateGateway` and `ErrorRateService`: one condition, two
+selectors, two owners, one runbook between them. A rule *set* is the unit that
+has to match this table, not a rule.
 
 Since PR-24 that directory holds the alert rules and the SLO run on the same
 argument, and a gate over all three:

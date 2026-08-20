@@ -105,7 +105,7 @@
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
         {
-          "expr": "sum by (service_name, lane) (outbox_pending_count{service_name=~\"$service\"})",
+          "expr": "max by (service_name, lane) (outbox_pending_count{service_name=~\"$service\"})",
           "legendFormat": "{{service_name}} {{lane}}"
         }
       ]
@@ -114,7 +114,7 @@
       "id": 6,
       "type": "stat",
       "title": "Abandoned rows, per lane (alert: >0)",
-      "description": "Silent, permanent data loss. A row past §9.4's attempt cap is skipped for ever, so the backlog drains and the graph goes green precisely because the message was given up on. The lane says whose loss: Broker, and other services never learned something; Local, and this service's read model is permanently wrong. Runbook: docs/runbooks/outbox-abandoned.md",
+      "description": "Permanent data loss. A row past §9.4's attempt cap is skipped for ever. IT STAYS COUNTED AS PENDING and keeps the age panel up, so the panels to the left do NOT go green — this looks exactly like an ordinary stall there, which is why this gauge exists: it separates a row nothing will retry from one that is merely waiting. The lane says whose loss: Broker, and other services never learned something; Local, and this service's read model is permanently wrong. Runbook: docs/runbooks/outbox-abandoned.md",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "fieldConfig": {
@@ -132,7 +132,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (service_name, lane) (outbox_abandoned_count{service_name=~\"$service\"})",
+          "expr": "max by (service_name, lane) (outbox_abandoned_count{service_name=~\"$service\"})",
           "legendFormat": "{{service_name}} {{lane}}"
         }
       ]

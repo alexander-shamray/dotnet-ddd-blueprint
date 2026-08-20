@@ -19,18 +19,45 @@
 groups:
   - name: platform-golden-signals
     rules:
-      - alert: ErrorRate
+      # TWO RULES FOR ONE CONDITION, because §13.8 splits the ownership:
+      # "Gateway 5xx, infrastructure alerts … Platform" against "Own p95 …
+      # the service team". A single rule with a static `owner` label routes
+      # every service's 5xx to whoever it names, and a pager that reaches the
+      # wrong team is the escalation path documented in one place and
+      # implemented in another. The condition is identical; only the selector
+      # and the owner differ.
+      - alert: ErrorRateGateway
         expr: |
           sum by (service_name) (
-            rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_seconds_count{service_name="gateway", http_response_status_code=~"5.."}[5m])
           )
           /
-          sum by (service_name) (rate(http_server_request_duration_seconds_count[5m]))
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name="gateway"}[5m]))
           > 0.01
         for: 5m
         labels:
           severity: page
           owner: platform
+        annotations:
+          summary: "5xx rate above 1% at the edge"
+          description: >-
+            More than one request in a hundred is failing at the gateway. The
+            edge has no domain and no database (§10.1), so this is routing,
+            auth, or a backend that is not answering.
+          runbook_url: docs/runbooks/error-rate.md
+
+      - alert: ErrorRateService
+        expr: |
+          sum by (service_name) (
+            rate(http_server_request_duration_seconds_count{service_name!="gateway", http_response_status_code=~"5.."}[5m])
+          )
+          /
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name!="gateway"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: page
+          owner: service
         annotations:
           summary: "5xx rate above 1% on {{ $labels.service_name }}"
           description: >-
@@ -89,11 +116,17 @@ groups:
             lane, and §13.7 records that their staleness has no signal yet.
           runbook_url: docs/runbooks/projection-lag.md
 
+      # `max by (…, lane)` INSIDE, then sum the two lanes. Every replica reads
+      # the same table and exports the same database-wide number, so a plain
+      # `sum` multiplies the backlog by the replica count — Ordering's chart
+      # sets `replicaCount: 3`, which would fire this at about 334 real rows
+      # instead of 1000. The gauge is a property of the database, not of the
+      # pod, and the aggregation has to say so.
       - alert: OutboxGrowth
         expr: |
-          sum by (service_name) (outbox_pending_count) > 1000
+          sum by (service_name) (max by (service_name, lane) (outbox_pending_count)) > 1000
           and
-          deriv(sum by (service_name) (outbox_pending_count)[10m:]) > 0
+          deriv(sum by (service_name) (max by (service_name, lane) (outbox_pending_count))[10m:]) > 0
         for: 10m
         labels:
           severity: ticket
@@ -108,18 +141,23 @@ groups:
       # No `for`, deliberately. Every other rule here waits out a transient;
       # an abandoned row is already permanent by the time it is counted, so a
       # wait would only delay the page.
+      #
+      # `max`, not `sum`, for the reason the growth rule gives: the count is
+      # database-wide and every replica exports it.
       - alert: OutboxAbandonedRows
-        expr: sum by (service_name, lane) (outbox_abandoned_count) > 0
+        expr: max by (service_name, lane) (outbox_abandoned_count) > 0
         labels:
           severity: page
           owner: service
         annotations:
           summary: "Abandoned outbox rows on {{ $labels.service_name }} ({{ $labels.lane }} lane)"
           description: >-
-            Silent, permanent data loss: a message past §9.4's attempt cap is
-            skipped for ever, so the queue drains and the graph goes green
-            precisely because the message was given up on. The lane says whose
-            loss it is.
+            Permanent data loss: a message past §9.4's attempt cap is skipped
+            for ever. It stays counted as pending and keeps the oldest-age
+            gauge up, so this looks like an ordinary stall on every other
+            graph — which is exactly why this gauge exists, to tell a row
+            nothing will retry from one that is merely waiting. The lane says
+            whose loss it is.
           runbook_url: docs/runbooks/outbox-abandoned.md
 
   - name: platform-infrastructure
@@ -142,8 +180,21 @@ groups:
             and parked.
           runbook_url: docs/runbooks/error-queue.md
 
+      # TWO BRANCHES, because §13.6's condition is "non-zero, OR a release stuck
+      # pending". A failed-count-only rule catches the first and is blind to the
+      # second: a hook Job that never completes keeps `kube_job_status_failed`
+      # at zero for ever, so the deploy hangs and nothing pages. The second
+      # branch is an *active* Job older than fifteen minutes — well past any
+      # migration this platform has, and the shape a stuck release takes.
       - alert: MigrationJobFailed
-        expr: max by (namespace, job_name) (kube_job_status_failed{job_name=~".+-migrate.*"}) > 0
+        expr: |
+          max by (namespace, job_name) (kube_job_status_failed{job_name=~".+-migrate.*"}) > 0
+          or
+          (
+            max by (namespace, job_name) (kube_job_status_active{job_name=~".+-migrate.*"}) > 0
+            and
+            (time() - max by (namespace, job_name) (kube_job_status_start_time{job_name=~".+-migrate.*"})) > 900
+          )
         for: 1m
         labels:
           severity: page
