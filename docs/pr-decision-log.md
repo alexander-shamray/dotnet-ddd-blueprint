@@ -75,8 +75,9 @@ library chart holding every template once, three deployables that are values
 plus one-line includes and a fourth — the gateway — that adds one template of
 its own, an umbrella,
 [§7.4](backend-architecture/07-persistence.md)'s migration hook, and
-`deploy/helm/smoke.sh` behind the second path-filtered workflow of §15.1. Seven
-of its decisions bind what comes after.
+`deploy/helm/smoke.sh` behind the second path-filtered workflow of §15.1. Ten
+of its decisions bind what comes after — three of them found by review rather
+than by building, and marked as such.
 
 - **Helm's `fullname` convention would have broken the platform's routing, and
   nothing in the chart could have shown it.** The idiom is
@@ -152,6 +153,31 @@ of its decisions bind what comes after.
   keys the container never sees and is the safe direction. **Found by writing
   the assertion, not by reading the template**, which is the argument for
   writing the assertion.
+- **A capability is a fact about the code, not an environment value**, and the
+  charts modelled six of them as free booleans. `Catalog.Infrastructure` always
+  resolves its connection string and always registers MassTransit; `Web.Bff`
+  always binds `ServiceIdentityOptions` with `ValidateOnStart`. So
+  `database.enabled: false` on Catalog is not a smaller deployment — it is a
+  clean render and a pod that will not start. Helm has no immutable value, so
+  the guard is **coherence**: a chart carrying the settings for a capability
+  may not disable it, and the gate additionally checks each committed chart
+  against the code it deploys. A *whole* override at deploy time
+  (`--set` clearing both halves) stays outside a render-time gate's reach and
+  is named as a residual. A `chart:` capability block is the better schema and
+  is owed.
+- **Validate a derived name; never truncate it.** The migration Job's name
+  embeds the tag, and `trunc 63 | trimSuffix "-"` was a guard that could
+  produce the thing it guarded against — a cut landing on a dot, which trimming
+  a hyphen never touched, and two tags colliding on one name. The derived name
+  is checked whole and a tag that overruns is refused, which is also why
+  `app.kubernetes.io/version` stopped truncating: a cut version label names a
+  tag no registry has.
+- **The migration pod must not be selectable by the Service it migrates.** Its
+  pod template carried `commerce.labels`, which contains the Service's
+  selector verbatim — so for the length of every hook a pod with a database
+  connection and no HTTP listener was a live endpoint, and inside the
+  PodDisruptionBudget. The Job *object* keeps the ordinary labels, because
+  object labels are not what endpoints are computed from.
 - **`Chart.lock` and `charts/` are generated, not source.** `file://`
   dependencies resolve from disk, so the lock pins nothing a remote repository
   could move and the tarball is a binary copy of a directory two levels up.

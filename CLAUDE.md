@@ -488,6 +488,24 @@ own line rather than sending a reader to a file that does not hold it.
   earliest point: not a gate that stopped covering a surface, but one whose
   subject never existed. Assert the **agreement** between the two halves, which
   fails from either side.
+- **One tool's "valid" is not the next tool's, and the gap is where a value
+  crosses between them.** PR-23 hit this three times in one file: `Release_1`
+  is a legal OCI tag and an illegal Job name; `https://shop.example.com:443` is
+  a legal URI and never matches `WithOrigins`; and `010.0.0.0/8` is legal to
+  `IPNetwork.Parse`, which reads it as **octal** and silently yields
+  `8.0.0.0/8`. A value validated against the alphabet of the system it comes
+  from, and then handed to a system with a narrower one, fails at the far end —
+  after the deploy has started. Validate against the **intersection**, and say
+  in the guard which system each rejection is for.
+- **A validator must check the value it emits.** A CORS origin was trimmed,
+  validated, and then written out untrimmed, so a trailing space passed every
+  check and failed the host's own comparison. A check on one string and a write
+  of another is worse than no check, because the check reads as authoritative.
+- **A list drifts exactly as a number does.** PR-23 lost count of the same
+  inventory three times — the source files its chart gate reads — and each fix
+  was a copy that went stale again. What ended it was declaring the list once,
+  beside the code that reads it, and asserting the other copy matches. The
+  prose then carries the argument for each entry rather than the entries.
 
 ### The commands
 
