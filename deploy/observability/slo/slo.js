@@ -223,17 +223,22 @@ export function teardown(data) {
     const rows = [
         {
             name: 'Command p95 < 100 ms',
-            // Split by naming convention: RequestMetrics tags `request` with
-            // the request type's name and has no kind tag, so *Command and
-            // *Query is what distinguishes the two rows. §6.2's naming is what
-            // makes that reliable, and a request type named otherwise is
-            // invisible to this check.
-            query: `histogram_quantile(0.95, sum by (le) (rate(request_duration_seconds_bucket{request=~".+Command"}[${window}])))`,
+            // SCOPED TO THE EXACT REQUEST THIS RUN DRIVES, not to `*Command`.
+            // Staging carries traffic this run did not generate, and pooling
+            // every command histogram lets fast unrelated types dilute a slow
+            // PlaceOrderCommand until the quantile passes — a gate reporting
+            // on a population it did not create. The same applies to the query
+            // row below, scoped to Catalog's listing.
+            //
+            // The trade is that a renamed request type turns this row into NO
+            // DATA rather than a wrong number, and teardown() fails on an
+            // absent series. That is the direction to fail in.
+            query: `histogram_quantile(0.95, sum by (le) (rate(request_duration_seconds_bucket{service_name="Ordering.Api", request="PlaceOrderCommand"}[${window}])))`,
             limit: 0.1,
         },
         {
             name: 'Query p95 < 80 ms',
-            query: `histogram_quantile(0.95, sum by (le) (rate(request_duration_seconds_bucket{request=~".+Query"}[${window}])))`,
+            query: `histogram_quantile(0.95, sum by (le) (rate(request_duration_seconds_bucket{service_name="Catalog.Api", request="GetProductsQuery"}[${window}])))`,
             limit: 0.08,
         },
         {

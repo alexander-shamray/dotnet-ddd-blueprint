@@ -85,17 +85,20 @@ SHARED_RUNBOOKS = {
 # them — each is published by an exporter or an instrumentation package that is
 # part of the target deployment. A name that is neither found in C# nor listed
 # here is a typo, which is the entire point of keeping this list short.
+# Each carries its kind, so the same exact-series rule applies to them as to the
+# solution's own instruments — a name plus a suffix that kind never exports is
+# still a typo, wherever it is published from.
 EXTERNAL_METRICS = {
-    "http_server_request_duration_seconds":
-        "ASP.NET Core instrumentation, enabled in §13.2",
-    "rabbitmq_queue_messages":
-        "the RabbitMQ exporter — §14.1's broker, §13.6's error-queue alert",
-    "kube_job_status_failed":
-        "kube-state-metrics — §7.4's migration hook Job",
-    "kube_job_status_active":
-        "kube-state-metrics — the stuck-pending half of §13.6's migration alert",
-    "kube_job_status_start_time":
-        "kube-state-metrics — how long that Job has been active",
+    "http_server_request_duration_seconds": (
+        "Histogram", "ASP.NET Core instrumentation, enabled in §13.2"),
+    "rabbitmq_queue_messages": (
+        "Gauge", "the RabbitMQ exporter — §14.1's broker, §13.6's error-queue alert"),
+    "kube_job_status_failed": (
+        "Gauge", "kube-state-metrics — §7.4's migration hook Job"),
+    "kube_job_status_active": (
+        "Gauge", "kube-state-metrics — the stuck-pending half of §13.6's migration alert"),
+    "kube_job_status_start_time": (
+        "Gauge", "kube-state-metrics — how long that Job has been active"),
 }
 
 # THE CACHE ROW HAS NO PREDICATE HERE, AND THAT IS A MEASUREMENT RATHER THAN A
@@ -151,7 +154,9 @@ PROMQL_KEYWORDS = {
 # progressively when matching a PromQL name back to a C# instrument, because
 # `request.duration` with unit `s` is exported as
 # `request_duration_seconds_bucket`.
-SUFFIXES = ("_bucket", "_count", "_sum", "_total", "_seconds", "_bytes", "_ratio")
+# UCUM units the OpenTelemetry Prometheus exporter turns into a name suffix.
+# An annotation unit — anything in braces, like `{message}` — is dropped.
+UNIT_SUFFIX = {"s": "_seconds", "By": "_bytes", "1": "_ratio"}
 
 # The generic argument is OPTIONAL, and that is not tidiness. CreateHistogram
 # and CreateCounter are always written `<double>` / `<long>`, but
@@ -160,9 +165,19 @@ SUFFIXES = ("_bucket", "_count", "_sum", "_total", "_seconds", "_bytes", "_ratio
 # finds the counters, and silently misses every gauge §13.6 added. It did, on
 # the first run of this gate, and the symptom was four correct alerts reported
 # as having no signal.
+#
+# The KIND is captured too, because a metric's exported series depend on it: a
+# histogram exports `_bucket`/`_count`/`_sum`, a counter `_total`, a gauge the
+# bare name. Matching on a stripped prefix instead — which this did until
+# Copilot's sixth round — accepts `outbox_pending_count_total` for a gauge that
+# exports no `_total` series at all, so check 4 could certify an alert that
+# queries a name nothing writes. The whole point of check 4 is that it cannot.
 INSTRUMENT = re.compile(
-    r"Create(?:Observable)?(?:Histogram|Counter|Gauge|UpDownCounter)"
-    r"\s*(?:<[^>]+>)?\s*\(\s*\"([^\"]+)\"")
+    r"Create(Observable)?(Histogram|Counter|Gauge|UpDownCounter)"
+    r"\s*(?:<[^>]+>)?\s*\(\s*\"([^\"]+)\"([^;]*?)\)\s*;",
+    re.DOTALL)
+
+UNIT_ARGUMENT = re.compile(r"\bunit:\s*\"([^\"]*)\"")
 
 failures: list[str] = []
 
@@ -271,42 +286,53 @@ def metrics_in(expression: str) -> set[str]:
     return found
 
 
+def exported_series(name: str, kind: str, unit: str) -> set[str]:
+    """The exact Prometheus series one instrument exports — no more.
+
+    Dots become underscores, a UCUM unit becomes a suffix and an annotation unit
+    is dropped, and then the KIND decides the rest. Nothing else is accepted:
+    that is what stops a rule querying a name the instrument never writes.
+    """
+    base = name.replace(".", "_") + UNIT_SUFFIX.get(unit, "")
+
+    if kind == "Histogram":
+        return {f"{base}_bucket", f"{base}_count", f"{base}_sum"}
+    if kind == "Counter":
+        return {f"{base}_total"}
+
+    return {base}                        # Gauge, UpDownCounter
+
+
 def declared_instruments() -> set[str]:
-    """Instrument names declared in C#, with dots turned into underscores."""
-    names = set()
+    """Every series this solution's own instruments export."""
+    names: set[str] = set()
     for source in (ROOT / "src").rglob("*.cs"):
         if "/obj/" in source.as_posix() or "/bin/" in source.as_posix():
             continue
         for match in INSTRUMENT.finditer(read(source)):
-            names.add(match.group(1).replace(".", "_"))
+            observable, kind, name, rest = match.groups()
+            unit_match = UNIT_ARGUMENT.search(rest or "")
+            unit = unit_match.group(1) if unit_match else ""
+
+            # An observable counter still exports `_total`; `Observable` only
+            # says how the value is produced, not what shape it has.
+            names |= exported_series(name, kind, unit)
 
     return names
 
 
-def candidates(metric: str) -> set[str]:
-    """A Prometheus name and every name it could have been exported from."""
-    seen = {metric}
-    queue = [metric]
-    while queue:
-        name = queue.pop()
-        for suffix in SUFFIXES:
-            if name.endswith(suffix):
-                shorter = name[: -len(suffix)]
-                if shorter and shorter not in seen:
-                    seen.add(shorter)
-                    queue.append(shorter)
-
-    return seen
+def external_series() -> set[str]:
+    return {
+        series
+        for name, (kind, _) in EXTERNAL_METRICS.items()
+        for series in exported_series(name, kind, "")
+    }
 
 
 def is_published(metric: str, instruments: set[str]) -> bool:
-    # Both sides take the same stripping. An exporter's metric carries the same
-    # _count / _bucket / _sum suffixes a solution instrument's does, so matching
-    # EXTERNAL_METRICS on the raw name alone would demand three entries per
-    # histogram and reject the two that were not written down.
-    reachable = candidates(metric)
-
-    return bool(reachable & instruments) or bool(reachable & EXTERNAL_METRICS.keys())
+    # An exact membership test on both sides. Nothing is stripped, because a
+    # stripped name is a name nobody exports.
+    return metric in instruments or metric in external_series()
 
 
 # ------------------------------------------------------------------ checks --

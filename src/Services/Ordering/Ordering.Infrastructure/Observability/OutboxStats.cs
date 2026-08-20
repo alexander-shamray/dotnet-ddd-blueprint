@@ -78,6 +78,21 @@ internal sealed class OutboxStats : IOutboxStats, IDisposable
     /// </remarks>
     private const int CommandTimeoutSeconds = 2;
 
+    /// <summary>
+    /// The other half of that bound, and the half a command timeout does not
+    /// cover: <c>AddOrderingInfrastructure</c> builds this type's connection
+    /// string with <c>ConnectTimeout</c> set to it.
+    /// </summary>
+    /// <remarks>
+    /// <b>A <c>commandTimeout</c> starts once a connection is open.</b>
+    /// SqlClient's default connect timeout is fifteen seconds, so against a
+    /// database that black-holes rather than refuses, the open blocks first and
+    /// the command timer never gets a chance — the safeguard above would be
+    /// stated and absent, which is the failure this whole pull request keeps
+    /// finding in other people's guards.
+    /// </remarks>
+    public const int ConnectTimeoutSeconds = 2;
+
     private readonly IDbConnectionFactory _connections;
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
     private readonly string _oldestSql;

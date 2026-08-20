@@ -9,6 +9,7 @@ using Common.Contracts;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -160,7 +161,28 @@ public static class DependencyInjection
         // resolves the last, so two instances would mean two sets of
         // instruments on one meter, and the one MetricsInitialiser forces need
         // not be the one the pipeline injects.
-        services.AddSingleton<IOutboxStats, OutboxStats>();
+        // ITS OWN CONNECTION FACTORY, with a bounded connect timeout, and that
+        // is not tidiness. OutboxStats runs inside observable gauge callbacks,
+        // and a `commandTimeout` bounds only the statement — SqlClient's
+        // default `Connect Timeout` is fifteen seconds, so against a
+        // black-holed database (a dropped route, a NetworkPolicy change, where
+        // connections hang rather than refuse) the open blocks before the
+        // command timer ever starts. Six callbacks would serialise into a
+        // minute and a half of stalled metric reader, taking unrelated
+        // telemetry down with these gauges.
+        //
+        // The runtime key, deliberately — this reads the same data plane the
+        // service does (§7.1) — and only the timeout differs, so no query path
+        // inherits a bound chosen for a metrics callback.
+        string metricsConnectionString =
+            new SqlConnectionStringBuilder(configuration.GetConnectionString("Ordering"))
+            {
+                ConnectTimeout = OutboxStats.ConnectTimeoutSeconds
+            }.ConnectionString;
+
+        services.AddSingleton<IOutboxStats>(sp => new OutboxStats(
+            new SqlConnectionFactory(metricsConnectionString),
+            sp.GetRequiredService<OutboxTable>()));
         services.AddSingleton<OutboxMetrics>();
 
         // Singleton registration alone is lazy — the instruments appear on

@@ -150,9 +150,21 @@ event it is waiting for, or the timeout it missed, rather than editing the state
 row. Editing `CurrentState` directly leaves the scheduled messages armed and the
 aggregate unaware, and produces a saga that is inconsistent with its own order.
 
-If the aggregate must be moved by hand, do it through the API's own command
-endpoints so the domain rules run — §5's `Order` refuses transitions that do not
-make sense, and that refusal is a feature here.
+**Most of these transitions have no HTTP route, and reaching for one is how an
+incident stalls.** `Ordering.Api` exposes exactly two: `POST /api/v1/orders`
+and `POST /api/v1/orders/{id}/cancel`. `ConfirmOrder`, `MarkOrderShipped` and
+`FlagOrderForReview` are **broker-only** — the saga sends them to
+`ordering-commands`, and that endpoint is their only ingress.
+
+| To do this | Use |
+|---|---|
+| Cancel the order | The API's cancel endpoint — the domain rules run, and §11.4's ownership check applies |
+| Confirm, ship, or flag for review | Publish the command to `ordering-commands`; there is no route |
+| Advance the saga past a wait | Publish the *event* it is waiting for, not a command |
+
+Whichever ingress, it goes through the domain rather than around it — §5's
+`Order` refuses transitions that do not make sense, and that refusal is a
+feature here.
 
 Record every manual action against the `OrderId`. The next person to read this
 order will find a state machine that moved without a message, and the only

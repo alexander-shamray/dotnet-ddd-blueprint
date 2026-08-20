@@ -1150,9 +1150,21 @@ internal sealed class OutboxStats : IOutboxStats, IDisposable
 
             // NULL rather than zero is what an empty lane returns — MIN over no
             // rows — and COUNT never returns it. One coalesce covers both.
+            //
+            // BOTH TIMEOUTS ARE BOUNDED, and neither is optional. These run
+            // inside observable gauge callbacks on the metric reader's own
+            // thread, so an unbounded wait stalls the reader and takes
+            // UNRELATED telemetry down with these gauges. `commandTimeout`
+            // bounds the statement; the connection string this type is built
+            // with bounds `ConnectTimeout`, because a command timer does not
+            // start until a connection is open and SqlClient waits fifteen
+            // seconds for that by default. One without the other is a
+            // safeguard that is stated and absent.
             return connection.ExecuteScalar<double?>(
-                _oldestSql,
-                new { lane = lane.ToString() }) ?? 0;
+                new CommandDefinition(
+                    _oldestSql,
+                    new { lane = lane.ToString() },
+                    commandTimeout: 2)) ?? 0;
         });
 
     // PendingCount and AbandonedCount follow the same shape — same cache, same
