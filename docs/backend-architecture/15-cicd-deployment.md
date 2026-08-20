@@ -81,8 +81,13 @@ make a monorepo practical at this size:
         - 'src/BFF/**'
       # A chart or values change produces no new image and must still reach
       # the cluster. See below — this path needs a tag it did not build.
-      # deploy/compose/** is excluded: it reaches no cluster, and its own
-      # workflow exercises it (see below).
+      #
+      # deploy/compose/** is excluded because it reaches NO cluster, and that
+      # is the whole of the reason. It used to read "and its own workflow
+      # exercises it", which stopped discriminating the moment PR-23 gave
+      # deploy/helm/** a workflow of its own and did NOT exclude it: a chart
+      # change has to roll, so it belongs here as well as there. Having a
+      # dedicated workflow was never the test.
       deploy:
         - 'deploy/**'
         - '!deploy/compose/**'
@@ -93,8 +98,9 @@ do.** Every path under `src/` must be matched by **some** filter — the
 deployables (`Gateway`, `BFF`, and each directory under `Services/`) by their
 own, and `BuildingBlocks` by `shared`, which is the anchor every service
 inherits rather than a filter of its own. Everything under `deploy/` except
-`deploy/compose/**` is matched by `deploy`: charts are deliberately not
-attached to a service, because a chart change deploys without building and
+`deploy/compose/**` is matched by `deploy` — `deploy/helm/**` included, whose
+own workflow renders the charts but deploys nothing. Charts are deliberately
+not attached to a service, because a chart change deploys without building and
 takes the second path through the pipeline — and the Compose tree is
 excluded because it reaches no cluster, so a compose-only change must not
 roll one.
@@ -123,15 +129,34 @@ re-assert what Kubernetes has already enforced, or assert something nobody has
 written down. The first real gate after dev is the k6 SLO run against staging,
 which names its tool, its target and its assertions (§13.7).
 
-One `deploy/**` artefact is exercised by CI directly rather than deployed:
-the Compose file. A separate workflow, path-filtered to
-`deploy/compose/**` and to itself, runs `docker compose config -q`, then
+Two `deploy/**` artefacts are exercised by CI directly rather than deployed,
+one per subtree, each in its own path-filtered workflow. **Neither is the smoke
+stage ruled out above**: both deploy nothing and assert only what a chapter
+already defines.
+
+The first is the Compose file. A workflow path-filtered to
+`deploy/compose/**` and to itself runs `docker compose config -q`, then
 `up --wait` — which fails if any healthcheck never passes, or a
 container exits before the wait completes — then
-`down -v` (PR-06 in [Appendix C](appendix-c-delivery-plan.md)). It is not
-the smoke stage ruled out above: it deploys nothing and asserts only what
-[§14.1](14-local-development.md) already defines, and it is what makes
-[§14.2](14-local-development.md)'s "Compose runs in CI" true.
+`down -v` (PR-06 in [Appendix C](appendix-c-delivery-plan.md)). It is what
+makes [§14.2](14-local-development.md)'s "Compose runs in CI" true.
+
+The second is the Helm tree (PR-23). A workflow path-filtered to
+`deploy/helm/**` runs `deploy/helm/smoke.sh`, which resolves the charts'
+`file://` dependencies, lints each one, and then renders all five and asserts
+what comes out: three probes per workload, a memory limit and no CPU limit, the
+hook annotations of [§7.4](07-persistence.md), the ConfigMap/Secret split of
+§15.4, and one client secret in the whole platform (§11.5). Rendering only — no
+cluster is reached, so schema validation against a live API server stays a
+deploy-time gate and is named in the script as not covered.
+
+**That filter also names two files under `src/`**, which is the one place a
+`deploy/**` workflow reaches outside its own tree and is not an oversight. The
+script asserts that every Service the charts render is a name something dials —
+§10.2's route file and `PricingHop.cs` both hold their destination hosts as
+literals, on the stated grounds that "the host is the Kubernetes Service name".
+Without those two lines, renaming a destination is a green pull request that
+breaks the next deploy.
 
 `BuildingBlocks` appears under every service, so a change there rebuilds
 everything. That is correct, and it is also the reason to keep those projects
@@ -315,8 +340,39 @@ the exact failure the pre-upgrade hook exists to prevent.
 
 Each service gets a Helm chart; an umbrella chart deploys the platform.
 
+**The templates live once, in a library chart.** `deploy/helm/common` is a
+`type: library` chart every other chart takes as a `file://` dependency, and
+each service chart's templates are one-line includes of it. That is the same
+decision §4.5's scaffold takes for the solution — Catalog is read at run time
+so there is one copy of the wiring rather than two that drift — arrived at from
+the other side: five charts of near-identical YAML is five places to fix a
+probe. What differs per deployable is the values file below, which is exactly
+what this section shows.
+
+The cost is one command: `file://` dependencies resolve from disk, but they
+must be resolved before `helm lint` or `helm template` will run. `charts/` and
+`Chart.lock` are generated and ignored, not committed —
+`deploy/helm/README.md` argues both.
+
+> **The workload's name is routing configuration, not a Helm convention.**
+> Helm's `fullname` is `{{ .Release.Name }}-{{ .Chart.Name }}`, and that is
+> wrong here: §10.2's route file resolves `http://catalog-api:8080/` and
+> [§9.7](09-messaging.md)'s pricing hop resolves `http://catalog-api:8081`, both
+> as literals in source, on the stated grounds that the host *is* the
+> Kubernetes Service name. A release-derived name makes that false the moment
+> the umbrella installs the same workload under its own release name, and the
+> failure is a 502 rather than a template error. So every chart carries a
+> required `workload.name`, the Service takes it verbatim, and the selector
+> carries it and nothing release-scoped — a Deployment's selector is immutable,
+> so a release-derived one breaks on exactly the migration an umbrella chart
+> exists to perform.
+
 ```yaml
 # deploy/helm/ordering/values.yaml
+workload:
+  # The Service's name, and therefore the string its callers already spell.
+  name: ordering-api
+
 replicaCount: 3
 
 image:
@@ -346,7 +402,15 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 2
 
+# Must exceed the host's own shutdown timeout — see the note below, where the
+# number is measured rather than chosen.
+terminationGracePeriodSeconds: 45
+
 probes:
+  # The container port every probe addresses. Named rather than numbered, and
+  # `http` rather than `grpc`: Catalog's second endpoint is HTTP/2-only and
+  # answers an HTTP/1.1 probe with a 400, which reads as a dead pod.
+  probePort: http
   liveness:  { path: /health/live,  initialDelaySeconds: 10, periodSeconds: 10 }
   readiness: { path: /health/ready, initialDelaySeconds: 5,  periodSeconds: 5 }
   startup:   { path: /health/startup, failureThreshold: 30,  periodSeconds: 2 }
@@ -358,7 +422,58 @@ identity:
   # rest goes over the broker. No clientId here means no Keycloak client, no
   # secret in the vault and nothing to rotate.
   authority: https://id.example.com/realms/commerce
+
+database:
+  # The .NET configuration key, not the database name: Infrastructure calls
+  # GetConnectionString("Ordering") and the Migrator calls
+  # GetConnectionString("OrderingMigrator") — one key plus §7.1's suffix.
+  # Two identities, two Secrets: the runtime login has DML only, and the
+  # migrator login is mounted into the hook Job and nowhere else.
+  enabled: true
+  connectionName: Ordering
+  runtimeSecretRef:  { name: ordering-database,        key: connection-string }
+  migratorSecretRef: { name: ordering-migrator-secret, key: connection-string }
+
+broker:
+  enabled: true
+  secretRef: { name: commerce-rabbitmq, key: connection-string }
+
+observability:
+  otlpEndpoint: http://otel-collector.observability:4317
 ```
+
+**The Kind column of §15.4 is the template, read down.** Everything it marks
+Config is rendered into a ConfigMap the pod mounts with `envFrom`; everything
+it marks Secret is an `env` entry with a `secretKeyRef`. The charts
+**reference** Secrets and never create them — External Secrets Operator owns
+the objects (§15.4), and a chart that templated a connection string would put a
+password into `helm get values` and into every diff of the repository.
+
+**The pod template hashes the chart's values, so a config-only deploy actually
+rolls.** Changing a ConfigMap changes nothing a running pod reads — the
+environment was bound at start — so without an annotation that moves with the
+values, `helm upgrade` reports success and every pod carries on serving what it
+started with. The hash covers **the whole of `.Values`**, not the rendered
+ConfigMap, and the difference is the gateway: it renders a second ConfigMap
+from its own template, so a narrower hash left `cors.origins` and
+`ingress.trustedNetworks` — the two keys most likely to be edited without a
+rebuild — changing a mounted object while the pod template stayed
+byte-identical. The cost of the wider hash is a rollout on a key the container
+never sees, such as `autoscaling.maxReplicas`, and that is the safe direction.
+
+**`replicas` is omitted from the Deployment whenever the HPA is enabled**,
+which is not the same as setting it to `minReplicas`. It is a managed field:
+present, every `helm upgrade` writes the chart's value and the autoscaler
+writes it back — so a config-only deploy (§15.1) scales the service down and it
+climbs out again over the following minutes, with nothing in the deploy log
+saying so.
+
+**A key joins a chart when a host's code reads it, and not before.** That is
+§14.1's rule for Compose blocks — an environment variable nothing reads is the
+container form of an unused registration — and it is why no chart carries the
+two Redis connection strings §15.4 marks required: no host calls
+`AddRedisConnections` yet, and a `secretKeyRef` to a Secret nobody has created
+is a pod that never starts. They join with the PR whose code reads them.
 
 **Shipping and Notifications get the same chart minus the Service and the
 Ingress.** They consume from the broker and expose no API, so their only
@@ -422,8 +537,14 @@ image:
   registry: registry.example.com/commerce
   api: gateway
   tag: ""
-  # No migrator key: the gateway owns no database (§10.1), so the umbrella
-  # chart's pre-upgrade hook (§7.4) has nothing to run for it.
+  # No migrator key: the gateway owns no database (§10.1), so the pre-upgrade
+  # hook (§7.4) has nothing to run for it. The hook belongs to each service
+  # chart rather than to the umbrella — a subchart's hooks run in the parent's
+  # release, so one deployable can be rolled on its own and still migrate.
+  #
+  # This chart also carries no migration template, so the absence is structural
+  # and the missing key is the values half of the same statement. Either half
+  # alone is a claim nothing checks, which is why smoke.sh asserts they agree.
 
 resources:
   requests: { cpu: 200m, memory: 128Mi }
@@ -459,7 +580,21 @@ ingress:
   # True in every Kubernetes environment: TLS terminates at the load balancer
   # or Ingress (§10.1), so RemoteIpAddress is the ingress on every request
   # until UseForwardedHeaders runs.
+  #
+  # The key carries two meanings at once, deliberately: an Ingress object
+  # exists, AND the host behind it is behind a proxy — which is what
+  # Ingress__Enabled tells the forwarded-headers block. They are the same fact
+  # about topology, which is why §14.1's Compose sets it false while the
+  # gateway there IS the edge.
   enabled: true
+  # An Ingress with no class is picked up by whichever controller claims the
+  # default, which is not a deployment decision to leave to a cluster. TLS
+  # terminates here, so this object owns the certificate — and every hop past
+  # it is plain http, which is the premise §9.7's pricing hop states.
+  className: nginx
+  host: api.example.com
+  tls:
+    secretName: gateway-tls
   # Mandatory once enabled — GetRequiredSection, so a missing value is a
   # refusal to boot rather than a rate limiter that meters the ingress
   # controller as its only client. These are the ingress controller's pod
@@ -475,7 +610,22 @@ cors:
   # origins: [ "https://shop.example.com" ]  # becomes mandatory the moment
   # enabled flips to true — GetRequiredSection, so the chart fails the pod
   # rather than serving a policy that rejects every browser.
+  origins: []
+
+# The gateway's own ConfigMap, rendered by a template only this chart has. The
+# two keys above are read by Gateway.Api and by nothing else in the platform,
+# so a shared template carrying them would put a conditional in every chart to
+# describe one — which is this section's opening sentence, in YAML.
+extraEnvFrom:
+  - gateway-edge
 ```
+
+**Both flags fail the render rather than the pod.** `Ingress__TrustedNetworks`
+and `Cors__Origins` are §15.4's *conditionally required* category, and the
+host's own guards already refuse an empty one — but `GetRequiredSection` proves
+a section exists and nothing more, so the failure arrives at startup naming a
+key nobody set. The chart refuses to template instead, and says which chart
+value is missing. `helm upgrade` never runs; nothing rolls.
 
 `ingress.enabled: true` in Kubernetes and `Ingress__Enabled: "false"` in Compose
 ([§14.1](14-local-development.md)) are not an inconsistency to reconcile — they are the same setting
@@ -493,6 +643,19 @@ the application must handle `SIGTERM` by draining: stop accepting new work,
 finish what is in progress, then exit. ASP.NET Core does this for HTTP requests
 automatically; message consumers need `StopAsync` to be given time to finish the
 current message.
+
+**The longest in-flight operation is the framework's own ceiling, not a
+per-service estimate, and that is what fixes the number at 45.**
+`HostOptions.ShutdownTimeout` is what bounds the drain — the host waits up to
+that long for every hosted service to stop and then exits regardless — and its
+default is **30 seconds**, measured on the pinned SDK rather than read off a
+documentation page, with nothing in this solution overriding it.
+`ServiceOptions.OperationTimeout` (20 s, §15.4) sits inside that window, so the
+ceiling subsumes it. Kubernetes' own default grace period is also 30, which is
+the trap: **30 is not a margin over 30.** A pod left at the default is
+`SIGKILL`ed at the instant the host would have finished draining, and the
+symptom is a request or a message lost on every rolling deploy — attributed to
+anything but the deploy, because nothing logs it.
 
 ## 15.4 Configuration and secrets
 
@@ -519,6 +682,16 @@ mount, all of which must be rotated and audited, for credentials no code path
 ever sends. Over-supply has no failing test to catch it, which is why it
 survives longer than under-supply does.
 
+**The two Redis rows are a fourth category and it is the one the table used to
+get wrong.** They were marked required outright, and no host in the solution
+calls `AddRedisConnections` — so a chart honouring the table would mount two
+Secrets nobody has created, and a `secretKeyRef` to a missing Secret is a pod
+that never starts. That is worse than the over-supply two paragraphs up, which
+merely provisions credentials nothing sends: this one stops the service. The
+rule that resolves it is §14.1's, applied one deployment target over — **a key
+joins when a host's code reads it** — so both rows are conditional on the
+consumer existing, and they become unconditional in the PR that adds one.
+
 The rule for the Kind column is mechanical: **if the value contains a
 credential, it is a Secret.** Every connection string here does — SQL Server
 carries a login, RabbitMQ a user, and Redis the per-service ACL user from [§8.1](08-caching-redis.md).
@@ -529,8 +702,8 @@ namespace read access and unencrypted at rest.
 |---|---|---|---|
 | `ConnectionStrings__Ordering` | Secret | External Secrets → runtime identity (§7.1) | ✓ |
 | `ConnectionStrings__OrderingMigrator` | Secret | External Secrets → migrator Job only | ✓ (Job) |
-| `ConnectionStrings__RedisCache` | **Secret** | External Secrets — carries the §8.1 ACL user and password | ✓ |
-| `ConnectionStrings__RedisCoordination` | **Secret** | External Secrets — separate ACL user, `noeviction` instance | ✓ |
+| `ConnectionStrings__RedisCache` | **Secret** | External Secrets — carries the §8.1 ACL user and password | ✓ **when the host reads a cache** — see below |
+| `ConnectionStrings__RedisCoordination` | **Secret** | External Secrets — separate ACL user, `noeviction` instance | ✓ **when the host reads a cache** |
 | `ConnectionStrings__RabbitMq` | Secret | External Secrets | ✓ |
 | `Identity__Authority` | Config | Helm `identity.authority` → ConfigMap | ✓ — **every host**, including the gateway |
 | `Identity__Client__ClientId` | Config | Helm `identity.clientId` | ✓ **BFF only** — the one host that calls a peer ([§9.7](09-messaging.md), [§11.5](11-identity-authorization.md)) |

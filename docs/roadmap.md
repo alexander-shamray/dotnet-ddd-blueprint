@@ -261,9 +261,12 @@ deleted, because it was right: the saga's own PR spent most of its work on
 things §9.6 did not say it needed, none of which is visible in a one-line
 milestone row.
 
-**M6 inherits the shape**, and nothing here has priced that yet: PR-23's charts
-and PR-24's twelve runbooks are the same "invisible from outside" kind, and
-they are the only large ones left.
+**M6 inherits the shape**, and PR-23 has now shown it: the charts are the same
+"invisible from outside" kind, and most of that PR's work went on things §15.3
+did not say it needed — a naming rule the platform's own routing already
+depended on, a grace period whose number had to be measured, and a render-time
+gate to keep any of it from drifting. PR-24's twelve runbooks are the last
+large one.
 
 ## Critical path
 

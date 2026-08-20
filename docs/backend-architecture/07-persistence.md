@@ -312,7 +312,11 @@ receive traffic:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ordering-migrate-{{ .Values.image.tag }}
+  # The workload's name (§15.3) plus the tag — one name per deployable rather
+  # than three, because that name is already a contract the route file and the
+  # pricing hop both spell. Truncated to 63 by the chart: Kubernetes stamps
+  # `job-name` onto the pods it creates, and a label value may not exceed it.
+  name: ordering-api-migrate-{{ .Values.image.tag }}
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-5"
