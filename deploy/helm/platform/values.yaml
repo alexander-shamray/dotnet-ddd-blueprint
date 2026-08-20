@@ -1,0 +1,26 @@
+# The umbrella carries no configuration of its own, and that is the point.
+#
+# Every key a deployable needs is in its own chart's values.yaml, so the same
+# file governs `helm upgrade catalog-api deploy/helm/catalog` and this release.
+# A second copy here would be the first thing to drift, and the drift would be
+# invisible: both renders succeed, and only one of them matches what is
+# running.
+#
+# What DOES belong here is the per-environment overlay, supplied on the command
+# line or in a values file beside this one, under each subchart's name:
+#
+#     helm upgrade platform deploy/helm/platform \
+#       --set catalog.image.tag="$SHA" \
+#       --set ordering.image.tag="$SHA" \
+#       --set gateway.image.tag="$SHA" \
+#       --set web-bff.image.tag="$SHA"
+#
+# The tags are separate rather than global because §15.1 builds and deploys
+# per service: a change under src/Services/Catalog rebuilds Catalog alone, and
+# every other subchart must keep the tag it is already running (§15.1's
+# "Resolve the running tag"). One shared tag would roll the whole platform on
+# every merge and call it a config-only deploy.
+#
+# Nothing is set below. A key here with a value would silently win over the
+# subchart's own, which is the one thing this file must not do quietly.
+{}

@@ -1,0 +1,48 @@
+{{/*
+The two keys no service has (§15.3), in a ConfigMap this chart renders itself
+rather than in the shared one.
+
+They live here because the gateway's chart is not a service chart with the
+database parts deleted: `Ingress__*` and `Cors__*` are read by Gateway.Api's
+Program.cs and by nothing else in the platform, so a shared template carrying
+them would put a conditional in every chart to describe one. §15.4's inventory
+marks both **gateway only**, and this file is where that column is true.
+
+Both flags are the same shape and §15.4 names it: **conditionally required is a
+real category, and it is not the same as optional.** Off is a valid topology;
+on-but-unconfigured is a silent defect — which is how `WithOrigins([])` came to
+reject every browser request while starting cleanly.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "commerce.name" . }}-edge
+  labels:
+    {{- include "commerce.labels" . | nindent 4 }}
+data:
+  Ingress__Enabled: {{ .Values.ingress.enabled | quote }}
+  {{- if .Values.ingress.enabled }}
+  {{/*
+  Indexed keys, because .NET binds an array from `Ingress__TrustedNetworks__0`
+  upward (§15.4). Guarded rather than ranged blindly: Program.cs reads this
+  through GetRequiredSection, which proves the section EXISTS and nothing more
+  — an empty list renders no keys at all, so the section is absent, and the
+  gateway throws at startup naming a key an operator never set. Failing the
+  render says which chart value is missing instead.
+  */}}
+  {{- if not .Values.ingress.trustedNetworks }}
+  {{- fail "ingress.trustedNetworks must hold at least one CIDR when ingress.enabled: the gateway reads Ingress:TrustedNetworks through GetRequiredSection, and without it the rate limiter partitions every anonymous caller into one bucket — a global cap wearing a per-client limit's name (§10.3, §15.3)." }}
+  {{- end }}
+  {{- range $i, $cidr := .Values.ingress.trustedNetworks }}
+  Ingress__TrustedNetworks__{{ $i }}: {{ $cidr | quote }}
+  {{- end }}
+  {{- end }}
+  Cors__Enabled: {{ .Values.cors.enabled | quote }}
+  {{- if .Values.cors.enabled }}
+  {{- if not .Values.cors.origins }}
+  {{- fail "cors.origins must hold at least one origin when cors.enabled: Program.cs refuses to start on an empty or blank entry, because WithOrigins([]) yields a policy matching nothing while the host reports healthy (§15.4)." }}
+  {{- end }}
+  {{- range $i, $origin := .Values.cors.origins }}
+  Cors__Origins__{{ $i }}: {{ $origin | quote }}
+  {{- end }}
+  {{- end }}

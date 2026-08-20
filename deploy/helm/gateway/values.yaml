@@ -1,0 +1,107 @@
+# The gateway's chart is not a service chart with the database parts deleted
+# (§15.3). It has no migrator, no client credentials, and two keys no service
+# has — and every one of those differences is something it will not start
+# without, or will start wrongly without.
+
+workload:
+  name: gateway
+
+replicaCount: 3
+
+image:
+  registry: registry.example.com/commerce
+  api: gateway
+  # No migrator key: the gateway owns no database (§10.1), so the pre-upgrade
+  # hook (§7.4) has nothing to run for it. This chart also carries no
+  # templates/migrate-job.yaml — §15.3's point that the gateway's chart is not
+  # a service chart with the database parts deleted — so the absence is
+  # structural and the missing key is the values half of the same statement.
+  # smoke.sh asserts the two halves agree, because either one alone is a claim
+  # nothing checks.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+ports:
+  - name: http
+    containerPort: 8080
+
+resources:
+  requests: { cpu: 200m, memory: 128Mi }
+  limits:   { memory: 256Mi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 30          # every external request passes through here
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+terminationGracePeriodSeconds: 45
+
+probes:
+  # The same three §13.5 defines, and the gateway needs them stated as much as
+  # any service: MapCommonHealthEndpoints exposes the endpoints, and a chart
+  # that never references them means nothing asks. Readiness is honest here
+  # even though the set is empty (§4.2) — "the process is up" is exactly the
+  # question, because the gateway owns no dependency to be un-ready for.
+  probePort: http
+  liveness:  { path: /health/live,  initialDelaySeconds: 10, periodSeconds: 10 }
+  readiness: { path: /health/ready, initialDelaySeconds: 5,  periodSeconds: 5 }
+  startup:   { path: /health/startup, failureThreshold: 30,  periodSeconds: 2 }
+
+service:
+  enabled: true
+
+identity:
+  # Authority only. The gateway validates JWTs (§11.2) but calls nobody —
+  # YARP forwards the caller's token — so there is no clientSecretRef here
+  # and no gateway entry in External Secrets (§11.5, §15.4).
+  authority: https://id.example.com/realms/commerce
+
+# The gateway owns no schema and reads no broker connection, so both are off
+# and the container's environment carries no Secret at all.
+database:
+  enabled: false
+broker:
+  enabled: false
+
+observability:
+  otlpEndpoint: http://otel-collector.observability:4317
+
+ingress:
+  # True in every Kubernetes environment: TLS terminates at the load balancer
+  # or Ingress (§10.1), so RemoteIpAddress is the ingress on every request
+  # until UseForwardedHeaders runs. The same key is false in §14.1's Compose,
+  # where the gateway IS the edge — not an inconsistency to reconcile, but one
+  # setting correctly describing two topologies.
+  enabled: true
+  className: nginx
+  host: api.example.com
+  tls:
+    secretName: gateway-tls
+  annotations: {}
+  # Mandatory once enabled — GetRequiredSection, so a missing value is a
+  # refusal to boot rather than a rate limiter that meters the ingress
+  # controller as its only client. These are the ingress controller's pod
+  # CIDRs, not the cluster's: anything trusted here can set X-Forwarded-For.
+  trustedNetworks:
+    - 10.42.0.0/16
+
+cors:
+  # Off. Browsers reach the platform through the CDN on the same origin
+  # (§10.2), so no preflight ever arrives. Off is a complete configuration;
+  # on without origins is not (§15.4).
+  enabled: false
+  # origins: [ "https://shop.example.com" ]  # becomes mandatory the moment
+  # enabled flips to true — GetRequiredSection, so the chart fails the pod
+  # rather than serving a policy that rejects every browser.
+  origins: []
+
+# The gateway's own ConfigMap, rendered by templates/edge-config.yaml — the two
+# keys no service has. Named here rather than derived, so the Deployment mounts
+# exactly what this chart renders.
+extraEnvFrom:
+  - gateway-edge

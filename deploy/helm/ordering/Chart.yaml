@@ -1,0 +1,11 @@
+apiVersion: v2
+name: ordering
+description: >-
+  Ordering (§4.1) — its API, its migrator hook, §6.6's price projection and
+  §9.6's fulfilment saga.
+type: application
+version: 0.1.0
+dependencies:
+  - name: commerce-common
+    version: 0.1.0
+    repository: file://../common

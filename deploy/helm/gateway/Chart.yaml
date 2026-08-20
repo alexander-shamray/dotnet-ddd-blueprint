@@ -1,0 +1,11 @@
+apiVersion: v2
+name: gateway
+description: >-
+  The edge (§10.1) — YARP routing, JWT validation, rate limiting, CORS, and the
+  platform's one Ingress. No migrator: the gateway owns no database.
+type: application
+version: 0.1.0
+dependencies:
+  - name: commerce-common
+    version: 0.1.0
+    repository: file://../common

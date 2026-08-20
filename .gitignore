@@ -28,3 +28,18 @@ appsettings.*.local.json
 # Python — the licence gate in .github/licence-gate/ is a script, not a package.
 __pycache__/
 *.py[cod]
+
+# Helm — `helm dependency update` resolves deploy/helm/*/Chart.yaml's file://
+# entries by PACKAGING the sibling chart into charts/ and writing a digest into
+# Chart.lock. Neither is source: the tarball is a binary copy of a directory two
+# levels up, and the lock pins nothing a remote repository could move, because
+# nothing here comes from one.
+#
+# Chart.lock earns its place when a dependency is fetched over the network and
+# a build has to be reproducible against a repository that changed. Committed
+# here it would be a second copy of the version already in Chart.yaml, and one
+# that goes stale on a bump — which is the drift CLAUDE.md's one rule exists to
+# close. `helm dependency update` is the whole of the setup, and smoke.sh and
+# the CI job both run it before anything else.
+deploy/helm/*/charts/
+deploy/helm/*/Chart.lock
