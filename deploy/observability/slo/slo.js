@@ -218,7 +218,15 @@ export function teardown(data) {
     // it reads; a row whose signal does not exist is NOT asserted here and is
     // listed at the bottom instead, because an SLO nobody can compute is worse
     // than an absence somebody has written down.
-    const window = `${Math.max(1, Math.round((Date.now() - data.startedAt) / 60000))}m`;
+    // SECONDS, AND ROUNDED UP. `Math.round` over minutes under-covers whenever
+    // the run rounds down: this one lasts about 190 seconds — a 180-second
+    // query scenario plus the command's ten-second offset — which rounds to
+    // `3m` and silently drops the query scenario's first ten seconds. An early
+    // server-side regression escapes the authoritative check entirely.
+    //
+    // A window slightly longer than the run is harmless: it can only pull in
+    // quiet time before traffic started.
+    const window = `${Math.max(1, Math.ceil((Date.now() - data.startedAt) / 1000))}s`;
 
     const rows = [
         {
@@ -233,6 +241,21 @@ export function teardown(data) {
             // The trade is that a renamed request type turns this row into NO
             // DATA rather than a wrong number, and teardown() fails on an
             // absent series. That is the direction to fail in.
+            //
+            // **THIS STILL DOES NOT ISOLATE THIS RUN'S TRAFFIC, and it cannot.**
+            // Scoping to one request type narrows the population; it does not
+            // fence it. Anything else calling PlaceOrderCommand during the
+            // window lands in the same histogram, and enough fast ambient
+            // traffic dilutes a regression this run generated.
+            //
+            // Fencing it would need a run identifier carried into the SERVER's
+            // metric, and `RequestMetrics` tags `request` and `outcome` only —
+            // deliberately, because §13.3's cardinality rule rules out a
+            // per-run tag. So the requirement moves to the environment instead:
+            // **run this against a quiescent staging target.** It is a
+            // precondition of the gate rather than something the query can
+            // enforce, which is why it is written here and in the README rather
+            // than left for a confusing result to teach later.
             query: `histogram_quantile(0.95, sum by (le) (rate(request_duration_seconds_bucket{service_name="Ordering.Api", request="PlaceOrderCommand"}[${window}])))`,
             limit: 0.1,
         },

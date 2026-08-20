@@ -170,6 +170,16 @@ switched off.
 **An absent series fails the run.** It is not treated as "no problem observed",
 for the reason the two rule files exist.
 
+**Run it against a quiescent target, and treat that as a precondition rather
+than a preference.** `teardown()` reads the *server's* histograms, which have no
+way to tell this run's requests from anyone else's: the queries are scoped to
+the exact request types the scenarios drive, and concurrent traffic of those
+same types still lands in the same series. Enough fast ambient load dilutes a
+regression the run generated. Fencing it would need a run identifier on the
+server metric, and §13.3's cardinality rule rules that out — so the isolation
+has to come from the environment. A staging deployment nobody else is driving
+is what makes the authoritative half of this gate mean anything.
+
 **Availability (99.9% monthly) is deliberately not evaluated.** A three-minute
 run cannot; `http_req_failed` bounds the error rate *during the run*, which is a
 much weaker claim, and the run says so rather than reporting a pass.

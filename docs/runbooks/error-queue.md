@@ -49,19 +49,31 @@ everything the steps below need. Use the Management API's `get` with
 **The credentials are not `guest/guest`.** That is §14.1's Compose default; a
 deployed broker's are supplied by External Secrets
 ([§15.4](../backend-architecture/15-cicd-deployment.md)), and reaching for the
-local default here authenticates as an account that does not exist. Take an
-authorised management credential from the incident context and export it:
+local default here authenticates as an account that does not exist.
+
+**Keep them out of `argv`.** Anything passed as `curl -u` or `-d` is visible in
+the process list to every user on the box, and an incident is exactly when a
+shell is being shared and scrollback is being pasted into a channel. A
+mode-0600 curl config carries the credential, and the request body comes from
+stdin:
 
 ```bash
 kubectl -n <ns> port-forward svc/rabbitmq 15672:15672 &
 
-export RABBIT_USER=... RABBIT_PASSWORD=...   # from the vault, not from §14.1
+umask 077
+cat > "$HOME/.rabbit.curl" <<'EOF'
+user = "OPERATOR:PASSWORD"
+EOF
 
-curl -su "$RABBIT_USER:$RABBIT_PASSWORD" -X POST \
+curl -sS --config "$HOME/.rabbit.curl" -X POST \
   -H 'content-type: application/json' \
-  -d '{"count":5,"ackmode":"ack_requeue_true","encoding":"auto"}' \
-  http://localhost:15672/api/queues/%2F/<endpoint>_error/get
+  -d @- http://localhost:15672/api/queues/%2F/<endpoint>_error/get <<'EOF'
+{"count":5,"ackmode":"ack_requeue_true","encoding":"auto"}
+EOF
 ```
+
+**Delete it when the incident closes** — `rm -f "$HOME/.rabbit.curl"` — and use
+a credential you can revoke rather than the service's own.
 
 `ackmode=ack_requeue_true` is the load-bearing part: **`ack_requeue_false`
 consumes the message and it is gone.** The Management UI's *Get messages* with
@@ -88,27 +100,34 @@ Move it back with the Management API's shovel, declared as a one-shot
 parameter. It moves every message on the error queue back to the endpoint and
 deletes itself when the queue is empty:
 
-```bash
-kubectl -n <ns> port-forward svc/rabbitmq 15672:15672 &
+The body carries an AMQP URI with a password in it, so it goes in through stdin
+for the same reason and never on the command line:
 
-curl -su "$RABBIT_USER:$RABBIT_PASSWORD" -X PUT \
+```bash
+curl -sS --config "$HOME/.rabbit.curl" -X PUT \
   -H 'content-type: application/json' \
-  -d '{"value":{
-        "src-protocol":"amqp091","src-uri":"'"$AMQP_URI"'","src-queue":"<endpoint>_error",
-        "dest-protocol":"amqp091","dest-uri":"'"$AMQP_URI"'","dest-queue":"<endpoint>",
-        "src-delete-after":"queue-length","ack-mode":"on-confirm"}}' \
-  http://localhost:15672/api/parameters/shovel/%2F/replay-<endpoint>
+  -d @- http://localhost:15672/api/parameters/shovel/%2F/replay-<endpoint> <<'EOF'
+{"value":{
+  "src-protocol":"amqp091","src-uri":"amqp://OPERATOR:PASSWORD@localhost:5672/%2F",
+  "src-queue":"<endpoint>_error",
+  "dest-protocol":"amqp091","dest-uri":"amqp://OPERATOR:PASSWORD@localhost:5672/%2F",
+  "dest-queue":"<endpoint>",
+  "src-delete-after":"queue-length","ack-mode":"on-confirm"}}
+EOF
 
 # Watch it drain, then confirm the shovel removed itself.
-curl -su "$RABBIT_USER:$RABBIT_PASSWORD" http://localhost:15672/api/shovels/%2F
+curl -sS --config "$HOME/.rabbit.curl" http://localhost:15672/api/shovels/%2F
 ```
 
-**Both URIs are explicit, and a bare `amqp://` is the trap.** The shovel runs
-*inside* the broker and connects with its own credentials, so an unqualified
-URI means `guest`, which on a deployed broker is not a user — the API accepts
-the parameter and the shovel then fails to connect at both ends. Set
-`AMQP_URI` to the authorised value (`amqp://user:password@localhost:5672/%2F`)
-so the API call and the shovel's own connections use the same account.
+**Both URIs are spelled out, and a bare `amqp://` is the trap.** The shovel runs
+*inside* the broker and connects with its own credentials, so an unqualified URI
+means `guest` — which on a deployed broker is not a user. The API accepts the
+parameter and the shovel then fails to connect at both ends, which is a worse
+outcome than a rejected request because it looks like it worked.
+
+**The shovel definition persists with the password in it** until it deletes
+itself or you remove it. `DELETE /api/parameters/shovel/%2F/replay-<endpoint>`
+if it is still there after the queue drains.
 
 `src-delete-after: queue-length` is what makes this one-shot: the shovel stops
 after the messages present when it started, so a consumer that fails again does
@@ -117,16 +136,26 @@ message is removed from the error queue only once the destination has confirmed
 it.
 
 **Requires the `rabbitmq_shovel` and `rabbitmq_shovel_management` plugins.**
-§14.1's image builds in the delayed-exchange plugin and not these, so check
-before reaching for this during an incident:
+§14.1's image now enables both — it was the delayed exchange alone until this
+procedure needed them, because a replay path the shipped image cannot run is
+not a replay path. A deployed broker is somebody else's image, so check anyway:
 
 ```bash
 kubectl -n <ns> exec deploy/rabbitmq -- rabbitmq-plugins list | grep shovel
 ```
 
-Without them, the Management UI's *Move messages* is unavailable too, and the
-fallback is to consume and republish with a short script — which is worth
-knowing *before* 03:00 rather than discovering then.
+If they are absent, **stop and enable them** rather than improvising:
+
+```bash
+kubectl -n <ns> exec deploy/rabbitmq -- \
+  rabbitmq-plugins enable rabbitmq_shovel rabbitmq_shovel_management
+```
+
+Both ship inside the official image, so this needs no download and no restart —
+which is why it is the recovery here rather than a hand-rolled consume-and-
+republish loop. That loop is where messages get lost at 03:00: it has to
+reproduce the headers `MT-Fault-*` and `MessageId` exactly, and a mistake
+consumes the evidence.
 
 **Replay is safe by design and it is worth knowing why.** §9.5's inbox filter
 records `MessageId` and makes a second delivery of the same message a no-op

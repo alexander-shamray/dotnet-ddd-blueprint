@@ -52,3 +52,14 @@ RUN cd /opt/rabbitmq/plugins \
         | sha256sum -c - \
     && chmod 644 rabbitmq_delayed_message_exchange-4.1.0.ez \
     && rabbitmq-plugins enable --offline rabbitmq_delayed_message_exchange
+
+# The shovel, and it is a RUNBOOK dependency rather than a platform one. Nothing
+# this solution runs needs it — §13.9's `error-queue.md` does, because the only
+# non-destructive way to move poison messages back to their endpoint is a
+# one-shot shovel, and a procedure that cannot be executed on the image the
+# repository ships is not a procedure.
+#
+# Both plugins ship IN the base image, unlike the delayed exchange above, so
+# this needs no download and no checksum — only enabling. `_management` is the
+# half that exposes /api/parameters/shovel, which is what the runbook drives.
+RUN rabbitmq-plugins enable --offline rabbitmq_shovel rabbitmq_shovel_management
