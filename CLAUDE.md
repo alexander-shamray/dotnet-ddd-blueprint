@@ -93,14 +93,13 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
 .github/workflows/compose.yml  path-filtered smoke on deploy/compose/** —
                              config -q, up --wait, down -v, and an image build
 .github/workflows/helm.yml   path-filtered smoke on deploy/helm/** — and on
-                             every input smoke.sh reads outside it: the route
-                             file, PricingHop.cs, Catalog's appsettings.json,
-                             Common.Web's HealthCheckExtensions.cs and
-                             .gitattributes. The one place a deploy/** workflow
-                             reaches outside its own tree. **The workflow is
-                             the authority and this is a copy**: it has been
-                             wrong twice, both times because a commit added an
-                             input and updated the filter alone
+                             every input smoke.sh reads outside it. **That list
+                             is not written down here on purpose.** It drifted
+                             three times; it now lives once, as SOURCE_INPUTS
+                             in smoke.sh beside the reads, and the gate asserts
+                             both of the workflow's triggers cover it. The one
+                             place a deploy/** workflow reaches outside its own
+                             tree
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/coverage/            the domain-coverage reporter — stdlib Python, no
                              tests, and the file argues why: it is a report and

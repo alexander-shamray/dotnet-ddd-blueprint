@@ -42,6 +42,27 @@ SERVICE_CHARTS="catalog ordering gateway web-bff"
 MIGRATOR_CHARTS="catalog ordering"
 DATABASELESS_CHARTS="gateway web-bff"
 
+# EVERY PATH OUTSIDE deploy/helm THAT THIS SCRIPT READS, declared once.
+#
+# The workflow's path filter must cover each of them, or a change to one is a
+# green pull request that skips the gate watching it. That list has now gone
+# stale THREE times — the routing files, then HealthCheckExtensions.cs, then
+# these service trees — and every time for the same reason: a read was added
+# here and the filter updated somewhere else, or not at all.
+#
+# So it is declared here, beside the reads, and the agreement is asserted
+# below. A list maintained in two places by hand is a list that drifts; this
+# branch has spent six findings learning that about counts and inventories, and
+# this is the same lesson applied to the gate's own inputs.
+SOURCE_INPUTS="
+src/Gateway/Gateway.Api/appsettings.json
+src/BFF/Web.Bff
+src/Services/Catalog
+src/Services/Ordering
+src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs
+.gitattributes
+"
+
 # The lists above are classifications and stay written down — which chart owns
 # a database is a fact about the platform, not something to infer. What must
 # NOT be written down is the membership, and until Copilot said so it was: a
@@ -171,6 +192,34 @@ done
 
 check 'the BFF binds ServiceIdentityOptions in src/, so its chart declares credentials' \
     grep -rq 'ServiceIdentityOptions' "$ROOT/src/BFF/Web.Bff"
+
+# --------------------------------------------------------------------------
+section 'The workflow watches everything this script reads'
+# --------------------------------------------------------------------------
+# Both triggers, because a merged change that skips the gate on `main` is the
+# same defect one branch later.
+covered() {
+    # covered <path> <trigger-block> -> exit 0 when some filter entry matches
+    awk -v want="$1" '
+        { sub(/^ *- /, ""); gsub(/'"'"'/, "") }
+        $0 == want { found = 1 }
+        /\/\*\*$/ {
+            prefix = substr($0, 1, length($0) - 3)
+            if (index(want, prefix) == 1) { found = 1 }
+        }
+        END { exit found ? 0 : 1 }
+    ' "$2"
+}
+
+awk '/^  pull_request:/ { p = 1 } p && /^      - / { print } /^  push:/ { p = 0 }' \
+    "$ROOT/.github/workflows/helm.yml" >"$OUT/pr-paths.txt"
+awk '/^  push:/ { p = 1 } p && /^      - / { print }' \
+    "$ROOT/.github/workflows/helm.yml" >"$OUT/push-paths.txt"
+
+for input in $SOURCE_INPUTS; do
+    check "the pull_request filter covers $input" covered "$input" "$OUT/pr-paths.txt"
+    check "the push filter covers $input" covered "$input" "$OUT/push-paths.txt"
+done
 
 # --------------------------------------------------------------------------
 section 'Resolving dependencies'

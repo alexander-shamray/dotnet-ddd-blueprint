@@ -36,8 +36,9 @@ on:
       - '.github/workflows/helm.yml'
       - '.gitattributes'
       - 'src/Gateway/Gateway.Api/appsettings.json'
-      - 'src/BFF/Web.Bff/PricingHop.cs'
-      - 'src/Services/Catalog/Catalog.Api/appsettings.json'
+      - 'src/BFF/Web.Bff/**'
+      - 'src/Services/Catalog/**'
+      - 'src/Services/Ordering/**'
       - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
   push:
     branches: [main]
@@ -46,8 +47,9 @@ on:
       - '.github/workflows/helm.yml'
       - '.gitattributes'
       - 'src/Gateway/Gateway.Api/appsettings.json'
-      - 'src/BFF/Web.Bff/PricingHop.cs'
-      - 'src/Services/Catalog/Catalog.Api/appsettings.json'
+      - 'src/BFF/Web.Bff/**'
+      - 'src/Services/Catalog/**'
+      - 'src/Services/Ordering/**'
       - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
 
 permissions:

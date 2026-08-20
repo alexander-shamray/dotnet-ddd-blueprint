@@ -169,11 +169,15 @@ oversight. Each is an input the script actually reads:
   renders a CR onto every line and the script's anchored greps match nothing on
   a Linux runner.
 
-**The list is written out rather than counted, and the workflow is still the
-authority.** This passage said "two files" and was made wrong by the change
-that added the third; it then omitted the fourth. A copy of an inventory drifts
-whether it is a number or a list — what a reader gets here is the argument for
-each entry, and `helm.yml` is what actually decides.
+**This passage is an argument, not an inventory, and the difference is what
+finally stopped it drifting.** It said "two files", and was made wrong by the
+change that added a third; then it omitted the fourth; then the fifth. A copy
+of a list drifts exactly as a copy of a number does. The list now lives once —
+`SOURCE_INPUTS` in `smoke.sh`, beside the reads it describes — and the gate
+asserts that **both** of the workflow's triggers cover every entry, because a
+merged change that skips the gate on `main` is the same defect one branch
+later. What belongs here is why each kind of input matters, which is what the
+bullets above give.
 
 `BuildingBlocks` appears under every service, so a change there rebuilds
 everything. That is correct, and it is also the reason to keep those projects

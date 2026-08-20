@@ -145,12 +145,11 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Sixty-nine deliberate defects have been run through it and sixty-eight
-turned a green run red** — a renamed Service, a CPU limit, a grace period
-back at the Kubernetes default, a dropped hook annotation, a connection string
-moved into a ConfigMap, a second chart growing client credentials, an `envFrom`
-naming a ConfigMap nothing renders, a rollout checksum that missed the
-gateway's own, a
+**Seventy deliberate defects have been run through it and sixty-nine turned a
+green run red** — a renamed Service, a CPU limit, a grace period back at the
+Kubernetes default, a dropped hook annotation, a connection string moved into a
+ConfigMap, a second chart growing client credentials, an `envFrom` naming a
+ConfigMap nothing renders, a rollout checksum that missed the gateway's own, a
 Service publishing only its first port, a chart renumbering the port its
 callers dial, a fifth chart the gate never looked at, an Ingress with no
 backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
@@ -190,12 +189,11 @@ annotation now hashes the whole of `.Values`, which over-triggers on a few keys
 the container never sees and is the safe direction.
 
 CI runs the same script, path-filtered to this tree **and to every input it
-reads outside it**: the gateway's route file and `PricingHop.cs` (renaming a
-destination there would otherwise break a deploy from a green PR), Catalog's
-`appsettings.json` (the listeners those Services forward to), `Common.Web`'s
-`HealthCheckExtensions.cs` (the probe paths, read from source rather than
-repeated here), and `.gitattributes` (which pins this tree to LF, without which
-the anchored greps match nothing on a Linux runner).
+reads outside it** — the routing literals, the Kestrel listeners, the probe
+paths, the capability registrations, and `.gitattributes`, which pins this tree
+to LF without which the anchored greps match nothing on a Linux runner.
 
-`.github/workflows/helm.yml` is the authority for that list; this is a copy,
-and it has been out of date once.
+**The paths themselves are deliberately not listed here.** `SOURCE_INPUTS` at
+the top of `smoke.sh` is the one place they live, beside the reads, and the
+gate asserts that both of the workflow's triggers cover every entry. Three
+separate copies of that list went stale before it was done this way.
