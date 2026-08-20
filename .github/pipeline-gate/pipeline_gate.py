@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """PR-25's quality gates: the pipeline asserting things about itself.
 
-Two subcommands, and they answer the two ways §15.1's staged pipeline can be
-quietly wrong.
+Three subcommands, and they answer the three ways §15.1's staged pipeline can
+be quietly wrong: a deployable nothing filters, an image nothing builds, and a
+stage nothing ran.
 
 `filters` is §15.1's own instruction -- "assert that every immediate child of
 `src/`, and every immediate child of `src/Services/`, appears in at least one
@@ -11,6 +12,14 @@ inventory, and an inventory drifts: a missing top-level entry is what left
 `src/Gateway/**` and `src/BFF/**` unbuilt, and a missing entry under
 `Services/` is quieter still, because the parent is spoken for by its siblings
 and the list looks complete right up until one service stops being deployed.
+
+`images` is the same inventory one artefact over, and §15.1's per-service image
+build is what makes it one: every Dockerfile under `src/` must be built by some
+matrix entry, and every entry must name a Dockerfile that exists. Its third
+check is the one neither direction can see — a matrix entry reading
+`needs.changes.outputs[matrix.filter]` on a name no filter defines evaluates to
+the empty string rather than erroring, so the step is skipped and the job
+reports success having built nothing.
 
 `stages` is the one docs/testing.md names: "whoever writes the staged pipeline
 should assert a floor on each stage's count rather than trusting a green exit."

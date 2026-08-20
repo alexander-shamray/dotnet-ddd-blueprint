@@ -267,7 +267,14 @@ collector merges every test project's data into one attachment — and the
 > and is the wrong one: it relaxes an architecture rule everywhere, for ever,
 > and in every service the scaffold renders, to accommodate a test tool. The
 > gates run first and uninstrumented instead. The two filters are exhaustive
-> and disjoint, so the counts still sum to the whole suite — **16 and 760**.
+> and disjoint, so the counts still sum to the whole suite — **18 and 777**.
+>
+> **That pair had gone stale before PR-25 touched it, and reconciling it is
+> the one rule rather than tidying.** It read 16 and 760, which sums to 776 —
+> neither the 794 that preceded this branch nor the 795 that follows it. The
+> figures above are now measured rather than remembered, and the split this
+> callout describes is the *first* seam of the three; `pipeline_gate.py stages`
+> is what asserts all three still partition the suite.
 
 ## Where a test goes
 

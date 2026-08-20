@@ -333,6 +333,21 @@ jobs:
             image: web-bff
             dockerfile: src/BFF/Web.Bff/Dockerfile
     steps:
+      # THE INDEX HAS TO RESOLVE, and nothing else here would say if it did
+      # not. `needs.changes.outputs[matrix.filter]` on a name no filter defines
+      # is the empty string rather than an error, so every `if` below would be
+      # false and this job would report success having built nothing — the
+      # failure `pipeline-gate images` catches at the *name* level and cannot
+      # catch at the expression level. This step has no `if`, so it runs for
+      # every matrix leg including the skipped ones, and it is the only thing
+      # standing between a typo and a silent no-op.
+      - name: The filter this leg reads resolves to a decision
+        run: |
+          case "${{ needs.changes.outputs[matrix.filter] }}" in
+            true|false) echo "${{ matrix.filter }}=${{ needs.changes.outputs[matrix.filter] }}" ;;
+            *) echo "::error::needs.changes.outputs[${{ matrix.filter }}] is not true/false. The images matrix names a filter the changes job does not output, so this image would never be built."; exit 1 ;;
+          esac
+
       - uses: actions/checkout@v4
         if: ${{ needs.changes.outputs[matrix.filter] == 'true' }}
 

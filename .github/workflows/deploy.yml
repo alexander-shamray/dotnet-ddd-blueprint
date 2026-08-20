@@ -37,6 +37,7 @@ on:
       - 'deploy/canary/**'
       - '.github/workflows/deploy.yml'
       - 'deploy/helm/**'
+      - 'deploy/observability/**'
       - 'src/**'
   push:
     branches: [main]
@@ -44,6 +45,7 @@ on:
       - 'deploy/canary/**'
       - '.github/workflows/deploy.yml'
       - 'deploy/helm/**'
+      - 'deploy/observability/**'
       - 'src/**'
 
 permissions:
@@ -110,6 +112,28 @@ jobs:
           # plus one canary. The two numbers were chosen independently and the
           # fit is worth knowing: at the chart's ceiling, 5% is the finest
           # weight the platform can express at all.
+          #
+          # **THE HPA'S FLOOR MOVES FIRST, and a `kubectl scale` alone would
+          # not have held.** These charts enable an autoscaler on the stable
+          # track with `minReplicas: 3`, and _deployment.tpl says in its own
+          # comment that `replicas` is a managed field — "the HPA writes it
+          # back". So a scale to 19 decays toward 3 across the ten-minute
+          # dwells, and `plan` is then computing 5% against a replica count
+          # the cluster no longer has. On a busy service the HPA may already
+          # be near 19 and the scale is a no-op, which hides the hole rather
+          # than closing it.
+          #
+          # Raising the floor is what makes the number stick. It is restored
+          # on both exits below, because a service left with minReplicas 19 is
+          # a rollout that silently resized production.
+          FLOOR=$(kubectl get hpa "$WORKLOAD" -n "$NAMESPACE" \
+            -o jsonpath='{.spec.minReplicas}' 2>/dev/null || echo "")
+          echo "HPA_FLOOR=$FLOOR" >> "$GITHUB_ENV"
+          if [ -n "$FLOOR" ]; then
+            kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
+              --type=merge -p "{\"spec\":{\"minReplicas\":$NEEDED}}"
+          fi
+
           kubectl scale deployment "$WORKLOAD" --replicas="$NEEDED" -n "$NAMESPACE"
           kubectl rollout status deployment "$WORKLOAD" -n "$NAMESPACE"
         env:
@@ -118,6 +142,18 @@ jobs:
       - name: Climb the ladder
         run: |
           set -euo pipefail
+
+          # Restoring the autoscaler's floor is owed on BOTH exits — a promote
+          # and a rollback alike — so it is one function rather than two copies
+          # that drift. A service left at minReplicas 19 is a rollout that
+          # silently resized production and reported success.
+          restore_floor() {
+            if [ -n "${HPA_FLOOR:-}" ]; then
+              kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
+                --type=merge -p "{\"spec\":{\"minReplicas\":$HPA_FLOOR}}"
+            fi
+          }
+
           STEPS=$(python deploy/canary/canary.py steps)
           STABLE=$(kubectl get deployment "$WORKLOAD" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
 
@@ -138,12 +174,26 @@ jobs:
             # what makes the rollback below cost the canary's own pods and
             # nothing else (ADR-022).
             #
+            # **IT INHERITS THE STABLE RELEASE'S VALUES, and `--install` is
+            # exactly why it has to.** A new release inherits nothing: without
+            # `-f`, every environment value falls through to the chart's own
+            # default, so the canary would come up against
+            # `identity.example.com`, the default OTLP endpoint and the default
+            # database — a pod that is not a canary of anything. The gateway is
+            # the one where this fails LOUDLY rather than silently, because
+            # `edge-config.yaml` refuses an empty `ingress.trustedNetworks`;
+            # the other three would have installed and been wrong. Measured:
+            # `helm template` with the flags below and no `-f` fails at
+            # edge-config.yaml:194.
+            #
             # autoscaling off on the canary because an HPA would move the
             # weight underneath the analysis: the served share is a replica
             # ratio, so a canary that scales itself is a canary whose blast
             # radius nobody chose.
+            helm get values "$WORKLOAD" -n "$NAMESPACE" -o yaml > stable-values.yaml
             helm upgrade --install "$WORKLOAD-canary" "deploy/helm/$CANARY_CHART" \
               -n "$NAMESPACE" \
+              -f stable-values.yaml \
               --set canary.enabled=true \
               --set replicaCount="$CANARY_CANARY_REPLICAS" \
               --set autoscaling.enabled=false \
@@ -155,6 +205,7 @@ jobs:
               helm upgrade "$WORKLOAD" -n "$NAMESPACE" \
                 --reuse-values --set image.tag="$TAG" --wait
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
+              restore_floor
               break
             fi
 
@@ -169,6 +220,7 @@ jobs:
             if ! python deploy/canary/canary.py analyse --readings readings.json; then
               echo "::error::Rolling back at step $STEP."
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
+              restore_floor
               exit 1
             fi
           done

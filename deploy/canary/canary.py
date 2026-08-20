@@ -46,6 +46,13 @@ PLAN_PATH = CANARY / "canary.json"
 SOURCE_INPUTS = [
     "src",
     "deploy/helm",
+    # Checks 3 and 5 both read platform-alerts.yaml -- one to take §13.6's
+    # thresholds out of it rather than restate them, the other to establish
+    # that a metric this plan queries is one a loaded alert already reads.
+    # Retuning ErrorRateService without this entry is a green pull request:
+    # observability.yml runs check.py, which does not compare canary
+    # thresholds, and the canary gate never runs.
+    "deploy/observability",
 ]
 
 WORKFLOW_PATH = ".github/workflows/deploy.yml"

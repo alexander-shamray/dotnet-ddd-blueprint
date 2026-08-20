@@ -199,17 +199,33 @@ reaches no cluster and no Prometheus, and the weight arithmetic and the
 promote/rollback decision have a suite because they are the parts a workflow
 cannot be trusted with.
 
-**Two of the three filters name files outside their own tree**, and neither is
-an oversight — each names an input its gate actually reads. The Helm one is
-below; the observability one names `src/**`, because deciding whether an alert's
-signal exists means reading every instrument declaration in C#, and
+**Three of the four filters name files outside their own tree**, and none is an
+oversight — each names an input its gate actually reads. Compose is the one
+that stays inside, because its smoke starts the file and nothing else. The Helm
+one is below; the observability one names `src/**`, because deciding whether an
+alert's signal exists means reading every instrument declaration in C#, and
 `docs/runbooks/**`, because a renamed runbook is an alert with no procedure
-behind it. **Neither workflow keeps that list in its own YAML.** `smoke.sh`
-declares `SOURCE_INPUTS` and `check.py` declares its own, each beside the reads,
-and each asserts that both of its workflow's triggers cover every entry — a
-copy of a list drifts exactly as a copy of a number does, which the Helm tree
-established at a cost of three findings and the observability tree adopted
-before paying it once.
+behind it; the canary one names `deploy/helm/**`, because its plan asserts each
+workload's chart exists and can render a canary track, `src/**`, because it
+checks each `serviceName` against a real entry assembly, and
+`deploy/observability/**`, because it takes §13.6's thresholds out of the rules
+file rather than restating them. **None of the three keeps that list in its own
+YAML.** `smoke.sh`, `check.py` and `canary.py` each declare `SOURCE_INPUTS`
+beside the reads, and each asserts that both of its workflow's triggers cover
+every entry — a copy of a list drifts exactly as a copy of a number does, which
+the Helm tree established at a cost of three findings and the observability
+tree adopted before paying it once.
+
+> **The canary tree paid for it anyway, and the shape of the failure is worth
+> more than the fix.** Its list shipped naming `src` and `deploy/helm` and
+> omitting `deploy/observability`, which two of its own checks open — so
+> retuning an alert threshold was a green pull request on the gate that exists
+> to keep the canary from being tuned looser than the alert it would then page
+> about. **The assertion stayed green throughout**, because a list can only be
+> compared against a workflow for the entries it already contains: a gate
+> cannot see a read it was never told about. What closes it is a test whose
+> subject is the reads rather than the list — the same shape as asserting a
+> parser found anything at all.
 
 Each of the Helm filter's outside paths is an input `smoke.sh` actually reads:
 
@@ -226,7 +242,10 @@ Each of the Helm filter's outside paths is an input `smoke.sh` actually reads:
   the routes from that file rather than holding a fourth copy of them;
 - `.gitattributes`, which pins this tree to LF — without it a CRLF template
   renders a CR onto every line and the script's anchored greps match nothing on
-  a Linux runner.
+  a Linux runner;
+- `deploy/canary/canary.json`, which names a chart per workload — so a rollout
+  can only target a chart that exists and renders a canary track, and the two
+  halves of that agreement fail from either side rather than at deploy time.
 
 **This passage is an argument, not an inventory, and the difference is what
 finally stopped it drifting.** It said "two files", and was made wrong by the

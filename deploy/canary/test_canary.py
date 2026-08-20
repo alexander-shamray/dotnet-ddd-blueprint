@@ -16,6 +16,7 @@ through a reading nobody took.
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -252,6 +253,51 @@ class PlanDocumentTests(unittest.TestCase):
         for expression in canary.entries(self.document["queries"]).values():
             self.assertIn("deployment_track", expression)
             self.assertNotIn("service_version", expression)
+
+
+class SourceInputTests(unittest.TestCase):
+    """SOURCE_INPUTS against the reads it claims to enumerate.
+
+    The list shipped incomplete: it declared `src` and `deploy/helm` and
+    omitted `deploy/observability`, which checks 3 and 5 both open. Check 7
+    stayed green throughout, because a list can only be compared against the
+    workflow for the entries it contains — **a gate cannot see a read it was
+    never told about.**
+
+    That is the same shape as the empty-parser tests one directory over, and
+    the reason this is a test rather than a careful re-reading: the comment
+    above the list says "EVERY PATH OUTSIDE deploy/canary THAT THIS SCRIPT
+    READS", and nothing was checking the word *every*.
+    """
+
+    # `root / "deploy" / "observability"` and `(root / "src")`, as written.
+    READ = re.compile(r'root\s*/\s*"([a-z]+)"(?:\s*/\s*"([a-z-]+)")?')
+
+    def paths_read(self) -> set[str]:
+        source = Path(canary.__file__).read_text(encoding="utf-8")
+        found = set()
+        for first, second in self.READ.findall(source):
+            # `deploy` alone is not a declarable input -- deploy/compose must
+            # NOT trigger this gate -- so a read under it is recorded with its
+            # subtree. Anything else is recorded at its top level.
+            found.add(f"{first}/{second}" if first == "deploy" and second else first)
+        return found
+
+    def test_the_scan_finds_the_reads_it_is_checking(self) -> None:
+        """The subject, before the assertion. A regex that matched nothing
+        would pass the test below against any list at all."""
+        self.assertIn("deploy/observability", self.paths_read())
+        self.assertIn("src", self.paths_read())
+
+    def test_every_path_the_script_reads_is_declared(self) -> None:
+        for path in sorted(self.paths_read()):
+            with self.subTest(path=path):
+                self.assertTrue(
+                    any(path == entry or path.startswith(f"{entry}/")
+                        for entry in canary.SOURCE_INPUTS),
+                    f"canary.py opens {path!r} and SOURCE_INPUTS does not declare it, "
+                    f"so deploy.yml's triggers do not watch it: {canary.SOURCE_INPUTS}",
+                )
 
 
 class CommentTests(unittest.TestCase):

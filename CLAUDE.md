@@ -118,8 +118,17 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
 .github/workflows/deploy.yml §15.5's canary, `workflow_dispatch` ONLY — a
                              deploy on `push` would fail on every merge for
                              want of a cluster, and a pipeline red by design
-                             trains everyone to ignore it. Its `check` job does
-                             run on pull requests and gates deploy/canary/**
+                             trains everyone to ignore it. Its `check` job DOES
+                             run on pull requests, and is the THIRD workflow to
+                             reach outside its tree: deploy/helm/**, src/** and
+                             deploy/observability/**, declared as SOURCE_INPUTS
+                             in canary.py. It adopted the lesson and paid for
+                             it anyway — the list shipped omitting the
+                             observability entry that two of its own checks
+                             read, and the trigger assertion stayed green,
+                             because a gate cannot see a read it was never told
+                             about. A test over the reads is what closes that,
+                             not a more careful list
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/pipeline-gate/       PR-25's quality gates, and all three are
                              inventories: every deployable under src/ is
@@ -606,6 +615,23 @@ own line rather than sending a reader to a file that does not hold it.
   that it refused, and a second test asserts *why*, against the options
   pipeline where nothing races. Measured on this repository: intermittent on a
   two-core CI runner, never once locally.
+- **A declared-inputs list checks itself against the workflow, never against
+  the reads — so an omission is invisible from inside the gate.** The Helm
+  tree's `SOURCE_INPUTS` pattern was adopted twice more and then failed a third
+  time in the obvious way: `canary.py` declared two paths and opened three, and
+  its "both triggers cover every entry" assertion stayed green throughout,
+  because a list can only be compared for the entries it already contains. **A
+  gate cannot see a read it was never told about.** The fix is a test whose
+  subject is the *reads* — the same shape as asserting a parser found anything
+  at all — and it is owed by every copy of this pattern, not just the one that
+  was caught.
+- **A `helm upgrade --install` of a new release inherits nothing.** A second
+  release of the same chart takes the chart's defaults for every value the
+  environment overlay would have supplied — authority, OTLP endpoint, database
+  — unless it is given them. Only one chart here failed loudly (the gateway
+  refuses an empty `ingress.trustedNetworks`); the other three would have
+  installed and been quietly wrong. Drive a sibling release from
+  `helm get values` of the one it is a sibling of.
 - **A tool that changes where it writes when you ask it for something else is
   a premise you did not know you had.** `domain_coverage.py` asserted exactly
   one Cobertura file per run, correctly, until `--logger trx` was added for an
