@@ -1477,10 +1477,19 @@ separately. Before the charts existed, "the scaffold writes no chart" described
 a file nobody had; since they exist, a scaffolded service compiles, tests,
 starts under Compose — and cannot be deployed, with nothing in the render
 saying so. That is a gap in the scaffold rather than a contradiction here, and
-it is **owed**: the chart is four files, three of which are one line, and the
-fourth is the values file that carries every per-service decision — which is
-precisely the file a template cannot guess and §15.3 spends a section
-arguing.
+it is **owed**, and the shape of what is owed is the shape §15.3 already
+describes: a `Chart.yaml`, one one-line include per template the library chart
+defines, and a `values.yaml`. Only the last is real work, and it is real work —
+it carries every per-service decision, which is precisely what a template
+cannot guess and what §15.3 spends a section arguing.
+
+**No file count here, deliberately.** An earlier revision said "four files,
+three of which are one line", which was wrong on both numbers and wrong in a
+way that would have propagated: a later PR closing this gap by emitting four
+files emits a chart that does not deploy. The count moves whenever the library
+gains a template — the deployables today carry six of those includes or seven,
+depending on whether the service owns a database — so the thing worth writing
+down is the rule, not the arithmetic.
 
 **The scaffold refuses `Shipping` and `Notifications` by name until it can.**
 Documenting the gap left the script willing to render either as an API service,

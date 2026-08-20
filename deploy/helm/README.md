@@ -123,8 +123,8 @@ fail, and the values comment crediting the missing key was describing a
 mechanism nothing consulted. It is now an assertion about the agreement between
 the two halves, and it fails from either side.
 
-**One of the twenty found a defect in the charts rather than in the harness**,
-and it was found by writing the assertion rather than by reading the template:
+**One of them found a defect in the charts rather than in the harness**, and it
+was found by writing the assertion rather than by reading the template:
 the rollout checksum hashed only the ConfigMap the library renders, so editing
 `cors.origins` changed a mounted ConfigMap and left the pod template
 byte-identical — a deploy that reports success and rolls nothing. The

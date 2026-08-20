@@ -574,8 +574,10 @@ wrongly without:
 # deploy/helm/gateway/values.yaml — an excerpt, on the same terms as Ordering's
 # above. The keys every chart shares are omitted here rather than repeated:
 # `workload.name` (required, and `gateway`), `ports`, `probes.probePort`,
-# `terminationGracePeriodSeconds`, `observability`, and `database.enabled` /
-# `broker.enabled`, both `false` because this host owns neither.
+# `terminationGracePeriodSeconds`, `observability`, `image.pullPolicy`, and
+# `database.enabled` / `broker.enabled`, both `false` because this host owns
+# neither. `service.enabled` is NOT among them — it is in the fence below,
+# because this section spends a page arguing that key must be written down.
 replicaCount: 3
 
 image:
@@ -614,6 +616,12 @@ probes:
   liveness:  { path: /health/live,  initialDelaySeconds: 10, periodSeconds: 10 }
   readiness: { path: /health/ready, initialDelaySeconds: 5,  periodSeconds: 5 }
   startup:   { path: /health/startup, failureThreshold: 30,  periodSeconds: 2 }
+
+service:
+  # True, and in the fence rather than in the omission list above, because this
+  # is the chart a new deployable gets copied from — it is the one with an
+  # Ingress — and `service.enabled` is the key a worker has to turn off.
+  enabled: true
 
 identity:
   # Authority only. The gateway validates JWTs (§11.2) but calls nobody —
