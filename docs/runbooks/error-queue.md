@@ -18,9 +18,21 @@ The threshold is `> 0` because there is no healthy number of poison messages.
 ## Which queue, and therefore which consumer
 
 The queue name is the endpoint name plus `_error`, so it names the receive
-endpoint directly. §9.8 and §9.4 define them; Ordering's are
-`ordering-catalog-events` and `ordering-commands`, each with its own error
-queue.
+endpoint directly. §9.8 and §9.4 define them, and **Ordering declares four** —
+each with an error queue of its own:
+
+| Endpoint | Carries |
+|---|---|
+| `ordering-catalog-events` | Catalog's three product events → the price projection (§6.6) |
+| `ordering-commands` | The four commands §9.6's saga sends to this service |
+| `ordering-stock-events` | `StockReserved` → `Order.ConfirmStock` |
+| `ordering-fulfilment-saga` | The saga's own correlated events and timeouts |
+
+**List them from `Endpoints`/`DependencyInjection.cs` rather than from memory.**
+An earlier version of this runbook named the first two and stopped, which is
+worse than naming none: the `_error` grep below still shows all four, but an
+on-call who trusts a short inventory reads a poisoned `ConfirmStock` or a stuck
+saga as "no Ordering error queue" and looks in another service.
 
 ```bash
 kubectl -n <ns> exec deploy/rabbitmq -- \

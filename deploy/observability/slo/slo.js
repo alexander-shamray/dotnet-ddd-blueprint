@@ -48,6 +48,30 @@ const CLIENT_SECRET = __ENV.CLIENT_SECRET;
 const commandDuration = new Trend('slo_command_duration', true);
 const queryDuration = new Trend('slo_query_duration', true);
 
+// THE RATE BUDGETS, and why they are low. The run drives the public edge —
+// `/api/v1/...` exists only after YARP strips the prefix — so §10.3's limiter
+// is in front of every request:
+//
+//   anonymous     (catalog-public)  100 req / minute / IP,      QueueLimit 0
+//   authenticated (ordering)        300 tokens / minute / sub,  QueueLimit 10
+//
+// An earlier draft ran 30/s and 5/s — 1,800/min and 300/min. The first is
+// eighteen times the anonymous budget, so everything past the first hundred
+// listings in each window is a 429; the second sits exactly ON the
+// authenticated ceiling, where arrival jitter turns a slice of the writes into
+// 429s and QueueLimit 10 is not a margin on 300.
+//
+// With `checks: ['rate==1']` that fails the run on a HEALTHY platform, and
+// `http_req_failed` does not count 429 — so without the checks threshold the
+// durations would look fast and it would pass instead. Both outcomes are the
+// trap this file already guards against for 422, arriving through the limiter
+// rather than the domain.
+//
+// **Do not raise these to make the run heavier**, and do not point BASE_URL at
+// a service port to escape the limiter: `/api/v1/...` 404s there, and the edge
+// is precisely what the client-side thresholds exist to see (§13.7). If more
+// load is genuinely wanted, the limits in Gateway.Api/Program.cs and these
+// numbers move in the same change — which is why both are written here.
 export const options = {
     scenarios: {
         // The anonymous product listing — §10.2's `catalog-public` route is
@@ -55,18 +79,22 @@ export const options = {
         // cleanest read-path signal available.
         query: {
             executor: 'constant-arrival-rate',
-            rate: 30,
+            // 60/min against §10.3's `anonymous` budget of 100/min per IP,
+            // fixed window, QueueLimit = 0. See THE RATE BUDGETS below.
+            rate: 1,
             timeUnit: '1s',
             duration: '3m',
-            preAllocatedVUs: 20,
-            maxVUs: 60,
+            preAllocatedVUs: 10,
+            maxVUs: 30,
             exec: 'browseCatalog',
         },
         // Placing an order is the write path: one aggregate, the outbox row in
         // the same transaction (§6.3), and the saga started off the back of it.
         command: {
             executor: 'constant-arrival-rate',
-            rate: 5,
+            // 180/min against §10.3's `authenticated` budget of 300/min per
+            // subject, token bucket, QueueLimit = 10. See below.
+            rate: 3,
             timeUnit: '1s',
             duration: '3m',
             preAllocatedVUs: 10,
