@@ -430,6 +430,21 @@ else
     fail "Service(s) nothing in src/ dials: $(echo "$undialled" | tr '\n' ' ')"
 fi
 
+# ...and the other direction, which is the one an overlay can break. A chart
+# whose workload name is dialled from src/ MUST render a Service: turning it off
+# leaves a healthy release in which every routed request fails, and
+# `service.enabled` was a free value until Copilot pointed at it.
+for chart in $SERVICE_CHARTS; do
+    name="$(awk '/^workload:/ { w = 1 } w && /^  name: / { sub(/^  name: /, ""); print; exit }' \
+        "$CHARTS_DIR/$chart/values.yaml")"
+    if grep -qx "$name" "$OUT/pairs.txt" 2>/dev/null || cut -d' ' -f1 "$OUT/pairs.txt" | grep -qx "$name"; then
+        check "$chart is dialled as $name, so it must keep its Service" \
+            grep -qE '^  enabled: true' <(awk '/^service:/ { s = 1; next } s && /^[a-z]/ { s = 0 } s' "$CHARTS_DIR/$chart/values.yaml")
+    else
+        pass "$chart ($name) is not a routed destination — its Service is optional"
+    fi
+done
+
 # The ports are literals in the same two files, so they are asserted the same
 # way rather than trusted — which means the SERVICE port, not the container
 # port. `PricingHop.cs` dials `http://catalog-api:8081`, and what answers that
@@ -486,7 +501,12 @@ section 'Branches no chart takes yet, exercised anyway'
 # neither exists yet — so without this the branch would ship untested and the
 # key would be decorative in every chart that sets it. Rendering one chart with
 # the value flipped is what makes the key mean something today.
-"$HELM" template ordering "$CHARTS_DIR/ordering" --set-string "image.tag=$TAG" \
+# Rendered under a name NOTHING dials, which is the difference between
+# exercising the worker branch and asserting that Ordering may drop its Service.
+# Ordering is a routed destination; the check above now forbids exactly that,
+# and this test used to establish it as valid one section earlier.
+"$HELM" template shipping "$CHARTS_DIR/ordering" --set-string "image.tag=$TAG" \
+    --set-string "workload.name=shipping-worker" \
     --set service.enabled=false >"$OUT/worker.yaml"
 check 'service.enabled=false renders no Service' \
     test "$(count '^kind: Service$' "$OUT/worker.yaml")" -eq 0
@@ -596,6 +616,32 @@ refuses 'an origin carrying a query fails the render' 'is not a browser origin' 
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com?x}'
 refuses 'an origin naming the default port fails the render' 'default port' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:443}'
+refuses 'an origin with a leading-zero port fails the render' 'non-canonically' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:08080}'
+
+# A capability is a fact about the code, not an environment setting. Each of
+# these renders cleanly and produces a pod that will not start — and each has to
+# be aimed at a chart that HAS the capability, or the test is vacuous. `refuses`
+# above renders the gateway, which owns no database and no migrator, so the
+# first two of these were meaningless against it until this helper existed.
+refuses_chart() {
+    # refuses_chart <chart> <label> <needle> <helm args...>
+    local chart="$1" label="$2" needle="$3"
+    shift 3
+    if "$HELM" template "$chart" "$CHARTS_DIR/$chart" --set-string "image.tag=$TAG" \
+        "$@" >"$OUT/cap.txt" 2>&1; then
+        fail "$label — it rendered instead"
+    else
+        check "$label" grep -q "$needle" "$OUT/cap.txt"
+    fi
+}
+
+refuses_chart catalog 'disabling a database the chart is configured for fails the render' \
+    'database.enabled is false' --set database.enabled=false
+refuses_chart catalog 'disabling a broker the chart is configured for fails the render' \
+    'broker.enabled is false' --set broker.enabled=false
+refuses_chart catalog 'clearing the migrator image fails the render' \
+    'image.migrator is required' --set-string 'image.migrator='
 refuses 'an origin with a non-numeric port fails the render' 'is not a browser origin' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:notaport}'
 # Case, which the shape test cannot see: the canonical origin lowercases scheme
@@ -640,6 +686,8 @@ refuses_bff 'clearing the BFF client id fails the render' 'identity.clientId is 
     --set-string 'identity.clientId='
 refuses_bff 'a whitespace-only BFF client id fails the render' 'identity.clientId is required' \
     --set-string 'identity.clientId= '
+refuses_bff 'disabling the BFF client credentials fails the render' \
+    'clientCredentials is false' --set identity.clientCredentials=false
 
 # --------------------------------------------------------------------------
 section 'No pod carries a cluster credential it never uses'

@@ -181,6 +181,45 @@ Secret objects (§15.4); a chart that templated a connection string would put a
 password into `helm get values` and into every diff of this repository.
 */}}
 {{- define "commerce.env" -}}
+{{- /*
+A CAPABILITY IS A FACT ABOUT THE CODE, NOT AN ENVIRONMENT SETTING, and these
+flags were free values until Copilot pointed at six of them at once.
+
+`Catalog.Infrastructure` always calls `GetConnectionString("Catalog")` and
+always registers MassTransit; `Web.Bff` always binds `ServiceIdentityOptions`
+with `ValidateOnStart`. So `database.enabled: false` on Catalog, or
+`clientCredentials: false` on the BFF, is not a smaller deployment — it is a
+clean render followed by a pod that will not start, which is the exact shape
+every guard in this file exists to refuse.
+
+Helm has no immutable value, so the guard is coherence instead: a chart that
+carries the SETTINGS for a capability may not disable it. Only a chart that
+never had them can be off, which is what makes the gateway's `enabled: false`
+lines honest and an overlay's a refusal.
+
+The schema was the other candidate — a `chart:` block naming each capability,
+replacing these flags. It is the better shape and it is not this PR's: it
+renames keys §15.3 prints, at round six of a review, and the coherence check
+closes the same six holes without moving anything a reader has been told to
+look for.
+*/}}
+{{- /*
+On Catalog and Ordering the migration Job's own coherence check reaches this
+first and reports a sharper message, so what surfaces there is "a migrator with
+no database is incoherent". This is the general case behind it: a chart with a
+connection name and no migrator — which nothing in the platform is yet, and
+which Shipping and Notifications will not be either — still may not disable the
+database its host unconditionally resolves.
+*/}}
+{{- if and .Values.database.connectionName (not .Values.database.enabled) }}
+{{- fail "database.enabled is false but database.connectionName is set. A service that carries a connection name reads one at startup (§7.1) — disabling it renders cleanly and produces a pod that cannot resolve its own database. A capability is a fact about the code, not an environment setting." }}
+{{- end }}
+{{- if and .Values.broker.secretRef (not .Values.broker.enabled) }}
+{{- fail "broker.enabled is false but broker.secretRef is set. AddMassTransitMessaging throws without ConnectionStrings:RabbitMq (§9.3), so this renders cleanly and the host does not start." }}
+{{- end }}
+{{- if and .Values.identity.clientId (not .Values.identity.clientCredentials) }}
+{{- fail "identity.clientCredentials is false but identity.clientId is set. Web.Bff binds ServiceIdentityOptions unconditionally and ValidateOnStart refuses to boot without all three values (§15.4) — so this is a render that succeeds and a pod that never starts." }}
+{{- end }}
 {{- if .Values.database.enabled }}
 {{- /*
 The RUNTIME connection string (DML only) — §7.1's split identity. The migrator

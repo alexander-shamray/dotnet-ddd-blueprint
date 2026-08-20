@@ -1,12 +1,16 @@
-# ONE RELEASE OWNS A NAMESPACE, AND THE TWO FLOWS CANNOT BE MIXED.
+# ONE RELEASE OWNS A RESOURCE, AND THAT IS WHAT THE TWO FLOWS CANNOT SHARE.
 #
 # Helm stamps `meta.helm.sh/release-name` onto every object it creates, and
 # these charts render fixed names (§15.3 — the Service name is routing
-# configuration, so it cannot carry a release prefix). So if `platform`
-# installs Catalog, a later `helm upgrade --install catalog-api
-# deploy/helm/catalog` is REJECTED for ownership, and the reverse is rejected
-# the same way. An environment stood up by this chart is upgraded by this
-# chart.
+# configuration, so it cannot carry a release prefix). So `platform` and a
+# per-service release cannot both own `catalog-api`: if this chart installs it,
+# a later `helm upgrade --install catalog-api deploy/helm/catalog` is REJECTED
+# for ownership, and the reverse is rejected the same way. An environment stood
+# up by this chart is upgraded by this chart.
+#
+# NOT "one release per namespace" — the production model below is several
+# per-service releases sharing one, which is fine because they own disjoint
+# objects. The conflict is overlap, not co-tenancy.
 #
 # §15.1 settles which one production uses, and it is not this one: its
 # config-only deploy step reads `helm get values ordering -n "$NAMESPACE"`,

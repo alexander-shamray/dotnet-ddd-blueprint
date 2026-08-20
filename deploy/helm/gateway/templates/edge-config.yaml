@@ -126,9 +126,21 @@ data:
   {{- end }}
   {{- $port := regexFind ":[0-9]+$" $o }}
   {{- if $port }}
-  {{- $n := atoi (trimPrefix ":" $port) }}
+  {{- $digits := trimPrefix ":" $port }}
+  {{- $n := atoi $digits }}
   {{- if or (lt $n 1) (gt $n 65535) }}
   {{- fail (printf "cors.origins[%d] names a port outside 1-65535." $i) }}
+  {{- end }}
+  {{- /*
+  And the spelling, not only the number. `:08080` is a valid integer and is not
+  a canonical origin: `GetLeftPart(UriPartial.Authority)` renders it `:8080`,
+  and `WithOrigins` compares text — so it renders here, rolls, and is rejected
+  at startup. Comparing the digits with the integer printed back is the whole
+  test, and it catches every non-canonical spelling rather than leading zeros
+  alone.
+  */}}
+  {{- if ne $digits (printf "%d" $n) }}
+  {{- fail (printf "cors.origins[%d] spells its port non-canonically (leading zeros). The canonical origin drops them and WithOrigins compares text, so this matches nothing while looking correct (§10.2)." $i) }}
   {{- end }}
   {{- if or (and (hasPrefix "https://" $o) (eq $n 443)) (and (hasPrefix "http://" $o) (eq $n 80)) }}
   {{- fail (printf "cors.origins[%d] names the scheme's default port. A browser serialises an origin without it, and WithOrigins compares the configured text — so this matches nothing while looking correct (§10.2)." $i) }}

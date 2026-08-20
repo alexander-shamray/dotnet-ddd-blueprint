@@ -115,12 +115,15 @@ gateway:
 - **A cluster.** `smoke.sh` renders and greps; it never applies. Schema
   validation against a live API server is a deploy-time gate (§15.1). Two
   known gaps live on that side of the line and neither can be rendered:
-  - **Mixing the two install modes.** One release owns a namespace — Helm
+  - **Mixing the two install modes.** One release owns a *resource* — Helm
     stamps `meta.helm.sh/release-name` on everything and these charts render
-    fixed names, so an umbrella-installed namespace rejects a later
-    per-service `helm upgrade --install`, and the reverse too. §15.1's
+    fixed names, so the umbrella and a per-service release cannot both own
+    `catalog-api`; whichever installs second is rejected, in either order. Not
+    one release per namespace: production is several per-service releases
+    sharing one, which is fine because they own disjoint objects. §15.1's
     per-service pipeline is what production uses; the umbrella stands an
-    environment up whole. The conflict is an API-server error at install time.
+    environment up whole. The conflict is an API-server error at install
+    time.
   - **Secret rotation does not roll pods.** `secretKeyRef` values are
     snapshotted when a container starts, and External Secrets rotating the
     underlying Secret changes no chart value — so the checksum is unchanged
@@ -134,7 +137,7 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Forty-nine deliberate defects have been run through it and forty-eight turned
+**Fifty-five deliberate defects have been run through it and fifty-four turned
 a green run red** — a renamed Service, a CPU limit, a grace period back at the
 Kubernetes default, a dropped hook annotation, a connection string moved into a
 ConfigMap, a second chart growing client credentials, an `envFrom` naming a
@@ -145,7 +148,9 @@ backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
 whitespace-only authority, an origin carrying credentials, a pod remounting the
 service-account token, a listener moved out from under its own Service, a
 validator that checked one string and shipped another, an uppercase host, a
-CIDR that is not one, a migrator pod answering its own service's traffic.
+CIDR that is not one, a migrator pod answering its own service's traffic, a
+routed service switching its own Service off, a capability cleared by an
+overlay.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,

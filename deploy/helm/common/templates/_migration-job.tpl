@@ -23,7 +23,21 @@ before it grows the value. smoke.sh asserts the two agree, because either half
 on its own is a claim nothing tests.
 */}}
 {{- define "commerce.migrationJob" -}}
-{{- if .Values.image.migrator -}}
+{{- /*
+REQUIRED, not `if`. A chart that includes this template is a chart that owns a
+database, and `image.migrator` was acting as an opt-out: clearing it made the
+Job vanish and let the release roll application pods against an unmigrated
+schema — silently, because a template that renders nothing renders no error.
+
+The gateway and the BFF do not reach this line at all; they carry no
+`migrate-job.yaml`. That is the structural half, and this is the other: the
+only charts that get here are the ones that must run a migration, so the image
+is a requirement rather than a switch. `smoke.sh` asserts the two halves agree.
+*/}}
+{{- $migrator := include "commerce.require" (list .Values.image.migrator "image.migrator is required in a chart that carries templates/migrate-job.yaml: clearing it would drop the hook and roll application pods against an unmigrated schema (§7.4, ADR-007).") -}}
+{{- if not .Values.database.enabled }}
+{{- fail "image.migrator is set but database.enabled is false. A migrator with no database is incoherent — the Job would mount a connection string the service is not configured to use (§7.1)." }}
+{{- end }}
 {{- $tag := include "commerce.tag" . -}}
 apiVersion: batch/v1
 kind: Job
@@ -87,7 +101,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: migrate
-          image: "{{ .Values.image.registry }}/{{ .Values.image.migrator }}:{{ $tag }}"
+          image: "{{ .Values.image.registry }}/{{ $migrator }}:{{ $tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -107,5 +121,4 @@ spec:
                   key: {{ include "commerce.require" (list .Values.database.migratorSecretRef.key "database.migratorSecretRef.key is required whenever image.migrator is set.") | quote }}
           resources:
             {{- toYaml .Values.migrationJob.resources | nindent 12 }}
-{{- end -}}
 {{- end -}}

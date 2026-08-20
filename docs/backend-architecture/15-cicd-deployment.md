@@ -360,12 +360,17 @@ the exact failure the migration hook exists to prevent.
 
 Each service gets a Helm chart; an umbrella chart deploys the platform.
 
-> **One release owns a namespace, and the two install modes cannot be mixed.**
-> Helm stamps `meta.helm.sh/release-name` onto everything it creates, and these
-> charts render fixed names — the Service name is routing configuration and
-> cannot carry a release prefix. So a namespace installed by the umbrella
-> rejects a later per-service `helm upgrade --install` for ownership, and the
-> reverse is rejected the same way. **§15.1 settles which one production
+> **One release owns a RESOURCE, and that is what the two install modes
+> cannot share.** Helm stamps `meta.helm.sh/release-name` onto everything it
+> creates, and these charts render fixed names — the Service name is routing
+> configuration and cannot carry a release prefix. So the umbrella and a
+> per-service release cannot both own `catalog-api`: whichever installs second
+> is rejected for ownership, in either order.
+>
+> **Not "one release per namespace", which would contradict the model
+> immediately below.** Production is several per-service releases sharing one
+> namespace, and that is fine — they own disjoint sets of objects. The conflict
+> is overlap, not co-tenancy. **§15.1 settles which one production
 > uses**: its config-only deploy reads `helm get values ordering`, a per-service
 > release by name, because the pipeline builds and deploys per service. The
 > umbrella's job is standing an environment up *whole* — a fresh cluster, a
