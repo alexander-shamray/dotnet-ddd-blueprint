@@ -351,9 +351,9 @@ it enforces:
 |---|---|---|
 | `*.Domain` | allow-list | every referenced assembly is on a list |
 | `*.Application` | allow-list | the same, one layer out |
-| `*.Infrastructure` | any package | no assembly from another service |
+| `*.Infrastructure` | any package | no assembly from another service, and none from the migrator |
 | `*.Migrator` | allow-list, narrowest | every referenced assembly is on a list |
-| `*.Api` | composition root, plus any package | the root rule above, and no assembly from another service |
+| `*.Api` | composition root, plus any package | the root rule above, no assembly from another service, and none from the migrator |
 
 **The cross-service rule is one test over all five assemblies**, and it is
 stated as an allow-list of *prefixes* rather than a deny-list of service
@@ -417,6 +417,20 @@ build failure; no ASP.NET, because it is a job host
 `Common.*` at all**, which is the strongest statement of the row — the migrator
 resolves a `DbContext` and calls `Database.Migrate()`, and none of the building
 blocks is on that path.
+
+**Nothing references the migrator, and saying so took a third gate rather than
+a wider prefix.** No row in the table names the `*.Migrator` as something a
+project *may* reference: it is a leaf, a job host that resolves a `DbContext`
+and calls `Database.Migrate()` ([§7.4](07-persistence.md)), so it references
+and is not referenced. The cross-service gate cannot see that edge, because it
+subtracts every assembly under this service's own name — which is precisely
+what makes an `Api → Migrator` reference invisible to it. That edge is inside
+one service and still forbidden, so it gets a rule of its own over the other
+four assemblies. **The two gates ask different questions** — *whose is it* and
+*which layer is it* — and one predicate answering both would answer neither
+legibly. The migrator is skipped as a subject rather than exempted in the
+predicate: an assembly does not reference itself, so including it would pass
+vacuously and read as coverage.
 
 **`*.Application`'s gate lists `Common.Domain` and the table above does not,
 and both are right.** The table is about project references, where the line is

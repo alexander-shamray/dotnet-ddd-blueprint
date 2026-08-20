@@ -315,7 +315,7 @@ the rest of §4.2's dependency table behind gates, split the suite on
 **PR-23 (Helm charts, migration hooks, probes) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 776 tests — so the build rules and the drift rules below
+and `dotnet test` runs 778 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -353,6 +353,14 @@ predicate exists because §4.5's scaffold renames the template's own name inside
 whatever it renders, so a list of service names reaches a new service with the
 one name it most needs *replaced* rather than joined. **A gate the scaffold
 copies cannot be keyed on a name the scaffold rewrites.**
+
+**A third gate says nothing references the `*.Migrator`**, and it exists
+because the cross-service one cannot: that test subtracts every assembly under
+this service's own name, so an `Api → Migrator` edge is invisible to it while
+being forbidden all the same — no row names the migrator as something a project
+*may* reference. Observed red against a deliberate `Catalog.Api →
+Catalog.Migrator` reference **that a line of `Program.cs` actually used**, which
+is the only way to observe this family red at all.
 
 **All five read *emitted* references, which is narrower than the word the table
 uses.** `GetReferencedAssemblies` reports the `AssemblyRef` table, so a
@@ -453,7 +461,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 612 of 776, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 614 of 778, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -487,8 +495,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 612 of
-the 776 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 614 of
+the 778 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 164, needing the daemon exactly as
 before. PR-25 runs them as separate CI stages; today CI runs one pass over
 both, because staging a split §15.1 has not grown yet would claim a pipeline

@@ -227,6 +227,43 @@ public class ArchitectureTests
     }
 
     [Fact]
+    public void Nothing_in_this_service_references_the_migrator()
+    {
+        // §4.2's rows say what each project MAY reference, and no row names
+        // the Migrator: Domain takes Common.Domain, Application takes its own
+        // Domain and the Common pair, Infrastructure takes Domain and
+        // Application, and the Api takes Application and Infrastructure. The
+        // migrator is a leaf — a job host that resolves a DbContext and calls
+        // Database.Migrate() (§7.4) — so it references and is not referenced.
+        //
+        // The cross-service gate above cannot say this, and is not meant to:
+        // it subtracts everything under this service's own prefix, which is
+        // exactly what makes it silent about an Api -> Migrator edge. That
+        // edge is inside one service and still forbidden, so it takes a rule
+        // of its own rather than a cleverer prefix. The two gates ask "whose
+        // is it" and "which layer is it", and one predicate answering both
+        // would answer neither legibly.
+        //
+        // The migrator is skipped as a subject rather than special-cased in
+        // the predicate: an assembly does not reference itself, so including
+        // it would pass vacuously and read as coverage.
+        string self = typeof(Program).Assembly.GetName().Name!.Split('.')[0];
+        string migrator = $"{self}.Migrator";
+
+        foreach (Assembly assembly in ServiceAssemblies)
+        {
+            if (assembly.GetName().Name == migrator)
+                continue;
+
+            string[] referenced = [.. assembly.GetReferencedAssemblies().Select(name => name.Name!)];
+
+            referenced.ShouldNotContain(
+                migrator,
+                $"{assembly.GetName().Name} references the migration job host, which no §4.2 row permits");
+        }
+    }
+
+    [Fact]
     public void The_migrator_references_only_what_applying_a_migration_needs()
     {
         // §4.2's narrowest row, and the only one whose "must never" is a

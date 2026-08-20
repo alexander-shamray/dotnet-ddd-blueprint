@@ -125,7 +125,7 @@ domain-layer coverage. Six of its decisions bind what comes after.
   therefore no reflection gate owed to check that nobody did, which is the
   first time this repo has closed one of these by construction rather than by
   adding a second test. xUnit v3's propagation was measured before the design
-  was trusted: 10 and 71 of 81 on one assembly, 612 and 164 of 776 across the
+  was trusted: 10 and 71 of 81 on one assembly, 614 and 164 of 778 across the
   solution, with no third state.
 - **"No container starts" is a claim about a run, so it was measured — and the
   first attempt to measure it proved nothing.** Pointing `DOCKER_HOST` at a
@@ -203,6 +203,25 @@ into `Directory.Build.props` at the least-reviewed moment in the change, with
 the Grok budget spent and one Copilot round behind it. **The limit is also not
 this PR's**: the Domain gate has read the same table since it was written, so
 the finding describes the gate family rather than the rows PR-22 added.
+
+**The second round found a hole the first one's fix had just papered over, and
+this one was closed rather than documented.** The cross-service gate subtracts
+every assembly under this service's own prefix, so an `Api → Migrator`
+reference passes it *and* the composition-root gate — while §4.2 names the
+migrator in no row's "may reference" column, because it is a leaf job host.
+`Nothing_in_this_service_references_the_migrator` is the third gate, over the
+other four assemblies, and it was **observed red** against a deliberate
+`Catalog.Api → Catalog.Migrator` reference that a line of `Program.cs` actually
+used — the qualifier being the whole lesson of the round before: an unused
+reference is invisible to this instrument, so a probe that only declares the
+edge proves nothing.
+
+**Two gates rather than one wider predicate**, because they ask different
+questions — *whose is it* and *which layer is it* — and a single `.Where` doing
+both reads as neither. The migrator is skipped as a subject rather than
+exempted inside the predicate: an assembly does not reference itself, so
+including it would pass vacuously, which is this repository's most-repeated
+failure wearing its usual disguise.
 
 **What did change is the claim.** The reach is now stated in §4.2 beside the
 two-shape table, in `docs/testing.md`, and in all four test files a reader

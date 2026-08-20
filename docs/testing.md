@@ -90,10 +90,10 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Those are the runner's numbers, and `--list-tests` gives different ones.**
 > Discovery reports 82 for that project where execution reports 81, so a
 > partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 776 is summed from `dotnet test` output, and mixing the two is how
+> here — the 778 is summed from `dotnet test` output, and mixing the two is how
 > this callout first came to claim 72 and 82. Quote what ran.
 >
-> Across the solution the split is **612 and 164 of 776**, and the fast half
+> Across the solution the split is **614 and 164 of 778**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -135,8 +135,8 @@ the instrumentation reason under Coverage below.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 612 and 164 summing to
-> 776 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 614 and 164 summing to
+> 778 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.
