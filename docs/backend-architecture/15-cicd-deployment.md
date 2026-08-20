@@ -161,13 +161,19 @@ oversight. Each is an input the script actually reads:
 - Catalog's `appsettings.json`, which declares the Kestrel endpoints those
   Services forward to, so moving the h2c listener off 8081 would otherwise
   leave a Service pointing at a closed port with every assertion still passing;
+- `Common.Web`'s `HealthCheckExtensions.cs`, which maps the three probe
+  paths — the charts are the manifest [§12.4](12-test-strategy.md)'s health
+  suite warns about by name, "a manifest no compiler reads", so the gate reads
+  the routes from that file rather than holding a fourth copy of them;
 - `.gitattributes`, which pins this tree to LF — without it a CRLF template
   renders a CR onto every line and the script's anchored greps match nothing on
   a Linux runner.
 
-**The list is written out rather than counted**, and that is this branch's
-experience rather than a preference: the sentence here said "two files" and was
-made wrong by the change that added the third.
+**The list is written out rather than counted, and the workflow is still the
+authority.** This passage said "two files" and was made wrong by the change
+that added the third; it then omitted the fourth. A copy of an inventory drifts
+whether it is a number or a list — what a reader gets here is the argument for
+each entry, and `helm.yml` is what actually decides.
 
 `BuildingBlocks` appears under every service, so a change there rebuilds
 everything. That is correct, and it is also the reason to keep those projects

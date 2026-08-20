@@ -50,14 +50,20 @@ spec:
         stays byte-identical. Hashing the render covers what the template does;
         hashing the values covers what the operator does.
 
-        **One residual, named rather than implied.** The gateway renders
-        `gateway-edge` from a template only that chart has, and a library
-        template cannot include it — so a change to *that template's body*, with
-        no values change, still does not roll the gateway. Its values are
-        hashed, which is the path an operator takes; the template body is a
-        chart edit, which arrives through this repository and its own gate.
+        AND every extra ConfigMap's body, which closes the residual this
+        comment used to name. A library template cannot reach a file only one
+        chart has — but it can include a NAMED template, and the name is
+        derivable: each `extraConfigMaps` entry is a suffix, and the chart
+        defines `<chart>.<suffix>` holding that ConfigMap's data. So the mount,
+        the object's metadata and the hash all come from one value, and a
+        chart-only edit to the gateway's edge config now rolls the gateway
+        instead of updating an object nothing rereads.
         */}}
-        checksum/values: {{ printf "%s%s" (toYaml .Values) (include "commerce.configmap" .) | sha256sum }}
+        {{- $extra := "" }}
+        {{- range .Values.extraConfigMaps }}
+        {{- $extra = printf "%s%s" $extra (include (printf "%s.%s" $.Chart.Name .) $) }}
+        {{- end }}
+        checksum/values: {{ printf "%s%s%s" (toYaml .Values) (include "commerce.configmap" .) $extra | sha256sum }}
     spec:
       {{- /*
       terminationGracePeriodSeconds must exceed the host's own shutdown

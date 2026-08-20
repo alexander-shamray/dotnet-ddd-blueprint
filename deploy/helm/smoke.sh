@@ -678,15 +678,24 @@ refuses_chart catalog 'clearing the migrator image fails the render' \
 # A tag is three things with three alphabets: an image reference, a Job name
 # (DNS-1123 subdomain) and a label value. `Release_1` is legal for a registry
 # and illegal for Kubernetes, and the SHA-only cases above never saw it.
-if "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string 'image.tag=Release_1' \
-    >"$OUT/badtag.txt" 2>&1; then
-    fail 'an uppercase image tag renders — it must not'
-else
-    check 'a tag that is legal for a registry and illegal for Kubernetes fails the render' \
-        grep -q 'not usable as Kubernetes metadata' "$OUT/badtag.txt"
-fi
-check 'and ordinary semver still renders' \
-    "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string 'image.tag=1.2.3'
+# One regex over the whole string was not enough: `release_1`, `release..1` and
+# `release.-1` all passed it and are all refused by the API server after the
+# upgrade has started. A DNS-1123 subdomain is dot-separated LABELS, so the
+# check is per segment and so are these cases.
+for bad in Release_1 release_1 release..1 release.-1 -release release-; do
+    if "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string "image.tag=$bad" \
+        >"$OUT/badtag.txt" 2>&1; then
+        fail "image.tag=$bad renders — Kubernetes would refuse the Job it names"
+    else
+        check "image.tag=$bad fails the render" \
+            grep -q 'not usable as Kubernetes metadata' "$OUT/badtag.txt"
+    fi
+done
+
+for good in 1.2.3 0000000000000000000000000000000000000000 v1-2-3; do
+    check "image.tag=$good still renders" \
+        "$HELM" template catalog "$CHARTS_DIR/catalog" --set-string "image.tag=$good"
+done
 refuses 'an origin with a non-numeric port fails the render' 'is not a browser origin' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:notaport}'
 # Case, which the shape test cannot see: the canonical origin lowercases scheme

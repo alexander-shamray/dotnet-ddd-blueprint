@@ -62,15 +62,25 @@ subdomain (uppercase), and therefore a Job the API server refuses — after
 `helm upgrade` has started. The render gate exercised commit SHAs and never
 saw it.
 
-So the accepted shape is the intersection: lowercase alphanumerics, dots,
-dashes and underscores, starting and ending alphanumeric. That admits every
-commit SHA and ordinary semver, and refuses the tags that are legal for a
-registry and illegal for Kubernetes. Validating is preferred to sanitising: a
-derived metadata value that differs from the image tag makes
-`app.kubernetes.io/version` a label that names something no registry has.
+So the accepted shape is the intersection, and the binding constraint is the Job
+name: a DNS-1123 **subdomain** is dot-separated labels, each of lowercase
+alphanumerics and dashes, each starting and ending alphanumeric. Underscores
+are out entirely — legal in a label VALUE and not in a name — and so are empty
+or hyphen-bounded segments.
+
+A single regex over the whole string is what got this wrong the first time:
+`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$` admits `release_1`, `release..1` and
+`release.-1`, all of which Kubernetes refuses after `helm upgrade` has started.
+The segments have to be checked as segments.
+
+Validating is preferred to sanitising: a derived metadata value that differs
+from the image tag makes `app.kubernetes.io/version` a label naming something
+no registry has.
 */}}
-{{- if not (regexMatch "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$" $tag) }}
-{{- fail (printf "image.tag %q is not usable as Kubernetes metadata. It becomes the migration Job's name (a DNS-1123 subdomain) and app.kubernetes.io/version, so it must be lowercase alphanumerics, dots, dashes or underscores, starting and ending alphanumeric — which every commit SHA and ordinary semver already is (§15.3)." $tag) }}
+{{- range $segment := splitList "." $tag }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $segment) }}
+{{- fail (printf "image.tag %q is not usable as Kubernetes metadata: the segment %q is not a DNS-1123 label. The tag becomes the migration Job's name and app.kubernetes.io/version, so each dot-separated segment must be lowercase alphanumerics and dashes, starting and ending alphanumeric — which every commit SHA and ordinary semver already is (§15.3)." $tag $segment) }}
+{{- end }}
 {{- end }}
 {{- $tag -}}
 {{- end -}}

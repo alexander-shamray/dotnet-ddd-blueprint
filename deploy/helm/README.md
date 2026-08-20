@@ -137,7 +137,7 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Fifty-seven deliberate defects have been run through it and fifty-six turned
+**Sixty-four deliberate defects have been run through it and sixty-three turned
 a green run red** — a renamed Service, a CPU limit, a grace period back at the
 Kubernetes default, a dropped hook annotation, a connection string moved into a
 ConfigMap, a second chart growing client credentials, an `envFrom` naming a
@@ -151,7 +151,7 @@ validator that checked one string and shipped another, an uppercase host, a
 CIDR that is not one, a migrator pod answering its own service's traffic, a
 routed service switching its own Service off, a capability cleared by an
 overlay, a health route renamed in the source that maps it, a tag that is legal
-for a registry and illegal for Kubernetes.
+for a registry and illegal for Kubernetes, in six spellings.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,
@@ -182,6 +182,10 @@ the container never sees and is the safe direction.
 CI runs the same script, path-filtered to this tree **and to every input it
 reads outside it**: the gateway's route file and `PricingHop.cs` (renaming a
 destination there would otherwise break a deploy from a green PR), Catalog's
-`appsettings.json` (which declares the listeners those Services forward to),
-and `.gitattributes` (which pins this tree to LF, without which the anchored
-greps match nothing on a Linux runner).
+`appsettings.json` (the listeners those Services forward to), `Common.Web`'s
+`HealthCheckExtensions.cs` (the probe paths, read from source rather than
+repeated here), and `.gitattributes` (which pins this tree to LF, without which
+the anchored greps match nothing on a Linux runner).
+
+`.github/workflows/helm.yml` is the authority for that list; this is a copy,
+and it has been out of date once.
