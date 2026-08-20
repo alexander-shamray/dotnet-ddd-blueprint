@@ -78,6 +78,14 @@ docs/testing.md              how to run the suites — the commands, the
                              Category=Integration filter, which five projects
                              need Docker, what the coverage figure measures.
                              §12 keeps the strategy and wins any disagreement
+docs/secrets.md              how a secret reaches a pod and how each kind is
+                             rotated — the operational half of §15.4 on
+                             testing.md's exact terms, and §15.4 keeps the
+                             inventory and wins any disagreement
+docs/runbooks/               twelve, one per §13.6 alert, since PR-24. Plus a
+                             README that is EXCLUDED from the pairing by name —
+                             one declared exception, so a second non-runbook
+                             file has to be argued for
 docs/superpowers/            one frozen spec + plan per PR, written before it
 
 global.json                  SDK pin (§4.4)
@@ -99,7 +107,14 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              in smoke.sh beside the reads, and the gate asserts
                              both of the workflow's triggers cover it. The one
                              place a deploy/** workflow reaches outside its own
-                             tree
+                             tree — and no longer the ONLY one; see below
+.github/workflows/observability.yml  path-filtered check on
+                             deploy/observability/** — and on src/** and
+                             docs/runbooks/**, which check.py declares as its
+                             own SOURCE_INPUTS beside the reads and asserts
+                             both triggers cover. The second workflow to reach
+                             outside its tree, and it adopted the Helm tree's
+                             lesson before paying for it once
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/coverage/            the domain-coverage reporter — stdlib Python, no
                              tests, and the file argues why: it is a report and
@@ -119,6 +134,17 @@ deploy/helm/                 §15.3's charts since PR-23. `common/` is a LIBRARY
                              the umbrella. `smoke.sh` renders all five and
                              asserts what comes out — it reaches no cluster,
                              and says so
+deploy/observability/        §13.8's dashboards, §13.6's alert rules and
+                             §13.7's k6 SLO run, since PR-24. TWO rule files,
+                             and the split is the point: `platform-alerts.yaml`
+                             is loaded, `awaiting-signal.yaml` holds the four
+                             alerts whose instrument nothing publishes yet and
+                             is NOT. `check.py` pairs alerts with runbooks both
+                             ways, and asserts the awaiting file's metrics are
+                             published by NOTHING — which is what makes that
+                             list self-clearing instead of a list of alerts
+                             nobody ever turned on. It reaches no Prometheus
+                             and does not validate rule syntax, and says so
 
 src/BuildingBlocks/          all five, and complete since PR-15
   Common.Domain/               Entity<TId>, AggregateRoot<TId>, IDomainEvent
@@ -317,7 +343,7 @@ because a probe cannot quietly become a service later.
 
 ## Which phase are you in
 
-**PR-01 through PR-23 have landed, and PR-27 with them** — out of numerical
+**PR-01 through PR-24 have landed, and PR-27 with them** — out of numerical
 order and in sequence, because Appendix C numbers it last and makes it depend
 on PR-17 alone, so it may land at any point after the gateway. The blueprint,
 the foundation, all five building blocks, §14.1's Compose infrastructure,
@@ -334,11 +360,17 @@ the rest of §4.2's dependency table behind gates, split the suite on
 the platform its Helm charts and, with them, the first artefact in this
 repository that **cannot be verified by anything the solution builds** — no
 project references it, `dotnet test` says nothing about it, and its gate is a
-shell script over `helm template`.
-**PR-24 (runbooks, secrets, dashboards-as-code, the SLO run) is next.**
+shell script over `helm template`. PR-24 gave §13.6's alerts their signals —
+`OutboxMetrics` and the `MetricsInitialiser` that forces every metrics type to
+exist — plus the twelve runbooks, `docs/secrets.md`, the dashboards and the k6
+SLO run. It also found that **four of §13.6's twelve alerts read an instrument
+nothing publishes**, which is that section's own callout coming true the moment
+the alerts stopped being a table and became files; those four ship unloaded and
+a gate keeps the list honest.
+**PR-25 (integration categories, canary deploy, quality gates) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 778 tests — so the build rules and the drift rules below
+and `dotnet test` runs 789 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -350,9 +382,10 @@ would otherwise have to guess. PR-20 found the figure eight low against
 summed a local `dotnet test Platform.slnx` the same way, which is the same
 arithmetic over an artefact one machine older.
 
-Since PR-11 there is a second suite
-with a second runner: `py -3.12 -m unittest` in `tools/new-service` runs 81,
-and CI has a `scaffold` job for them beside `licence-gate`.
+**PR-11 was where a second suite and a second runner first appeared**, and
+there are four suites now — see *The commands* below, which is where the
+current set lives. That one: `py -3.12 -m unittest` in `tools/new-service` runs
+81, and CI has a `scaffold` job for them beside `licence-gate`.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
 gate was observed red against a deliberately added forbidden reference before
@@ -506,6 +539,30 @@ own line rather than sending a reader to a file that does not hold it.
   was a copy that went stale again. What ended it was declaring the list once,
   beside the code that reads it, and asserting the other copy matches. The
   prose then carries the argument for each entry rather than the entries.
+- **A registered name is not a live signal, and the registration is what makes
+  the absence invisible.** §13.2 registers the HybridCache meter; no host calls
+  `AddRedisConnections`, so nothing publishes to it. A reviewer asking "is the
+  meter registered" gets a yes, the dashboard is empty, and empty reads as
+  healthy. The same shape reaches further than metrics — a declared
+  dependency, a mounted config key, a bound endpoint. **Ask what writes to it,
+  not whether it exists.**
+- **A list of things known to be missing needs a gate asserting they are still
+  missing.** PR-24's four unloaded alerts would otherwise become four alerts
+  nobody ever turned on: the gate that says "these metrics are published by
+  nothing" is what turns the list into a red build on the day one of them
+  lands. A TODO nothing re-checks is a decision, not a deferral.
+- **A filter that names a state the system does not have excludes nothing and
+  therefore matches everything.** §13.6 excludes a saga "awaiting despatch";
+  the state is called `Confirmed`, so `state!="AwaitingDespatch"` would have
+  paged on every healthy confirmed order. Prose describing a state and code
+  selecting one are different acts — **read the enum, not the sentence.**
+- **A pattern that is one token too strict silently covers less than it
+  claims.** The observability gate's instrument reader required `Create…<T>(`
+  and found every histogram and counter while missing all three observable
+  gauges, because `CreateObservableGauge` infers its type argument. It reported
+  four correct alerts as having no signal — loudly, this time. The quiet
+  version of the same bug is what the gate-coverage lesson at the top of this
+  list is about.
 
 ### The commands
 
@@ -516,15 +573,16 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 614 of 778, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 618 of 789, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Three suites, three runners, and only one of them is `dotnet test`.** The
-scaffold's tests are Python and the chart gate is bash over `helm template`;
-neither is in `Platform.slnx`, so a green solution says nothing about either:
+**Four suites, three runners, and only one of them is `dotnet test`.** The
+scaffold's tests are Python, the chart gate is bash over `helm template`, and
+the observability gate is Python again; none is in `Platform.slnx`, so a green
+solution says nothing about any of them:
 
 ```bash
 (cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
@@ -532,12 +590,19 @@ python tools/new-service/new_service.py <Name> --port <51xx>
 
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
 HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
+
+py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
 ```
 
 The chart gate needs `helm dependency update` before it can render anything,
 and runs it itself — `file://` dependencies resolve from disk, so there is no
 network step and no chart repository. `deploy/helm/README.md` is its
 operational reference.
+
+The observability gate needs nothing at all — it reads text, like the licence
+gate, which is why it can run before a restore. `deploy/observability/README.md`
+lists the seven things it asserts and, more usefully, the two it does not: it
+reaches no Prometheus and does not validate rule syntax.
 
 **`py -3.12`, not `python`, and the block above is written that way on
 purpose.** Every CI job that runs Python pins 3.12 — three of them since
@@ -559,9 +624,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 614 of
-the 778 and starts no container — measured with `docker events`, not inferred —
-and `Category=Integration` is the other 164, needing the daemon exactly as
+category runs a smaller suite and says which. `Category!=Integration` is 618 of
+the 789 and starts no container — measured with `docker events`, not inferred —
+and `Category=Integration` is the other 171, needing the daemon exactly as
 before. PR-25 runs them as separate CI stages; today CI runs one pass over
 both, because staging a split §15.1 has not grown yet would claim a pipeline
 shape that does not exist.
@@ -702,7 +767,7 @@ Run `/validate-blueprint` after any substantive edit.
   fine. Cite the section that actually states the claim; a reference to a
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
-  admonition syntax. Of the 161 in the blueprint, two forms are named and
+  admonition syntax. Of the 186 in the blueprint, two forms are named and
   recurring — `**Trap — …**` (15) for a mistake worth naming, and
   `**Decision — …**` (8), which always points at the ADR that records it:
 
@@ -713,20 +778,26 @@ Run `/validate-blueprint` after any substantive edit.
   > **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
   ```
 
-  The other 138 are a bold assertion followed by its argument —
+  The other 163 are a bold assertion followed by its argument —
   `> **Unregistered, this fails silently and completely.** …`. That is the
   default; reach for `Trap` or `Decision` only when the callout genuinely is
   one. `**Decision.** / **Why.** / **Consequences.**` are the ADR body form,
   not callouts.
 
-  **This total said 120 for eight PRs, and the two named forms did not
-  drift.** `grep -c '^> \*\*'` over the twenty chapter files reports 164 on
-  this branch and reported 160 on the `main` it was cut from — so 40 of the
-  gap predates the change that fixed it and only four are its own. That is the
-  shape a self-invalidating count actually takes: the *interesting* numbers
-  stayed right, because 15 and 8 are what a reader checks, and the residual
-  nobody looks at is the one that rots. Recount all three together or none of
-  them.
+  **This total said 120 for eight PRs, then 161, and the two named forms have
+  never drifted.** `grep -h '^> \*\*' *.md | wc -l` over the twenty blueprint
+  files reports **189** on this branch and **186** on the `main` it was cut
+  from; subtract the three definitional entries below and the figures above
+  follow. So 22 of the gap accumulated in the PRs since that sentence was last
+  true and only three are this branch's own — the same shape as last time,
+  measured again rather than adjusted.
+
+  That is what a self-invalidating count actually does: the *interesting*
+  numbers stay right, because 15 and 8 are what a reader checks, and the
+  residual nobody looks at is the one that rots. **Recount all three together
+  or none of them** — and count with `grep -h … | wc -l` rather than
+  `grep -c`, because `grep -c` over many files prints a count *per file* and
+  the total has to be summed out of it, which is one more place to be wrong.
 
   **Three callouts spell the dash outside the bold and are not counted above**:
   §1.3's two glossary entries, which *define* `Trap` and `Decision` rather than

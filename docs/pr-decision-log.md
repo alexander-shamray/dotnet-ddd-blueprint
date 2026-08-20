@@ -68,6 +68,130 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-24 — the runbooks, and the four alerts that could not fire
+
+PR-24 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s
+ops row: [§13.9](backend-architecture/13-observability.md)'s twelve runbooks,
+§13.6's per-lane outbox alerts, `docs/secrets.md`, §13.8's dashboards as code,
+and §13.7's k6 SLO run. It also built the code those alerts read —
+`OutboxMetrics`, `IOutboxStats`/`OutboxStats` and `MetricsInitialiser` — which
+§13.6 had specified since PR-14 deferred it by name and nobody had written.
+
+**Decision — the alerts split into two files, and only one of them is
+loaded.** Writing §13.6's twelve conditions out as Prometheus rules established
+that **four of them read an instrument nothing publishes**: the saga age and the
+review queue have no gauge over their tables, `orders.placed` waits on
+`OrderMetrics` and §6.6's `OrderSummaries` projection, and the cache ratio waits
+on a *consumer* rather than an instrument — §13.2 registers the HybridCache
+meter, and no host calls `AddRedisConnections`.
+
+**Why.** §13.6 spends a callout on exactly this: *"Two of the alerts in this
+document were written against signals that did not exist, and both looked
+correct: the dashboard is empty either way, whether the system is healthy or the
+metric was never published."* Shipping all twelve as loaded rules would have
+made that sentence true again, in files, at the moment it was being quoted.
+A rule that cannot fire is not a weak alert — it is a silent one, and silence
+reads as health.
+
+**Consequences.** `platform-alerts.yaml` holds the eight that can fire;
+`awaiting-signal.yaml` holds the four that cannot and is not loaded. All twelve
+runbooks exist either way, because §13.9 asks for the procedure to be written
+when the alert is created and every query in those four reads a table that
+exists today. The cost is a second file to notice, paid down by the gate below.
+
+**Decision — the gate asserts the awaiting file's metrics are published by
+*nothing*.** Not merely that the loaded file's are published by something.
+
+**Why.** A list of known-missing things that nothing re-checks becomes a list
+nobody ever acts on. Asserting the negative makes the list **self-clearing**:
+the day somebody ships `OrderMetrics`, `check.py` goes red and names the rule to
+move into the loaded file. This is `CLAUDE.md`'s most-repeated lesson — a gate
+whose subject is what it is *looking at* — applied to a deferral rather than to
+a selector.
+
+**Consequences.** Both directions were observed red before the gate was
+trusted, along with the runbook pairing both ways, a typo'd metric in a loaded
+rule, and a workflow filter that stopped covering a declared input. Five red
+observations, five green.
+
+**Decision — `check.py` declares its own `SOURCE_INPUTS` and asserts both
+workflow triggers cover them**, copying `deploy/helm/smoke.sh` on day one.
+
+**Why.** That list drifted three times in the Helm tree before it was declared
+once beside the reads. There was no reason to rediscover it.
+
+**Consequences.** The observability workflow filters on `src/**`, because
+deciding whether an alert's signal exists means reading every instrument
+declaration in C#. That is a broad filter for a gate measured in seconds, and it
+is the honest one: a narrower filter over "files that look like metrics" is a
+heuristic that fails silently, which is the whole category of defect this PR
+kept finding.
+
+### Four things were found by building it
+
+**§13.6's `MetricsInitialiser` did not compile, two ways.** Its primary
+constructor's parameters are named `_`, `__` and `___` and never read — three
+**CS9113**s, and the discard-looking names do not escape it, because `_` in a
+primary constructor is an ordinary parameter and not a discard. Its
+`StartAsync` spells the token `ct`, which is **CA1725** against
+`IHostedService`. Both are errors under
+[ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)
+and both were met by changing the code, adding no fourth suppression.
+
+**The rule a reader expects to fire on those names does not.** CA1707 governs
+underscores in identifiers and is disabled only for test projects — and it
+passes on `_`, `__` and `___` as parameter names. An earlier draft of this
+PR's comment asserted the opposite and was corrected by running it. **A
+plausible attribution of an error to a rule is not a measurement of which rule
+fired.**
+
+**§13.6's `OutboxStats` reached for a scope it does not need.** The chapter
+said it *"owns a scope per call rather than holding a `DbContext`"* — the right
+concern, applied to the wrong dependency: §6.5's `IDbConnectionFactory` is a
+**singleton** holding a connection string, and §4.2's own sample says so. The
+scope was ceremony around a resolution that returns the same instance either
+way. **A guard against the wrong dependency shape is not evidence about which
+shape you have.**
+
+**§13.6's saga alert excludes a state that does not exist.** The condition
+excludes a saga *"awaiting despatch"*, and `OrderFulfilmentSaga` has four
+states — `AwaitingStock`, `AwaitingPayment`, `Confirmed` and `Compensating`.
+The three-day despatch timeout is armed on the transition **into `Confirmed`**,
+because the order is confirmed and now waiting on Shipping. A label selector
+spelled `AwaitingDespatch` would match no series, exclude nothing, and page on
+every healthy confirmed order an hour after payment — a filter that reads as a
+safeguard and behaves as a pager, which is §11.4's ownership-guard finding in
+another vocabulary. **Prose describing a state and code selecting one are
+different acts; read the enum, not the sentence.**
+
+**The gate's own instrument reader missed every gauge on its first run.** The
+pattern required `Create…<T>(`, which every `CreateHistogram` and
+`CreateCounter` in the corpus has and which `CreateObservableGauge` does not —
+it infers its type argument from the callback. The three types this PR added
+were therefore invisible to it, and it reported four correct alerts as having
+no signal. It failed loudly because the answer it produced was checkable
+against a fact the author knew; the same bug in a gate asserting a *negative*
+would have passed. **A pattern one token too strict covers less than it claims,
+and which way that fails is decided by what the gate asserts, not by how wrong
+the pattern is.**
+
+### What this binds
+
+- **A new alert is three artefacts, not one**: a rule, a runbook, and a signal
+  something publishes. `check.py` refuses any two of the three.
+- **`OutboxDispatcher.MaxAttempts` is public**, because §13.6's abandoned-rows
+  gauge counts exactly the rows §9.4's claim skips. One declaration, two
+  readers — a second copy would stop agreeing the day somebody tunes it.
+- **`OrderMetrics` joins `MetricsInitialiser` in the PR that adds §6.6's
+  `OrderSummaries` projection**, and nobody has to remember: the convention
+  test reads the container's registrations, so an unforced metrics type fails
+  the build the day it is registered.
+- **`docs/secrets.md` carries the procedure and never the inventory.** §15.4's
+  table is the inventory and wins any disagreement — `docs/testing.md`'s
+  relationship to §12, one chapter over.
+
+---
+
 ## PR-23 — the charts, and a name the platform already depended on
 
 PR-23 shipped [§15.3](backend-architecture/15-cicd-deployment.md)'s charts: a
