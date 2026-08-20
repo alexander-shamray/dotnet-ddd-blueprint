@@ -68,10 +68,18 @@ kubectl -n <ns> exec deploy/rabbitmq -- rabbitmqctl list_connections user state
 
 ## While it is stopped
 
-Nothing needs replaying by hand. The dispatcher polls twice a second and the
-claim is idempotent — rows keep their place in `OccurredAt` order and go out
-when the broker returns. §9.5's inbox filter makes redelivery safe on the
-consumer side, so a burst after recovery is not a hazard.
+Nothing needs replaying by hand. The dispatcher polls twice a second, and every
+row is retried until it is delivered or hits the attempt cap; §9.5's inbox
+filter makes redelivery safe on the consumer side, so a burst after recovery is
+not a hazard.
+
+**What recovery does *not* promise is order.** The claim takes `TOP (100) …
+ORDER BY OccurredAt` with `READPAST`, so each replica leases its own batch and
+delivers it independently — a later batch on one replica can publish before an
+earlier one on another. §9.4 treats the outbox as unordered by design and
+consumers are built for it. An earlier version of this file said rows "keep
+their place in `OccurredAt` order", which is a guarantee the platform does not
+make and one an on-call might otherwise rely on while reconciling.
 
 **Do not delete rows to clear the backlog.** They are the only copy of those
 events.

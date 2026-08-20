@@ -164,9 +164,19 @@ uncommenting one freezes the password inside it and it quietly stops following.
 ## What must never be committed
 
 No production connection string, key or certificate path — in a sample, in a
-test, or in source. The CI secret scan reads the diff and runs **before the
-build** and before the path filters fork (§15.1), so `deploy/**` is covered on
-every path.
+test, or in source.
+
+> **There is no secret scan in CI today, and nothing here should be read as
+> though there were.** §15.1 puts "SCA + secret scan" ahead of the build and
+> ahead of the path-filter fork, and argues why: neither half needs a build, and
+> scanning downstream of one is scanning that a build failure skips. Only the
+> licence half has landed — `ci.yml` says so at the `licence-gate` job, and the
+> scan "joins this job when it lands".
+>
+> **A documented control that does not exist is worse than an absent one**,
+> because it is relied on. Until the scanner lands, the only thing standing
+> between a pasted credential and `main` is review — so the rule above is a rule
+> for a person to apply, not a gate that will catch you.
 
 `No_client_secret_is_committed` is an assertion in the test suite, and its
 premise is worth restating because it has already been falsified once: it was

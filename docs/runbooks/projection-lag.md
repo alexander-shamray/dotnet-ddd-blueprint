@@ -113,9 +113,15 @@ Local-lane rows are still in the outbox until the retention purge removes them
 (§9.4, seven days by default), so a rebuild inside that window needs no
 republish — reset the rows and let the dispatcher redeliver:
 
+**`ProcessedAt` has to be cleared, and that is the whole difference between the
+two operations.** Retrying a *stuck* row needs only the attempt counter and the
+lease reset, because the dispatcher's claim already selects it. A **rebuild**
+replays rows that were delivered successfully, and those carry a `ProcessedAt`
+— so a predicate of `ProcessedAt IS NULL` selects exactly the rows that do not
+need rebuilding and none of the ones that do.
+
 ```sql
--- One MessageId at a time while diagnosing; the whole lane only when the
--- handler is fixed and you have read what you are about to replay.
+-- Retrying one stuck row: it is already claimable, so only the backoff moves.
 UPDATE ordering.OutboxMessages
 SET
     Attempts    = 0,
@@ -124,6 +130,22 @@ SET
 WHERE ProcessedAt IS NULL
     AND Lane = 'Local'
     AND MessageId = @MessageId;
+```
+
+```sql
+-- Rebuilding from retained rows: ProcessedAt is what makes them eligible again.
+-- Bound it — by time, by message id, by type — and read what you are about to
+-- replay first. Unbounded, this redelivers every local-lane row inside the
+-- retention window, in one burst, through a handler you have just changed.
+UPDATE ordering.OutboxMessages
+SET
+    ProcessedAt = NULL,
+    Attempts    = 0,
+    LockedUntil = NULL,
+    LastError   = NULL
+WHERE Lane = 'Local'
+    AND OccurredAt >= @RebuildFrom
+    AND MessageType = @MessageType;
 ```
 
 **Projections must be idempotent for this to be safe**, and §6.6 requires it —

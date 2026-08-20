@@ -125,11 +125,27 @@ groups:
         # Unclamped, 0 / 0 is NaN, the series drops out, and the rule stays
         # quiet until there is traffic to judge. Prometheus's own idiom, and
         # the reason it is the idiom.
+        # EACH COUNTER DEFAULTS TO ZERO; THE DENOMINATOR STAYS UNCLAMPED. Two
+        # separate traps, and the fixes pull in opposite directions.
+        #
+        # A cold cache can have misses and no hit series at all — the all-miss
+        # case this rule is *for*. `sum()` over an absent vector is absent, so
+        # the division produces nothing and the alert stays silent at a hit
+        # ratio of zero. `or vector(0)` on each sum fixes that.
+        #
+        # But an earlier draft wrapped the denominator in `clamp_min(…, 1)` to
+        # avoid dividing by zero, which fires on an IDLE cache: 0 / 1 = 0, below
+        # 0.5. Unclamped, an idle cache gives 0 / 0 = NaN, the series drops out,
+        # and the rule waits for traffic. Both properties hold together: with
+        # misses and no hits it evaluates 0 / n; with neither it evaluates
+        # 0 / 0 and stays quiet.
         expr: |
-          sum(rate(hybrid_cache_hits_total[10m]))
+          (sum(rate(hybrid_cache_hits_total[10m])) or vector(0))
           /
           (
-            sum(rate(hybrid_cache_hits_total[10m])) + sum(rate(hybrid_cache_misses_total[10m]))
+            (sum(rate(hybrid_cache_hits_total[10m])) or vector(0))
+            +
+            (sum(rate(hybrid_cache_misses_total[10m])) or vector(0))
           )
           < 0.5
         for: 10m
@@ -151,8 +167,18 @@ groups:
       # Week-over-week rather than a fixed floor, because a volume alert with no
       # seasonality model is the first pager people mute.
       - alert: BusinessVolumeDrop
+        # `or vector(0)` ON THE CURRENT SIDE ONLY, and the asymmetry is the
+        # alert. If orders stop completely — a restarted instance, or the total
+        # halt this rule exists for — the counter series is *absent* rather than
+        # a sampled zero, `sum()` over an absent vector is absent too, and the
+        # comparison yields nothing. The alert would go quiet in exactly the
+        # scenario its runbook opens with.
+        #
+        # The baseline keeps no default deliberately: without a week-old series
+        # there is nothing to compare against, and firing on that would page
+        # every new deployment for its first week.
         expr: |
-          sum(rate(orders_placed_total[1h]))
+          (sum(rate(orders_placed_total[1h])) or vector(0))
           <
           0.5 * sum(rate(orders_placed_total[1h] offset 1w))
         for: 30m

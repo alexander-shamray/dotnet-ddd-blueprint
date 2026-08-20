@@ -74,9 +74,13 @@ attempt, written by the dispatcher's fail statement. `CorrelationId` ties the
 row back to the request that produced it, so the original trace and logs are
 reachable ([§10.4](../backend-architecture/10-api-gateway.md), §13.4).
 
-**Do not reset `Attempts` before reading `LastError`.** The reset does not clear
-it, but a successful redelivery will, and then the only record of why it failed
-ten times is gone.
+**`LastError` survives a replay**, so reading it is not a race. The dispatcher's
+completion statement sets `ProcessedAt` and `LockedUntil` and touches nothing
+else, and the replay below clears only `Attempts` and the lease — so the text of
+the final failure stays on the row until retention deletes it. An earlier
+version of this file warned that a successful redelivery would erase it; that
+was wrong about the implementation, and knowing the record persists is what lets
+you replay first and diagnose after.
 
 ## Deciding: repair, replay, or discard
 
