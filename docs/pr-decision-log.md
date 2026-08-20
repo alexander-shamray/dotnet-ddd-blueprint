@@ -68,6 +68,149 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-25 — the staged pipeline, and a canary that had no way to be measured
+
+PR-25 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s
+CI row: [§15.1](backend-architecture/15-cicd-deployment.md)'s path filter and
+per-service image build, its `UT → IT` split, the quality gate that says each
+stage ran, and [§15.5](backend-architecture/15-cicd-deployment.md)'s canary
+with automated rollback. It closes the roadmap's M6.
+
+**Decision — the canary is replica-weighted, and the mechanism was a decision
+nobody had taken.** §15.5 specified the behaviour in four sentences and named
+no machinery, so building the rollout was what forced the choice;
+[ADR-022](backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)
+records it. **The disqualifying argument is about this platform's topology and
+not about taste**, which is worth keeping because the rejected option is the
+one every reader reaches for first: an nginx-style ingress canary annotation
+splits traffic at the Ingress, and this platform has exactly one — the
+gateway's. Everything behind it is dialled by Kubernetes Service name from
+YARP's route file and from `PricingHop.cs`, both of which hold those names as
+literals *on the stated grounds that the host is the Service name*. So an edge
+weight can canary the edge and **cannot canary Catalog or Ordering at all**. A
+mesh or a rollout controller would give exact weights and is the better answer
+at scale; it is also a cluster-wide component with its own upgrade cycle, added
+to a platform whose entire deploy surface is `helm upgrade` — and one that
+would have to exist before any of this could be tested, against a cluster that
+does not.
+
+**Finding — `service.version` is registered, exported, and constant, which is
+§13.6's trap in a new place.** The analysis has to tell the canary's series
+from the stable one's, and the resource already carries a version attribute, so
+the design was finished before it was checked. `BuildInfo.Version` strips the
+source-revision suffix **deliberately** — its own comment argues that a value
+changing every commit turns one series into thousands — and
+[§4.4](backend-architecture/04-solution-structure.md) pins no assembly version,
+so every host in this platform reports `1.0.0`. The attribute exists, is
+exported, and separates nothing. `deployment.track` through
+`OTEL_RESOURCE_ATTRIBUTES` replaced it, and **no production C# changed**,
+because the SDK's own resource builder already honours that variable — which is
+a claim of exactly the kind that is true of a different overload, so it is
+established by a test against an exported resource rather than by reading the
+documentation.
+
+**Finding — §15.5's first rung is not expressible at the replica count §15.3
+ships, and rounding would have hidden it.** The served share is
+`canary / (stable + canary)`, so at `replicaCount: 3` a single canary pod
+already takes 25% — five times the 5% the chapter asks for. `canary.py plan`
+therefore treats the requested weight as a **ceiling** and refuses where even
+one pod overshoots, naming the 19 stable replicas that would satisfy the step.
+**The alternative was one line and is the whole failure mode**: round to the
+nearest expressible weight, and a step labelled 5% serves five times the blast
+radius anybody authorised, in a rollout whose logs say 5%.
+`autoscaling.maxReplicas` is 20, which is exactly 19 plus one canary — the
+smallest configuration in which the first rung is real is the largest the chart
+allows, and neither number was chosen with the other in mind.
+
+**Finding — the weight arithmetic was wrong in floating point at the one input
+the ladder starts from.** It read `ceil(stable * f / (1 - f))`, and
+`19 * 0.05 / 0.95` evaluates to `1.0000000000000002`, so `ceil` bought two pods
+and served 9.5%. Not an exotic input — the *first step of the default plan*.
+Every quantity involved is a count of pods or a whole percentage, so the exact
+answer was available throughout, and the fix was to do the comparison in
+integers. **What found it was the test asserting that the function naming the
+required replica count and the function checking that count agree**, which then
+turned out to be catching two bugs at once: they had also been written to
+opposite rules, one taking the smallest canary at or above the weight and the
+other the largest at or below.
+
+**Decision — the coverage threshold PR-25 was entitled to add, PR-25
+declined.** [§12.9](backend-architecture/12-test-strategy.md) and
+`docs/testing.md` both read "a threshold that fails a build is PR-25's quality
+gates", which defers rather than promises — and the same sentence argues that a
+diagnostic wired to a build failure stops being read and starts being
+satisfied. Both cannot be honoured. What the chapters *positively* define as
+this PR's gate is the other one: "assert a floor on each stage's count rather
+than trusting a green exit". So the threshold is refused on §12.9's own
+argument, the three sites saying it was owed now say it was declined, and a
+later change arguing for one will be arguing against that paragraph rather than
+filling a gap it left open.
+
+**Finding — a flag added for one gate moved another gate's input.**
+`--logger trx` is how the stage gate counts, and adding it changes where the
+coverage collector writes: each stage then leaves the run's merged attachment
+**and** one partial attachment per test project — eight files for one stage
+here, three of them empty. `domain_coverage.py` asserted exactly one file, and
+that assertion was correct when it was written. **When one step's output feeds
+another, adding a flag to the first is a change to the second**, and nothing
+about the flag says so.
+
+That merge then had to reproduce the collector's own arithmetic rather than
+invent one, or the printed figure would have moved for a reason nobody could
+name. Measured: `lines-valid` counts the lines under
+`class/methods/method/lines` and **not** the ones under `class/lines` — 308
+against 247 on this repository, and only the first reproduces the tool's own
+totals. Hits merge with `max` over that key, which makes reading the same
+attachment twice idempotent; summing would have grown the figure with the
+number of test projects. The union is worth having on its own terms: 253 lines
+from the unit stage, 192 from the integration stage, **257** from both, so four
+lines are reached only by a test that needs a container.
+
+**Decision — the reporter gains a suite and the argument for it not having one
+still stands.** `domain_coverage.py` said in its own docstring that it has no
+tests deliberately, because it gates nothing and asserts nothing about the
+repository. Both halves remain true. What arrived with the merge is
+*arithmetic* — a key that collides, a `max` that should have been a sum, a
+partial attachment counted as a whole — and none of those fails loudly while
+all of them move the number. A figure that is wrong but plausible is worse than
+no figure, because it is the one people read.
+
+**Decision — the Deployment's selector gains a track label, and that field is
+immutable.** Two Deployments sharing a selector each count the other's pods as
+their own and scale them away, so the track has to be in the Deployment's
+selector — and it must **not** be in the Service's, or the Service would route
+the canary nothing. One label, in exactly one of the two places. Adding it to
+an installed release is a delete-and-recreate, so this is free today, because
+nothing anywhere has ever installed these charts, and would be a downtime
+window if taken later. **That is the argument for taking it now rather than
+when a canary is first wanted**, and it is the same shape as PR-23's naming
+decision: a field a Deployment will never let you change is one to get right
+before the first install, not after.
+
+**The gates were observed red before they were trusted**, on this repository's
+standing rule. The chart gate's load-bearing new assertion — that a canary
+pod's `app.kubernetes.io/name` still matches the stable Service's selector —
+was run against a deliberately broken helper that gave the canary its own name,
+and failed on all four charts; a canary with its own selector name runs,
+reports healthy, serves nothing, and is promoted on an analysis of no traffic.
+Every check in `.github/pipeline-gate/` has a negative case for the same
+reason, and three of its tests contain no defect at all: their subject is an
+empty pattern list, an empty matrix and an empty stage, each a state in which
+every other check passes while reporting a complete inventory it never read.
+
+**What is NOT established, and is named rather than implied.** The rollout has
+never reached a cluster — no environment, no kubeconfig, no registry — so
+`deploy.yml` is `workflow_dispatch` only, because a deploy on `push` would fail
+on every merge and a pipeline red by design trains everyone to ignore it. The
+deciding is tested; the acting is four commands nobody has run. And the premise
+underneath the whole mechanism is unmeasured: kube-proxy spreads
+**connections**, not requests, so keep-alive, HTTP/2 multiplexing to the gRPC
+listener, or a client that opens one connection and holds it will each
+under-deliver the weight. Nothing short of a cluster can measure that, and
+ADR-022 records it as owed.
+
+---
+
 ## PR-24 — the runbooks, and the four alerts that could not fire
 
 PR-24 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s
