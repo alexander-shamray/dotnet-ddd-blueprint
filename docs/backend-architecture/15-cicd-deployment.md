@@ -127,12 +127,16 @@ The readiness probes ([§13.5](13-observability.md)) already gate the rollout �
 `/health/ready` never takes traffic — so a separate "smoke test" step would
 re-assert what Kubernetes has already enforced, or assert something nobody has
 written down. The first real gate after dev is the k6 SLO run against staging,
-which names its tool, its target and its assertions (§13.7).
+which names its tool, its target and its assertions (§13.7): it is
+`deploy/observability/slo/slo.js` since PR-24, and it fails on an **absent**
+series as well as on a breached one — a target with no data is the same silence
+§13.6 spends a callout on, and reading it as "nothing wrong" would turn this
+stage into the gate configured to pass that the paragraph above rules out.
 
-Two `deploy/**` artefacts are exercised by CI directly rather than deployed,
-one per subtree, each in its own path-filtered workflow. **Neither is the smoke
-stage ruled out above**: both deploy nothing and assert only what a chapter
-already defines.
+**Three** `deploy/**` artefacts are exercised by CI directly rather than
+deployed, one per subtree, each in its own path-filtered workflow. **None is the
+smoke stage ruled out above**: all three deploy nothing and assert only what a
+chapter already defines.
 
 The first is the Compose file. A workflow path-filtered to
 `deploy/compose/**` and to itself runs `docker compose config -q`, then
@@ -150,9 +154,30 @@ hook annotations of [§7.4](07-persistence.md), the ConfigMap/Secret split of
 cluster is reached, so schema validation against a live API server stays a
 deploy-time gate and is named in the script as not covered.
 
-**That filter also names files outside `deploy/helm/`**, which is the one
-place a `deploy/**` workflow reaches outside its own tree and is not an
-oversight. Each is an input the script actually reads:
+The third is the observability tree (PR-24). A workflow path-filtered to
+`deploy/observability/**` runs `deploy/observability/check.py`, which pairs
+[§13.9](13-observability.md)'s runbooks with §13.6's alerts in **both**
+directions, asserts that every metric a loaded rule or a dashboard panel reads
+is one this platform actually publishes, and asserts that every metric in the
+*awaiting-signal* file is published by nothing — the check that makes that file
+self-clearing. Stdlib Python over text, so it needs no restore and runs on the
+licence gate's terms. It reaches no Prometheus and no Grafana, and it does not
+validate rule syntax: `promtool` would be the tool for that, and adding it is a
+decision no chapter has taken.
+
+**Two of the three filters name files outside their own tree**, and neither is
+an oversight — each names an input its gate actually reads. The Helm one is
+below; the observability one names `src/**`, because deciding whether an alert's
+signal exists means reading every instrument declaration in C#, and
+`docs/runbooks/**`, because a renamed runbook is an alert with no procedure
+behind it. **Neither workflow keeps that list in its own YAML.** `smoke.sh`
+declares `SOURCE_INPUTS` and `check.py` declares its own, each beside the reads,
+and each asserts that both of its workflow's triggers cover every entry — a
+copy of a list drifts exactly as a copy of a number does, which the Helm tree
+established at a cost of three findings and the observability tree adopted
+before paying it once.
+
+Each of the Helm filter's outside paths is an input `smoke.sh` actually reads:
 
 - §10.2's route file and `PricingHop.cs`, which hold their destination hosts as
   literals on the stated grounds that "the host is the Kubernetes Service
@@ -827,6 +852,13 @@ anything but the deploy, because nothing logs it.
 Every key a service requires, and where each comes from. **This table is the
 inventory `ValidateOnStart` enforces** — a `[Required]` option missing from it
 is a service that will not boot.
+
+**`docs/secrets.md` is the operational half of this section**, on the terms
+`docs/testing.md` holds for [§12](12-test-strategy.md): how a secret travels
+from a vault into a pod, how each kind is rotated, and what the five places are
+that a new required key has to reach. It carries the procedure and **not** the
+inventory — the table below is the inventory, and a second copy would be a
+second thing to reconcile. Where the two disagree, this section wins.
 
 **Conditionally required is a real category, and it is not the same as
 optional.** `Cors__Origins` is not needed when `Cors__Enabled` is false and is

@@ -957,7 +957,7 @@ actionable — if the response is "acknowledge and ignore", delete it.
 | Error rate | 5xx > 1% over 5 min | Users are seeing failures | `error-rate.md` |
 | Latency | p99 > 1 s over 10 min | Users are waiting | `latency.md` |
 | Error queue depth | > 0 | A business process has stopped | `error-queue.md` |
-| Saga age | any saga unfinalised > 1 h, **excluding one awaiting despatch** | Orders are stuck. Every other wait state in §9.6 times out in 5, 10 or 15 minutes, so an hour is a sane margin above all of them — but the despatch wait is **three days** by design, three orders of magnitude further out, and an unqualified hour would page on the healthy path for most of a saga's real lifetime. A despatch that genuinely expires escalates to the row below, not to this one | `stuck-saga.md` |
+| Saga age | any saga unfinalised > 1 h, **excluding one in `Confirmed`** | Orders are stuck. Every other wait state in §9.6 times out in 5, 10 or 15 minutes, so an hour is a sane margin above all of them — but the despatch wait is **three days** by design, three orders of magnitude further out, and an unqualified hour would page on the healthy path for most of a saga's real lifetime. A despatch that genuinely expires escalates to the row below, not to this one. **The state is named rather than described, and this row used to describe it**: §9.6 has no `AwaitingDespatch`, because the saga arms `DespatchTimeout` on the transition *into* `Confirmed` — the order is confirmed and now waiting on Shipping. A selector spelled the way the description reads would match no series, exclude nothing, and page on every healthy confirmed order | `stuck-saga.md` |
 | Orders awaiting review | any row in `ordering.OrderReviews` older than 1 h | A saga hit a wait it could not compensate and escalated (§9.6). It has already finalised, so the saga-age alert above will *not* catch this | `order-review.md` |
 | Migration job failed | Helm `pre-install,pre-upgrade` hook non-zero, or a release stuck pending | The deploy stopped before any pod rolled ([§7.4](07-persistence.md)). On an **upgrade** the previous version is still serving, which is why nothing else fires — so this alert is the only signal. On a first **install** there is no previous version and no pod at all, so nothing else fires for the opposite reason: check which before promising availability | `migration-failure.md` |
 | Cache hit ratio collapse | `rate(cache_hits) / rate(cache_hits + cache_misses)` < 50% over 10 min, from `Microsoft.Extensions.Caching.Hybrid` | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |
@@ -1019,24 +1019,18 @@ public sealed class OutboxMetrics
 
         meter.CreateObservableGauge(
             "outbox.oldest.age",
-            () => new[]
-            {
-                new Measurement<double>(stats.OldestAgeSeconds(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<double>(stats.OldestAgeSeconds(OutboxLane.Local), Tag(OutboxLane.Local))
-            },
-            unit: "s");
+            () => PerLane(stats.OldestAgeSeconds),
+            unit: "s",
+            description: "Age of the oldest unprocessed row, per lane.");
 
         // Depth, per lane. The growth alert needs a count and the age gauge
         // cannot supply one: a single very old row and a backlog of ten
         // thousand recent ones read identically on oldest-age.
         meter.CreateObservableGauge(
             "outbox.pending.count",
-            () => new[]
-            {
-                new Measurement<int>(stats.PendingCount(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<int>(stats.PendingCount(OutboxLane.Local), Tag(OutboxLane.Local))
-            },
-            unit: "{message}");
+            () => PerLane(lane => stats.PendingCount(lane)),
+            unit: "{message}",
+            description: "Unprocessed rows, per lane.");
 
         // Also per lane, and this is the one where it matters most: a Broker
         // abandonment means other services never learned something, a Local one
@@ -1045,18 +1039,37 @@ public sealed class OutboxMetrics
         // one first.
         meter.CreateObservableGauge(
             "outbox.abandoned.count",
-            () => new[]
-            {
-                new Measurement<int>(stats.AbandonedCount(OutboxLane.Broker), Tag(OutboxLane.Broker)),
-                new Measurement<int>(stats.AbandonedCount(OutboxLane.Local), Tag(OutboxLane.Local))
-            },
-            unit: "{message}");
+            () => PerLane(lane => stats.AbandonedCount(lane)),
+            unit: "{message}",
+            description: "Rows past the attempt cap, per lane.");
     }
+
+    // One measurement per lane, read from the enum rather than from a list
+    // written out at each of three call sites. A lane added to OutboxLane and
+    // forgotten at one of them would be a lane with no gauge and therefore no
+    // alert — the silent gap this section spends a callout on, arriving through
+    // the instrument instead of through the query.
+    private static IEnumerable<Measurement<double>> PerLane(Func<OutboxLane, double> read) =>
+    [
+        .. Enum.GetValues<OutboxLane>()
+            .Select(lane => new Measurement<double>(read(lane), Tag(lane)))
+    ];
 }
 ```
 
-`IOutboxStats` is read from a singleton on the collector's schedule, so it owns
-a scope per call rather than holding a `DbContext`:
+`IOutboxStats` is read from a singleton on the collector's schedule, so it must
+not hold a `DbContext` — and it satisfies that by never asking for one. §6.5's
+`IDbConnectionFactory` is itself a singleton holding a connection string, so it
+is injected directly and the reads are Dapper on a connection the caller
+disposes:
+
+> **This used to reach for an `IServiceScopeFactory`, and PR-24 removed it.**
+> The stated reason was the right one — a metrics singleton that captured a
+> scoped `DbContext` would hold a connection open for the life of the process —
+> but the remedy assumed the port it wanted was scoped. It is not, and
+> §4.2's own sample says so, so the scope was ceremony around a resolution that
+> returns the same instance either way. **A guard against the wrong dependency
+> shape is not evidence about which shape you have.**
 
 ```csharp
 // Every member takes the lane. Three questions about one table, each of which
@@ -1068,36 +1081,56 @@ public interface IOutboxStats
     int AbandonedCount(OutboxLane lane);
 }
 
-internal sealed class OutboxStats(IServiceScopeFactory scopes) : IOutboxStats
+internal sealed class OutboxStats : IOutboxStats, IDisposable
 {
     // Cached briefly: the collector polls every few seconds and these are
-    // aggregate queries over a filtered index, not free.
+    // aggregate queries over a filtered index, not free. A metrics type that
+    // loads the database it is measuring is a monitor causing the symptom.
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
+    private readonly IDbConnectionFactory _connections;
+    private readonly string _oldestSql;
+
+    public OutboxStats(IDbConnectionFactory connections, OutboxTable table)
+    {
+        _connections = connections;
+
+        // Composed from the registered table rather than written literally,
+        // for the reason OutboxTable itself gives: this chapter writes
+        // `ordering.OutboxMessages` because it is a chapter about Ordering, and
+        // a second literal in code is a second place the schema has to be right.
+        _oldestSql =
+            $"""
+            SELECT DATEDIFF(second, MIN(OccurredAt), SYSDATETIMEOFFSET())
+            FROM {table.QualifiedName}
+            WHERE ProcessedAt IS NULL
+                AND Lane = @lane;
+            """;
+    }
 
     public double OldestAgeSeconds(OutboxLane lane) => _cache.GetOrCreate(
         $"oldest:{lane}",
         e =>
         {
             e.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5);
-            using IServiceScope scope = scopes.CreateScope();
-            using IDbConnection connection =
-                scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
+            using IDbConnection connection = _connections.Create();
 
+            // NULL rather than zero is what an empty lane returns — MIN over no
+            // rows — and COUNT never returns it. One coalesce covers both.
             return connection.ExecuteScalar<double?>(
-                """
-                SELECT DATEDIFF(second, MIN(OccurredAt), SYSDATETIMEOFFSET())
-                FROM ordering.OutboxMessages
-                WHERE ProcessedAt IS NULL
-                    AND Lane = @lane;
-                """,
+                _oldestSql,
                 new { lane = lane.ToString() }) ?? 0;
         });
 
     // PendingCount and AbandonedCount follow the same shape — same cache, same
-    // scope-per-call, same @lane parameter — over COUNT(*) with
-    // `ProcessedAt IS NULL AND Lane = @lane`, plus `AND Attempts >= 10` for the
-    // second. The lane predicate is not optional on any of the three: an
-    // untagged gauge cannot answer the first question its runbook asks.
+    // connection per call, same @lane parameter — over COUNT(*) with
+    // `ProcessedAt IS NULL AND Lane = @lane`, plus
+    // `AND Attempts >= OutboxDispatcher.MaxAttempts` for the second. That cap is
+    // READ rather than written again: §9.4 claims rows below it, this counts the
+    // rows above it, and two copies of one number stop agreeing on the day
+    // somebody tunes it.
+    //
+    // The lane predicate is not optional on any of the three: an untagged gauge
+    // cannot answer the first question its runbook asks.
 }
 ```
 
@@ -1130,8 +1163,9 @@ services.AddSingleton<MessagingMetrics>();
 
 // Singleton registration alone is lazy — the instruments appear on first
 // resolve, which for a class nothing injects is never. Force construction at
-// startup, for all four. MetricsInitialiser is registered by Infrastructure,
-// which may reference Application; the reverse would not compile.
+// startup, for every one that exists. MetricsInitialiser is registered by
+// Infrastructure, which may reference Application; the reverse would not
+// compile.
 services.AddHostedService<MetricsInitialiser>();
 ```
 
@@ -1139,18 +1173,47 @@ services.AddHostedService<MetricsInitialiser>();
 // Public, not internal, for the same reason `Program` is (§4.2): the test
 // below names the type from another assembly, and one access modifier is a
 // smaller commitment than an InternalsVisibleTo that has to name the consumer.
-public sealed class MetricsInitialiser(
-    OutboxMetrics _,
-    OrderMetrics __,
-    MessagingMetrics ___,
-    RequestMetrics ____) : IHostedService
+public sealed class MetricsInitialiser : IHostedService
 {
     // Resolving the parameters is the entire job: constructing them registers
-    // the instruments with their meters.
-    public Task StartAsync(CancellationToken ct) => Task.CompletedTask;
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    // the instruments with their meters, and nothing here needs to keep them.
+    // The guards are what make them READ — see below.
+    public MetricsInitialiser(OutboxMetrics outbox, MessagingMetrics messaging, RequestMetrics requests)
+    {
+        ArgumentNullException.ThrowIfNull(outbox);
+        ArgumentNullException.ThrowIfNull(messaging);
+        ArgumentNullException.ThrowIfNull(requests);
+    }
+
+    // `cancellationToken`, not this blueprint's usual `ct`: CA1725 requires an
+    // implementation's parameter name to match the interface it implements.
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 ```
+
+> **This sample was written as a primary constructor whose parameters were
+> named `_`, `__` and `___`, and it did not compile.** Two rules, both made
+> errors by [ADR-019](appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input),
+> and PR-24 met each by changing the code rather than waiving anything.
+> **CS9113** — *parameter is unread* — fires three times, and the
+> discard-looking names do not escape it: `_` in a primary constructor is an
+> ordinary parameter, not a discard. **CA1725** rejects `ct` against
+> `IHostedService`'s `cancellationToken`. Measured rather than reasoned about,
+> which is worth recording because the rule a reader expects to fire on those
+> names — CA1707, on underscores in identifiers — does **not**.
+>
+> The guards are not ceremony bought to satisfy a compiler. A null here would
+> mean the container resolved a metrics type to nothing, which is precisely the
+> silent-instrument failure this class exists to prevent.
+
+**`OrderMetrics` is not in that constructor, and its absence is a schedule
+rather than an exemption.** §13.3 puts it in `Ordering.Application` with
+`OrderSummaryProjection` as its only call site, and §6.6's `OrderSummaries`
+projection has not been built. It joins in the pull request that adds that
+projection — and nobody has to remember, because the test below reads the
+container's registrations rather than this list, so an unforced metrics type
+fails a build the day it is registered.
 
 **The test for membership is not "is it a gauge".** It is *"can this service run
 for an hour without constructing it"* — and for every metrics type in this
@@ -1246,6 +1309,33 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
 > ratio — write the expression, not an invented metric name. A name that looks
 > like an instrument and is not is the hardest version of this to spot.
 
+### Four of the twelve have no signal yet
+
+PR-24 wrote all twelve conditions out as Prometheus rules and found that **four
+of them read an instrument nothing publishes**. That is this section's own
+callout coming true, at the moment the alerts stopped being a table and became
+files — and it is recorded here rather than resolved by quietly shipping rules
+that cannot fire.
+
+| Alert | What is owed |
+|---|---|
+| Saga age | A gauge over `ordering.OrderFulfilmentStates`. §9.6 persists every saga, so the reading is a query away — there is simply no instrument over it |
+| Orders awaiting review | A gauge over `ordering.OrderReviews`, which the `IX_OrderReviews_RaisedAt` index already exists for |
+| Cache hit ratio collapse | **A consumer, not an instrument.** §13.2 registers the `Microsoft.Extensions.Caching.Hybrid` meter, but no host calls `AddRedisConnections`, so nothing constructs a `HybridCache` and the meter has nothing behind it. §15.4 records the same absence from the secrets side |
+| Business volume | `OrderMetrics`, which arrives with §6.6's `OrderSummaries` projection |
+
+**The third row is the one worth pausing on**, because it is the failure mode
+this section warns about wearing its best disguise: the `AddMeter` line makes
+the signal look wired, and a reviewer checking "is the meter registered" gets a
+yes. A registered meter with no publisher is as silent as an unregistered one.
+
+Their rules live in `deploy/observability/alerts/awaiting-signal.yaml`, which is
+**not loaded**, and `deploy/observability/check.py` asserts in both directions:
+every loaded rule's metric is published, and every awaiting rule's metric is
+published by *nothing*. The second is what makes the list self-clearing — the
+day one of these instruments lands, the gate goes red and names the rule to
+move. All twelve runbooks exist regardless, per §13.9.
+
 ## 13.7 Starting SLOs
 
 Alert thresholds without targets are arbitrary. These are **starting points** to
@@ -1305,9 +1395,29 @@ Cutting a row is the honest move when the alternative is a target nobody can
 compute. An SLO that cannot be evaluated is not a weak SLO — it is a claim that
 the service is meeting a bar nobody is checking.
 
-Verify order-of-magnitude with the **k6 or NBomber SLO run against staging**
-([§15.1](15-cicd-deployment.md)) — the load run in CD, which asserts the targets in this table and is the
-first real gate after the dev deploy. Not a "smoke test": §15.1 declines to have
+Verify order-of-magnitude with the **k6 SLO run against staging**
+([§15.1](15-cicd-deployment.md)) — `deploy/observability/slo/slo.js`, the load
+run in CD, which asserts the targets in this table and is the
+first real gate after the dev deploy. (NBomber was the stated alternative until
+PR-24 picked one; a stage that names two tools names none.)
+
+**It drives with k6 and adjudicates with Prometheus**, and the split is forced
+by this table rather than chosen. A load generator measures wall-clock at the
+client, which includes the edge, TLS and the network; the first two rows read
+`request.duration`, which is dispatcher entry to result. Asserting only the
+client's number would fail a healthy service on a slow link, and asserting only
+the server's would pass a broken edge with perfect handler timings — so k6's own
+thresholds are a coarse guard and every row above is checked by querying its
+named instrument after the run.
+
+**An absent series fails that run.** It is not read as "no problem observed",
+for the reason §13.6 gives one section up: empty and healthy look identical.
+
+**The availability row is the exception and is deliberately not evaluated
+there.** It is a monthly objective and a three-minute run cannot compute one;
+the run bounds its own error rate instead, says so, and does not report a pass
+for the row. Cutting a row rather than pretending is this table's own rule,
+applied to the gate that reads it. Not a "smoke test": §15.1 declines to have
 one and §12.1 gives the reason, which is that a stage named for what it actually
 does gets maintained. This is also not a capacity test — it catches the
 regression where a query loses its index and goes from 40 ms to 4 s, which no
@@ -1325,6 +1435,28 @@ unit test will find.
 Dashboards are **code**, checked into `deploy/observability/` as Grafana JSON or
 equivalent. A dashboard clicked together in a UI is lost with the instance and
 cannot be reviewed.
+
+Since PR-24 that directory holds the alert rules and the SLO run on the same
+argument, and a gate over all three:
+
+```
+deploy/observability/
+  alerts/       platform-alerts.yaml (loaded) and awaiting-signal.yaml (not)
+  dashboards/   golden-signals.json, outbox.json
+  slo/          slo.js — the k6 run of §13.7 and §15.1
+  check.py      the gate; see deploy/observability/README.md
+```
+
+**Nothing here deploys Prometheus or Grafana.** §15.3's charts cover this
+platform's own workloads, so how these files reach a running stack — a
+`PrometheusRule`, a ConfigMap, a sidecar-discovered folder — is a decision no
+chapter has taken. What the directory guarantees is that the content is
+reviewed, versioned and internally consistent, which is the half a UI loses.
+
+The two dashboards follow the ownership split in the table above rather than
+cutting across it: golden signals are Platform's, and the outbox dashboard
+keeps the two lanes apart because averaging them produces a panel nobody can
+act on.
 
 ## 13.9 Runbooks
 
@@ -1347,7 +1479,20 @@ attached is a page to somebody who will have to reason from scratch.
 | `docs/runbooks/redis-cold.md` | Cache-loss load spike on the databases, and how to shed load while it warms |
 
 Write each one when the corresponding alert is created, not after it first
-fires.
+fires. All twelve landed with PR-24 — including the four whose alert cannot fire
+yet, because a procedure whose queries read tables that already exist is useful
+before its pager is.
+
+**The pairing is a gate, not a convention.** `deploy/observability/check.py`
+fails the build on an alert whose `runbook_url` names a file that is not there,
+on a runbook no alert points at, and on a runbook claimed by two alerts. Both
+directions were observed red before the gate was trusted, which is this
+repository's rule for any gate: the failure it exists to catch has to have been
+seen.
+
+`docs/runbooks/README.md` is the index and is excluded from the pairing by
+name — one declared exception, so a second non-runbook file in that directory
+has to be argued for rather than added.
 
 ---
 

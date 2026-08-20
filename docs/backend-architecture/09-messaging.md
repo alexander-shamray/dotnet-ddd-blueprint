@@ -842,7 +842,11 @@ public sealed class OutboxTable
 ```csharp
 public sealed class OutboxDispatcher : BackgroundService
 {
-    private const int MaxAttempts = 10;
+    // Public, and only because §13.6's abandoned-rows gauge counts exactly the
+    // rows this claim skips. One declaration with two readers beats two copies
+    // that stop agreeing the day somebody tunes the cap — which is the same
+    // argument OutboxTable makes about the schema, one field over.
+    public const int MaxAttempts = 10;
 
     // Compiled once rather than parsed per call. CA1848 is enforced by ADR-019
     // and this loop runs twice a second — see §13.3's LoggingBehavior, which
