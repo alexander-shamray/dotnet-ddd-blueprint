@@ -23,6 +23,12 @@ alerts nobody ever turned on.
 Check 6 is the gate's own subject: a parser that silently extracted nothing
 would pass 4 and 5 vacuously, which is this repository's most-repeated failure.
 
+Check 8 covers what 4 and 5 structurally cannot. They are about metric NAMES;
+the loaded outbox alerts group `by (service_name)`, so a service that runs the
+dispatcher and publishes no gauges is "covered" by four alerts that can never
+fire for it. Every such service must publish the gauges or carry a stated
+exemption, and both directions fail.
+
 Stdlib only, on the licence gate's terms: no restore, no dependencies, and it
 runs before anything is built.
 
@@ -70,6 +76,44 @@ EXTERNAL_METRICS = {
         "the RabbitMQ exporter — §14.1's broker, §13.6's error-queue alert",
     "kube_job_status_failed":
         "kube-state-metrics — §7.4's migration hook Job",
+}
+
+# Metrics a PACKAGE declares, which become live when a HOST wires the package
+# up — so what is owed is a consumer, not a `Create*` call this gate can see.
+#
+# Without this, check 5's self-clearing promise is false for exactly one of the
+# four awaiting rules, and it is the one §13.6 calls the interesting case.
+# HybridCache creates its counters inside the package; `AddRedisConnections`
+# already exists in Common.Infrastructure and the tests already call it. A host
+# adding it to its Program.cs would light the signal up in production and add
+# no instrument declaration anywhere — so the scan below would stay green, the
+# rule would stay unloaded, and silence would go on reading as health.
+#
+# The predicate is deliberately "a HOST", not "anywhere in src": a test calling
+# the helper proves nothing about a deployed process.
+CONSUMER_GATED_METRICS = {
+    "hybrid_cache_hits": ("AddRedisConnections", "a host calling AddRedisConnections (§8.2)"),
+    "hybrid_cache_misses": ("AddRedisConnections", "a host calling AddRedisConnections (§8.2)"),
+}
+
+# What counts as a host: the composition root §4.2 permits, and nothing else.
+HOST_FILES = "Program.cs"
+
+# Services that host §9.4's dispatcher and publish NO outbox gauges, each with
+# the reason. Check 8 requires an entry here for every such service, so the
+# absence is a decision somebody argued rather than a dashboard nobody noticed
+# was empty.
+#
+# The four loaded outbox alerts group `by (service_name)` and read gauges only
+# Ordering publishes. A stalled Catalog outbox is therefore the silent case
+# §13.6 spends its callout on — and Catalog is §4.5's template, so every
+# scaffolded service inherits the gap until this is closed.
+OUTBOX_METRICS_EXEMPT = {
+    "Catalog":
+        "§13.3 places OutboxMetrics in Ordering.Infrastructure, so closing this "
+        "means lifting the type into common code and teaching §4.5's scaffold to "
+        "emit it — a design decision PR-24 does not own. Named here so it is a "
+        "known gap rather than an empty panel.",
 }
 
 # PromQL keywords that survive the stripping below and are not metric names.
@@ -231,14 +275,31 @@ def candidates(metric: str) -> set[str]:
     return seen
 
 
-def is_published(metric: str, instruments: set[str]) -> bool:
+def wired_consumers() -> set[str]:
+    """Helper calls a HOST makes — the composition roots of §4.2, nothing else."""
+    calls = set()
+    for program in (ROOT / "src").rglob(HOST_FILES):
+        if "/obj/" in program.as_posix() or "/bin/" in program.as_posix():
+            continue
+        body = read(program)
+        for metric, (call, _) in CONSUMER_GATED_METRICS.items():
+            if call in body:
+                calls.add(metric)
+
+    return calls
+
+
+def is_published(metric: str, instruments: set[str], consumers: set[str]) -> bool:
     # Both sides take the same stripping. An exporter's metric carries the same
     # _count / _bucket / _sum suffixes a solution instrument's does, so matching
     # EXTERNAL_METRICS on the raw name alone would demand three entries per
     # histogram and reject the two that were not written down.
     reachable = candidates(metric)
 
-    return bool(reachable & instruments) or bool(reachable & EXTERNAL_METRICS.keys())
+    return (
+        bool(reachable & instruments)
+        or bool(reachable & EXTERNAL_METRICS.keys())
+        or bool(reachable & consumers))
 
 
 # ------------------------------------------------------------------ checks --
@@ -256,6 +317,7 @@ def main() -> int:
     awaiting = parse_rules(AWAITING_RULES)
     every_rule = loaded + awaiting
     instruments = declared_instruments()
+    consumers = wired_consumers()
 
     runbooks = {
         path.name for path in RUNBOOKS.glob("*.md") if path.name not in NOT_A_RUNBOOK
@@ -312,7 +374,7 @@ def main() -> int:
     # 4. Every metric a LOADED rule reads is published by something.
     for rule in loaded:
         for metric in sorted(metrics_in(str(rule["expr"]))):
-            if not is_published(metric, instruments):
+            if not is_published(metric, instruments, consumers):
                 fail(
                     f"{rule['alert']}: reads `{metric}`, which no C# instrument declares "
                     f"and EXTERNAL_METRICS does not list. A loaded rule with no signal is "
@@ -322,7 +384,7 @@ def main() -> int:
     #    the self-clearing half: it goes red on the day the instrument lands.
     for rule in awaiting:
         for metric in sorted(metrics_in(str(rule["expr"]))):
-            if is_published(metric, instruments):
+            if is_published(metric, instruments, consumers):
                 fail(
                     f"{rule['alert']}: reads `{metric}`, which now HAS a signal. "
                     f"Move this rule from awaiting-signal.yaml into platform-alerts.yaml")
@@ -331,7 +393,12 @@ def main() -> int:
     #    metric nothing publishes draws a flat empty line, which reads as "no
     #    traffic" rather than as "this panel is broken" — the same trap as a
     #    silent alert, one artefact over.
-    check_dashboards(instruments)
+    check_dashboards(instruments, consumers)
+
+    # 8. Every service hosting the outbox dispatcher publishes outbox gauges,
+    #    or is on a declared exemption with a reason. Checks 4 and 5 are about
+    #    metric NAMES and cannot see a service missing from a series.
+    check_outbox_metrics_per_service()
 
     # 7. The workflow's triggers cover every path this script reads outside its
     #    own tree — asserted on BOTH triggers, because a merged change that
@@ -341,7 +408,7 @@ def main() -> int:
     return report()
 
 
-def check_dashboards(instruments: set[str]) -> None:
+def check_dashboards(instruments: set[str], consumers: set[str]) -> None:
     dashboards = sorted((OBSERVABILITY / "dashboards").glob("*.json"))
 
     if not dashboards:
@@ -371,10 +438,58 @@ def check_dashboards(instruments: set[str]) -> None:
 
         for expression in expressions:
             for metric in sorted(metrics_in(expression)):
-                if not is_published(metric, instruments):
+                if not is_published(metric, instruments, consumers):
                     fail(
                         f"{path.name}: a panel reads `{metric}`, which no C# instrument "
                         f"declares and EXTERNAL_METRICS does not list")
+
+
+def check_outbox_metrics_per_service() -> None:
+    """Every service hosting §9.4's dispatcher publishes outbox gauges, or says why not.
+
+    The loaded outbox alerts are service-agnostic — they group `by
+    (service_name)` — so a service that runs a dispatcher and publishes no
+    gauges is covered by four alerts that can never fire for it. That is the
+    silent-dashboard case, arriving through a *service* rather than through a
+    metric name, which is why checks 4 and 5 cannot see it.
+    """
+    services = sorted((ROOT / "src" / "Services").glob("*"))
+
+    if not services:
+        fail("found no services under src/Services — the reader, not the tree")
+        return
+
+    dispatching, instrumented = set(), set()
+    for service in services:
+        if not service.is_dir():
+            continue
+        for source in service.rglob("*.cs"):
+            if "/obj/" in source.as_posix() or "/bin/" in source.as_posix():
+                continue
+            body = read(source)
+            if "AddHostedService<OutboxDispatcher>" in body:
+                dispatching.add(service.name)
+            if "AddSingleton<OutboxMetrics>" in body:
+                instrumented.add(service.name)
+
+    # Subject: a matcher that found no dispatcher at all would pass this
+    # vacuously, and Ordering is known to host one.
+    if not dispatching:
+        fail("found no service hosting OutboxDispatcher — the matcher, not the tree")
+        return
+
+    for name in sorted(dispatching - instrumented - OUTBOX_METRICS_EXEMPT.keys()):
+        fail(
+            f"{name} hosts OutboxDispatcher and registers no OutboxMetrics, and is not "
+            f"in OUTBOX_METRICS_EXEMPT. Four loaded alerts read gauges it never "
+            f"publishes, so a stalled lane there is silent (§13.6)")
+
+    # The other direction: an exemption for a service that no longer needs one
+    # is a stale excuse, and stale excuses are how a list stops being read.
+    for name in sorted(OUTBOX_METRICS_EXEMPT.keys() - (dispatching - instrumented)):
+        fail(
+            f"{name} is in OUTBOX_METRICS_EXEMPT but no longer needs to be — it "
+            f"either publishes outbox gauges now or hosts no dispatcher. Remove the entry")
 
 
 def check_workflow_covers_inputs() -> None:

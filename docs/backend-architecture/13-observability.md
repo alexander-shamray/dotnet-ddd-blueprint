@@ -1217,7 +1217,9 @@ fails a build the day it is registered.
 
 **The test for membership is not "is it a gauge".** It is *"can this service run
 for an hour without constructing it"* — and for every metrics type in this
-document the answer is yes, which is why all four are here.
+document the answer is yes, which is why each belongs in that constructor as it
+comes to exist. **Three are there today**; `OrderMetrics` is the fourth and
+joins with the projection that is its only call site, per the paragraph above.
 
 That includes `RequestMetrics`, and the reasoning that nearly excluded it is
 worth keeping as the worked example. `LoggingBehavior` injects it, a behaviour
@@ -1254,12 +1256,12 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
     // provider for one throws — registrations cannot be enumerated after the
     // build. BuildServices() stops one step earlier than BuildProvider().
     //
-    // It runs BOTH helpers, which matters here and nowhere else: the four
-    // types are split across AddOrderingApplication (OrderMetrics,
-    // RequestMetrics) and AddOrderingInfrastructure (OutboxMetrics,
-    // MessagingMetrics). A helper that ran only the Application half would see
-    // two of four and fail against a correct MetricsInitialiser — the test
-    // reporting a defect in the thing it is guarding.
+    // It runs BOTH helpers, which matters here and nowhere else: the types are
+    // split across AddOrderingApplication (RequestMetrics today, OrderMetrics
+    // when it exists) and AddOrderingInfrastructure (OutboxMetrics,
+    // MessagingMetrics). A helper that ran only one half would see a subset and
+    // fail against a correct MetricsInitialiser — the test reporting a defect
+    // in the thing it is guarding.
     IEnumerable<Type> registered = BuildServices()
         .Select(d => d.ServiceType)
         .Where(t => t.Name.EndsWith("Metrics"))
@@ -1336,6 +1338,40 @@ published by *nothing*. The second is what makes the list self-clearing — the
 day one of these instruments lands, the gate goes red and names the rule to
 move. All twelve runbooks exist regardless, per §13.9.
 
+> **The cache row needed a different predicate, and finding that out is what
+> the self-clearing claim is worth.** The other three are owed a `Create*` call
+> the gate can see in `src/`. This one is owed a **consumer**: HybridCache
+> creates its counters inside the package, `AddRedisConnections` already exists
+> in `Common.Infrastructure`, and a host adding it to `Program.cs` would light
+> the signal up in production while adding no instrument declaration anywhere.
+> The gate would have stayed green, the rule would have stayed unloaded, and
+> silence would have gone on reading as health — the promise broken for exactly
+> the row this section calls the interesting case. The check now watches for a
+> **host** calling the helper, and a test calling it does not count.
+
+### The gap is per service as well as per metric
+
+A fifth absence sits underneath all of this and is invisible to the checks
+above, because they are about metric *names*. **The four loaded outbox alerts
+group `by (service_name)`, and only Ordering publishes those gauges.** Catalog
+hosts §9.4's dispatcher and registers no `OutboxMetrics`, so a stalled Catalog
+lane is precisely the silent case this section exists to prevent — arriving
+through a service missing from a series rather than through a metric nobody
+declared.
+
+It is not closed here because §13.3 places `OutboxMetrics` in
+`Ordering.Infrastructure`, and moving it is a decision about **the template**:
+Catalog is what §4.5's scaffold renders, so every new service inherits the gap
+until the type is common and the scaffold emits it. Ordering is the one-off
+that closed it for itself.
+
+What this pull request does instead is refuse to let the absence be quiet.
+`check.py` requires every service hosting the dispatcher to publish the gauges
+**or** to be on a declared exemption with a reason, and it fails in both
+directions — a new unexempted service, and a stale exemption for one that no
+longer needs it. **A gap somebody argued is not the same as a dashboard nobody
+noticed was empty**, and that distinction is the whole of what is being bought.
+
 ## 13.7 Starting SLOs
 
 Alert thresholds without targets are arbitrary. These are **starting points** to
@@ -1363,6 +1399,21 @@ row, so it only ever measures a read model this service feeds from its own
 domain events (§7.5). A read model fed by *another* service's contract never
 touches the outbox at all — Ordering's `ordering.ProductPrices` is the worked
 case (§6.6) — so `projection.lag` is empty for it.
+
+> **And today that row has no producer either, which is a second gap and a
+> sharper one.** `MessagingMetrics.Projected` exists and `ProjectionInvoker`
+> calls it — after a registered `IProjectionHandler<T>` succeeds. **No service
+> registers one**: §6.6's `OrderSummaries` is not built, and Ordering's
+> composition root says so in as many words. So the instrument is declared, the
+> meter is collected, and nothing ever writes to it.
+>
+> That is the same shape §13.6 records for the HybridCache meter one section
+> up — **a registered name is not a live signal** — and it is why
+> `deploy/observability/slo/slo.js` names this row as not evaluated instead of
+> asserting it. Asserting a row nothing can satisfy would fail every run on a
+> healthy platform, which is how a gate gets switched off. The row stays in
+> this table because it states the target the projection will be held to; what
+> it does not yet do is measure anything.
 
 **Broker-fed read-model staleness therefore has no SLO here, and the honest
 move is to say so rather than to point at a row that nearly fits.** The

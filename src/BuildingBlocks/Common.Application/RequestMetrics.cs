@@ -8,10 +8,20 @@ namespace Common.Application;
 /// it and the pipeline is Application (§13.3).
 /// </summary>
 /// <remarks>
-/// Registered by a service's <c>Add&lt;Service&gt;Application</c> and forced at
-/// startup like every other metrics type: "a behaviour injects it" is not the
-/// same as "something has constructed it", and a service whose traffic has
-/// stopped publishes nothing at all (§13.6).
+/// Registered by a service's <c>Add&lt;Service&gt;Application</c>, and forced at
+/// startup wherever a <c>MetricsInitialiser</c> exists: "a behaviour injects it"
+/// is not the same as "something has constructed it", and a service whose
+/// traffic has stopped publishes nothing at all (§13.6).
+/// <para>
+/// <b>Ordering forces it and Catalog does not</b>, because §13.3 puts
+/// <c>MetricsInitialiser</c> beside <c>OutboxMetrics</c> in
+/// <c>Ordering.Infrastructure</c>. That is a real gap rather than a nuance —
+/// it is named in §13.6 and asserted by <c>deploy/observability/check.py</c>,
+/// which refuses to let a service host the outbox dispatcher without either
+/// publishing the gauges or carrying a stated exemption. This remark used to
+/// say "like every other metrics type", which described the target rather than
+/// the solution.
+/// </para>
 /// </remarks>
 public sealed class RequestMetrics
 {

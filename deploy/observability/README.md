@@ -43,6 +43,17 @@ a signal and a procedure"* — and the last is the gate watching its own inputs.
 | 5 | Every metric an **awaiting-signal** rule reads is published by **nothing** |
 | 6 | Every dashboard panel's metric is published |
 | 7 | The workflow's triggers cover every path outside this tree that the gate reads |
+| 8 | Every service hosting §9.4's dispatcher publishes outbox gauges, or is on a declared exemption |
+
+**Check 8 exists because checks 4 and 5 are about metric *names* and cannot see
+a service missing from a series.** The four loaded outbox alerts group `by
+(service_name)`; a service that runs a dispatcher and publishes no gauges is
+"covered" by four alerts that can never fire for it. Catalog is that service
+today — §13.3 places `OutboxMetrics` in `Ordering.Infrastructure`, so closing
+it means lifting the type into common code and teaching §4.5's scaffold to emit
+it, which is a larger decision. It is on the exemption list with that reason,
+and the check fails in **both** directions: a new unexempted service, and a
+stale exemption for one that no longer needs it.
 
 **What it does not do.** It reaches no Prometheus, no Grafana and no cluster,
 and it does **not** check that a rules file is syntactically valid to
@@ -130,7 +141,16 @@ k6 drives the traffic and Prometheus adjudicates: k6's own thresholds are a
 coarse guard, because a client's wall-clock includes the edge, TLS and the
 network, while §13.7's command and query rows read `request.duration`, which is
 dispatcher entry to result. The authoritative assertions are in `teardown()`,
-one per §13.7 row that has a signal.
+one per §13.7 row this run's own traffic can actually produce.
+
+**Three of §13.7's seven rows are not evaluated**, each named in `teardown()`
+rather than quietly dropped: availability, because a three-minute run cannot
+compute a monthly objective; `projection.lag`, because no service registers an
+`IProjectionHandler<T>` and so nothing writes to it; and
+`messaging.delivery.lag`, because the consumer that records it handles
+Catalog's product events and neither scenario produces one. Asserting any of
+the three would fail every run on a healthy platform, which is how a gate gets
+switched off.
 
 **An absent series fails the run.** It is not treated as "no problem observed",
 for the reason the two rule files exist.

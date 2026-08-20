@@ -71,6 +71,13 @@ export const options = {
         slo_command_duration: ['p(95)<600'],
         // Not the availability SLO — see teardown().
         http_req_failed: ['rate<0.01'],
+        // WITHOUT THIS, EVERY check() BELOW IS DECORATION. k6 does not fail the
+        // run on a failed check unless a threshold names the `checks` metric —
+        // it prints a red line in the summary and exits 0. So a write path
+        // returning 422 for every request would leave the command scenario
+        // "fast", satisfy the duration thresholds, and pass. That is exactly
+        // the trap placeOrder's own comment describes.
+        checks: ['rate==1'],
     },
 };
 
@@ -79,8 +86,18 @@ export function setup() {
     // the command scenario because it has no credentials reports a pass for a
     // gate that did not execute, which is the failure mode §15.1's whole
     // "no smoke stage" argument is about.
-    const missing = ['BASE_URL', 'PROM_URL', 'TOKEN_URL', 'CLIENT_ID', 'CLIENT_SECRET']
-        .filter((name) => !__ENV[name]);
+    // SLO_PRODUCT_ID belongs on this list and was missed when it was written.
+    // An unset k6 env var is `""`, not undefined, so the command scenario would
+    // have run happily with an empty product id and been refused on every
+    // request — a configuration failure wearing the costume of a load result.
+    const missing = [
+        'BASE_URL',
+        'PROM_URL',
+        'TOKEN_URL',
+        'CLIENT_ID',
+        'CLIENT_SECRET',
+        'SLO_PRODUCT_ID',
+    ].filter((name) => !__ENV[name]);
 
     if (missing.length > 0)
         fail(`SLO run is not configured: missing ${missing.join(', ')}`);
@@ -158,11 +175,6 @@ export function teardown(data) {
             limit: 0.08,
         },
         {
-            name: 'Event end-to-end p95 < 2 s',
-            query: `histogram_quantile(0.95, sum by (le) (rate(messaging_delivery_lag_seconds_bucket[${window}])))`,
-            limit: 2,
-        },
-        {
             name: 'Outbox oldest, broker lane, p99 < 5 s',
             query: `quantile_over_time(0.99, outbox_oldest_age_seconds{lane="Broker"}[${window}])`,
             limit: 5,
@@ -170,11 +182,6 @@ export function teardown(data) {
         {
             name: 'Outbox oldest, local lane, p99 < 1 s',
             query: `quantile_over_time(0.99, outbox_oldest_age_seconds{lane="Local"}[${window}])`,
-            limit: 1,
-        },
-        {
-            name: 'Read-model staleness, own events, p99 < 1 s',
-            query: `histogram_quantile(0.99, sum by (le) (rate(projection_lag_seconds_bucket[${window}])))`,
             limit: 1,
         },
     ];
@@ -196,13 +203,34 @@ export function teardown(data) {
             breaches.push(`${row.name}: measured ${value.toFixed(4)}, limit ${row.limit}`);
     }
 
-    // Availability (99.9% monthly) is deliberately NOT asserted. It is a
-    // monthly objective and a three-minute run cannot evaluate it; http_req_failed
-    // above bounds the error rate DURING the run, which is a different and much
-    // weaker claim. Saying so is the point — a run that reported "availability:
-    // pass" after three minutes would be the exact defect §13.7 cut two rows to
-    // avoid.
-    console.log('SLO run: availability (99.9% monthly) is not evaluated by this run.');
+    // THREE OF §13.7's SEVEN ROWS ARE NOT EVALUATED HERE, and each is named
+    // rather than quietly dropped — §13.7 cut two rows outright on the same
+    // rule: an SLO that cannot be evaluated is not a weak SLO, it is a claim
+    // that the service is meeting a bar nobody is checking.
+    //
+    //   * Availability (99.9% MONTHLY) — a three-minute run cannot compute a
+    //     monthly objective. `http_req_failed` above bounds the error rate
+    //     DURING the run, which is a different and much weaker claim.
+    //
+    //   * Read-model staleness, own events (`projection.lag`) — `ProjectionInvoker`
+    //     records it after a registered IProjectionHandler<T> succeeds, and NO
+    //     SERVICE REGISTERS ONE: §6.6's OrderSummaries is not built, and
+    //     Ordering's composition root says so in as many words. The instrument
+    //     exists and nothing writes to it, which is the same shape as the
+    //     HybridCache meter in §13.6 — a registered name is not a live signal.
+    //
+    //   * Event end-to-end (`messaging.delivery.lag`) — recorded by
+    //     IntegrationEventConsumer<T> at consume start. This run places orders;
+    //     the consumer that records it handles Catalog's product events, which
+    //     neither scenario produces. Asserting it against traffic that cannot
+    //     generate it would fail every run for a reason that is not a
+    //     regression.
+    //
+    // Asserting any of the three would have made this gate fail permanently on
+    // a healthy platform, which is how a gate gets switched off.
+    console.log(
+        'SLO run: not evaluated — availability (monthly), projection.lag (no ' +
+        'registered handler), messaging.delivery.lag (not exercised by this traffic).');
 
     if (breaches.length > 0)
         fail(`SLO run failed:\n  ${breaches.join('\n  ')}`);
