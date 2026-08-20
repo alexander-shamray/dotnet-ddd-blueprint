@@ -11,8 +11,8 @@ replicaCount: 3
 image:
   registry: registry.example.com/commerce
   api: gateway
-  # No migrator key: the gateway owns no database (§10.1), so the pre-upgrade
-  # hook (§7.4) has nothing to run for it. This chart also carries no
+  # No migrator key: the gateway owns no database (§10.1), so §7.4's
+  # migration hook has nothing to run for it. This chart also carries no
   # templates/migrate-job.yaml — §15.3's point that the gateway's chart is not
   # a service chart with the database parts deleted — so the absence is
   # structural and the missing key is the values half of the same statement.

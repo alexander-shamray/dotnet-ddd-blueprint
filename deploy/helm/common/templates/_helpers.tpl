@@ -116,7 +116,7 @@ password into `helm get values` and into every diff of this repository.
 {{- if .Values.database.enabled }}
 {{- /*
 The RUNTIME connection string (DML only) — §7.1's split identity. The migrator
-key is the other half, mounted into the pre-upgrade Job and nowhere else.
+key is the other half, mounted into the migration Job and nowhere else.
 */}}
 - name: ConnectionStrings__{{ required "database.connectionName is required when database.enabled: it is the .NET configuration key this service's Infrastructure passes to GetConnectionString (§7.1), and it differs per service." .Values.database.connectionName }}
   valueFrom:

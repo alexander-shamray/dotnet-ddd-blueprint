@@ -276,9 +276,18 @@ question.
 
 ### Every service builds two images
 
-The migration job (§7.4) is a Helm `pre-upgrade` hook, so its image must exist
-**before** the deploy that uses it. A pipeline that builds only the API image
-fails at the first step of every release, pulling a tag CI never pushed.
+The migration job (§7.4) is a Helm `pre-install,pre-upgrade` hook, so its image
+must exist **before** the deploy that uses it. A pipeline that builds only the
+API image fails at the first step of every release, pulling a tag CI never
+pushed.
+
+**Both halves of that annotation, and the shorter spelling is a first deploy
+that never migrates.** Helm runs `pre-upgrade` on `helm upgrade` and
+`pre-install` on `helm install` — they are different events, not a range — so a
+hook registered for the second alone is skipped on the release that creates the
+namespace, and the first pods start against a database with no schema. That is
+the exact moment §7.4's hook exists for, and the failure is silent in the
+deploy log: no hook ran, so no hook failed.
 
 ```dockerfile
 # src/Services/Ordering/Ordering.Migrator/Dockerfile
@@ -334,20 +343,31 @@ ENTRYPOINT ["dotnet", "Ordering.Migrator.dll"]
 Both images carry the **same tag**, which is what lets `values.yaml` hold one
 `image.tag` and the Helm hook interpolate it into the migrator reference
 (§7.4). A migrator built from a different commit than the API it precedes is
-the exact failure the pre-upgrade hook exists to prevent.
+the exact failure the migration hook exists to prevent.
 
 ## 15.3 Deployment
 
 Each service gets a Helm chart; an umbrella chart deploys the platform.
 
 **The templates live once, in a library chart.** `deploy/helm/common` is a
-`type: library` chart every other chart takes as a `file://` dependency, and
-each service chart's templates are one-line includes of it. That is the same
-decision §4.5's scaffold takes for the solution — Catalog is read at run time
-so there is one copy of the wiring rather than two that drift — arrived at from
-the other side: five charts of near-identical YAML is five places to fix a
-probe. What differs per deployable is its values file, and that is what the
-fences below show.
+`type: library` chart every **deployable** chart takes as a `file://`
+dependency, and each one's templates are one-line includes of it. The umbrella
+is the exception and takes no such dependency: it depends on the deployable
+charts, and reaches the library only through them — which is why they have to
+be resolved first, or it packages a subchart whose templates are missing.
+
+That is the same decision §4.5's scaffold takes for the solution — Catalog is
+read at run time so there is one copy of the wiring rather than two that
+drift — arrived at from the other side: without it, every deployable carries
+its own copy of the probe block, and fixing a probe means finding all of them.
+What differs per deployable is its values file, and that is what the fences
+below show.
+
+**No count in that sentence, deliberately**, and the sentence it replaces had
+two that the tree falsified: "every other chart" included the umbrella, which
+takes no library dependency, and "five charts" counted a sixth directory that
+holds no templates at all. A number describing this tree is wrong on the PR
+that adds Inventory; the rule is not.
 
 **They are excerpts, and the comment at the top of each says so.** A fence
 labelled with a path and then disagreeing with the file at that path is the
@@ -584,8 +604,8 @@ image:
   registry: registry.example.com/commerce
   api: gateway
   tag: ""
-  # No migrator key: the gateway owns no database (§10.1), so the pre-upgrade
-  # hook (§7.4) has nothing to run for it. The hook belongs to each service
+  # No migrator key: the gateway owns no database (§10.1), so §7.4's migration
+  # hook has nothing to run for it. The hook belongs to each service
   # chart rather than to the umbrella — a subchart's hooks run in the parent's
   # release, so one deployable can be rolled on its own and still migrate.
   #
