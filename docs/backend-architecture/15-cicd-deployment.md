@@ -337,6 +337,16 @@ namespace, and the first pods start against a database with no schema. That is
 the exact moment §7.4's hook exists for, and the failure is silent in the
 deploy log: no hook ran, so no hook failed.
 
+> **The deploy command carries a `--timeout`, and the number is owed to §13.6
+> rather than chosen here.** Helm blocks on a hook whatever `--wait` says, so
+> the migration Job gets whatever `--timeout` allows and the default is five
+> minutes. §13.6's `MigrationJobFailed` pages on a Job still active past 900
+> seconds, plus `for: 1m` — sixteen minutes — so at the default Helm gives up
+> first and a Job that finishes after it takes the gauge back to zero with
+> nothing having fired: a failed release and no alert. `deploy/helm/README.md`
+> sets `--timeout 20m` on both documented commands, and **20m > 16m is the
+> constraint**; move either number and the other follows.
+
 ```dockerfile
 # src/Services/Ordering/Ordering.Migrator/Dockerfile
 

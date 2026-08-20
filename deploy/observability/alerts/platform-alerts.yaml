@@ -203,6 +203,15 @@ groups:
       # at zero for ever, so the deploy hangs and nothing pages. The second
       # branch is an *active* Job older than fifteen minutes — well past any
       # migration this platform has, and the shape a stuck release takes.
+      # 900 + `for: 1m` is SIXTEEN MINUTES, and the deploy has to outlive it or
+      # this branch watches a window that is already closed. Helm blocks on a
+      # hook whatever `--wait` says, and its default timeout is five minutes —
+      # so it would give up first, and a Job finishing at eight minutes takes
+      # `kube_job_status_active` back to zero with nothing fired: a failed
+      # release and no page. deploy/helm/README.md pins `--timeout 20m` on both
+      # documented commands for exactly this, and 20m > 16m is the constraint
+      # between them. Move either number and the other follows.
+      #
       # `kube_job_failed{condition="true"}`, NOT `kube_job_status_failed`. The
       # latter counts failed *pods*, and §15.3's hook sets `backoffLimit: 2` —
       # so one transient attempt puts it above zero while a retry is still

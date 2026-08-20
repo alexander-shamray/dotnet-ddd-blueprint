@@ -60,8 +60,24 @@ So a render always carries one:
 helm template catalog deploy/helm/catalog --set-string image.tag="$SHA"
 
 helm upgrade --install catalog-api deploy/helm/catalog \
-    --namespace commerce --set-string image.tag="$SHA"
+    --namespace commerce --timeout 20m --set-string image.tag="$SHA"
 ```
+
+**`--timeout` is not tuning, and leaving it off puts a §13.6 alert outside the
+window it watches.** Helm always blocks on a hook — `--wait` governs the
+release's own resources, never this — so the migration Job (§7.4) gets whatever
+`--timeout` allows, and the default is **5 minutes**. §13.6's `MigrationJobFailed`
+has a second branch for a Job that is *stuck*: active for more than 900 seconds,
+plus `for: 1m`, so it needs **16 minutes** before it will page. At the default
+those two never overlap. Helm gives up first, and a Job that then finishes at,
+say, eight minutes takes `kube_job_status_active` back to zero with nothing
+having fired — a failed release and no alert.
+
+Two numbers, and the deploy is the one that moves. Pinning the alert under five
+minutes instead would page on a migration that is merely slow, on a deploy that
+was going to fail anyway; §13.6's threshold is deliberately "well past any
+migration this platform has". So the deploy window is set to outlive it, and
+**20m > 16m is the whole constraint** — change one and the other has to follow.
 
 The umbrella takes a tag per subchart, because §15.1 builds and deploys per
 service — a change under `src/Services/Catalog` rebuilds Catalog alone, and
@@ -70,6 +86,7 @@ every other subchart must keep the tag it is already running:
 ```bash
 helm upgrade --install platform deploy/helm/platform \
     --namespace commerce \
+    --timeout 20m \
     --values environments/staging.yaml \
     --set-string catalog.image.tag="$CATALOG_SHA" \
     --set-string ordering.image.tag="$ORDERING_SHA" \

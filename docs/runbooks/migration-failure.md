@@ -109,6 +109,19 @@ kubectl -n <ns> get job/"$job" -o jsonpath='{.status}'
 A pending release blocks the next deploy. Once the Job's outcome is understood,
 `helm rollback` (upgrade) or `helm uninstall` (failed first install) clears it.
 
+**By the time this branch pages, the client that started the deploy is gone.**
+It fires on a Job active past 900 seconds plus `for: 1m`, and
+`deploy/helm/README.md` runs `helm upgrade` with `--timeout 20m` so the alert
+lands inside that window rather than after it — but the release is stuck either
+way, and whoever ran the command may have seen it return long before you were
+paged. **Do not assume someone is still watching.** Check `helm history` for
+who and when, and say in the incident channel that you have it.
+
+If the deploy was run **without** `--timeout` — a hand-typed command, a
+pipeline that predates the flag — Helm gave up at its five-minute default and
+this alert may never fire at all. A stuck release with no page is that shape;
+`helm list --all-namespaces --pending` is what finds it.
+
 ## Rolling forward
 
 **Forward, not back, and the asymmetry is the point.** EF Core migrations are
