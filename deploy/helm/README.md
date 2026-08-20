@@ -113,8 +113,9 @@ gateway:
   asserts what the image already does — UID 1654, measured off the base
   image's own config.
 - **A cluster.** `smoke.sh` renders and greps; it never applies. Schema
-  validation against a live API server is a deploy-time gate (§15.1). Two
-  known gaps live on that side of the line and neither can be rendered:
+  validation against a live API server is a deploy-time gate (§15.1). These
+  gaps live on that side of the line and none of them can be rendered — listed
+  rather than counted, because the count was two when this was written:
   - **Mixing the two install modes.** One release owns a *resource* — Helm
     stamps `meta.helm.sh/release-name` on everything and these charts render
     fixed names, so the umbrella and a per-service release cannot both own
@@ -144,12 +145,12 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Sixty-eight deliberate defects have been run through it and sixty-seven
+**Sixty-nine deliberate defects have been run through it and sixty-eight
 turned a green run red** — a renamed Service, a CPU limit, a grace period
 back at the Kubernetes default, a dropped hook annotation, a connection string
 moved into a ConfigMap, a second chart growing client credentials, an `envFrom`
-naming a
-ConfigMap nothing renders, a rollout checksum that missed the gateway's own, a
+naming a ConfigMap nothing renders, a rollout checksum that missed the
+gateway's own, a
 Service publishing only its first port, a chart renumbering the port its
 callers dial, a fifth chart the gate never looked at, an Ingress with no
 backend, an Ingress with no TLS, a blank CIDR, a blank origin, a

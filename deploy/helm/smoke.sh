@@ -137,9 +137,18 @@ check "exactly one chart declares client credentials (found $credentialed)" \
 # The real fix is a `chart:` capability block — one key per capability, named
 # for what it is — and it is deferred to its own change rather than taken at
 # round nine of a review loop.
+# SCOPED TO ITS OWN BLOCK, and the first version was not — `^ +enabled: true`
+# matched whichever block came first (there are five in Catalog's values), so
+# clearing the broker entirely left this gate green while claiming to check it.
+# A vacuous assertion in the file whose whole subject is vacuous assertions.
 declares() {
-    # declares <chart> <key> -> exit 0 when the chart's values set it true
-    grep -qE "^ +$2: true" "$CHARTS_DIR/$1/values.yaml"
+    # declares <chart> <block> -> exit 0 when that block sets enabled: true
+    awk -v want="$2" '
+        $0 ~ ("^" want ":") { inside = 1; next }
+        /^[a-z]/ { inside = 0 }
+        inside && /^  enabled: true$/ { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "$CHARTS_DIR/$1/values.yaml"
 }
 
 for chart in $MIGRATOR_CHARTS; do
@@ -149,7 +158,7 @@ for chart in $MIGRATOR_CHARTS; do
     if [ -d "$src" ]; then
         if grep -rq 'GetConnectionString("RabbitMq")' "$src"; then
             check "$chart reads RabbitMq in src/, so its chart declares a broker" \
-                declares "$chart" 'enabled'
+                declares "$chart" broker
         fi
         if grep -rqE 'GetConnectionString\("[A-Za-z]+"\)' "$src"; then
             check "$chart resolves a connection string in src/, so its chart names one" \

@@ -510,7 +510,7 @@ scaffold's tests are Python and the chart gate is bash over `helm template`;
 neither is in `Platform.slnx`, so a green solution says nothing about either:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 81 tests, no Docker, no SDK
+(cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK

@@ -28,7 +28,7 @@ dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
 
-cd tools/new-service && py -3.12 -m unittest    # no Docker, no SDK
+(cd tools/new-service && py -3.12 -m unittest)  # no Docker, no SDK
 
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
 ```
