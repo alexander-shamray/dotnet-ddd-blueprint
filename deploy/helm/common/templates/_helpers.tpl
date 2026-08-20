@@ -154,10 +154,10 @@ immutable.
 {{ include "commerce.selectorLabels" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- /*
-Not truncated:  refuses a tag longer than 63 outright, for the
+Not truncated: `commerce.tag` refuses a tag longer than 63 outright, for the
 reason _migration-job.tpl gives about its own name. Truncating produced a
 version label naming a tag no registry has, and could not be made safe — a cut
-can land on a dot, which  never touched.
+can land on a dot, which `trimSuffix "-"` never touched.
 */}}
 app.kubernetes.io/version: {{ include "commerce.tag" . | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}

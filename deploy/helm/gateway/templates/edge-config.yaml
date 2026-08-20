@@ -70,6 +70,21 @@ shape is the thing this branch keeps having to fix.
 {{- if gt (atoi $octet) 255 }}
 {{- fail (printf "ingress.trustedNetworks[%d] has an octet above 255." $i) }}
 {{- end }}
+{{- /*
+AND THE SPELLING, which is the security half rather than a tidiness one.
+MEASURED on .NET 10: `IPNetwork.Parse("010.0.0.0/8")` does not throw and does
+not give `10.0.0.0/8` — it returns **`8.0.0.0/8`**, because the parser reads a
+leading zero as octal. So an operator who writes `010.` to line a column up
+trusts an entirely different network, `KnownIPNetworks` is loaded with it, and
+`X-Forwarded-For` from the real ingress is ignored while some other range can
+spoof it. Nothing in the render, the rollout or the logs says so.
+
+Comparing the text with the integer printed back is the whole test, and it is
+the same one the port above uses.
+*/}}
+{{- if ne $octet (printf "%d" (atoi $octet)) }}
+{{- fail (printf "ingress.trustedNetworks[%d] spells an octet non-canonically (%q). IPNetwork.Parse reads a leading zero as OCTAL — 010.0.0.0/8 parses to 8.0.0.0/8, measured — so the gateway would trust a different network from the one written, silently (§10.3, §15.3)." $i $octet) }}
+{{- end }}
 {{- end }}
 {{- /* The trimmed value, for the reason the origins list gives below. */}}
 Ingress__TrustedNetworks__{{ $i }}: {{ $n | quote }}

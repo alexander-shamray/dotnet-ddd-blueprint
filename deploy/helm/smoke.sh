@@ -831,6 +831,12 @@ refuses 'a trusted network with a bad octet fails the render' 'octet above 255' 
     --set 'ingress.trustedNetworks={10.0.300.0/8}'
 refuses 'a trusted network with a bad prefix fails the render' 'prefix length above 32' \
     --set 'ingress.trustedNetworks={10.0.0.0/64}'
+# The security case rather than a tidiness one, and measured on .NET 10:
+# IPNetwork.Parse("010.0.0.0/8") returns 8.0.0.0/8, because a leading zero is
+# read as octal. The operator writes one network and the gateway trusts
+# another, with nothing in the render or the rollout saying so.
+refuses 'a trusted network with an octal octet fails the render' 'non-canonically' \
+    --set 'ingress.trustedNetworks={010.0.0.0/8}'
 
 # The guard checked `$o` and the ConfigMap emitted `$origin`, so a trailing
 # space passed every test above and then failed the host's exact text

@@ -145,7 +145,7 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Seventy deliberate defects have been run through it and sixty-nine turned a
+**Seventy-one deliberate defects have been run through it and seventy turned a
 green run red** — a renamed Service, a CPU limit, a grace period back at the
 Kubernetes default, a dropped hook annotation, a connection string moved into a
 ConfigMap, a second chart growing client credentials, an `envFrom` naming a
@@ -156,7 +156,8 @@ backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
 whitespace-only authority, an origin carrying credentials, a pod remounting the
 service-account token, a listener moved out from under its own Service, a
 validator that checked one string and shipped another, an uppercase host, a
-CIDR that is not one, a migrator pod answering its own service's traffic, a
+CIDR that is not one, a CIDR octet read as octal, a migrator pod answering its
+own service's traffic, a
 routed service switching its own Service off, a capability cleared by an
 overlay, a health route renamed in the source that maps it, a tag that is legal
 for a registry and illegal for Kubernetes, in six spellings, a tag that overruns
