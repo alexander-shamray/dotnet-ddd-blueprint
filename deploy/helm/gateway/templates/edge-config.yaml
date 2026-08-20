@@ -64,8 +64,28 @@ data:
   {{- if not (trim $origin) }}
   {{- fail (printf "cors.origins[%d] is blank. WithOrigins accepts it and matches nothing, so the host starts healthy and refuses every browser (§15.4)." $i) }}
   {{- end }}
-  {{- if not (regexMatch "^https?://[^/ ]+$" (trim $origin)) }}
-  {{- fail (printf "cors.origins[%d] is not a browser origin. One is a scheme, a host, and a port only when it is not the scheme's default — exactly as a browser serialises it — so a trailing slash or a path matches nothing (§10.2). The value is deliberately not echoed (§13.4)." $i) }}
+  {{- /*
+  The shape, and it has to be the SAME shape Program.cs enforces or the guard
+  is theatre. That check is one equality — the configured text must equal
+  `GetLeftPart(UriPartial.Authority)` — which a template cannot compute, so
+  this approximates it with the four rejections that equality implies. The
+  first version here was `^https?://[^/ ]+$`, which let
+  `https://user:pass@example.com`, `https://shop.example.com:443` and
+  `https://shop.example.com?x` through: each renders, begins a rollout, and
+  crashes the new pod, which is precisely what a render-time guard exists to
+  prevent.
+
+  Userinfo, path, query and fragment are excluded by the character class. The
+  default port needs its own test, because a browser omits it and WithOrigins
+  compares text — so `https://x:443` matches nothing while looking correct,
+  which §10.2's own guard spent seven review rounds arriving at.
+  */}}
+  {{- $o := trim $origin }}
+  {{- if not (regexMatch "^https?://[^/?#@ ]+$" $o) }}
+  {{- fail (printf "cors.origins[%d] is not a browser origin. One is a scheme, a host, and a port only when it is not the scheme's default — exactly as a browser serialises it — so userinfo, a path, a query or a fragment matches nothing (§10.2). The value is deliberately not echoed (§13.4)." $i) }}
+  {{- end }}
+  {{- if or (hasPrefix "https://" $o | and (hasSuffix ":443" $o)) (hasPrefix "http://" $o | and (hasSuffix ":80" $o)) }}
+  {{- fail (printf "cors.origins[%d] names the scheme's default port. A browser serialises an origin without it, and WithOrigins compares the configured text — so this matches nothing while looking correct (§10.2)." $i) }}
   {{- end }}
   Cors__Origins__{{ $i }}: {{ $origin | quote }}
   {{- end }}

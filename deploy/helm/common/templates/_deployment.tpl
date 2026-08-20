@@ -57,6 +57,15 @@ spec:
       one there is, because ServiceOptions.OperationTimeout (20 s) sits inside
       it.
       */}}
+      {{- /*
+      Nothing in this platform calls the Kubernetes API. Omitting this field
+      mounts the namespace's default service-account token into every
+      container anyway, so an application compromise — an SSRF, a deserialisation
+      bug, anything that can read a file — also hands over a cluster
+      credential. Off costs nothing here and removes that from the blast
+      radius entirely.
+      */}}
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- /*

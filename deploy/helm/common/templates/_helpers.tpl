@@ -15,8 +15,31 @@ rather than a template error.
 So the name is a value, and it is required. `workload.name` is what the Service
 is called, which is what a peer dials.
 */}}
+{{/*
+`required` is not enough on its own, and every guard in these charts rested on
+it until Copilot said so.
+
+Helm's `required` fails on nil and on the empty string, and passes anything
+else — including `" "`. The hosts do not agree: `AddJwtAuthentication` guards
+with `IsNullOrWhiteSpace` and says in its own comment that an environment
+variable set to the empty string arrives as `""` rather than null. So an
+overlay with `identity.authority: " "` rendered cleanly, began a rollout, and
+died in the new pod — which is the failure every render-time guard here exists
+to move earlier.
+
+BLANK COUNTS AS MISSING is already a lesson in CLAUDE.md, learned twice against
+this exact key. This is the third time, and it goes in one helper so there is
+one place to be wrong. `toString` before `trim` because `trim` errors on a
+non-string, and `tag: 1.2` is a YAML float.
+*/}}
+{{- define "commerce.require" -}}
+{{- $value := index . 0 -}}
+{{- $message := index . 1 -}}
+{{- required $message ($value | default "" | toString | trim) -}}
+{{- end -}}
+
 {{- define "commerce.name" -}}
-{{- required "workload.name is required: it is this deployable's Service name, and therefore the string the gateway's route file and the BFF's pricing hop dial (§10.2, §9.7)." .Values.workload.name -}}
+{{- include "commerce.require" (list .Values.workload.name "workload.name is required: it is this deployable's Service name, and therefore the string the gateway's route file and the BFF's pricing hop dial (§10.2, §9.7).") -}}
 {{- end -}}
 
 {{- /*
@@ -30,7 +53,7 @@ refusal — without it the empty string renders `image: registry/api:` and the
 kubelet resolves that to `:latest`, which is the one tag §15.3 forbids by name.
 */}}
 {{- define "commerce.tag" -}}
-{{- required "image.tag is required and values.yaml leaves it empty on purpose: a deploy that cannot name its image must fail rather than roll something nobody chose (§15.3). CI supplies it; a config-only deploy resolves the running tag first (§15.1)." .Values.image.tag -}}
+{{- include "commerce.require" (list .Values.image.tag "image.tag is required and values.yaml leaves it empty on purpose: a deploy that cannot name its image must fail rather than roll something nobody chose (§15.3). CI supplies it; a config-only deploy resolves the running tag first (§15.1).") -}}
 {{- end -}}
 
 {{- /*
@@ -78,8 +101,8 @@ read down its Kind column, and a key in the wrong one is a password in a
 ConfigMap or a plain string in a Secret.
 */}}
 {{- define "commerce.config" -}}
-Identity__Authority: {{ required "identity.authority is required for every host, the gateway included (§15.4) — AddJwtAuthentication reads it eagerly and throws naming the key, so an unset value is a pod that never starts." .Values.identity.authority | quote }}
-OTEL_EXPORTER_OTLP_ENDPOINT: {{ required "observability.otlpEndpoint is required: UseOtlpExporter reads the OpenTelemetry standard variable, and left unset it exports to localhost:4317, where nothing listens in a pod (§15.4)." .Values.observability.otlpEndpoint | quote }}
+Identity__Authority: {{ include "commerce.require" (list .Values.identity.authority "identity.authority is required for every host, the gateway included (§15.4) — AddJwtAuthentication reads it eagerly and throws naming the key, so an unset value is a pod that never starts.") | quote }}
+OTEL_EXPORTER_OTLP_ENDPOINT: {{ include "commerce.require" (list .Values.observability.otlpEndpoint "observability.otlpEndpoint is required: UseOtlpExporter reads the OpenTelemetry standard variable, and left unset it exports to localhost:4317, where nothing listens in a pod (§15.4).") | quote }}
 {{- if .Values.identity.clientId }}
 {{- /*
 Two of the three client-credential keys are Config and only the secret is a
@@ -91,7 +114,7 @@ somebody reads as the callee's fault.
 A second chart growing these is a design change, not a configuration change.
 */}}
 Identity__Client__ClientId: {{ .Values.identity.clientId | quote }}
-Identity__Client__Scope: {{ required "identity.scope is required whenever identity.clientId is set: it becomes the audience every service validates (§11.5), and ServiceIdentityOptions marks it [Required]." .Values.identity.scope | quote }}
+Identity__Client__Scope: {{ include "commerce.require" (list .Values.identity.scope "identity.scope is required whenever identity.clientId is set: it becomes the audience every service validates (§11.5), and ServiceIdentityOptions marks it [Required].") | quote }}
 {{- end }}
 {{- end -}}
 
@@ -118,24 +141,24 @@ password into `helm get values` and into every diff of this repository.
 The RUNTIME connection string (DML only) — §7.1's split identity. The migrator
 key is the other half, mounted into the migration Job and nowhere else.
 */}}
-- name: ConnectionStrings__{{ required "database.connectionName is required when database.enabled: it is the .NET configuration key this service's Infrastructure passes to GetConnectionString (§7.1), and it differs per service." .Values.database.connectionName }}
+- name: ConnectionStrings__{{ include "commerce.require" (list .Values.database.connectionName "database.connectionName is required when database.enabled: it is the .NET configuration key this service's Infrastructure passes to GetConnectionString (§7.1), and it differs per service.") }}
   valueFrom:
     secretKeyRef:
-      name: {{ required "database.runtimeSecretRef.name is required when database.enabled." .Values.database.runtimeSecretRef.name | quote }}
-      key: {{ required "database.runtimeSecretRef.key is required when database.enabled." .Values.database.runtimeSecretRef.key | quote }}
+      name: {{ include "commerce.require" (list .Values.database.runtimeSecretRef.name "database.runtimeSecretRef.name is required when database.enabled.") | quote }}
+      key: {{ include "commerce.require" (list .Values.database.runtimeSecretRef.key "database.runtimeSecretRef.key is required when database.enabled.") | quote }}
 {{- end }}
 {{- if .Values.broker.enabled }}
 - name: ConnectionStrings__RabbitMq
   valueFrom:
     secretKeyRef:
-      name: {{ required "broker.secretRef.name is required when broker.enabled: AddMassTransitMessaging throws without the connection string, so the host does not start (§9.3)." .Values.broker.secretRef.name | quote }}
-      key: {{ required "broker.secretRef.key is required when broker.enabled." .Values.broker.secretRef.key | quote }}
+      name: {{ include "commerce.require" (list .Values.broker.secretRef.name "broker.secretRef.name is required when broker.enabled: AddMassTransitMessaging throws without the connection string, so the host does not start (§9.3).") | quote }}
+      key: {{ include "commerce.require" (list .Values.broker.secretRef.key "broker.secretRef.key is required when broker.enabled.") | quote }}
 {{- end }}
 {{- if .Values.identity.clientId }}
 - name: Identity__Client__ClientSecret
   valueFrom:
     secretKeyRef:
-      name: {{ required "identity.clientSecretRef.name is required whenever identity.clientId is set. The secret is a reference, never a value (§15.3)." .Values.identity.clientSecretRef.name | quote }}
-      key: {{ required "identity.clientSecretRef.key is required whenever identity.clientId is set." .Values.identity.clientSecretRef.key | quote }}
+      name: {{ include "commerce.require" (list .Values.identity.clientSecretRef.name "identity.clientSecretRef.name is required whenever identity.clientId is set. The secret is a reference, never a value (§15.3).") | quote }}
+      key: {{ include "commerce.require" (list .Values.identity.clientSecretRef.key "identity.clientSecretRef.key is required whenever identity.clientId is set.") | quote }}
 {{- end }}
 {{- end -}}

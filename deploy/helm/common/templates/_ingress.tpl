@@ -46,12 +46,12 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  ingressClassName: {{ required "ingress.className is required when ingress.enabled: an Ingress with no class is picked up by whichever controller claims the default, which is not a deployment decision to leave to a cluster." .Values.ingress.className | quote }}
-  {{- $host := required "ingress.host is required when ingress.enabled." .Values.ingress.host }}
+  ingressClassName: {{ include "commerce.require" (list .Values.ingress.className "ingress.className is required when ingress.enabled: an Ingress with no class is picked up by whichever controller claims the default, which is not a deployment decision to leave to a cluster.") | quote }}
+  {{- $host := include "commerce.require" (list .Values.ingress.host "ingress.host is required when ingress.enabled.") }}
   {{- /* Unconditional: the guard above refuses to render without it. */}}
   tls:
     - hosts: [{{ $host | quote }}]
-      secretName: {{ required "ingress.tls.secretName is required when ingress.enabled." .Values.ingress.tls.secretName | quote }}
+      secretName: {{ include "commerce.require" (list .Values.ingress.tls.secretName "ingress.tls.secretName is required when ingress.enabled.") | quote }}
   rules:
     - host: {{ $host | quote }}
       http:

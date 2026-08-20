@@ -96,7 +96,20 @@ helm upgrade --install platform deploy/helm/platform \
   asserts what the image already does — UID 1654, measured off the base
   image's own config.
 - **A cluster.** `smoke.sh` renders and greps; it never applies. Schema
-  validation against a live API server is a deploy-time gate (§15.1).
+  validation against a live API server is a deploy-time gate (§15.1). Two
+  known gaps live on that side of the line and neither can be rendered:
+  - **Mixing the two install modes.** One release owns a namespace — Helm
+    stamps `meta.helm.sh/release-name` on everything and these charts render
+    fixed names, so an umbrella-installed namespace rejects a later
+    per-service `helm upgrade --install`, and the reverse too. §15.1's
+    per-service pipeline is what production uses; the umbrella stands an
+    environment up whole. The conflict is an API-server error at install time.
+  - **Secret rotation does not roll pods.** `secretKeyRef` values are
+    snapshotted when a container starts, and External Secrets rotating the
+    underlying Secret changes no chart value — so the checksum is unchanged
+    and nothing restarts. **A rotation is not complete until the consuming
+    workloads have been restarted**, before the old credential is revoked.
+    Closing it properly is PR-24's secrets work, and §15.3 names it as owed.
 
 ## The gate
 
@@ -104,14 +117,16 @@ helm upgrade --install platform deploy/helm/platform \
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Thirty-two deliberate defects have been run through it and thirty-one turned
-a green run red** — a renamed Service, a CPU limit, a grace period back at the
-Kubernetes default, a dropped hook annotation, a connection string moved into a
-ConfigMap, a second chart growing client credentials, an `envFrom` naming a
-ConfigMap nothing renders, a rollout checksum that missed the gateway's own, a
-Service publishing only its first port, a chart renumbering the port its
-callers dial, a fifth chart the gate never looked at, an Ingress with no
-backend, an Ingress with no TLS, a blank CIDR, a blank origin.
+**Thirty-seven deliberate defects have been run through it and thirty-six
+turned a green run red** — a renamed Service, a CPU limit, a grace period
+back at the Kubernetes default, a dropped hook annotation, a connection string
+moved into a ConfigMap, a second chart growing client credentials, an `envFrom`
+naming a ConfigMap nothing renders, a rollout checksum that missed the
+gateway's own, a Service publishing only its first port, a chart renumbering
+the port its callers dial, a fifth chart the gate never looked at, an Ingress
+with no backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
+whitespace-only authority, an origin carrying credentials, a pod remounting
+the service-account token.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,

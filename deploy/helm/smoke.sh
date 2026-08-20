@@ -548,6 +548,41 @@ check 'the gateway ships no default trusted network' \
     grep -qE '^  trustedNetworks: \[\]' "$CHARTS_DIR/gateway/values.yaml"
 
 # --------------------------------------------------------------------------
+section 'Blank is not present, whatever `required` thinks'
+# --------------------------------------------------------------------------
+# Helm's `required` fails on nil and on "" and passes `" "`. The hosts disagree
+# — AddJwtAuthentication guards with IsNullOrWhiteSpace — so a whitespace-only
+# overlay rendered cleanly, began a rollout, and died in the new pod. Every
+# required scalar now goes through `commerce.require`, which trims first; these
+# assert the two that reach a host eagerly.
+refuses 'a whitespace-only authority fails the render' 'identity.authority is required' \
+    $GATEWAY_OVERLAY --set-string 'identity.authority= '
+refuses 'a whitespace-only OTLP endpoint fails the render' 'observability.otlpEndpoint is required' \
+    $GATEWAY_OVERLAY --set-string 'observability.otlpEndpoint=   '
+refuses 'a whitespace-only workload name fails the render' 'workload.name is required' \
+    $GATEWAY_OVERLAY --set-string 'workload.name= '
+
+# The origin guard has to reject what Program.cs rejects, or it is theatre:
+# each of these renders, begins a rollout, and crashes the new pod otherwise.
+refuses 'an origin carrying userinfo fails the render' 'is not a browser origin' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://user:pass@shop.example.com}'
+refuses 'an origin carrying a query fails the render' 'is not a browser origin' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com?x}'
+refuses 'an origin naming the default port fails the render' 'default port' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:443}'
+
+# --------------------------------------------------------------------------
+section 'No pod carries a cluster credential it never uses'
+# --------------------------------------------------------------------------
+# Nothing here calls the Kubernetes API, and omitting the field mounts the
+# namespace's default service-account token anyway — so an application
+# compromise also hands over a cluster credential. It matters most on the
+# migration Job, which holds the one identity with DDL rights (§7.1).
+check 'every pod template disables the service-account token' \
+    test "$(count 'automountServiceAccountToken: false' "$OUT/platform.yaml")" \
+    -eq "$(( $(count '^kind: Deployment$' "$OUT/platform.yaml") + $(count '^kind: Job$' "$OUT/platform.yaml") ))"
+
+# --------------------------------------------------------------------------
 section 'Result'
 # --------------------------------------------------------------------------
 if [ "$failures" -ne 0 ]; then

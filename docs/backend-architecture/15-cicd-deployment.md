@@ -349,6 +349,19 @@ the exact failure the migration hook exists to prevent.
 
 Each service gets a Helm chart; an umbrella chart deploys the platform.
 
+> **One release owns a namespace, and the two install modes cannot be mixed.**
+> Helm stamps `meta.helm.sh/release-name` onto everything it creates, and these
+> charts render fixed names — the Service name is routing configuration and
+> cannot carry a release prefix. So a namespace installed by the umbrella
+> rejects a later per-service `helm upgrade --install` for ownership, and the
+> reverse is rejected the same way. **§15.1 settles which one production
+> uses**: its config-only deploy reads `helm get values ordering`, a per-service
+> release by name, because the pipeline builds and deploys per service. The
+> umbrella's job is standing an environment up *whole* — a fresh cluster, a
+> review environment — where one command is the point and nothing deploys
+> independently afterwards. Nothing in a render can catch a mix; the conflict
+> is an API-server error at install time.
+
 **The templates live once, in a library chart.** `deploy/helm/common` is a
 `type: library` chart every **deployable** chart takes as a `file://`
 dependency, and each one's templates are one-line includes of it. The umbrella
@@ -503,6 +516,23 @@ from its own template, so a narrower hash left `cors.origins` and
 rebuild — changing a mounted object while the pod template stayed
 byte-identical. The cost of the wider hash is a rollout on a key the container
 never sees, such as `autoscaling.maxReplicas`, and that is the safe direction.
+
+> **That hash covers values, and a rotated Secret is not one — this is owed.**
+> Kubernetes snapshots a `secretKeyRef` into the container's environment when
+> the container **starts**, and External Secrets rotating the underlying Secret
+> changes nothing about a running pod. The chart's values are identical across
+> that rotation, so the checksum is identical, so nothing rolls: every service
+> keeps its previous database, broker and client credentials until some
+> unrelated deploy restarts it — and revoking the old credential then takes the
+> platform down at a moment nobody connected to a deploy.
+>
+> The interim procedure is explicit and manual: **a rotation is not complete
+> until the consuming workloads have been restarted**, before the old
+> credential is revoked. Closing it properly is a platform decision this
+> chapter has not taken — a reload controller watching the Secret, versioned
+> Secret names that change the pod spec, or projected-token-style remounting —
+> and it belongs with PR-24's secrets work rather than being chosen here by a
+> chart.
 
 **`replicas` is omitted from the Deployment whenever the HPA is enabled**,
 which is not the same as setting it to `minReplicas`. It is a managed field:

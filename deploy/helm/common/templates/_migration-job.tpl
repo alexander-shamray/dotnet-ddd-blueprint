@@ -70,6 +70,13 @@ spec:
         {{- include "commerce.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
+      {{- /*
+      The same reasoning as the Deployment's, and it bites harder here: this
+      pod holds the MIGRATOR credential (§7.1), the one identity in the
+      platform with DDL rights. It connects to a database and to nothing else,
+      so a cluster credential beside it is pure blast radius.
+      */}}
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
       containers:
@@ -90,8 +97,8 @@ spec:
             - name: ConnectionStrings__{{ .Values.database.connectionName }}Migrator
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "database.migratorSecretRef.name is required whenever image.migrator is set." .Values.database.migratorSecretRef.name | quote }}
-                  key: {{ required "database.migratorSecretRef.key is required whenever image.migrator is set." .Values.database.migratorSecretRef.key | quote }}
+                  name: {{ include "commerce.require" (list .Values.database.migratorSecretRef.name "database.migratorSecretRef.name is required whenever image.migrator is set.") | quote }}
+                  key: {{ include "commerce.require" (list .Values.database.migratorSecretRef.key "database.migratorSecretRef.key is required whenever image.migrator is set.") | quote }}
           resources:
             {{- toYaml .Values.migrationJob.resources | nindent 12 }}
 {{- end -}}
