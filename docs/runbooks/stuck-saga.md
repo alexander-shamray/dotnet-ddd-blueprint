@@ -1,0 +1,130 @@
+# Runbook — stuck saga
+
+| | |
+|---|---|
+| Alert | `StuckSaga`, in `deploy/observability/alerts/awaiting-signal.yaml` — **not loaded yet** |
+| Condition | Any saga unfinalised for over an hour, excluding one in `Confirmed` |
+| Signal | **Owed.** `ordering.saga.oldest_unfinalised.age` does not exist ([§13.6](../backend-architecture/13-observability.md)) |
+| Owner | The service team ([§13.8](../backend-architecture/13-observability.md)) |
+
+> **This alert cannot fire today, and that is recorded rather than hidden.**
+> Nothing publishes a saga-age instrument, so the rule lives in
+> `awaiting-signal.yaml` and is not loaded. The queries below work now — they
+> read the table directly — so this runbook is usable whether the alert exists
+> or not, which is the point of writing it before the signal lands.
+
+## What it means
+
+An order has entered §9.6's fulfilment saga and stopped advancing. Payment may
+be taken, stock may be reserved, and nothing is moving it forward.
+
+**Why `Confirmed` is excluded.** The saga has four states and three of them are
+short: `AwaitingStock` times out in 5 minutes, `Compensating` in 10 and
+`AwaitingPayment` in 15. `Confirmed` is the wait on Shipping, and its timeout is
+**three days** by design — an hour-old saga in `Confirmed` is the healthy path.
+A despatch that genuinely expires escalates to
+[`order-review.md`](order-review.md), never here.
+
+## Find them
+
+The state machine persists to `ordering.OrderFulfilmentStates` through
+MassTransit's EF repository (§9.6).
+
+```sql
+SELECT
+    OrderId      = CorrelationId,
+    CurrentState,
+    StartedAt,
+    AgeMinutes   = DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()),
+    CancelReason
+FROM ordering.OrderFulfilmentStates
+WHERE CurrentState <> 'Confirmed'
+    AND DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()) > 60
+ORDER BY StartedAt;
+```
+
+**A finalised saga has no row.** MassTransit deletes the instance on
+`Finalize`, so anything this returns is by definition unfinalised and the query
+needs no completion predicate — which is also why the alert's condition is
+phrased as an age rather than as a state count.
+
+Group by `CurrentState` first — one stuck order is a message; twenty in the same
+state is a dependency.
+
+## Read the state, then ask what it is waiting for
+
+Each state is waiting on exactly one thing, and each has a timeout that should
+already have fired.
+
+| State | Waiting for | Timeout | If the timeout fires |
+|---|---|---|---|
+| `AwaitingStock` | `StockReserved` from Inventory | 5 min | Cancels the order, `stock_timeout` |
+| `AwaitingPayment` | `PaymentAuthorised` / `PaymentDeclined` | 15 min | Cancels and releases stock, `payment_timeout` |
+| `Confirmed` | `ShipmentDispatched` from Shipping | 3 days | Escalates to `OrderReviews`, `not_despatched` |
+| `Compensating` | `StockReleased` from Inventory | 10 min | Escalates to `OrderReviews`, `stock_not_released` |
+
+**A saga older than its state's timeout is a timeout that did not arrive**, and
+that is a different fault from the peer being slow. It is the first thing to
+check, because it has one cause far more often than not.
+
+## The timeout scheduler is the usual culprit
+
+[ADR-021](../backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
+schedules every saga timeout on RabbitMQ's **delayed message exchange**, which
+is why §14.1's RabbitMQ is the one infrastructure image that is *built* rather
+than pulled. Three ways that breaks, all of which look like a hung saga:
+
+1. **The plugin is missing.** A broker replaced with a stock image accepts
+   ordinary publishes and silently drops scheduled ones. Check it:
+
+   ```bash
+   kubectl -n <ns> exec deploy/rabbitmq -- rabbitmq-plugins list | grep delayed
+   ```
+
+2. **The scheduler is not registered.** A registration nothing resolves at
+   startup fails at the first message, not at boot — `ValidateOnBuild` never
+   constructs an open generic and no host resolves a scheduler while it boots,
+   so the service connects, declares, and reports ready with no scheduler at
+   all. This is recorded in `CLAUDE.md` as a lesson because it cost a debugging
+   session: the symptom is timeouts that never arrive and a log that says
+   nothing.
+
+3. **The broker lost its delayed messages.** A delayed exchange holds them in a
+   node-local store; a node that was rebuilt loses whatever was pending. Nothing
+   reports this — the messages simply never arrive.
+
+If the plugin and registration are fine, check the broker lane is moving at all:
+a stalled outbox means the saga's own `Send` never left the service, which is
+[`outbox-broker.md`](outbox-broker.md) rather than this.
+
+## Or the peer never answered
+
+If timeouts are working and the saga is younger than its timeout, it is simply
+waiting and there is nothing wrong yet. If it is *older* and the timeout fired
+but the state did not change, look for the command that was sent:
+
+```sql
+SELECT MessageId, MessageType, Lane, Attempts, ProcessedAt, LEFT(LastError, 500) AS LastError
+FROM ordering.OutboxMessages
+WHERE CorrelationId = @OrderId
+ORDER BY OccurredAt;
+```
+
+A `CancelOrder` or `FlagOrderForReview` that never left is the answer, and the
+outbox runbooks take it from there.
+
+## Manual compensation
+
+**Last resort, and only with the order read first.** The saga sends commands to
+`ordering-commands` (§9.4); the honest way to unstick one is to publish the
+event it is waiting for, or the timeout it missed, rather than editing the state
+row. Editing `CurrentState` directly leaves the scheduled messages armed and the
+aggregate unaware, and produces a saga that is inconsistent with its own order.
+
+If the aggregate must be moved by hand, do it through the API's own command
+endpoints so the domain rules run — §5's `Order` refuses transitions that do not
+make sense, and that refusal is a feature here.
+
+Record every manual action against the `OrderId`. The next person to read this
+order will find a state machine that moved without a message, and the only
+explanation will be whatever you wrote down.

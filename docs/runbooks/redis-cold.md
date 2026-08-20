@@ -1,0 +1,101 @@
+# Runbook — cache hit ratio collapse
+
+| | |
+|---|---|
+| Alert | `CacheHitRatioCollapse`, in `deploy/observability/alerts/awaiting-signal.yaml` — **not loaded yet** |
+| Condition | hits / (hits + misses) < 50% over 10 minutes |
+| Signal | **Owed.** The `Microsoft.Extensions.Caching.Hybrid` meter is registered but nothing publishes to it |
+| Owner | Platform ([§13.8](../backend-architecture/13-observability.md)) |
+
+> **This alert cannot fire today, and the reason is worth reading before the
+> rest of this file.** §13.2's `AddObservability` *does* register the
+> `Microsoft.Extensions.Caching.Hybrid` meter — but no host in this solution
+> calls `AddRedisConnections`, so nothing ever constructs a `HybridCache` and
+> the meter has no instruments behind it. A registered meter with no publisher
+> is exactly the trap §13.6 warns about: the `AddMeter` line makes it look
+> wired. §15.4 records the same absence from the other side, where the two
+> Redis rows are conditional on a consumer existing.
+>
+> Everything below applies from the moment a host takes the cache. Until then
+> it is a procedure written ahead of its alert, which is what §13.9 asks for.
+
+## What it means
+
+Redis lost its working set. Every miss becomes a database read, and **the
+databases are sized for a warm cache**
+([ADR-006](../backend-architecture/appendix-a-adrs.md)) — so the immediate risk
+is not the cache, it is the database behind it falling over under a load it was
+never provisioned for.
+
+Expect this alert to arrive with, or just before,
+[`latency.md`](latency.md).
+
+## Confirm it is coldness, not absence
+
+Three different faults produce a low ratio and they need different responses.
+
+```bash
+kubectl -n <ns> exec deploy/redis -- redis-cli info stats | grep keyspace
+kubectl -n <ns> exec deploy/redis -- redis-cli info memory | grep -E 'used_memory_human|maxmemory'
+kubectl -n <ns> exec deploy/redis -- redis-cli info replication
+```
+
+- **Redis restarted or failed over.** Keyspace near zero, uptime low. The cache
+  is cold and will warm; the job is to survive the warming.
+- **Eviction under memory pressure.** `evicted_keys` climbing, `used_memory`
+  near `maxmemory`. The working set no longer fits — this does not warm up, it
+  keeps evicting.
+- **Redis is unreachable.** Every read is a miss because nothing answers.
+  HybridCache degrades to its L1 and then to the source, so the application
+  keeps working and only the graph and the database load say so.
+
+**§8.1's two-instance split matters here.** The cache instance is
+`allkeys-lru`; the coordination instance is `noeviction` and holds distributed
+locks. A hit-ratio collapse on the *cache* is a performance incident. The same
+symptom on coordination means locks are being evicted, which is a correctness
+incident and a different, worse conversation.
+
+## Shed load while it warms
+
+The databases are the thing at risk, so protect them first. In order of
+preference:
+
+1. **Tighten the edge.** §10.3's rate-limit policies are the one lever that
+   works without a deploy and without touching the services. Reducing the
+   permitted rate on the heaviest read routes buys the cache time to fill.
+2. **Scale the read replicas** if the read path uses them.
+3. **Scale the services out** — but only if the trace shows request queuing
+   rather than database saturation. More replicas against a saturated database
+   make it worse.
+
+**Do not disable the cache to "reduce complexity" during the incident.** Every
+read then goes to the database permanently rather than temporarily.
+
+## Warming it
+
+Usually nothing to do: normal traffic refills an LRU cache within minutes, and
+§8.2's HybridCache stampede protection means a thousand concurrent misses on one
+key produce one database read rather than a thousand.
+
+Where a deliberate warm is wanted, drive the read endpoints for the hottest keys
+rather than writing into Redis directly — a hand-populated entry with the wrong
+key shape or no TTL is a bug that outlives the incident, and §8.1 enforces a
+mandatory TTL **in code** precisely because entries without one accumulate.
+
+## If it is eviction rather than restart
+
+This is the case that does not resolve itself.
+
+- Check what grew. A new cache consumer with a large value, or a TTL that was
+  raised, changes the working-set size.
+- Check the key namespaces. §8.1 partitions by
+  `{service}:cache|lock|idem|denylist:`, and a service writing outside its
+  prefix is both a bug and a capacity surprise.
+- Raising `maxmemory` is a real fix if the working set genuinely grew. Raising
+  it repeatedly is a cache being used as a database.
+
+## Closing it
+
+The ratio should climb back above 50% and keep climbing. Watch database load
+come down with it — if the ratio recovers and the database stays hot, the load
+was never cache-driven and the incident is somewhere else.
