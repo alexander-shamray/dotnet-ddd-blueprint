@@ -1,0 +1,159 @@
+# §13.6's alerts, for every condition whose signal this platform actually
+# publishes today. The four that read an instrument nothing creates yet live in
+# awaiting-signal.yaml and are NOT loaded — see the README beside this file, and
+# check.py, which asserts the split rather than trusting it.
+#
+# Metric names are the OpenTelemetry-to-Prometheus spelling, not the C# one:
+# dots become underscores and a UCUM unit becomes a suffix, so `outbox.oldest.age`
+# with unit `s` is `outbox_oldest_age_seconds`, while the annotation unit
+# `{message}` is dropped and `outbox.pending.count` stays `outbox_pending_count`.
+# check.py applies that same transformation when it matches these expressions
+# against the instruments declared in C#, so the two cannot drift apart in
+# silence.
+#
+# `service_name` assumes the collector promotes the `service.name` resource
+# attribute to a label. That is a collector-config decision rather than
+# something this repository can assert, and it is named here rather than
+# assumed: without the promotion every `by (service_name)` below groups
+# everything into one series and the per-service alerts stop discriminating.
+groups:
+  - name: platform-golden-signals
+    rules:
+      - alert: ErrorRate
+        expr: |
+          sum by (service_name) (
+            rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
+          )
+          /
+          sum by (service_name) (rate(http_server_request_duration_seconds_count[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: page
+          owner: platform
+        annotations:
+          summary: "5xx rate above 1% on {{ $labels.service_name }}"
+          description: >-
+            More than one request in a hundred is failing. Users are seeing
+            errors now.
+          runbook_url: docs/runbooks/error-rate.md
+
+      - alert: Latency
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (service_name, le) (rate(http_server_request_duration_seconds_bucket[10m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "p99 above 1s on {{ $labels.service_name }}"
+          description: >-
+            The slowest one per cent of requests are taking over a second.
+            Users are waiting.
+          runbook_url: docs/runbooks/latency.md
+
+  - name: platform-messaging
+    rules:
+      # §13.6 gives the two lanes thresholds an order of magnitude apart because
+      # they have different floors: the local lane is in-process with no network
+      # hop, so 30 seconds of lag already means something is wrong, while the
+      # broker lane should absorb a short RabbitMQ blip or a rolling restart
+      # without paging anyone.
+      - alert: OutboxBrokerLaneStalled
+        expr: max by (service_name) (outbox_oldest_age_seconds{lane="Broker"}) > 120
+        for: 2m
+        labels:
+          severity: page
+          owner: platform
+        annotations:
+          summary: "Broker outbox lane stalled on {{ $labels.service_name }}"
+          description: >-
+            Other services are working from stale data and sagas will stop
+            advancing.
+          runbook_url: docs/runbooks/outbox-broker.md
+
+      - alert: OutboxLocalLaneStalled
+        expr: max by (service_name) (outbox_oldest_age_seconds{lane="Local"}) > 30
+        for: 2m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Local outbox lane stalled on {{ $labels.service_name }}"
+          description: >-
+            Read models this service feeds from its own events are stale. Not
+            the ones another service's contract feeds — those never touch this
+            lane, and §13.7 records that their staleness has no signal yet.
+          runbook_url: docs/runbooks/projection-lag.md
+
+      - alert: OutboxGrowth
+        expr: |
+          sum by (service_name) (outbox_pending_count) > 1000
+          and
+          deriv(sum by (service_name) (outbox_pending_count)[10m:]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          owner: service
+        annotations:
+          summary: "Outbox backlog above 1000 and rising on {{ $labels.service_name }}"
+          description: >-
+            Either lane, not keeping up. Both halves are required: a large
+            backlog that is draining needs no page.
+          runbook_url: docs/runbooks/outbox-growth.md
+
+      # No `for`, deliberately. Every other rule here waits out a transient;
+      # an abandoned row is already permanent by the time it is counted, so a
+      # wait would only delay the page.
+      - alert: OutboxAbandonedRows
+        expr: sum by (service_name, lane) (outbox_abandoned_count) > 0
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Abandoned outbox rows on {{ $labels.service_name }} ({{ $labels.lane }} lane)"
+          description: >-
+            Silent, permanent data loss: a message past §9.4's attempt cap is
+            skipped for ever, so the queue drains and the graph goes green
+            precisely because the message was given up on. The lane says whose
+            loss it is.
+          runbook_url: docs/runbooks/outbox-abandoned.md
+
+  - name: platform-infrastructure
+    rules:
+      # The two rules whose signal comes from an exporter rather than from this
+      # platform's own meters. They are live because those exporters are part of
+      # the target deployment (§15.3), and check.py holds their metric names in
+      # its declared external list for exactly that reason — a name it cannot
+      # find in C# is either external and declared, or a typo.
+      - alert: ErrorQueueDepth
+        expr: sum by (queue) (rabbitmq_queue_messages{queue=~".+_error"}) > 0
+        for: 1m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Messages in error queue {{ $labels.queue }}"
+          description: >-
+            A business process has stopped. Something was retried to exhaustion
+            and parked.
+          runbook_url: docs/runbooks/error-queue.md
+
+      - alert: MigrationJobFailed
+        expr: max by (namespace, job_name) (kube_job_status_failed{job_name=~".+-migrate.*"}) > 0
+        for: 1m
+        labels:
+          severity: page
+          owner: platform
+        annotations:
+          summary: "Migration job {{ $labels.job_name }} failed"
+          description: >-
+            The deploy stopped before any pod rolled (§7.4). On an upgrade the
+            previous version is still serving, which is why nothing else fires;
+            on a first install there is no previous version and nothing else
+            fires for the opposite reason. Check which before promising
+            availability.
+          runbook_url: docs/runbooks/migration-failure.md

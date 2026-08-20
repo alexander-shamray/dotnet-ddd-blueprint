@@ -35,3 +35,13 @@
 # A checkout is what decides this, not an editor: with core.autocrlf=true these
 # files arrive CRLF unless something says otherwise.
 deploy/helm/** text eol=lf
+
+# deploy/observability/ joins on the Helm tree's argument rather than on its
+# own measurement, and the difference is worth stating. Nothing here is
+# rendered through a template engine, so the CR-per-line failure above cannot
+# happen in the same way — but these files are consumed by Prometheus, Grafana
+# and k6 on Linux, and `check.py` matches PromQL against C# with anchored
+# patterns. A tree that arrives CRLF on one machine and LF on another is a gate
+# whose result depends on who checked it out, which is the property the .cs
+# paragraph above spent a PR discovering.
+deploy/observability/** text eol=lf

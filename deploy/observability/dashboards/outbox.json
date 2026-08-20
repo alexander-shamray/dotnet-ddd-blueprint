@@ -1,0 +1,216 @@
+{
+  "uid": "platform-outbox",
+  "title": "Platform — outbox and messaging",
+  "description": "The two lanes of §9.4, kept apart. §13.6: the lanes fail for different reasons, produce different symptoms and need different people — a single averaged 'outbox backlog' panel is one nobody can act on. Broker-lane stalls are Platform's, local-lane stalls and abandoned rows are the service team's (§13.8).",
+  "tags": ["platform", "messaging", "outbox"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(outbox_pending_count, service_name)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      },
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Lane age — has a lane STOPPED",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Broker lane — oldest unprocessed (alert: 2 min)",
+      "description": "Other services are working from stale data and sagas stop advancing. The threshold is an order of magnitude above the local lane's because this one crosses a network and should absorb a short RabbitMQ blip or a rolling restart. Runbook: docs/runbooks/outbox-broker.md",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 120 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max by (service_name) (outbox_oldest_age_seconds{service_name=~\"$service\", lane=\"Broker\"})",
+          "legendFormat": "{{service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Local lane — oldest unprocessed (alert: 30 s)",
+      "description": "Read models this service feeds from its OWN events are stale. Not the ones another service's contract feeds — those never touch this lane, and §13.7 records that their staleness has no direct signal yet. Runbook: docs/runbooks/projection-lag.md",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max by (service_name) (outbox_oldest_age_seconds{service_name=~\"$service\", lane=\"Local\"})",
+          "legendFormat": "{{service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "row",
+      "title": "Depth — is a lane FALLING BEHIND",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pending rows, per lane (alert: >1000 and rising)",
+      "description": "Neither gauge substitutes for the other. A single stuck row pins the age panel above at hours while this one stays at 1, and a backlog of ten thousand rows all seconds old leaves the age panel flat. Runbook: docs/runbooks/outbox-growth.md",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (service_name, lane) (outbox_pending_count{service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{lane}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Abandoned rows, per lane (alert: >0)",
+      "description": "Silent, permanent data loss. A row past §9.4's attempt cap is skipped for ever, so the backlog drains and the graph goes green precisely because the message was given up on. The lane says whose loss: Broker, and other services never learned something; Local, and this service's read model is permanently wrong. Runbook: docs/runbooks/outbox-abandoned.md",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (service_name, lane) (outbox_abandoned_count{service_name=~\"$service\"})",
+          "legendFormat": "{{service_name}} {{lane}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Delivery — and the gap §13.7 names",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Event end-to-end p95 (target 2 s)",
+      "description": "messaging.delivery.lag — OccurredAt to consumer start. IT DOES NOT COVER BROKER-FED READ MODELS: IntegrationEventConsumer<T> records this at the top of Consume, BEFORE it resolves a handler, so the measurement stops where the projection starts. This panel can sit inside its target while ordering.ProductPrices is stale or was never written. §13.7 records that gap as owed.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(messaging_delivery_lag_seconds_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Read-model staleness, own events, p99 (target 1 s)",
+      "description": "projection.lag, recorded by ProjectionInvoker off an outbox row — so it only ever measures a read model this service feeds from its own domain events (§7.5). A read model fed by another service's contract never touches the outbox and is empty here.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (service_name, le) (rate(projection_lag_seconds_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Commands the domain refused",
+      "description": "command.domain_rejected (§9.8). Feeds no SLO row — a business signal that happens to share the meter, and it belongs on a dashboard rather than on a pager. The `error` tag is an Error.Code and never a cancellation reason: a payment-declined cancellation is a command the domain ACCEPTED.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "cps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (service_name, message, error) (rate(command_domain_rejected_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{message}} — {{error}}"
+        }
+      ]
+    }
+  ]
+}
