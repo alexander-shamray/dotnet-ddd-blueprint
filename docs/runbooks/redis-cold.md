@@ -56,20 +56,33 @@ with no credentials either reaches the wrong instance or answers `NOAUTH`.
 Take an operational credential from the vault (§15.4), not the §14.1 Compose
 default:
 
-```bash
-export REDIS_DEPLOY=redis-cache          # the allkeys-lru instance, not coordination
-export REDISCLI_AUTH=...                 # an authorised operator ACL, from the vault
+**The password has to be set *inside* the container.** `kubectl exec` does not
+forward local environment variables, so exporting `REDISCLI_AUTH` in your own
+shell leaves `redis-cli` unauthenticated and every command answers `NOAUTH` —
+which reads as a broken procedure rather than a missing credential. Pipe it in
+on stdin instead: it never reaches `argv`, and it never depends on forwarding
+that does not happen.
 
-kubectl -n <ns> exec deploy/"$REDIS_DEPLOY" -- \
-  redis-cli --user <operator> --no-auth-warning info stats | grep -E 'keyspace|evicted'
-kubectl -n <ns> exec deploy/"$REDIS_DEPLOY" -- \
-  redis-cli --user <operator> --no-auth-warning info memory | grep -E 'used_memory_human|maxmemory'
-kubectl -n <ns> exec deploy/"$REDIS_DEPLOY" -- \
-  redis-cli --user <operator> --no-auth-warning info replication
+```bash
+ns=<namespace>
+deploy=redis-cache          # the allkeys-lru instance, not coordination
+operator=<operator-acl-user>
+
+# $OPERATOR_PASSWORD from the vault (§15.4), never §14.1's Compose default.
+redis() {
+    printf '%s' "$OPERATOR_PASSWORD" |
+        kubectl -n "$ns" exec -i deploy/"$deploy" -- sh -c '
+            REDISCLI_AUTH=$(cat); export REDISCLI_AUTH
+            redis-cli --user "$0" --no-auth-warning "$@"' "$operator" "$@"
+}
+
+redis info stats       | grep -E 'keyspace|evicted'
+redis info memory      | grep -E 'used_memory_human|maxmemory'
+redis info replication
 ```
 
-`REDISCLI_AUTH` keeps the password off the process list, which `redis-cli -a`
-does not.
+`REDISCLI_AUTH` inside the container keeps the password off that process list
+too, which `redis-cli -a` does not.
 
 - **Redis restarted or failed over.** Keyspace near zero, uptime low. The cache
   is cold and will warm; the job is to survive the warming.
