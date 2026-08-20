@@ -75,6 +75,14 @@ jobs:
         with:
           global-json-file: global.json
 
+      # The coverage reporter at the end of this job is stdlib Python, so it
+      # takes the same 3.12 pin the licence-gate and scaffold jobs do. The
+      # runner does ship a Python, and relying on it would make this the one
+      # job whose interpreter nobody chose.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - run: dotnet restore Platform.slnx
 
       - run: dotnet build Platform.slnx --no-restore -c Release
@@ -85,4 +93,60 @@ jobs:
       #
       # This step passes on zero discovered tests (§12.1) — asserting a floor on
       # the count is PR-25's quality gates, not this skeleton's job.
-      - run: dotnet test Platform.slnx --no-build -c Release
+      #
+      # One run, both categories. The Category=Integration split (§12.4,
+      # docs/testing.md) is real from PR-22 and staged by PR-25 — running the
+      # halves separately here would claim a pipeline shape §15.1 does not have
+      # yet, and would run the fast half twice for nothing.
+      #
+      # TWO steps all the same, and the seam is instrumentation rather than
+      # category. §4.2's architecture gates read GetReferencedAssemblies on the
+      # Domain assemblies; coverage.runsettings instruments exactly those and
+      # nothing else; and on this runner an instrumented Domain assembly
+      # reports a `netstandard` reference its source cannot have. Both Domain
+      # gates went red on the run that first collected coverage here — and pass
+      # on Windows, where the same collector leaves the file byte-identical.
+      #
+      # So the gates run first and uninstrumented, where the question they ask
+      # is about the compiler's output. Weakening the allow-list to admit
+      # `netstandard` was the one-line alternative and is the wrong one: it
+      # would relax an architecture rule everywhere, for ever, and in every
+      # service the scaffold renders, to accommodate a test-tool artefact.
+      #
+      # The two filters are exhaustive and disjoint by construction, so the
+      # counts sum to the whole suite. A gate added in a class NOT named
+      # ArchitectureTests lands in the instrumented run instead — which fails
+      # loudly here rather than quietly, and is why this is a comment and not a
+      # hope.
+      - run: >
+          dotnet test Platform.slnx --no-build -c Release
+          --filter "FullyQualifiedName~ArchitectureTests"
+
+      # The collector is Microsoft.CodeCoverage, which arrives with
+      # Microsoft.NET.Test.Sdk and is therefore already in every test project:
+      # no package added, no licence-register entry owed. It merges every test
+      # project's data into ONE attachment for the run, which is why the step
+      # below reads a single file rather than reconciling thirteen.
+      - run: >
+          dotnet test Platform.slnx --no-build -c Release
+          --filter "FullyQualifiedName!~ArchitectureTests"
+          --collect:"Code Coverage"
+          --settings coverage.runsettings
+          --results-directory ./TestResults
+
+      # Reported, never gated. §12.9 calls coverage a diagnostic rather than a
+      # target, and a threshold that fails a build is PR-25's quality gate —
+      # so this step writes a number and cannot fail the job on its value.
+      #
+      # It CAN fail on a missing or unreadable report, and should: a coverage
+      # step that shrugs at no data is a step that reports nothing on the day
+      # the collector stops running, which reads exactly like a clean result.
+      # No `if: always()` for the same reason from the other side — after a
+      # failed test step there is nothing to report, and a second red step
+      # would say the reporter broke when the suite did.
+      #
+      # coverage.runsettings filters the report to `.*\.Domain\.dll$`, so what
+      # this prints is §12.9's "coverage of the domain layer specifically" and
+      # not a solution-wide figure with the domain averaged into it.
+      - name: Report domain-layer coverage
+        run: python .github/coverage/domain_coverage.py ./TestResults

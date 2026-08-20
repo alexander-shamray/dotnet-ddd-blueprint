@@ -56,6 +56,13 @@ Every row above names a project **and has an example in this section**. Both
 halves are the rule: a level with no home is a level nobody writes, and a level
 whose home is empty is one nobody notices is missing.
 
+**How to run them is `docs/testing.md`**, deliberately not this chapter: the
+commands, the `Category=Integration` filter of §12.4, which five projects need
+a Docker daemon and what the coverage figure of §12.9 is measured over. This
+chapter decides what to test and that file decides how to run it, and the
+second goes stale on a different clock — a new runner flag changes nothing
+about the pyramid. Where they disagree, this chapter wins.
+
 > **A suite that never ran looks exactly like a suite that passed.** `dotnet
 > test` discovers through a VSTest adapter, and `xunit.v3` does not carry one:
 > `xunit.runner.visualstudio` is a separate package ([Appendix B](appendix-b-licences.md)).
@@ -978,10 +985,23 @@ Containers start once per test collection, not per test. Truncating with
 Respawn between tests keeps them isolated at a fraction of the cost.
 
 > **A collection is per assembly, and the fixture has to live somewhere both
-> can see.** `ServiceFixture` and `TestAuthHandler` are used by
-> `Ordering.Application.Tests` (handler tests) and `Ordering.Api.Tests` (the
-> contract tests below), and those cannot reference each other — so both live in
-> `Ordering.TestSupport` ([§4.1](04-solution-structure.md)), a library rather than a test project.
+> can see.** `ServiceFixture` and `TestAuthHandler` are used by a service's
+> `*.Application.Tests` (handler tests) and its `*.Api.Tests` (the contract
+> tests below), and those cannot reference each other — so both live in
+> `*.TestSupport` ([§4.1](04-solution-structure.md)), a library rather than a test project.
+> Catalog is where that shape is realised: both its suites take the fixture,
+> which is exactly why the library exists.
+>
+> **Ordering is the exception, and it is the code's rather than this
+> section's.** Its handler tests moved to `Ordering.Api.Tests`, because
+> `ICurrentUser` is `HttpContextCurrentUser` and a handler resolved in a bare
+> scope has no principal to bind a subject from — so
+> `Ordering.Application.Tests` references no `TestSupport`, declares no
+> collection, and holds §12.5's saga suite instead, which needs no
+> infrastructure at all. The library is still right for the reason above; it
+> simply has one consumer there rather than two. `docs/testing.md` says the
+> same thing from the other side, and this paragraph exists because that file
+> would otherwise contradict this one.
 >
 > The `[CollectionDefinition]` does **not** move there. xUnit resolves
 > collections within an assembly, so each test project declares its own, naming
@@ -989,8 +1009,42 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 >
 > ```csharp
 > [CollectionDefinition(nameof(IntegrationCollection))]
+> [Trait("Category", "Integration")]
 > public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > ```
+>
+> **The category goes on the definition rather than on each test class, and
+> that placement is the whole of why it cannot drift.** xUnit v3 applies a
+> collection's traits to every test in it, so *joining the container collection
+> is carrying the category* — there is no per-class attribute for a new test
+> class to forget, and therefore no reflection gate needed to check that nobody
+> did. The thing that decides the category is the same thing that decides
+> whether the test gets a container.
+>
+> Measured rather than assumed, because that propagation is load-bearing: on
+> `Common.Infrastructure.Tests`, `Category=Integration` selects the ten tests
+> of the two classes in the collection and `Category!=Integration` selects the
+> other seventy-one — 81 as the runner counts them, with no third state and
+> nothing counted twice.
+>
+> **The fast half starts no container, and that is proved rather than
+> inferred**: `docker events --filter event=create` over a solution-wide
+> `Category!=Integration` run reported nothing, against a probe that captured a
+> control container started beside it. The mechanism is that xUnit constructs a
+> collection fixture only when a test in that collection runs, so filtering the
+> collection out means the container is never asked for.
+>
+> **A category is not a skip, and the distinction is the one this chapter
+> keeps.** A skip on a missing daemon fails open: CI goes green on a runner
+> whose Docker broke. The trait decides which *stage* runs a test and never
+> whether it may be absent — selected in it needs the daemon exactly as before,
+> and selected out it is not reported as passing. A class that needs a
+> container and forgets the collection fails loudly in the fast half, which is
+> the direction this has to fail in.
+>
+> Nothing in CI runs the halves separately yet; [§15.1](15-cicd-deployment.md)'s
+> integration stage is PR-25's, and the category ships ahead of it so the
+> filter is real before the stage that depends on it is written.
 >
 > The consequence is worth stating rather than discovering from a slow
 > pipeline: two assemblies mean two collections and therefore **two sets of
@@ -1946,6 +2000,61 @@ missing things worth testing; above roughly 85% you are usually testing getters
 to move a number. Watch the *trend* and watch coverage of the domain layer
 specifically — that is where it should be near-total, and where it is cheapest
 to achieve.
+
+That last sentence is an instruction until something measures it, so
+`coverage.runsettings` does:
+
+```bash
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests" \
+    --collect:"Code Coverage" --settings coverage.runsettings \
+    --results-directory ./TestResults
+```
+
+**Both flags after the settings file are load-bearing.** Without
+`--results-directory` the collector writes under each test project's own
+`TestResults/` rather than the repo root, so the reporter finds nothing; the
+filter is what keeps §4.2's gates out of the instrumented run, for the reason
+the callout below gives. `docs/testing.md` carries the reporting command that
+follows it.
+
+The file filters the report to `.*\.Domain\.dll$` and emits Cobertura, and CI
+prints the figure to the job summary. **Reported, never gated** — a threshold
+that fails a build is PR-25's quality gates
+([Appendix C](appendix-c-delivery-plan.md)), and a diagnostic wired to a build
+failure stops being read and starts being satisfied.
+
+Three things about that filter are deliberate:
+
+- **It is a pattern, not a list.** `Catalog.Domain`, `Ordering.Domain` and
+  `Common.Domain` match it today, and every later service's Domain matches it
+  the day it exists. A list would have to be edited by whoever adds a service,
+  which is exactly the edit that gets missed.
+- **It measures the domain assemblies over the whole run**, not the domain test
+  projects. Domain types are exercised by application and API tests too, and a
+  figure taken from `*.Domain.Tests` alone would under-report the thing it is
+  named after.
+- **The collector arrives with `Microsoft.NET.Test.Sdk`**, so no package was
+  added and [Appendix B](appendix-b-licences.md) gained no entry. A coverage
+  figure is not worth a new dependency.
+
+> **Measuring a layer changes it, and §4.2's gates are what noticed.** The
+> filter above instruments the Domain assemblies and nothing else — which are
+> exactly the assemblies the Domain gates read `GetReferencedAssemblies` on. On
+> the Linux runner an instrumented Domain assembly reports a `netstandard`
+> reference no source line can produce, and both gates went red on the first CI
+> run that collected coverage. It does not reproduce on Windows, where the same
+> collector leaves the file byte-identical.
+>
+> So CI runs the gates **first and uninstrumented**, and collects coverage over
+> the complement. Admitting `netstandard` to the allow-list was the one-line
+> alternative and is the wrong one: an architecture rule relaxed everywhere and
+> for ever, in every service the scaffold renders, to accommodate a test tool.
+> **If a change needs one of those gates relaxed, the gate is probably right.**
+
+`docs/testing.md` carries the commands, the categories and what needs Docker —
+the operational half of this chapter, kept separate because a runner flag goes
+stale on a different clock than a strategy does. Where the two disagree, this
+chapter wins.
 
 ---
 

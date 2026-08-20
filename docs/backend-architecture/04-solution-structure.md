@@ -105,14 +105,22 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/
-│   └── backend-architecture/           This document, one file
-│                                       per chapter; ADRs in Appendix A
+│   ├── backend-architecture/           This document, one file
+│   │                                   per chapter; ADRs in Appendix A
+│   └── testing.md                      How to run the suites, what needs
+│                                       Docker, and the categories of §12.4 —
+│                                       the operational half of §12, which
+│                                       keeps the strategy
 │
 ├── tools/
 │   └── new-service/                    The scaffold of §4.5 and its tests.
 │                                       Stdlib Python, no restore — it renders
 │                                       a service from Catalog at run time
 │
+├── coverage.runsettings                What `--collect:"Code Coverage"` measures:
+│                                       the report filtered to `.*\.Domain\.dll$`,
+│                                       which is §12.9's "coverage of the domain
+│                                       layer specifically" as an artefact
 ├── Directory.Build.props               Shared MSBuild settings
 ├── Directory.Packages.props            Central package version management
 └── Platform.slnx
@@ -176,6 +184,15 @@ public void Domain_references_only_common_domain_and_the_framework()
     // using earns its line here on purpose — extending this list is the
     // decision the gate exists to force, and System.Text.Json is the
     // extension the table forbids by name.
+    //
+    // Two entries, because two is what an EMPTY domain references — this is
+    // the form §4.5's scaffold renders. A live one grows: Catalog's and
+    // Ordering's both carry System.Collections, earned by the first domain
+    // event, whose generated record equality goes through
+    // EqualityComparer<T>, and System.Linq, earned by the first value object
+    // doing enumerable logic over owned values. Run as printed against either
+    // of them, this list fails — which is the gate working, not the sample
+    // being wrong.
     string[] allowed = ["Common.Domain", "System.Runtime"];
 
     IEnumerable<string> referenced = typeof(Order).Assembly
@@ -190,11 +207,23 @@ public void Domain_references_only_common_domain_and_the_framework()
 
 `*.Api` may reference Infrastructure, but only in one place. Stated normatively:
 
-- **Only** `Program.cs` and host-level `*ServiceCollectionExtensions` may
-  reference `*.Infrastructure` types.
+- **Only** `Program.cs` may reference `*.Infrastructure` types.
 - **Endpoints and controllers may not.** No `DbContext`, no concrete
   repository, no `IPublishEndpoint`, no `IConnectionMultiplexer` — Application
   and Domain contracts only.
+
+> **The first bullet used to grant host-level `*ServiceCollectionExtensions`
+> the same exemption, and the gate never implemented it.** No file in any of
+> the four hosts is named `*ServiceCollectionExtensions` — `Catalog.Api`,
+> `Ordering.Api`, `Gateway.Api` and `Web.Bff` alike — so the sentence granted
+> a hole to nothing, and the test below exempts the composition root alone.
+>
+> Narrowing the prose to the code is the right direction rather than the
+> convenient one. The exemption is the whole of this gate's trust, and the
+> companion test that asserts it has not grown is only meaningful while the
+> exempted set is something a reader can hold in mind. A host that genuinely
+> wants a registration extension is welcome to one; what it does not get is a
+> pre-granted licence written before it existed.
 
 Without this rule the dependency table is satisfied at project level while being
 violated everywhere that matters, because "Api may reference Infrastructure"
@@ -287,9 +316,155 @@ If the namespace rule proves awkward to enforce, split the host into
 (endpoints, does not) and let the project reference enforce it. That is the more
 robust option; the single-project namespace rule is the lighter one.
 
+**"Namespace rule" here is the rule, not the selector the callouts above
+abandoned**, and the two are easy to read as one thing this close together. What
+the gate stopped doing is *selecting* candidates by namespace; what it still
+does is tell the composition root from everything else by exactly that —
+`IsCompositionRoot` tests `!fullName.Contains('.')`, because top-level
+statements put `Program` in the global namespace while an endpoint keeps
+`Catalog.Api.Endpoints`. The alternative above replaces that discrimination
+with a project boundary, which is why it is the heavier option and the one a
+compiler enforces.
+
 **These tests are a CI gate from the first template commit**, not a later
 addition. An architecture rule introduced after the violations exist is a
 backlog item; one introduced before them is a constraint.
+
+### The rest of the table, enforced
+
+**What the three gates above leave uncovered is a clause rather than a row**,
+and saying "three rows had no test" would erase work that exists. Between them
+they cover the Domain row whole, the Application row's named must-nots, and the
+Api row's composition-root half. What none of them says is the clause
+**Infrastructure, Migrator and Api** all carry — *must never reference another
+service's projects* — and the Migrator row is the one with no gate of any kind
+until PR-22.
+
+**The table has two kinds of row, so the gates have two shapes.** A row that
+says what a project *may* reference is an allow-list, and gets an allow-list
+gate over `GetReferencedAssemblies`. A row that says a project may reference
+any package cannot have one, and gets a named deny instead. Choosing by the
+row rather than by taste is what keeps a gate from contradicting the sentence
+it enforces:
+
+| Row | Shape | Gate |
+|---|---|---|
+| `*.Domain` | allow-list | every referenced assembly is on a list |
+| `*.Application` | allow-list | the same, one layer out |
+| `*.Infrastructure` | any package | no assembly from another service, and none from the migrator |
+| `*.Migrator` | allow-list, narrowest | every referenced assembly is on a list |
+| `*.Api` | composition root, plus any package | the root rule above, no assembly from another service, and none from the migrator |
+
+**The cross-service rule is one test over all five assemblies**, and it is
+stated as an allow-list of *prefixes* rather than a deny-list of service
+names — which is what makes it cover Inventory, Payments, Shipping and
+Notifications before any of them exists:
+
+```csharp
+// Every referenced assembly that is one of this repository's own must belong
+// to this service or to a building block. Common.Contracts is admitted by the
+// Common prefix, which is §4.3 from the other side: it is a building block
+// rather than a service, so the one assembly permitted to cross a boundary
+// needs no exception of its own.
+string self = typeof(Program).Assembly.GetName().Name!.Split('.')[0];
+
+string[] foreign =
+[
+    .. assembly
+        .GetReferencedAssemblies()
+        .Where(IsFirstParty)
+        .Select(reference => reference.Name!)
+        .Where(name =>
+            !name.StartsWith("Common.", StringComparison.Ordinal) &&
+            !name.StartsWith($"{self}.", StringComparison.Ordinal))
+        .Order()
+];
+```
+
+> **`IsFirstParty` is a measured property rather than a list, and the reason
+> is the scaffold.** §4.5's script renders this file:
+> it applies its patches and *then* renames every casing of the template's
+> name, so a list naming `Catalog` reaches the new service with `Catalog`
+> replaced rather than joined — silently dropping the one service a scaffolded
+> service is most likely to reference by accident. No spelling of the patch
+> survives that, because the rename is what the patch output is fed through.
+>
+> So the predicate asks a question the rename cannot answer wrongly: **every
+> package this platform pins is strong-named, and none of this repository's own
+> projects is.** Checked across all ten service assemblies, which between them
+> reference thirty-odd packages. `Dapper` is the one unsigned package in the
+> graph and is named for that reason alone.
+>
+> ```csharp
+> private static bool IsFirstParty(AssemblyName reference) =>
+>     reference.GetPublicKeyToken() is null or [] && reference.Name != "Dapper";
+> ```
+>
+> A second unsigned package would be misread as first-party and fail the gate.
+> **That is the direction this has to fail in**: the failure names an assembly
+> nobody expected and is closed by a line with an argument beside it, where a
+> predicate erring the other way would have opened a hole and said nothing.
+
+**The migrator's row is the one that most wanted a gate**, because its "must
+never" is a sentence rather than a list — *anything it does not need to apply a
+migration*. A deny-list cannot enforce that; it can only ban what somebody
+thought of. So the narrowest row gets the strictest instrument, and what the
+absences buy is worth reading as a list of things that cannot happen: no
+Application, so the migrator cannot dispatch; no MassTransit and no Redis, so
+the paragraph above about a migration job that can open a message broker is a
+build failure; no ASP.NET, because it is a job host
+([§7.4](07-persistence.md)) and not a second composition root; and **no
+`Common.*` at all**, which is the strongest statement of the row — the migrator
+resolves a `DbContext` and calls `Database.Migrate()`, and none of the building
+blocks is on that path.
+
+**Nothing references the migrator, and saying so took a third gate rather than
+a wider prefix.** No row in the table names the `*.Migrator` as something a
+project *may* reference: it is a leaf, a job host that resolves a `DbContext`
+and calls `Database.Migrate()` ([§7.4](07-persistence.md)), so it references
+and is not referenced. The cross-service gate cannot see that edge, because it
+subtracts every assembly under this service's own name — which is precisely
+what makes an `Api → Migrator` reference invisible to it. That edge is inside
+one service and still forbidden, so it gets a rule of its own over the other
+four assemblies. **The two gates ask different questions** — *whose is it* and
+*which layer is it* — and one predicate answering both would answer neither
+legibly. The migrator is skipped as a subject rather than exempted in the
+predicate: an assembly does not reference itself, so including it would pass
+vacuously and read as coverage.
+
+**`*.Application`'s gate lists `Common.Domain` and the table above does not,
+and both are right.** The table is about project references, where the line is
+genuinely absent: a service's Application references its own Domain, and that
+Domain cannot exist without `Common.Domain` (row one), so it arrives carrying
+it. The gate is about *assembly* references, where §9.3's mapper naming
+`IDomainEvent` puts `Common.Domain` in the list whether or not any csproj says
+so. Adding the project reference to close the gap was considered and rejected:
+it would make the second row disagree with the first about what "its own
+Domain" includes, to no benefit a compiler can see.
+
+**Each list is a subset check rather than an equality.** An entry for something
+no longer referenced is a pre-authorised hole rather than a failure, which is a
+real cost and the smaller one — the alternative fails a build for a legitimate
+*removal*, and the decision worth forcing is the one that adds a dependency.
+
+> **Every gate above reads *emitted* references, which is narrower than the
+> word this table uses.** `GetReferencedAssemblies` reads an assembly's
+> `AssemblyRef` table, and the compiler writes an entry only for an assembly
+> whose types the compiled code actually names. A forbidden reference that
+> nothing *uses* emits nothing — so a project may declare one and every gate
+> here stays green. Each fires the moment code names a type across that edge,
+> which makes these gates **late rather than absent**: the escape needs the
+> reference to be both forbidden and entirely unused, and it stops being an
+> escape the first time anybody relies on it.
+>
+> **Closing it means reading the declared graph rather than the compiled one**
+> — the restore assets, or a reference list MSBuild emits into an assembly
+> attribute — and that is a repo-wide build change carrying the failure this
+> repository repeats most: a target that quietly stops emitting leaves every
+> gate passing vacuously, so it would owe a companion test whose subject is
+> what the gate is looking at. It is **owed rather than done**, and stated here
+> rather than only in a test comment because it is a property of this table's
+> enforcement and not of one service's file.
 
 ### What the composition root composes
 
@@ -1233,10 +1408,14 @@ dispatcher without its table logs a failed claim twice a second from its first
 boot. It then edits five shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, and the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
-builds and its **fifty-six** tests pass before a line of it is written,
-**thirty** of them against real SQL Server and RabbitMQ containers — counts
-measured against a rendered service by PR-18, which found them reading
-forty-one and sixteen three PRs after they stopped being true.
+builds and its **sixty** tests pass before a line of it is written, **thirty**
+of them against real SQL Server and RabbitMQ containers — counts measured
+against a rendered service, by PR-18 when they read forty-one and sixteen three
+PRs after they stopped being true, and again by PR-22 when they read fifty-six.
+**Arithmetic is not a remeasurement**: PR-22 added three tests to the template
+and the total moved by four, so whoever adds the next one renders `Yankee` and
+runs it rather than adding to the number here. The thirty is now the
+`Category=Integration` count of §12.4, which is a filter rather than a tally.
 
 **There is no template directory, and that is the design.** The script reads
 `src/Services/Catalog` at run time, so there is exactly one copy of the

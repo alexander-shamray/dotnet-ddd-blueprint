@@ -1,5 +1,5 @@
 ---
-description: Multi-pass self-consistency audit of the blueprint and its roadmap, and of the code against them
+description: Multi-pass self-consistency audit of the blueprint, its roadmap and docs/testing.md, and of the code against them
 argument-hint: "[chapter file or topic to focus on — omit for a full sweep]"
 allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
 ---
@@ -13,9 +13,19 @@ the prices, so it drifts exactly as an appendix would — and unlike an appendix
 no link checker or nav footer will notice when it does. Check 10 covers what is
 particular to it; checks 1–8 apply to it unchanged.
 
-Scope: $1 — if empty, sweep the whole blueprint and the roadmap; if a filename,
-audit that chapter against every other chapter; if a topic, trace that topic
-everywhere it appears.
+**`docs/testing.md` is in scope on the same terms**, and needs no check of its
+own. It is the operational half of §12 — the commands, the
+`Category=Integration` filter, which projects need a Docker daemon, what the
+coverage filter measures — so every claim in it is a claim about a chapter or
+about the code, and checks 1–9 reach all of them unchanged.
+What it shares with the roadmap is the reason it has to be named here at all:
+outside the tree, in no index, behind no nav footer, so nothing structural
+notices when it drifts. **§12 wins where they disagree**, exactly as Appendix C
+wins over the roadmap.
+
+Scope: $1 — if empty, sweep the whole blueprint, the roadmap and
+`docs/testing.md`; if a filename, audit that chapter against every other
+chapter; if a topic, trace that topic everywhere it appears.
 
 **First, establish the phase.** If `Platform.slnx` (or any `src/`) exists, the
 code is in scope and check 9 below applies. If not, this is a docs-only audit
@@ -113,8 +123,15 @@ not tone, not "this could be clearer". Specifically hunt for:
 ## Method
 
 Work in passes. Each pass picks one axis from the list above and traces it
-across all 21 files — the 20 under `docs/backend-architecture/` plus
-`docs/roadmap.md`. Do not read chapter-by-chapter; read claim-by-claim.
+across all 22 files — the 20 under `docs/backend-architecture/`, plus
+`docs/roadmap.md` and `docs/testing.md`. Do not read chapter-by-chapter; read
+claim-by-claim.
+
+**The last of those is named here because the scope paragraph naming it is not
+the operative procedure.** An agent works from this section, so a file admitted
+above and absent from this list is a file nobody greps — and the claims that
+live only in `docs/testing.md`, not in §12, are exactly the ones a 20-chapter
+sweep cannot see.
 
 For each candidate:
 

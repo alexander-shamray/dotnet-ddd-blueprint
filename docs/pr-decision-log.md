@@ -27,9 +27,17 @@ otherwise now point at nothing; where a block stated a *live* fact that
 that drifts; and one 136-column line was rewrapped. Not one argument was
 shortened.
 
-Five lines still run one to nine columns past 80, each ending in a backticked
+A few lines still run one to nine columns past 80, each ending in a backticked
 identifier too long to break. They came across as they were, and the original
 carried them the same way.
+
+**That sentence used to carry a count, and the count was wrong.** It said five
+where six matched its own description — the sixth arrived with a later entry,
+as the next one will, because nothing recomputes it and the sentence is not
+where anybody looks. The predicate is checkable and the number was not, so the
+number is gone rather than corrected: `CLAUDE.md` makes the same argument about
+its own line count one file over, and a figure this file states about itself
+invalidates with the next PR that appends to it.
 
 **It is guidance, not specification.** Where an entry disagrees with the
 blueprint, the blueprint wins — the same rule `docs/superpowers/` carries — and
@@ -59,6 +67,169 @@ PR-19 each raised it, in that block, and were right to. **A log that forbade
 those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
+
+## PR-22 — the rest of §4.2, and a category that cannot drift
+
+PR-22 put the last of [§4.2](backend-architecture/04-solution-structure.md)'s
+dependency table behind gates — the cross-service clause three of its five
+rows carry had no test, and the Migrator row had none of any kind — split the
+suite on
+`Category=Integration`, added `docs/testing.md` and started reporting
+domain-layer coverage. Six of its decisions bind what comes after.
+
+- **A gate the scaffold copies cannot be keyed on a name the scaffold
+  rewrites.** The obvious instrument for "no service references another
+  service's projects" is a list of §4.1's six service names, and it is wrong
+  here for a mechanical reason: `new_service.py` applies its patches and *then*
+  renames every casing of the template's name, so a list naming `Catalog`
+  reaches the new service with `Catalog` **replaced** rather than joined —
+  dropping the one service a scaffolded service is most likely to reference by
+  accident. No spelling of the patch survives that, because the rename is what
+  the patch output is fed through. So the gate asks a measured question
+  instead: **every package this platform pins is strong-named and none of this
+  repository's own projects is**, checked across all ten service assemblies.
+  `Dapper` is the single unsigned package in the graph and is named as the
+  residual. A second one would be misread as first-party and fail the gate —
+  which is the direction it has to fail in, because the failure names an
+  assembly nobody expected and the alternative predicate would have opened a
+  hole silently. The rule then covers Inventory, Payments, Shipping and
+  Notifications before any of them exists, which no list would have.
+- **§4.2's table has two kinds of row, so it gets two kinds of gate.** A row
+  saying what a project *may* reference is an allow-list and gets an allow-list
+  over `GetReferencedAssemblies`; a row saying it may reference any package
+  cannot have one and gets a named deny. Picking by the row rather than by
+  taste is what keeps a gate from contradicting the sentence it enforces —
+  a full allow-list on `*.Infrastructure` would have been the strongest
+  instrument available and would have flatly denied the "any package" the table
+  grants it. **The migrator is the row that most wanted this**, because its
+  must-not is a sentence rather than a list — *anything it does not need to
+  apply a migration* — which a deny-list cannot express at all.
+- **A pre-granted exemption for a class that does not exist is a hole, not a
+  provision.** §4.2's composition-root rule read "only `Program.cs` **and
+  host-level `*ServiceCollectionExtensions`**", and the gate had never
+  implemented the second limb; no host has such a class. Both directions were
+  available and the prose was narrowed to the code rather than the gate widened
+  to the prose. The exemption is the whole of that gate's trust, and its
+  companion test — *the composition root is the only thing exempted* — is only
+  meaningful while the exempted set is small enough to hold in mind. A host
+  that genuinely wants a registration extension may have one; what it does not
+  get is a licence written before it existed.
+- **A category is the opposite of a skip, and this repository had refused them
+  together.** `CLAUDE.md` said the container tests were "neither skipped nor
+  categorised", on one argument that only applies to the first: a skip on a
+  missing daemon fails open, so CI goes green on a runner whose Docker broke. A
+  category decides which *stage* runs a test and never whether it may be
+  absent. **Where it goes is what makes it undriftable**: the trait is declared
+  on the `[CollectionDefinition]`, so joining the container collection *is*
+  carrying the category — there is no per-class attribute to forget and
+  therefore no reflection gate owed to check that nobody did, which is the
+  first time this repo has closed one of these by construction rather than by
+  adding a second test. xUnit v3's propagation was measured before the design
+  was trusted: 10 and 71 of 81 on one assembly, 614 and 164 of 778 across the
+  solution, with no third state.
+- **"No container starts" is a claim about a run, so it was measured — and the
+  first attempt to measure it proved nothing.** Pointing `DOCKER_HOST` at a
+  dead endpoint and watching the fast half pass looked conclusive and was not:
+  Testcontainers ignored the variable on this host, and the *integration* half
+  passed against the real daemon under the same override. What settled it was
+  `docker events --filter event=create` over the window, reporting nothing
+  against a probe that captured a control container started beside it. **A
+  green run under a broken override reads exactly like a green run under a
+  working one**, which is the same shape as this repository's vacuous-gate
+  failures one layer out.
+
+- **Measuring a layer changes it, and the change was invisible on the machine
+  that wrote the measurement.** `coverage.runsettings` instruments the Domain
+  assemblies and nothing else — which are exactly the assemblies §4.2's Domain
+  gates read `GetReferencedAssemblies` on. On the Linux runner an instrumented
+  Domain assembly reports a `netstandard` reference no source line can produce,
+  and **both** Domain gates went red on the first CI run that collected
+  coverage. It does not reproduce on Windows: the same collector leaves
+  `Ordering.Domain.dll` byte-identical, checked by hashing it either side of a
+  run, so every local run — Debug, Release, with the collector and without —
+  was green on a defect CI found immediately. **A green local suite is a claim
+  about one machine**, and this is the sharpest instance of it the repository
+  has: not a stale artefact, but a platform where the instrumentation mode
+  differs.
+
+  The one-line fix was to admit `netstandard` to the allow-list, and it is the
+  wrong one — an architecture rule relaxed everywhere, for ever, and in every
+  service the scaffold renders, to accommodate a test tool. CI runs the gates
+  first and uninstrumented instead, and collects coverage over the complement;
+  the two filters are exhaustive and disjoint, so the counts still sum to the
+  suite. **If a change needs one of those gates relaxed, the gate is probably
+  right** — this is that rule meeting a case where relaxing it would have been
+  easier and nobody would have noticed.
+
+Two smaller things are worth carrying. **Coverage is reported and never
+gated** — §12.9 calls it a diagnostic, and a diagnostic wired to a build
+failure stops being read and starts being satisfied; the threshold is PR-25's.
+The filter is a *pattern*, `.*\.Domain\.dll$`, so every later service's Domain
+joins it the day it exists rather than waiting for someone to edit a list. And
+the collector is the one `Microsoft.NET.Test.Sdk` already carries, so the
+figure cost no package and Appendix B no entry — measured at **83.4%** across
+`Catalog.Domain`, `Ordering.Domain` and `Common.Domain` on the run that landed
+this PR. That is the complement run's figure and it is the right one: the
+architecture gates reach Domain types by reflection and nothing else, so
+counting them inflated both halves of the ratio for no behaviour tested.
+
+**One thing was found and deliberately not fixed.** `Catalog.Infrastructure`
+carries a `ProjectReference` to `Catalog.Application` that its own code never
+names — `GetReferencedAssemblies` does not list it, and no file in the project
+has a `using` for it. Ordering's equivalent *is* used, so the two services
+differ. §4.2 permits the reference either way, and removing it would break the
+moment Infrastructure names an Application type, which §4.2 anticipates; it is
+recorded here rather than tidied because the reverse case — a *used*
+dependency that no csproj declares — is what `Common.Domain` in the Application
+gate is, and the two look alike from a distance and are not.
+
+**That paragraph is also the hole in the five gates, and the external review
+found it there.** Copilot's round raised one finding at six sites: every gate
+in §4.2's table reads `GetReferencedAssemblies`, which reports the emitted
+`AssemblyRef` table, so a forbidden `ProjectReference` or `PackageReference`
+that no compiled code *names* is invisible to all of them — the reviewer's
+evidence being the unused edge recorded directly above. The mechanism is
+correct and the consequence is real: a project may declare a forbidden
+reference and the gate that names that row stays green.
+
+**The instrument was not changed, and the reasoning is the part worth
+keeping.** Reading the declared graph is the fix — the restore assets, or a
+reference list MSBuild emits into an assembly attribute — and it is a
+repo-wide build change whose own failure mode is the one this repository
+repeats most: a target that quietly stops emitting leaves every gate passing
+vacuously, so it owes a companion test whose subject is what the gate is
+looking at. Landing that here would have put a new build-system dependency
+into `Directory.Build.props` at the least-reviewed moment in the change, with
+the Grok budget spent and one Copilot round behind it. **The limit is also not
+this PR's**: the Domain gate has read the same table since it was written, so
+the finding describes the gate family rather than the rows PR-22 added.
+
+**The second round found a hole the first one's fix had just papered over, and
+this one was closed rather than documented.** The cross-service gate subtracts
+every assembly under this service's own prefix, so an `Api → Migrator`
+reference passes it *and* the composition-root gate — while §4.2 names the
+migrator in no row's "may reference" column, because it is a leaf job host.
+`Nothing_in_this_service_references_the_migrator` is the third gate, over the
+other four assemblies, and it was **observed red** against a deliberate
+`Catalog.Api → Catalog.Migrator` reference that a line of `Program.cs` actually
+used — the qualifier being the whole lesson of the round before: an unused
+reference is invisible to this instrument, so a probe that only declares the
+edge proves nothing.
+
+**Two gates rather than one wider predicate**, because they ask different
+questions — *whose is it* and *which layer is it* — and a single `.Where` doing
+both reads as neither. The migrator is skipped as a subject rather than
+exempted inside the predicate: an assembly does not reference itself, so
+including it would pass vacuously, which is this repository's most-repeated
+failure wearing its usual disguise.
+
+**What did change is the claim.** The reach is now stated in §4.2 beside the
+two-shape table, in `docs/testing.md`, and in all four test files a reader
+meets before trusting a green run — the escape needs a reference that is both
+forbidden and entirely unused, and it closes the moment anybody relies on it,
+which makes these gates late rather than absent. **The declared-graph
+instrument is owed**, and is the first thing to reach for the next time §4.2's
+enforcement is opened.
 
 ## PR-21 — the saga, and the four things §9.6 did not say
 
@@ -498,9 +669,11 @@ the `web-bff` route's service — and ten of its decisions bind what comes after
 - **The `.Endpoints`-only architecture gate went vacuous the moment a second
   transport namespace existed.** `PricingService` is an endpoint in every sense
   §4.2 cares about and lived in `.Grpc`, so the gate selected none of it and
-  stayed green. The selector is a pattern now, and — this is the half worth
-  copying — a **second test asserts the selection itself**, naming both
-  adapters. A gate that silently stops covering the newest surface is this
+  stayed green. PR-19 made the selector a pattern and — this is the half worth
+  copying — added a **second test asserting the selection itself**, naming both
+  adapters. Neither survives: a later shape dropped the selector entirely and
+  moved that test's subject to the exemption, for the reason the next sentence
+  gives. A gate that silently stops covering the newest surface is this
   repository's most-repeated failure, and the only defence is a test whose
   subject is what the gate is looking at rather than what it found.
 - **The realm was built through the admin API and verified by re-importing it**,
