@@ -1,0 +1,177 @@
+name: Deploy
+
+# §15.5's canary, and §15.1's production leg of the pipeline.
+#
+# THIS WORKFLOW HAS NEVER REACHED A CLUSTER, and that is stated here rather
+# than discovered from a failed run. There is no dev, staging or production
+# environment for this repository, no kubeconfig and no registry; PR-23 shipped
+# charts that nothing installs and PR-24 alert rules that no Prometheus loads,
+# and this is the third artefact of that kind. What is asserted about it is
+# asserted by `deploy/canary/canary.py`, whose suite runs on every change to
+# this tree, and by the `check` job below, which reads this file.
+#
+# `workflow_dispatch` ONLY, and the reason is `main` staying green. A canary on
+# `push` would fail on every merge for want of a cluster, which trains everyone
+# to ignore a red pipeline -- the exact failure §15.1 spends a paragraph on
+# about gates nobody has defined. When an environment exists, the trigger to
+# add is `workflow_run` on a green CI over `main`, plus §15.1's manual approval
+# gate between staging and production; the steps below do not change.
+on:
+  workflow_dispatch:
+    inputs:
+      workload:
+        description: 'Which deployable to roll (a key in deploy/canary/canary.json)'
+        required: true
+        type: choice
+        options: [catalog-api, ordering-api, gateway, web-bff]
+      tag:
+        description: 'Image tag to promote. §15.3 refuses an empty one rather than rolling :latest.'
+        required: true
+        type: string
+  # The gate runs on its own inputs, so a change to the plan, the script or
+  # this file is checked without a deploy. `canary.py` declares SOURCE_INPUTS
+  # beside the reads and asserts BOTH lists below cover every entry -- the Helm
+  # tree's lesson, adopted rather than re-learned.
+  pull_request:
+    paths:
+      - 'deploy/canary/**'
+      - '.github/workflows/deploy.yml'
+      - 'deploy/helm/**'
+      - 'src/**'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/canary/**'
+      - '.github/workflows/deploy.yml'
+      - 'deploy/helm/**'
+      - 'src/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  # NOT cancel-in-progress. Cancelling a rollout mid-ladder leaves a canary
+  # Deployment serving traffic with nothing left to promote or retire it, which
+  # is the one state this whole file exists to avoid. A second run queues.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Stdlib Python over text, so it needs no cluster, no restore and no SDK --
+  # the licence gate's terms, which is why it can gate the deploy below.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the canary's arithmetic
+        working-directory: deploy/canary
+        run: python -m unittest
+
+      - name: The rollout plan agrees with the charts and the alerts
+        run: python deploy/canary/canary.py check
+
+  rollout:
+    needs: check
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      NAMESPACE: commerce
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Every step below is written against a cluster this repository does not
+      # have. `kubectl` and `helm` are assumed on the runner and PROMETHEUS_URL
+      # and the kubeconfig are assumed in the environment; none is configured,
+      # so this job has never run. It is here because the decision it encodes
+      # is the deliverable, and burying it in a runbook would make it prose.
+      - name: The first rung has a price, and it is paid before anything rolls
+        run: |
+          set -euo pipefail
+          NEEDED=$(python deploy/canary/canary.py required --step 0)
+          echo "The first step needs $NEEDED stable replicas (ADR-022)."
+          # §15.5's 5% is one pod in twenty, so a three-replica service cannot
+          # express it: one canary already serves 25%. Scaling up is what makes
+          # the requested weight the served weight, and it is deliberate rather
+          # than implicit -- `canary.py plan` refuses instead of rounding.
+          #
+          # §15.3's autoscaling.maxReplicas is 20, which is exactly this 19
+          # plus one canary. The two numbers were chosen independently and the
+          # fit is worth knowing: at the chart's ceiling, 5% is the finest
+          # weight the platform can express at all.
+          kubectl scale deployment "$WORKLOAD" --replicas="$NEEDED" -n "$NAMESPACE"
+          kubectl rollout status deployment "$WORKLOAD" -n "$NAMESPACE"
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+
+      - name: Climb the ladder
+        run: |
+          set -euo pipefail
+          STEPS=$(python deploy/canary/canary.py steps)
+          STABLE=$(kubectl get deployment "$WORKLOAD" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
+
+          for STEP in $(seq 0 $((STEPS - 1))); do
+            # `plan` prints CANARY_* assignments rather than JSON so this stays
+            # a shell script instead of five inline `python -c` invocations,
+            # each of them a quoting bug in the one file nothing here can test.
+            # It EXITS NON-ZERO when the requested weight is not expressible at
+            # the current replica count, and `set -e` is what makes that a
+            # stopped rollout rather than a stale plan reused.
+            eval "$(python deploy/canary/canary.py plan \
+              --workload "$WORKLOAD" --stable "$STABLE" --step "$STEP")"
+            echo "step $STEP: $CANARY_CANARY_REPLICAS canary pod(s), ${CANARY_ACHIEVED}% served"
+
+            # The canary is a SECOND release of the same chart, differing only
+            # in `canary.enabled`, its replica count and the image tag. The
+            # stable release is not touched anywhere in this loop, which is
+            # what makes the rollback below cost the canary's own pods and
+            # nothing else (ADR-022).
+            #
+            # autoscaling off on the canary because an HPA would move the
+            # weight underneath the analysis: the served share is a replica
+            # ratio, so a canary that scales itself is a canary whose blast
+            # radius nobody chose.
+            helm upgrade --install "$WORKLOAD-canary" "deploy/helm/$CANARY_CHART" \
+              -n "$NAMESPACE" \
+              --set canary.enabled=true \
+              --set replicaCount="$CANARY_CANARY_REPLICAS" \
+              --set autoscaling.enabled=false \
+              --set image.tag="$TAG" \
+              --wait
+
+            if [ "$CANARY_FINAL" = "True" ]; then
+              echo "The canary is the release; promoting the tag onto the stable release."
+              helm upgrade "$WORKLOAD" -n "$NAMESPACE" \
+                --reuse-values --set image.tag="$TAG" --wait
+              helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
+              break
+            fi
+
+            # The window equals the dwell: a rate over ten minutes, read at the
+            # end of ten minutes, IS §15.5's "watch for ten minutes".
+            sleep "$((CANARY_DWELL_MINUTES * 60))"
+            python deploy/canary/read_prometheus.py \
+              --service "$CANARY_SERVICE_NAME" \
+              --window "${CANARY_DWELL_MINUTES}m" \
+              --out readings.json
+
+            if ! python deploy/canary/canary.py analyse --readings readings.json; then
+              echo "::error::Rolling back at step $STEP."
+              helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
+              exit 1
+            fi
+          done
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+          TAG: ${{ inputs.tag }}

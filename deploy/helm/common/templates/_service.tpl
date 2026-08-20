@@ -13,8 +13,15 @@ about this exact line: a worker's safety comes from having no route, so the
 absence of a route is the thing to assert. A missing key looks the same whether
 it was considered or forgotten.
 */}}
+{{- /*
+The canary release renders none of this, and that is the mechanism rather than
+an optimisation. §15.5 splits traffic by having BOTH tracks answer to the ONE
+Service the stable release owns; a second Service of the same name is an
+ownership failure at install time, and a second Service of a different name
+would be a second front door nothing dials.
+*/}}
 {{- define "commerce.service" -}}
-{{- if .Values.service.enabled -}}
+{{- if and .Values.service.enabled (not .Values.canary.enabled) -}}
 apiVersion: v1
 kind: Service
 metadata:

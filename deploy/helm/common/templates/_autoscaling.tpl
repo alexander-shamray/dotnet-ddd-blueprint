@@ -1,5 +1,12 @@
+{{- /*
+Not on the canary release, and for a reason beyond the shared object name: the
+served weight IS the replica ratio, so an autoscaler on either track moves the
+blast radius underneath the analysis that is judging it. The rollout sets
+`autoscaling.enabled=false` on the canary explicitly as well — belt and braces,
+because a canary that scaled itself would be a step whose weight nobody chose.
+*/}}
 {{- define "commerce.hpa" -}}
-{{- if .Values.autoscaling.enabled -}}
+{{- if and .Values.autoscaling.enabled (not .Values.canary.enabled) -}}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -30,8 +37,15 @@ spec:
 {{- end -}}
 {{- end -}}
 
+{{- /*
+Also stable-only, and here the shared NAME is the whole reason. The budget's
+selector is `commerce.selectorLabels`, which matches both tracks — so the one
+the stable release owns already protects the canary's pods, and that is
+correct: they serve the same Service and a drain that took them all is the same
+outage either way.
+*/}}
 {{- define "commerce.pdb" -}}
-{{- if .Values.podDisruptionBudget.enabled -}}
+{{- if and .Values.podDisruptionBudget.enabled (not .Values.canary.enabled) -}}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

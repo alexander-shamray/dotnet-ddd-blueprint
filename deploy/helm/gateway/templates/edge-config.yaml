@@ -187,7 +187,7 @@ Cors__Origins__{{ $i }}: {{ $o | quote }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "commerce.name" . }}-edge
+  name: {{ include "commerce.instanceName" . }}-edge
   labels:
     {{- include "commerce.labels" . | nindent 4 }}
 data:

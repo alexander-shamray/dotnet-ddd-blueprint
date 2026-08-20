@@ -13,7 +13,14 @@ past it is plain http — which is the premise PricingHop.cs states for using
 `http://` on the BFF's one synchronous hop.
 */}}
 {{- define "commerce.ingress" -}}
-{{- if .Values.ingress.enabled -}}
+{{- /*
+Never on the canary release: the route in belongs to the stable release, and
+the canary is reached through the Service behind it rather than through a
+second Ingress. Suppressed BEFORE the guards below, because a canary release
+inherits `ingress.enabled` from the same values file and would otherwise be
+required to supply a TLS secret for an object it must not create.
+*/}}
+{{- if and .Values.ingress.enabled (not .Values.canary.enabled) -}}
 {{- /*
 An Ingress whose backend does not exist renders, installs and reports success,
 and answers every request with a 503 from the controller. `service.enabled` is

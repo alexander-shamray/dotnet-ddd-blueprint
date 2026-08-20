@@ -9,6 +9,20 @@ workload:
 
 replicaCount: 3
 
+# §15.5's canary track, and OFF is what every ordinary release means.
+#
+# Turned on, this chart renders the SECOND of two Deployments that answer to the
+# one Service: its objects take a `-canary` suffix, its pods carry
+# `app.kubernetes.io/track: canary`, and the Service, Ingress, HPA and
+# PodDisruptionBudget are suppressed because the stable release owns those names
+# (ADR-022). The share of traffic it serves is its replica count over the total,
+# which is why `deploy/canary/canary.py` does the arithmetic and refuses the
+# weights a replica ratio cannot express.
+#
+# Set by the rollout, not by an operator: `deploy/canary/` drives it.
+canary:
+  enabled: false
+
 image:
   # Registry namespace only. Each workload appends its own name, so the chart
   # can reference both the API and the migrator (§7.4) from one tag.

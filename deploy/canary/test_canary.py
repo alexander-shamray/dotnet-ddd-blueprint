@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""The canary's arithmetic and its verdict, which are the only parts testable.
+
+Nothing in this repository has ever run a canary -- there is no cluster, and
+`deploy/canary/README.md` says so in its first paragraph. What that makes this
+suite is the whole of the gate: the workflow is four commands whose failure is
+loud, and every decision it takes comes from here.
+
+The verdict tests are weighted toward the ways an analysis can pass when it
+should not. A canary that rolls back wrongly costs a deploy; one that promotes
+wrongly ships the release it was meant to catch, and every path to that runs
+through a reading nobody took.
+
+    py -3.12 -m unittest discover -s deploy/canary
+"""
+from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+
+import canary
+
+THRESHOLDS = {
+    "errorRate": 0.01,
+    "latencyP99Seconds": 1.0,
+    "errorRateFloor": 0.001,
+    "latencyP99FloorSeconds": 0.05,
+    "regressionFactor": 2.0,
+    "minimumRequests": 100,
+}
+
+
+def readings(**overrides) -> dict:
+    """A healthy step, which the tests then break one field at a time."""
+    document = {
+        "canary": {"errorRate": 0.0, "latencyP99Seconds": 0.2, "requests": 5000.0},
+        "baseline": {"errorRate": 0.0, "latencyP99Seconds": 0.2, "requests": 90000.0},
+    }
+    for track, values in overrides.items():
+        if values is None:
+            document.pop(track)
+        else:
+            document[track].update(values)
+    return document
+
+
+class WeightTests(unittest.TestCase):
+    def test_five_percent_is_not_expressible_at_the_chart_default(self) -> None:
+        """§15.3's replicaCount is 3, so one canary pod already serves 25% --
+        five times §15.5's first rung. The refusal is the deliverable: rounding
+        would have written 5% and shipped five times the blast radius."""
+        with self.assertRaises(canary.PlanError) as raised:
+            canary.plan(5, stable_replicas=3, overshoot_points=0)
+
+        message = str(raised.exception)
+        self.assertIn("19", message, "the refusal must name the count that would work")
+        self.assertIn("25.0%", message)
+
+    def test_five_percent_is_expressible_at_nineteen(self) -> None:
+        """And 19 + 1 is 20, which is §15.3's autoscaling.maxReplicas exactly."""
+        result = canary.plan(5, stable_replicas=19, overshoot_points=0)
+
+        self.assertEqual(result["canaryReplicas"], 1)
+        self.assertEqual(result["achieved"], 5.0)
+
+    def test_the_needed_count_actually_satisfies_the_check_that_named_it(self) -> None:
+        """`plan` and `required_stable` are one derivation used twice, and this
+        is why. Two derivations of one figure is how a message ends up naming a
+        replica count that the check printing it would still reject."""
+        for weight in (1, 2, 5, 10, 20, 25, 33, 50, 75, 99):
+            needed = canary.required_stable(weight, overshoot_points=0)
+            result = canary.plan(weight, stable_replicas=needed, overshoot_points=0)
+            self.assertLessEqual(
+                result["achieved"],
+                weight,
+                f"required_stable({weight}) returned {needed}, which plan() rejects",
+            )
+
+    def test_the_achieved_weight_never_exceeds_the_request(self) -> None:
+        """The direction that matters. Overshooting is more traffic on the new
+        version than anyone asked for; undershooting is a smaller canary."""
+        for weight in (5, 10, 25, 50):
+            for stable in range(1, 60):
+                try:
+                    result = canary.plan(weight, stable, overshoot_points=0)
+                except canary.PlanError:
+                    continue
+                self.assertLessEqual(result["achieved"], weight)
+
+    def test_a_canary_is_never_zero_pods(self) -> None:
+        """`ceil` of a fraction under one is one, and rounding down is not
+        available: zero canary pods is not a canary, it is a step that reports
+        a weight and serves none of it."""
+        result = canary.plan(1, stable_replicas=99, overshoot_points=0)
+
+        self.assertGreaterEqual(result["canaryReplicas"], 1)
+
+    def test_the_last_rung_retires_the_stable_track(self) -> None:
+        """100% is the end of the rollout rather than a weight. Expressed as
+        pods it would ask for an infinite canary against a track that is about
+        to go away."""
+        result = canary.plan(100, stable_replicas=19, overshoot_points=0)
+
+        self.assertTrue(result["final"])
+        self.assertEqual(result["stableReplicas"], 0)
+
+    def test_a_tolerance_buys_a_coarser_first_step(self) -> None:
+        """The knob exists so the refusal is a decision and not a wall -- and
+        canary.json sets it to zero, so taking that decision is an edit
+        somebody signs."""
+        result = canary.plan(5, stable_replicas=3, overshoot_points=20)
+
+        self.assertEqual(result["achieved"], 25.0)
+
+    def test_nonsense_weights_are_refused(self) -> None:
+        for weight in (0, -5, 101):
+            with self.assertRaises(canary.PlanError):
+                canary.plan(weight, stable_replicas=19, overshoot_points=0)
+
+
+class VerdictTests(unittest.TestCase):
+    def test_a_healthy_step_promotes(self) -> None:
+        verdict = canary.analyse(readings(), THRESHOLDS)
+
+        self.assertEqual(verdict["decision"], canary.PROMOTE)
+
+    def test_an_absent_series_rolls_back(self) -> None:
+        """§15.1 already says this about the k6 SLO run: it "fails on an absent
+        series as well as on a breached one". An empty dashboard reads the same
+        whether the system is healthy or nobody scraped it."""
+        for metric in ("errorRate", "latencyP99Seconds", "requests"):
+            with self.subTest(metric=metric):
+                verdict = canary.analyse(readings(canary={metric: None}), THRESHOLDS)
+
+                self.assertEqual(verdict["decision"], canary.ROLLBACK)
+                self.assertIn(metric, verdict["reason"])
+
+    def test_a_missing_canary_track_rolls_back(self) -> None:
+        verdict = canary.analyse(readings(canary=None), THRESHOLDS)
+
+        self.assertEqual(verdict["decision"], canary.ROLLBACK)
+
+    def test_too_little_traffic_rolls_back(self) -> None:
+        """Five per cent of a quiet ten minutes can be four requests, and four
+        requests cannot tell a 1% error rate from a 0% one. Promoting there is
+        promoting on no evidence and reporting a green analysis."""
+        verdict = canary.analyse(readings(canary={"requests": 40.0}), THRESHOLDS)
+
+        self.assertEqual(verdict["decision"], canary.ROLLBACK)
+        self.assertIn("40", verdict["reason"])
+
+    def test_the_minimum_is_the_smallest_sample_that_can_express_the_threshold(self) -> None:
+        """minimumRequests is 1/errorRate rather than a number somebody liked:
+        below it, one failure is already more than the threshold."""
+        self.assertEqual(THRESHOLDS["minimumRequests"], 1 / THRESHOLDS["errorRate"])
+
+    def test_breaching_the_alert_threshold_rolls_back(self) -> None:
+        """The absolute check is §13.6's own number. A canary tuned looser
+        would promote a release and then page about it."""
+        verdict = canary.analyse(readings(canary={"errorRate": 0.02}), THRESHOLDS)
+
+        self.assertEqual(verdict["decision"], canary.ROLLBACK)
+        self.assertIn("pages", verdict["reason"])
+
+    def test_breaching_the_latency_threshold_rolls_back(self) -> None:
+        verdict = canary.analyse(readings(canary={"latencyP99Seconds": 1.5}), THRESHOLDS)
+
+        self.assertEqual(verdict["decision"], canary.ROLLBACK)
+
+    def test_a_regression_inside_the_threshold_still_rolls_back(self) -> None:
+        """§15.5 says "regresses", not "breaches". A canary at four times the
+        stable track's error rate is a bad release even while both are under
+        the number that pages."""
+        verdict = canary.analyse(
+            readings(canary={"errorRate": 0.008}, baseline={"errorRate": 0.001}),
+            THRESHOLDS,
+        )
+
+        self.assertEqual(verdict["decision"], canary.ROLLBACK)
+        self.assertIn("stable track", verdict["reason"])
+
+    def test_noise_under_the_floor_does_not_roll_back(self) -> None:
+        """Without the floor every quiet service rolls back for ever: a
+        baseline of 0.0001 against a canary of 0.0004 is four times worse and
+        is two requests."""
+        verdict = canary.analyse(
+            readings(canary={"errorRate": 0.0004}, baseline={"errorRate": 0.0001}),
+            THRESHOLDS,
+        )
+
+        self.assertEqual(verdict["decision"], canary.PROMOTE)
+
+    def test_a_missing_baseline_does_not_invent_a_regression(self) -> None:
+        """Asymmetric with the canary's own absence, and deliberately so: no
+        canary reading means the new version is unobserved, while no baseline
+        means there is nothing to compare against. The absolute checks still
+        ran."""
+        verdict = canary.analyse(
+            readings(baseline={"errorRate": None, "latencyP99Seconds": None}),
+            THRESHOLDS,
+        )
+
+        self.assertEqual(verdict["decision"], canary.PROMOTE)
+
+    def test_the_reason_survives_every_verdict(self) -> None:
+        """The rollout prints this and nothing else. A decision with an empty
+        reason is a rollback nobody can act on."""
+        for document in (readings(), readings(canary={"errorRate": 0.5}), readings(canary=None)):
+            self.assertTrue(canary.analyse(document, THRESHOLDS)["reason"].strip())
+
+
+class PlanDocumentTests(unittest.TestCase):
+    """The shipped canary.json, against the repository it deploys."""
+
+    def setUp(self) -> None:
+        self.document = canary.load_plan()
+
+    def test_the_shipped_plan_is_consistent(self) -> None:
+        self.assertEqual(canary.check(self.document), [])
+
+    def test_the_ladder_is_the_chapters(self) -> None:
+        """§15.5, verbatim: 5, 25, 50, 100, ten minutes each. Not trimmed to
+        what three replicas can express -- that is what the refusal is for."""
+        self.assertEqual(
+            [step["weight"] for step in self.document["steps"]],
+            [5, 25, 50, 100],
+        )
+        for step in self.document["steps"][:-1]:
+            self.assertEqual(step["dwellMinutes"], 10)
+
+    def test_every_threshold_analyse_reads_is_present(self) -> None:
+        """`analyse` indexes these rather than `.get`-ing them, so a missing
+        key is a KeyError mid-rollout with a canary already serving traffic."""
+        canary.analyse(readings(), canary.entries(self.document["thresholds"]))
+
+    def test_the_queries_carry_all_three_substitutions(self) -> None:
+        """A query that kept `$TRACK` literal matches no series, and an absent
+        series rolls back -- so the mistake yields a rollout that can only ever
+        fail, at the end of a ten-minute wait."""
+        for name, expression in canary.entries(self.document["queries"]).items():
+            with self.subTest(query=name):
+                self.assertIn("$SERVICE", expression)
+                self.assertIn("$TRACK", expression)
+                self.assertIn("$WINDOW", expression)
+
+    def test_the_queries_read_the_track_label_and_not_the_version(self) -> None:
+        """service_version was the obvious discriminator and is not one:
+        BuildInfo.Version strips the source-revision suffix on purpose and
+        nothing sets an assembly version, so every build reports 1.0.0. A
+        registered name is not a live signal."""
+        for expression in canary.entries(self.document["queries"]).values():
+            self.assertIn("deployment_track", expression)
+            self.assertNotIn("service_version", expression)
+
+
+class CommentTests(unittest.TestCase):
+    def test_comment_keys_are_not_data(self) -> None:
+        """JSON has no comments and every number in the plan is a decision
+        somebody has to be able to re-take. Filtered in one place, because
+        forgetting it once turns a comment into a workload with no service
+        name."""
+        self.assertEqual(
+            canary.entries({"$comment": ["why"], "gateway": {}}),
+            {"gateway": {}},
+        )
+
+    def test_the_shipped_plan_actually_uses_them(self) -> None:
+        """If the comments were ever stripped out, the filter above would stop
+        being exercised by anything real."""
+        raw = json.loads(Path(canary.PLAN_PATH).read_text(encoding="utf-8"))
+
+        self.assertIn("$comment", raw)
+        self.assertIn("$comment", raw["workloads"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -40,6 +40,7 @@ on:
       - 'src/Services/Catalog/**'
       - 'src/Services/Ordering/**'
       - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
+      - 'deploy/canary/**'
   push:
     branches: [main]
     paths:
@@ -51,6 +52,7 @@ on:
       - 'src/Services/Catalog/**'
       - 'src/Services/Ordering/**'
       - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
+      - 'deploy/canary/**'
 
 permissions:
   contents: read

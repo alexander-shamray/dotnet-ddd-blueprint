@@ -106,6 +106,11 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │                                   and §13.7's k6 SLO run, as code — plus
 │   │                                   check.py, which pairs the alerts with
 │   │                                   §13.9's runbooks both ways
+│   ├── canary/                         §15.5's rollout as data and one decision
+│   │                                   function — the ladder, the thresholds and
+│   │                                   the PromQL as JSON, the weight arithmetic
+│   │                                   and the promote/rollback verdict as tested
+│   │                                   Python. It reaches no cluster (ADR-022)
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/

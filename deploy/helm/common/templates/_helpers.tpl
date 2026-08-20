@@ -116,6 +116,69 @@ app.kubernetes.io/name: {{ include "commerce.name" . }}
 app.kubernetes.io/part-of: commerce
 {{- end -}}
 
+{{- /*
+§15.5's canary, and the three helpers below are the whole of it in this chart.
+
+**The canary is a SECOND RELEASE of the same chart**, differing in
+`canary.enabled`, its replica count and its image tag. The stable release is
+never touched, which is what makes a rollback cost the canary's own pods and
+nothing else — no `helm rollback`, no image change on the pods serving the
+rest, and no schema to undo (ADR-022).
+
+Traffic splits because BOTH tracks answer to the SAME Service: the selector
+above carries the workload name and nothing about the track, so kube-proxy
+spreads connections across every pod behind it and the share the new version
+serves is `canary / (stable + canary)`. That is also why the weight is
+quantised — `deploy/canary/canary.py` does that arithmetic and refuses the
+weights this cannot express.
+*/}}
+{{- define "commerce.track" -}}
+{{- if .Values.canary.enabled }}canary{{ else }}stable{{ end -}}
+{{- end -}}
+
+{{- /*
+The name of every object THIS RELEASE owns, which is not the workload's name.
+
+Helm stamps `meta.helm.sh/release-name` on what it creates and refuses to touch
+another release's objects (§15.3, platform/values.yaml). So the canary release
+cannot render a `catalog-api` Deployment or ConfigMap — those belong to the
+stable release, and the install fails on ownership rather than on anything a
+render could show.
+
+`commerce.name` therefore keeps its job — it is the Service name, and so the
+string §10.2's route file and §9.7's pricing hop dial — and this is what
+Deployments and ConfigMaps are called. On the stable release the two are the
+same string, which is why nothing before PR-25 needed the distinction.
+*/}}
+{{- define "commerce.instanceName" -}}
+{{- if .Values.canary.enabled -}}
+{{ include "commerce.name" . }}-canary
+{{- else -}}
+{{ include "commerce.name" . }}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+A Deployment's selector, which is the Service's PLUS the track.
+
+**The two Deployments must not select each other's pods.** With identical
+selectors each would count the other's pods as its own and scale them away, so
+the track has to be in here — and it must NOT be in `commerce.selectorLabels`,
+because that one is the Service's and a Service that selected only `stable`
+would send the canary no traffic at all. One label, in exactly one of the two
+places, is the whole mechanism.
+
+**This field is immutable, so adding it is a breaking change to an installed
+release** — the API server refuses the update and the Deployment has to be
+deleted and recreated. It costs nothing today because nothing anywhere has
+installed these charts, and it would cost a downtime window later. That is the
+argument for taking it now rather than when a canary is first wanted.
+*/}}
+{{- define "commerce.deploymentSelectorLabels" -}}
+{{ include "commerce.selectorLabels" . }}
+app.kubernetes.io/track: {{ include "commerce.track" . }}
+{{- end -}}
+
 {{/*
 The migration Job's POD labels, which must NOT match the Service selector.
 
@@ -174,6 +237,25 @@ read down its Kind column, and a key in the wrong one is a password in a
 ConfigMap or a plain string in a Secret.
 */}}
 {{- define "commerce.config" -}}
+{{- /*
+§15.5's canary needs the two tracks to be distinguishable in the telemetry, and
+this is the line that makes them so.
+
+OTEL_RESOURCE_ATTRIBUTES is the OpenTelemetry SDK's OWN mechanism: the resource
+builder AddObservability configures already honours it, so this adds an
+attribute without Common.Web knowing the word "canary". Asserted end to end in
+`ObservabilityTests.The_resource_carries_the_deployment_track_the_environment_supplies`,
+against the resource a real host exports rather than against the variable.
+
+`service.version` was the obvious discriminator and is not one. BuildInfo
+strips the source-revision suffix deliberately — "a value that changes every
+commit turns one series into thousands" — and nothing in this solution sets an
+assembly version, so every build in the platform reports 1.0.0. A registered
+name is not a live signal.
+
+Two values only, so the cardinality cost is one extra series per track.
+*/}}
+OTEL_RESOURCE_ATTRIBUTES: {{ printf "deployment.track=%s" (include "commerce.track" .) | quote }}
 Identity__Authority: {{ include "commerce.require" (list .Values.identity.authority "identity.authority is required for every host, the gateway included (§15.4) — AddJwtAuthentication reads it eagerly and throws naming the key, so an unset value is a pod that never starts.") | quote }}
 OTEL_EXPORTER_OTLP_ENDPOINT: {{ include "commerce.require" (list .Values.observability.otlpEndpoint "observability.otlpEndpoint is required: UseOtlpExporter reads the OpenTelemetry standard variable, and left unset it exports to localhost:4317, where nothing listens in a pod (§15.4).") | quote }}
 {{- if .Values.identity.clientCredentials }}

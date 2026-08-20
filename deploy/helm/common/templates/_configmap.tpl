@@ -2,7 +2,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "commerce.name" . }}-config
+  {{- /* Per instance, so the canary release owns its own (§15.3 ownership). */}}
+  name: {{ include "commerce.instanceName" . }}-config
   labels:
     {{- include "commerce.labels" . | nindent 4 }}
 data:

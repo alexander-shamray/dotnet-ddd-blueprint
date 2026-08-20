@@ -28,6 +28,17 @@ text — which is the practical argument for central pinning that
 [§4.4](04-solution-structure.md) makes on other grounds. Cheapest and least
 dependent goes first.
 
+> **The diagram is the target pipeline, and this repository runs the left half
+> of it.** Everything up to and including the image build is live since PR-25:
+> the scan, the fork, the build, the three test stages and one `docker build`
+> per changed service. **Signing is not** — it needs a registry and a key this
+> repository has neither of, so what runs is the half that can run rather than
+> a step that would have to be faked. Nor is any `Deploy:` node: there is no
+> dev, staging or production environment, which is why §15.5's canary is
+> `workflow_dispatch` only and why the k6 SLO run has a target that does not
+> exist yet. Naming the split here is cheaper than letting a reader infer from
+> a green pipeline that a deploy happened.
+
 Only services whose files changed are built and deployed. Path filters are what
 make a monorepo practical at this size:
 
@@ -133,10 +144,18 @@ series as well as on a breached one — a target with no data is the same silenc
 §13.6 spends a callout on, and reading it as "nothing wrong" would turn this
 stage into the gate configured to pass that the paragraph above rules out.
 
-**Three** `deploy/**` artefacts are exercised by CI directly rather than
+**Four** `deploy/**` artefacts are exercised by CI directly rather than
 deployed, one per subtree, each in its own path-filtered workflow. **None is the
-smoke stage ruled out above**: all three deploy nothing and assert only what a
+smoke stage ruled out above**: all four deploy nothing and assert only what a
 chapter already defines.
+
+> **A count in prose is a claim to reconcile, and this one has now been wrong
+> once.** It read *three* until PR-25 added a fourth subtree, which is the
+> failure `deploy/helm/smoke.sh` spent three findings learning about its own
+> inventory. It stays a number rather than becoming a list because the
+> paragraphs below are the list — each names one subtree and what its gate
+> asserts — so a fifth subtree that reached this section without a paragraph
+> would be visible here in a way a missing row in a table is not.
 
 The first is the Compose file. A workflow path-filtered to
 `deploy/compose/**` and to itself runs `docker compose config -q`, then
@@ -166,6 +185,19 @@ gap the metric-name checks structurally cannot see. Stdlib Python over text, so
 it needs no restore and runs on the licence gate's terms. It reaches no Prometheus and no Grafana, and it does not
 validate rule syntax: `promtool` would be the tool for that, and adding it is a
 decision no chapter has taken.
+
+The fourth is the canary (PR-25). A workflow path-filtered to
+`deploy/canary/**` runs that tree's own suite and `canary.py check`, which
+asserts §15.5's ladder climbs and ends at 100, that the rollout's absolute
+thresholds are [§13.6](13-observability.md)'s alert thresholds **read out of
+the rules file rather than restated**, that each workload's `serviceName` is an
+entry assembly this solution actually builds — §13.2 takes `service.name` from
+`ApplicationName`, so a query spelled from the deployment's vocabulary matches
+no series — and that every metric its queries read is one a loaded alert reads,
+which is what the observability gate has already proved is published. It
+reaches no cluster and no Prometheus, and the weight arithmetic and the
+promote/rollback decision have a suite because they are the parts a workflow
+cannot be trusted with.
 
 **Two of the three filters name files outside their own tree**, and neither is
 an oversight — each names an input its gate actually reads. The Helm one is
@@ -946,6 +978,7 @@ namespace read access.
 | `Ingress__Enabled` | Config | Helm `ingress.enabled` → ConfigMap — **gateway only** | ✓ — true in Kubernetes, false only where the gateway is the edge (Compose) |
 | `Ingress__TrustedNetworks__0…n` | Config | Helm `ingress.trustedNetworks` → ConfigMap — **gateway only** | ✓ **when `Ingress__Enabled`**; CIDRs of the LB/Ingress, without which the rate limiter partitions everyone together |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Config | Helm `observability.otlpEndpoint` → ConfigMap | ✓ — **every host**. The SDK does default, which is the argument for requiring it rather than against — see below |
+| `OTEL_RESOURCE_ATTRIBUTES` | Config | Helm — derived from `canary.enabled`, never set by hand | ✓ — **every host**, as `deployment.track=stable` or `=canary`. §15.5's rollout compares the two tracks and this is the only thing that tells them apart ([ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)) |
 
 | Kind | Source | Example |
 |---|---|---|
@@ -1055,6 +1088,45 @@ public static class ServiceOptions
 Canary: route 5% of traffic to the new version, watch error rate and p99 for ten
 minutes, then progress to 25%, 50%, 100%. Roll back automatically if either
 metric regresses beyond threshold.
+
+**The mechanism is replica-weighted and it is
+[ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)**,
+taken by PR-25 because building the rollout was what forced the choice. The
+canary is a second Helm release of the same chart whose pods answer to the same
+Service, so the share it serves is `canary / (stable + canary)`. No mesh and no
+rollout controller — and no ingress-controller weight either, which is
+disqualified by topology rather than taste: this platform has one Ingress, the
+gateway's ([§10.1](10-api-gateway.md)), and everything behind it is reached by
+Service name, so an edge weight cannot canary Catalog or Ordering at all.
+
+**Two things the ladder above does not say, both found by building it.**
+
+**The weights are ceilings, not targets, because a replica ratio is
+quantised.** `deploy/canary/canary.py` takes the largest canary that stays
+within the requested weight and **refuses** where even one pod overshoots,
+naming the stable replica count that would satisfy the step. At §15.3's
+`replicaCount: 3` a single canary pod already serves 25%, so the 5% rung above
+is unreachable until the stable track is scaled to **19** — which the rollout
+does, deliberately and before anything rolls, rather than quietly serving five
+times the blast radius under a label that says 5%. `autoscaling.maxReplicas` is
+20, so 19 plus one canary is exactly the chart's ceiling; the smallest
+configuration in which 5% is expressible is the largest one the chart allows.
+
+**The two tracks are told apart by `deployment.track`**, a resource attribute
+the chart supplies through `OTEL_RESOURCE_ATTRIBUTES` (§15.4).
+`service.version` is the obvious discriminator and is not one:
+[§13.2](13-observability.md)'s `BuildInfo` strips the source-revision suffix on
+purpose, and nothing in the solution sets an assembly version, so every build in
+the platform reports `1.0.0`. Without a discriminator the analysis compares a
+release against itself, which passes every time — including on a canary that is
+on fire.
+
+> **A canary that cannot be measured is worse than no canary**, and the failure
+> is silent in one direction only. A query spelled with the wrong label matches
+> no series; an absent series is read here as a rollback, never as health — the
+> rule §15.1's SLO run already applies — so the mistake yields a rollout that
+> can only ever fail, ten minutes at a time. That is the safe direction, and it
+> is safe by construction rather than by luck.
 
 Because database migrations run ahead of the deploy and old code may still be
 serving traffic, **every migration must be backward compatible with the previous
