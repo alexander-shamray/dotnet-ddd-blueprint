@@ -92,6 +92,14 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              restore/build/test/report-coverage
 .github/workflows/compose.yml  path-filtered smoke on deploy/compose/** —
                              config -q, up --wait, down -v, and an image build
+.github/workflows/helm.yml   path-filtered smoke on deploy/helm/** — and on
+                             every input smoke.sh reads outside it. **That list
+                             is not written down here on purpose.** It drifted
+                             three times; it now lives once, as SOURCE_INPUTS
+                             in smoke.sh beside the reads, and the gate asserts
+                             both of the workflow's triggers cover it. The one
+                             place a deploy/** workflow reaches outside its own
+                             tree
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/coverage/            the domain-coverage reporter — stdlib Python, no
                              tests, and the file argues why: it is a report and
@@ -103,6 +111,14 @@ deploy/compose/              §14.1's infrastructure, plus one application pair
                              `rabbitmq/` is the one infrastructure image that is
                              BUILT — ADR-021's delayed-exchange plugin — so a
                              seventh build rides on the compose smoke
+deploy/helm/                 §15.3's charts since PR-23. `common/` is a LIBRARY
+                             chart holding every template once; Catalog,
+                             Ordering and the BFF are values plus one-line
+                             includes, the gateway adds `edge-config.yaml` for
+                             the two keys no service has, and `platform/` is
+                             the umbrella. `smoke.sh` renders all five and
+                             asserts what comes out — it reaches no cluster,
+                             and says so
 
 src/BuildingBlocks/          all five, and complete since PR-15
   Common.Domain/               Entity<TId>, AggregateRoot<TId>, IDomainEvent
@@ -169,7 +185,10 @@ type a CS0436, which ADR-019 turns into an error.
 Planned, per §4.1 — do not invent a different shape for it. `src/Services/`
 gains Inventory and Payments with the same five projects, Shipping with a
 Worker in place of the Api, and Notifications with four (no Domain, and a
-Worker). `deploy/` gains `helm/` and `k8s/`.
+Worker). `deploy/` still owes `k8s/` — `helm/` landed with PR-23, and the two
+are not alternatives: §4.1 gives `k8s/` the raw manifests "where Helm is
+overkill", which is a decision no chapter has yet taken about any particular
+object.
 
 Three things sit outside that tree because §4.1 does not draw them:
 `global.json`, whose SDK pin §4.1's prose relies on for the `.slnx` floor;
@@ -298,7 +317,7 @@ because a probe cannot quietly become a service later.
 
 ## Which phase are you in
 
-**PR-01 through PR-22 have landed, and PR-27 with them** — out of numerical
+**PR-01 through PR-23 have landed, and PR-27 with them** — out of numerical
 order and in sequence, because Appendix C numbers it last and makes it depend
 on PR-17 alone, so it may land at any point after the gateway. The blueprint,
 the foundation, all five building blocks, §14.1's Compose infrastructure,
@@ -311,8 +330,12 @@ with §9.6's fulfilment saga — the platform's first state machine, its first
 scheduled message ([ADR-021](docs/backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
 its first command endpoint and the first thing Ordering publishes. PR-22 put
 the rest of §4.2's dependency table behind gates, split the suite on
-`Category=Integration` and started reporting domain-layer coverage.
-**PR-23 (Helm charts, migration hooks, probes) is next.**
+`Category=Integration` and started reporting domain-layer coverage. PR-23 gave
+the platform its Helm charts and, with them, the first artefact in this
+repository that **cannot be verified by anything the solution builds** — no
+project references it, `dotnet test` says nothing about it, and its gate is a
+shell script over `helm template`.
+**PR-24 (runbooks, secrets, dashboards-as-code, the SLO run) is next.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
 and `dotnet test` runs 778 tests — so the build rules and the drift rules below
@@ -451,6 +474,38 @@ own line rather than sending a reader to a file that does not hold it.
 - **Drive `TestServer` for what the *application* decides and a real server for
   what the *server* decides.** `ConfigureKestrel` is a silent no-op under
   `TestServer`, and the two are indistinguishable from the test.
+- **A measurement taken through a tool that normalises reports the absence of
+  the defect it was taken to find.** A CRLF Helm template renders a `\r` onto
+  every line, and `deploy/helm/smoke.sh` went green against it here — MSYS
+  `grep` strips the CR before matching, where the Linux runner does not. The
+  first run said the hazard did not exist. Reading the bytes said it did. When
+  a measurement clears a platform-specific hazard, check what the measuring
+  tool did to the evidence.
+- **A gate cannot fail on a file that is not there.** "The gateway renders no
+  migration Job" passed against a gateway declaring `image.migrator`, because
+  that chart carries no migration template — so the values key the comment
+  credited was never consulted. This is the gate-coverage lesson at its
+  earliest point: not a gate that stopped covering a surface, but one whose
+  subject never existed. Assert the **agreement** between the two halves, which
+  fails from either side.
+- **One tool's "valid" is not the next tool's, and the gap is where a value
+  crosses between them.** PR-23 hit this three times in one file: `Release_1`
+  is a legal OCI tag and an illegal Job name; `https://shop.example.com:443` is
+  a legal URI and never matches `WithOrigins`; and `010.0.0.0/8` is legal to
+  `IPNetwork.Parse`, which reads it as **octal** and silently yields
+  `8.0.0.0/8`. A value validated against the alphabet of the system it comes
+  from, and then handed to a system with a narrower one, fails at the far end —
+  after the deploy has started. Validate against the **intersection**, and say
+  in the guard which system each rejection is for.
+- **A validator must check the value it emits.** A CORS origin was trimmed,
+  validated, and then written out untrimmed, so a trailing space passed every
+  check and failed the host's own comparison. A check on one string and a write
+  of another is worse than no check, because the check reads as authoritative.
+- **A list drifts exactly as a number does.** PR-23 lost count of the same
+  inventory three times — the source files its chart gate reads — and each fix
+  was a copy that went stale again. What ended it was declaring the list once,
+  beside the code that reads it, and asserting the other copy matches. The
+  prose then carries the argument for each entry rather than the entries.
 
 ### The commands
 
@@ -467,13 +522,22 @@ dotnet test  Platform.slnx --filter "Category!=Integration"   # 614 of 778, no d
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-Two suites, two runners. The scaffold's tests are Python and are **not** in
-`Platform.slnx`, so `dotnet test` says nothing about them:
+**Three suites, three runners, and only one of them is `dotnet test`.** The
+scaffold's tests are Python and the chart gate is bash over `helm template`;
+neither is in `Platform.slnx`, so a green solution says nothing about either:
 
 ```bash
-cd tools/new-service && py -3.12 -m unittest    # 81 tests, no Docker, no SDK
+(cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
+
+bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
+HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
 ```
+
+The chart gate needs `helm dependency update` before it can render anything,
+and runs it itself — `file://` dependencies resolve from disk, so there is no
+network step and no chart repository. `deploy/helm/README.md` is its
+operational reference.
 
 **`py -3.12`, not `python`, and the block above is written that way on
 purpose.** Every CI job that runs Python pins 3.12 — three of them since

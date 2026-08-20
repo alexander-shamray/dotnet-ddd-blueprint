@@ -1,0 +1,81 @@
+name: Helm
+
+# A separate workflow rather than a job in ci.yml, for the reason compose.yml
+# is one: path filtering is per-workflow, and this proves a tree most PRs never
+# touch. It is the second `deploy/**` artefact CI exercises directly rather
+# than deploying (§15.1) — the Compose file was the first, and the sentence in
+# that chapter naming one was amended by this PR rather than left to drift.
+#
+# It does NOT reach a cluster. `helm template` renders locally, so what this
+# asserts is that the charts produce the manifests §15.3, §15.4 and §7.4
+# describe. Whether an API server would accept them is a deploy-time question
+# (§15.1) and is named in smoke.sh as not covered.
+#
+# The filter reaches outside deploy/helm/ on purpose, and none of it is
+# decoration — each path is an input the gate actually reads:
+#
+#   - the gateway's route file and PricingHop.cs hold the host:port literals
+#     smoke.sh asserts every rendered Service against, so renaming a YARP
+#     destination would otherwise be a green PR that breaks the next deploy;
+#   - Catalog's appsettings.json declares the Kestrel endpoints those Services
+#     forward to, so moving the h2c listener off 8081 would leave a Service
+#     pointing at a closed port with every assertion still passing;
+#   - HealthCheckExtensions.cs maps the three probe paths, and the charts are
+#     the manifest HealthEndpointTests warns about by name: "the kubelet's
+#     startupProbe holds its own copy of /health/startup in a manifest no
+#     compiler reads". The gate reads the routes from that file rather than
+#     repeating them, so renaming one turns the charts red instead of killing
+#     slow-starting pods;
+#   - .gitattributes pins this tree to LF, and without it a CRLF template
+#     renders a CR onto every line and the anchored greps below match nothing
+#     on a Linux runner. A change removing that rule must run this gate.
+on:
+  pull_request:
+    paths:
+      - 'deploy/helm/**'
+      - '.github/workflows/helm.yml'
+      - '.gitattributes'
+      - 'src/Gateway/Gateway.Api/appsettings.json'
+      - 'src/BFF/Web.Bff/**'
+      - 'src/Services/Catalog/**'
+      - 'src/Services/Ordering/**'
+      - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/helm/**'
+      - '.github/workflows/helm.yml'
+      - '.gitattributes'
+      - 'src/Gateway/Gateway.Api/appsettings.json'
+      - 'src/BFF/Web.Bff/**'
+      - 'src/Services/Catalog/**'
+      - 'src/Services/Ordering/**'
+      - 'src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    # No images, no containers, no restore: this renders text. The whole run is
+    # seconds, which is why there is nothing to path-filter it away from beyond
+    # the paths above.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the version the charts were developed and verified against.
+      # `latest` here would make a helm release note a way for this repository
+      # to go red on a morning nobody changed anything — the same argument
+      # global.json makes for the SDK (§4.4).
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Render every chart and assert what comes out
+        run: bash deploy/helm/smoke.sh

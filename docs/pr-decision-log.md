@@ -68,6 +68,126 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-23 — the charts, and a name the platform already depended on
+
+PR-23 shipped [§15.3](backend-architecture/15-cicd-deployment.md)'s charts: a
+library chart holding every template once, three deployables that are values
+plus one-line includes and a fourth — the gateway — that adds one template of
+its own, an umbrella,
+[§7.4](backend-architecture/07-persistence.md)'s migration hook, and
+`deploy/helm/smoke.sh` behind the second path-filtered workflow of §15.1. Ten
+of its decisions bind what comes after — three of them found by review rather
+than by building, and marked as such.
+
+- **Helm's `fullname` convention would have broken the platform's routing, and
+  nothing in the chart could have shown it.** The idiom is
+  `{{ .Release.Name }}-{{ .Chart.Name }}`,
+  and §10.2's route file resolves `http://catalog-api:8080/`
+  while §9.7's pricing hop resolves `http://catalog-api:8081` — both literals
+  in source, both arguing *on the record* that the value does not vary because
+  "the host is the Kubernetes Service name". A release-derived name makes that
+  sentence false the moment the umbrella installs the same workload under its
+  own release, and the failure is a 502 at run time rather than a template
+  error. So `workload.name` is a required value, the Service takes it verbatim,
+  and **the selector carries nothing release-scoped**, because a selector is
+  workload identity rather than release bookkeeping: these pods are found by
+  the same name their callers dial, and a Deployment will never let that field
+  change afterwards. The first justification here was the
+  standalone-to-umbrella migration, and Copilot killed it — Helm rejects that
+  adoption on ownership before the API server's immutable-selector check is
+  reached. The conclusion outlived its argument, which is worth recording
+  rather than quietly keeping. The gate that keeps this true reads the source
+  files that hold those literals and asserts every rendered Service is a name
+  one of them dials — and, since Copilot's third round, that Catalog is
+  listening on the ports its own Service forwards to. The CI filter names each
+  of those paths, which is the one place a `deploy/**` workflow reaches outside
+  its own tree.
+- **A gate cannot fail on a file that is not there, and this is that lesson at
+  its earliest point.** "The gateway renders no migration Job" passed against a
+  gateway that declared `image.migrator: gateway-migrator` — because the
+  gateway chart carries no migration template at all, so the values key the
+  comment beside it credited was never consulted by anything. It is not a gate
+  that stopped covering a surface; it is one whose subject never existed. The
+  assertion is now about the **agreement** between the two halves — a chart has
+  a migration template exactly when its values name a migrator image — which
+  fails from either side. Of every deliberate defect run through that gate it
+  is the **one** that failed to turn a green run red, and it was found by
+  running them rather than by reading it again.
+- **§15.4's two Redis rows were required against a solution where nothing
+  reads them**, and the consequence is worse than the over-supply that table
+  already warns about. Supplying credentials no code path sends merely
+  provisions something to rotate; a `secretKeyRef` naming a Secret nobody
+  created is a pod stuck in `CreateContainerConfigError` and a service that
+  never starts. No host calls `AddRedisConnections`, so both rows are now
+  conditional on the consumer existing. The rule that resolved it is §14.1's,
+  applied one deployment target over — **a key joins when a host's code reads
+  it** — and it is the same rule that keeps the charts' environment identical
+  in shape to the Compose blocks'.
+- **`terminationGracePeriodSeconds` had a rule and no number, and the number is
+  not free.** §15.3 requires the grace period to exceed the longest in-flight
+  operation. The longest one is not per-service: `HostOptions.ShutdownTimeout`
+  bounds the whole drain and defaults to **30 seconds** — measured on the
+  pinned SDK rather than read off a documentation page, with nothing in this
+  solution overriding it — and `ServiceOptions.OperationTimeout` (20 s) sits
+  inside that window. Kubernetes' own default is also 30, which is the trap:
+  **30 is not a margin over 30.** A pod at the default is `SIGKILL`ed at the
+  instant the host would have finished draining, and nothing logs it.
+- **A measurement taken through a tool that normalises reports the absence of
+  the defect it was taken to find.** Go's template engine copies bytes through,
+  so a CRLF template renders `path: /health/live\r` and the smoke's
+  `$`-anchored greps match nothing on a Linux runner. Run here, the same
+  mutation was **green** — MSYS `grep` treats CRLF as the line terminator and
+  strips the CR before matching — so the first measurement said the hazard did
+  not exist. Only reading the rendered bytes settled it. `.gitattributes` now
+  pins `deploy/helm/**` to LF, on the same argument its `*.cs` paragraph
+  already makes, and the paragraph records how the answer was nearly missed.
+- **A rollout checksum has to cover every ConfigMap the pod mounts, and the
+  narrow one is how that was learned.** Changing a ConfigMap changes nothing a
+  running pod reads, so the pod template carries a hash that moves with the
+  values — otherwise a config-only deploy (§15.1) reports success and rolls
+  nothing. Hashing the *rendered ConfigMap* looked right and was not: the
+  gateway renders a second one from its own template, so `cors.origins` and
+  `ingress.trustedNetworks` — the two keys most likely to be edited without a
+  rebuild — rewrote a mounted object while the annotation stayed
+  byte-identical. It now hashes the whole of `.Values`, which over-triggers on
+  keys the container never sees and is the safe direction. **Found by writing
+  the assertion, not by reading the template**, which is the argument for
+  writing the assertion.
+- **A capability is a fact about the code, not an environment value**, and the
+  charts modelled six of them as free booleans. `Catalog.Infrastructure` always
+  resolves its connection string and always registers MassTransit; `Web.Bff`
+  always binds `ServiceIdentityOptions` with `ValidateOnStart`. So
+  `database.enabled: false` on Catalog is not a smaller deployment — it is a
+  clean render and a pod that will not start. Helm has no immutable value, so
+  the guard is **coherence**: a chart carrying the settings for a capability
+  may not disable it, and the gate additionally checks each committed chart
+  against the code it deploys. A *whole* override at deploy time
+  (`--set` clearing both halves) stays outside a render-time gate's reach and
+  is named as a residual. A `chart:` capability block is the better schema and
+  is owed.
+- **Validate a derived name; never truncate it.** The migration Job's name
+  embeds the tag, and `trunc 63 | trimSuffix "-"` was a guard that could
+  produce the thing it guarded against — a cut landing on a dot, which trimming
+  a hyphen never touched, and two tags colliding on one name. The derived name
+  is checked whole and a tag that overruns is refused, which is also why
+  `app.kubernetes.io/version` stopped truncating: a cut version label names a
+  tag no registry has.
+- **The migration pod must not be selectable by the Service it migrates.** Its
+  pod template carried `commerce.labels`, which contains the Service's
+  selector verbatim — so for the length of every hook a pod with a database
+  connection and no HTTP listener was a live endpoint, and inside the
+  PodDisruptionBudget. The Job *object* keeps the ordinary labels, because
+  object labels are not what endpoints are computed from.
+- **`Chart.lock` and `charts/` are generated, not source.** `file://`
+  dependencies resolve from disk, so the lock pins nothing a remote repository
+  could move and the tarball is a binary copy of a directory two levels up.
+  Committed, the lock would be a second copy of a version `Chart.yaml` already
+  states — the drift the one rule exists to close — so both are ignored and
+  `helm dependency update` is the whole of the setup, run by `smoke.sh` and by
+  the CI job before anything else.
+
+---
+
 ## PR-22 — the rest of §4.2, and a category that cannot drift
 
 PR-22 put the last of [§4.2](backend-architecture/04-solution-structure.md)'s

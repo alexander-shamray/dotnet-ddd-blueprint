@@ -1,0 +1,123 @@
+# Catalog, per §15.3. The keys and their argument are the chapter's; what is
+# specific to this service is the workload name, the second port and the
+# connection-string name.
+
+workload:
+  # NOT derived from the release name, and _helpers.tpl argues why at length:
+  # §10.2's route file dials `http://catalog-api:8080/` and PricingHop.cs dials
+  # `http://catalog-api:8081`, both as literals in source. This value is that
+  # string, so the Service answers to the name its callers already spell.
+  name: catalog-api
+
+replicaCount: 3
+
+image:
+  # Registry namespace only. Each workload appends its own name, so the chart
+  # can reference both the API and the migrator (§7.4) from one tag.
+  registry: registry.example.com/commerce
+  api: catalog-api
+  migrator: catalog-migrator
+  # Supplied by CI, never "latest"; both images share it. Deliberately empty
+  # rather than a default: a deploy that cannot name its tag must fail, not
+  # roll something. A config-only deploy reads the running value back (§15.1)
+  # instead of falling through to this.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The container ports, and the Service's ports where one is rendered. Two here
+# because a cleartext Kestrel endpoint cannot serve HTTP/1.1 and h2c at once —
+# measured, and argued in Catalog.Api/appsettings.json — so Catalog declares a
+# second, HTTP/2-only endpoint for the BFF's one synchronous hop (§9.7).
+#
+# 8081 is cluster-internal: no route reaches it (§10.2 routes HTTP) and the
+# Ingress below is disabled anyway. It is on the same footing as the SQL port,
+# which is why the RPC on it still authenticates (§11.2).
+ports:
+  - name: http
+    containerPort: 8080
+  - name: grpc
+    containerPort: 8081
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { memory: 512Mi }          # No CPU limit — §15.3.
+
+migrationJob:
+  # Smaller than the service's: the migrator opens one connection, applies a
+  # migration and exits (§7.4). It is not serving anything.
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 256Mi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Must exceed the host's own shutdown timeout, which is 30 s and measured
+# rather than assumed — _deployment.tpl carries the argument.
+terminationGracePeriodSeconds: 45
+
+probes:
+  # The port every probe addresses. `http` and not `grpc`: the health endpoints
+  # are mapped on the REST surface, and an HTTP/2-only endpoint answers an
+  # HTTP/1.1 probe with a 400 — which reads as a dead pod.
+  probePort: http
+  liveness:  { path: /health/live,  initialDelaySeconds: 10, periodSeconds: 10 }
+  readiness: { path: /health/ready, initialDelaySeconds: 5,  periodSeconds: 5 }
+  startup:   { path: /health/startup, failureThreshold: 30,  periodSeconds: 2 }
+
+service:
+  # True: the gateway and the BFF both dial this workload by name.
+  enabled: true
+
+ingress:
+  # False, and written down rather than omitted (§15.3). Catalog is reached
+  # through the gateway; an Ingress here would publish a service whose
+  # rate limiting, CORS and forwarded-header handling all live at the edge.
+  enabled: false
+
+identity:
+  # The authority, to validate incoming JWTs (§11.2) — and nothing else.
+  # Identity:Client is what a host presents when it CALLS a peer (§11.5), and
+  # Catalog calls none. No clientId here means no Keycloak client, no secret in
+  # the vault and nothing to rotate.
+  authority: https://id.example.com/realms/commerce
+  # False, and written down rather than absent: §15.4's
+  # required-for-some-hosts category is a claim a chart has to make, not one to
+  # infer from a missing key. Exactly one chart in the platform sets it true.
+  clientCredentials: false
+
+database:
+  enabled: true
+  # The .NET configuration key, not the database name: Catalog.Infrastructure
+  # calls GetConnectionString("Catalog") and Catalog.Migrator calls
+  # GetConnectionString("CatalogMigrator") — the migrator key is this one plus
+  # the suffix, which is §7.1's convention and is applied by the template.
+  connectionName: Catalog
+  # Two identities, two Secrets (§7.1). The runtime login has DML only; the
+  # migrator login has DDL and is mounted into the hook Job alone.
+  runtimeSecretRef:
+    name: catalog-database
+    key: connection-string
+  migratorSecretRef:
+    name: catalog-migrator-secret
+    key: connection-string
+
+broker:
+  enabled: true
+  secretRef:
+    name: commerce-rabbitmq
+    key: connection-string
+
+observability:
+  otlpEndpoint: http://otel-collector.observability:4317
+
+# ConfigMaps to mount beyond this chart's own. Empty for every chart but the
+# gateway, which renders a second one for the two keys no service has (§15.3).
+extraConfigMaps: []

@@ -20,3 +20,18 @@
 # Git Bash on Windows, where the same `\r` breaks bash mid-line.
 *.py text eol=lf
 *.sh text eol=lf
+
+# The Helm tree is the same failure one artefact over, and it is worth stating
+# how it was found. Go's template engine copies a template's bytes through, so
+# a CRLF template renders a CR at the end of every emitted line — measured:
+# `path: /health/live\r`. deploy/helm/smoke.sh then greps that output with
+# patterns anchored on `$`, and on the Linux runner none of them match.
+#
+# Locally the same run is GREEN, because MSYS grep treats CRLF as the line
+# terminator and strips the CR before matching. So the first measurement said
+# the hazard did not exist and was wrong for the reason the .cs paragraph above
+# gives — the platform hid it — and only reading the rendered bytes settled it.
+#
+# A checkout is what decides this, not an editor: with core.autocrlf=true these
+# files arrive CRLF unless something says otherwise.
+deploy/helm/** text eol=lf

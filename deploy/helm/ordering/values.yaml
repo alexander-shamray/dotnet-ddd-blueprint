@@ -1,0 +1,105 @@
+# Ordering, and the chart §15.3 prints. One port rather than Catalog's two:
+# Ordering serves no gRPC, because ADR-017 spends the platform's one
+# synchronous hop on the BFF's pricing call and nothing else.
+
+workload:
+  # §10.2's route file dials `http://ordering-api:8080/` as a literal, so this
+  # value is that string — _helpers.tpl argues why it is not release-derived.
+  name: ordering-api
+
+replicaCount: 3
+
+image:
+  # Registry namespace only. Each workload appends its own name, so the chart
+  # can reference both the API and the migrator (§7.4) from one tag.
+  registry: registry.example.com/commerce
+  api: ordering-api
+  migrator: ordering-migrator
+  # Supplied by CI, never "latest"; both images share it. Deliberately empty
+  # rather than a default: a deploy that cannot name its tag must fail, not
+  # roll something. A config-only deploy reads the running value back (§15.1)
+  # instead of falling through to this.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+ports:
+  - name: http
+    containerPort: 8080
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { memory: 512Mi }          # No CPU limit — §15.3.
+
+migrationJob:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 256Mi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Ordering is the host with the most to drain: four receive endpoints, a saga
+# and an outbox dispatcher on a two-second tick (§9.4, §9.6). The number is
+# still the framework's shutdown ceiling plus a margin rather than a per-service
+# estimate — _deployment.tpl argues why 30 is not a margin over 30.
+terminationGracePeriodSeconds: 45
+
+probes:
+  probePort: http
+  liveness:  { path: /health/live,  initialDelaySeconds: 10, periodSeconds: 10 }
+  readiness: { path: /health/ready, initialDelaySeconds: 5,  periodSeconds: 5 }
+  startup:   { path: /health/startup, failureThreshold: 30,  periodSeconds: 2 }
+
+service:
+  # True: the gateway dials this workload by name. False is the worker case
+  # (§15.3), and it is the ONE key separating Shipping's chart from this one —
+  # the chapter said two until the charts were written, because it assumed a
+  # service behind the edge would carry an Ingress of its own.
+  enabled: true
+
+ingress:
+  # False, and written down rather than omitted (§15.3). Ordering is reached
+  # through the gateway (§10.2); an Ingress here would be a second door past
+  # the edge's rate limiting, CORS policy and forwarded-header handling.
+  enabled: false
+
+identity:
+  # The authority, to validate incoming JWTs (§11.2) — and nothing else.
+  # Identity:Client is what a host presents when it CALLS a peer (§11.5), and
+  # Ordering calls none: prices come from a local projection (§6.4) and the
+  # rest goes over the broker. No clientId here means no Keycloak client, no
+  # secret in the vault and nothing to rotate.
+  authority: https://id.example.com/realms/commerce
+  # False, and written down rather than absent: §15.4's
+  # required-for-some-hosts category is a claim a chart has to make, not one to
+  # infer from a missing key. Exactly one chart in the platform sets it true.
+  clientCredentials: false
+
+database:
+  enabled: true
+  # GetConnectionString("Ordering") at runtime, "OrderingMigrator" in the hook.
+  connectionName: Ordering
+  runtimeSecretRef:
+    name: ordering-database
+    key: connection-string
+  migratorSecretRef:
+    name: ordering-migrator-secret
+    key: connection-string
+
+broker:
+  enabled: true
+  secretRef:
+    name: commerce-rabbitmq
+    key: connection-string
+
+observability:
+  otlpEndpoint: http://otel-collector.observability:4317
+
+extraConfigMaps: []

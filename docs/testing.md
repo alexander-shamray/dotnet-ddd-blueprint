@@ -18,9 +18,9 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 > `/validate-blueprint` reaches it only because it is named in that command's
 > scope. The one rule in `CLAUDE.md` covers it, and that is all that does.
 
-## The two suites
+## The three suites
 
-Two runners, and `dotnet test` says nothing about the second:
+Three runners, and `dotnet test` says nothing about the other two:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -28,8 +28,19 @@ dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
 
-cd tools/new-service && py -3.12 -m unittest    # no Docker, no SDK
+(cd tools/new-service && py -3.12 -m unittest)  # no Docker, no SDK
+
+bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
 ```
+
+**Only the first is a §12 suite, and the other two are here anyway**, because
+this file is written for someone with a checkout rather than for someone
+deciding what to test. The scaffold's tests exercise a developer tool and the
+chart gate renders `deploy/helm/` and asserts what comes out (§15.3); neither
+is in `Platform.slnx`, so a green solution says nothing about either, which is
+exactly why a person needs to be told they exist. `deploy/helm/README.md` is
+the chart gate's own reference — what it asserts and what it deliberately does
+not, since it reaches no cluster.
 
 **`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12, and a
 newer interpreter is the hazard — it accepts APIs 3.12 does not, so the local

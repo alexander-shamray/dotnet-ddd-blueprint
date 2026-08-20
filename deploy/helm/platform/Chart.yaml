@@ -1,0 +1,26 @@
+apiVersion: v2
+name: platform
+description: >-
+  The umbrella (§15.3) — every deployable in one release, in Appendix C's
+  order. A chart per service exists so a service can be rolled on its own;
+  this one exists so an environment can be stood up whole.
+type: application
+version: 0.1.0
+dependencies:
+  # No `condition` keys. A service is either built and deployable or it is not
+  # in this list, and a chart switched off by a value would render nothing while
+  # reading as present — the same failure §15.3 argues against for
+  # `service.enabled`, one level up. Inventory, Payments, Shipping and
+  # Notifications join when their PRs build them (Appendix C).
+  - name: catalog
+    version: 0.1.0
+    repository: file://../catalog
+  - name: ordering
+    version: 0.1.0
+    repository: file://../ordering
+  - name: gateway
+    version: 0.1.0
+    repository: file://../gateway
+  - name: web-bff
+    version: 0.1.0
+    repository: file://../web-bff

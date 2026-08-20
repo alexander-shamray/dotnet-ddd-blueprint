@@ -1,0 +1,286 @@
+{{- /*
+The name every object a chart renders takes — and the one thing here that is
+deliberately NOT derived from the release name.
+
+Helm's convention is `{{ .Release.Name }}-{{ .Chart.Name }}`, and it is wrong
+for this platform: these names are ROUTING CONFIGURATION. The gateway's route
+file resolves `http://catalog-api:8080/` and `http://ordering-api:8080/`
+(§10.2, appsettings.json), and the BFF's one synchronous hop resolves
+`http://catalog-api:8081` from a literal in PricingHop.cs, which argues on the
+record that the value does not vary because "the host is the Kubernetes Service
+name". A release-derived name makes that false the moment the umbrella chart
+installs the same workload under a different release, and the failure is a 502
+rather than a template error.
+
+So the name is a value, and it is required. `workload.name` is what the Service
+is called, which is what a peer dials.
+*/}}
+{{/*
+`required` is not enough on its own, and every guard in these charts rested on
+it until Copilot said so.
+
+Helm's `required` fails on nil and on the empty string, and passes anything
+else — including `" "`. The hosts do not agree: `AddJwtAuthentication` guards
+with `IsNullOrWhiteSpace` and says in its own comment that an environment
+variable set to the empty string arrives as `""` rather than null. So an
+overlay with `identity.authority: " "` rendered cleanly, began a rollout, and
+died in the new pod — which is the failure every render-time guard here exists
+to move earlier.
+
+BLANK COUNTS AS MISSING is already a lesson in CLAUDE.md, learned twice against
+this exact key. This is the third time, and it goes in one helper so there is
+one place to be wrong. `toString` before `trim` because `trim` errors on a
+non-string, and `tag: 1.2` is a YAML float.
+*/}}
+{{- define "commerce.require" -}}
+{{- $value := index . 0 -}}
+{{- $message := index . 1 -}}
+{{- required $message ($value | default "" | toString | trim) -}}
+{{- end -}}
+
+{{- define "commerce.name" -}}
+{{- include "commerce.require" (list .Values.workload.name "workload.name is required: it is this deployable's Service name, and therefore the string the gateway's route file and the BFF's pricing hop dial (§10.2, §9.7).") -}}
+{{- end -}}
+
+{{- /*
+The image tag, required rather than defaulted.
+
+values.yaml carries `tag: ""` deliberately (§15.3): a deploy that cannot name
+its image must fail rather than roll something nobody chose. CI supplies it
+from the build; a config-only deploy reads the running value back out of the
+cluster first (§15.1). `required` is what turns the empty default into a
+refusal — without it the empty string renders `image: registry/api:` and the
+kubelet resolves that to `:latest`, which is the one tag §15.3 forbids by name.
+*/}}
+{{- define "commerce.tag" -}}
+{{- $tag := include "commerce.require" (list .Values.image.tag "image.tag is required and values.yaml leaves it empty on purpose: a deploy that cannot name its image must fail rather than roll something nobody chose (§15.3). CI supplies it; a config-only deploy resolves the running tag first (§15.1).") -}}
+{{- /*
+The tag is not only an image reference here: it goes into the migration Job's
+NAME and into `app.kubernetes.io/version`, and the three have different
+alphabets. `Release_1` is a perfectly valid OCI tag, an invalid DNS-1123
+subdomain (uppercase), and therefore a Job the API server refuses — after
+`helm upgrade` has started. The render gate exercised commit SHAs and never
+saw it.
+
+So the accepted shape is the intersection, and the binding constraint is the Job
+name: a DNS-1123 **subdomain** is dot-separated labels, each of lowercase
+alphanumerics and dashes, each starting and ending alphanumeric. Underscores
+are out entirely — legal in a label VALUE and not in a name — and so are empty
+or hyphen-bounded segments.
+
+A single regex over the whole string is what got this wrong the first time:
+`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$` admits `release_1`, `release..1` and
+`release.-1`, all of which Kubernetes refuses after `helm upgrade` has started.
+The segments have to be checked as segments.
+
+Validating is preferred to sanitising: a derived metadata value that differs
+from the image tag makes `app.kubernetes.io/version` a label naming something
+no registry has.
+*/}}
+{{- range $segment := splitList "." $tag }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $segment) }}
+{{- fail (printf "image.tag %q is not usable as Kubernetes metadata: the segment %q is not a DNS-1123 label. The tag becomes the migration Job's name and app.kubernetes.io/version, so each dot-separated segment must be lowercase alphanumerics and dashes, starting and ending alphanumeric — which every commit SHA and ordinary semver already is (§15.3)." $tag $segment) }}
+{{- end }}
+{{- end }}
+{{- /*
+And the length, because `app.kubernetes.io/version` carries the tag on every
+chart — including the two with no migration Job, where the Job-name budget
+never applies. A label value may not exceed 63 characters, and this used to be
+handled by truncating, which produced a version label naming a tag no registry
+has.
+*/}}
+{{- if gt (len $tag) 63 }}
+{{- fail (printf "image.tag is %d characters. It becomes app.kubernetes.io/version, and a label value may not exceed 63 (§15.3)." (len $tag)) }}
+{{- end }}
+{{- $tag -}}
+{{- end -}}
+
+{{- /*
+The selector, which carries the workload name and NOTHING release-derived.
+
+**Because the selector is workload identity, not release bookkeeping.** These
+pods are found by their name: the Service selects them, and that name is the
+string §10.2's route file and §9.7's pricing hop dial. Putting the release into
+the selector would make a pod's identity depend on which command installed it,
+for a field a Deployment will never let you change afterwards.
+
+This comment used to justify it by the standalone-to-umbrella migration, and
+that justification is dead — §15.3 and `platform/values.yaml` now record that
+Helm rejects the adoption outright on ownership, so the migration never reaches
+the API server's immutable-selector check. The conclusion survives its original
+argument, which is worth saying rather than quietly keeping: a release-scoped
+selector would still be wrong, and the reason is now the one above.
+*/}}
+{{- define "commerce.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "commerce.name" . }}
+app.kubernetes.io/part-of: commerce
+{{- end -}}
+
+{{/*
+The migration Job's POD labels, which must NOT match the Service selector.
+
+A Service selects pods, and the migration Job's pod template carried
+`commerce.labels` — which contains `commerce.selectorLabels` verbatim. So for
+the length of every `pre-upgrade` hook, the migrator became an endpoint of the
+service it was migrating: a pod with a database connection, no HTTP listener,
+and a share of live traffic being routed to it. Measured in the render, not
+inferred — `catalog-api`'s Service selector and the Job's pod labels were the
+same two lines.
+
+The same match put it inside the PodDisruptionBudget, so a one-shot pod counted
+toward the availability of a service it does not serve.
+
+`-migrate` on the name is what breaks both, and `component` says what the pod
+is for anyone reading `kubectl get pods -L`. The Job OBJECT keeps the ordinary
+labels: object labels are not what endpoints are computed from, and losing the
+identity there would cost the one thing these labels are for.
+*/}}
+{{- define "commerce.migrationPodLabels" -}}
+app.kubernetes.io/name: {{ include "commerce.name" . }}-migrate
+app.kubernetes.io/part-of: commerce
+app.kubernetes.io/component: migrator
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/version: {{ include "commerce.tag" . | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+{{- end -}}
+
+{{- /*
+The full label set for object metadata. Free to carry release-scoped and
+version-scoped labels, because unlike the selector above nothing here is
+immutable.
+*/}}
+{{- define "commerce.labels" -}}
+{{ include "commerce.selectorLabels" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- /*
+Not truncated: `commerce.tag` refuses a tag longer than 63 outright, for the
+reason _migration-job.tpl gives about its own name. Truncating produced a
+version label naming a tag no registry has, and could not be made safe — a cut
+can land on a dot, which `trimSuffix "-"` never touched.
+*/}}
+app.kubernetes.io/version: {{ include "commerce.tag" . | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+{{- end -}}
+
+{{- /*
+The non-secret half of §15.4's inventory: everything whose Kind column reads
+Config, rendered into the ConfigMap the Deployment mounts with `envFrom`.
+
+The split is §15.4's own and it is mechanical — **if the value contains a
+credential, it is a Secret** — so the two halves of this file are that table
+read down its Kind column, and a key in the wrong one is a password in a
+ConfigMap or a plain string in a Secret.
+*/}}
+{{- define "commerce.config" -}}
+Identity__Authority: {{ include "commerce.require" (list .Values.identity.authority "identity.authority is required for every host, the gateway included (§15.4) — AddJwtAuthentication reads it eagerly and throws naming the key, so an unset value is a pod that never starts.") | quote }}
+OTEL_EXPORTER_OTLP_ENDPOINT: {{ include "commerce.require" (list .Values.observability.otlpEndpoint "observability.otlpEndpoint is required: UseOtlpExporter reads the OpenTelemetry standard variable, and left unset it exports to localhost:4317, where nothing listens in a pod (§15.4).") | quote }}
+{{- if .Values.identity.clientCredentials }}
+{{- /*
+Two of the three client-credential keys are Config and only the secret is a
+Secret (§15.4). They belong to the one host that calls a peer synchronously
+(§9.7, ADR-017); all three are [Required] on ServiceIdentityOptions and gated
+by ValidateOnStart, so a missing one is a refusal to boot rather than a 401
+somebody reads as the callee's fault.
+
+A second chart growing these is a design change, not a configuration change.
+
+**The switch is its own key, and `clientId` used to be it.** That made the
+opt-out invalid rather than merely odd: clearing `identity.clientId` on the BFF
+dropped all three keys, and `Web.Bff` binds `ServiceIdentityOptions`
+unconditionally — so the release rendered, rolled, and the pod refused to
+start. A whitespace-only value did the same while slipping past
+`commerce.require`, because a truthiness test is not a requirement. §15.4 calls
+this the *required-for-some-hosts* category; an explicit boolean is what makes
+a host say which it is, and every value below is then required rather than
+implied.
+*/}}
+Identity__Client__ClientId: {{ include "commerce.require" (list .Values.identity.clientId "identity.clientId is required when identity.clientCredentials: Web.Bff binds ServiceIdentityOptions unconditionally and ValidateOnStart refuses to boot without it (§15.4).") | quote }}
+Identity__Client__Scope: {{ include "commerce.require" (list .Values.identity.scope "identity.scope is required when identity.clientCredentials: it becomes the audience every service validates (§11.5), and ServiceIdentityOptions marks it [Required].") | quote }}
+{{- end }}
+{{- end -}}
+
+{{- /*
+The secret half of the same table, and the rule that decides what is in either:
+a variable joins when a host's code READS it, and not before.
+
+That is the rule §14.1's Compose blocks already state — "an env var nothing
+reads is the container form of an unused registration" — and it is why there
+are no Redis keys here. §15.4's inventory marks `ConnectionStrings__RedisCache`
+and `ConnectionStrings__RedisCoordination` required *once a host reads a cache*,
+and none does — nothing calls `AddRedisConnections` yet. Supplying them anyway
+would demand two Secrets exist before any pod can start, for values nothing
+reads. They join with the PR whose code reads them, exactly as
+`Identity__Authority` joined with PR-16.
+
+Secrets are REFERENCED, never rendered. External Secrets Operator owns the
+Secret objects (§15.4); a chart that templated a connection string would put a
+password into `helm get values` and into every diff of this repository.
+*/}}
+{{- define "commerce.env" -}}
+{{- /*
+A CAPABILITY IS A FACT ABOUT THE CODE, NOT AN ENVIRONMENT SETTING, and these
+flags were free values until Copilot pointed at six of them at once.
+
+`Catalog.Infrastructure` always calls `GetConnectionString("Catalog")` and
+always registers MassTransit; `Web.Bff` always binds `ServiceIdentityOptions`
+with `ValidateOnStart`. So `database.enabled: false` on Catalog, or
+`clientCredentials: false` on the BFF, is not a smaller deployment — it is a
+clean render followed by a pod that will not start, which is the exact shape
+every guard in this file exists to refuse.
+
+Helm has no immutable value, so the guard is coherence instead: a chart that
+carries the SETTINGS for a capability may not disable it. Only a chart that
+never had them can be off, which is what makes the gateway's `enabled: false`
+lines honest and an overlay's a refusal.
+
+The schema was the other candidate — a `chart:` block naming each capability,
+replacing these flags. It is the better shape and it is not this PR's: it
+renames keys §15.3 prints, at round six of a review, and the coherence check
+closes the same six holes without moving anything a reader has been told to
+look for.
+*/}}
+{{- /*
+On Catalog and Ordering the migration Job's own coherence check reaches this
+first and reports a sharper message, so what surfaces there is "a migrator with
+no database is incoherent". This is the general case behind it: a chart with a
+connection name and no migrator — which nothing in the platform is yet, and
+which Shipping and Notifications will not be either — still may not disable the
+database its host unconditionally resolves.
+*/}}
+{{- if and .Values.database.connectionName (not .Values.database.enabled) }}
+{{- fail "database.enabled is false but database.connectionName is set. A service that carries a connection name reads one at startup (§7.1) — disabling it renders cleanly and produces a pod that cannot resolve its own database. A capability is a fact about the code, not an environment setting." }}
+{{- end }}
+{{- if and .Values.broker.secretRef (not .Values.broker.enabled) }}
+{{- fail "broker.enabled is false but broker.secretRef is set. AddMassTransitMessaging throws without ConnectionStrings:RabbitMq (§9.3), so this renders cleanly and the host does not start." }}
+{{- end }}
+{{- if and .Values.identity.clientId (not .Values.identity.clientCredentials) }}
+{{- fail "identity.clientCredentials is false but identity.clientId is set. Web.Bff binds ServiceIdentityOptions unconditionally and ValidateOnStart refuses to boot without all three values (§15.4) — so this is a render that succeeds and a pod that never starts." }}
+{{- end }}
+{{- if .Values.database.enabled }}
+{{- /*
+The RUNTIME connection string (DML only) — §7.1's split identity. The migrator
+key is the other half, mounted into the migration Job and nowhere else.
+*/}}
+- name: ConnectionStrings__{{ include "commerce.require" (list .Values.database.connectionName "database.connectionName is required when database.enabled: it is the .NET configuration key this service's Infrastructure passes to GetConnectionString (§7.1), and it differs per service.") }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "commerce.require" (list .Values.database.runtimeSecretRef.name "database.runtimeSecretRef.name is required when database.enabled.") | quote }}
+      key: {{ include "commerce.require" (list .Values.database.runtimeSecretRef.key "database.runtimeSecretRef.key is required when database.enabled.") | quote }}
+{{- end }}
+{{- if .Values.broker.enabled }}
+- name: ConnectionStrings__RabbitMq
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "commerce.require" (list .Values.broker.secretRef.name "broker.secretRef.name is required when broker.enabled: AddMassTransitMessaging throws without the connection string, so the host does not start (§9.3).") | quote }}
+      key: {{ include "commerce.require" (list .Values.broker.secretRef.key "broker.secretRef.key is required when broker.enabled.") | quote }}
+{{- end }}
+{{- if .Values.identity.clientCredentials }}
+- name: Identity__Client__ClientSecret
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "commerce.require" (list .Values.identity.clientSecretRef.name "identity.clientSecretRef.name is required when identity.clientCredentials. The secret is a reference, never a value (§15.3).") | quote }}
+      key: {{ include "commerce.require" (list .Values.identity.clientSecretRef.key "identity.clientSecretRef.key is required when identity.clientCredentials.") | quote }}
+{{- end }}
+{{- end -}}

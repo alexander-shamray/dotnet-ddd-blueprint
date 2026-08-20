@@ -611,8 +611,9 @@ environments already do:
   way.
 
 > **The AppHost is a deployment environment, and drifts like one.** It is the
-> only one with no automated exercise: Compose runs in CI, Helm is applied by
-> CD, and the integration fixture builds its own. Every configuration change
+> only one with no automated exercise: Compose runs in CI, Helm is rendered and
+> asserted in CI (§15.1) as well as applied by CD, and the integration fixture
+> builds its own. Every configuration change
 > lands in three places and can be forgotten in the fourth without anything
 > failing. When a required key is added (§15.4), this file is the one to check
 > last and the one most likely to be wrong.

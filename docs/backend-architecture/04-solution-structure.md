@@ -1471,6 +1471,26 @@ configuration, not the service's tree — the Helm chart
 Shipping and Notifications take (§4.1) and which joins the script with the
 first one built.
 
+**The chart's exclusion cost nothing until PR-23 and now costs something**, and
+the sentence above is the same either way, which is why it is worth saying
+separately. Before the charts existed, "the scaffold writes no chart" described
+a file nobody had; since they exist, a scaffolded service compiles, tests,
+starts under Compose — and cannot be deployed, with nothing in the render
+saying so. That is a gap in the scaffold rather than a contradiction here, and
+it is **owed**, and the shape of what is owed is the shape §15.3 already
+describes: a `Chart.yaml`, one one-line include per template the library chart
+defines, and a `values.yaml`. Only the last is real work, and it is real work —
+it carries every per-service decision, which is precisely what a template
+cannot guess and what §15.3 spends a section arguing.
+
+**No file count here, deliberately.** An earlier revision said "four files,
+three of which are one line", which was wrong on both numbers and wrong in a
+way that would have propagated: a later PR closing this gap by emitting four
+files emits a chart that does not deploy. The count moves whenever the library
+gains a template — the deployables today carry six of those includes or seven,
+depending on whether the service owns a database — so the thing worth writing
+down is the rule, not the arithmetic.
+
 **The scaffold refuses `Shipping` and `Notifications` by name until it can.**
 Documenting the gap left the script willing to render either as an API service,
 which would have contradicted §4.1 quietly — Notifications has no Domain

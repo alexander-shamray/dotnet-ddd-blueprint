@@ -1,0 +1,9 @@
+apiVersion: v2
+name: commerce-common
+description: >-
+  The templates every deployable in this platform shares (§15.3). A library
+  chart rather than a copy per chart, for the reason tools/new-service reads
+  Catalog at run time instead of keeping a template directory: one copy of the
+  wiring cannot drift from another.
+type: library
+version: 0.1.0
