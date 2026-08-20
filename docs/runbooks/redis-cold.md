@@ -4,20 +4,35 @@
 |---|---|
 | Alert | `CacheHitRatioCollapse`, in `deploy/observability/alerts/awaiting-signal.yaml` — **not loaded yet** |
 | Condition | hits / (hits + misses) < 50% over 10 minutes |
-| Signal | **Owed.** The `Microsoft.Extensions.Caching.Hybrid` meter is registered but nothing publishes to it |
+| Signal | **Owed — an instrument *and* a consumer.** See the callout below |
 | Owner | Platform ([§13.8](../backend-architecture/13-observability.md)) |
 
-> **This alert cannot fire today, and the reason is worth reading before the
-> rest of this file.** §13.2's `AddObservability` *does* register the
-> `Microsoft.Extensions.Caching.Hybrid` meter — but no host in this solution
-> calls `AddRedisConnections`, so nothing ever constructs a `HybridCache` and
-> the meter has no instruments behind it. A registered meter with no publisher
-> is exactly the trap §13.6 warns about: the `AddMeter` line makes it look
-> wired. §15.4 records the same absence from the other side, where the two
-> Redis rows are conditional on a consumer existing.
+> **This alert cannot fire today, it is owed two things rather than one, and
+> the second is the reason wiring Redis will not be enough.**
 >
-> Everything below applies from the moment a host takes the cache. Until then
-> it is a procedure written ahead of its alert, which is what §13.9 asks for.
+> §13.2's `AddObservability` *does* register the
+> `Microsoft.Extensions.Caching.Hybrid` meter. **The package publishes no
+> meter.** `Microsoft.Extensions.Caching.Hybrid` 10.0.0 references
+> `System.Diagnostics.Tracing` and not `System.Diagnostics.Metrics` — it
+> reports through `HybridCacheEventSource` with `PollingCounter`, which is
+> EventCounters — so that `AddMeter` line collects nothing and would still
+> collect nothing with the cache in use. A registered meter with no publisher
+> is exactly the trap §13.6 warns about, and the `AddMeter` line is what makes
+> it look wired.
+>
+> Separately, no host calls `AddRedisConnections`, so nothing constructs a
+> `HybridCache` at all. §15.4 records that absence from the other side, where
+> the two Redis rows are conditional on a consumer existing.
+>
+> So the signal needs an **instrument** — an EventCounters-to-OTel bridge, or a
+> package version that publishes a meter — **and** a consumer. Taking the cache
+> is necessary and not sufficient, and an earlier draft of this file said
+> otherwise.
+>
+> Everything below applies from the moment both arrive. Until then it is a
+> procedure written ahead of its alert, which is what §13.9 asks for — and the
+> Redis commands in it work today regardless, because they read the server
+> rather than the metric.
 
 ## What it means
 

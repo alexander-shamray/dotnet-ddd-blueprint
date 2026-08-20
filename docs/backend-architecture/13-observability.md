@@ -115,7 +115,14 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
             .AddMeter("Commerce.Requests")                     // §13.3, §13.7
             .AddMeter("Commerce.Messaging")                    // §13.3, §13.7
             .AddMeter("MassTransit")
-            .AddMeter("Microsoft.Extensions.Caching.Hybrid")   // cache hit ratio
+            // §13.6's cache-hit-ratio alert, and it COLLECTS NOTHING at the
+            // pinned version: Microsoft.Extensions.Caching.Hybrid 10.0.0
+            // references System.Diagnostics.Tracing and not
+            // System.Diagnostics.Metrics, reporting through
+            // HybridCacheEventSource with PollingCounter. Measured against the
+            // package. The line stays, with this comment, because deleting it
+            // hides the obligation where naming it records one — see §13.6.
+            .AddMeter("Microsoft.Extensions.Caching.Hybrid")
             .AddMeter("StackExchange.Redis"))
         .WithTracing(t => t
             .AddAspNetCoreInstrumentation(o =>
@@ -1465,7 +1472,9 @@ the service is meeting a bar nobody is checking.
 
 Verify order-of-magnitude with the **k6 SLO run against staging**
 ([§15.1](15-cicd-deployment.md)) — `deploy/observability/slo/slo.js`, the load
-run in CD, which asserts the targets in this table and is the
+run in CD, which asserts the four rows of this table it can evaluate — the two
+request rows and the two outbox lanes, with the other three named below — and is
+the
 first real gate after the dev deploy. (NBomber was the stated alternative until
 PR-24 picked one; a stage that names two tools names none.)
 

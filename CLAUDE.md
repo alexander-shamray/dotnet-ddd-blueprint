@@ -540,12 +540,21 @@ own line rather than sending a reader to a file that does not hold it.
   beside the code that reads it, and asserting the other copy matches. The
   prose then carries the argument for each entry rather than the entries.
 - **A registered name is not a live signal, and the registration is what makes
-  the absence invisible.** §13.2 registers the HybridCache meter; no host calls
-  `AddRedisConnections`, so nothing publishes to it. A reviewer asking "is the
-  meter registered" gets a yes, the dashboard is empty, and empty reads as
-  healthy. The same shape reaches further than metrics — a declared
-  dependency, a mounted config key, a bound endpoint. **Ask what writes to it,
-  not whether it exists.**
+  the absence invisible.** §13.2 registers the HybridCache meter and
+  `Microsoft.Extensions.Caching.Hybrid` 10.0.0 **publishes no meter at all** —
+  it reports through `HybridCacheEventSource` with `PollingCounter`, which is
+  EventCounters. A reviewer asking "is the meter registered" gets a yes, the
+  dashboard is empty, and empty reads as healthy. The same shape reaches
+  further than metrics — a declared dependency, a mounted config key, a bound
+  endpoint. **Ask what writes to it, not whether it exists.**
+- **"What is it owed" is a question to answer by reading, not by inferring
+  from what is absent.** The same alert was first diagnosed as owed a
+  *consumer*, because nothing calls `AddRedisConnections` — true, visible from
+  this repository, and not the reason. A gate was written against that
+  premise, observed red and removed once the package was read: gating on a
+  consumer would have gone green→red the day Redis was wired and moved a
+  silent alert into the loaded file. **A plausible cause you can see beats an
+  actual cause you have not looked for, which is what makes it dangerous.**
 - **A list of things known to be missing needs a gate asserting they are still
   missing.** PR-24's four unloaded alerts would otherwise become four alerts
   nobody ever turned on: the gate that says "these metrics are published by
@@ -769,9 +778,9 @@ Run `/validate-blueprint` after any substantive edit.
   fine. Cite the section that actually states the claim; a reference to a
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
-  admonition syntax. Of the 186 in the blueprint, two forms are named and
-  recurring — `**Trap — …**` (15) for a mistake worth naming, and
-  `**Decision — …**` (8), which always points at the ADR that records it:
+  admonition syntax. Two forms are named and recurring — `**Trap — …**` (15)
+  for a mistake worth naming, and `**Decision — …**` (8), which always points
+  at the ADR that records it:
 
   ```markdown
   > **Trap — projecting everything by default.** Each projection is a second
@@ -780,26 +789,28 @@ Run `/validate-blueprint` after any substantive edit.
   > **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
   ```
 
-  The other 163 are a bold assertion followed by its argument —
+  The rest are a bold assertion followed by its argument —
   `> **Unregistered, this fails silently and completely.** …`. That is the
   default; reach for `Trap` or `Decision` only when the callout genuinely is
   one. `**Decision.** / **Why.** / **Consequences.**` are the ADR body form,
   not callouts.
 
-  **This total said 120 for eight PRs, then 161, and the two named forms have
-  never drifted.** `grep -h '^> \*\*' *.md | wc -l` over the twenty blueprint
-  files reports **189** on this branch and **186** on the `main` it was cut
-  from; subtract the three definitional entries below and the figures above
-  follow. So 22 of the gap accumulated in the PRs since that sentence was last
-  true and only three are this branch's own — the same shape as last time,
-  measured again rather than adjusted.
+  **The total used to be written here and no longer is, which is the third
+  fix and the only one that holds.** It said 120 for eight PRs, then 161, then
+  186; PR-24 recounted it to 189 mid-branch and its own later commits made
+  that 194 before the pull request merged. **A number that goes stale twice
+  inside one PR is not a number that recounting fixes.**
 
-  That is what a self-invalidating count actually does: the *interesting*
-  numbers stay right, because 15 and 8 are what a reader checks, and the
-  residual nobody looks at is the one that rots. **Recount all three together
-  or none of them** — and count with `grep -h … | wc -l` rather than
-  `grep -c`, because `grep -c` over many files prints a count *per file* and
-  the total has to be summed out of it, which is one more place to be wrong.
+  What never drifted is 15 and 8, and the reason is the whole lesson: those
+  are the figures a reader checks, and the residual nobody looks at is the one
+  that rots. So the two named forms keep their counts and the total is gone —
+  `CLAUDE.md` makes the same argument about its own line count at the top of
+  this file, and `deploy/observability/README.md` about its rule counts.
+
+  If you do need the figure, it is `grep -h '^> \*\*' *.md | wc -l` over the
+  twenty blueprint files, minus the three definitional entries below — and
+  **not** `grep -c`, which over many files prints a count *per file* and has
+  to be summed, which is one more place to be wrong.
 
   **Three callouts spell the dash outside the bold and are not counted above**:
   §1.3's two glossary entries, which *define* `Trap` and `Decision` rather than

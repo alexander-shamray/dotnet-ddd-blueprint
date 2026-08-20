@@ -82,8 +82,16 @@ loaded.** Writing §13.6's twelve conditions out as Prometheus rules established
 that **four of them read an instrument nothing publishes**: the saga age and the
 review queue have no gauge over their tables, `orders.placed` waits on
 `OrderMetrics` and §6.6's `OrderSummaries` projection, and the cache ratio waits
-on a *consumer* rather than an instrument — §13.2 registers the HybridCache
-meter, and no host calls `AddRedisConnections`.
+on **an instrument and a consumer both** — §13.2 registers the HybridCache
+meter, `Microsoft.Extensions.Caching.Hybrid` 10.0.0 publishes no meter at all
+(EventCounters, via `HybridCacheEventSource`), and no host calls
+`AddRedisConnections` either.
+
+**That last row was first recorded here as owed a *consumer* rather than an
+instrument, and the correction is kept rather than overwritten**, because the
+mistake is the more useful half: the visible absence — nothing calls the
+helper — was taken for the cause, and a gate was built on it, observed red and
+removed once the package was actually read. See the fourth finding below.
 
 **Why.** §13.6 spends a callout on exactly this: *"Two of the alerts in this
 document were written against signals that did not exist, and both looked

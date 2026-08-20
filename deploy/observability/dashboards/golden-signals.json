@@ -168,7 +168,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(request_duration_seconds_bucket{request=~\".+Command\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(request_duration_seconds_bucket{service_name=~\"$service\", request=~\".+Command\"}[5m])))",
           "legendFormat": "{{service_name}}"
         }
       ]
@@ -194,7 +194,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(request_duration_seconds_bucket{request=~\".+Query\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(request_duration_seconds_bucket{service_name=~\"$service\", request=~\".+Query\"}[5m])))",
           "legendFormat": "{{service_name}}"
         }
       ]
