@@ -103,7 +103,7 @@ ConfigMap or a plain string in a Secret.
 {{- define "commerce.config" -}}
 Identity__Authority: {{ include "commerce.require" (list .Values.identity.authority "identity.authority is required for every host, the gateway included (§15.4) — AddJwtAuthentication reads it eagerly and throws naming the key, so an unset value is a pod that never starts.") | quote }}
 OTEL_EXPORTER_OTLP_ENDPOINT: {{ include "commerce.require" (list .Values.observability.otlpEndpoint "observability.otlpEndpoint is required: UseOtlpExporter reads the OpenTelemetry standard variable, and left unset it exports to localhost:4317, where nothing listens in a pod (§15.4).") | quote }}
-{{- if .Values.identity.clientId }}
+{{- if .Values.identity.clientCredentials }}
 {{- /*
 Two of the three client-credential keys are Config and only the secret is a
 Secret (§15.4). They belong to the one host that calls a peer synchronously
@@ -112,9 +112,19 @@ by ValidateOnStart, so a missing one is a refusal to boot rather than a 401
 somebody reads as the callee's fault.
 
 A second chart growing these is a design change, not a configuration change.
+
+**The switch is its own key, and `clientId` used to be it.** That made the
+opt-out invalid rather than merely odd: clearing `identity.clientId` on the BFF
+dropped all three keys, and `Web.Bff` binds `ServiceIdentityOptions`
+unconditionally — so the release rendered, rolled, and the pod refused to
+start. A whitespace-only value did the same while slipping past
+`commerce.require`, because a truthiness test is not a requirement. §15.4 calls
+this the *required-for-some-hosts* category; an explicit boolean is what makes
+a host say which it is, and every value below is then required rather than
+implied.
 */}}
-Identity__Client__ClientId: {{ .Values.identity.clientId | quote }}
-Identity__Client__Scope: {{ include "commerce.require" (list .Values.identity.scope "identity.scope is required whenever identity.clientId is set: it becomes the audience every service validates (§11.5), and ServiceIdentityOptions marks it [Required].") | quote }}
+Identity__Client__ClientId: {{ include "commerce.require" (list .Values.identity.clientId "identity.clientId is required when identity.clientCredentials: Web.Bff binds ServiceIdentityOptions unconditionally and ValidateOnStart refuses to boot without it (§15.4).") | quote }}
+Identity__Client__Scope: {{ include "commerce.require" (list .Values.identity.scope "identity.scope is required when identity.clientCredentials: it becomes the audience every service validates (§11.5), and ServiceIdentityOptions marks it [Required].") | quote }}
 {{- end }}
 {{- end -}}
 
@@ -154,11 +164,11 @@ key is the other half, mounted into the migration Job and nowhere else.
       name: {{ include "commerce.require" (list .Values.broker.secretRef.name "broker.secretRef.name is required when broker.enabled: AddMassTransitMessaging throws without the connection string, so the host does not start (§9.3).") | quote }}
       key: {{ include "commerce.require" (list .Values.broker.secretRef.key "broker.secretRef.key is required when broker.enabled.") | quote }}
 {{- end }}
-{{- if .Values.identity.clientId }}
+{{- if .Values.identity.clientCredentials }}
 - name: Identity__Client__ClientSecret
   valueFrom:
     secretKeyRef:
-      name: {{ include "commerce.require" (list .Values.identity.clientSecretRef.name "identity.clientSecretRef.name is required whenever identity.clientId is set. The secret is a reference, never a value (§15.3).") | quote }}
-      key: {{ include "commerce.require" (list .Values.identity.clientSecretRef.key "identity.clientSecretRef.key is required whenever identity.clientId is set.") | quote }}
+      name: {{ include "commerce.require" (list .Values.identity.clientSecretRef.name "identity.clientSecretRef.name is required when identity.clientCredentials. The secret is a reference, never a value (§15.3).") | quote }}
+      key: {{ include "commerce.require" (list .Values.identity.clientSecretRef.key "identity.clientSecretRef.key is required when identity.clientCredentials.") | quote }}
 {{- end }}
 {{- end -}}

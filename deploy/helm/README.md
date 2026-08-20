@@ -70,10 +70,27 @@ every other subchart must keep the tag it is already running:
 ```bash
 helm upgrade --install platform deploy/helm/platform \
     --namespace commerce \
+    --values environments/staging.yaml \
     --set-string catalog.image.tag="$CATALOG_SHA" \
     --set-string ordering.image.tag="$ORDERING_SHA" \
     --set-string gateway.image.tag="$GATEWAY_SHA" \
     --set-string web-bff.image.tag="$BFF_SHA"
+```
+
+**The values file is not optional in that command**, and leaving it out is a
+render failure rather than a default: the gateway ships
+`ingress.trustedNetworks: []` on purpose, so an environment has to name its own
+ingress CIDRs before anything templates. That is the point — see *Defaults that
+must stay absent* below — and it is why this example carries the argument
+rather than an illustrative CIDR that would be wrong in every cluster but one.
+
+```yaml
+# environments/staging.yaml — not in this repository; it belongs wherever the
+# environment is described, because its contents are facts about one cluster.
+gateway:
+  ingress:
+    host: api.staging.example.com
+    trustedNetworks: [ "10.42.0.0/16" ]   # the ingress controller's pod CIDRs
 ```
 
 ## What is deliberately not here
@@ -117,16 +134,17 @@ helm upgrade --install platform deploy/helm/platform \
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Thirty-seven deliberate defects have been run through it and thirty-six
-turned a green run red** — a renamed Service, a CPU limit, a grace period
-back at the Kubernetes default, a dropped hook annotation, a connection string
-moved into a ConfigMap, a second chart growing client credentials, an `envFrom`
-naming a ConfigMap nothing renders, a rollout checksum that missed the
-gateway's own, a Service publishing only its first port, a chart renumbering
-the port its callers dial, a fifth chart the gate never looked at, an Ingress
-with no backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
-whitespace-only authority, an origin carrying credentials, a pod remounting
-the service-account token.
+**Forty-three deliberate defects have been run through it and forty-two turned
+a green run red** — a renamed Service, a CPU limit, a grace period back at the
+Kubernetes default, a dropped hook annotation, a connection string moved into a
+ConfigMap, a second chart growing client credentials, an `envFrom` naming a
+ConfigMap nothing renders, a rollout checksum that missed the gateway's own, a
+Service publishing only its first port, a chart renumbering the port its
+callers dial, a fifth chart the gate never looked at, an Ingress with no
+backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
+whitespace-only authority, an origin carrying credentials, a pod remounting the
+service-account token, a listener moved out from under its own Service, a
+validator that checked one string and shipped another.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,

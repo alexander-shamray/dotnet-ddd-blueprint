@@ -43,8 +43,21 @@ spec:
         `autoscaling.maxReplicas` or `ingress.host` touches nothing in the
         container and rolls the pods anyway. That is one rollout nobody needed.
         The alternative was a deploy that reported success and changed nothing.
+
+        AND the rendered ConfigMap, because values alone miss the other half: a
+        chart-only change to `commerce.config` adds or renames a key with no
+        values change at all, so Helm updates the ConfigMap and the annotation
+        stays byte-identical. Hashing the render covers what the template does;
+        hashing the values covers what the operator does.
+
+        **One residual, named rather than implied.** The gateway renders
+        `gateway-edge` from a template only that chart has, and a library
+        template cannot include it — so a change to *that template's body*, with
+        no values change, still does not roll the gateway. Its values are
+        hashed, which is the path an operator takes; the template body is a
+        chart edit, which arrives through this repository and its own gate.
         */}}
-        checksum/values: {{ toYaml .Values | sha256sum }}
+        checksum/values: {{ printf "%s%s" (toYaml .Values) (include "commerce.configmap" .) | sha256sum }}
     spec:
       {{- /*
       terminationGracePeriodSeconds must exceed the host's own shutdown

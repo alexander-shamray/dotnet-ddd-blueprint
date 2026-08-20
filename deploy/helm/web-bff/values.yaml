@@ -58,6 +58,12 @@ identity:
   authority: https://id.example.com/realms/commerce
   # Required by ValidateOnStart (§15.4): this host does call a peer (§9.7).
   # The secret is a reference, never a value.
+  #
+  # The switch is its own key rather than clientId'''s presence. Web.Bff binds
+  # ServiceIdentityOptions unconditionally, so clearing clientId would render a
+  # release whose pod then refuses to start — an opt-out that is not one. With
+  # the boolean, all three values below are required and blank fails the render.
+  clientCredentials: true
   clientId: web-bff
   scope: commerce-api
   clientSecretRef:

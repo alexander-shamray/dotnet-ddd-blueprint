@@ -11,25 +11,36 @@ name: Helm
 # describe. Whether an API server would accept them is a deploy-time question
 # (§15.1) and is named in smoke.sh as not covered.
 #
-# The filter includes src/ paths on purpose, and they are not decoration:
-# smoke.sh reads the gateway's route file and PricingHop.cs and asserts that
-# every Service the charts render is a name one of them dials. Without these
-# two lines, renaming a YARP destination is a green PR that breaks the deploy —
-# which is the direction that costs an outage rather than a build.
+# The filter reaches outside deploy/helm/ on purpose, and none of it is
+# decoration — each path is an input the gate actually reads:
+#
+#   - the gateway's route file and PricingHop.cs hold the host:port literals
+#     smoke.sh asserts every rendered Service against, so renaming a YARP
+#     destination would otherwise be a green PR that breaks the next deploy;
+#   - Catalog's appsettings.json declares the Kestrel endpoints those Services
+#     forward to, so moving the h2c listener off 8081 would leave a Service
+#     pointing at a closed port with every assertion still passing;
+#   - .gitattributes pins this tree to LF, and without it a CRLF template
+#     renders a CR onto every line and the anchored greps below match nothing
+#     on a Linux runner. A change removing that rule must run this gate.
 on:
   pull_request:
     paths:
       - 'deploy/helm/**'
       - '.github/workflows/helm.yml'
+      - '.gitattributes'
       - 'src/Gateway/Gateway.Api/appsettings.json'
       - 'src/BFF/Web.Bff/PricingHop.cs'
+      - 'src/Services/Catalog/Catalog.Api/appsettings.json'
   push:
     branches: [main]
     paths:
       - 'deploy/helm/**'
       - '.github/workflows/helm.yml'
+      - '.gitattributes'
       - 'src/Gateway/Gateway.Api/appsettings.json'
       - 'src/BFF/Web.Bff/PricingHop.cs'
+      - 'src/Services/Catalog/Catalog.Api/appsettings.json'
 
 permissions:
   contents: read

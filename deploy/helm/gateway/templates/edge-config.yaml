@@ -42,10 +42,12 @@ data:
   CLAUDE.md, learned against `Identity__Authority` and again against
   `Cors__Origins`, and it was not applied here until Copilot said so.
   */}}
-  {{- if not (trim $cidr) }}
+  {{- $n := trim $cidr }}
+  {{- if not $n }}
   {{- fail (printf "ingress.trustedNetworks[%d] is blank. IPNetwork.Parse throws on it at startup, so the pod dies after the rollout begins rather than before it (§15.4)." $i) }}
   {{- end }}
-  Ingress__TrustedNetworks__{{ $i }}: {{ $cidr | quote }}
+  {{- /* The trimmed value, for the reason the origins list gives below. */}}
+  Ingress__TrustedNetworks__{{ $i }}: {{ $n | quote }}
   {{- end }}
   {{- end }}
   Cors__Enabled: {{ .Values.cors.enabled | quote }}
@@ -81,12 +83,39 @@ data:
   which §10.2's own guard spent seven review rounds arriving at.
   */}}
   {{- $o := trim $origin }}
-  {{- if not (regexMatch "^https?://[^/?#@ ]+$" $o) }}
-  {{- fail (printf "cors.origins[%d] is not a browser origin. One is a scheme, a host, and a port only when it is not the scheme's default — exactly as a browser serialises it — so userinfo, a path, a query or a fragment matches nothing (§10.2). The value is deliberately not echoed (§13.4)." $i) }}
+  {{- /*
+  The host, then optionally a numeric port, and nothing else. `:notaport`
+  matched the previous shape and `Uri.TryCreate` rejects it, so it rendered,
+  began a rollout, and crashed the new pod — which is what this guard exists to
+  prevent, twice over now.
+
+  **This is deliberately a SUBSET of Program.cs's rule, not a copy of it.** That
+  rule is one equality against `GetLeftPart(UriPartial.Authority)`, and a
+  template cannot construct a Uri; claiming equivalence would be the more
+  dangerous error, because the next shape it misses would be read as accepted.
+  What it does promise: every origin an operator plausibly writes that the host
+  would reject is refused here instead. An IPv6 literal is refused outright
+  rather than half-checked, for the same reason.
+  */}}
+  {{- if not (regexMatch "^https?://[^/?#@:\\[\\] ]+(:[0-9]+)?$" $o) }}
+  {{- fail (printf "cors.origins[%d] is not a browser origin this chart will accept: a scheme, a host, and optionally a numeric port. Userinfo, a path, a query, a fragment, a non-numeric port and IPv6 literals are all refused here rather than at startup (§10.2). The value is deliberately not echoed (§13.4)." $i) }}
   {{- end }}
-  {{- if or (hasPrefix "https://" $o | and (hasSuffix ":443" $o)) (hasPrefix "http://" $o | and (hasSuffix ":80" $o)) }}
+  {{- $port := regexFind ":[0-9]+$" $o }}
+  {{- if $port }}
+  {{- $n := atoi (trimPrefix ":" $port) }}
+  {{- if or (lt $n 1) (gt $n 65535) }}
+  {{- fail (printf "cors.origins[%d] names a port outside 1-65535." $i) }}
+  {{- end }}
+  {{- if or (and (hasPrefix "https://" $o) (eq $n 443)) (and (hasPrefix "http://" $o) (eq $n 80)) }}
   {{- fail (printf "cors.origins[%d] names the scheme's default port. A browser serialises an origin without it, and WithOrigins compares the configured text — so this matches nothing while looking correct (§10.2)." $i) }}
   {{- end }}
-  Cors__Origins__{{ $i }}: {{ $origin | quote }}
+  {{- end }}
+  {{- /*
+  The TRIMMED value, not the original. Validating `$o` and emitting `$origin`
+  meant `"https://shop.example.com "` passed every check above and then failed
+  the host's exact text comparison at startup — a guard that checked one string
+  and shipped another.
+  */}}
+  Cors__Origins__{{ $i }}: {{ $o | quote }}
   {{- end }}
   {{- end }}

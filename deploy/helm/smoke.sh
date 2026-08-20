@@ -111,6 +111,17 @@ else
     fail "MIGRATOR_CHARTS + DATABASELESS_CHARTS ($both) do not partition SERVICE_CHARTS ($listed)"
 fi
 
+# Read from the values files rather than from a render, and asserted HERE for
+# that reason: a second chart setting it renders nothing at all — it has no
+# clientId, scope or secret ref — so under `set -e` the run aborts in the
+# render section and this never reports. The gate is red either way; it is only
+# legible if the file check runs first.
+#
+# ADR-017's budget is one synchronous hop, so it is one chart (§11.5).
+credentialed="$(grep -l 'clientCredentials: true' "$CHARTS_DIR"/*/values.yaml | wc -l | tr -d ' ')"
+check "exactly one chart declares client credentials (found $credentialed)" \
+    test "$credentialed" -eq 1
+
 # --------------------------------------------------------------------------
 section 'Resolving dependencies'
 # --------------------------------------------------------------------------
@@ -570,6 +581,35 @@ refuses 'an origin carrying a query fails the render' 'is not a browser origin' 
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com?x}'
 refuses 'an origin naming the default port fails the render' 'default port' \
     $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:443}'
+refuses 'an origin with a non-numeric port fails the render' 'is not a browser origin' \
+    $GATEWAY_OVERLAY --set cors.enabled=true --set 'cors.origins={https://shop.example.com:notaport}'
+
+# The guard checked `$o` and the ConfigMap emitted `$origin`, so a trailing
+# space passed every test above and then failed the host's exact text
+# comparison at startup — a validator that checks one string and ships another.
+"$HELM" template gateway "$CHARTS_DIR/gateway" --set-string "image.tag=$TAG" \
+    $GATEWAY_OVERLAY --set cors.enabled=true \
+    --set 'cors.origins={https://shop.example.com }' >"$OUT/spaced.txt" 2>&1 || true
+check 'the rendered origin is the validated one, not the raw value' \
+    grep -q 'Cors__Origins__0: "https://shop.example.com"' "$OUT/spaced.txt"
+
+# Clearing clientId used to drop all three keys silently. Web.Bff binds
+# ServiceIdentityOptions unconditionally, so that rendered a release whose pod
+# refuses to start — an opt-out that is not one.
+refuses_bff() {
+    local label="$1" needle="$2"
+    shift 2
+    if "$HELM" template web-bff "$CHARTS_DIR/web-bff" --set-string "image.tag=$TAG" \
+        "$@" >"$OUT/bff.txt" 2>&1; then
+        fail "$label — it rendered instead"
+    else
+        check "$label" grep -q "$needle" "$OUT/bff.txt"
+    fi
+}
+refuses_bff 'clearing the BFF client id fails the render' 'identity.clientId is required' \
+    --set-string 'identity.clientId='
+refuses_bff 'a whitespace-only BFF client id fails the render' 'identity.clientId is required' \
+    --set-string 'identity.clientId= '
 
 # --------------------------------------------------------------------------
 section 'No pod carries a cluster credential it never uses'
@@ -581,6 +621,39 @@ section 'No pod carries a cluster credential it never uses'
 check 'every pod template disables the service-account token' \
     test "$(count 'automountServiceAccountToken: false' "$OUT/platform.yaml")" \
     -eq "$(( $(count '^kind: Deployment$' "$OUT/platform.yaml") + $(count '^kind: Job$' "$OUT/platform.yaml") ))"
+
+# --------------------------------------------------------------------------
+section 'The Service forwards to a port something is listening on'
+# --------------------------------------------------------------------------
+# The routing gate above compares CALLER urls with rendered Service ports, and
+# stops there — so it never looks at the process behind `targetPort`. Catalog
+# declares its two Kestrel endpoints in its own appsettings.json (§9.7: a
+# cleartext port cannot serve HTTP/1.1 and h2c at once), and moving the h2c
+# listener off 8081 there would satisfy every assertion in this file while
+# deploying a Service that forwards to a closed port.
+#
+# Three files, one number, and until now the gate held two of them together.
+grep -ohE 'http://0\.0\.0\.0:[0-9]+' "$ROOT/src/Services/Catalog/Catalog.Api/appsettings.json" |
+    sed -E 's|.*:([0-9]+)|\1|' | sort -u >"$OUT/listeners.txt"
+
+if [ ! -s "$OUT/listeners.txt" ]; then
+    fail 'no Kestrel endpoints found in Catalog appsettings.json — the parse, not the chart, is wrong'
+else
+    while read -r port; do
+        check "catalog-api listens on $port and the chart declares it" \
+            grep -q "containerPort: $port$" "$OUT/catalog.yaml"
+    done <"$OUT/listeners.txt"
+fi
+
+# And the other direction, so a chart port with nothing behind it is caught too.
+awk '/^kind: Deployment$/ { in_dep = 1 } in_dep && /containerPort:/ { print $2 }' \
+    "$OUT/catalog.yaml" | sort -u >"$OUT/declared.txt"
+missing="$(comm -23 "$OUT/declared.txt" "$OUT/listeners.txt")"
+if [ -z "$missing" ]; then
+    pass 'and declares no port Catalog does not listen on'
+else
+    fail "chart declares port(s) Catalog has no listener for: $(echo "$missing" | tr '\n' ' ')"
+fi
 
 # --------------------------------------------------------------------------
 section 'Result'
