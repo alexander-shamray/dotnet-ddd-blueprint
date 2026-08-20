@@ -79,7 +79,7 @@ ConfigMap or a plain string in a Secret.
 */}}
 {{- define "commerce.config" -}}
 Identity__Authority: {{ required "identity.authority is required for every host, the gateway included (§15.4) — AddJwtAuthentication reads it eagerly and throws naming the key, so an unset value is a pod that never starts." .Values.identity.authority | quote }}
-OTEL_EXPORTER_OTLP_ENDPOINT: {{ required "observability.otlpEndpoint is required: UseOtlpExporter reads the OpenTelemetry standard variable, and left unset it exports to localhost:4317, where nothing listens in a pod (§13.2)." .Values.observability.otlpEndpoint | quote }}
+OTEL_EXPORTER_OTLP_ENDPOINT: {{ required "observability.otlpEndpoint is required: UseOtlpExporter reads the OpenTelemetry standard variable, and left unset it exports to localhost:4317, where nothing listens in a pod (§15.4)." .Values.observability.otlpEndpoint | quote }}
 {{- if .Values.identity.clientId }}
 {{- /*
 Two of the three client-credential keys are Config and only the secret is a
