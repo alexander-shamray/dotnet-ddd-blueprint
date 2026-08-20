@@ -109,10 +109,10 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Those are the runner's numbers, and `--list-tests` gives different ones.**
 > Discovery reports 82 for that project where execution reports 81, so a
 > partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 794 is summed from `dotnet test` output, and mixing the two is how
+> here — the 795 is summed from `dotnet test` output, and mixing the two is how
 > this callout first came to claim 72 and 82. Quote what ran.
 >
-> Across the solution the split is **623 and 171 of 794**, and the fast half
+> Across the solution the split is **624 and 171 of 795**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -143,36 +143,78 @@ rather than quietly**, which is the direction this has to fail in. It has no
 fixture, so it does not run against one; it also carries no category, so it
 runs in the fast half and fails there. What it cannot do is report a pass.
 
-**Nothing in CI runs the two *category* halves separately yet.** PR-25 owns the
-staged pipeline of [§15.1](backend-architecture/15-cicd-deployment.md); this is
-the category it stages on, delivered ahead of it so the filter is real before
-the stage that depends on it is written. CI does run `dotnet test` twice, and
-that seam is a different one — architecture gates versus everything else, for
-the instrumentation reason under Coverage below.
+**CI runs the two *category* halves separately since PR-25**, which is
+[§15.1](backend-architecture/15-cicd-deployment.md)'s `UT → IT`. Three
+`dotnet test` invocations, not two, and the seams answer different questions:
+the first is architecture gates versus everything else, for the instrumentation
+reason under Coverage below, and the second is `Category=Integration`. Measured
+on this repository they are **18**, **606** and **171**, summing to the 795 the
+whole suite runs — which is the arithmetic the callout below asks for.
+
+```bash
+dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests"
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration"
+dotnet test Platform.slnx --filter "Category=Integration"
+```
+
+**Separate steps in one job, not separate jobs**, and both halves of that are
+deliberate: a job boundary would mean shipping the build output between runners
+to keep `--no-build` honest, and the coverage figure is the union of the last
+two, which wants one place to be merged.
 
 > **A filter is a new way for a suite to not run, and that is
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 623 and 171 summing to
-> 794 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 624 and 171 summing to
+> 795 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.
+>
+> **It shipped, as `.github/pipeline-gate/pipeline_gate.py stages`, and it is
+> more than the floor this callout asked for.** A floor is a number in a file
+> and numbers in files go stale, so it carries the weaker half: the floors sit
+> well under the measurements above, because what they grope for is an
+> order-of-magnitude miss rather than ordinary churn. The half with no number
+> in it does the work — **every test project in `Platform.slnx` ran in some
+> stage, no stage was empty, and no test ran in two.** The last of those turns
+> `ci.yml`'s "exhaustive and disjoint by construction" from a claim into a
+> check, and on the integration stage an overlap is a container set paid for
+> twice.
 
 ## Coverage
 
 **Reported, not gated** — [§12.9](backend-architecture/12-test-strategy.md)
-calls coverage a diagnostic rather than a target, and a threshold that fails a
-build is PR-25's quality gates. What ships here is the number, measured over
-the layer where it means something.
+calls coverage a diagnostic rather than a target, and a diagnostic wired to a
+build failure stops being read and starts being satisfied. **PR-25 declined the
+threshold on that argument** rather than leaving it owed; its quality gate is
+the stage check above, whose subject is whether a suite ran at all. What ships
+here is the number, measured over the layer where it means something.
 
 ```bash
-dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests" \
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration" \
     --collect:"Code Coverage" --settings coverage.runsettings \
-    --results-directory ./TestResults
-python .github/coverage/domain_coverage.py ./TestResults
+    --results-directory ./TestResults/unit
+dotnet test Platform.slnx --filter "Category=Integration" \
+    --collect:"Code Coverage" --settings coverage.runsettings \
+    --results-directory ./TestResults/integration
+python .github/coverage/domain_coverage.py ./TestResults/unit ./TestResults/integration
 ```
+
+**Both stages, because the figure is the union and not either half.** §12.9
+asks for the domain assemblies "over the whole run", and the domain is
+exercised on both sides of the category: measured here, the unit stage covers
+253 of 308 method lines, the integration stage 192, and the union **257** —
+four lines reached only by a test that needs a container.
+
+The reporter merges rather than reading one file, and it has to. Adding
+`--logger trx`, which the stage gate counts from, changes where the collector
+writes: each stage then leaves the run's merged attachment **and** one partial
+per test project — eight files for one stage here, three of them empty. Hits
+are merged with `max` over a key that reproduces the collector's own
+`lines-valid` exactly, so reading the same attachment twice, which that layout
+guarantees, cannot inflate the figure.
 
 **`--results-directory` is not decoration, and leaving it off is why this
 command is written in full.** Without it the collector writes under each *test
