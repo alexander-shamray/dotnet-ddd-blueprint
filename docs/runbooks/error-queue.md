@@ -110,8 +110,12 @@ The body carries that URI, so it goes in through stdin for the same reason the
 first request did, and never on the command line:
 
 ```bash
-enc() { python3 -c 'import sys,urllib.parse as u; print(u.quote(sys.argv[1], safe=""))' "$1"; }
-uri="amqp://$(enc "$OPERATOR"):$(enc "$OPERATOR_PASSWORD")@localhost:5672/%2F"
+# Reads from stdin, NOT from argv. An earlier version passed the value as an
+# argument, so the encoder written to keep the password off the command line
+# put it on the command line of its own child — visible in the process list for
+# as long as Python ran.
+enc() { python3 -c 'import sys,urllib.parse as u; print(u.quote(sys.stdin.read(), safe=""), end="")'; }
+uri="amqp://$(printf '%s' "$OPERATOR" | enc):$(printf '%s' "$OPERATOR_PASSWORD" | enc)@localhost:5672/%2F"
 
 # Unquoted heredoc, so $uri expands. Everything else here is literal.
 curl -sS --config "$HOME/.rabbit.curl" -X PUT \

@@ -57,9 +57,28 @@ kubectl -n <ns> exec deploy/rabbitmq -- rabbitmqctl list_connections user state
    Secret ([§15.4](../backend-architecture/15-cicd-deployment.md)); a rotation
    that reached the vault and not the pod presents exactly like this. Compare
    the mounted secret's version with the vault's.
-3. **Queue at its length limit?** A queue at `max-length` rejects publishes.
-   `list_queues` shows it; the fix is to drain the consumer, not to raise the
-   limit.
+3. **Queue at its length limit — and read the overflow mode before deciding
+   what happened.** A queue at `max-length` does **not** block the publisher by
+   default: `drop-head` discards the *oldest* messages and the publish
+   succeeds, so this lane would not stall at all — it would lose messages
+   silently, which is a worse incident wearing no symptoms. Only
+   `reject-publish` and `reject-publish-dlx` refuse the publisher, and only
+   those can produce the stall this alert fired on.
+
+   ```bash
+   kubectl -n <ns> exec deploy/rabbitmq -- \
+     rabbitmqctl list_queues name messages arguments policy
+   kubectl -n <ns> exec deploy/rabbitmq -- rabbitmqctl list_policies
+   ```
+
+   The limit and the mode arrive either as queue `arguments`
+   (`x-max-length`, `x-overflow`) or from a `policy`, so both have to be read —
+   `list_queues name messages` alone shows a full queue and nothing about what
+   it does when full.
+
+   If the mode is `drop-head`, **this alert is not your problem and the missing
+   messages are**: go and find out what was dropped. If it rejects, drain the
+   consumer rather than raising the limit.
 4. **Memory or disk alarm?** `rabbitmqctl status` reports both. An alarmed node
    blocks publishers, which looks like a hang rather than an error.
 5. **The delayed-exchange plugin.** ADR-021 schedules saga timeouts on it, which

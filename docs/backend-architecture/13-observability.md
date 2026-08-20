@@ -1195,7 +1195,19 @@ container is happy without it (§6.2):
 // In AddOrderingInfrastructure (§4.2). Both of Infrastructure's metrics types:
 // OutboxMetrics reads the database, MessagingMetrics is injected by the two
 // consumers and resolved by the outbox invoker (§13.3).
-services.AddSingleton<IOutboxStats, OutboxStats>();
+// ITS OWN connection factory, with the bounded ConnectTimeout the callbacks
+// need. Resolving the shared IDbConnectionFactory here would leave SqlClient's
+// fifteen-second default on the open, and the commandTimeout above never gets
+// to run — the two bounds only work together.
+string metricsConnectionString =
+    new SqlConnectionStringBuilder(configuration.GetConnectionString("Ordering"))
+    {
+        ConnectTimeout = 2
+    }.ConnectionString;
+
+services.AddSingleton<IOutboxStats>(sp => new OutboxStats(
+    new SqlConnectionFactory(metricsConnectionString),
+    sp.GetRequiredService<OutboxTable>()));
 services.AddSingleton<OutboxMetrics>();
 services.AddSingleton<MessagingMetrics>();
 
