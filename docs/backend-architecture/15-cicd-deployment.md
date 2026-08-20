@@ -917,7 +917,18 @@ The rule for the Kind column is mechanical: **if the value contains a
 credential, it is a Secret.** Every connection string here does — SQL Server
 carries a login, RabbitMQ a user, and Redis the per-service ACL user from [§8.1](08-caching-redis.md).
 A connection string in a ConfigMap is a password readable by anyone with
-namespace read access and unencrypted at rest.
+namespace read access.
+
+> **The Kind buys RBAC, and it does not buy encryption.** A Secret is a
+> *separate resource*, so `get configmaps` and `get secrets` are separate verbs
+> and the usual read-only role grants only the first — that separation is the
+> whole reason the column exists. What it does **not** do is encrypt anything:
+> a Secret's value is base64, which is an encoding, and Kubernetes stores it in
+> etcd unencrypted unless an `EncryptionConfiguration` is enabled on the API
+> server. **Encryption at rest is a cluster setting this platform depends on
+> and does not configure**, and stating it as a property of the Kind is how a
+> team ends up believing it is already on. See [`docs/secrets.md`](../secrets.md),
+> which carries the operational half of this section.
 
 | Key | Kind | Source | Required |
 |---|---|---|---|

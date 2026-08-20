@@ -21,8 +21,20 @@ in this platform does — SQL Server carries a login, RabbitMQ a user, and Redis
 the per-service ACL user of [§8.1](backend-architecture/08-caching-redis.md).
 
 A connection string in a ConfigMap is a password readable by anyone with
-namespace read access, and unencrypted at rest. There is no "it is only
-staging".
+namespace read access. There is no "it is only staging".
+
+**What the Kind buys is RBAC, not encryption, and the difference matters
+because the wrong half is the one people remember.** A Secret is a separate
+resource from a ConfigMap, so `get configmaps` and `get secrets` are separate
+verbs and an ordinary read-only role grants only the first — that separation,
+plus External Secrets keeping the value out of git entirely, is the reason for
+the kind. A Secret's value is **base64, which is an encoding and not
+encryption**, and Kubernetes stores it in etcd unencrypted unless an
+`EncryptionConfiguration` is enabled on the API server.
+
+**So encryption at rest is a cluster setting this platform depends on and does
+not configure.** Confirm it is on before treating a Secret as protected
+storage; §15.4 states the same thing from the specification side.
 
 ## The path a secret takes
 
