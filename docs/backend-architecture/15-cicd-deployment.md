@@ -417,9 +417,18 @@ must be resolved before `helm lint` or `helm template` will run. `charts/` and
 > the umbrella installs the same workload under its own release name, and the
 > failure is a 502 rather than a template error. So every chart carries a
 > required `workload.name`, the Service takes it verbatim, and the selector
-> carries it and nothing release-scoped — a Deployment's selector is immutable,
-> so a release-derived one breaks on exactly the migration an umbrella chart
-> exists to perform.
+> carries it and nothing release-scoped — because a selector is **workload
+> identity** rather than release bookkeeping. These pods are found by the same
+> name their callers dial, and a Deployment never lets that field change
+> afterwards.
+>
+> **That last clause replaces a dead one, and the replacement is the point.**
+> It read "a release-derived selector breaks on exactly the migration an
+> umbrella chart exists to perform" — which the ownership rule above falsifies,
+> since Helm rejects that adoption before the API server's immutable-selector
+> check is ever reached. The conclusion outlived its argument. Keeping a reason
+> a later paragraph has disproved is how a chapter starts contradicting itself
+> from the inside.
 
 ```yaml
 # deploy/helm/ordering/values.yaml — an excerpt. The file also carries `ports`,

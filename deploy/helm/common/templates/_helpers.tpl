@@ -77,6 +77,35 @@ app.kubernetes.io/name: {{ include "commerce.name" . }}
 app.kubernetes.io/part-of: commerce
 {{- end -}}
 
+{{/*
+The migration Job's POD labels, which must NOT match the Service selector.
+
+A Service selects pods, and the migration Job's pod template carried
+`commerce.labels` — which contains `commerce.selectorLabels` verbatim. So for
+the length of every `pre-upgrade` hook, the migrator became an endpoint of the
+service it was migrating: a pod with a database connection, no HTTP listener,
+and a share of live traffic being routed to it. Measured in the render, not
+inferred — `catalog-api`'s Service selector and the Job's pod labels were the
+same two lines.
+
+The same match put it inside the PodDisruptionBudget, so a one-shot pod counted
+toward the availability of a service it does not serve.
+
+`-migrate` on the name is what breaks both, and `component` says what the pod
+is for anyone reading `kubectl get pods -L`. The Job OBJECT keeps the ordinary
+labels: object labels are not what endpoints are computed from, and losing the
+identity there would cost the one thing these labels are for.
+*/}}
+{{- define "commerce.migrationPodLabels" -}}
+app.kubernetes.io/name: {{ include "commerce.name" . }}-migrate
+app.kubernetes.io/part-of: commerce
+app.kubernetes.io/component: migrator
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/version: {{ include "commerce.tag" . | trunc 63 | trimSuffix "-" | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+{{- end -}}
+
 {{- /*
 The full label set for object metadata. Free to carry release-scoped and
 version-scoped labels, because unlike the selector above nothing here is

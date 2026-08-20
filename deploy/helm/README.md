@@ -134,7 +134,7 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Forty-seven deliberate defects have been run through it and forty-six turned
+**Forty-nine deliberate defects have been run through it and forty-eight turned
 a green run red** — a renamed Service, a CPU limit, a grace period back at the
 Kubernetes default, a dropped hook annotation, a connection string moved into a
 ConfigMap, a second chart growing client credentials, an `envFrom` naming a
@@ -145,7 +145,7 @@ backend, an Ingress with no TLS, a blank CIDR, a blank origin, a
 whitespace-only authority, an origin carrying credentials, a pod remounting the
 service-account token, a listener moved out from under its own Service, a
 validator that checked one string and shipped another, an uppercase host, a
-CIDR that is not one.
+CIDR that is not one, a migrator pod answering its own service's traffic.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,

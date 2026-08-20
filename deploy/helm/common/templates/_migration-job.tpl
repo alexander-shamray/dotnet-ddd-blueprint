@@ -67,7 +67,13 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "commerce.labels" . | nindent 8 }}
+        {{/*
+        NOT `commerce.labels`, which is what the Service selects on — see
+        `commerce.migrationPodLabels`. This pod has a database connection and no
+        HTTP listener, and for the length of the hook it was an endpoint of the
+        service it was migrating.
+        */}}
+        {{- include "commerce.migrationPodLabels" . | nindent 8 }}
     spec:
       restartPolicy: Never
       {{- /*

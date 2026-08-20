@@ -269,6 +269,21 @@ for chart in $MIGRATOR_CHARTS; do
         test "$(count 'hook-failed' "$OUT/$chart.yaml")" -eq 0
     check "$chart mounts the MIGRATOR connection string, not the runtime one" \
         grep -qE '^ *- name: ConnectionStrings__[A-Za-z]+Migrator$' "$OUT/$chart.yaml"
+
+    # The migrator must not be selectable BY THE SERVICE IT MIGRATES. Its pod
+    # template carried the same labels the Service selects on, so for the length
+    # of every pre-upgrade hook a pod with a database connection and no HTTP
+    # listener was an endpoint of a live service — and inside its PDB.
+    #
+    # Compares the Service's selector name with the Job pod template's, which
+    # is the pair that decides endpoint membership; the Job OBJECT's labels are
+    # not part of that and deliberately still carry the ordinary identity.
+    svc_name="$(awk '/^kind: Service$/ { s = 1 } s && /^    app.kubernetes.io\/name: / { sub(/.*: /, ""); print; exit }' "$OUT/$chart.yaml")"
+    job_pod_name="$(awk '/^kind: Job$/ { j = 1 } j && /^  template:/ { t = 1 } t && /^        app.kubernetes.io\/name: / { sub(/.*: /, ""); print; exit }' "$OUT/$chart.yaml")"
+    check "$chart's migrator pod is not an endpoint of its own Service ($job_pod_name vs $svc_name)" \
+        test "$job_pod_name" != "$svc_name"
+    check "$chart's migrator pod says what it is" \
+        grep -q 'app.kubernetes.io/component: migrator' "$OUT/$chart.yaml"
 done
 
 # The gateway and the BFF own no database (§10.1, §4.2), so the hook has
