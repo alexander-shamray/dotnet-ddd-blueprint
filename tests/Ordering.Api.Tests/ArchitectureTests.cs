@@ -123,6 +123,26 @@ public class ArchitectureTests
     /// which carries Application, Domain and Infrastructure, and
     /// <c>Ordering.TestSupport</c>, which carries the Migrator.
     /// </summary>
+    /// <remarks>
+    /// <b>Both gates below read emitted references, which is narrower than the
+    /// table's word, and a green run should be read knowing it.</b>
+    /// <c>GetReferencedAssemblies</c> reads the <c>AssemblyRef</c> table, and
+    /// the compiler writes an entry only for an assembly whose types the
+    /// compiled code actually names. A forbidden <c>ProjectReference</c> — a
+    /// foreign service's, or one the migrator's row excludes — that nothing
+    /// <i>uses</i> emits nothing, so both gates go green on a project that
+    /// declares one. Each fires the moment any code names a type across that
+    /// edge, which makes them late rather than absent: the escape needs the
+    /// reference to be both forbidden and entirely unused.
+    /// <para>
+    /// Closing it means reading the declared graph instead of the compiled
+    /// one, which is a repo-wide build change with a silent-failure mode of
+    /// its own — see §4.2, which states the reach and what closing it would
+    /// cost. The limit belongs to the Domain and Application gates in the
+    /// sibling suites as much as to these two, and predates the PR that wrote
+    /// this comment.
+    /// </para>
+    /// </remarks>
     private static readonly Assembly[] ServiceAssemblies =
     [
         typeof(Order).Assembly,

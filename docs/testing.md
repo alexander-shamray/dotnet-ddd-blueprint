@@ -229,7 +229,9 @@ inside a checkout:
 [§4.2](backend-architecture/04-solution-structure.md)'s dependency table is
 enforced by `ArchitectureTests` in each service's Domain, Application and Api
 suites, and a violation is a **build failure rather than a review comment**.
-They need no container, so they are in the fast half:
+They read *emitted* assembly references, so a forbidden reference nothing uses
+passes until code crosses it — §4.2 states that reach and what closing it would
+cost. They need no container, so they are in the fast half:
 
 ```bash
 dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests"

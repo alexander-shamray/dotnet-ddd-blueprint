@@ -21,6 +21,25 @@ namespace Ordering.Application.Tests;
 /// <c>GetReferencedAssemblies</c> — the same instrument the Domain gate uses
 /// one project down, and for the same reason: a blacklist only bans what
 /// somebody thought to name.
+/// <para>
+/// <b>What that instrument sees is narrower than the table's word, and the
+/// gap is worth knowing before trusting a green run.</b>
+/// <c>GetReferencedAssemblies</c> reads the emitted <c>AssemblyRef</c> table,
+/// and the compiler writes an entry only for an assembly whose types the
+/// compiled code actually names. A forbidden <c>ProjectReference</c> or
+/// <c>PackageReference</c> that nothing <i>uses</i> emits nothing, so this
+/// gate goes green on a project that declares one. It fires the moment any
+/// code names a type across that edge, which makes the gate late rather than
+/// absent — the escape needs the reference to be both forbidden and entirely
+/// unused.
+/// </para>
+/// <para>
+/// Closing it means reading the declared graph instead of the compiled one,
+/// which is a repo-wide build change with a silent-failure mode of its own —
+/// see §4.2, which states the reach and what closing it would cost. The limit
+/// belongs to the Domain gate one project down as much as to this one, and
+/// predates the PR that wrote this comment.
+/// </para>
 /// </remarks>
 public class ArchitectureTests
 {

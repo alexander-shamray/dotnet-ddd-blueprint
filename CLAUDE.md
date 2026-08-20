@@ -354,6 +354,15 @@ whatever it renders, so a list of service names reaches a new service with the
 one name it most needs *replaced* rather than joined. **A gate the scaffold
 copies cannot be keyed on a name the scaffold rewrites.**
 
+**All five read *emitted* references, which is narrower than the word the table
+uses.** `GetReferencedAssemblies` reports the `AssemblyRef` table, so a
+forbidden reference nothing *uses* emits nothing and the gate stays green until
+code names a type across that edge — **late rather than absent**, and the
+escape needs the reference to be both forbidden and entirely unused. Closing it
+means reading the declared graph, which is a repo-wide build change whose own
+failure mode is the vacuous pass named above. §4.2 states the reach and the
+cost; the instrument is **owed**.
+
 **`Common.Application`'s pipeline is three behaviours of four.**
 `IdempotencyBehavior` (§8.5) does not exist, and its seat is between Validation
 and Transaction; `PublishProductCommand` carries no `CommandId` for the same

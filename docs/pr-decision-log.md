@@ -183,6 +183,35 @@ recorded here rather than tidied because the reverse case — a *used*
 dependency that no csproj declares — is what `Common.Domain` in the Application
 gate is, and the two look alike from a distance and are not.
 
+**That paragraph is also the hole in the five gates, and the external review
+found it there.** Copilot's round raised one finding at six sites: every gate
+in §4.2's table reads `GetReferencedAssemblies`, which reports the emitted
+`AssemblyRef` table, so a forbidden `ProjectReference` or `PackageReference`
+that no compiled code *names* is invisible to all of them — the reviewer's
+evidence being the unused edge recorded directly above. The mechanism is
+correct and the consequence is real: a project may declare a forbidden
+reference and the gate that names that row stays green.
+
+**The instrument was not changed, and the reasoning is the part worth
+keeping.** Reading the declared graph is the fix — the restore assets, or a
+reference list MSBuild emits into an assembly attribute — and it is a
+repo-wide build change whose own failure mode is the one this repository
+repeats most: a target that quietly stops emitting leaves every gate passing
+vacuously, so it owes a companion test whose subject is what the gate is
+looking at. Landing that here would have put a new build-system dependency
+into `Directory.Build.props` at the least-reviewed moment in the change, with
+the Grok budget spent and one Copilot round behind it. **The limit is also not
+this PR's**: the Domain gate has read the same table since it was written, so
+the finding describes the gate family rather than the rows PR-22 added.
+
+**What did change is the claim.** The reach is now stated in §4.2 beside the
+two-shape table, in `docs/testing.md`, and in all four test files a reader
+meets before trusting a green run — the escape needs a reference that is both
+forbidden and entirely unused, and it closes the moment anybody relies on it,
+which makes these gates late rather than absent. **The declared-graph
+instrument is owed**, and is the first thing to reach for the next time §4.2's
+enforcement is opened.
+
 ## PR-21 — the saga, and the four things §9.6 did not say
 
 PR-21 landed §9.6's `OrderFulfilmentSaga` with its four compensation paths and

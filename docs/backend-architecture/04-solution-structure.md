@@ -433,6 +433,25 @@ no longer referenced is a pre-authorised hole rather than a failure, which is a
 real cost and the smaller one — the alternative fails a build for a legitimate
 *removal*, and the decision worth forcing is the one that adds a dependency.
 
+> **Every gate above reads *emitted* references, which is narrower than the
+> word this table uses.** `GetReferencedAssemblies` reads an assembly's
+> `AssemblyRef` table, and the compiler writes an entry only for an assembly
+> whose types the compiled code actually names. A forbidden reference that
+> nothing *uses* emits nothing — so a project may declare one and every gate
+> here stays green. Each fires the moment code names a type across that edge,
+> which makes these gates **late rather than absent**: the escape needs the
+> reference to be both forbidden and entirely unused, and it stops being an
+> escape the first time anybody relies on it.
+>
+> **Closing it means reading the declared graph rather than the compiled one**
+> — the restore assets, or a reference list MSBuild emits into an assembly
+> attribute — and that is a repo-wide build change carrying the failure this
+> repository repeats most: a target that quietly stops emitting leaves every
+> gate passing vacuously, so it would owe a companion test whose subject is
+> what the gate is looking at. It is **owed rather than done**, and stated here
+> rather than only in a test comment because it is a property of this table's
+> enforcement and not of one service's file.
+
 ### What the composition root composes
 
 Each layer exposes exactly one registration method. `Program.cs` calls them and
