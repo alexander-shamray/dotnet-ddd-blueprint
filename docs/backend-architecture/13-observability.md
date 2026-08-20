@@ -1047,13 +1047,24 @@ public sealed class OutboxMetrics
     private static KeyValuePair<string, object?> Tag(OutboxLane lane) =>
         new("lane", lane.ToString());
 
-    public OutboxMetrics(IMeterFactory factory, IOutboxStats stats)
+    // The only thing that separates a contained failure from a healthy quiet
+    // lane, because both are an absent series. LoggerMessage.Define on ADR-019's
+    // terms: CA1848 is an error, and this runs once per export interval for as
+    // long as the failure lasts.
+    private static readonly Action<ILogger, Exception?> GaugeReadFailed =
+        LoggerMessage.Define(
+            LogLevel.Error,
+            new EventId(1, nameof(GaugeReadFailed)),
+            "Outbox gauge read failed. This interval's measurements are omitted, so "
+            + "every outbox series is absent rather than wrong — see OutboxMetrics.");
+
+    public OutboxMetrics(IMeterFactory factory, IOutboxStats stats, ILogger<OutboxMetrics> logger)
     {
         Meter meter = factory.Create(MeterName);
 
         meter.CreateObservableGauge(
             "outbox.oldest.age",
-            () => PerLane(stats.OldestAgeSeconds),
+            () => PerLane(stats.OldestAgeSeconds, logger),
             unit: "s",
             description: "Age of the oldest unprocessed row, per lane.");
 
@@ -1062,7 +1073,7 @@ public sealed class OutboxMetrics
         // thousand recent ones read identically on oldest-age.
         meter.CreateObservableGauge(
             "outbox.pending.count",
-            () => PerLane(lane => stats.PendingCount(lane)),
+            () => PerLane(lane => stats.PendingCount(lane), logger),
             unit: "{message}",
             description: "Unprocessed rows, per lane.");
 
@@ -1073,7 +1084,7 @@ public sealed class OutboxMetrics
         // one first.
         meter.CreateObservableGauge(
             "outbox.abandoned.count",
-            () => PerLane(lane => stats.AbandonedCount(lane)),
+            () => PerLane(lane => stats.AbandonedCount(lane), logger),
             unit: "{message}",
             description: "Rows past the attempt cap, per lane.");
     }
@@ -1083,13 +1094,53 @@ public sealed class OutboxMetrics
     // forgotten at one of them would be a lane with no gauge and therefore no
     // alert — the silent gap this section spends a callout on, arriving through
     // the instrument instead of through the query.
-    private static IEnumerable<Measurement<double>> PerLane(Func<OutboxLane, double> read) =>
-    [
-        .. Enum.GetValues<OutboxLane>()
-            .Select(lane => new Measurement<double>(read(lane), Tag(lane)))
-    ];
+    //
+    // THE READ IS CONTAINED, and the loop is what contains it. An observable
+    // callback that throws does not fail alone: RecordObservableInstruments
+    // propagates and abandons the rest of the pass, so a SqlException here can
+    // stop unrelated observable instruments being collected. Every lane is
+    // dropped rather than the failing one, because a lane missing from a
+    // `max by (lane)` reads as a healthy zero rather than as no data.
+    private static List<Measurement<double>> PerLane(
+        Func<OutboxLane, double> read,
+        ILogger logger)
+    {
+        List<Measurement<double>> measurements = [];
+
+        foreach (OutboxLane lane in Enum.GetValues<OutboxLane>())
+        {
+            double value;
+
+            try
+            {
+                value = read(lane);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                GaugeReadFailed(logger, exception);
+                return [];
+            }
+
+            measurements.Add(new Measurement<double>(value, Tag(lane)));
+        }
+
+        return measurements;
+    }
 }
 ```
+
+> **Containment answers a transient outage; the log is what answers a permanent
+> one.** An absent series is the right reading of a database that is briefly
+> unreachable — an outbox alert firing for that would page the wrong person
+> with the wrong runbook. It is the *wrong* reading of schema drift or a
+> revoked grant, where every read fails for ever, all four outbox alerts go
+> quiet, and the service stays ready: §13.5's check proves the connection opens
+> and nothing about this table. An empty outbox dashboard is then
+> indistinguishable from a healthy one, which is this section's own callout
+> arriving through the instrument. **An alert on the absence itself is what
+> would close it, and is owed** — a thirteenth alert, a thirteenth runbook and
+> a row in §13.6's table, on the same terms as the four this chapter already
+> ships unloaded.
 
 `IOutboxStats` is read from a singleton on the collector's schedule, so it must
 not hold a `DbContext` — and it satisfies that by never asking for one. §6.5's
@@ -1614,7 +1665,7 @@ attached is a page to somebody who will have to reason from scratch.
 | `docs/runbooks/error-queue.md` | Inspecting a poison message, deciding replay vs discard, replaying safely |
 | `docs/runbooks/outbox-broker.md` | Broker lane stalled: checking RabbitMQ reachability, credentials, queue limits; what downstream services are missing while it is stopped |
 | `docs/runbooks/projection-lag.md` | Local lane stalled: finding the throwing handler, deciding whether to serve from the write model meanwhile, replaying a projection from scratch |
-| `docs/runbooks/outbox-growth.md` | Total backlog rising: dispatcher liveness, batch sizing, retention purge failure |
+| `docs/runbooks/outbox-growth.md` | Total backlog rising: dispatcher liveness, batch sizing, and the retention purge as a *diagnostic* rather than a cause — a stopped purge deletes nothing and this gauge counts only unprocessed rows, so it cannot have moved it |
 | `docs/runbooks/outbox-abandoned.md` | Rows past the attempt cap: reading the payload and `LastError`, deciding repair vs discard, resetting `Attempts` to replay |
 | `docs/runbooks/stuck-saga.md` | Finding unfinalised sagas, reading their state, manual compensation |
 | `docs/runbooks/order-review.md` | Working the `OrderReviews` queue: what each reason code means, how to resolve it, and deleting the row when done |

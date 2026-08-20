@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using Common.Application;
+using Microsoft.Extensions.Logging;
 
 namespace Ordering.Infrastructure.Observability;
 
@@ -34,13 +35,30 @@ public sealed class OutboxMetrics
     /// </summary>
     public const string MeterName = "Ordering.Outbox";
 
-    public OutboxMetrics(IMeterFactory factory, IOutboxStats stats)
+    /// <summary>
+    /// The only thing that distinguishes a contained failure from a healthy
+    /// quiet lane, because both are an absent series on the graph.
+    /// </summary>
+    /// <remarks>
+    /// <c>LoggerMessage.Define</c> rather than an interpolated call, on the
+    /// terms ADR-019 already settled for §6.3's <c>LoggingBehavior</c>: CA1848
+    /// is an error here, and this runs on the collector's thread once per
+    /// export interval for as long as the failure lasts.
+    /// </remarks>
+    private static readonly Action<ILogger, Exception?> GaugeReadFailed =
+        LoggerMessage.Define(
+            LogLevel.Error,
+            new EventId(1, nameof(GaugeReadFailed)),
+            "Outbox gauge read failed. This interval's measurements are omitted, so "
+            + "every outbox series is absent rather than wrong — see OutboxMetrics.");
+
+    public OutboxMetrics(IMeterFactory factory, IOutboxStats stats, ILogger<OutboxMetrics> logger)
     {
         Meter meter = factory.Create(MeterName);
 
         meter.CreateObservableGauge(
             "outbox.oldest.age",
-            () => PerLane(stats.OldestAgeSeconds),
+            () => PerLane(stats.OldestAgeSeconds, logger),
             unit: "s",
             description: "Age of the oldest unprocessed row, per lane.");
 
@@ -48,7 +66,7 @@ public sealed class OutboxMetrics
         // cannot supply one — see the class remarks.
         meter.CreateObservableGauge(
             "outbox.pending.count",
-            () => PerLane(lane => stats.PendingCount(lane)),
+            () => PerLane(lane => stats.PendingCount(lane), logger),
             unit: "{message}",
             description: "Unprocessed rows, per lane.");
 
@@ -59,7 +77,7 @@ public sealed class OutboxMetrics
         // asks which one first.
         meter.CreateObservableGauge(
             "outbox.abandoned.count",
-            () => PerLane(lane => stats.AbandonedCount(lane)),
+            () => PerLane(lane => stats.AbandonedCount(lane), logger),
             unit: "{message}",
             description: "Rows past the attempt cap, per lane.");
     }
@@ -86,13 +104,32 @@ public sealed class OutboxMetrics
     /// that was an assumption, and this makes it true by construction instead.
     /// </para>
     /// <para>
-    /// Returning no measurements is the right failure: the series goes absent
-    /// for that interval, which §13.5's readiness already reports properly, and
-    /// an outbox alert firing because SQL Server is unreachable would page the
-    /// wrong person with the wrong runbook.
+    /// Returning no measurements is the right failure for a <em>transient</em>
+    /// outage: the series goes absent for that interval, and an outbox alert
+    /// firing because SQL Server is briefly unreachable would page the wrong
+    /// person with the wrong runbook.
+    /// </para>
+    /// <para>
+    /// <b>A persistent failure is a different case, and containment alone does
+    /// not cover it.</b> Schema drift, a revoked grant or a renamed table make
+    /// every read fail for ever — and then all four outbox alerts are silent
+    /// while the service stays ready, because §13.5's readiness check proves
+    /// the connection opens and nothing about this table. An earlier version of
+    /// this remark said readiness "already reports properly"; it reports
+    /// connectivity, which is not the same claim. That is why the failure is
+    /// <b>logged</b> rather than only swallowed: an empty outbox dashboard is
+    /// indistinguishable from a healthy one, and the log is the only thing that
+    /// tells them apart.
+    /// </para>
+    /// <para>
+    /// <b>An alert on the absence itself would be the complete answer and is
+    /// deliberately not here.</b> It needs a thirteenth alert, a thirteenth
+    /// runbook and a row in §13.6's table — a chapter decision rather than a
+    /// fix, and one taken at a review ceiling would be the worst moment for it.
+    /// Named as owed, on the same terms as §13.6's four unloaded alerts.
     /// </para>
     /// </remarks>
-    private static List<Measurement<double>> PerLane(Func<OutboxLane, double> read)
+    private static List<Measurement<double>> PerLane(Func<OutboxLane, double> read, ILogger logger)
     {
         List<Measurement<double>> measurements = [];
 
@@ -109,6 +146,7 @@ public sealed class OutboxMetrics
                 // Every lane is dropped, not just this one: half a reading is
                 // worse than none, because a lane missing from a `max by (lane)`
                 // reads as a healthy zero rather than as no data.
+                GaugeReadFailed(logger, exception);
                 return [];
             }
 

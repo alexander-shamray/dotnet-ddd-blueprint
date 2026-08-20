@@ -7,6 +7,8 @@ using Common.Infrastructure.Messaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
 
@@ -121,7 +123,7 @@ public class MetricsRegistrationTests
             .BuildServiceProvider()
             .GetRequiredService<IMeterFactory>();
 
-        OutboxMetrics metrics = new(factory, stats);
+        OutboxMetrics metrics = new(factory, stats, NullLogger<OutboxMetrics>.Instance);
         metrics.ShouldNotBeNull();
 
         // The SAME Meter instance the constructor above used — IMeterFactory
@@ -205,11 +207,14 @@ public class MetricsRegistrationTests
     [Fact]
     public void A_foreign_meter_of_the_same_name_is_not_collected()
     {
-        // AddMetrics() because a host adds it, not AddOrderingInfrastructure —
-        // OutboxMetrics takes IMeterFactory and nothing in the service's own
-        // registration supplies one.
+        // AddMetrics() and AddLogging() because a HOST adds both, not
+        // AddOrderingInfrastructure — OutboxMetrics takes an IMeterFactory and
+        // an ILogger, and nothing in the service's own registration supplies
+        // either. `WebApplication.CreateBuilder` has always had them; this
+        // container is assembled by hand and has to say so.
         ServiceCollection services = BuildServices();
         services.AddMetrics();
+        services.AddLogging();
 
         using ServiceProvider foreign = services.BuildServiceProvider();
 
@@ -223,7 +228,7 @@ public class MetricsRegistrationTests
             .BuildServiceProvider()
             .GetRequiredService<IMeterFactory>();
 
-        OutboxMetrics mineMetrics = new(factory, new StubOutboxStats());
+        OutboxMetrics mineMetrics = new(factory, new StubOutboxStats(), NullLogger<OutboxMetrics>.Instance);
         mineMetrics.ShouldNotBeNull();
         Meter mine = factory.Create(OutboxMetrics.MeterName);
 
@@ -266,7 +271,8 @@ public class MetricsRegistrationTests
             .BuildServiceProvider()
             .GetRequiredService<IMeterFactory>();
 
-        OutboxMetrics metrics = new(factory, new ThrowingOutboxStats());
+        RecordingLogger logger = new();
+        OutboxMetrics metrics = new(factory, new ThrowingOutboxStats(), logger);
         metrics.ShouldNotBeNull();
         Meter mine = factory.Create(OutboxMetrics.MeterName);
 
@@ -286,6 +292,15 @@ public class MetricsRegistrationTests
         Should.NotThrow(() => listener.RecordObservableInstruments());
 
         collected.ShouldBeEmpty("a failing read must drop the series, not report one");
+
+        // And it must say so. Containment alone makes a permanent failure —
+        // schema drift, a revoked grant — indistinguishable from a healthy
+        // quiet lane, because both are an absent series; §13.5's readiness
+        // check proves the connection opens and nothing about this table, so
+        // it does not report it either. The log is the only signal there is,
+        // which makes an unasserted one a signal nobody would miss removing.
+        logger.Errors.Count.ShouldBe(3, "one per gauge, carrying the exception");
+        logger.Errors.ShouldAllBe(e => e is InvalidOperationException);
     }
 
     private static string LaneOf(ReadOnlySpan<KeyValuePair<string, object?>> tags)
@@ -322,12 +337,8 @@ public class MetricsRegistrationTests
     }
 
     /// <summary>
-    /// A distinct number per lane and per question, so an assertion cannot pass
-    /// by reading the right value off the wrong call.
-    /// </summary>
-    /// <summary>
-    /// Stands in for an unreachable database: the shape a `SqlException` from
-    /// a timed-out connect or command arrives in.
+    /// Stands in for an unreachable database: the shape a <c>SqlException</c>
+    /// from a timed-out connect or command arrives in.
     /// </summary>
     private sealed class ThrowingOutboxStats : IOutboxStats
     {
@@ -338,6 +349,41 @@ public class MetricsRegistrationTests
         public int AbandonedCount(OutboxLane lane) => throw new InvalidOperationException("database unreachable");
     }
 
+    /// <summary>
+    /// Enough of <see cref="ILogger{TCategoryName}"/> to answer one question:
+    /// did the contained failure say anything?
+    /// </summary>
+    /// <remarks>
+    /// Hand-written rather than <c>Microsoft.Extensions.Diagnostics.Testing</c>,
+    /// which would be a new package, a pin and a row in Appendix B for one
+    /// assertion. Only <c>Error</c> is recorded, because that is the level the
+    /// claim is about.
+    /// </remarks>
+    private sealed class RecordingLogger : ILogger<OutboxMetrics>
+    {
+        public List<Exception?> Errors { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Error)
+                Errors.Add(exception);
+        }
+    }
+
+    /// <summary>
+    /// A distinct number per lane and per question, so an assertion cannot pass
+    /// by reading the right value off the wrong call.
+    /// </summary>
     private sealed class StubOutboxStats : IOutboxStats
     {
         public double OldestAgeSeconds(OutboxLane lane) => lane == OutboxLane.Broker ? 11 : 12;
