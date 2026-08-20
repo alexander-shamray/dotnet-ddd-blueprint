@@ -962,7 +962,7 @@ actionable — if the response is "acknowledge and ignore", delete it.
 | Saga age | any saga unfinalised > 1 h, **excluding one in `Confirmed`** | Orders are stuck. Every other wait state in §9.6 times out in 5, 10 or 15 minutes, so an hour is a sane margin above all of them — but the despatch wait is **three days** by design, three orders of magnitude further out, and an unqualified hour would page on the healthy path for most of a saga's real lifetime. A despatch that genuinely expires escalates to the row below, not to this one. **The state is named rather than described, and this row used to describe it**: §9.6 has no `AwaitingDespatch`, because the saga arms `DespatchTimeout` on the transition *into* `Confirmed` — the order is confirmed and now waiting on Shipping. A selector spelled the way the description reads would match no series, exclude nothing, and page on every healthy confirmed order | `stuck-saga.md` |
 | Orders awaiting review | any row in `ordering.OrderReviews` older than 1 h | A saga hit a wait it could not compensate and escalated (§9.6). It has already finalised, so the saga-age alert above will *not* catch this | `order-review.md` |
 | Migration job failed | Helm `pre-install,pre-upgrade` hook non-zero, or a release stuck pending | The deploy stopped before any pod rolled ([§7.4](07-persistence.md)). On an **upgrade** the previous version is still serving, which is why nothing else fires — so this alert is the only signal. On a first **install** there is no previous version and no pod at all, so nothing else fires for the opposite reason: check which before promising availability | `migration-failure.md` |
-| Cache hit ratio collapse | `rate(cache_hits) / rate(cache_hits + cache_misses)` < 50% over 10 min, from `Microsoft.Extensions.Caching.Hybrid` | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |
+| Cache hit ratio collapse | hits ÷ (hits + misses) < 50% over 10 min. **The expression lives in the rule file, not here** — see below | Redis lost its working set; every miss becomes a database read, and the databases are sized for a warm cache (ADR-006) | `redis-cold.md` |
 | Business volume | `orders.placed` per hour drops > 50% vs the same hour last week | The most valuable alert here — it catches failures no technical metric detects. §6.6's worked case: `ordering.ProductPrices` has no row for a product, every order containing it is **refused by the domain**, and the result is a 422 `order.products_unavailable` the customer sees, no exception, no 5xx and no lag. **Not a 400, and the difference is where the on-call looks**: the request is well-formed and the validator passed it (§10.5 maps `Error.Rule` to 422, `ValidationException` to 400), so a 400 dashboard shows a path this request never took. Week-over-week rather than a fixed floor, because a volume alert without a seasonality model is the first pager people mute | `business-volume.md` |
 
 ### Outbox alerts are per lane
@@ -1156,8 +1156,9 @@ services.AddSingleton<OutboxMetrics>();
 services.AddSingleton<MessagingMetrics>();
 
 // OrderMetrics and RequestMetrics are NOT registered here — they are
-// Application types, and AddOrderingApplication registers the one that exists
-// (§4.2). OrderMetrics arrives with §6.6's OrderSummaries projection.
+// Application types, and AddOrderingApplication registers them (§4.2, where
+// OrderMetrics is shown as the specified shape rather than the shipped one).
+// OrderMetrics arrives with §6.6's OrderSummaries projection.
 // A second AddSingleton would not fail: the container keeps both and resolves
 // the last, which is the trap. Two instances mean two sets of instruments on
 // one meter, and the one MetricsInitialiser forces need not be the one the
@@ -1326,7 +1327,7 @@ that cannot fire.
 |---|---|
 | Saga age | A gauge over `ordering.OrderFulfilmentStates`. §9.6 persists every saga, so the reading is a query away — there is simply no instrument over it |
 | Orders awaiting review | A gauge over `ordering.OrderReviews`, which the `IX_OrderReviews_RaisedAt` index already exists for |
-| Cache hit ratio collapse | **A consumer, not an instrument.** §13.2 registers the `Microsoft.Extensions.Caching.Hybrid` meter, but no host calls `AddRedisConnections`, so nothing constructs a `HybridCache` and the meter has nothing behind it. §15.4 records the same absence from the secrets side |
+| Cache hit ratio collapse | **An instrument *and* a consumer — see the callout below.** §13.2 registers the `Microsoft.Extensions.Caching.Hybrid` meter and the package publishes no meter at all; no host calls `AddRedisConnections` either. §15.4 records the second absence from the secrets side |
 | Business volume | `OrderMetrics`, which arrives with §6.6's `OrderSummaries` projection |
 
 **The third row is the one worth pausing on**, because it is the failure mode
@@ -1341,16 +1342,29 @@ published by *nothing*. The second is what makes the list self-clearing — the
 day one of these instruments lands, the gate goes red and names the rule to
 move. All twelve runbooks exist regardless, per §13.9.
 
-> **The cache row needed a different predicate, and finding that out is what
-> the self-clearing claim is worth.** The other three are owed a `Create*` call
-> the gate can see in `src/`. This one is owed a **consumer**: HybridCache
-> creates its counters inside the package, `AddRedisConnections` already exists
-> in `Common.Infrastructure`, and a host adding it to `Program.cs` would light
-> the signal up in production while adding no instrument declaration anywhere.
-> The gate would have stayed green, the rule would have stayed unloaded, and
-> silence would have gone on reading as health — the promise broken for exactly
-> the row this section calls the interesting case. The check now watches for a
-> **host** calling the helper, and a test calling it does not count.
+> **The cache row is the one the self-clearing claim does not cover, and only
+> reading the package settled why.** The other three are owed a `Create*` call
+> the gate can see in `src/`. This one was first taken to be owed a
+> **consumer** — nothing calls `AddRedisConnections`, so nothing constructs a
+> `HybridCache` — and gating on that call was written, tested red, and then
+> removed, because the premise is false.
+>
+> **`Microsoft.Extensions.Caching.Hybrid` 10.0.0 publishes no `Meter`.** The
+> assembly references `System.Diagnostics.Tracing` and not
+> `System.Diagnostics.Metrics`: it reports through `HybridCacheEventSource`
+> with `PollingCounter`, which is EventCounters. So the `AddMeter` line in
+> §13.2 collects nothing today and would still collect nothing with Redis
+> wired — **the registered-name trap this section warns about, in this
+> platform's own configuration**, and it survived being written, reviewed and
+> quoted because the name looks exactly like an instrument.
+>
+> A consumer is therefore necessary and not sufficient, and gating on one would
+> have been worse than the gap: the gate would go red the day Redis was wired,
+> somebody would move the rule into the loaded file, and it would sit there
+> silent. What the row is owed is an **instrument** — an EventCounters bridge
+> written here, which check 5 would see, or a package that publishes a meter,
+> **which no gate in this repository can observe.** That second half is a
+> residual, named rather than implied.
 
 ### The gap is per service as well as per metric
 

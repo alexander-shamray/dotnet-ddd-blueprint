@@ -77,7 +77,18 @@ public static class ObservabilityExtensions
                 .AddMeter("Commerce.Requests")                     // §13.3, §13.7
                 .AddMeter("Commerce.Messaging")                    // §13.3, §13.7
                 .AddMeter("MassTransit")
-                .AddMeter("Microsoft.Extensions.Caching.Hybrid")   // cache hit ratio
+                // §13.6's cache-hit-ratio alert. COLLECTS NOTHING AT THE
+                // PINNED VERSION, and the line stays with this comment rather
+                // than being deleted: Microsoft.Extensions.Caching.Hybrid
+                // 10.0.0 references System.Diagnostics.Tracing and not
+                // System.Diagnostics.Metrics — it publishes through
+                // HybridCacheEventSource with PollingCounter, so there is no
+                // Meter behind this name. Measured against the package, not
+                // assumed. The alert is unloaded in awaiting-signal.yaml and
+                // §13.6 records what it is owed; a registered meter with no
+                // publisher is the trap that section spends a callout on, and
+                // this is the platform's own instance of it.
+                .AddMeter("Microsoft.Extensions.Caching.Hybrid")
                 .AddMeter("StackExchange.Redis"))
             .WithTracing(t => t
                 .AddAspNetCoreInstrumentation(o =>

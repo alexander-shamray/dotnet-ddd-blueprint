@@ -74,18 +74,29 @@ groups:
             It has already finalised, so the saga-age alert will not catch it.
           runbook_url: docs/runbooks/order-review.md
 
-      # Owed twice over, and the second is the interesting one. The
-      # Microsoft.Extensions.Caching.Hybrid meter IS registered by §13.2's
-      # AddObservability — but no host in this solution calls
-      # AddRedisConnections, so nothing constructs a HybridCache and the meter
-      # publishes nothing. §15.4 already records the same absence from the
-      # secrets side, where the two Redis rows are conditional on a consumer
-      # existing. A registered meter with no instrument behind it is precisely
-      # the trap this file exists for: the AddMeter line makes it look wired.
+      # OWED TWICE OVER, AND THE SECOND IS THE ONE NO GATE HERE CAN WATCH.
+      #
+      # First: no host calls AddRedisConnections, so nothing constructs a
+      # HybridCache. §15.4 records that absence from the secrets side, where the
+      # two Redis rows are conditional on a consumer existing.
+      #
+      # Second, and measured against the pinned package rather than assumed:
+      # Microsoft.Extensions.Caching.Hybrid 10.0.0 references
+      # System.Diagnostics.Tracing and NOT System.Diagnostics.Metrics. It
+      # reports through HybridCacheEventSource with PollingCounter — that is
+      # EventCounters, not a Meter. §13.2's AddMeter for this name therefore
+      # collects nothing, and wiring Redis would not change that. A registered
+      # meter with no publisher is precisely the trap this file exists for, and
+      # the AddMeter line is what makes it look wired.
+      #
+      # So the metric names below are what an EventCounters-to-OTel bridge would
+      # plausibly export, and NOT names read off a running system. They are here
+      # to keep the rule reviewable; whoever lands the bridge owns confirming
+      # them, and check 5 will go red on the instrument arriving.
       #
       # The expression is derived rather than measured, per §13.6: a ratio is
       # computed from the hit and miss counters and is not published as one, so
-      # what is written here is the expression and never an invented name.
+      # what is written here is the expression and never an invented ratio name.
       - alert: CacheHitRatioCollapse
         expr: |
           sum(rate(hybrid_cache_hits_total[10m]))

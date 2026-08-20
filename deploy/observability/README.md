@@ -78,13 +78,28 @@ and each names the instrument it is waiting for:
 |---|---|
 | `StuckSaga` | a gauge over `ordering.OrderFulfilmentStates` |
 | `OrdersAwaitingReview` | a gauge over `ordering.OrderReviews` |
-| `CacheHitRatioCollapse` | a host that calls `AddRedisConnections` — the meter is registered, nothing publishes to it |
+| `CacheHitRatioCollapse` | an instrument **and** a consumer — see below |
 | `BusinessVolumeDrop` | `OrderMetrics`, which arrives with §6.6's `OrderSummaries` projection |
 
 **Check 5 is what keeps that list honest.** It asserts the metrics named there
 are published by *nothing*, so the day somebody ships one of these instruments
 the gate goes red and names the rule to move. An "awaiting signal" list that
 nothing re-checks would quietly become a list of alerts nobody ever turned on.
+
+**The cache row is the one check 5 cannot keep honest, and that is a measured
+residual rather than an oversight.** `Microsoft.Extensions.Caching.Hybrid`
+10.0.0 references `System.Diagnostics.Tracing` and not
+`System.Diagnostics.Metrics` — it reports through `HybridCacheEventSource` with
+`PollingCounter`, so there is **no `Meter`** behind the name §13.2 registers,
+and wiring Redis would not change that. An earlier version of this gate treated
+a call to `AddRedisConnections` as the signal arriving; that was written, tested
+red and removed, because it would have gone red on a consumer while the alert
+stayed silent — moving a rule into the loaded file where it cannot fire.
+
+What the row is owed is an instrument: a bridge written here, which check 5
+would see, or a package that publishes a meter — **which no gate in this
+repository can observe**. The metric names in the rule are what such a bridge
+would plausibly export, not names read off a running system.
 
 **Neither file's rule count is written down here on purpose.** The table above
 names all four by alert, so it evidences itself and cannot drift silently; a

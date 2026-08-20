@@ -78,26 +78,30 @@ EXTERNAL_METRICS = {
         "kube-state-metrics — §7.4's migration hook Job",
 }
 
-# Metrics a PACKAGE declares, which become live when a HOST wires the package
-# up — so what is owed is a consumer, not a `Create*` call this gate can see.
+# THE CACHE ROW HAS NO PREDICATE HERE, AND THAT IS A MEASUREMENT RATHER THAN A
+# SHRUG.
 #
-# Without this, check 5's self-clearing promise is false for exactly one of the
-# four awaiting rules, and it is the one §13.6 calls the interesting case.
-# HybridCache creates its counters inside the package; `AddRedisConnections`
-# already exists in Common.Infrastructure and the tests already call it. A host
-# adding it to its Program.cs would light the signal up in production and add
-# no instrument declaration anywhere — so the scan below would stay green, the
-# rule would stay unloaded, and silence would go on reading as health.
+# An earlier version of this gate treated `hybrid_cache_hits` / `_misses` as
+# published once a host called `AddRedisConnections`, on the reasoning that what
+# that alert is owed is a consumer rather than an instrument. Reading the pinned
+# package settled it the other way: `Microsoft.Extensions.Caching.Hybrid`
+# 10.0.0 references `System.Diagnostics.Tracing` and **not**
+# `System.Diagnostics.Metrics` — it publishes through `HybridCacheEventSource`
+# with `PollingCounter`, so there is no `Meter` and no instrument for OTel to
+# collect. §13.2's `AddMeter("Microsoft.Extensions.Caching.Hybrid")` therefore
+# collects nothing today, and would still collect nothing with Redis wired.
 #
-# The predicate is deliberately "a HOST", not "anywhere in src": a test calling
-# the helper proves nothing about a deployed process.
-CONSUMER_GATED_METRICS = {
-    "hybrid_cache_hits": ("AddRedisConnections", "a host calling AddRedisConnections (§8.2)"),
-    "hybrid_cache_misses": ("AddRedisConnections", "a host calling AddRedisConnections (§8.2)"),
-}
-
-# What counts as a host: the composition root §4.2 permits, and nothing else.
-HOST_FILES = "Program.cs"
+# So a consumer is necessary and not sufficient, and gating on one would have
+# been worse than the gap it replaced: the gate would go red the day a host
+# wired Redis, somebody would move the rule into platform-alerts.yaml, and it
+# would sit there silent — a loaded alert that cannot fire, which is precisely
+# what the two-file split exists to prevent.
+#
+# What that row is really owed is an instrument: an EventCounters-to-OTel bridge
+# in this repository, or a package that publishes a Meter. The first would be a
+# `Create*` call and check 5 would see it. **The second is invisible to this
+# gate**, and is named in §13.6 and in the README as a residual rather than
+# left implicit — a gate cannot watch a dependency's internals.
 
 # Services that host §9.4's dispatcher and publish NO outbox gauges, each with
 # the reason. Check 8 requires an entry here for every such service, so the
@@ -275,31 +279,14 @@ def candidates(metric: str) -> set[str]:
     return seen
 
 
-def wired_consumers() -> set[str]:
-    """Helper calls a HOST makes — the composition roots of §4.2, nothing else."""
-    calls = set()
-    for program in (ROOT / "src").rglob(HOST_FILES):
-        if "/obj/" in program.as_posix() or "/bin/" in program.as_posix():
-            continue
-        body = read(program)
-        for metric, (call, _) in CONSUMER_GATED_METRICS.items():
-            if call in body:
-                calls.add(metric)
-
-    return calls
-
-
-def is_published(metric: str, instruments: set[str], consumers: set[str]) -> bool:
+def is_published(metric: str, instruments: set[str]) -> bool:
     # Both sides take the same stripping. An exporter's metric carries the same
     # _count / _bucket / _sum suffixes a solution instrument's does, so matching
     # EXTERNAL_METRICS on the raw name alone would demand three entries per
     # histogram and reject the two that were not written down.
     reachable = candidates(metric)
 
-    return (
-        bool(reachable & instruments)
-        or bool(reachable & EXTERNAL_METRICS.keys())
-        or bool(reachable & consumers))
+    return bool(reachable & instruments) or bool(reachable & EXTERNAL_METRICS.keys())
 
 
 # ------------------------------------------------------------------ checks --
@@ -317,7 +304,7 @@ def main() -> int:
     awaiting = parse_rules(AWAITING_RULES)
     every_rule = loaded + awaiting
     instruments = declared_instruments()
-    consumers = wired_consumers()
+
 
     runbooks = {
         path.name for path in RUNBOOKS.glob("*.md") if path.name not in NOT_A_RUNBOOK
@@ -374,7 +361,7 @@ def main() -> int:
     # 4. Every metric a LOADED rule reads is published by something.
     for rule in loaded:
         for metric in sorted(metrics_in(str(rule["expr"]))):
-            if not is_published(metric, instruments, consumers):
+            if not is_published(metric, instruments):
                 fail(
                     f"{rule['alert']}: reads `{metric}`, which no C# instrument declares "
                     f"and EXTERNAL_METRICS does not list. A loaded rule with no signal is "
@@ -384,7 +371,7 @@ def main() -> int:
     #    the self-clearing half: it goes red on the day the instrument lands.
     for rule in awaiting:
         for metric in sorted(metrics_in(str(rule["expr"]))):
-            if is_published(metric, instruments, consumers):
+            if is_published(metric, instruments):
                 fail(
                     f"{rule['alert']}: reads `{metric}`, which now HAS a signal. "
                     f"Move this rule from awaiting-signal.yaml into platform-alerts.yaml")
@@ -393,7 +380,7 @@ def main() -> int:
     #    metric nothing publishes draws a flat empty line, which reads as "no
     #    traffic" rather than as "this panel is broken" — the same trap as a
     #    silent alert, one artefact over.
-    check_dashboards(instruments, consumers)
+    check_dashboards(instruments)
 
     # 8. Every service hosting the outbox dispatcher publishes outbox gauges,
     #    or is on a declared exemption with a reason. Checks 4 and 5 are about
@@ -408,7 +395,7 @@ def main() -> int:
     return report()
 
 
-def check_dashboards(instruments: set[str], consumers: set[str]) -> None:
+def check_dashboards(instruments: set[str]) -> None:
     dashboards = sorted((OBSERVABILITY / "dashboards").glob("*.json"))
 
     if not dashboards:
@@ -438,7 +425,7 @@ def check_dashboards(instruments: set[str], consumers: set[str]) -> None:
 
         for expression in expressions:
             for metric in sorted(metrics_in(expression)):
-                if not is_published(metric, instruments, consumers):
+                if not is_published(metric, instruments):
                     fail(
                         f"{path.name}: a panel reads `{metric}`, which no C# instrument "
                         f"declares and EXTERNAL_METRICS does not list")
