@@ -130,16 +130,25 @@ class VerdictTests(unittest.TestCase):
 
         self.assertEqual(verdict["decision"], canary.PROMOTE)
 
-    def test_an_absent_series_rolls_back(self) -> None:
+    def test_an_absent_series_rolls_back_on_either_track(self) -> None:
         """§15.1 already says this about the k6 SLO run: it "fails on an absent
         series as well as on a breached one". An empty dashboard reads the same
-        whether the system is healthy or nobody scraped it."""
-        for metric in ("errorRate", "latencyP99Seconds", "requests"):
-            with self.subTest(metric=metric):
-                verdict = canary.analyse(readings(canary={metric: None}), THRESHOLDS)
+        whether the system is healthy or nobody scraped it.
 
-                self.assertEqual(verdict["decision"], canary.ROLLBACK)
-                self.assertIn(metric, verdict["reason"])
+        SIX cases, not three. The baseline's `requests` was the one reading
+        fetched on every step and validated by nothing — `read` runs each query
+        independently, so a single malformed response can null one metric while
+        its neighbours succeed. A contract saying "any absent reading is a
+        rollback" is only true if the check is over both tracks.
+        """
+        for track in ("canary", "baseline"):
+            for metric in ("errorRate", "latencyP99Seconds", "requests"):
+                with self.subTest(track=track, metric=metric):
+                    verdict = canary.analyse(readings(**{track: {metric: None}}), THRESHOLDS)
+
+                    self.assertEqual(verdict["decision"], canary.ROLLBACK)
+                    self.assertIn(metric, verdict["reason"])
+                    self.assertIn(track, verdict["reason"])
 
     def test_a_missing_canary_track_rolls_back(self) -> None:
         verdict = canary.analyse(readings(canary=None), THRESHOLDS)
@@ -215,7 +224,7 @@ class VerdictTests(unittest.TestCase):
         )
 
         self.assertEqual(verdict["decision"], canary.ROLLBACK)
-        self.assertIn("stable-track", verdict["reason"])
+        self.assertIn("baseline", verdict["reason"])
 
     def test_the_reason_survives_every_verdict(self) -> None:
         """The rollout prints this and nothing else. A decision with an empty

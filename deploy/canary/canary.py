@@ -271,14 +271,27 @@ def analyse(readings: dict, thresholds: dict) -> dict:
     canary = readings["canary"]
     baseline = readings["baseline"]
 
-    for name in ("errorRate", "latencyP99Seconds", "requests"):
-        if canary.get(name) is None:
-            return _verdict(
-                ROLLBACK,
-                f"the canary reported no {name}: the series is absent, which is "
-                "what a metric nobody publishes and a pod nobody scraped look "
-                "like alike (§13.6)",
-            )
+    # BOTH TRACKS, all three metrics, before any threshold is applied.
+    #
+    # This checked the canary's three and left the baseline's to the relative
+    # check, which reached two of them and never looked at `requests` at all —
+    # a reading fetched on every step and validated by nothing. `read` runs
+    # each query independently, so one malformed response can null a single
+    # metric while its neighbours succeed, and the contract this function
+    # states is "any absent reading is a rollback". A loop over both tracks is
+    # the only shape in which that sentence is true, and it costs one nesting
+    # level to remove the exception.
+    for track, values in (("canary", canary), ("baseline", baseline)):
+        for name in ("errorRate", "latencyP99Seconds", "requests"):
+            if values.get(name) is None:
+                return _verdict(
+                    ROLLBACK,
+                    f"the {track} track reported no {name}: the series is "
+                    "absent, which is what a metric nobody publishes and a pod "
+                    "nobody scraped look like alike (§13.6). The stable track "
+                    "carries the majority of traffic at every rung, so its "
+                    "silence is the monitoring failing on the larger half",
+                )
 
     minimum = thresholds["minimumRequests"]
     if canary["requests"] < minimum:
@@ -341,27 +354,21 @@ def _regression(
 ) -> list[str]:
     """One metric's relative check.
 
-    **A missing baseline is a rollback, and it used to be a skip.** The
-    argument for skipping was that the canary's own absence means the new
-    version is unobserved while the baseline's means there is nothing to
-    compare against — the absolute checks having already run. That reasoning
-    survived only while an absent series was ambiguous.
+    **Both readings are present by the time this runs**, because `analyse`
+    rejects an absent one on either track before applying any threshold. That
+    is a change: a missing baseline used to skip this check, on the argument
+    that the canary's absence means the new version is unobserved while the
+    baseline's only means there is nothing to compare against.
 
-    It is not, for two reasons that arrived together. The stable track serves
-    the MAJORITY of traffic at every rung of §15.5's ladder, so its series
-    going missing is not a quiet edge case, it is the monitoring failing on the
-    larger half. And since the error-rate numerator is coalesced, a query only
-    returns nothing when the DENOMINATOR is empty — no requests at all — which
-    for the stable track during a canary means something is badly wrong.
-
-    Skipping quietly removed regression detection at exactly that moment, which
-    is the one thing the relative check exists for. Treating it as a rollback
-    also makes the rule uniform and therefore statable: **any absent reading is
-    a rollback**, with no exception to remember.
+    It did not survive. The stable track serves the MAJORITY of traffic at
+    every rung of §15.5's ladder, so its series going missing is the monitoring
+    failing on the larger half — and since the error-rate numerator is
+    coalesced, a query returns nothing only when the DENOMINATOR is empty, no
+    requests at all. Skipping removed regression detection at exactly that
+    moment. The rule is now uniform and therefore statable: **any absent
+    reading is a rollback**, with no exception to remember and none to check
+    for here.
     """
-    if baseline_value is None:
-        return [f"no stable-track reading for {label}: the majority of traffic "
-                "is unobserved, so a regression against it cannot be ruled out"]
     if canary_value <= floor:
         return []
     if canary_value <= baseline_value * factor:
