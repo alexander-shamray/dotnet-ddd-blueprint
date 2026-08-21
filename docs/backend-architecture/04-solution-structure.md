@@ -78,8 +78,14 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │                                   Keycloak — the audience mapper it proves
 │   │                                   is realm configuration, so nothing
 │   │                                   compiles differently when it is missing
-│   ├── Web.Bff.TestSupport/            The stub Catalog, and the SERVER half of
-│   │                                   pricing.proto with it. Not a test
+│   ├── Web.Bff.TestSupport/            The stub Catalog, the SERVER half of
+│   │                                   pricing.proto with it, and PR-26's
+│   │                                   PricingContract — the BFF's expectations
+│   │                                   of §9.7's hop (§12.6), authored here
+│   │                                   because only a consumer can write one,
+│   │                                   and LINKED into Catalog.Api.Tests rather
+│   │                                   than referenced, exactly as the .proto
+│   │                                   is linked into Web.Bff. Not a test
 │   │                                   project — and NOT here for §4.1's usual
 │   │                                   reason: there is one BFF suite. Web.Bff
 │   │                                   compiles the client half of the same

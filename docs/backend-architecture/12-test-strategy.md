@@ -2025,9 +2025,17 @@ new PricingInteraction(
 An interaction names its products by **alias** rather than by id, because
 neither side can be handed one: the stub mints its ids and the provider suite
 publishes through `POST /v1/catalog/products` and is given them back. Each side
-realises the state its own way and binds the alias, and the request itself is
-then built once, by the contract, so the stub and the real service are asked the
-identical question.
+realises the state its own way and binds the alias.
+
+**What the contract builds once is the *question*, not the message**, and the
+difference is deliberate. The ids and the currency come from
+`PricingContract.RequestedIds` on both sides, so the stub and the real service
+are asked about the same products in the same currency. Only the provider suite
+then sends that as a `GetPricesRequest`; the consumer suite hands it to the
+screen as a query string and lets `CheckoutEndpoints` build the gRPC message
+itself. Having the contract build it there would verify the contract against
+itself — the consumer's half exists precisely to establish that the request the
+*endpoint* constructs is the one the contract describes.
 
 The per-field tolerance is stated once and applied to every answered
 interaction, on both sides. It is the **consumer's** tolerance and not the
