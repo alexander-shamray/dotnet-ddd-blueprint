@@ -35,8 +35,9 @@ step uses for `--body-file`:
 ```bash
 mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $posix
 git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
+git worktree list                                    # BEFORE — capture the paths as $before
 bash .claude/scripts/git-worktree-detach.sh "$posix" "$pinned"   # pin that exact commit, never HEAD re-resolved
-git worktree list                                    # the new row's path IS $work — host-native, from git
+git worktree list                                    # AFTER — the row absent from $before IS $work
 ```
 
 **`$work` is the host-native spelling and `$posix` is the shell's — two strings
@@ -53,13 +54,26 @@ and Agent prompt below takes `$work`.
 step.** Git prints its own worktrees in the host's native spelling with forward
 slashes — `D:/tmp/alexa/secsweep-nlPuf1` for a root the shell called
 `/tmp/secsweep-nlPuf1`, measured on this repository rather than assumed — and
-the readers resolve that. The row to read is the one whose path ends in the
-`secsweep-` basename `mktemp` just printed — that basename and nothing else.
-Detachment is **not** a usable cross-check, and the first draft of this
-paragraph offered it as one: a worktree an earlier sweep abandoned is also
-detached, and so is the caller's own checkout when the sweep runs from a
-detached HEAD, so the property fails in exactly the case it was offered for.
-The basename is unique because `mktemp` just minted it.
+the readers resolve that. **The row to read is the one that was not there a
+moment ago** — hence two listings, and the difference between them. Then check
+that its path ends in the `secsweep-` basename `mktemp` just printed, which
+turns a single selector into an agreement between two.
+
+**Neither half is sufficient alone, and both weaker versions were written
+before this one.** Detachment is not a cross-check: a worktree an earlier sweep
+abandoned is also detached, and so is the caller's own checkout when the sweep
+runs from a detached HEAD, so it fails in exactly the case it was offered for.
+Nor is the basename: `mktemp` guarantees its six characters are unused **in the
+temp directory it chose**, not across every worktree this repository has
+registered, so an abandoned sweep under a different temp root can collide. That
+one is worth spelling out because of where it lands — the stale checkout
+contains `Platform.slnx` too, so the readable-root proof below passes against
+it and the auditors read a commit nobody pinned. A wrong snapshot, silently,
+which is the failure this whole section exists to prevent.
+
+The set difference is what makes the answer positive rather than merely
+plausible: exactly one row appears between the two listings, and it is the one
+the helper just created.
 
 **No `cygpath`, deliberately, and the reason is this repository's most-repeated
 grant lesson.** `cygpath -m` is the obvious translation and it was the first
