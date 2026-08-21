@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The canary's arithmetic and its verdict, which are the only parts testable.
 
-Nothing in this repository has ever run a canary -- there is no cluster, and
+Nothing in this repository has ever run a canary — there is no cluster, and
 `deploy/canary/README.md` says so in its first paragraph. What that makes this
 suite is the whole of the gate: the workflow is four commands whose failure is
 loud, and every decision it takes comes from here.
@@ -49,7 +49,7 @@ def readings(**overrides) -> dict:
 
 class WeightTests(unittest.TestCase):
     def test_five_percent_is_not_expressible_at_the_chart_default(self) -> None:
-        """§15.3's replicaCount is 3, so one canary pod already serves 25% --
+        """§15.3's replicaCount is 3, so one canary pod already serves 25% —
         five times §15.5's first rung. The refusal is the deliverable: rounding
         would have written 5% and shipped five times the blast radius."""
         with self.assertRaises(canary.PlanError) as raised:
@@ -111,7 +111,7 @@ class WeightTests(unittest.TestCase):
         self.assertEqual(result["stableReplicas"], 0)
 
     def test_a_tolerance_buys_a_coarser_first_step(self) -> None:
-        """The knob exists so the refusal is a decision and not a wall -- and
+        """The knob exists so the refusal is a decision and not a wall — and
         canary.json sets it to zero, so taking that decision is an edit
         somebody signs."""
         result = canary.plan(5, stable_replicas=3, overshoot_points=20)
@@ -226,7 +226,7 @@ class PlanDocumentTests(unittest.TestCase):
 
     def test_the_ladder_is_the_chapters(self) -> None:
         """§15.5, verbatim: 5, 25, 50, 100, ten minutes each. Not trimmed to
-        what three replicas can express -- that is what the refusal is for."""
+        what three replicas can express — that is what the refusal is for."""
         self.assertEqual(
             [step["weight"] for step in self.document["steps"]],
             [5, 25, 50, 100],
@@ -241,7 +241,7 @@ class PlanDocumentTests(unittest.TestCase):
 
     def test_the_queries_carry_all_three_substitutions(self) -> None:
         """A query that kept `$TRACK` literal matches no series, and an absent
-        series rolls back -- so the mistake yields a rollout that can only ever
+        series rolls back — so the mistake yields a rollout that can only ever
         fail, at the end of a ten-minute wait."""
         for name, expression in canary.entries(self.document["queries"]).items():
             with self.subTest(query=name):

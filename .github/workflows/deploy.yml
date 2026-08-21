@@ -188,7 +188,14 @@ jobs:
           fi
 
           kubectl scale deployment "$WORKLOAD" --replicas="$NEEDED" -n "$NAMESPACE"
-          kubectl rollout status deployment "$WORKLOAD" -n "$NAMESPACE"
+          # BOUNDED, because an unbounded wait here does not fail — it consumes
+          # the job. A scale-up that cannot schedule 19 ready pods would block
+          # until the 150-minute cap, and a job cancelled on its timeout is not
+          # the same as a step that failed: the `if: always()` cleanup is not
+          # reliably reached, so the raised HPA floor stays raised with nothing
+          # left to run. A bounded failure reaches the cleanup; an unbounded
+          # one is how the floor survives the rollout.
+          kubectl rollout status deployment "$WORKLOAD" -n "$NAMESPACE" --timeout=10m
         env:
           WORKLOAD: ${{ inputs.workload }}
 

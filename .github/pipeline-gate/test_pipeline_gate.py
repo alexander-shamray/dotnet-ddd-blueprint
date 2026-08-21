@@ -4,7 +4,7 @@
 Every check here is a negative case. `pipeline_gate.py filters` and
 `pipeline_gate.py images` pass against the checkout, and a gate that has only
 ever been observed green is a gate nobody has established is looking at
-anything -- CLAUDE.md names that as this repository's most-repeated failure, and
+anything — CLAUDE.md names that as this repository's most-repeated failure, and
 the licence gate's suite exists for the same reason one directory over.
 
 Three of the tests below have no defect in them at all. Their subject is the
@@ -191,7 +191,7 @@ class ImageTests(Fixture):
 
     def test_a_matrix_entry_naming_no_dockerfile_is_caught(self) -> None:
         """The reverse direction. Path-filtered, this fails on the day the
-        entry is next selected -- months after the rename, in a job nobody
+        entry is next selected — months after the rename, in a job nobody
         connects to it."""
         (self.root / "src/Gateway/Gateway.Api/Dockerfile").unlink()
 
@@ -204,7 +204,7 @@ class ImageTests(Fixture):
         """The one neither direction can see, and the worst of the three.
 
         `needs.changes.outputs[matrix.filter]` on a name no filter defines is
-        the empty string, not an error -- so the `if` is false, the step is
+        the empty string, not an error — so the `if` is false, the step is
         skipped, and the job goes green having built nothing. Both halves of
         the inventory are still perfectly consistent.
         """

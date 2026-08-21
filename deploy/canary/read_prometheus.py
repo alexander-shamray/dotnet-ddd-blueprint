@@ -7,7 +7,7 @@ network on the other side of a file boundary is what lets the decision have a
 suite at all.
 
 **It never interprets.** A query that matched no series produces `null` here,
-not a zero -- and `canary.py analyse` reads `null` as a rollback, because an
+not a zero — and `canary.py analyse` reads `null` as a rollback, because an
 absent series and a healthy one look identical from a dashboard and §13.6
 spends a callout on exactly that. Substituting a zero would turn "nobody
 scraped the canary" into "the canary had no errors", which promotes on a
@@ -42,7 +42,7 @@ def query(base_url: str, expression: str) -> float | None:
 
     None covers three different silences on purpose: an empty result, a
     non-finite value, and a body that does not parse. All three mean the same
-    thing to the caller -- this metric was not measured -- and distinguishing
+    thing to the caller — this metric was not measured — and distinguishing
     them here would invite a caller to treat one of them as a reading.
 
     A transport or HTTP error is NOT one of them. That is the monitoring stack
@@ -76,7 +76,7 @@ def query(base_url: str, expression: str) -> float | None:
 
     # EVERY non-finite value, not just NaN. `histogram_quantile` returns NaN for
     # a histogram with no observations, and NaN compares false against every
-    # threshold -- so read as a number it sails through the absolute and the
+    # threshold — so read as a number it sails through the absolute and the
     # relative checks alike and promotes.
     #
     # Prometheus also encodes `+Inf` and `-Inf`, and `-Inf` is the dangerous

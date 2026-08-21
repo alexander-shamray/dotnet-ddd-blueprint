@@ -4,8 +4,8 @@
 §15.5 specifies the rollout: "route 5% of traffic to the new version, watch
 error rate and p99 for ten minutes, then progress to 25%, 50%, 100%. Roll back
 automatically if either metric regresses beyond threshold." This file is the
-half of that sentence a workflow cannot be trusted with -- the weight
-arithmetic and the promote/rollback decision -- kept out of YAML so it can be
+half of that sentence a workflow cannot be trusted with — the weight
+arithmetic and the promote/rollback decision — kept out of YAML so it can be
 asserted.
 
 **It reaches no cluster and no Prometheus.** `plan` and `analyse` are pure
@@ -14,7 +14,7 @@ functions over their arguments; the workflow queries Prometheus and runs
 nobody has run still worth shipping: the part that decides is testable today,
 and the part that acts is four commands whose failure is loud.
 
-Stdlib only, on the licence gate's terms -- no restore, no SDK, no
+Stdlib only, on the licence gate's terms — no restore, no SDK, no
 dependencies. The plan is JSON rather than YAML for the same reason
 `deploy/observability/dashboards` is: there is no stdlib YAML parser, and a
 gate that needs a `pip install` is a gate that gets skipped.
@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import re
 import sys
 from pathlib import Path
@@ -46,7 +45,7 @@ PLAN_PATH = CANARY / "canary.json"
 SOURCE_INPUTS = [
     "src",
     "deploy/helm",
-    # Checks 3 and 5 both read platform-alerts.yaml -- one to take §13.6's
+    # Checks 3 and 5 both read platform-alerts.yaml — one to take §13.6's
     # thresholds out of it rather than restate them, the other to establish
     # that a metric this plan queries is one a loaded alert already reads.
     # Retuning ErrorRateService without this entry is a green pull request:
@@ -60,19 +59,19 @@ WORKFLOW = ROOT / WORKFLOW_PATH
 
 # The two verdicts, and there are deliberately only two.
 #
-# A third -- "hold", "inconclusive", "needs a human" -- reads as caution and is
+# A third — "hold", "inconclusive", "needs a human" — reads as caution and is
 # the opposite: an unattended rollout that cannot decide leaves a canary
 # serving traffic on nobody's authority. The reason this is affordable is the
 # shape of the mechanism rather than optimism about the readings. The canary is
 # a SECOND Deployment and the stable one is never touched (ADR-022), so
-# rollback costs the canary's own pods and nothing else -- no `helm rollback`
+# rollback costs the canary's own pods and nothing else — no `helm rollback`
 # and no image change on the pods serving the other 95%.
 #
 # NOT "and no schema to undo", which this comment said and ADR-022 denies: the
 # canary release runs §7.4's migration hook, because it is the first thing
 # carrying the new image, and a rollback removes the pods and LEAVES THE SCHEMA
 # MIGRATED. What makes that survivable is §15.5's backward-compatibility
-# requirement, which ADR-022 sharpens rather than relaxes -- a cheap rollback is
+# requirement, which ADR-022 sharpens rather than relaxes — a cheap rollback is
 # worth nothing against an incompatible migration. The pods are the cheap half;
 # the schema is not a half this mechanism buys at all.
 #
@@ -119,7 +118,7 @@ def _ceil_div(numerator: int, denominator: int) -> int:
 
     Every quantity in the weight arithmetic is a count of pods or a whole
     percentage, so the exact answer is available and the float route is not
-    merely imprecise -- it is wrong at the input the ladder starts from.
+    merely imprecise — it is wrong at the input the ladder starts from.
     """
     return -(-numerator // denominator)
 
@@ -130,7 +129,7 @@ def required_stable(weight_percent: int, overshoot_points: int) -> int:
     One canary pod is the smallest canary there is, so it serves
     `1 / (stable + 1)` of the traffic and that fraction is the finest weight
     the mechanism has. Inverting it gives the stable count a requested weight
-    needs -- 19 for §15.5's 5%, which is why the ladder's first rung is a
+    needs — 19 for §15.5's 5%, which is why the ladder's first rung is a
     scale-up and not a no-op.
 
     Separate from `plan` and used by it, so the number in the refusal and the
@@ -150,7 +149,7 @@ def plan(weight_percent: int, stable_replicas: int, overshoot_points: int) -> di
     **A replica-weighted canary cannot hit an arbitrary weight**, and this is
     the function that refuses to pretend otherwise. Traffic reaches these pods
     through a ClusterIP Service, which spreads connections across its endpoints
-    -- so the share the new version serves is `canary / (stable + canary)` and
+    — so the share the new version serves is `canary / (stable + canary)` and
     the achievable weights are the fractions that arithmetic can make. With
     §15.3's `replicaCount: 3`, the smallest canary is one pod and the smallest
     weight is 25%, which is five times the 5% §15.5 asks for.
@@ -166,7 +165,7 @@ def plan(weight_percent: int, stable_replicas: int, overshoot_points: int) -> di
     One pod is the floor, so where even a single canary exceeds the ceiling
     there is nothing to round down to and this raises. The message names the
     stable replica count that WOULD satisfy the request, because that is the
-    decision the operator actually has -- scale up and pay for it, or accept a
+    decision the operator actually has — scale up and pay for it, or accept a
     coarser step and say so in `tolerance`.
 
     This rule and `required_stable` are one design read from two ends: that
@@ -194,7 +193,7 @@ def plan(weight_percent: int, stable_replicas: int, overshoot_points: int) -> di
     # INTEGER ARITHMETIC THROUGHOUT, and that is a correction rather than a
     # preference. Written with floats this read
     # `ceil(stable * f / (1 - f))`, and at the one input the whole ladder
-    # starts from -- 5% against 19 replicas -- `19 * 0.05 / 0.95` evaluates to
+    # starts from — 5% against 19 replicas — `19 * 0.05 / 0.95` evaluates to
     # 1.0000000000000002, so `ceil` returned two pods and the step served 9.5%
     # instead of 5%. `required_stable` and `plan` then disagreed about the same
     # number: one named 19 as the count that works and the other refused it.
@@ -242,8 +241,8 @@ def analyse(readings: dict, thresholds: dict) -> dict:
     they are checked in.
 
     **An absent series is a failure, not a silence.** §15.1 already says this
-    about the k6 SLO run -- it "fails on an absent series as well as on a
-    breached one" -- and §13.6 spends a callout on the same shape: an empty
+    about the k6 SLO run — it "fails on an absent series as well as on a
+    breached one" — and §13.6 spends a callout on the same shape: an empty
     dashboard reads identically whether the system is healthy or the metric was
     never published. A canary that promotes on `None` promotes on a scrape that
     did not happen.
@@ -345,7 +344,7 @@ def _regression(
     A missing BASELINE is not a rollback and a missing canary reading is, which
     looks asymmetric and is not. The canary's own absence means the new version
     is not being observed. The baseline's absence means there is nothing to
-    compare against -- the absolute checks above still ran, and inventing a
+    compare against — the absolute checks above still ran, and inventing a
     regression against a number nobody has is worse than declining to.
     """
     if baseline_value is None:
@@ -410,7 +409,7 @@ def check(plan_document: dict, root: Path = ROOT) -> list[str]:
 
     # 2. Every threshold the verdict reads exists. `analyse` indexes these
     #    rather than `.get`-ing them, so a missing key is a KeyError mid-rollout
-    #    -- which is this check's whole reason for existing.
+    #    — which is this check's whole reason for existing.
     for key in (
         "errorRate",
         "latencyP99Seconds",
@@ -432,13 +431,13 @@ def check(plan_document: dict, root: Path = ROOT) -> list[str]:
     #
     #    §13.2 sets the resource's service.name from
     #    `builder.Environment.ApplicationName`, which defaults to the ENTRY
-    #    ASSEMBLY name -- so the edge emits `Gateway.Api` and the chart's
+    #    ASSEMBLY name — so the edge emits `Gateway.Api` and the chart's
     #    `workload.name` (`gateway`) never reaches the label.
     #    platform-alerts.yaml carries a nine-line comment about getting this
     #    exact substitution wrong, where the misspelling matched no series and
     #    the alert was silent. The same misspelling here promotes every canary,
     #    because a query that matches nothing returns nothing and an absent
-    #    series is the rollback above -- so it fails safe and never promotes,
+    #    series is the rollback above — so it fails safe and never promotes,
     #    which is a rollout that can only ever roll back.
     hosts = _host_assemblies(root)
     if not workloads:
@@ -469,7 +468,7 @@ def check(plan_document: dict, root: Path = ROOT) -> list[str]:
 
     # 6. The gate's own subject. Checks 3, 4 and 5 all compare against
     #    something parsed out of another file, and a parser that quietly
-    #    extracted nothing would pass all three vacuously -- which is this
+    #    extracted nothing would pass all three vacuously — which is this
     #    repository's most-repeated failure, named in CLAUDE.md as such.
     if not hosts:
         failures.append(
@@ -542,7 +541,7 @@ def _alert_threshold(text: str, alert: str) -> float | None:
 def _host_assemblies(root: Path) -> set[str]:
     """Every project that produces a host, by assembly name.
 
-    A host is a project with a `Program.cs` beside its csproj -- which is what
+    A host is a project with a `Program.cs` beside its csproj — which is what
     `Assembly.GetEntryAssembly()` resolves to at run time and therefore what
     `ApplicationName` defaults to. Derived rather than listed, so a sixth
     service's API is a host here the day it exists.

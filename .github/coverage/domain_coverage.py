@@ -3,7 +3,7 @@
 
 Section 12.9 calls coverage a diagnostic rather than a target, so this reports and
 never gates: no threshold, and no non-zero exit on a low figure.  **PR-25 took
-that decision rather than inheriting it** -- the same section says a threshold
+that decision rather than inheriting it** — the same section says a threshold
 that fails a build stops being read and starts being satisfied, and PR-25's
 quality gate is the stage-count floor in `.github/pipeline-gate/` instead, whose
 subject is whether a suite ran at all.
@@ -33,29 +33,29 @@ the merge is written:
 * `--logger trx` changes the layout.  Without it the collector leaves one
   merged attachment per run, which is what the single-file reader this replaces
   relied on; with it, each test project also writes its own partial attachment
-  under the TRX result directory -- eight files for one stage here, three of
+  under the TRX result directory — eight files for one stage here, three of
   them empty.  The stage-count gate needs those TRX files, so the reporter had
   to stop assuming.
 
 **The union is what makes both of those safe.**  Hits are merged with `max`
-over an injective key, so reading the same attachment twice -- which the layout
-above guarantees, since the merged file and the per-project ones overlap --
+over an injective key, so reading the same attachment twice — which the layout
+above guarantees, since the merged file and the per-project ones overlap —
 cannot inflate the figure.  Summing hits would have.
 
 Stdlib only, like the licence gate one directory over, though **not** for the
-licence gate's reason: that one runs ahead of the build, and this one cannot --
+licence gate's reason: that one runs ahead of the build, and this one cannot —
 it reads what the test run produced, so restore and build are behind it either
 way.  What it inherits is only the preference for adding no dependency.  That
 rules out `defusedxml`, which is the usual answer to `ElementTree`'s
 entity-expansion exposure; what makes the stdlib parser acceptable here is the
 input rather than the parser.  This reads
 artefacts that `Microsoft.CodeCoverage` wrote, on the runner, minutes earlier,
-under paths this step names -- there is no untrusted document on that path, and
+under paths this step names — there is no untrusted document on that path, and
 a repository that could plant one could plant the script instead.
 
 **It has a test suite now, and the reason it did not is what changed.**  The
 old argument was that it asserts nothing about the repository and its one real
-failure mode -- no report -- is checked at run time.  Both halves still hold.
+failure mode — no report — is checked at run time.  Both halves still hold.
 What arrived with the merge is arithmetic: a key that collides, a `max` that
 should have been a sum, a partial attachment counted as a whole.  None of those
 fails loudly, and all of them move the number.  A figure that is quietly wrong
@@ -71,7 +71,7 @@ from pathlib import Path
 # One method line, identified the way the collector identifies it.
 #
 # The signature is in the key because overloads share a name, and the class is
-# because a partial class's members are spread across files -- both measured to
+# because a partial class's members are spread across files — both measured to
 # collide without it on this repository's own report.  With all five parts the
 # key is injective: 308 keys for 308 lines, checked against the collector's own
 # `lines-valid` rather than assumed.
@@ -102,8 +102,8 @@ def merge(reports: list[Path]) -> dict[LineKey, int]:
     """Union the reports, keeping the highest hit count seen for each line.
 
     `max` rather than `+` is the whole of the de-duplication story.  The
-    layout puts the same line in more than one file by construction -- the
-    run's merged attachment and the per-project one that fed it -- so summing
+    layout puts the same line in more than one file by construction — the
+    run's merged attachment and the per-project one that fed it — so summing
     would count a line twice for having been reported twice, and the figure
     would grow with the number of test projects rather than with the tests.
     """

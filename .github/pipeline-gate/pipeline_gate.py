@@ -5,9 +5,9 @@ Three subcommands, and they answer the three ways §15.1's staged pipeline can
 be quietly wrong: a deployable nothing filters, an image nothing builds, and a
 stage nothing ran.
 
-`filters` is §15.1's own instruction -- "assert that every immediate child of
+`filters` is §15.1's own instruction — "assert that every immediate child of
 `src/`, and every immediate child of `src/Services/`, appears in at least one
-filter -- and fail on the one that does not". A path filter is a deployable
+filter — and fail on the one that does not". A path filter is a deployable
 inventory, and an inventory drifts: a missing top-level entry is what left
 `src/Gateway/**` and `src/BFF/**` unbuilt, and a missing entry under
 `Services/` is quieter still, because the parent is spoken for by its siblings
@@ -23,7 +23,7 @@ reports success having built nothing.
 
 `stages` is the one docs/testing.md names: "whoever writes the staged pipeline
 should assert a floor on each stage's count rather than trusting a green exit."
-The trap it closes is §12.1's oldest one wearing different clothes -- a missing
+The trap it closes is §12.1's oldest one wearing different clothes — a missing
 test adapter makes `dotnet test` report no tests and exit **zero**, and a
 mistyped `--filter` does exactly the same. Splitting one run into three is
 three new ways to select nothing and be congratulated for it.
@@ -59,15 +59,15 @@ SOLUTION = ROOT / "Platform.slnx"
 #
 # MEASURED, not guessed: `dotnet test Platform.slnx --no-build -c Release` under
 # each stage's filter on this repository, summed over the thirteen per-project
-# totals -- 18 + 606 + 171 = 795, which is the figure CLAUDE.md and
+# totals — 18 + 606 + 171 = 795, which is the figure CLAUDE.md and
 # docs/testing.md carry and the sum docs/testing.md points at ("624 and 171
 # summing to 795", 624 being the architecture and unit stages together).
 #
 # THE NUMBERS BELOW ARE NOT THOSE COUNTS, and the gap is deliberate. A floor
 # set at the measurement is a ratchet: it fails on the day somebody legitimately
 # deletes a test class, which is a green change made red by bookkeeping. What
-# this is groping for is an order-of-magnitude miss -- a filter that selected
-# nothing, or a tenth of what it should -- and a round number well under the
+# this is groping for is an order-of-magnitude miss — a filter that selected
+# nothing, or a tenth of what it should — and a round number well under the
 # measurement catches that without firing on ordinary churn. The structural
 # checks below are what catch the small stuff, and they have no number to age.
 STAGE_FLOORS = {
@@ -162,14 +162,14 @@ def check_filters(root: Path = ROOT) -> list[str]:
 
     # The gate's own subject, first. Every check below is "is this directory in
     # that list", so an empty list passes all of them and reports a clean
-    # inventory -- which CLAUDE.md names as this repository's most-repeated
+    # inventory — which CLAUDE.md names as this repository's most-repeated
     # failure. A parser that extracted nothing is the parser being broken, not
     # the workflow being complete.
     if not patterns:
         return [
             "found no path patterns under `filters: |` in ci.yml. Every check "
             "here asks whether a directory appears in that list, so an empty "
-            "list would pass all of them vacuously -- this is the parser "
+            "list would pass all of them vacuously — this is the parser "
             "failing, not the inventory being complete"
         ]
 
@@ -244,13 +244,13 @@ def check_images(root: Path = ROOT) -> list[str]:
     Both directions, on `deploy/observability/check.py`'s reasoning about
     alerts and runbooks: a Dockerfile in no matrix is an image CI never builds,
     and a matrix entry naming no Dockerfile is a step that fails on the day it
-    is first selected -- which, being path-filtered, may be months after the
+    is first selected — which, being path-filtered, may be months after the
     rename that caused it.
 
     The third check is the one neither direction can make. A matrix entry's
     `filter` is read back as `needs.changes.outputs[matrix.filter]`, and an
     expression indexing a name no filter defines evaluates to the empty string
-    rather than erroring -- so the `if` is false, the step is skipped, and the
+    rather than erroring — so the `if` is false, the step is skipped, and the
     job reports success having built nothing. A misspelling there is invisible
     from both sides of the inventory.
     """
@@ -266,7 +266,7 @@ def check_images(root: Path = ROOT) -> list[str]:
         return [
             "found no (filter, dockerfile) pairs in the images matrix in "
             "ci.yml. Every check here compares against that list, so an empty "
-            "one passes them all vacuously -- the parser is what is broken"
+            "one passes them all vacuously — the parser is what is broken"
         ]
 
     declared = {dockerfile for _filter, dockerfile in matrix}
@@ -285,7 +285,7 @@ def check_images(root: Path = ROOT) -> list[str]:
         problems.append(
             f"{dockerfile} is built by no entry in ci.yml's images matrix. "
             "§15.1 builds every image a changed service ships, and one nothing names "
-            "is one CI never builds -- which surfaces on the next compose pull "
+            "is one CI never builds — which surfaces on the next compose pull "
             "request rather than on the change that broke it"
         )
 
@@ -324,7 +324,7 @@ def read_stage(directory: Path) -> tuple[int, set[str], set[str]]:
 
     `dotnet test` over a solution writes one TRX per test project, so this sums
     rather than reads a single number. A stage directory with no TRX in it is
-    not zero tests -- it is a logger that did not run, and the caller treats
+    not zero tests — it is a logger that did not run, and the caller treats
     the two differently.
     """
     total = 0
@@ -353,8 +353,8 @@ def read_stage(directory: Path) -> tuple[int, set[str], set[str]]:
                 total += int(element.get("total", "0"))
             elif tag == "TestMethod":
                 # The assembly is part of the identity, not just of the
-                # inventory. Two projects may hold a class of the same name --
-                # `ArchitectureTests` is very nearly that already -- and an
+                # inventory. Two projects may hold a class of the same name —
+                # `ArchitectureTests` is very nearly that already — and an
                 # identity without it would report an overlap that is not
                 # there, which is a red build with no defect behind it.
                 code_base = element.get("codeBase", "")
