@@ -179,7 +179,9 @@ each output into the named variable, the same discipline the File step uses for
 
 ```bash
 mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $posix
-cygpath -m "<the path just printed>"                 # the same directory, host-native — capture it as $work
+cygpath -m "<the path just printed>"                 # host-native — capture it as $work
+                                                     # …unless cygpath is absent: skip this ONE line
+                                                     # and $work is $posix. Never leave it unset.
 git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
 bash .claude/scripts/git-worktree-detach.sh "$posix" "$pinned"   # pin that exact commit, never HEAD re-resolved
 ```
@@ -195,11 +197,25 @@ check each makes against `secsweep-` plus six characters is performed on the
 spelling it was written for — while every `Read`, `Grep`, `Glob` and Agent
 prompt below takes `$work`. The two variables are not interchangeable in either
 direction, and the split runs the whole length of the command: shell in one
-column, readers in the other. Where `cygpath` does not exist there is no
-divergence to correct and `$work` is the printed path unchanged, which is the
-shape `grok-review.sh`'s `host_path()` already uses. `-m` rather than `-w`
-deliberately: it yields forward slashes, which the readers accept and which
-survive interpolation into a prompt, where a backslash spelling does not.
+column, readers in the other. **Where `cygpath` does not exist the second line
+is skipped rather than run and failed**, and `$work` is `$posix` unchanged — the
+branch `grok-review.sh`'s `host_path()` spells with `command -v`. That verb is
+not in the grant, and a `work=$(cygpath …)` assignment would not lead with the
+verb its grant names, so the branch lives in the block above as a line the
+procedure says to skip rather than as a conditional it cannot express. It is the
+one line there that *Never fail open* does not govern, because a line
+deliberately skipped did not fail — and stating that is what keeps a
+container-layout run from having two instructions it cannot both obey.
+
+**`$work` is never unset, and that is the half with teeth.** Left unset, the
+readable-root proof below degrades from `$work/Platform.slnx` to a
+workspace-relative `Platform.slnx` — which this repository has at its root — so
+the check passes against the caller's tree and reports a snapshot it never
+opened. That is the precise fail-open the named-file assertion exists to close,
+reintroduced by an unbound variable, so the proof takes an **absolute** path or
+it is not the proof. `-m` rather than `-w` deliberately: it yields forward
+slashes, which the readers accept and which survive interpolation into a prompt,
+where a backslash spelling does not.
 
 **The `secsweep-` prefix is not a copy-paste slip, and it is this command's one
 piece of borrowed clothing.** `git-worktree-detach.sh` and
@@ -279,16 +295,16 @@ stdin (the File step), not written to files — so `$work` stays clean and the
 teardown below removes it without `--force`.
 
 **Prove the root is readable before the fan-out, rather than trusting the add.**
-`Glob` a file the pinned commit is known to carry — `$work/Platform.slnx` — and
-require exactly one hit. A path the shell created is not necessarily a path the
-built-in readers resolve, and the failure is not reliably loud: `Glob` given a
-`path=` argument reports a directory that does not exist, but a *pattern*
-matching nothing returns `No files found`, which is exactly what a clean scope
-returns. Assert on a named tracked file rather than on a non-empty result — a
-wrong-but-populated directory satisfies non-emptiness, and on this repository's
-own development host the wrong directory has content in it. A root that cannot
-be proved readable is a round that could not run, reported under *Never fail
-open* below exactly like a failed `git worktree add`.
+`Glob` a file the pinned commit is known to carry — `$work/Platform.slnx`, as an
+**absolute** path — and require exactly one hit. A path the shell created is not
+necessarily a path the built-in readers resolve, and the failure is not reliably
+loud: `Glob` given a `path=` argument reports a directory that does not exist,
+but a *pattern* matching nothing returns `No files found`, which is exactly what
+a clean scope returns. Assert on a named tracked file rather than on a non-empty
+result — a wrong-but-populated directory satisfies non-emptiness, and on this
+repository's own development host the wrong directory has content in it. A root
+that cannot be proved readable is a round that could not run, reported under
+*Never fail open* below exactly like a failed `git worktree add`.
 
 **Binding the reads to `$work` is a rule, not the worktree's doing.** The
 detached checkout pins the commit, but nothing about it forces a reader to look

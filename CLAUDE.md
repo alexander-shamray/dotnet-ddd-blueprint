@@ -586,7 +586,11 @@ own line rather than sending a reader to a file that does not hold it.
   host-native ones, and on this host `/tmp` is `D:\tmp\alexa` for the shell and
   `C:\tmp` for the readers — different directories, both populated. Translate
   with `cygpath -m` at the point of capture and keep the two spellings in named
-  variables, because the failure is silent in the direction that matters: a
+  variables — and write the no-`cygpath` host into the procedure as a **skipped
+  line**, never as prose beside an unconditional one, or a container layout gets
+  two instructions it cannot both obey and the unbound variable turns the next
+  absolute path into a relative one. The failure is silent in the direction
+  that matters: a
   `Glob` **pattern** under an unresolvable root returns `No files found`, which
   is exactly what a clean scope returns. Only the `path=` form errors. The
   divergence was already diagnosed twice in-tree for *subprocesses*
