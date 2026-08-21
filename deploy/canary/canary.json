@@ -68,9 +68,21 @@
       "The window equals the dwell rather than being a separate constant. §15.5",
       "watches each weight for ten minutes; a rate over ten minutes read at the",
       "end of ten minutes IS that watch, and a second number here would be a",
-      "second thing to keep in step."
+      "second thing to keep in step.",
+      "",
+      "THE `or vector(0)` ON THE ERROR-RATE NUMERATOR IS NOT DEFENSIVE, it is",
+      "what lets a healthy canary promote at all. A canary serving no 5xx",
+      "matches no series for the numerator, and PromQL keeps an empty vector",
+      "empty through the division rather than treating it as zero — so the",
+      "query returns no sample, read_prometheus returns null, and analyse reads",
+      "that as an absent series and rolls back. A canary with a perfect record",
+      "would have failed every step, for ever.",
+      "",
+      "Only the numerator is coalesced. An empty DENOMINATOR means no traffic",
+      "at all, which is a real silence and must stay one — the requests query",
+      "and minimumRequests are what judge it."
     ],
-    "errorRate": "sum(rate(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\", http_response_status_code=~\"5..\"}[$WINDOW])) / sum(rate(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\"}[$WINDOW]))",
+    "errorRate": "(sum(rate(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\", http_response_status_code=~\"5..\"}[$WINDOW])) or vector(0)) / sum(rate(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\"}[$WINDOW]))",
     "latencyP99Seconds": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"$SERVICE\", deployment_track=\"$TRACK\"}[$WINDOW])))",
     "requests": "sum(increase(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\"}[$WINDOW]))"
   },

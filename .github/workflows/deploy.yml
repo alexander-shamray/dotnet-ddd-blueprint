@@ -172,6 +172,33 @@ jobs:
             --ignore-not-found -o jsonpath='{.spec.minReplicas}')
           echo "HPA_FLOOR=$FLOOR" >> "$GITHUB_ENV"
 
+          # THE TARGET IS A MAXIMUM, because this step may only ever scale UP.
+          # `$NEEDED` is what the first rung's weight requires, not what the
+          # service is currently running: a workload the autoscaler has taken
+          # to 20 under load would have been forced DOWN to 19, and an HPA
+          # floor already above 19 would have been LOWERED to it. Reducing
+          # production capacity to start a canary is the opposite of what a
+          # canary is for, and it happens at the busiest moment, since a high
+          # replica count is what load looks like.
+          #
+          # Taking the maximum keeps the weight honest too — more stable pods
+          # only make the canary's share smaller than the rung asked for, and
+          # `plan` treats the requested weight as a ceiling.
+          # ONE read of the replica count, used for both the maximum above and
+          # the value the cleanup restores. Two reads of one number is how a
+          # message ends up naming a figure the check beside it would reject,
+          # which this branch has already paid for once.
+          CURRENT=$(kubectl get deployment "$WORKLOAD" -n "$NAMESPACE" \
+            -o jsonpath='{.spec.replicas}')
+          echo "STABLE_REPLICAS_BEFORE=$CURRENT" >> "$GITHUB_ENV"
+
+          for candidate in "$CURRENT" "$FLOOR"; do
+            if [ -n "$candidate" ] && [ "$candidate" -gt "$NEEDED" ]; then
+              NEEDED="$candidate"
+            fi
+          done
+          echo "Scaling the stable track to $NEEDED (never below what it runs now)."
+
           # The Deployment's own replica count, recorded whether or not there
           # is an HPA — and it is the ONLY thing to restore when there is not.
           # `autoscaling.enabled: false` is a supported chart configuration
@@ -179,9 +206,6 @@ jobs:
           # while this step had still scaled production to 19. A rollback then
           # left the service permanently over-scaled, which is the same defect
           # as leaving minReplicas at 19 and is invisible for longer.
-          echo "STABLE_REPLICAS_BEFORE=$(kubectl get deployment "$WORKLOAD" \
-            -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')" >> "$GITHUB_ENV"
-
           if [ -n "$FLOOR" ]; then
             kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
               --type=merge -p "{\"spec\":{\"minReplicas\":$NEEDED}}"

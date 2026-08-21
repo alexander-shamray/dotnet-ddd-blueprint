@@ -249,6 +249,38 @@ class PlanDocumentTests(unittest.TestCase):
                 self.assertIn("$TRACK", expression)
                 self.assertIn("$WINDOW", expression)
 
+    def test_the_error_rate_numerator_is_coalesced(self) -> None:
+        """The difference between a canary that can promote and one that cannot.
+
+        A canary serving no 5xx matches no series for the numerator, and PromQL
+        carries an empty vector through the division rather than treating it as
+        zero — so the query returns no sample, `read_prometheus` returns None,
+        and `analyse` reads that as an absent series and rolls back. **A canary
+        with a perfect record would have failed every step, for ever**, which
+        is the one defect that makes the whole mechanism inoperable rather than
+        merely wrong.
+
+        Only the numerator: an empty denominator means no traffic at all, which
+        is a real silence and is judged by `requests` against
+        `minimumRequests`.
+        """
+        error_rate = canary.entries(self.document["queries"])["errorRate"]
+
+        self.assertIn("or vector(0)", error_rate)
+        self.assertTrue(
+            error_rate.startswith("(sum("),
+            "the coalesce has to wrap the numerator, not the whole expression",
+        )
+        for name, expression in canary.entries(self.document["queries"]).items():
+            if name != "errorRate":
+                with self.subTest(query=name):
+                    self.assertNotIn(
+                        "or vector(0)", expression,
+                        "coalescing a count or a quantile turns 'nobody scraped "
+                        "this' into a healthy zero, which is the trap the "
+                        "absent-series rule exists for",
+                    )
+
     def test_the_queries_read_the_track_label_and_not_the_version(self) -> None:
         """service_version was the obvious discriminator and is not one:
         BuildInfo.Version strips the source-revision suffix on purpose and
