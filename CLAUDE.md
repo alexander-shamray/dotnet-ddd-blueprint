@@ -580,6 +580,18 @@ own line rather than sending a reader to a file that does not hold it.
   earliest point: not a gate that stopped covering a surface, but one whose
   subject never existed. Assert the **agreement** between the two halves, which
   fails from either side.
+- **A path the shell created is not necessarily a path the built-in readers
+  resolve.** Under MSYS the two halves of this session disagree: `mktemp -d`
+  prints a POSIX path, `Read`/`Grep`/`Glob` and every subagent resolve
+  host-native ones, and on this host `/tmp` is `D:\tmp\alexa` for the shell and
+  `C:\tmp` for the readers — different directories, both populated. Translate
+  with `cygpath -m` at the point of capture and keep the two spellings in named
+  variables, because the failure is silent in the direction that matters: a
+  `Glob` **pattern** under an unresolvable root returns `No files found`, which
+  is exactly what a clean scope returns. Only the `path=` form errors. The
+  divergence was already diagnosed twice in-tree for *subprocesses*
+  (`git-worktree-drop.sh`, `grok-review.sh`'s `host_path()`) and never for the
+  readers.
 - **One tool's "valid" is not the next tool's, and the gap is where a value
   crosses between them.** PR-23 hit this three times in one file: `Release_1`
   is a legal OCI tag and an illegal Job name; `https://shop.example.com:443` is

@@ -1,7 +1,7 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*), Bash(cygpath:*)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -26,16 +26,35 @@ layout, both of which this repo runs under) cannot create `../<repo>-secsweep`,
 and `mktemp -d` is the same choice `grok-review.sh` already makes for this
 reason:
 
-Each capturing line leads with the verb its grant names — `Bash(mktemp:*)` and
-`Bash(git rev-parse:*)` prefix-match the command string, and a `work=$(mktemp …)`
-assignment starts with `work=`, not `mktemp`. Capture each output into the named
-variable, the same discipline the File step uses for `--body-file`:
+Each capturing line leads with the verb its grant names — `Bash(mktemp:*)`,
+`Bash(cygpath:*)` and `Bash(git rev-parse:*)` prefix-match the command string,
+and a `work=$(cygpath …)` assignment starts with `work=`, not `cygpath`. Capture
+each output into the named variable, the same discipline the File step uses for
+`--body-file`:
 
 ```bash
-mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $work
+mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $posix
+cygpath -m "<the path just printed>"                 # the same directory, host-native — capture it as $work
 git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
-bash .claude/scripts/git-worktree-detach.sh "$work" "$pinned"   # pin that exact commit, never HEAD re-resolved
+bash .claude/scripts/git-worktree-detach.sh "$posix" "$pinned"   # pin that exact commit, never HEAD re-resolved
 ```
+
+**`$work` is the host-native spelling and `$posix` is the shell's — two strings
+for one directory, and on some hosts two directories.** Under MSYS or Git Bash
+`mktemp` prints a POSIX path, while the built-in readers and every subagent
+resolve host-native ones; `/tmp` can be one directory for the shell and quite
+another for them, which is not a rounding error but a different tree with
+different contents. So both worktree helpers take `$posix` — they are shell
+scripts, so git receives the argument through MSYS conversion and the shape
+check each makes against `secsweep-` plus six characters is performed on the
+spelling it was written for — while every `Read`, `Grep`, `Glob` and Agent
+prompt below takes `$work`. The two variables are not interchangeable in either
+direction, and the split runs the whole length of the command: shell in one
+column, readers in the other. Where `cygpath` does not exist there is no
+divergence to correct and `$work` is the printed path unchanged, which is the
+shape `grok-review.sh`'s `host_path()` already uses. `-m` rather than `-w`
+deliberately: it yields forward slashes, which the readers accept and which
+survive interpolation into a prompt, where a backslash spelling does not.
 
 **Pin the resolved commit, not `HEAD` a second time.** Reading `HEAD` once for a
 summary and again for `git worktree add` are two calls, and in a repo worked by
@@ -52,6 +71,18 @@ nothing to disk** — issue bodies are piped to `gh issue create` on stdin (the
 File step), not written to files — so `$work` stays clean on its own and the
 teardown below removes it without `--force`.
 
+**Prove the root is readable before the fan-out, rather than trusting the add.**
+`Glob` a file the pinned commit is known to carry — `$work/Platform.slnx` — and
+require exactly one hit. A path the shell created is not necessarily a path the
+built-in readers resolve, and the failure is not reliably loud: `Glob` given a
+`path=` argument reports a directory that does not exist, but a *pattern*
+matching nothing returns `No files found`, which is exactly what a clean scope
+returns. Assert on a named tracked file rather than on a non-empty result — a
+wrong-but-populated directory satisfies non-emptiness, and on this repository's
+own development host the wrong directory has content in it. A root that cannot
+be proved readable is a round that could not run, reported under *Never fail
+open* below exactly like a failed `git worktree add`.
+
 **Binding the reads to `$work` is a rule, not the worktree's doing.** The
 detached checkout pins the commit, but nothing about it forces a reader to look
 there — `Read`, `Grep`, `Glob` and an Agent default to the caller's workspace.
@@ -63,7 +94,13 @@ ways to point one at `$work` — `cd "$work" && …` or `git -C "$work" …` —
 with a verb the grant does not name, so the rule would have been unsatisfiable.
 The built-in readers take an explicit path and need no such trick. Reading
 outside `$work` after a successful add is the same fail-open the hard stop above
-closes for a failed one; treat it the same way.
+closes for a failed one; treat it the same way. **The rule is satisfiable only
+because `$work` is host-native.** In the shell's own spelling every one of those
+reads resolves somewhere else, and the containment check the verify step makes
+below — that a cited path lies under `$work` — compares two spellings that never
+match, so it would reject every correct finding as though it had come from
+outside the snapshot. One spelling for the root and for the citations is what
+makes that check mean anything.
 
 **It audits the committed `HEAD`.** Uncommitted work in the caller's tree is out
 of scope — that is the point, not a gap: the checkout holds committed `HEAD`
@@ -85,7 +122,7 @@ is not available to defeat it**, which is the helper's whole purpose — it also
 refuses the main worktree and any path this repository has not registered:
 
 ```bash
-bash .claude/scripts/git-worktree-drop.sh "$work"    # from the original directory
+bash .claude/scripts/git-worktree-drop.sh "$posix"   # from the original directory
 ```
 
 A detached, read-only sweep that wrote its scratch to a separate temp path
@@ -257,10 +294,19 @@ files and does not fix. So:
   at seven.
 
 **Never fail open.** A round that errored — a subagent that died, a `gh` call
-that failed — is not a clean round. Report the error and let the user decide;
-do not count a review that did not happen as a review that found nothing. This
-is the same rule that made the Grok loop trust the verdict check over the exit
-code: a review that never ran cannot report as clean.
+that failed, an auditor reporting `unreadable-root` — is not a clean round.
+Report the error and let the user decide; do not count a review that did not
+happen as a review that found nothing. This is the same rule that made the Grok
+loop trust the verdict check over the exit code: a review that never ran cannot
+report as clean.
+
+**The third of those is the one that arrives looking like success.** A dead
+subagent and a failed `gh` call both surface as errors; an auditor handed a
+root it cannot resolve returns an ordinary, well-formed, empty report, and an
+empty report is what a clean scope returns too. That is why the root is proved
+readable before the fan-out and why the auditors have an outcome for it — the
+error has to be manufactured, because nothing about the failure produces one on
+its own.
 
 ## What this command does not do
 
