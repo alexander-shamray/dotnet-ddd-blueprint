@@ -21,8 +21,9 @@ WORKDIR /src
 # present when it runs is simply not restored, and the --no-restore publish
 # below then fails with NETSDK1004 naming a project this file never mentions.
 # So a new ProjectReference anywhere in the chain is a line here too, and
-# §15.1's `images` job is what says so since PR-25: it builds one image per
-# changed service, so a missing line fails `docker build` on the pull request
+# §15.1's `images` job is what says so since PR-25: it builds every image a
+# changed service ships — api and migrator alike, so two for a service that
+# owns a database — and a missing line fails `docker build` on the pull request
 # that added the reference. It used to surface only on the next compose pull
 # request, that smoke being path-filtered on deploy/compose/** while a
 # reference lands under src/.
