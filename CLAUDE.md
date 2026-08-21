@@ -968,7 +968,7 @@ Run `/validate-blueprint` after any substantive edit.
   fine. Cite the section that actually states the claim; a reference to a
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
-  admonition syntax. Two forms are named and recurring — `**Trap — …**` (15)
+  admonition syntax. Two forms are named and recurring — `**Trap — …**` (16)
   for a mistake worth naming, and `**Decision — …**` (8), which always points
   at the ADR that records it:
 
