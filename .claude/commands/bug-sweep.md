@@ -237,7 +237,7 @@ form is not.
 Porcelain without `-z` C-quotes a pathname containing unusual bytes, and a
 non-ASCII `TMPDIR` is the ordinary way to get one: a Windows account name
 outside ASCII puts one straight into `mktemp`'s output. The record then reads
-`worktree "C:/Users/ZoÃ«/..."`, and that string is a *representation*
+`worktree "C:/Users/Zo\303\253/..."`, and that string is a *representation*
 rather than a path, so handing it to the readers fails the proof below. Treat a
 record whose path begins with a double quote as the same class as a root that
 does not resolve, reported under *Never fail open*.
