@@ -713,7 +713,7 @@ carries those three commands.
 
 `deploy/canary/README.md` is that tree's operational reference, on
 `deploy/observability/README.md`'s terms: what the gate asserts, and — more
-usefully — the four things it does not, of which the load-bearing one is that
+usefully — the things it does not, of which the load-bearing one is that
 **nothing has established a replica ratio is a traffic ratio**. kube-proxy
 spreads connections rather than requests, and no render-time check reaches
 that.

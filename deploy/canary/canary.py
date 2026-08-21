@@ -484,6 +484,23 @@ def check(plan_document: dict, root: Path = ROOT) -> list[str]:
     #    reads that a loaded alert also reads inherits the proof. A metric here
     #    and nowhere else is a name nothing has ever vouched for, which is the
     #    typo this catches.
+    # 5a. The three queries `analyse` consumes must exist.
+    #
+    # Check 5 vouches for the metrics a query READS, and says nothing about a
+    # query that is not there: deleting `requests` — or the whole `queries`
+    # object — passed every check here, after which `read` returns a reading
+    # short and `analyse` rolls back for an absent series. An inoperable plan
+    # that fails at the end of the first ten-minute dwell rather than in a gate
+    # that takes milliseconds.
+    queries = entries(plan_document.get("queries", {}))
+    for name in ("errorRate", "latencyP99Seconds", "requests"):
+        if name not in queries:
+            failures.append(
+                f"queries.{name} is missing, and analyse() reads it for both "
+                "tracks. Without it every rung ends in a rollback for an absent "
+                "series, ten minutes at a time"
+            )
+
     failures += _metrics_are_vouched_for(plan_document, root)
 
     # 6. The gate's own subject. Checks 3, 4 and 5 all compare against
@@ -627,7 +644,13 @@ def _workflow_covers_inputs() -> list[str]:
     failures = []
     for index, block in enumerate(blocks):
         patterns = re.findall(r"-\s*'([^']+)'", block)
-        for entry in SOURCE_INPUTS:
+        # THE WORKFLOW'S OWN PATH IS REQUIRED TOO, and leaving it out made this
+        # check unable to protect itself: with `.github/workflows/deploy.yml`
+        # removed from both trigger lists, a change to those very lists no
+        # longer runs the gate that validates them. `check.py` has required its
+        # own path since it was written; this copy inherited the pattern and
+        # not that part of it.
+        for entry in SOURCE_INPUTS + [WORKFLOW_PATH]:
             if not any(p == entry or p == f"{entry}/**" for p in patterns):
                 failures.append(
                     f"{WORKFLOW_PATH} trigger {index + 1} does not cover "

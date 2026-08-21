@@ -308,12 +308,21 @@ class StageTests(unittest.TestCase):
         )
 
     def test_a_clean_run_passes(self) -> None:
+        """All THREE stages, because that is what a clean run is. This fixture
+        passed two until the missing-stage check landed, which is the same
+        mistake the check exists to catch, made in the suite."""
+        architecture = self.stage(
+            "architecture", trx(18, "Catalog.Domain.Tests", ["arch"])
+        )
         unit = self.stage("unit", trx(600, "Catalog.Domain.Tests", ["a", "b"]))
         integration = self.stage(
             "integration", trx(160, "Platform.IntegrationTests", ["c"])
         )
 
-        self.assertEqual(pipeline_gate.check_stages([unit, integration], self.solution), [])
+        self.assertEqual(
+            pipeline_gate.check_stages([architecture, unit, integration], self.solution),
+            [],
+        )
 
     def test_an_empty_stage_is_caught(self) -> None:
         """§12.1's oldest trap: `dotnet test` exits ZERO on a filter that
@@ -363,12 +372,34 @@ class StageTests(unittest.TestCase):
         """The identity carries the assembly, and without it this is a red
         build with no defect behind it. `ArchitectureTests` is very nearly a
         class of the same name in more than one project already."""
+        architecture = self.stage(
+            "architecture", trx(18, "Catalog.Domain.Tests", ["arch"])
+        )
         unit = self.stage("unit", trx(600, "Catalog.Domain.Tests", ["a"]))
         integration = self.stage("integration", trx(160, "Platform.IntegrationTests", ["a"]))
 
-        problems = pipeline_gate.check_stages([unit, integration], self.solution)
+        problems = pipeline_gate.check_stages(
+            [architecture, unit, integration], self.solution
+        )
 
         self.assertEqual(problems, [])
+
+    def test_a_declared_stage_nobody_passed_is_caught(self) -> None:
+        """The other direction, and the one that was missing.
+
+        Rejecting an undeclared directory says nothing about a declared stage
+        nobody ran. Drop the architecture invocation and its argument, let
+        those tests fall into the unit filter, and the project-coverage, floor
+        and overlap checks all pass while the gate reports two stages — a gate
+        cannot fail on a file that is not there.
+        """
+        unit = self.stage("unit", trx(600, "Catalog.Domain.Tests", ["a"]))
+        integration = self.stage("integration", trx(160, "Platform.IntegrationTests", ["c"]))
+
+        problems = pipeline_gate.check_stages([unit, integration], self.solution)
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("architecture stage was never read", problems[0])
 
     def test_an_undeclared_stage_directory_is_caught(self) -> None:
         """A results directory nobody declared has no floor, and a check with

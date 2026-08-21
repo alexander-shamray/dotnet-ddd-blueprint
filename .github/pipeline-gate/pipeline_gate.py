@@ -487,6 +487,21 @@ def check_stages(directories: list[Path], solution: Path = SOLUTION) -> list[str
             "no stage was read, so every check here passed vacuously"
         ]
 
+    # EVERY DECLARED STAGE HAS TO HAVE BEEN READ, not merely every read stage
+    # declared. The loop above rejects a directory nobody declared and had
+    # nothing to say about a declared stage nobody passed: drop the
+    # architecture invocation and its argument, let those tests fall into the
+    # unit filter, and the project-coverage, floor and overlap checks all pass
+    # while the gate reports "2 stages ran". A gate cannot fail on a file that
+    # is not there — which is the shape `deploy/helm/smoke.sh` recorded when an
+    # assertion credited a values key the chart never consulted.
+    for stage in sorted(set(STAGE_FLOORS) - set(seen)):
+        problems.append(
+            f"the {stage} stage was never read: no results directory was passed "
+            "for it. §15.1 runs three stages, and a gate that only checks the "
+            "ones it was given cannot notice one going missing"
+        )
+
     # Structural half 1: the stages partition the suite rather than sampling it.
     expected = test_projects(solution)
     if not expected:

@@ -217,7 +217,12 @@ awk '/^  pull_request:/ { p = 1 } p && /^      - / { print } /^  push:/ { p = 0 
 awk '/^  push:/ { p = 1 } p && /^      - / { print }' \
     "$ROOT/.github/workflows/helm.yml" >"$OUT/push-paths.txt"
 
-for input in $SOURCE_INPUTS; do
+# THE WORKFLOW'S OWN PATH IS ON THIS LIST, and leaving it off made the check
+# unable to protect itself: with `.github/workflows/helm.yml` removed from both
+# trigger lists, a change to those very lists no longer runs the gate that
+# validates them. `deploy/observability/check.py` has required its own path
+# since it was written; this copy inherited the pattern without that part.
+for input in $SOURCE_INPUTS .github/workflows/helm.yml; do
     check "the pull_request filter covers $input" covered "$input" "$OUT/pr-paths.txt"
     check "the push filter covers $input" covered "$input" "$OUT/push-paths.txt"
 done
