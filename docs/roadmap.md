@@ -277,9 +277,24 @@ did not say it needed — a naming rule the platform's own routing already
 depended on, a grace period whose number had to be measured, and a render-time
 gate to keep any of it from drifting. PR-24 has since done the same thing
 again — twelve runbooks, and beside them the metrics type §13.6 had specified
-and nobody had built, plus a second render-time gate — which leaves **PR-25 as
-M6's only outstanding item**, and the one whose "invisible from outside" work
-is a canary nobody has run.
+and nobody had built, plus a second render-time gate.
+
+**PR-25 has landed and M6 with it, and the prediction above was right about
+where the work would be.** "A canary nobody has run" is still a fair
+description of what shipped — no cluster exists — but the invisible work was
+not the running, it was the deciding. §15.5 named a behaviour and no chapter
+had chosen a mechanism, so the pull request had to take
+[ADR-022](backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas);
+the attribute the analysis compares on turned out to be constant across every
+build in the platform and needed replacing; §15.5's first rung turned out to be
+inexpressible at the replica count §15.3 ships; and the arithmetic that
+computes the weight was wrong in floating point at exactly that input. Four
+decisions, none of them in the estimate, and all four found by writing the
+thing rather than by reading about it.
+
+**Which makes M6 complete, and the estimate's lesson the same one PR-24
+taught.** An estimate that prices a pipeline pull request as pipeline work has
+not asked what the pipeline is being asked to decide.
 
 ## Critical path
 

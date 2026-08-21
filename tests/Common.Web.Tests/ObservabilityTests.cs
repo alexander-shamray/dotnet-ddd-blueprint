@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Common.Application;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -175,6 +176,77 @@ public class ObservabilityTests
 
         attributes["service.name"].ShouldBe(TelemetryHost.ServiceName);
         attributes["service.version"].ShouldBe(BuildInfo.Version);
+        attributes["deployment.environment"].ShouldBe(TelemetryHost.EnvironmentName);
+    }
+
+    [Fact]
+    public void The_resource_carries_the_deployment_track_the_environment_supplies()
+    {
+        // §15.5's canary compares the new version against the running one, and
+        // this attribute is the only thing that tells them apart.
+        //
+        // NOT service.version, which is the obvious candidate and does not
+        // work: BuildInfo strips the source-revision suffix on purpose — "a
+        // value that changes every commit turns one series into thousands" —
+        // and nothing in this repository sets an assembly version, so every
+        // build reports 1.0.0. A registered name is not a live signal.
+        //
+        // No production code adds it. OTEL_RESOURCE_ATTRIBUTES is the
+        // OpenTelemetry SDK's own mechanism and AddObservability's resource
+        // builder already honours it, so the chart sets one environment
+        // variable and nothing in Common.Web has to know the word "canary".
+        // This test is what establishes that — the alternative was an
+        // AddAttributes line asserted against itself.
+        ResourceCapturingExporter exporter = new();
+
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+        builder.Configuration.AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["OTEL_RESOURCE_ATTRIBUTES"] = "deployment.track=canary"
+            });
+
+        builder.AddObservability();
+        builder.Services
+            .AddOpenTelemetry()
+            .WithMetrics(m => m.AddReader(new BaseExportingMetricReader(exporter)));
+
+        using IHost host = builder.Build();
+
+        MeterProvider provider = host.Services.GetRequiredService<MeterProvider>();
+        host.Services
+            .GetRequiredService<IMeterFactory>()
+            .Create("Commerce.Requests")
+            .CreateCounter<long>("probe.counter")
+            .Add(1);
+        provider.ForceFlush();
+
+        Dictionary<string, object> attributes = exporter.Captured
+            .ShouldNotBeNull()
+            .Attributes
+            .ToDictionary(a => a.Key, a => a.Value);
+
+        // THIS PROVES THE ATTRIBUTE REACHES THE RESOURCE, AND NOTHING BEYOND
+        // THAT. It used to say "Prometheus renders this as
+        // `deployment_track`", which is a claim about the collector rather
+        // than about this host: under the standard OTLP-to-Prometheus mapping
+        // only service.name, service.namespace and service.instance.id become
+        // labels on each series, and every other resource attribute goes to
+        // `target_info`. §14.1's collector copies this one onto the datapoint
+        // with a `transform` processor and the deployed collector must too
+        // (ADR-022) — without which canary.json's queries match nothing, which
+        // the rollout reads as an absent series and rolls back.
+        //
+        // A test can only assert its own half, and saying so is the point:
+        // the other half is a requirement on an environment, recorded where a
+        // person configuring one will find it.
+        attributes["deployment.track"].ShouldBe("canary");
+
+        // And the attributes AddObservability sets itself survive alongside
+        // it: the environment variable adds to the resource rather than
+        // replacing it, which is the half a test of the new key alone would
+        // not have caught.
+        attributes["service.name"].ShouldBe(TelemetryHost.ServiceName);
         attributes["deployment.environment"].ShouldBe(TelemetryHost.EnvironmentName);
     }
 

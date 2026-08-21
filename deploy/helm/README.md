@@ -129,6 +129,16 @@ gateway:
   trade a review question for a CrashLoop. `runAsNonRoot` IS set, because it
   asserts what the image already does — UID 1654, measured off the base
   image's own config.
+- **A canary that anyone has watched split traffic.** Since PR-25 the gate
+  renders the canary track of every chart and asserts what comes out — that its
+  pods still carry the `app.kubernetes.io/name` the *stable* Service selects
+  on, that the two Deployments select on different tracks, that the canary
+  renders no Service, Ingress, HPA or PodDisruptionBudget, and that each track
+  declares its own `deployment.track`. Every one of those is a claim about a
+  manifest. Whether kube-proxy's spread of **connections** approximates the
+  replica ratio under keep-alive or HTTP/2 is a claim about a cluster, and
+  [ADR-022](../../docs/backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)
+  records it as owed.
 - **A cluster.** `smoke.sh` renders and greps; it never applies. Schema
   validation against a live API server is a deploy-time gate (§15.1). These
   gaps live on that side of the line and none of them can be rendered — listed
@@ -162,8 +172,8 @@ gateway:
 bash deploy/helm/smoke.sh          # HELM=/path/to/helm if it is not on PATH
 ```
 
-**Seventy-one deliberate defects have been run through it and seventy turned a
-green run red** — a renamed Service, a CPU limit, a grace period back at the
+**Seventy-two deliberate defects have been run through it and seventy-one
+turned a green run red** — a renamed Service, a CPU limit, a grace period back at the
 Kubernetes default, a dropped hook annotation, a connection string moved into a
 ConfigMap, a second chart growing client credentials, an `envFrom` naming a
 ConfigMap nothing renders, a rollout checksum that missed the gateway's own, a
@@ -178,7 +188,8 @@ own service's traffic, a
 routed service switching its own Service off, a capability cleared by an
 overlay, a health route renamed in the source that maps it, a tag that is legal
 for a registry and illegal for Kubernetes, in six spellings, a tag that overruns
-the name it derives, an image reference missing its registry.
+the name it derives, an image reference missing its registry, a canary whose
+pods the stable Service would never select.
 
 **The tally is this branch's and it grows**; what does not grow is the count of
 defects that got past the gate, which is one. That is the number worth reading,

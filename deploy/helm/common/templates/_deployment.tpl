@@ -2,9 +2,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "commerce.name" . }}
+  {{- /*
+  The INSTANCE name, not the workload name: on the canary release these differ,
+  because Helm refuses to render an object another release owns (§15.3). On the
+  stable release they are the same string, which is why nothing needed the
+  distinction before §15.5's canary did.
+  */}}
+  name: {{ include "commerce.instanceName" . }}
   labels:
     {{- include "commerce.labels" . | nindent 4 }}
+    app.kubernetes.io/track: {{ include "commerce.track" . }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   {{- /*
@@ -18,12 +25,23 @@ spec:
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
+    {{- /*
+    The Service's selector PLUS the track, and the difference is load-bearing.
+    Two Deployments sharing a selector each count the other's pods as their own
+    and scale them away; a Service that selected only `stable` would route the
+    canary nothing. One label, in exactly one of the two places.
+
+    Immutable, so this cannot be added to a Deployment that already exists —
+    see `commerce.deploymentSelectorLabels`, which argues why it is being added
+    now rather than when a canary is first wanted.
+    */}}
     matchLabels:
-      {{- include "commerce.selectorLabels" . | nindent 6 }}
+      {{- include "commerce.deploymentSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
         {{- include "commerce.labels" . | nindent 8 }}
+        app.kubernetes.io/track: {{ include "commerce.track" . }}
       annotations:
         {{- /*
         A config-only deploy changes a ConfigMap and nothing else, so without
@@ -120,7 +138,7 @@ spec:
             {{- end }}
           envFrom:
             - configMapRef:
-                name: {{ include "commerce.name" . }}-config
+                name: {{ include "commerce.instanceName" . }}-config
             {{- /*
             SUFFIXES, not names. This list held full ConfigMap names, and
             `edge-config.yaml` builds its own from `commerce.name` — so the two
@@ -130,11 +148,15 @@ spec:
             CreateContainerConfigError.
 
             One value, two derivations, is the fix: both ends now start from
-            `commerce.name`, so there is nothing left to disagree.
+            `commerce.instanceName`, so there is nothing left to disagree —
+            and on the canary track those two names differ from
+            `commerce.name`, which is exactly when a stale second derivation
+            would have bitten. (This comment said `commerce.name` until PR-25
+            moved both ends; the argument never changed, only the helper.)
             */}}
             {{- range .Values.extraConfigMaps }}
             - configMapRef:
-                name: {{ printf "%s-%s" (include "commerce.name" $) . }}
+                name: {{ printf "%s-%s" (include "commerce.instanceName" $) . }}
             {{- end }}
           {{- /*
           `with`, not a bare include: the gateway owns no database, no broker

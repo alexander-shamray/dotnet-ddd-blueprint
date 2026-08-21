@@ -561,6 +561,7 @@ def main() -> int:
     # 7. The workflow's triggers cover every path this script reads outside its
     #    own tree — asserted on BOTH triggers, because a merged change that
     #    skips the gate on `main` is the same defect one branch later.
+    check_source_inputs_covers_reads()
     check_workflow_covers_inputs()
 
     return report()
@@ -719,6 +720,48 @@ def covers(path: str, entry: str) -> bool:
         return False
 
     return entry == path
+
+
+def check_source_inputs_covers_reads() -> None:
+    """SOURCE_INPUTS against the reads it claims to enumerate, not the workflow.
+
+    Check 7 below compares the list to the triggers, which is the half that
+    stays green when the list is SHORT — a workflow can only be checked for
+    entries the list already contains, so a read nobody declared is invisible
+    from both sides. `deploy/canary/canary.py` shipped exactly that defect:
+    two paths declared, three opened, and its trigger assertion green
+    throughout.
+
+    CLAUDE.md states the fix as owed by every copy of this pattern rather than
+    by the copy that was caught, so this is that debt paid here. The subject is
+    this file's own source: every `ROOT / "…"` construction outside
+    deploy/observability must be declared.
+    """
+    source = read(Path(__file__))
+
+    reads = set()
+    for first, second in re.findall(r'ROOT\s*/\s*"([a-z]+)"(?:\s*/\s*"([a-z-]+)")?', source):
+        # Two segments where there are two, because the declarable unit is not
+        # always the top level: `docs` is too wide to declare (this gate does
+        # not want every chapter) and `deploy` is too wide to be correct
+        # (deploy/compose must not trigger it). The coverage test below accepts
+        # a declared entry that is a prefix, so a one-segment declaration still
+        # covers a two-segment read where that is what somebody meant.
+        reads.add(f"{first}/{second}" if second else first)
+
+    # Subject first. A regex that matched nothing would pass the loop below
+    # against any list at all, which is this gate's own most-repeated failure
+    # turned on itself.
+    if not reads:
+        fail("check.py: found no ROOT-relative reads in its own source — "
+             "the scan is broken, not the list")
+        return
+
+    declared = SOURCE_INPUTS + ["deploy/observability"]
+    for entry in sorted(reads):
+        if not any(entry == path or entry.startswith(f"{path}/") for path in declared):
+            fail(f"check.py opens `{entry}` and SOURCE_INPUTS does not declare it, "
+                 f"so observability.yml's triggers do not watch it: {SOURCE_INPUTS}")
 
 
 def check_workflow_covers_inputs() -> None:

@@ -165,6 +165,26 @@ policy mean anything — the two arrive together because neither works alone.
 > XML docs, which list it. Nothing here can turn it on. **If a later bump
 > exposes it, it stays off.**
 
+> **A third attribute reaches the resource and no line above puts it there.**
+> `deployment.track` — `stable` or `canary` — is what
+> [§15.5](15-cicd-deployment.md)'s rollout compares the two versions by, and it
+> arrives through `OTEL_RESOURCE_ATTRIBUTES`, the SDK's own mechanism, set by
+> the chart from `canary.enabled` (§15.4,
+> [ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)).
+> The resource builder above already honours it, so nothing in `Common.Web`
+> knows the word *canary* and no `AddAttributes` line was added for it.
+> Asserted end to end against an exported resource rather than against the
+> variable, because "the SDK reads this" is exactly the kind of claim that is
+> true of a different overload.
+>
+> **`service.version` is the attribute a reader reaches for first and it cannot
+> do this job.** `BuildInfo.Version` strips the source-revision suffix
+> deliberately — a value that changes every commit turns one series into
+> thousands — and [§4.4](04-solution-structure.md) pins no assembly version, so
+> every host in the platform reports `1.0.0`. The attribute is registered,
+> exported and constant: a registered name is not a live signal, which is the
+> same trap §13.6 spends a callout on one section over.
+
 Filtering health checks out of traces is not cosmetic — at a ten-second probe
 interval across a dozen pods they would otherwise dominate both trace volume and
 storage cost.

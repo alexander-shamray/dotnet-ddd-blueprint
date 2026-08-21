@@ -28,6 +28,18 @@ text — which is the practical argument for central pinning that
 [§4.4](04-solution-structure.md) makes on other grounds. Cheapest and least
 dependent goes first.
 
+> **The diagram is the target pipeline, and this repository runs the left half
+> of it.** Everything up to and including the image build is live since PR-25:
+> the scan, the fork, the build, the three test stages and one `docker build`
+> per changed service — two, where the service has a migrator (§15.2).
+> **Signing is not** — it needs a registry and a key this
+> repository has neither of, so what runs is the half that can run rather than
+> a step that would have to be faked. Nor is any `Deploy:` node: there is no
+> dev, staging or production environment, which is why §15.5's canary is
+> `workflow_dispatch` only and why the k6 SLO run has a target that does not
+> exist yet. Naming the split here is cheaper than letting a reader infer from
+> a green pipeline that a deploy happened.
+
 Only services whose files changed are built and deployed. Path filters are what
 make a monorepo practical at this size:
 
@@ -49,6 +61,14 @@ make a monorepo practical at this size:
         - 'Directory.Build.props'
         - 'Directory.Packages.props'
         - 'global.json'
+        # An input to every `docker build .` and to nothing the solution build
+        # can check: excluding a copied project here is a broken image, and
+        # un-excluding a local secret is one with credentials in it. Neither is
+        # visible to `dotnet build`.
+        - '.dockerignore'
+        # Copied into the publish stage by every application Dockerfile, and
+        # ADR-019 makes it a build input rather than an editor hint.
+        - '.editorconfig'
         - 'src/BuildingBlocks/**'
         # The contract suite (§12.6) guards compatibility BETWEEN services, so
         # it belongs to all of them. Owned by none, it would run for none.
@@ -76,9 +96,18 @@ make a monorepo practical at this size:
         - 'src/Gateway/**'
       # The BFF is a deployable too, with its own image, chart and the
       # platform's only client secret.
+      #
+      # AND CATALOG'S PROTO — the one entry here that reaches into another
+      # service's tree. Web.Bff compiles `pricing.proto` as a LINKED source
+      # file (§9.7) and its Dockerfile copies that path, so a proto-only
+      # change alters what the BFF ships while matching only `catalog`. That
+      # is the rule below applied to the one host that compiles another
+      # service's file, and it is easy to omit precisely because the filter
+      # otherwise reads as "this service's own tree".
       bff:
         - *shared
         - 'src/BFF/**'
+        - 'src/Services/Catalog/Catalog.Api/Protos/**'
       # A chart or values change produces no new image and must still reach
       # the cluster. See below — this path needs a tag it did not build.
       #
@@ -133,10 +162,18 @@ series as well as on a breached one — a target with no data is the same silenc
 §13.6 spends a callout on, and reading it as "nothing wrong" would turn this
 stage into the gate configured to pass that the paragraph above rules out.
 
-**Three** `deploy/**` artefacts are exercised by CI directly rather than
+**Four** `deploy/**` artefacts are exercised by CI directly rather than
 deployed, one per subtree, each in its own path-filtered workflow. **None is the
-smoke stage ruled out above**: all three deploy nothing and assert only what a
+smoke stage ruled out above**: all four deploy nothing and assert only what a
 chapter already defines.
+
+> **A count in prose is a claim to reconcile, and this one has now been wrong
+> once.** It read *three* until PR-25 added a fourth subtree, which is the
+> failure `deploy/helm/smoke.sh` spent three findings learning about its own
+> inventory. It stays a number rather than becoming a list because the
+> paragraphs below are the list — each names one subtree and what its gate
+> asserts — so a fifth subtree that reached this section without a paragraph
+> would be visible here in a way a missing row in a table is not.
 
 The first is the Compose file. A workflow path-filtered to
 `deploy/compose/**` and to itself runs `docker compose config -q`, then
@@ -167,17 +204,46 @@ it needs no restore and runs on the licence gate's terms. It reaches no Promethe
 validate rule syntax: `promtool` would be the tool for that, and adding it is a
 decision no chapter has taken.
 
-**Two of the three filters name files outside their own tree**, and neither is
-an oversight — each names an input its gate actually reads. The Helm one is
-below; the observability one names `src/**`, because deciding whether an alert's
-signal exists means reading every instrument declaration in C#, and
+The fourth is the canary (PR-25). A workflow path-filtered to
+`deploy/canary/**` runs that tree's own suite and `canary.py check`, which
+asserts §15.5's ladder climbs and ends at 100, that the rollout's absolute
+thresholds are [§13.6](13-observability.md)'s alert thresholds **read out of
+the rules file rather than restated**, that each workload's `serviceName` is an
+entry assembly this solution actually builds — §13.2 takes `service.name` from
+`ApplicationName`, so a query spelled from the deployment's vocabulary matches
+no series — and that every metric its queries read is one a loaded alert reads,
+which is what the observability gate has already proved is published. It
+reaches no cluster and no Prometheus, and the weight arithmetic and the
+promote/rollback decision have a suite because they are the parts a workflow
+cannot be trusted with.
+
+**Three of the four filters name files outside their own tree**, and none is an
+oversight — each names an input its gate actually reads. Compose is the one
+that stays inside, because its smoke starts the file and nothing else. The Helm
+one is below; the observability one names `src/**`, because deciding whether an
+alert's signal exists means reading every instrument declaration in C#, and
 `docs/runbooks/**`, because a renamed runbook is an alert with no procedure
-behind it. **Neither workflow keeps that list in its own YAML.** `smoke.sh`
-declares `SOURCE_INPUTS` and `check.py` declares its own, each beside the reads,
-and each asserts that both of its workflow's triggers cover every entry — a
-copy of a list drifts exactly as a copy of a number does, which the Helm tree
-established at a cost of three findings and the observability tree adopted
-before paying it once.
+behind it; the canary one names `deploy/helm/**`, because its plan asserts each
+workload's chart exists and can render a canary track, `src/**`, because it
+checks each `serviceName` against a real entry assembly, and
+`deploy/observability/**`, because it takes §13.6's thresholds out of the rules
+file rather than restating them. **None of the three keeps that list in its own
+YAML.** `smoke.sh`, `check.py` and `canary.py` each declare `SOURCE_INPUTS`
+beside the reads, and each asserts that both of its workflow's triggers cover
+every entry — a copy of a list drifts exactly as a copy of a number does, which
+the Helm tree established at a cost of three findings and the observability
+tree adopted before paying it once.
+
+> **The canary tree paid for it anyway, and the shape of the failure is worth
+> more than the fix.** Its list shipped naming `src` and `deploy/helm` and
+> omitting `deploy/observability`, which two of its own checks open — so
+> retuning an alert threshold was a green pull request on the gate that exists
+> to keep the canary from being tuned looser than the alert it would then page
+> about. **The assertion stayed green throughout**, because a list can only be
+> compared against a workflow for the entries it already contains: a gate
+> cannot see a read it was never told about. What closes it is a test whose
+> subject is the reads rather than the list — the same shape as asserting a
+> parser found anything at all.
 
 Each of the Helm filter's outside paths is an input `smoke.sh` actually reads:
 
@@ -194,7 +260,10 @@ Each of the Helm filter's outside paths is an input `smoke.sh` actually reads:
   the routes from that file rather than holding a fourth copy of them;
 - `.gitattributes`, which pins this tree to LF — without it a CRLF template
   renders a CR onto every line and the script's anchored greps match nothing on
-  a Linux runner.
+  a Linux runner;
+- `deploy/canary/canary.json`, which names a chart per workload — so a rollout
+  can only target a chart that exists and renders a canary track, and the two
+  halves of that agreement fail from either side rather than at deploy time.
 
 **This passage is an argument, not an inventory, and the difference is what
 finally stopped it drifting.** It said "two files", and was made wrong by the
@@ -224,13 +293,27 @@ build — and `helm upgrade` then has no tag to pass. Left to the chart default
 it would resolve to `image.tag: ""` (§15.3) and roll whatever that means, which
 is a version nobody chose in a job nobody thought was a release.
 
+**The release is named for the workload, not for the service**, and the two
+had drifted: this sample read `helm get values ordering` while
+`deploy/helm/README.md` installs `catalog-api` and `platform/values.yaml`
+argues its ownership case with `catalog-api`. PR-25's canary made the
+disagreement load-bearing rather than cosmetic — that rollout drives
+`helm get values`, `helm upgrade --install` **and**
+`kubectl scale deployment` from one string, and the last of those must be the
+Kubernetes object name (`workload.name`). A release called `ordering` would
+make `helm get values ordering-api` empty, and the canary would install
+against chart defaults: a pod pointing at the wrong authority and the wrong
+database, which is precisely the failure driving the canary from the stable
+release's values exists to prevent. So the release name *is* `workload.name`,
+here and in §15.3, and one identifier does both jobs.
+
 The tag already in the cluster is the only correct answer, so read it back:
 
 ```yaml
 - name: Resolve the running tag
   if: steps.changes.outputs.deploy == 'true' && steps.changes.outputs.ordering == 'false'
   run: |
-    TAG=$(helm get values ordering -n "$NAMESPACE" -o json | jq -r '.image.tag')
+    TAG=$(helm get values ordering-api -n "$NAMESPACE" -o json | jq -r '.image.tag')
     # Fail rather than default. A config deploy that cannot say which image is
     # running is a config deploy that must not proceed.
     [ -n "$TAG" ] && [ "$TAG" != "null" ] || exit 1
@@ -266,9 +349,11 @@ WORKDIR /src
 # project's own obj/project.assets.json; a csproj absent when it runs is
 # simply not restored, and the --no-restore publish below then fails with
 # NETSDK1004 naming a project this file never mentions. So a new
-# ProjectReference anywhere in the chain is a line here too, and no CI job
-# says so — the compose smoke that builds these images is path-filtered on
-# deploy/compose/**, and a reference lands under src/.
+# ProjectReference anywhere in the chain is a line here too, and §15.1's
+# `images` job is what says so — it builds every image a changed service
+# ships, api and migrator alike, so
+# a missing line fails on the pull request that added the reference rather
+# than on the next compose one.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
 COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/
@@ -418,8 +503,9 @@ Each service gets a Helm chart; an umbrella chart deploys the platform.
 > immediately below.** Production is several per-service releases sharing one
 > namespace, and that is fine — they own disjoint sets of objects. The conflict
 > is overlap, not co-tenancy. **§15.1 settles which one production
-> uses**: its config-only deploy reads `helm get values ordering`, a per-service
-> release by name, because the pipeline builds and deploys per service. The
+> uses**: its config-only deploy reads `helm get values ordering-api`, a
+> per-service release by name, because the pipeline builds and deploys per
+> service. The
 > umbrella's job is standing an environment up *whole* — a fresh cluster, a
 > review environment — where one command is the point and nothing deploys
 > independently afterwards. Nothing in a render can catch a mix; the conflict
@@ -946,6 +1032,7 @@ namespace read access.
 | `Ingress__Enabled` | Config | Helm `ingress.enabled` → ConfigMap — **gateway only** | ✓ — true in Kubernetes, false only where the gateway is the edge (Compose) |
 | `Ingress__TrustedNetworks__0…n` | Config | Helm `ingress.trustedNetworks` → ConfigMap — **gateway only** | ✓ **when `Ingress__Enabled`**; CIDRs of the LB/Ingress, without which the rate limiter partitions everyone together |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Config | Helm `observability.otlpEndpoint` → ConfigMap | ✓ — **every host**. The SDK does default, which is the argument for requiring it rather than against — see below |
+| `OTEL_RESOURCE_ATTRIBUTES` | Config | Helm — derived from `canary.enabled`, never set by hand | ✓ — **every host**, as `deployment.track=stable` or `=canary`. §15.5's rollout compares the two tracks and this is the only thing that tells them apart ([ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)) |
 
 | Kind | Source | Example |
 |---|---|---|
@@ -1055,6 +1142,48 @@ public static class ServiceOptions
 Canary: route 5% of traffic to the new version, watch error rate and p99 for ten
 minutes, then progress to 25%, 50%, 100%. Roll back automatically if either
 metric regresses beyond threshold.
+
+**The mechanism is replica-weighted and it is
+[ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)**,
+taken by PR-25 because building the rollout was what forced the choice. The
+canary is a second Helm release of the same chart whose pods answer to the same
+Service, so the share it serves is `canary / (stable + canary)`. No mesh and no
+rollout controller — and no ingress-controller weight either, which is
+disqualified by topology rather than taste: this platform has one Ingress, the
+gateway's ([§10.1](10-api-gateway.md)), and everything behind it is reached by
+Service name, so an edge weight cannot canary Catalog or Ordering at all.
+
+**Two things the ladder above does not say, both found by building it.**
+
+**The weights are ceilings, not targets, because a replica ratio is
+quantised.** `deploy/canary/canary.py` takes the largest canary that stays
+within the requested weight and **refuses** where even one pod overshoots,
+naming the stable replica count that would satisfy the step. At §15.3's
+`replicaCount: 3` a single canary pod already serves 25%, so the 5% rung above
+is unreachable until the stable track is scaled to **19** — which the rollout
+does, deliberately and before anything rolls, rather than quietly serving five
+times the blast radius under a label that says 5%. `autoscaling.maxReplicas` is
+20 on the three service charts, so on those 19 plus one canary is exactly the
+ceiling. **The gateway's is 30** — every external request passes through it —
+so there 19 is simply what 5% needs rather than all the chart allows, and its
+autoscaler can still climb past the canary's stable count during a dwell. The
+19 is a property of the weight, not of every HPA.
+
+**The two tracks are told apart by `deployment.track`**, a resource attribute
+the chart supplies through `OTEL_RESOURCE_ATTRIBUTES` (§15.4).
+`service.version` is the obvious discriminator and is not one:
+[§13.2](13-observability.md)'s `BuildInfo` strips the source-revision suffix on
+purpose, and nothing in the solution sets an assembly version, so every build in
+the platform reports `1.0.0`. Without a discriminator the analysis compares a
+release against itself, which passes every time — including on a canary that is
+on fire.
+
+> **A canary that cannot be measured is worse than no canary**, and the failure
+> is silent in one direction only. A query spelled with the wrong label matches
+> no series; an absent series is read here as a rollback, never as health — the
+> rule §15.1's SLO run already applies — so the mistake yields a rollout that
+> can only ever fail, ten minutes at a time. That is the safe direction, and it
+> is safe by construction rather than by luck.
 
 Because database migrations run ahead of the deploy and old code may still be
 serving traffic, **every migration must be backward compatible with the previous

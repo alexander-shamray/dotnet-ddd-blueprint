@@ -11,6 +11,40 @@ receivers:
 processors:
   batch:
 
+  # §15.5's canary compares two tracks, and this is what makes the label it
+  # compares on exist.
+  #
+  # `deployment.track` is a RESOURCE attribute (§13.2, set from
+  # OTEL_RESOURCE_ATTRIBUTES by the chart). Under the standard OTLP-to-
+  # Prometheus mapping, resource attributes other than service.name,
+  # service.namespace and service.instance.id do not become labels on each
+  # series — they land in `target_info` instead. So a query filtering
+  # `deployment_track="canary"` matches NOTHING, `read_prometheus` returns
+  # null, and `analyse` reads that as an absent series and rolls back: every
+  # rung, every time, on a canary that is behaving perfectly.
+  #
+  # Copying it onto the datapoint is what turns it into a label. Only this one
+  # attribute, because every promoted resource attribute is a label on every
+  # series of every service and cardinality is paid for per series;
+  # `deployment.track` has two values.
+  #
+  # THE DEPLOYED COLLECTOR MUST DO THE SAME. This file is §14.1's local one and
+  # the cluster's is not in this repository, so the requirement is recorded in
+  # ADR-022 and in deploy/canary/README.md rather than being satisfied here for
+  # an environment this cannot reach.
+  # `datapoint.attributes`, spelled with its context prefix. Written as a bare
+  # `attributes[…]` the collector accepts it and logs "one or more paths were
+  # modified to include their context prefix, please rewrite them accordingly"
+  # — measured by running this file against the pinned image, which is also how
+  # the statement below was established to parse at all. A form the tool
+  # rewrites for you is a form it may stop rewriting.
+  transform/canary-track:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(datapoint.attributes["deployment.track"], resource.attributes["deployment.track"])
+            where resource.attributes["deployment.track"] != nil
+
 exporters:
   otlphttp:
     endpoint: http://grafana:4318
@@ -23,7 +57,7 @@ service:
       exporters: [otlphttp]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [transform/canary-track, batch]
       exporters: [otlphttp]
     logs:
       receivers: [otlp]

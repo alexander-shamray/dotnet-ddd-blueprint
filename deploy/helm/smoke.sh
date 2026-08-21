@@ -61,6 +61,7 @@ src/Services/Catalog
 src/Services/Ordering
 src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs
 .gitattributes
+deploy/canary/canary.json
 "
 
 # The lists above are classifications and stay written down — which chart owns
@@ -216,10 +217,64 @@ awk '/^  pull_request:/ { p = 1 } p && /^      - / { print } /^  push:/ { p = 0 
 awk '/^  push:/ { p = 1 } p && /^      - / { print }' \
     "$ROOT/.github/workflows/helm.yml" >"$OUT/push-paths.txt"
 
-for input in $SOURCE_INPUTS; do
+# THE WORKFLOW'S OWN PATH AND THIS GATE'S OWN TREE ARE BOTH ON THIS LIST, and
+# each was missing in turn. Without the workflow, removing it from both trigger
+# lists means a change to those very lists no longer runs the gate validating
+# them. Without `deploy/helm`, removing THAT means a chart edit — or an edit to
+# this script — does not run the gate either: the tree holding the thing being
+# checked, gone from the triggers, with every assertion still green.
+#
+# `deploy/observability/check.py` has required both since it was written; this
+# copy inherited the pattern one piece at a time.
+for input in $SOURCE_INPUTS deploy/helm .github/workflows/helm.yml; do
     check "the pull_request filter covers $input" covered "$input" "$OUT/pr-paths.txt"
     check "the push filter covers $input" covered "$input" "$OUT/push-paths.txt"
 done
+
+# AND THE OTHER DIRECTION, which is the half that stays green when the list is
+# SHORT rather than wrong.
+#
+# The loop above can only ask the workflow about entries SOURCE_INPUTS already
+# contains, so a path this script reads and nobody declared is invisible from
+# both sides. `deploy/canary/canary.py` shipped exactly that — two entries
+# declared, three paths opened, trigger assertion green throughout — and
+# CLAUDE.md states the fix as owed by every copy of this pattern rather than by
+# the copy that was caught. This is that debt paid here.
+#
+# The subject is this script's own source: every `$ROOT/…` path it names must
+# be covered by a declared entry — the WHOLE path, not a prefix of it, because
+# the entries here are deeper than a top-level segment
+# (`src/Gateway/Gateway.Api/appsettings.json` is a file, not a tree).
+#
+# Two kinds of match are skipped, and neither hides a gap:
+#
+#   * anything ending in `/` is an interpolation prefix rather than a path —
+#     `$ROOT/src/Services/$chart` is built per chart, and the concrete forms it
+#     builds (`src/Services/Catalog`, `src/Services/Ordering`) are declared;
+#   * `deploy/helm` is this script's OWN tree, and SOURCE_INPUTS is by
+#     definition the paths outside it. The workflow file is check 7's subject
+#     rather than an input to it.
+grep -oE '\$ROOT/[A-Za-z0-9_./-]+' "$0" | sed -E 's|^\$ROOT/||' | sort -u >"$OUT/reads.txt"
+
+if [ ! -s "$OUT/reads.txt" ]; then
+    # Subject first: a scan that found nothing would pass the loop below
+    # against any list at all, which is this gate's own most-repeated failure
+    # turned on itself.
+    fail 'found no $ROOT-relative reads in smoke.sh — the scan is broken, not the list'
+else
+    while read -r path; do
+        case "$path" in
+            */|deploy/helm|deploy/helm/*|.github/workflows/helm.yml) continue ;;
+        esac
+        matched=no
+        for input in $SOURCE_INPUTS; do
+            case "$path" in
+                "$input"|"$input"/*) matched=yes ;;
+            esac
+        done
+        check "SOURCE_INPUTS declares $path, which this script reads" test "$matched" = yes
+    done <"$OUT/reads.txt"
+fi
 
 # --------------------------------------------------------------------------
 section 'Resolving dependencies'
@@ -910,6 +965,150 @@ if [ -z "$missing" ]; then
 else
     fail "chart declares port(s) Catalog has no listener for: $(echo "$missing" | tr '\n' ' ')"
 fi
+
+# --------------------------------------------------------------------------
+section 'The canary track (§15.5, ADR-022)'
+# --------------------------------------------------------------------------
+# The newest surface in this tree, and therefore the one most in need of
+# assertions: a gate that quietly stops covering what was added last is this
+# repository's most-repeated failure, and the canary render is reached by
+# nothing above.
+#
+# EVERY service chart, not a representative one. The mechanism lives in the
+# library, so a chart that failed to pick it up would be a service with no
+# canary and a rollout that promoted it without ever splitting traffic.
+for chart in $SERVICE_CHARTS; do
+    "$HELM" template "$chart-canary" "$CHARTS_DIR/$chart" --set-string "image.tag=$TAG" \
+        --set canary.enabled=true --set autoscaling.enabled=false \
+        $GATEWAY_OVERLAY >"$OUT/$chart-canary.yaml"
+    pass "$chart renders a canary"
+
+    name="$(awk '/^workload:/ { w = 1 } w && /^  name: / { sub(/^  name: /, ""); print; exit }' \
+        "$CHARTS_DIR/$chart/values.yaml")"
+
+    # THE ONE THAT MAKES IT A CANARY. Traffic reaches these pods because the
+    # stable release's Service selects them, and it selects on the workload
+    # name alone — so the canary's pod label has to be the SAME string the
+    # stable Service matches on. A `-canary` suffix leaking into this label is
+    # a canary that runs, reports healthy, serves nothing, and is promoted on
+    # an analysis of no traffic.
+    check "$chart: canary pods answer to the stable Service's selector" \
+        awk -v want="$name" '
+            /^kind: Deployment$/ { in_dep = 1 }
+            in_dep && /^    matchLabels:$/ { in_sel = 1; next }
+            in_sel && /app.kubernetes.io\/name: / {
+                sub(/.*: /, ""); if ($0 == want) found = 1; in_sel = 0
+            }
+            END { exit found ? 0 : 1 }
+        ' "$OUT/$chart-canary.yaml"
+
+    # And the two Deployments must NOT select each other's pods, or each scales
+    # the other away. The track label is what separates them, and it has to be
+    # in the Deployment's SELECTOR — not merely somewhere in the manifest.
+    #
+    # THESE WERE PLAIN GREPS AND THAT MADE THEM VACUOUS. The same label is on
+    # the Deployment's metadata and on the pod template, so deleting it from
+    # `spec.selector.matchLabels` — the one place it does any work — left both
+    # assertions green while the two Deployments began selecting each other's
+    # pods, which is the exact failure this pair exists to catch. A gate that
+    # greps the document cannot assert something about one field of it.
+    selects_track() {
+        # selects_track <file> <track> -> exit 0 when the Deployment's
+        # matchLabels carries that track
+        awk -v want="$2" '
+            /^kind: Deployment$/ { in_dep = 1 }
+            in_dep && /^    matchLabels:$/ { in_sel = 1; next }
+            in_sel && /^      [a-z]/ {
+                if ($0 ~ ("app.kubernetes.io/track: " want)) found = 1
+                next
+            }
+            in_sel { in_sel = 0 }
+            END { exit found ? 0 : 1 }
+        ' "$1"
+    }
+
+    check "$chart: the canary Deployment SELECTS on track=canary" \
+        selects_track "$OUT/$chart-canary.yaml" canary
+    check "$chart: the stable Deployment SELECTS on track=stable" \
+        selects_track "$OUT/$chart.yaml" stable
+    check "$chart: no stable object leaks into the canary render" \
+        test "$(count 'app.kubernetes.io/track: stable' "$OUT/$chart-canary.yaml")" -eq 0
+
+    # Helm refuses to render an object another release owns (§15.3), so every
+    # name the canary release emits has to differ from the stable one's. These
+    # are the four the stable release keeps.
+    for kind in Service Ingress HorizontalPodAutoscaler PodDisruptionBudget; do
+        check "$chart: the canary renders no $kind" \
+            test "$(count "^kind: $kind\$" "$OUT/$chart-canary.yaml")" -eq 0
+    done
+    check "$chart: the canary Deployment is named $name-canary" \
+        grep -q "^  name: $name-canary\$" "$OUT/$chart-canary.yaml"
+
+    # THE REPLICA COUNT HAS TO REACH THE SPEC, and nothing else here would
+    # notice if it did not. `_deployment.tpl` omits `replicas` whenever
+    # `autoscaling.enabled` is true, so a canary installed from the stable
+    # release's values without `--set autoscaling.enabled=false` renders no
+    # replica count and the API server defaults it to one — every rung of the
+    # ladder a single pod, reported as the weight `plan` computed. The render
+    # above passes the flag exactly as the rollout does; this asserts the flag
+    # is what it is passed for.
+    check "$chart: the canary Deployment carries a replica count" \
+        grep -q '^  replicas: ' "$OUT/$chart-canary.yaml"
+
+    # The ConfigMap too — same rule, and the mount has to follow the rename or
+    # the pod sits in CreateContainerConfigError. Asserted as agreement between
+    # the two halves rather than against a literal, which is the shape PR-23
+    # learned when a gate credited a values key nothing consulted.
+    awk '/configMapRef:/ { want = 1; next } want && /name:/ { sub(/^ *name: /, ""); print; want = 0 }' \
+        "$OUT/$chart-canary.yaml" | sort -u >"$OUT/$chart-canary-mounted.txt"
+    awk '/^kind: ConfigMap$/ { want = 1 } want && /^  name: / { sub(/^  name: /, ""); print; want = 0 }' \
+        "$OUT/$chart-canary.yaml" | sort -u >"$OUT/$chart-canary-rendered.txt"
+    check "$chart: every ConfigMap the canary mounts, the canary renders" \
+        test -z "$(comm -23 "$OUT/$chart-canary-mounted.txt" "$OUT/$chart-canary-rendered.txt")"
+    check "$chart: and none of them is the stable release's" \
+        test "$(grep -cvE -- '-canary(-|$)' "$OUT/$chart-canary-rendered.txt")" -eq 0
+
+    # The discriminator the analysis actually reads. Without it both tracks
+    # report the same series and every step compares a release against itself
+    # — which passes, every time, on a canary that is on fire.
+    check "$chart: the canary declares deployment.track=canary" \
+        grep -q 'OTEL_RESOURCE_ATTRIBUTES: "deployment.track=canary"' "$OUT/$chart-canary.yaml"
+    check "$chart: the stable release declares deployment.track=stable" \
+        grep -q 'OTEL_RESOURCE_ATTRIBUTES: "deployment.track=stable"' "$OUT/$chart.yaml"
+done
+
+# ADR-022's load-bearing consequence, and nothing above asserts it.
+#
+# The ADR says the canary release runs §7.4's hook, because it is the first
+# thing carrying the new image — and therefore that a rollback removes the pods
+# and LEAVES THE SCHEMA MIGRATED, which is what makes §15.5's
+# backward-compatibility requirement sharper rather than softer. The templates
+# do that today only because `_migration-job.tpl` has no canary guard. A later
+# `if not canary` would render nothing, break the ADR, and pass every
+# assertion in the section above — the gate-coverage failure this repository
+# names as its most-repeated, on the newest surface in this tree.
+#
+# Both directions, on the same reasoning as the migration-template check
+# further up: a chart with a migrator runs the hook on both tracks, and a
+# chart without one runs it on neither.
+for chart in $MIGRATOR_CHARTS; do
+    check "$chart: the canary runs the migration hook (ADR-022)" \
+        test "$(count '^kind: Job$' "$OUT/$chart-canary.yaml")" -eq 1
+    check "$chart: and it is the same hook the stable release runs" \
+        test "$(count '"helm.sh/hook": pre-install,pre-upgrade' "$OUT/$chart-canary.yaml")" -eq 1
+done
+
+for chart in $DATABASELESS_CHARTS; do
+    check "$chart: the canary renders no migration Job either" \
+        test "$(count '^kind: Job$' "$OUT/$chart-canary.yaml")" -eq 0
+done
+
+# The rollout plan names a chart per workload, and a plan pointing at a chart
+# that cannot render a canary is a deploy that fails after the scale-up.
+for chart in $SERVICE_CHARTS; do
+    check "$chart appears in deploy/canary/canary.json" \
+        grep -q "\"chart\": \"$chart\"" "$ROOT/deploy/canary/canary.json"
+done
 
 # --------------------------------------------------------------------------
 section 'Result'

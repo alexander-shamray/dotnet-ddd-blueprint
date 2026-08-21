@@ -1046,9 +1046,18 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > container and forgets the collection fails loudly in the fast half, which is
 > the direction this has to fail in.
 >
-> Nothing in CI runs the halves separately yet; [§15.1](15-cicd-deployment.md)'s
-> integration stage is PR-25's, and the category ships ahead of it so the
-> filter is real before the stage that depends on it is written.
+> **CI runs the halves separately since PR-25**, as §15.1's `UT → IT`, with
+> §4.2's architecture gates ahead of both for the instrumentation reason
+> `docs/testing.md` gives. The category shipped a release ahead of the stage
+> that depends on it, which is what let the stage be written against a filter
+> already known to select what it claims.
+>
+> **Three stages are three new ways to select nothing**, and that is what
+> PR-25's quality gate is for: `dotnet test` exits **zero** on a filter that
+> matches no test, so each stage can be green and empty. The gate asserts a
+> floor on each stage's count, that every test project in `Platform.slnx` ran
+> in one of them, and that none ran in two — the last of which is what makes
+> "exhaustive and disjoint" a check rather than a claim.
 >
 > The consequence is worth stating rather than discovering from a slow
 > pipeline: two assemblies mean two collections and therefore **two sets of
@@ -2022,10 +2031,26 @@ the callout below gives. `docs/testing.md` carries the reporting command that
 follows it.
 
 The file filters the report to `.*\.Domain\.dll$` and emits Cobertura, and CI
-prints the figure to the job summary. **Reported, never gated** — a threshold
-that fails a build is PR-25's quality gates
-([Appendix C](appendix-c-delivery-plan.md)), and a diagnostic wired to a build
-failure stops being read and starts being satisfied.
+prints the figure to the job summary. **Reported, never gated** — a diagnostic
+wired to a build failure stops being read and starts being satisfied.
+
+**PR-25 took that decision rather than deferring it, and this passage used to
+defer.** It read "a threshold that fails a build is PR-25's quality gates",
+which named the pull request entitled to add one; that pull request declined,
+on the sentence above rather than on effort. What it gated instead is whether
+each stage *ran* — a fact, where a coverage percentage is a target — and
+[Appendix C](appendix-c-delivery-plan.md)'s "quality gates" is that. A later
+change may still argue for a threshold; it will be arguing against this
+paragraph rather than filling a gap it left open.
+
+**The figure is now a union across stages, and that is forced rather than
+chosen.** §15.1 runs the unit and integration halves as separate `dotnet test`
+invocations, so there is no longer one run to read — and the sentence above
+asks for the domain assemblies "over the whole run". Measured on this
+repository: the unit stage covers 253 of 308 method lines and the integration
+stage 192, and the union is **257**. Four of those lines are reached only by a
+test that needs a container, so a figure taken from either half alone
+under-reports the thing it is named after.
 
 Three things about that filter are deliberate:
 

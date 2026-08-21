@@ -41,6 +41,47 @@ jobs:
         working-directory: .github/licence-gate
         run: python licence_gate.py
 
+  # PR-25's inventory gates, and they sit beside the licence gate rather than
+  # inside `build` for the same reason it does: stdlib Python over text, so
+  # they need no restore and cannot be skipped by a build failure.
+  #
+  # Both are §15.1's own instruction rather than a convention invented here.
+  # The path filter is a deployable inventory and the image matrix is another,
+  # and an inventory that stops covering the newest surface is the failure
+  # CLAUDE.md names as this repository's most-repeated. Neither check trusts
+  # its own parser: each fails on an empty subject rather than reporting a
+  # complete list it never read.
+  pipeline-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the gate
+        working-directory: .github/pipeline-gate
+        run: python -m unittest
+
+      # The coverage reporter's suite runs HERE rather than beside the
+      # reporter, and the reason is the one licence-gate and canary already
+      # follow: test the tool, then run it. It gained a suite because a wrong
+      # merge is silent — a colliding key or a `max` that should have been a
+      # sum prints a plausible figure and nothing goes red — so running the
+      # reporter without its suite is the one arrangement that defeats the
+      # argument for having written it. Stdlib, no restore, so it belongs in
+      # the fast job rather than behind the build.
+      - name: Test the coverage reporter
+        working-directory: .github/coverage
+        run: python -m unittest
+
+      - name: Every deployable is matched by a path filter
+        run: python .github/pipeline-gate/pipeline_gate.py filters
+
+      - name: Every image is built by some service
+        run: python .github/pipeline-gate/pipeline_gate.py images
+
   # The scaffold has no template directory: it renders a new service from
   # src/Services/Catalog at run time, so there is one copy of the wiring rather
   # than two that drift. The risk that buys is that Catalog moves under the
@@ -63,8 +104,106 @@ jobs:
         working-directory: tools/new-service
         run: python -m unittest
 
+  # §15.1's fork: only services whose files changed are built and deployed.
+  #
+  # A job of its own so that everything downstream can read one answer. The
+  # filter is §15.1's, verbatim — including the shared anchor, which is the
+  # part most easily lost: a version bump in Directory.Packages.props changes
+  # every binary the pipeline produces and matches no service path, so without
+  # those lines the one change the pin file exists to control is the one change
+  # CI never rebuilds.
+  #
+  # `pipeline-gate` asserts the list below is complete. It is not enough for
+  # this to be right today.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      catalog: ${{ steps.changes.outputs.catalog }}
+      ordering: ${{ steps.changes.outputs.ordering }}
+      gateway: ${{ steps.changes.outputs.gateway }}
+      bff: ${{ steps.changes.outputs.bff }}
+      deploy: ${{ steps.changes.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed services
+        id: changes
+        uses: dorny/paths-filter@v4
+        with:
+          # Without this, negated patterns are silently ignored: the default
+          # quantifier ('some') never evaluates the exclusion below.
+          predicate-quantifier: 'some-with-excludes'
+          filters: |
+            # Inputs shared by every service, including the three repo-root files.
+            shared: &shared
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'global.json'
+              # An input to every `docker build .` in the images job, and to
+              # nothing the solution build can check: excluding a copied
+              # project here is a broken image, and un-excluding a local secret
+              # is one with credentials in it. Neither is visible to
+              # `dotnet build`, and without this line a change to it rebuilds
+              # no image at all.
+              - '.dockerignore'
+              # Copied into the publish stage by all six application
+              # Dockerfiles, and ADR-019 makes it a build INPUT rather than an
+              # editor hint: a change to it alters what every image compiles
+              # with, and the solution build cannot see the Docker context.
+              - '.editorconfig'
+              - 'src/BuildingBlocks/**'
+              # The contract suite (§12.6) guards compatibility BETWEEN
+              # services, so it belongs to all of them. Owned by none, it would
+              # run for none.
+              - 'tests/Platform.*/**'
+            catalog:
+              - *shared
+              - 'src/Services/Catalog/**'
+              - 'tests/Catalog.*/**'
+            ordering:
+              - *shared
+              - 'src/Services/Ordering/**'
+              - 'tests/Ordering.*/**'
+            # The gateway is a deployable like any other — its own image
+            # (§15.2), its own chart (§15.3), its own Program.cs and route
+            # file. Left out of this list, a change to that route file is never
+            # rebuilt — and the route file is the one place in the platform
+            # where a policy name is resolved at startup rather than at a call
+            # site (§10.2), so a bad one is a host that refuses to boot on the
+            # first deploy that does build it.
+            gateway:
+              - *shared
+              - 'src/Gateway/**'
+            # The BFF is a deployable too, with its own image, chart and the
+            # platform's only client secret.
+            #
+            # AND CATALOG'S PROTO, which is the one place in this list where a
+            # service's filter reaches into another service's tree. Web.Bff
+            # compiles `pricing.proto` as a LINKED source file (§9.7) and its
+            # Dockerfile copies that path, so a proto-only change alters what
+            # the BFF ships while matching only `catalog`. §15.1's own rule is
+            # that if changing a file can change what a service ships, it
+            # belongs in that service's filter — and `pipeline-gate filters`
+            # structurally cannot see this, because it asks whether a
+            # deployable is reachable rather than whether a filter is complete.
+            bff:
+              - *shared
+              - 'src/BFF/**'
+              - 'src/Services/Catalog/Catalog.Api/Protos/**'
+            # A chart or values change produces no new image and must still
+            # reach the cluster (§15.1's "a config-only deploy needs a tag it
+            # did not build").
+            #
+            # deploy/compose/** is excluded because it reaches NO cluster, and
+            # that is the whole of the reason — deploy/helm/** has a workflow
+            # of its own and is NOT excluded, because a chart change has to
+            # roll.
+            deploy:
+              - 'deploy/**'
+              - '!deploy/compose/**'
+
   build:
-    needs: licence-gate
+    needs: [licence-gate, pipeline-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,10 +214,10 @@ jobs:
         with:
           global-json-file: global.json
 
-      # The coverage reporter at the end of this job is stdlib Python, so it
-      # takes the same 3.12 pin the licence-gate and scaffold jobs do. The
-      # runner does ship a Python, and relying on it would make this the one
-      # job whose interpreter nobody chose.
+      # The two reporters at the end of this job are stdlib Python, so they
+      # take the same 3.12 pin the licence-gate, pipeline-gate and scaffold
+      # jobs do. The runner does ship a Python, and relying on it would make
+      # this the one job whose interpreter nobody chose.
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -87,20 +226,17 @@ jobs:
 
       - run: dotnet build Platform.slnx --no-restore -c Release
 
-      # Real from PR-02, which shipped the first tests alongside the code they
-      # cover. The step predates them on purpose, so that the PR adding tests
-      # added tests and not the pipeline that runs them.
+      # THREE STAGES, and PR-25 is what made them three (§15.1's UT → IT).
       #
-      # This step passes on zero discovered tests (§12.1) — asserting a floor on
-      # the count is PR-25's quality gates, not this skeleton's job.
+      # The whole solution is built once and the stages select from it. Per
+      # service, the filter above decides what to IMAGE and what to DEPLOY; it
+      # deliberately does not decide what to build or test, because §4.2's
+      # architecture gates read the whole dependency graph and §12.9's coverage
+      # figure is over the whole run. A per-service `dotnet build` would make
+      # both of those about a subset while still printing one number.
       #
-      # One run, both categories. The Category=Integration split (§12.4,
-      # docs/testing.md) is real from PR-22 and staged by PR-25 — running the
-      # halves separately here would claim a pipeline shape §15.1 does not have
-      # yet, and would run the fast half twice for nothing.
-      #
-      # TWO steps all the same, and the seam is instrumentation rather than
-      # category. §4.2's architecture gates read GetReferencedAssemblies on the
+      # The first seam is instrumentation rather than category, and it predates
+      # PR-25. §4.2's architecture gates read GetReferencedAssemblies on the
       # Domain assemblies; coverage.runsettings instruments exactly those and
       # nothing else; and on this runner an instrumented Domain assembly
       # reports a `netstandard` reference its source cannot have. Both Domain
@@ -113,40 +249,159 @@ jobs:
       # would relax an architecture rule everywhere, for ever, and in every
       # service the scaffold renders, to accommodate a test-tool artefact.
       #
-      # The two filters are exhaustive and disjoint by construction, so the
-      # counts sum to the whole suite. A gate added in a class NOT named
-      # ArchitectureTests lands in the instrumented run instead — which fails
-      # loudly here rather than quietly, and is why this is a comment and not a
-      # hope.
-      - run: >
+      # The second seam is the category (§12.4, docs/testing.md): the fast half
+      # starts no container — proved with `docker events`, not inferred — and
+      # the slow half needs a daemon for five projects' worth of collections.
+      # Separate STEPS rather than separate JOBS, because a job boundary means
+      # shipping the build output between runners to keep `--no-build` honest,
+      # and because the coverage figure is the union of the two (§12.9) and
+      # wants one place to be merged.
+      #
+      # The three filters are exhaustive and disjoint by construction, so the
+      # counts sum to the whole suite — and the stage gate below is what turns
+      # that from a claim into a check, in both directions: every test project
+      # ran in some stage, and no test ran in two. `docs/testing.md`,
+      # `pipeline_gate.py` and its suite all quote this sentence as this file's,
+      # which it stopped being when PR-25 rewrote the block around it.
+      #
+      # `--logger trx` is what the stage gate counts from, and it is not free:
+      # it changes where the collector writes, so each stage now leaves the
+      # run's merged attachment AND one partial per test project. The reporter
+      # merges rather than assuming a single file, and its suite pins that.
+      - name: Architecture gates
+        run: >
           dotnet test Platform.slnx --no-build -c Release
           --filter "FullyQualifiedName~ArchitectureTests"
+          --logger trx
+          --results-directory ./TestResults/architecture
 
       # The collector is Microsoft.CodeCoverage, which arrives with
       # Microsoft.NET.Test.Sdk and is therefore already in every test project:
-      # no package added, no licence-register entry owed. It merges every test
-      # project's data into ONE attachment for the run, which is why the step
-      # below reads a single file rather than reconciling thirteen.
-      - run: >
+      # no package added, no licence-register entry owed.
+      - name: Unit stage
+        run: >
           dotnet test Platform.slnx --no-build -c Release
-          --filter "FullyQualifiedName!~ArchitectureTests"
+          --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration"
           --collect:"Code Coverage"
           --settings coverage.runsettings
-          --results-directory ./TestResults
+          --logger trx
+          --results-directory ./TestResults/unit
+
+      # ADR-010 already made real infrastructure non-optional, and a category
+      # is not a skip: selected out, a test is not reported as passing;
+      # selected in, it needs the daemon exactly as before. The runner has one.
+      - name: Integration stage
+        run: >
+          dotnet test Platform.slnx --no-build -c Release
+          --filter "Category=Integration"
+          --collect:"Code Coverage"
+          --settings coverage.runsettings
+          --logger trx
+          --results-directory ./TestResults/integration
+
+      # PR-25's quality gate, and the reason it exists is that the three steps
+      # above are three new ways to select nothing: `dotnet test` exits ZERO on
+      # a filter that matches no test (§12.1), so every one of them can be
+      # green and empty. This asserts a floor on each stage, that every test
+      # project in Platform.slnx ran in one of them, and that none ran in two.
+      #
+      # Not `if: always()`. After a failed stage there is nothing to count, and
+      # a second red step would say the gate broke when the suite did.
+      - name: Every stage ran, ran enough, and ran once
+        run: >
+          python .github/pipeline-gate/pipeline_gate.py stages
+          ./TestResults/architecture ./TestResults/unit ./TestResults/integration
 
       # Reported, never gated. §12.9 calls coverage a diagnostic rather than a
-      # target, and a threshold that fails a build is PR-25's quality gate —
-      # so this step writes a number and cannot fail the job on its value.
+      # target and argues that a diagnostic wired to a build failure stops
+      # being read and starts being satisfied — so PR-25, which was the pull
+      # request entitled to add a threshold, declined and put its quality gate
+      # on the step above instead. That gate's subject is whether a suite ran
+      # at all, which is a fact rather than a target.
       #
       # It CAN fail on a missing or unreadable report, and should: a coverage
       # step that shrugs at no data is a step that reports nothing on the day
       # the collector stops running, which reads exactly like a clean result.
-      # No `if: always()` for the same reason from the other side — after a
-      # failed test step there is nothing to report, and a second red step
-      # would say the reporter broke when the suite did.
       #
-      # coverage.runsettings filters the report to `.*\.Domain\.dll$`, so what
-      # this prints is §12.9's "coverage of the domain layer specifically" and
-      # not a solution-wide figure with the domain averaged into it.
+      # BOTH stages, because the domain assemblies are exercised on both sides
+      # of the category and §12.9 asks for the figure over the whole run.
+      # Measured here: 253 of 308 lines from the unit stage, 192 from the
+      # integration stage, and 257 from the union — four lines that only a
+      # test needing a container reaches.
       - name: Report domain-layer coverage
-        run: python .github/coverage/domain_coverage.py ./TestResults
+        run: >
+          python .github/coverage/domain_coverage.py
+          ./TestResults/unit ./TestResults/integration
+
+  # §15.1's per-service image build, and the gap it closes is named in
+  # compose.yml: that smoke is filtered to deploy/compose/**, so a Dockerfile
+  # broken by a source change surfaced on the next compose pull request rather
+  # than on the offending one. Here it surfaces on the offending one.
+  #
+  # Built and not pushed. §15.1's node reads "Build + sign images", and signing
+  # needs a registry and a key this repository has neither of — so what runs is
+  # the half that can run, and the other half is named rather than faked.
+  # `pipeline-gate images` asserts every Dockerfile under src/ appears below.
+  #
+  # After `build`, because an image of code that does not compile is a slow way
+  # to learn it does not compile.
+  images:
+    needs: [changes, build]
+    if: ${{ needs.changes.outputs.catalog == 'true' || needs.changes.outputs.ordering == 'true' || needs.changes.outputs.gateway == 'true' || needs.changes.outputs.bff == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # One red image should not cancel the others: which of six Dockerfiles
+      # broke is the useful signal, and fail-fast reports the first alphabetically.
+      fail-fast: false
+      matrix:
+        include:
+          - filter: catalog
+            image: catalog-api
+            dockerfile: src/Services/Catalog/Catalog.Api/Dockerfile
+          - filter: catalog
+            image: catalog-migrator
+            dockerfile: src/Services/Catalog/Catalog.Migrator/Dockerfile
+          - filter: ordering
+            image: ordering-api
+            dockerfile: src/Services/Ordering/Ordering.Api/Dockerfile
+          - filter: ordering
+            image: ordering-migrator
+            dockerfile: src/Services/Ordering/Ordering.Migrator/Dockerfile
+          - filter: gateway
+            image: gateway
+            dockerfile: src/Gateway/Gateway.Api/Dockerfile
+          - filter: bff
+            image: web-bff
+            dockerfile: src/BFF/Web.Bff/Dockerfile
+    steps:
+      # THE INDEX HAS TO RESOLVE, and nothing else here would say if it did
+      # not. `needs.changes.outputs[matrix.filter]` on a name no filter defines
+      # is the empty string rather than an error, so every `if` below would be
+      # false and this job would report success having built nothing — the
+      # failure `pipeline-gate images` catches at the *name* level and cannot
+      # catch at the expression level. This step has no `if`, so it runs for
+      # every matrix leg including the skipped ones, and it is the only thing
+      # standing between a typo and a silent no-op.
+      - name: The filter this leg reads resolves to a decision
+        run: |
+          case "${{ needs.changes.outputs[matrix.filter] }}" in
+            true|false) echo "${{ matrix.filter }}=${{ needs.changes.outputs[matrix.filter] }}" ;;
+            *) echo "::error::needs.changes.outputs[${{ matrix.filter }}] is not true/false. The images matrix names a filter the changes job does not output, so this image would never be built."; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+        if: ${{ needs.changes.outputs[matrix.filter] == 'true' }}
+
+      # The build context is the repository root, exactly as §14.1's Compose
+      # file sets it — these Dockerfiles copy csproj files from across the
+      # solution, so a narrower context breaks the restore layer. The tag is
+      # local and never pushed; it exists so the build has somewhere to put the
+      # result.
+      - name: Build ${{ matrix.image }}
+        if: ${{ needs.changes.outputs[matrix.filter] == 'true' }}
+        run: >
+          docker build
+          --file ${{ matrix.dockerfile }}
+          --tag ${{ matrix.image }}:${{ github.sha }}
+          .

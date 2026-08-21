@@ -1,0 +1,104 @@
+{
+  "$comment": [
+    "§15.5's rollout, as data. canary.py reads this; deploy.yml reads canary.py.",
+    "",
+    "The ladder is the chapter's, verbatim: 5, 25, 50, 100, ten minutes each.",
+    "It is NOT trimmed to what a three-replica deployment can express, and that",
+    "is the point of tolerance.weightOvershootPoints being zero — with three",
+    "stable pods a single canary already serves 25%, and a plan that silently",
+    "accepted that would have written 5% while shipping five times the blast",
+    "radius. `canary.py plan` refuses instead and names the stable replica",
+    "count the step needs (ADR-022).",
+    "",
+    "That count is 19, and the charts already permit it: §15.3's",
+    "autoscaling.maxReplicas is 20 on the three service charts, exactly 19",
+    "stable plus one canary. The gateway's is 30, so there the 19 is what the",
+    "weight costs rather than all the chart allows.",
+    "The smallest configuration in which 5% is expressible is the largest one",
+    "the chart allows, and neither number was chosen with the other in mind."
+  ],
+
+  "steps": [
+    { "weight": 5, "dwellMinutes": 10 },
+    { "weight": 25, "dwellMinutes": 10 },
+    { "weight": 50, "dwellMinutes": 10 },
+    { "weight": 100, "dwellMinutes": 0 }
+  ],
+
+  "tolerance": {
+    "weightOvershootPoints": 0
+  },
+
+  "thresholds": {
+    "$comment": [
+      "errorRate and latencyP99Seconds are §13.6's alert thresholds and are",
+      "asserted equal to them by canary.py check 3, read out of",
+      "platform-alerts.yaml rather than restated here. A canary tuned looser",
+      "than the alert promotes a release and then pages about it.",
+      "",
+      "minimumRequests is 1/errorRate and is derived rather than picked: below",
+      "a hundred requests a single failure is more than one per cent, so the",
+      "threshold cannot be expressed at all and a green analysis is arithmetic",
+      "rather than evidence.",
+      "",
+      "The two floors exist because a ratio between small numbers is noise. A",
+      "baseline of 0.0001 against a canary of 0.0004 is four times worse and is",
+      "two requests."
+    ],
+    "errorRate": 0.01,
+    "latencyP99Seconds": 1,
+    "errorRateFloor": 0.001,
+    "latencyP99FloorSeconds": 0.05,
+    "regressionFactor": 2.0,
+    "minimumRequests": 100
+  },
+
+  "queries": {
+    "$comment": [
+      "PromQL, with three substitutions the workflow makes: $SERVICE is the",
+      "service_name resource attribute (§13.2 takes it from ApplicationName, so",
+      "it is the ENTRY ASSEMBLY name — `Gateway.Api`, never `gateway`), $TRACK",
+      "is stable or canary, and $WINDOW is the step's dwell.",
+      "",
+      "deployment_track is the resource attribute ADR-022 adds. service_version",
+      "was the obvious discriminator and is not one: BuildInfo.Version strips",
+      "the source-revision suffix on purpose, and nothing sets an assembly",
+      "version, so every build in this platform reports 1.0.0.",
+      "",
+      "The window equals the dwell rather than being a separate constant. §15.5",
+      "watches each weight for ten minutes; a rate over ten minutes read at the",
+      "end of ten minutes IS that watch, and a second number here would be a",
+      "second thing to keep in step.",
+      "",
+      "THE `or vector(0)` ON THE ERROR-RATE NUMERATOR IS NOT DEFENSIVE, it is",
+      "what lets a healthy canary promote at all. A canary serving no 5xx",
+      "matches no series for the numerator, and PromQL keeps an empty vector",
+      "empty through the division rather than treating it as zero — so the",
+      "query returns no sample, read_prometheus returns null, and analyse reads",
+      "that as an absent series and rolls back. A canary with a perfect record",
+      "would have failed every step, for ever.",
+      "",
+      "Only the numerator is coalesced. An empty DENOMINATOR means no traffic",
+      "at all, which is a real silence and must stay one — the requests query",
+      "and minimumRequests are what judge it."
+    ],
+    "errorRate": "(sum(rate(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\", http_response_status_code=~\"5..\"}[$WINDOW])) or vector(0)) / sum(rate(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\"}[$WINDOW]))",
+    "latencyP99Seconds": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"$SERVICE\", deployment_track=\"$TRACK\"}[$WINDOW])))",
+    "requests": "sum(increase(http_server_request_duration_seconds_count{service_name=\"$SERVICE\", deployment_track=\"$TRACK\"}[$WINDOW]))"
+  },
+
+  "workloads": {
+    "$comment": [
+      "serviceName is what the process emits and chart is what Helm installs,",
+      "and they are different strings for the same thing. Check 4 asserts the",
+      "first against the solution's own entry assemblies and the second against",
+      "deploy/helm, because a query spelled from the deployment's vocabulary",
+      "matches no series — and an empty result rolls every canary back, so the",
+      "mistake produces a rollout that can only ever fail."
+    ],
+    "catalog-api": { "serviceName": "Catalog.Api", "chart": "catalog" },
+    "ordering-api": { "serviceName": "Ordering.Api", "chart": "ordering" },
+    "gateway": { "serviceName": "Gateway.Api", "chart": "gateway" },
+    "web-bff": { "serviceName": "Web.Bff", "chart": "web-bff" }
+  }
+}

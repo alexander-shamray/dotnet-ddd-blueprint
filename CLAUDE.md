@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..021),
+                             15-cicd-deployment, appendix A (ADR-001..022),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -115,10 +115,42 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              both triggers cover. The second workflow to reach
                              outside its tree, and it adopted the Helm tree's
                              lesson before paying for it once
+.github/workflows/deploy.yml §15.5's canary, `workflow_dispatch` ONLY — a
+                             deploy on `push` would fail on every merge for
+                             want of a cluster, and a pipeline red by design
+                             trains everyone to ignore it. Its `check` job DOES
+                             run on pull requests, and is the THIRD workflow to
+                             reach outside its tree: deploy/helm/**, src/** and
+                             deploy/observability/**, declared as SOURCE_INPUTS
+                             in canary.py. It adopted the lesson and paid for
+                             it anyway — the list shipped omitting the
+                             observability entry that two of its own checks
+                             read, and the trigger assertion stayed green,
+                             because a gate cannot see a read it was never told
+                             about. A test over the reads is what closes that,
+                             not a more careful list
 .github/licence-gate/        the gate, its allow-list and its tests
-.github/coverage/            the domain-coverage reporter — stdlib Python, no
-                             tests, and the file argues why: it is a report and
-                             not a gate, so it asserts nothing about the repo
+.github/pipeline-gate/       PR-25's quality gates, and all three are
+                             inventories: every deployable under src/ is
+                             matched by a path filter, every Dockerfile is
+                             built by some matrix entry, and every test stage
+                             ran, ran enough, and ran ONCE. Tested, and every
+                             test is a negative case — a gate only ever
+                             observed green is one nobody has established is
+                             looking at anything
+.github/coverage/            the domain-coverage reporter. Still a report and
+                             not a gate: PR-25 was the PR entitled to add a
+                             threshold and declined, on §12.9's own argument
+                             that a diagnostic wired to a build failure stops
+                             being read. It has a suite since PR-25 all the
+                             same, because it now MERGES across stages, and
+                             arithmetic that is quietly wrong is worse than
+                             no figure
+deploy/canary/               §15.5's rollout since PR-25 — the ladder as JSON,
+                             the weight arithmetic and the promote/rollback
+                             verdict as tested stdlib Python, and one file that
+                             reads Prometheus. It reaches no cluster; the
+                             deciding is tested and the acting is not
 tools/new-service/           §4.5's scaffold — see the notes below
 deploy/compose/              §14.1's infrastructure, plus one application pair
                              per service and the gateway on 5000, which has no
@@ -367,10 +399,18 @@ SLO run. It also found that **four of §13.6's twelve alerts read an instrument
 nothing publishes**, which is that section's own callout coming true the moment
 the alerts stopped being a table and became files; those four ship unloaded and
 a gate keeps the list honest.
-**PR-25 (integration categories, canary deploy, quality gates) is next.**
+PR-25 closed the roadmap's M6 with §15.1's staged pipeline — the path filter,
+the per-service image build, three test stages where there was one run, and the
+quality gate that says each of them actually ran — plus §15.5's canary, which
+needed a mechanism no chapter had chosen ([ADR-022](docs/backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)).
+It is the platform's **third artefact that no cluster has ever seen**, after
+the charts and the alert rules, and the honest half of it is that the *deciding*
+is tested and the *acting* is four commands nobody has run.
+**PR-26 is optional and conditional (Appendix C), so the plan has no next
+mandatory PR.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 794 tests — so the build rules and the drift rules below
+and `dotnet test` runs 795 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -383,8 +423,8 @@ summed a local `dotnet test Platform.slnx` the same way, which is the same
 arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
-there are four suites now — see *The commands* below, which is where the
-current set lives. That one: `py -3.12 -m unittest` in `tools/new-service` runs
+there are eight suites now — see *The commands* below, which is where the
+current set lives, and which is the only place a count of them belongs. That one: `py -3.12 -m unittest` in `tools/new-service` runs
 81, and CI has a `scaffold` job for them beside `licence-gate`.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
@@ -575,6 +615,47 @@ own line rather than sending a reader to a file that does not hold it.
   that it refused, and a second test asserts *why*, against the options
   pipeline where nothing races. Measured on this repository: intermittent on a
   two-core CI runner, never once locally.
+- **A declared-inputs list checks itself against the workflow, never against
+  the reads — so an omission is invisible from inside the gate.** The Helm
+  tree's `SOURCE_INPUTS` pattern was adopted twice more and then failed a third
+  time in the obvious way: `canary.py` declared two paths and opened three, and
+  its "both triggers cover every entry" assertion stayed green throughout,
+  because a list can only be compared for the entries it already contains. **A
+  gate cannot see a read it was never told about.** The fix is a test whose
+  subject is the *reads* — the same shape as asserting a parser found anything
+  at all — and it was owed by every copy of this pattern rather than by the one
+  that was caught. **All three have it now**: `canary.py`'s in its suite,
+  `check.py`'s as a check of its own, and `smoke.sh`'s over its own `$ROOT/…`
+  literals. Each was observed red against a removed entry. A fourth copy of
+  `SOURCE_INPUTS` arrives owing the same test.
+- **A `helm upgrade --install` of a new release inherits nothing.** A second
+  release of the same chart takes the chart's defaults for every value the
+  environment overlay would have supplied — authority, OTLP endpoint, database
+  — unless it is given them. Only one chart here failed loudly (the gateway
+  refuses an empty `ingress.trustedNetworks`); the other three would have
+  installed and been quietly wrong. Drive a sibling release from
+  `helm get values` of the one it is a sibling of.
+- **A tool that changes where it writes when you ask it for something else is
+  a premise you did not know you had.** `domain_coverage.py` asserted exactly
+  one Cobertura file per run, correctly, until `--logger trx` was added for an
+  unrelated gate — and the TRX logger makes the collector leave one partial
+  attachment per test project beside the merged one. Nothing about the flag
+  says so. **When a step's output feeds another step, adding a flag to the
+  first is a change to the second.**
+- **Floating point is wrong at the input a ladder starts from, not at the
+  exotic ones.** The canary's weight arithmetic read
+  `ceil(stable * f / (1 - f))`, and at 5% against 19 replicas `19 * 0.05 / 0.95`
+  is `1.0000000000000002` — so it bought two pods and served 9.5% under a label
+  reading 5%. Every quantity was a count of pods or a whole percentage, so the
+  exact answer was available the whole time. **Where the inputs are integers,
+  the float route is not merely imprecise, it is available to be wrong.**
+- **Two functions deriving one number will disagree, and the test that pairs
+  them is cheaper than the one that finds out later.** `required_stable` named
+  the replica count the step needs and `plan` refused it — not because of the
+  arithmetic above, but because the two had been written to different rules,
+  one taking the smallest canary at or above the weight and the other the
+  largest at or below. The bug was the rule, and only asserting the round trip
+  said so.
 - **A pattern that is one token too strict silently covers less than it
   claims.** The observability gate's instrument reader required `Create…<T>(`
   and found every histogram and counter while missing all three observable
@@ -592,16 +673,19 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 623 of 794, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 624 of 795, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Four suites, three runners, and only one of them is `dotnet test`.** The
+**Eight suites, three runners, and only one of them is `dotnet test`.** The
 scaffold's tests are Python, the chart gate is bash over `helm template`, and
-the observability gate is Python again; none is in `Platform.slnx`, so a green
-solution says nothing about any of them:
+the licence gate, the observability gate, the pipeline gate, the coverage
+reporter's suite and the canary's are Python again; none is in `Platform.slnx`,
+so a green solution says nothing about any of them. **The licence gate belongs
+in that count** — CI tests it and then runs it, which is the pattern every gate
+here follows — and leaving it out is what made this seven:
 
 ```bash
 (cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
@@ -611,7 +695,28 @@ bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SD
 HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
+
+(cd .github/licence-gate && py -3.12 -m unittest)  # then licence_gate.py
+
+py -3.12 -m unittest discover -s .github/pipeline-gate
+py -3.12 .github/pipeline-gate/pipeline_gate.py filters
+py -3.12 .github/pipeline-gate/pipeline_gate.py images
+py -3.12 -m unittest discover -s .github/coverage
+py -3.12 -m unittest discover -s deploy/canary
+py -3.12 deploy/canary/canary.py check
 ```
+
+**`pipeline_gate.py stages` is the one that cannot be run on its own**: it
+reads what the three test steps wrote, so it needs a `dotnet test` per stage
+into `./TestResults/{architecture,unit,integration}` first. `docs/testing.md`
+carries those three commands.
+
+`deploy/canary/README.md` is that tree's operational reference, on
+`deploy/observability/README.md`'s terms: what the gate asserts, and — more
+usefully — the things it does not, of which the load-bearing one is that
+**nothing has established a replica ratio is a traffic ratio**. kube-proxy
+spreads connections rather than requests, and no render-time check reaches
+that.
 
 The chart gate needs `helm dependency update` before it can render anything,
 and runs it itself — `file://` dependencies resolve from disk, so there is no
@@ -633,8 +738,10 @@ A newer one is the hazard, not an older one — it accepts APIs 3.12 does not, s
 the local suite goes green on code the runner cannot execute.
 `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly that way. The
 scaffold *script* is a different matter: running it is not a test of the floor,
-so plain `python` is fine there. 3.12 is installed here, so both Python suites
-— `tools/new-service` and `.github/licence-gate` — can be run against it.
+so plain `python` is fine there. 3.12 is installed here, so **every** Python
+suite can be run against it — the set is the one *The commands* lists, plus
+`.github/licence-gate`, and it is not enumerated a second time here for the
+reason that sentence gives.
 
 **`dotnet test` requires Docker from PR-08**, and the container tests are still
 never *skipped* when it is absent: a skip on a missing daemon **fails open**, so
@@ -645,12 +752,19 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 623 of
-the 794 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 624 of
+the 795 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 171, needing the daemon exactly as
-before. PR-25 runs them as separate CI stages; today CI runs one pass over
-both, because staging a split §15.1 has not grown yet would claim a pipeline
-shape that does not exist.
+before.
+
+**Since PR-25 CI runs three stages rather than one pass**: architecture gates
+(18), unit (606) and integration (171), which is the 624 above split at the
+seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
+boundary would mean shipping the build output between runners to keep
+`--no-build` honest, and the coverage figure is the union of the last two.
+**Three stages are three new ways to select nothing**, since `dotnet test`
+exits zero on a filter that matches no test, which is what
+`.github/pipeline-gate/` exists for.
 
 **The trait is declared on the `[CollectionDefinition]`, not per test class**,
 so joining the container collection *is* carrying the category — there is
@@ -662,8 +776,10 @@ propagation was measured before the design was trusted.
 with its own collection and therefore its own container set (§12.4's stated
 price). The last is the odd one: most of its tests need no container, one class
 needs a Keycloak, so the suite is fast and then pays for an identity provider
-once — 59 tests of 63 on the fast side, which is the clearest case in the repo
-for categorising a collection rather than a project.
+once — 62 tests of 66 on the fast side, which is the clearest case in the repo
+for categorising a collection rather than a project. (Measured from the stage
+TRX, not counted by eye: `docs/testing.md` had it right and this line was three
+short on both halves of the same split.)
 `Ordering.Application.Tests` is deliberately not among them — its handler
 tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
 `HttpContextCurrentUser` and a handler resolved in a bare scope has no
@@ -1425,7 +1541,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-022) and keep the
+  (currently ADR-023) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

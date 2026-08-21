@@ -23,9 +23,13 @@ WORKDIR /src
 # writes each project's own obj/project.assets.json; a csproj that is not
 # present when it runs is simply not restored, and the --no-restore publish
 # below then fails with NETSDK1004 naming a project this file never mentions.
-# So a new ProjectReference anywhere in the chain is a line here too — and
-# nothing in CI will say so, because the compose smoke that builds these images
-# is path-filtered on deploy/compose/** and a reference lands under src/.
+# So a new ProjectReference anywhere in the chain is a line here too, and
+# §15.1's `images` job is what says so since PR-25: it builds every image a
+# changed service ships — api and migrator alike, so two for a service that
+# owns a database — and a missing line fails `docker build` on the pull request
+# that added the reference. It used to surface only on the next compose pull
+# request, that smoke being path-filtered on deploy/compose/** while a
+# reference lands under src/.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
 COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/

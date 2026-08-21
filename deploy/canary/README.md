@@ -1,0 +1,105 @@
+# Canary rollout
+
+§15.5's progressive delivery, as data and one decision function.
+[ADR-022](../../docs/backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)
+records the mechanism.
+
+**Nothing here has ever reached a cluster.** There is no dev, staging or
+production environment for this repository, no kubeconfig and no registry.
+`.github/workflows/deploy.yml` is `workflow_dispatch` only for that reason — a
+canary on `push` would fail on every merge for want of a cluster, and a
+pipeline that is red by design trains everybody to ignore it. This is the third
+artefact of that kind: PR-23 shipped charts nothing installs and PR-24 alert
+rules no Prometheus loads.
+
+What is asserted, and by what, is the whole of the next two sections.
+
+## What runs
+
+```bash
+py -3.12 -m unittest discover -s deploy/canary   # the arithmetic and the verdict
+py -3.12 deploy/canary/canary.py check           # the plan against this repository
+```
+
+Stdlib Python, no dependencies, no SDK, no `helm`, no Docker — the licence
+gate's terms, which is why the gate can run before anything is built.
+`deploy/helm/smoke.sh` covers the other half: it renders the canary track of
+every chart and asserts what comes out.
+
+| File | What it is |
+|---|---|
+| `canary.json` | §15.5's ladder, the thresholds, the PromQL and the workload map |
+| `canary.py` | The weight arithmetic, the promote/rollback verdict, and the gate over `canary.json` |
+| `read_prometheus.py` | The one file that talks to anything. Runs the queries and writes what came back |
+| `test_canary.py` | The suite. It is the whole of the assurance the rollout has |
+
+## What it asserts
+
+`canary.py check` is seven checks and the last two are about itself:
+
+1. The ladder climbs, ends at 100%, and every rung but the last has a dwell.
+2. Every threshold `analyse` reads is present — it indexes them, so a missing
+   key would be a `KeyError` with a canary already serving traffic.
+3. The absolute thresholds **are** §13.6's alert thresholds, read out of
+   `platform-alerts.yaml` rather than restated. A canary tuned looser than the
+   alert promotes a release and then pages about it.
+4. Each workload's `serviceName` is an entry assembly this solution builds, and
+   its `chart` is a chart under `deploy/helm`.
+5. Every metric the queries read is one a loaded alert reads — which
+   `deploy/observability/check.py` has already established is published by
+   something. Not a second copy of that scan; a composition with it.
+6. The parser found host assemblies at all, so checks 4 and 5 cannot pass
+   vacuously.
+7. Both of `deploy.yml`'s triggers cover every path in `SOURCE_INPUTS`.
+
+## What it does not
+
+- **It reaches no cluster and no Prometheus.** Every function in `canary.py` is
+  pure over its arguments; the workflow fetches and acts.
+- **It does not validate PromQL.** The queries are strings here. A syntax error
+  in one surfaces as a failed query at the end of a ten-minute dwell — which
+  the verdict reads as an absent series and therefore as a rollback, so it
+  fails safe and slowly rather than unsafely.
+- **It does not hold the weight against a voluntary disruption.** The
+  PodDisruptionBudget belongs to the stable release and its selector matches
+  both tracks, so it constrains the total rather than the stable count: a node
+  drain during a dwell can evict stable pods and leave the canary serving more
+  than the rung asked for. The verdict is still measured rather than assumed —
+  `analyse` reads both tracks' real numbers — so the cost is exposure for one
+  dwell, not a wrong decision. ADR-022 records why the temporary stable-track
+  budget that would fix it is deferred.
+- **It does not establish that a replica ratio is a traffic ratio.** kube-proxy
+  spreads *connections*, not requests. Keep-alive, HTTP/2 multiplexing to the
+  gRPC listener, or a client that opens one connection and holds it will all
+  under-deliver the weight, and nothing short of a cluster can measure that.
+  ADR-022 names it as owed.
+- **It cannot see an ad-hoc `--set` at deploy time**, the same reach
+  `deploy/helm/README.md` states for the chart gate.
+- **It does not establish that `deployment_track` is a label on the deployed
+  backend's series.** `deployment.track` is a *resource* attribute, and the
+  standard OTLP-to-Prometheus mapping puts only `service.name`,
+  `service.namespace` and `service.instance.id` on each series — the rest go to
+  `target_info`. §14.1's collector copies this one attribute onto the datapoint
+  with a `transform` processor, and **the deployed collector must do the
+  same**. Without it every query matches nothing, which this reads as an absent
+  series and rolls back: every rung, on a healthy canary. The requirement is in
+  ADR-022; nothing here can check it, because the cluster's collector is not in
+  this repository.
+
+## The two things worth knowing before reading the code
+
+**The requested weight is a ceiling, not a target.** `plan` returns the largest
+canary that stays *within* it and refuses where even one pod overshoots, naming
+the stable replica count that would satisfy the step. A replica ratio is
+quantised, so §15.5's 5% needs 19 stable replicas; at the chart's default of 3,
+one canary pod is already 25%. The refusal is the deliverable — rounding to the
+nearest expressible weight is how a step labelled 5% comes to serve five times
+the blast radius anybody authorised.
+
+**There is no third verdict.** Promote or roll back, and every doubt resolves to
+the second: an absent series, a canary too quiet to judge, a breach, or a
+regression against the stable track. That is affordable because of what the
+mechanism is — the canary is a second Deployment and the stable release is
+never touched, so a rollback costs the canary's own pods and nothing else. When
+rolling back is cheap, "inconclusive" is not caution, it is a canary left
+serving traffic on nobody's authority.

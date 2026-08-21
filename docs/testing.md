@@ -18,10 +18,10 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 > `/validate-blueprint` reaches it only because it is named in that command's
 > scope. The one rule in `CLAUDE.md` covers it, and that is all that does.
 
-## The four suites
+## The suites
 
-Four of them, three runners, and `dotnet test` says nothing about the other
-three:
+Eight of them, three runners, and `dotnet test` says nothing about the other
+seven:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -34,14 +34,28 @@ dotnet test  Platform.slnx         # needs a running Docker daemon
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
+
+(cd .github/licence-gate && py -3.12 -m unittest)        # ADR-019's register gate
+
+py -3.12 -m unittest discover -s .github/pipeline-gate   # PR-25's quality gates
+py -3.12 -m unittest discover -s .github/coverage        # the coverage merge
+py -3.12 -m unittest discover -s deploy/canary           # §15.5's rollout
 ```
 
-**Only the first is a §12 suite, and the other three are here anyway**, because
+**The licence gate is in that list because CI runs it on the same terms**, and
+leaving it out is what made this count seven. `ci.yml` tests the gate and then
+runs it — the pattern every gate here follows — so a suite that ships with the
+repository, runs in CI, and is invisible to `dotnet test` is one of these
+whatever directory it lives in.
+
+**Only the first is a §12 suite, and the other seven are here anyway**, because
 this file is written for someone with a checkout rather than for someone
 deciding what to test. The scaffold's tests exercise a developer tool; the
-chart gate renders `deploy/helm/` and asserts what comes out (§15.3); and the
+chart gate renders `deploy/helm/` and asserts what comes out (§15.3); the
 observability gate pairs §13.6's alerts with §13.9's runbooks both ways and
-checks that every metric a loaded rule reads is one something publishes. None
+checks that every metric a loaded rule reads is one something publishes; and
+PR-25's three cover the pipeline's own inventories, the coverage merge, and
+§15.5's rollout arithmetic. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
 
@@ -109,10 +123,10 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Those are the runner's numbers, and `--list-tests` gives different ones.**
 > Discovery reports 82 for that project where execution reports 81, so a
 > partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 794 is summed from `dotnet test` output, and mixing the two is how
+> here — the 795 is summed from `dotnet test` output, and mixing the two is how
 > this callout first came to claim 72 and 82. Quote what ran.
 >
-> Across the solution the split is **623 and 171 of 794**, and the fast half
+> Across the solution the split is **624 and 171 of 795**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -143,36 +157,91 @@ rather than quietly**, which is the direction this has to fail in. It has no
 fixture, so it does not run against one; it also carries no category, so it
 runs in the fast half and fails there. What it cannot do is report a pass.
 
-**Nothing in CI runs the two *category* halves separately yet.** PR-25 owns the
-staged pipeline of [§15.1](backend-architecture/15-cicd-deployment.md); this is
-the category it stages on, delivered ahead of it so the filter is real before
-the stage that depends on it is written. CI does run `dotnet test` twice, and
-that seam is a different one — architecture gates versus everything else, for
-the instrumentation reason under Coverage below.
+**CI runs the two *category* halves separately since PR-25**, which is
+[§15.1](backend-architecture/15-cicd-deployment.md)'s `UT → IT`. Three
+`dotnet test` invocations, not two, and the seams answer different questions:
+the first is architecture gates versus everything else, for the instrumentation
+reason under Coverage below, and the second is `Category=Integration`. Measured
+on this repository they are **18**, **606** and **171**, summing to the 795 the
+whole suite runs — which is the arithmetic the callout below asks for.
+
+```bash
+dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests" \
+    --logger trx --results-directory ./TestResults/architecture
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration" \
+    --logger trx --results-directory ./TestResults/unit
+dotnet test Platform.slnx --filter "Category=Integration" \
+    --logger trx --results-directory ./TestResults/integration
+
+py -3.12 .github/pipeline-gate/pipeline_gate.py stages \
+    ./TestResults/architecture ./TestResults/unit ./TestResults/integration
+```
+
+**The logger and the directories are not decoration here either.** The gate
+counts from TRX and looks for those three directory names, so a bare
+`dotnet test` runs the stages and leaves it nothing to read — following this
+file without them produced three green runs and a gate that could not be run
+at all. Both halves of the split are stated because the gate is what makes the
+counts above a check rather than a claim.
+
+**Separate steps in one job, not separate jobs**, and both halves of that are
+deliberate: a job boundary would mean shipping the build output between runners
+to keep `--no-build` honest, and the coverage figure is the union of the last
+two, which wants one place to be merged.
 
 > **A filter is a new way for a suite to not run, and that is
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 623 and 171 summing to
-> 794 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 624 and 171 summing to
+> 795 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.
+>
+> **It shipped, as `.github/pipeline-gate/pipeline_gate.py stages`, and it is
+> more than the floor this callout asked for.** A floor is a number in a file
+> and numbers in files go stale, so it carries the weaker half: the floors sit
+> well under the measurements above, because what they grope for is an
+> order-of-magnitude miss rather than ordinary churn. The half with no number
+> in it does the work — **every test project in `Platform.slnx` ran in some
+> stage, no stage was empty, and no test ran in two.** The last of those turns
+> `ci.yml`'s "exhaustive and disjoint by construction" from a claim into a
+> check, and on the integration stage an overlap is a container set paid for
+> twice.
 
 ## Coverage
 
 **Reported, not gated** — [§12.9](backend-architecture/12-test-strategy.md)
-calls coverage a diagnostic rather than a target, and a threshold that fails a
-build is PR-25's quality gates. What ships here is the number, measured over
-the layer where it means something.
+calls coverage a diagnostic rather than a target, and a diagnostic wired to a
+build failure stops being read and starts being satisfied. **PR-25 declined the
+threshold on that argument** rather than leaving it owed; its quality gate is
+the stage check above, whose subject is whether a suite ran at all. What ships
+here is the number, measured over the layer where it means something.
 
 ```bash
-dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests" \
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration" \
     --collect:"Code Coverage" --settings coverage.runsettings \
-    --results-directory ./TestResults
-python .github/coverage/domain_coverage.py ./TestResults
+    --results-directory ./TestResults/unit
+dotnet test Platform.slnx --filter "Category=Integration" \
+    --collect:"Code Coverage" --settings coverage.runsettings \
+    --results-directory ./TestResults/integration
+python .github/coverage/domain_coverage.py ./TestResults/unit ./TestResults/integration
 ```
+
+**Both stages, because the figure is the union and not either half.** §12.9
+asks for the domain assemblies "over the whole run", and the domain is
+exercised on both sides of the category: measured here, the unit stage covers
+253 of 308 method lines, the integration stage 192, and the union **257** —
+four lines reached only by a test that needs a container.
+
+The reporter merges rather than reading one file, and it has to. Adding
+`--logger trx`, which the stage gate counts from, changes where the collector
+writes: each stage then leaves the run's merged attachment **and** one partial
+per test project — eight files for one stage here, three of them empty. Hits
+are merged with `max` over a key that reproduces the collector's own
+`lines-valid` exactly, so reading the same attachment twice, which that layout
+guarantees, cannot inflate the figure.
 
 **`--results-directory` is not decoration, and leaving it off is why this
 command is written in full.** Without it the collector writes under each *test
@@ -203,10 +272,18 @@ Three things about that filter are deliberate:
   ([Appendix B](backend-architecture/appendix-b-licences.md)); a coverage
   figure is not worth a new dependency.
 
-The run writes a single `*.cobertura.xml` under `TestResults/<guid>/` — the
-collector merges every test project's data into one attachment — and the
-`line-rate` attribute on its `<coverage>` element is the figure, with
-`<package name="…">` naming each assembly.
+**A run without `--logger trx` writes a single `*.cobertura.xml` under
+`TestResults/<guid>/`**, because the collector merges every test project's
+data into one attachment. That is the layout the reporter used to assume, and
+the commands above are not it: the stage gate needs TRX, and the TRX logger
+makes each test project write its own partial attachment beside the merged one.
+So the reporter unions whatever it finds across both stage directories rather
+than reading a file, and the figure is `lines-covered / lines-valid` over that
+union — with `<package name="…">` naming each assembly, as before.
+
+**Do not reason from the single-file layout.** Both are real and which one you
+get depends on a flag several paragraphs away; the union is correct under
+either, which is why it is what ships.
 
 > **CI runs this as a second step over the *complement* of the architecture
 > gates, and that seam is instrumentation rather than preference.** §4.2's
@@ -225,7 +302,14 @@ collector merges every test project's data into one attachment — and the
 > and is the wrong one: it relaxes an architecture rule everywhere, for ever,
 > and in every service the scaffold renders, to accommodate a test tool. The
 > gates run first and uninstrumented instead. The two filters are exhaustive
-> and disjoint, so the counts still sum to the whole suite — **16 and 760**.
+> and disjoint, so the counts still sum to the whole suite — **18 and 777**.
+>
+> **That pair had gone stale before PR-25 touched it, and reconciling it is
+> the one rule rather than tidying.** It read 16 and 760, which sums to 776 —
+> neither the 794 that preceded this branch nor the 795 that follows it. The
+> figures above are now measured rather than remembered, and the split this
+> callout describes is the *first* seam of the three; `pipeline_gate.py stages`
+> is what asserts all three still partition the suite.
 
 ## Where a test goes
 

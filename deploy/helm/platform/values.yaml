@@ -13,7 +13,7 @@
 # objects. The conflict is overlap, not co-tenancy.
 #
 # §15.1 settles which one production uses, and it is not this one: its
-# config-only deploy step reads `helm get values ordering -n "$NAMESPACE"`,
+# config-only deploy step reads `helm get values ordering-api -n "$NAMESPACE"`,
 # which is a per-service release by name. The pipeline builds, tests and
 # deploys per service, so the releases are per service.
 #
