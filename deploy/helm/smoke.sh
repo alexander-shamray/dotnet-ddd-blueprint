@@ -994,12 +994,34 @@ for chart in $SERVICE_CHARTS; do
         ' "$OUT/$chart-canary.yaml"
 
     # And the two Deployments must NOT select each other's pods, or each scales
-    # the other away. The track label is what separates them, and it is in the
-    # Deployment's selector and not the Service's.
-    check "$chart: the canary Deployment selects on track=canary" \
-        grep -q 'app.kubernetes.io/track: canary' "$OUT/$chart-canary.yaml"
-    check "$chart: the stable Deployment selects on track=stable" \
-        grep -q 'app.kubernetes.io/track: stable' "$OUT/$chart.yaml"
+    # the other away. The track label is what separates them, and it has to be
+    # in the Deployment's SELECTOR — not merely somewhere in the manifest.
+    #
+    # THESE WERE PLAIN GREPS AND THAT MADE THEM VACUOUS. The same label is on
+    # the Deployment's metadata and on the pod template, so deleting it from
+    # `spec.selector.matchLabels` — the one place it does any work — left both
+    # assertions green while the two Deployments began selecting each other's
+    # pods, which is the exact failure this pair exists to catch. A gate that
+    # greps the document cannot assert something about one field of it.
+    selects_track() {
+        # selects_track <file> <track> -> exit 0 when the Deployment's
+        # matchLabels carries that track
+        awk -v want="$2" '
+            /^kind: Deployment$/ { in_dep = 1 }
+            in_dep && /^    matchLabels:$/ { in_sel = 1; next }
+            in_sel && /^      [a-z]/ {
+                if ($0 ~ ("app.kubernetes.io/track: " want)) found = 1
+                next
+            }
+            in_sel { in_sel = 0 }
+            END { exit found ? 0 : 1 }
+        ' "$1"
+    }
+
+    check "$chart: the canary Deployment SELECTS on track=canary" \
+        selects_track "$OUT/$chart-canary.yaml" canary
+    check "$chart: the stable Deployment SELECTS on track=stable" \
+        selects_track "$OUT/$chart.yaml" stable
     check "$chart: no stable object leaks into the canary render" \
         test "$(count 'app.kubernetes.io/track: stable' "$OUT/$chart-canary.yaml")" -eq 0
 

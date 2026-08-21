@@ -61,6 +61,11 @@ make a monorepo practical at this size:
         - 'Directory.Build.props'
         - 'Directory.Packages.props'
         - 'global.json'
+        # An input to every `docker build .` and to nothing the solution build
+        # can check: excluding a copied project here is a broken image, and
+        # un-excluding a local secret is one with credentials in it. Neither is
+        # visible to `dotnet build`.
+        - '.dockerignore'
         - 'src/BuildingBlocks/**'
         # The contract suite (§12.6) guards compatibility BETWEEN services, so
         # it belongs to all of them. Owned by none, it would run for none.

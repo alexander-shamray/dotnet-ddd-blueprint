@@ -55,7 +55,16 @@ concurrency:
   # NOT cancel-in-progress. Cancelling a rollout mid-ladder leaves a canary
   # Deployment serving traffic with nothing left to promote or retire it, which
   # is the one state this whole file exists to avoid. A second run queues.
-  group: deploy-${{ github.ref }}
+  #
+  # KEYED BY WORKLOAD, NOT BY REF, and the ref is what it used to be. Two
+  # manual dispatches of the same workload from different branches are two runs
+  # against ONE stable release, one HPA floor and one `<workload>-canary` — and
+  # under a ref-scoped key they proceed in parallel, each restoring a floor the
+  # other moved and each uninstalling the other's canary. The thing that must
+  # serialise is the cluster object, and the branch a dispatch was launched
+  # from says nothing about which one that is. `workflow_dispatch` is the only
+  # trigger that reaches this job, so `inputs.workload` is always present.
+  group: deploy-${{ inputs.workload }}
   cancel-in-progress: false
 
 jobs:
@@ -341,14 +350,17 @@ jobs:
         run: |
           failed=0
 
-          # The canary first: it is the one serving traffic. `helm status`
-          # rather than an unconditional uninstall, because the ordinary
-          # success path already removed it at promotion and a missing release
-          # must not turn a green rollout red.
-          if helm status "$WORKLOAD-canary" -n "$NAMESPACE" >/dev/null 2>&1; then
-            echo "::warning::A canary release survived the rollout; removing it."
-            helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE" || failed=1
-          fi
+          # The canary first: it is the one serving traffic.
+          #
+          # `--ignore-not-found` on the uninstall, NOT a `helm status` guard.
+          # The guard was the HPA's `2>/dev/null` fail-open in another costume:
+          # `helm status` exits non-zero for an absent release AND for an
+          # expired credential, a network failure or an API server saying no,
+          # so every one of those skipped the canary entirely — silently, in
+          # the step whose whole job is to make sure it is gone. The flag makes
+          # absence the only ignored outcome and leaves the rest visible.
+          echo "Removing the canary release if the rollout left one."
+          helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE" --ignore-not-found || failed=1
 
           if [ -n "${HPA_FLOOR:-}" ]; then
             kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
