@@ -96,8 +96,8 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   │                                   referenced by the two above, which each need
 │   │                                   containers and cannot reference each other.
 │   ├── ...
-│   └── Platform.IntegrationTests/      Contract tests (§12.6) — the only suite
-│                                       that references every service
+│   └── Platform.IntegrationTests/      Contract-assembly tests (§12.6) — the
+│                                       only suite that references every service
 │
 ├── deploy/
 │   ├── compose/                        docker-compose.yml + overrides

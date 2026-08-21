@@ -2694,6 +2694,36 @@ the registration; and it is self-checking about the name, because asking for
 the wrong one returns a default-constructed instance whose 30 s total request
 timeout fails the first assertion at once.
 
+### What the `.proto` cannot say
+
+The contract-first `.proto` at the top of this section removes a category of
+drift and not the category that matters most here. It pins the *shape* — one
+file, two generated halves, so a field cannot be renamed on one side only. It
+cannot pin what the fields **mean**, and every load-bearing thing about this
+reply is meaning: an unpriced product is absent rather than zero, the amount is
+text to be **parsed** rather than compared because Catalog's column scale
+reaches the wire, and a reply's currency is the amount's own label rather than
+an echo of the question. All three are stated in `pricing.proto` — in comments.
+
+So this hop is the one relationship in the platform carrying a **consumer-driven
+contract**: `Web.Bff` writes down what it needs, its own suite drives every
+expectation through the screen that needs it, and Catalog's suite verifies the
+same list against the real service.
+[§12.6](12-test-strategy.md) has the shape and
+[ADR-023](appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+has the mechanism, which is a linked file rather than Pact.
+
+> **A stub is a second specification, and nothing was verifying it.** The BFF's
+> suite drives a hand-written gRPC server standing in for Catalog, and four of
+> its behaviours had drifted from the service it models. The one that mattered
+> was the currency: it echoed the *request's* spelling where Catalog projects
+> its own stored one, so the endpoint's case-insensitive comparison had never
+> been handed two spellings to reconcile — and tightening it to an ordinal
+> comparison left the whole suite green over a change that answers 500 to every
+> lower-case currency a customer types. **A synchronous hop is the one place a
+> peer's behaviour is load-bearing rather than eventual**, which is why this is
+> where the platform spends a contract.
+
 ## 9.8 Failure handling
 
 | Failure | Handling |

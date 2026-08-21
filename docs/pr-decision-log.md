@@ -68,6 +68,127 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-26 — the contract a `.proto` cannot carry, and Pact's missing half
+
+PR-26 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s
+one optional row: a **consumer-driven contract** over
+[§9.7](backend-architecture/09-messaging.md)'s single synchronous hop,
+`Web.Bff → Catalog`. Six interactions, authored by the consumer, driven through
+the BFF's own screen by `Web.Bff.Tests` and verified against the real service by
+`Catalog.Api.Tests`. Plus [§12.6](backend-architecture/12-test-strategy.md)'s
+second half, `ADR-023`, and no package at all.
+
+**The row was conditional — "only if a consumer relationship becomes
+contentious" — and the condition had already been met for some time.** Nothing
+had noticed, because the thing that had gone wrong was the thing doing the
+noticing. `StubCatalog` is a hand-written gRPC server standing in for Catalog in
+the BFF's suite, and four of its behaviours had drifted from the service it
+models: it filtered currency case-sensitively where Catalog does not, echoed the
+*request's* spelling of the currency rather than its own stored one, formatted
+amounts at the test's own scale rather than the column's `decimal(19,4)`, and
+enforced no request ceiling whatever. The suite was green throughout all four,
+which is not a surprise once stated plainly — **a double cannot disagree with
+itself.**
+
+**The sharpest consequence is not a stale stub, and it was measured rather than
+argued.** `CheckoutEndpoints` compares a reply's currency to the request's with
+`OrdinalIgnoreCase`, and the comment beside it says why: a producer's invariant
+is not a consumer's guarantee. Because the stub echoed the request, that
+comparison had never once been handed two spellings to reconcile. Tightening it
+to `Ordinal` and running the suite left **all 62 of `Web.Bff.Tests`' pre-PR
+tests passing** — over a change that answers 500 to every lower-case currency a
+customer types, since Catalog projects its own upper-cased column. So the
+failure mode a double creates is worse than staleness: **a guard written for the
+provider's real behaviour becomes untestable**, because the double never
+produces the input the guard exists for. The counterfactual was run twice, once
+against the branch's contract test (fails, exactly one interaction) and once
+against `main`'s suite (passes, all 62).
+
+**Then the mechanism the plan named turned out not to reach the relationship the
+plan made it conditional on.** Appendix C said Pact. PactNet 5.0.1 ships HTTP
+and message pacts; Protobuf and gRPC are a *plugin*, and the .NET binding for
+the plugin framework is `PactNet.Extensions.Grpc` — pull request 548 against
+`pact-foundation/pact-net`, opened on 4 September 2025 and still open. Every
+other relationship Pact could have expressed is uncontentious: the async
+contracts travel as a shared assembly both ends compile
+([§4.3](backend-architecture/04-solution-structure.md)) and §12.6 already
+round-trips each one, the gateway is a reverse proxy with no semantic contract,
+and the BFF's own HTTP API has no consumer in this repository. **The plan was
+written against the tool's reputation rather than its surface**, which is the
+lesson `CLAUDE.md` now carries: a capability present in a project's Rust core,
+its JVM binding and its marketing is not thereby present in the one language
+this repository compiles.
+
+The out-of-band route was priced and refused. It needs `pact_verifier_cli` and a
+platform-specific plugin binary installed into `~/.pact/plugins` — neither a
+NuGet package, so `Directory.Packages.props` cannot pin them and the licence
+gate, which reads that file and Appendix B as text ahead of the build, would
+never see them. Pact's own documentation also rules out `WebApplicationFactory`
+for provider verification, because its Rust core makes real TCP calls, so
+Catalog's suite would have needed a second hosting shape as well.
+
+**So the property was taken and the machinery declined**, which
+[ADR-023](backend-architecture/appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+records. What makes a pact worth having is that **one artefact is authored by
+the consumer and verified against the provider**; the broker and the wire format
+are how that property is shipped across a *repository* boundary, and this is a
+monorepo. `pricing.proto` already makes the same argument one level down — one
+file, two generated halves, linked rather than referenced — so the semantic
+contract is shared exactly as the syntactic one is. The `.proto` is Catalog's
+because Catalog serves the RPC; `PricingContract.cs` is Web.Bff's because only a
+consumer can say what it needs.
+
+**Three smaller things were decided by building it.**
+
+The stub's **single currency for the whole catalogue** made the most interesting
+interaction inexpressible. A basket holding one product priced in the requested
+currency and one priced in another is exactly the shape that fills
+`QuoteResponse.Unpriced` while still totalling the rest, and a single-currency
+stub answers such a request either wholly or not at all. The currency moved onto
+the row, where Catalog keeps it.
+
+The request ceiling needs **both edges or neither**. A provider that quietly
+lowered `MaxProductIds` still refuses a hundred and one; one that raised it
+still serves a hundred. So one interaction requires a basket *at* the ceiling to
+be served and the next requires one *past* it to be refused with
+`InvalidArgument` — the status `UpstreamExceptionHandler` turns into the
+caller's 400. A change in either direction now fails verification, deliberately:
+a provider free to change a number its consumer wrote down has a contract nobody
+is holding. That is not a contradiction of `CheckoutEndpoints` holding no
+ceiling of its own — production code with a copy would refuse requests Catalog
+would have served, where a contract with one is the consumer saying which number
+it relies on.
+
+And [§4.1](backend-architecture/04-solution-structure.md) calls
+`Platform.IntegrationTests` "the only suite that references every service",
+which reads as the obvious home for a cross-service contract and is the wrong
+one. **A provider verification needs the provider running** — a migrated SQL
+Server, a broker, the real host over them — so homing it there would buy a sixth
+project a container set ([§12.4](backend-architecture/12-test-strategy.md)'s
+stated price) in order to run six tests that `Catalog.Api.Tests` runs over the
+`ServiceFixture` it already has. §12.6's existing suite stays where it is; those
+tests are about the *shape* of the contract assembly, and this is about one
+service honouring one consumer.
+
+**The verification was observed red twice before it was trusted**, on the rule
+this repository applies to every gate. Formatting the provider's amount under a
+comma-decimal culture failed four of the six interactions — the two that survive
+are the ceiling pair, which price nothing and therefore have no amount to
+mis-format. Lowering `GetPricesValidator.MaxProductIds` to 50 failed exactly
+one, the at-the-ceiling interaction, and nothing else. A green-only gate would
+have established neither that it reads the wire nor that both edges do work.
+
+**What it does not do is stated rather than implied.** It covers one
+relationship, because the platform has one synchronous hop by §9.7's design; a
+second would be the same conditional judgement again rather than an automatic
+second contract. And it does not cross a repository boundary — extract the BFF
+and this file becomes something that has to be published, at which point Pact is
+the answer after all. The decision is reversible and its trigger is nameable,
+which is the most that can be asked of one taken against a plugin that may merge
+next month.
+
+---
+
 ## PR-25 — the staged pipeline, and a canary that had no way to be measured
 
 PR-25 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s
