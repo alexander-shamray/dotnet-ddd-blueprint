@@ -423,7 +423,7 @@ summed a local `dotnet test Platform.slnx` the same way, which is the same
 arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
-there are seven suites now — see *The commands* below, which is where the
+there are eight suites now — see *The commands* below, which is where the
 current set lives, and which is the only place a count of them belongs. That one: `py -3.12 -m unittest` in `tools/new-service` runs
 81, and CI has a `scaffold` job for them beside `licence-gate`.
 
@@ -679,11 +679,13 @@ dotnet test  Platform.slnx --filter "Category!=Integration"   # 624 of 795, no d
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Seven suites, three runners, and only one of them is `dotnet test`.** The
+**Eight suites, three runners, and only one of them is `dotnet test`.** The
 scaffold's tests are Python, the chart gate is bash over `helm template`, and
-the observability gate, the pipeline gate, the coverage reporter's suite and
-the canary's are Python again; none is in `Platform.slnx`, so a green solution
-says nothing about any of them:
+the licence gate, the observability gate, the pipeline gate, the coverage
+reporter's suite and the canary's are Python again; none is in `Platform.slnx`,
+so a green solution says nothing about any of them. **The licence gate belongs
+in that count** — CI tests it and then runs it, which is the pattern every gate
+here follows — and leaving it out is what made this seven:
 
 ```bash
 (cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
@@ -693,6 +695,8 @@ bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SD
 HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
+
+(cd .github/licence-gate && py -3.12 -m unittest)  # then licence_gate.py
 
 py -3.12 -m unittest discover -s .github/pipeline-gate
 py -3.12 .github/pipeline-gate/pipeline_gate.py filters

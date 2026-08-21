@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 
 import canary
+import read_prometheus
 
 THRESHOLDS = {
     "errorRate": 0.01,
@@ -304,6 +305,82 @@ class SourceInputTests(unittest.TestCase):
                     f"canary.py opens {path!r} and SOURCE_INPUTS does not declare it, "
                     f"so deploy.yml's triggers do not watch it: {canary.SOURCE_INPUTS}",
                 )
+
+
+class ReadingTests(unittest.TestCase):
+    """`read_prometheus.query`'s silences, which decide promote or roll back.
+
+    Every case here returns `None`, and `analyse` reads `None` as a rollback —
+    so the test is really that a reading which cannot be trusted never reaches
+    the verdict as a number. Two of the four were promoted as healthy before
+    this pass.
+    """
+
+    def response(self, payload: bytes):
+        """A stand-in for `urlopen`'s context manager over a fixed body."""
+        class Response:
+            def read(self):
+                return payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+        return lambda *_args, **_kwargs: Response()
+
+    def query(self, payload: bytes):
+        original = read_prometheus.urllib.request.urlopen
+        read_prometheus.urllib.request.urlopen = self.response(payload)
+        try:
+            return read_prometheus.query("http://prometheus.invalid", "up")
+        finally:
+            read_prometheus.urllib.request.urlopen = original
+
+    def test_a_healthy_sample_is_a_number(self) -> None:
+        body = b'{"status":"success","data":{"result":[{"value":[0,"0.25"]}]}}'
+
+        self.assertEqual(self.query(body), 0.25)
+
+    def test_a_body_that_does_not_parse_is_absent(self) -> None:
+        """The docstring promised this and the code did not do it: `json.loads`
+        raised straight past the function. A proxy returning an HTML error page
+        with a 200 is the ordinary way it happens."""
+        self.assertIsNone(self.query(b"<html>502 Bad Gateway</html>"))
+
+    def test_nan_is_absent(self) -> None:
+        """`histogram_quantile` over a histogram with no observations. NaN
+        compares false against every threshold, so read as a number it passes
+        the absolute and relative checks alike."""
+        body = b'{"status":"success","data":{"result":[{"value":[0,"NaN"]}]}}'
+
+        self.assertIsNone(self.query(body))
+
+    def test_negative_infinity_is_absent(self) -> None:
+        """The dangerous one, and the one `!= self` missed. `-Inf` is below
+        every absolute threshold and below any multiple of the baseline — not
+        merely admitted, but excellent-looking."""
+        body = b'{"status":"success","data":{"result":[{"value":[0,"-Inf"]}]}}'
+
+        self.assertIsNone(self.query(body))
+
+    def test_positive_infinity_is_absent(self) -> None:
+        body = b'{"status":"success","data":{"result":[{"value":[0,"+Inf"]}]}}'
+
+        self.assertIsNone(self.query(body))
+
+    def test_an_empty_result_is_absent(self) -> None:
+        self.assertIsNone(self.query(b'{"status":"success","data":{"result":[]}}'))
+
+    def test_a_refusal_is_not_a_silence(self) -> None:
+        """Prometheus answering `error` means the monitoring stack is
+        reachable and disagreeing, which is a stopped rollout rather than an
+        unobserved canary."""
+        body = b'{"status":"error","error":"parse error"}'
+
+        with self.assertRaises(RuntimeError):
+            self.query(body)
 
 
 class CommentTests(unittest.TestCase):

@@ -82,10 +82,22 @@ jobs:
     needs: check
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # ARITHMETIC, not a round number, and 60 was less than the rollout's own
+    # declared maximum. §15.5's ladder dwells ten minutes on each of three
+    # rungs (30), and each of the three canary upgrades plus the promotion may
+    # take the 20 minutes §15.1's callout requires for a migration hook (80) —
+    # 110 in total, before the cleanup step. A 60-minute cap cancelled a valid
+    # slow migration mid-rollout without any per-command timeout being hit,
+    # which is the one way to leave a canary serving with no step left to
+    # remove it.
+    timeout-minutes: 150
     environment: production
     env:
       NAMESPACE: commerce
+      # A GitHub Environment scopes secrets and variables; it does not put them
+      # in the process. The reader takes the standard variable, so it is bound
+      # here explicitly rather than assumed to arrive.
+      PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -93,11 +105,23 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Every step below is written against a cluster this repository does not
-      # have. `kubectl` and `helm` are assumed on the runner and PROMETHEUS_URL
-      # and the kubeconfig are assumed in the environment; none is configured,
-      # so this job has never run. It is here because the decision it encodes
-      # is the deliverable, and burying it in a runbook would make it prose.
+      # THE STEP THAT AUTHENTICATES TO A CLUSTER IS MISSING, and naming it is
+      # better than a comment implying it is handled. `ubuntu-latest` is a
+      # fresh hosted runner with no kubeconfig, and a GitHub Environment scopes
+      # secrets without materialising one — so the first `kubectl` below has no
+      # context and this job cannot be dispatched as it stands. What it is
+      # owed, in this order: a checkout of the cluster credential (an OIDC
+      # login for the provider, or `azure/k8s-set-context`-style step), and
+      # `helm` on the runner, which `ubuntu-latest` does ship but no line here
+      # pins.
+      #
+      # It is not written speculatively because there is no cluster to write it
+      # against, and a login step for a provider nobody has chosen would be a
+      # fiction with credentials in it. `PROMETHEUS_URL` IS bound, in the job's
+      # `env` above, because that one needs no provider to be correct.
+      #
+      # Everything below is here because the decision it encodes is the
+      # deliverable, and burying it in a runbook would make it prose.
       - name: The first rung has a price, and it is paid before anything rolls
         run: |
           set -euo pipefail
@@ -127,9 +151,28 @@ jobs:
           # is owed FROM THE MOMENT IT IS RAISED. The floor is recorded in
           # GITHUB_ENV before the patch, and the `if: always()` step at the end
           # of this job is what puts it back — see the argument there.
+          # `--ignore-not-found`, NOT `2>/dev/null || echo ""`. That form
+          # turned every failure into "there is no HPA" — an expired
+          # credential, a network blip, an API server saying 403 — and the
+          # rollout would then scale the Deployment without raising a floor
+          # that does exist, so the autoscaler pulls the stable count back down
+          # and every weight the ladder computes is against a number the
+          # cluster does not have. Only a genuinely absent HPA may yield an
+          # empty string here; anything else has to stop the rollout.
           FLOOR=$(kubectl get hpa "$WORKLOAD" -n "$NAMESPACE" \
-            -o jsonpath='{.spec.minReplicas}' 2>/dev/null || echo "")
+            --ignore-not-found -o jsonpath='{.spec.minReplicas}')
           echo "HPA_FLOOR=$FLOOR" >> "$GITHUB_ENV"
+
+          # The Deployment's own replica count, recorded whether or not there
+          # is an HPA — and it is the ONLY thing to restore when there is not.
+          # `autoscaling.enabled: false` is a supported chart configuration
+          # (§15.3), and under it the cleanup below had nothing to put back
+          # while this step had still scaled production to 19. A rollback then
+          # left the service permanently over-scaled, which is the same defect
+          # as leaving minReplicas at 19 and is invisible for longer.
+          echo "STABLE_REPLICAS_BEFORE=$(kubectl get deployment "$WORKLOAD" \
+            -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')" >> "$GITHUB_ENV"
+
           if [ -n "$FLOOR" ]; then
             kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
               --type=merge -p "{\"spec\":{\"minReplicas\":$NEEDED}}"
@@ -185,10 +228,21 @@ jobs:
               # not the chart — without it this is
               # `Error: "helm upgrade" requires 2 arguments`, at cutover, with
               # the canary still serving.
+              #
+              # `--atomic` because this is the ONE command in the file that
+              # mutates the stable release. Without it a failed hook, rollout
+              # or wait leaves production partially upgraded, and uninstalling
+              # the canary afterwards cannot put the previous revision back —
+              # the rollback this whole mechanism advertises would be gone at
+              # precisely the moment it is needed. `--atomic` rolls the stable
+              # release back itself before the cleanup step runs. It is
+              # deliberately NOT on the canary installs: there a failure is
+              # handled by removing the canary, and rolling it back to an
+              # earlier canary revision is not a state anybody wants.
               helm upgrade "$WORKLOAD" "deploy/helm/$CANARY_CHART" \
                 -n "$NAMESPACE" \
                 --reuse-values --set-string image.tag="$TAG" \
-                --wait --timeout 20m
+                --atomic --wait --timeout 20m
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
               break
             fi
@@ -270,20 +324,46 @@ jobs:
       # `if: success()`. Each fix was correct about the case it named and
       # scoped to the wrong unit.
       #
-      # `if: always()` is scoped to the JOB, which is the unit the floor is
-      # actually raised for. It restores after a promote, after a rollback,
-      # after a failure in either step, and after a cancellation — and it does
-      # nothing at all when HPA_FLOOR is unset, which is the case where no
-      # autoscaler existed to patch.
+      # `if: always()` is scoped to the JOB, which is the unit every one of
+      # these is undone for. It runs after a promote, after a rollback, after a
+      # failure in any step, and after a cancellation.
       #
-      # A service left at minReplicas 19 is a rollout that silently resized
-      # production and then reported a failure about something else.
-      - name: Put the autoscaler's floor back
+      # THREE things are undone here, and the canary is the one that was
+      # missing. A failure between the install and either exit — a Prometheus
+      # that cannot be reached, a Helm timeout, the analyse step erroring
+      # rather than returning a verdict — bypasses both explicit
+      # `helm uninstall` calls under `set -e`, and a step that restores only
+      # the autoscaler leaves a canary of an unproven build serving a share of
+      # production indefinitely. That is a worse outcome than the over-scaling
+      # this step was written for.
+      - name: Undo everything the rollout raised
         if: always()
         run: |
+          failed=0
+
+          # The canary first: it is the one serving traffic. `helm status`
+          # rather than an unconditional uninstall, because the ordinary
+          # success path already removed it at promotion and a missing release
+          # must not turn a green rollout red.
+          if helm status "$WORKLOAD-canary" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "::warning::A canary release survived the rollout; removing it."
+            helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE" || failed=1
+          fi
+
           if [ -n "${HPA_FLOOR:-}" ]; then
             kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
-              --type=merge -p "{\"spec\":{\"minReplicas\":$HPA_FLOOR}}" || true
+              --type=merge -p "{\"spec\":{\"minReplicas\":$HPA_FLOOR}}" || failed=1
+          elif [ -n "${STABLE_REPLICAS_BEFORE:-}" ]; then
+            # No HPA to own the count, so the scale-up is this step's to undo.
+            kubectl scale deployment "$WORKLOAD" \
+              --replicas="$STABLE_REPLICAS_BEFORE" -n "$NAMESPACE" || failed=1
           fi
+
+          # NOT `|| true` swallowing the lot. A cleanup that fails is a cluster
+          # left in the state this step exists to prevent, and reporting
+          # success would hide exactly that — the failure the `|| true` here
+          # used to cause. Each command is allowed to fail without skipping the
+          # ones after it, and then the step fails.
+          exit "$failed"
         env:
           WORKLOAD: ${{ inputs.workload }}

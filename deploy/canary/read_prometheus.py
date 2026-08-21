@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.error
@@ -50,7 +51,16 @@ def query(base_url: str, expression: str) -> float | None:
     """
     url = f"{base_url.rstrip('/')}/api/v1/query?" + urllib.parse.urlencode({"query": expression})
     with urllib.request.urlopen(url, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
-        body = json.loads(response.read().decode("utf-8"))
+        raw = response.read()
+
+    # The docstring above promises that a body which does not parse is one of
+    # the silences, and it was not: `json.loads` and the UTF-8 decode both
+    # raised straight past this function. A proxy returning an HTML error page
+    # with a 200 is the ordinary way that happens.
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
 
     if body.get("status") != "success":
         raise RuntimeError(f"Prometheus refused the query: {body.get('error', body)}")
@@ -59,12 +69,22 @@ def query(base_url: str, expression: str) -> float | None:
     if not result:
         return None
 
-    value = float(result[0]["value"][1])
-    # NaN is what `histogram_quantile` returns for a histogram with no
-    # observations, and it compares false against every threshold -- so a NaN
-    # read as a number would sail through both the absolute and the relative
-    # checks and promote.
-    return None if value != value else value
+    try:
+        value = float(result[0]["value"][1])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+    # EVERY non-finite value, not just NaN. `histogram_quantile` returns NaN for
+    # a histogram with no observations, and NaN compares false against every
+    # threshold -- so read as a number it sails through the absolute and the
+    # relative checks alike and promotes.
+    #
+    # Prometheus also encodes `+Inf` and `-Inf`, and `-Inf` is the dangerous
+    # one: it is BELOW every absolute threshold and below any multiple of the
+    # baseline, so it is not merely admitted, it looks excellent. `!= self` only
+    # catches NaN, which is how the first version of this line covered a third
+    # of what its own comment claimed.
+    return value if math.isfinite(value) else None
 
 
 def read(base_url: str, service: str, window: str, plan: dict) -> dict:

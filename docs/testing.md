@@ -20,8 +20,8 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 
 ## The suites
 
-Seven of them, three runners, and `dotnet test` says nothing about the other
-six:
+Eight of them, three runners, and `dotnet test` says nothing about the other
+seven:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -35,12 +35,20 @@ bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SD
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
 
+(cd .github/licence-gate && py -3.12 -m unittest)        # ADR-019's register gate
+
 py -3.12 -m unittest discover -s .github/pipeline-gate   # PR-25's quality gates
 py -3.12 -m unittest discover -s .github/coverage        # the coverage merge
 py -3.12 -m unittest discover -s deploy/canary           # §15.5's rollout
 ```
 
-**Only the first is a §12 suite, and the other six are here anyway**, because
+**The licence gate is in that list because CI runs it on the same terms**, and
+leaving it out is what made this count seven. `ci.yml` tests the gate and then
+runs it — the pattern every gate here follows — so a suite that ships with the
+repository, runs in CI, and is invisible to `dotnet test` is one of these
+whatever directory it lives in.
+
+**Only the first is a §12 suite, and the other seven are here anyway**, because
 this file is written for someone with a checkout rather than for someone
 deciding what to test. The scaffold's tests exercise a developer tool; the
 chart gate renders `deploy/helm/` and asserts what comes out (§15.3); the
