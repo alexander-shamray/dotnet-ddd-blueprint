@@ -108,6 +108,26 @@ jobs:
       # here explicitly rather than assumed to arrive.
       PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
     steps:
+      # PRODUCTION ROLLS FROM `main` AND NOTHING ELSE.
+      #
+      # `workflow_dispatch` lets the caller choose any branch or tag, and
+      # `actions/checkout` then loads the charts, the rollout script AND the
+      # validation from that ref — so an unmerged branch could deploy itself
+      # using its own weakened copy of the tag preflight and the analysis
+      # thresholds. Every gate in this file is code from the same ref it is
+      # gating, which is only safe when that ref is the protected one.
+      #
+      # A step rather than a job-level `if`, deliberately: a skipped job says
+      # nothing, and somebody who dispatched this on purpose should be told
+      # why it did not run. The header above already names green CI over
+      # `main` as the intended source; this is that sentence enforced.
+      - name: Production rolls from main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Refusing to roll production from $GITHUB_REF. This job runs the charts, the rollout and its own validation from the dispatched ref, so it is restricted to the protected branch."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
