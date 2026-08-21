@@ -165,6 +165,34 @@ jobs:
             # stopped rollout rather than a stale plan reused.
             eval "$(python deploy/canary/canary.py plan \
               --workload "$WORKLOAD" --stable "$STABLE" --step "$STEP")"
+
+            # THE LAST RUNG IS HANDLED BEFORE THE CANARY IS TOUCHED, because
+            # 100% is not a weight — `plan` says so in its own docstring and
+            # returns `final`, with `stableReplicas: 0`, rather than a share.
+            #
+            # Run in rung order this branch sat AFTER the upgrade below, and
+            # every part of that was wrong: the canary was already at this
+            # replica count from the 50% step, so the upgrade was a no-op that
+            # re-ran §7.4's migration hook for nothing; and the step announced
+            # "100.0% served" while the stable track was still up, so the
+            # cluster was at 50% and the log said otherwise. Promotion is a
+            # different operation from a rung, and it belongs before the code
+            # that performs one.
+            if [ "$CANARY_FINAL" = "True" ]; then
+              echo "The canary is the release; promoting the tag onto the stable release."
+              # THE CHART ARGUMENT IS REQUIRED. `helm upgrade` is
+              # `[RELEASE] [CHART]`, and `--reuse-values` reuses the values,
+              # not the chart — without it this is
+              # `Error: "helm upgrade" requires 2 arguments`, at cutover, with
+              # the canary still serving.
+              helm upgrade "$WORKLOAD" "deploy/helm/$CANARY_CHART" \
+                -n "$NAMESPACE" \
+                --reuse-values --set-string image.tag="$TAG" \
+                --wait --timeout 20m
+              helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
+              break
+            fi
+
             echo "step $STEP: $CANARY_CANARY_REPLICAS canary pod(s), ${CANARY_ACHIEVED}% served"
 
             # The canary is a SECOND release of the same chart, differing only
@@ -210,24 +238,8 @@ jobs:
               --set canary.enabled=true \
               --set replicaCount="$CANARY_CANARY_REPLICAS" \
               --set autoscaling.enabled=false \
-              --set image.tag="$TAG" \
+              --set-string image.tag="$TAG" \
               --wait --timeout 20m
-
-            if [ "$CANARY_FINAL" = "True" ]; then
-              echo "The canary is the release; promoting the tag onto the stable release."
-              # THE CHART ARGUMENT IS REQUIRED. `helm upgrade` is
-              # `[RELEASE] [CHART]`, and `--reuse-values` reuses the values,
-              # not the chart — without it this is
-              # `Error: "helm upgrade" requires 2 arguments`, at cutover, with
-              # the canary still serving. The ladder climbs fine and then
-              # cannot finish, which is the worst place in this file to fail.
-              helm upgrade "$WORKLOAD" "deploy/helm/$CANARY_CHART" \
-                -n "$NAMESPACE" \
-                --reuse-values --set image.tag="$TAG" \
-                --wait --timeout 20m
-              helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
-              break
-            fi
 
             # The window equals the dwell: a rate over ten minutes, read at the
             # end of ten minutes, IS §15.5's "watch for ten minutes".

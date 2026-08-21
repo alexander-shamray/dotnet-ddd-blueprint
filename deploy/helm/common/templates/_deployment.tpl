@@ -148,7 +148,11 @@ spec:
             CreateContainerConfigError.
 
             One value, two derivations, is the fix: both ends now start from
-            `commerce.name`, so there is nothing left to disagree.
+            `commerce.instanceName`, so there is nothing left to disagree —
+            and on the canary track those two names differ from
+            `commerce.name`, which is exactly when a stale second derivation
+            would have bitten. (This comment said `commerce.name` until PR-25
+            moved both ends; the argument never changed, only the helper.)
             */}}
             {{- range .Values.extraConfigMaps }}
             - configMapRef:
