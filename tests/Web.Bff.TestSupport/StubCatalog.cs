@@ -38,6 +38,7 @@ namespace Web.Bff.TestSupport;
 public sealed class StubCatalog : IAsyncLifetime
 {
     private readonly ConcurrentQueue<Call> _calls = new();
+    private readonly ConcurrentQueue<GetPricesReply> _replies = new();
 
     private WebApplication? _app;
 
@@ -48,17 +49,35 @@ public sealed class StubCatalog : IAsyncLifetime
     public IReadOnlyCollection<Call> Calls => _calls;
 
     /// <summary>
-    /// Prices this stub knows, by product id. Set by a test before it drives
-    /// the endpoint.
+    /// Every reply this stub has actually sent, in order.
     /// </summary>
-    public ConcurrentDictionary<Guid, (string Name, decimal Amount)> Prices { get; } = new();
+    /// <remarks>
+    /// <b>A second queue rather than a member of <see cref="Call"/>, because a
+    /// call is recorded before it is answered.</b> That order is what lets
+    /// <c>UpstreamRetryTests</c> count attempts that failed, aborted or hung —
+    /// none of which produces a reply — so a reply field on <c>Call</c> would be
+    /// null for exactly the calls that suite is about. What this queue is for is
+    /// the other direction: <c>PricingContract.Verify</c> applied to what the
+    /// stub sent, which is what establishes that the consumer's suite is driven
+    /// by a Catalog the real one could be.
+    /// </remarks>
+    public IReadOnlyCollection<GetPricesReply> Replies => _replies;
 
     /// <summary>
-    /// The currency this stub will price in. A product is answered only when
-    /// the request's currency matches, which is Catalog's own semantics — one
-    /// price per product, filtered rather than converted.
+    /// Prices this stub knows, by product id. Set by a test before it drives
+    /// the endpoint, or by <see cref="Publish"/> from a contract interaction.
     /// </summary>
-    public string Currency { get; set; } = "GBP";
+    /// <remarks>
+    /// <b>The currency is per product, because Catalog's is.</b> This stub used
+    /// to carry one currency for the whole catalogue, which made the two
+    /// interesting cases inexpressible: a basket holding one product priced in
+    /// the requested currency and one priced in another is the shape that puts
+    /// something in <c>QuoteResponse.Unpriced</c> while still totalling the
+    /// rest, and a single-currency stub answers such a request either wholly or
+    /// not at all. Catalog stores one price per product and filters rather than
+    /// converts (<c>pricing.proto</c>), so the row is where the currency lives.
+    /// </remarks>
+    public ConcurrentDictionary<Guid, (string Name, decimal Amount, string Currency)> Prices { get; } = new();
 
     /// <summary>
     /// Statuses to fail the next calls with, one per call, before answering
@@ -154,6 +173,34 @@ public sealed class StubCatalog : IAsyncLifetime
             await _app.DisposeAsync();
     }
 
+    /// <summary>
+    /// Realises an interaction's <c>Given</c> state, and answers the id each
+    /// product was published under.
+    /// </summary>
+    /// <remarks>
+    /// The consumer's half of the same job <c>PricingContractVerificationTests</c>
+    /// does against the real provider by posting to
+    /// <c>/v1/catalog/products</c>. Neither side can be handed ids by the
+    /// contract, because both mint their own — which is why an interaction names
+    /// its products by alias and both sides answer with a binding.
+    /// </remarks>
+    public IReadOnlyDictionary<string, Guid> Publish(PricingInteraction interaction)
+    {
+        Dictionary<string, Guid> published = [];
+
+        foreach (ContractProduct product in interaction.Given)
+        {
+            // Version 7, as Catalog mints them — which is also what keeps these
+            // clear of PricingContract.UnknownId's all-but-zero shape.
+            Guid id = Guid.CreateVersion7();
+
+            Prices[id] = (product.Name, product.Amount, product.Currency);
+            published.Add(product.Alias, id);
+        }
+
+        return published;
+    }
+
     /// <summary>One answered call: what was asked, and what was presented.</summary>
     /// <param name="ProductIds">The ids the request named, verbatim.</param>
     /// <param name="Currency">The currency the request named.</param>
@@ -204,10 +251,34 @@ public sealed class StubCatalog : IAsyncLifetime
             if (stub.FailNextWith.TryDequeue(out StatusCode failure))
                 throw new RpcException(new Status(failure, "stubbed failure"));
 
-            GetPricesReply reply = new();
+            // The DEFAULTS below this line are Catalog's own behaviour, and
+            // PricingContract is what says so: a divergence in one of them is a
+            // suite proving the BFF works against a Catalog that does not exist.
+            // The ceiling, the case-insensitive currency filter, the "F4" scale
+            // and the stored spelling are all in that group.
+            //
+            // They are not the only thing below it. RawAmount, RawCurrency,
+            // AlsoAnswerWith and DuplicateEveryPrice each OVERRIDE one of those
+            // defaults with a reply the contract forbids, which is what
+            // QuoteEndpointTests drives the endpoint's refusals with. Each says
+            // so on its own property. So the line separates a default from a
+            // fault, not a region of this method from another — and every one of
+            // the overrides is opt-in, so a test that sets none of them gets the
+            // faithful model.
 
-            if (!string.Equals(request.Currency, stub.Currency, StringComparison.Ordinal))
-                return reply;
+            // GetPricesValidator's ceiling, which the stub did not have until
+            // the contract named it. CheckoutEndpoints deliberately holds no
+            // copy of the number and relies on this refusal reaching the caller
+            // as a 400 — a stub that served a hundred and one products was
+            // proving that reliance was safe by never testing it.
+            if (request.ProductId.Count > PricingContract.MaxProductIds)
+            {
+                throw new RpcException(new Status(
+                    StatusCode.InvalidArgument,
+                    $"A request may name at most {PricingContract.MaxProductIds} products."));
+            }
+
+            GetPricesReply reply = new();
 
             List<string> answering = [.. request.ProductId, .. stub.AlsoAnswerWith.Select(id => id.ToString())];
 
@@ -217,19 +288,45 @@ public sealed class StubCatalog : IAsyncLifetime
             foreach (string id in answering)
             {
                 if (!Guid.TryParse(id, out Guid productId) ||
-                    !stub.Prices.TryGetValue(productId, out (string Name, decimal Amount) price))
+                    !stub.Prices.TryGetValue(
+                        productId,
+                        out (string Name, decimal Amount, string Currency) price))
                 {
                     continue;
                 }
+
+                // OrdinalIgnoreCase, because Catalog's is: GetPricesValidator
+                // accepts [A-Za-z]{3} and Money.Of upper-cases on the way in, so
+                // "gbp" prices the same products "GBP" does. Ordinal here made
+                // the stub STRICTER than the provider — the safe direction for a
+                // false pass, and still a model of a service that does not
+                // exist.
+                if (!string.Equals(price.Currency, request.Currency, StringComparison.OrdinalIgnoreCase))
+                    continue;
 
                 reply.Price.Add(new ProductPrice
                 {
                     ProductId = id,
                     Name = price.Name,
-                    Amount = stub.RawAmount ?? price.Amount.ToString(CultureInfo.InvariantCulture),
-                    Currency = stub.RawCurrency ?? request.Currency
+                    // "F4", not the default: Catalog's PriceAmount column is
+                    // decimal(19,4) (§7.2) and .NET's decimal carries scale
+                    // through, so 49.99 leaves the real provider as "49.9900".
+                    // Formatting at the test's own scale made the stub the one
+                    // producer in the platform whose amounts a consumer could
+                    // safely string-compare — which is exactly what
+                    // pricing.proto tells a consumer never to do.
+                    Amount = stub.RawAmount ?? price.Amount.ToString("F4", CultureInfo.InvariantCulture),
+                    // The STORED spelling, not the request's. Catalog projects
+                    // its own column, so a "gbp" request is answered "GBP";
+                    // echoing the request made every reply agree with its own
+                    // question by construction, and CheckoutEndpoints'
+                    // OrdinalIgnoreCase comparison was never once given two
+                    // spellings to reconcile.
+                    Currency = stub.RawCurrency ?? price.Currency
                 });
             }
+
+            stub._replies.Enqueue(reply);
 
             return reply;
         }

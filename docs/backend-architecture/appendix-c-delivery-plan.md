@@ -100,9 +100,14 @@ Phase names map to the `phase` column. Dependencies are PR numbers.
 
 ### Optional
 
+Optional describes how it entered the plan, not whether it happened. **PR-26's
+condition was met and it has landed**; the row records what it delivered on the
+same terms as every mandatory row above. It is still not required for
+completeness, and nothing depends on it.
+
 | PR | Title | Depends | Delivers |
 |---|---|---|---|
-| **26** | `chore(optional): consumer-driven contract tests` | 25 | Pact, only if a consumer relationship becomes contentious. Not required for completeness |
+| **26** | `chore(optional): consumer-driven contract tests` | 25 | A consumer-driven contract over [§9.7](09-messaging.md)'s one synchronous hop — `Web.Bff → Catalog` — as six interactions the consumer authors, its own suite drives and Catalog's suite verifies, plus [§12.6](12-test-strategy.md)'s second half. Delivered **without Pact**, which [ADR-023](appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact) records, and therefore with **no package and no row in [Appendix B](appendix-b-licences.md)**. **Five things were found by building it.** The conditional was already satisfied and the evidence was sitting in the consumer's own suite: `StubCatalog` is a hand-written gRPC server modelling Catalog, and **four of its behaviours had drifted from the service it models** — it filtered currency case-sensitively where Catalog does not, echoed the *request's* spelling of the currency rather than its own stored one, formatted amounts at the test's scale rather than the column's `decimal(19,4)`, and enforced no request ceiling at all. **A stub is a second specification nobody verifies**, and the sharpest consequence was measured rather than argued: because the stub echoed the request, `CheckoutEndpoints`' `OrdinalIgnoreCase` currency comparison had never once been handed two spellings, so tightening it to `Ordinal` left all **62** of `Web.Bff.Tests`' pre-PR container-free tests green — the fast half, not the suite's 66 — over a change that answers 500 to every lower-case currency a customer types. Then the mechanism the row named **cannot reach the relationship the row made it conditional on**: PactNet 5.0.1 ships HTTP and message pacts only, gRPC is a plugin, and its .NET binding is `PactNet.Extensions.Grpc` — pull request 548 against `pact-foundation/pact-net`, opened 4 September 2025 and still open — while the out-of-band route costs a `pact_verifier_cli` and a platform-specific plugin binary that `Directory.Packages.props` cannot pin and the licence gate therefore cannot see. The stub's **single currency for the whole catalogue** made the interesting case inexpressible — one product priced in the requested currency beside one that is not is exactly the shape that fills `QuoteResponse.Unpriced` while still totalling the rest — so the currency moved onto the row, where Catalog keeps it. The request ceiling needs **both edges or neither**: a provider that quietly lowered `MaxProductIds` still refuses a hundred and one, and one that raised it still serves a hundred, so one interaction alone is satisfiable by a limit that has moved. And [§4.1](04-solution-structure.md) calls `Platform.IntegrationTests` the only suite that references every service, which reads as the obvious home and is the wrong one: a provider verification needs the provider *running*, so it would buy a sixth project a container set ([§12.4](12-test-strategy.md)'s stated price) to run six tests `Catalog.Api.Tests` runs over `ServiceFixture` for nothing |
 
 ## C.3 Dependency graph
 
@@ -167,7 +172,7 @@ flowchart TD
     P22 --> P25
     P17 --> P25
     P17 --> P27[27 Gateway compression + size limits]
-    P25 --> P26[26 Optional: Pact]
+    P25 --> P26[26 Optional: Consumer-driven contract]
 ```
 
 The graph carries every edge in the tables above and no others. It is a

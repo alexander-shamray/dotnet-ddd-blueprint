@@ -22,7 +22,7 @@
 | Edge configuration | The route file of §10.2 against the host that loaded it, and §10.1's edge behaviours — compression and the body ceiling | `WebApplicationFactory` + a stub destination on loopback — no containers, and `UseKestrel` where the property under test is the server's own | < 1 s | One suite | `Gateway.Api.Tests` |
 | Outbound hop | §9.7's one synchronous call: the timeout hierarchy read off the built host, the credential handler's position inside the resilience pipeline, and §11.5's realm | `WebApplicationFactory` + a real gRPC server on loopback; one class also runs a real Keycloak | < 1 s, and seconds for the Keycloak class | One suite | `Web.Bff.Tests` |
 | Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
-| Contract | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
+| Contract shape | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
 **Neither is there an "all services in containers" level, nor an E2E one.** Both
 are rows that get written into a strategy and never built — the second needs a
@@ -41,9 +41,13 @@ asserts. §12.5's traps price that and name the correctness hazard that comes
 with it, and between them they are the reason these tests are "a few" rather
 than hundreds. **Contract compatibility** —
 does the message one service publishes still mean what its consumers expect —
-is a reflection test over the contract assembly, and it is the one thing
-genuinely between services, which is why `Platform.IntegrationTests` exists
-and holds nothing else.
+is a reflection test over the contract assembly, and it is why
+`Platform.IntegrationTests` exists and holds nothing else. It is **not the
+only thing genuinely between services** — §9.7's one synchronous hop is the
+other, and §12.6 tests the two in almost opposite ways. The hop is
+deliberately not in this suite: a contract over it needs the provider
+running, so it lives in the provider's own suite rather than buying a sixth
+project a container set.
 
 What no level above covers is whether the *deployed* system responds under load
 and against real infrastructure. That is the **k6 run against staging**
@@ -1834,11 +1838,17 @@ public async Task Commands_are_sent_and_events_are_published()
 
 ## 12.6 Contract tests
 
-The saga tests above prove one service's coordination. The only thing left that
-is genuinely *between* services is the contract assembly, and its rules are all
-stated elsewhere as things reviewers should notice: §9.1's "a contract may not
-name a domain type", §9.2's versioned namespace, `required` members. Each is
-mechanical, so each is a test rather than a review note.
+The saga tests above prove one service's coordination. **Two things are
+genuinely *between* services**, and they are tested in almost opposite ways: the
+contract assembly, whose rules are about *shape* and hold for every contract
+there will ever be, and [§9.7](09-messaging.md)'s one synchronous hop, whose
+rules are about *behaviour* and are one consumer's. The first is below; the
+second is the consumer-driven contract at the end of this section.
+
+The contract assembly's rules are all stated elsewhere as things reviewers
+should notice: §9.1's "a contract may not name a domain type", §9.2's versioned
+namespace, `required` members. Each is mechanical, so each is a test rather than
+a review note.
 
 This is the one suite that references every service, which is why it has its own
 project and why that project holds nothing else:
@@ -1963,6 +1973,110 @@ public parameterless constructor must mark every settable property.
 > dropped the member entirely, which turns the assertion it feeds into one that
 > cannot fail. The same rule makes `OccurredAt` a fixed instant with a non-zero
 > offset: `DateTimeOffset.MinValue` survives every serialiser bug there is.
+
+### Consumer-driven contracts
+
+Everything above is about the *shape* of a contract, and none of it reaches
+[§9.7](09-messaging.md)'s hop. `pricing.proto` already pins that shape — one
+file, two generated halves, so a field cannot be renamed on one side only. What
+it cannot pin is what the fields **mean**: that an unpriced product is absent
+rather than zero, that the amount is text to be parsed rather than compared,
+that a reply's currency is the amount's own label. `pricing.proto` says all
+three, in comments, and until PR-26 nothing checked any of them across the
+boundary.
+
+**What stood in for a check was a stub, and a stub is a second specification
+nobody verifies.** `Web.Bff.Tests` drives its endpoint against `StubCatalog`, a
+hand-written gRPC server modelling Catalog. Four of its behaviours had drifted
+from the service it models — it filtered currency case-sensitively where Catalog
+does not, echoed the request's spelling of the currency rather than its own
+stored one, formatted amounts at the test's scale rather than the column's
+`decimal(19,4)`, and enforced no request ceiling at all.
+
+> **The consumer's guard against the drift was itself unguarded, and that was
+> measured rather than argued.** `CheckoutEndpoints` compares a reply's currency
+> to the request's with `OrdinalIgnoreCase`, precisely because Catalog answers
+> `GBP` to a request for `gbp`. Because the stub echoed the request, the
+> comparison had never once been handed two spellings — so tightening it to
+> `Ordinal` left every one of that suite's 62 pre-PR tests that need no
+> container green, over a change that would answer 500 to every lower-case
+> currency a customer typed. That is the fast half rather than the whole
+> suite, which was 66 before this PR and is 77 after it; the four that want
+> a Keycloak were not run.
+
+So the consumer writes down what it needs, and the provider is verified against
+it. The expectations are **one file** — `PricingContract.cs`, in the consumer's
+own test-support project — compiled into `Web.Bff.Tests` and **linked** into
+`Catalog.Api.Tests`, exactly as `pricing.proto` is linked into `Web.Bff`. The
+syntactic contract and the semantic one are then shared the same way, and
+neither is an assembly, so [§4.3](04-solution-structure.md) keeps
+`Common.Contracts` as its one exception.
+
+```csharp
+new PricingInteraction(
+    "a product priced in another currency is absent rather than zero",
+    [Chair, Lamp],
+    ["chair", "lamp"],
+    0,
+    "GBP",
+    PricingOutcome.Prices("chair"))
+```
+
+An interaction names its products by **alias** rather than by id, because
+neither side can be handed one: the stub mints its ids and the provider suite
+publishes through `POST /v1/catalog/products` and is given them back. Each side
+realises the state its own way and binds the alias.
+
+**What the contract builds once is the *question*, not the message**, and the
+difference is deliberate. The ids and the currency come from
+`PricingContract.RequestedIds` on both sides, so the stub and the real service
+are asked about the same products in the same currency. Only the provider suite
+then sends that as a `GetPricesRequest`; the consumer suite hands it to the
+screen as a query string and lets `CheckoutEndpoints` build the gRPC message
+itself. Having the contract build it there would verify the contract against
+itself — the consumer's half exists precisely to establish that the request the
+*endpoint* constructs is the one the contract describes.
+
+The per-field tolerance is stated once and applied to every answered
+interaction, on both sides. It is the **consumer's** tolerance and not the
+provider's behaviour, which is what keeps a contract from over-specifying: the
+amount is parsed and compared numerically, never matched as text, because
+Catalog's column scale reaches the wire as `49.9900` and a migration that
+changed it would change nothing a customer can see.
+
+> **A consumer-driven contract carries only what the consumer needs, and the
+> discipline is what makes it worth verifying.** Catalog also refuses a
+> malformed product id, a non-canonical GUID and an anonymous caller. None is an
+> interaction: the BFF always sends canonical ids and always presents a token,
+> so an expectation about any of them would be a promise nobody is relying on.
+> Those stay `PricingServiceTests`' — provider-owned behaviour, tested where it
+> is decided. A contract that lists everything the provider happens to do is a
+> second provider suite wearing the consumer's name.
+
+The one number the contract does state is the request ceiling, and it is stated
+in **both** directions: a basket at `MaxProductIds` must be served, and one past
+it must be refused with `InvalidArgument` — the status
+`UpstreamExceptionHandler` turns into the caller's 400. Either interaction
+alone is satisfiable by a provider that has quietly moved the limit, so the pair
+is what pins it, and a change in either direction fails verification on purpose.
+That is not a contradiction of `CheckoutEndpoints` holding no ceiling of its
+own: production code with a copy would refuse requests Catalog would have
+served, where a contract with one is the consumer saying which number it is
+relying on.
+
+**It is not Pact, and the mechanism was a decision rather than a
+convenience** — [ADR-023](appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+records it. Pact's .NET binding cannot express gRPC at all, which is the only
+relationship here that needed one; what Pact is *for* — one artefact the
+consumer authors and the provider verifies — is taken, and the broker and wire
+format that ship it across a repository boundary are declined, because this is a
+monorepo and that boundary is not there.
+
+**Two things it does not do.** It covers one relationship, because the platform
+has one synchronous hop; a second would be the same conditional judgement again
+rather than an automatic second contract. And it does not cross a repository
+boundary — extract the BFF and this file becomes something that has to be
+published, at which point Pact is the answer after all.
 
 ## 12.7 Test doubles
 

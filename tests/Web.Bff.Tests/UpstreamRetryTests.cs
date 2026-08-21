@@ -51,7 +51,7 @@ public sealed class UpstreamRetryTests : IAsyncLifetime
         await _catalog.InitializeAsync();
 
         _factory = new BffFactory { PricingAddress = _catalog.Address };
-        _catalog.Prices[Chair] = ("Chair", 49.99m);
+        _catalog.Prices[Chair] = ("Chair", 49.99m, "GBP");
     }
 
     public async ValueTask DisposeAsync()

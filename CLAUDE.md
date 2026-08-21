@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..022),
+                             15-cicd-deployment, appendix A (ADR-001..023),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -240,6 +240,17 @@ but `StubCatalog` must compile the *server* half of a `.proto` whose *client*
 half `Web.Bff` already compiles, and both in one assembly makes every message
 type a CS0436, which ADR-019 turns into an error.
 
+**Since PR-26 it holds the second thing in this repository shared as a linked
+file rather than as an assembly**, and the two are the same relationship one
+level apart. `pricing.proto` is Catalog's, because Catalog serves the RPC;
+`PricingContract.cs` is Web.Bff's, because only a consumer can say what it
+needs — and `Catalog.Api.Tests` compiles it through a `<Compile Link>` so the
+provider can be held to it. A file crosses no boundary §4.3 draws, which is
+what keeps a test helper from becoming the second assembly that does. **A third
+copy of this pattern owes the scaffold an entry**: `tools/new-service` drops
+both the link and the suite that uses it, because a contract copied to a
+service no consumer calls is an expectation nobody holds.
+
 Planned, per §4.1 — do not invent a different shape for it. `src/Services/`
 gains Inventory and Payments with the same five projects, Shipping with a
 Worker in place of the Api, and Notifications with four (no Domain, and a
@@ -406,11 +417,19 @@ needed a mechanism no chapter had chosen ([ADR-022](docs/backend-architecture/ap
 It is the platform's **third artefact that no cluster has ever seen**, after
 the charts and the alert rules, and the honest half of it is that the *deciding*
 is tested and the *acting* is four commands nobody has run.
-**PR-26 is optional and conditional (Appendix C), so the plan has no next
-mandatory PR.**
+PR-26 was optional and conditional (Appendix C) and **has landed**, because the
+condition was already met: §9.7's hop is the platform's one synchronous
+dependency, and the consumer's model of it — `StubCatalog` — had drifted from
+the provider in four places. It is the platform's first **consumer-driven
+contract**, and the first artefact deliberately *not* built with the tool the
+plan named: PactNet cannot express gRPC at all
+([ADR-023](docs/backend-architecture/appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)),
+so the property is taken and the machinery is not — one file, linked into both
+suites, exactly as `pricing.proto` is. **Every mandatory PR in the plan has now
+landed and so has the one optional PR, so there is no next PR.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 795 tests — so the build rules and the drift rules below
+and `dotnet test` runs 812 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -663,6 +682,25 @@ own line rather than sending a reader to a file that does not hold it.
   four correct alerts as having no signal — loudly, this time. The quiet
   version of the same bug is what the gate-coverage lesson at the top of this
   list is about.
+- **A hand-written double is a second specification, and only the real provider
+  can falsify it.** `StubCatalog` had drifted from Catalog in four places and
+  the suite it serves stayed green throughout, because a double cannot disagree
+  with itself. The consequence is sharper than a stale stub: a guard written
+  *for* the provider's real behaviour becomes untestable, since the double never
+  produces the input the guard exists for. Measured here — the BFF's
+  case-insensitive currency comparison could be tightened to `Ordinal` with all
+  62 of that suite's container-free tests still passing — the fast half of the
+  66 it ran before this PR, not the 77 it runs now — over a change that
+  answers 500 to every lower-case currency in production. **Ask what would
+  falsify the double, not whether its suite is green.**
+- **A tool a plan names may not reach the case the plan made it conditional
+  on.** Appendix C made Pact conditional on a consumer relationship becoming
+  contentious; the relationship that did is gRPC, and PactNet ships HTTP and
+  message pacts only — gRPC is a plugin whose .NET binding has been an open pull
+  request since September 2025. The plan was written against the tool's
+  reputation rather than its surface. **Check the binding, not the ecosystem**:
+  a capability present in a project's Rust core, its JVM binding and its
+  marketing is not thereby present in the one language this repository compiles.
 
 ### The commands
 
@@ -673,7 +711,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 624 of 795, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 635 of 812, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -752,13 +790,13 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 624 of
-the 795 and starts no container — measured with `docker events`, not inferred —
-and `Category=Integration` is the other 171, needing the daemon exactly as
+category runs a smaller suite and says which. `Category!=Integration` is 635 of
+the 812 and starts no container — measured with `docker events`, not inferred —
+and `Category=Integration` is the other 177, needing the daemon exactly as
 before.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (606) and integration (171), which is the 624 above split at the
+(18), unit (617) and integration (177), which is the 635 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -776,7 +814,7 @@ propagation was measured before the design was trusted.
 with its own collection and therefore its own container set (§12.4's stated
 price). The last is the odd one: most of its tests need no container, one class
 needs a Keycloak, so the suite is fast and then pays for an identity provider
-once — 62 tests of 66 on the fast side, which is the clearest case in the repo
+once — 73 tests of 77 on the fast side, which is the clearest case in the repo
 for categorising a collection rather than a project. (Measured from the stage
 TRX, not counted by eye: `docs/testing.md` had it right and this line was three
 short on both halves of the same split.)
@@ -1541,7 +1579,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-023) and keep the
+  (currently ADR-024) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

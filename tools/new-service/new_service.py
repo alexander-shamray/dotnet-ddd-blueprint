@@ -203,6 +203,16 @@ OMITTED = frozenset(
         # once: there is no PricingService to drive, and the channel it
         # builds needs the generated client the csproj patch below drops.
         "tests/Catalog.Api.Tests/PricingServiceTests.cs",
+        # PR-26's provider verification, which leaves for a third reason on
+        # top of that pair: it is one named consumer's expectations of one
+        # named provider. Web.Bff asks Catalog for prices (§9.7 permits
+        # exactly one synchronous hop and this is it), so a scaffolded
+        # service inherits neither the RPC nor anyone consuming it — and a
+        # contract copied to a service no consumer calls is an expectation
+        # nobody holds, which is the one thing a consumer-driven contract
+        # must never become. The csproj patch below drops the linked
+        # PricingContract.cs with it, for the same reason.
+        "tests/Catalog.Api.Tests/PricingContractVerificationTests.cs",
         # Both name /v1/catalog/products, so both are slice by requirement:
         # they read the host as a deployment rather than a fixture, and a
         # service with no endpoint has nothing to read. They return with the
@@ -814,6 +824,35 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "         because a project that names a type declares the package rather than\n"
             "         relying on a production csproj it does not control. -->\n"
             "    <PackageReference Include=\"Grpc.Net.ClientFactory\" />\n",
+            "",
+        ),
+        # PR-26's linked contract, dropped with the verification suite that
+        # compiles it. A rendered service keeps neither: the file is Web.Bff's
+        # expectations of CATALOG, so a link to it from Inventory.Api.Tests
+        # would compile a contract naming a hop that service does not serve —
+        # and then fail to build, because PricingContract names the generated
+        # pricing types the Protobuf item above already left with the .proto.
+        (
+            "  <ItemGroup>\n"
+            "    <!-- PR-26's consumer-driven contract, LINKED rather than referenced — the\n"
+            "         same relationship pricing.proto already has, one level up. The .proto\n"
+            "         is Catalog's because Catalog serves the RPC; this file is Web.Bff's\n"
+            "         because only a consumer can say what it needs, and it is compiled into\n"
+            "         this suite so the provider can be held to it.\n"
+            "\n"
+            "         A FILE and not an assembly, so no project dependency is created and\n"
+            "         §4.3 is untouched: Common.Contracts is still the only assembly that\n"
+            "         crosses a service boundary, and a test helper is expressly not it —\n"
+            "         which is why Gateway.Api.Tests carries its own copy of Catalog's\n"
+            "         TestAuthHandler rather than referencing one.\n"
+            "\n"
+            "         The cost is a build-time path into another suite's tree, and unlike the\n"
+            "         .proto it is paid once: no Dockerfile builds a test project, so there\n"
+            "         is no COPY line to keep in step with it. -->\n"
+            "    <Compile Include=\"..\\Web.Bff.TestSupport\\PricingContract.cs\""
+            " Link=\"Contract\\PricingContract.cs\" />\n"
+            "  </ItemGroup>\n"
+            "\n",
             "",
         ),
         (

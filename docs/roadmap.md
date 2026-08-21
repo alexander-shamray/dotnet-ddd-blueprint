@@ -231,9 +231,22 @@ does not exist yet.
 |---|---|---|---|---|
 | **26** | `chore(optional): consumer-driven contract tests` | 4d | — | — |
 
-Not counted. Appendix C makes Pact conditional on a consumer relationship
+Not counted. Appendix C makes it conditional on a consumer relationship
 becoming contentious, and pricing a conditional into a total is how a total
 stops meaning anything. If it is taken, it adds a week.
+
+**It was taken, and the estimate stays out of the total anyway.** The scope
+line at the top of this file quotes a figure that was priced before any code
+existed, and folding a conditional into it after the fact would make the number
+mean two different things depending on when it was read. So the 99 days still
+describe the plan as estimated; the week PR-26 actually cost is beside it, not
+in it.
+
+The estimate said Pact and the delivery is not — [ADR-023](backend-architecture/appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+records why, and Appendix C's row carries what was found. That is worth a line
+here only because it moved the estimate's shape: no broker to stand up and no
+package to adopt, against a stub that had to be corrected in four places before
+anything could be verified against it.
 
 ## Milestones
 
