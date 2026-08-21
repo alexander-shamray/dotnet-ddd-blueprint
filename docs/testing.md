@@ -18,10 +18,10 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 > `/validate-blueprint` reaches it only because it is named in that command's
 > scope. The one rule in `CLAUDE.md` covers it, and that is all that does.
 
-## The four suites
+## The suites
 
-Four of them, three runners, and `dotnet test` says nothing about the other
-three:
+Seven of them, three runners, and `dotnet test` says nothing about the other
+six:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -34,14 +34,20 @@ dotnet test  Platform.slnx         # needs a running Docker daemon
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
+
+py -3.12 -m unittest discover -s .github/pipeline-gate   # PR-25's quality gates
+py -3.12 -m unittest discover -s .github/coverage        # the coverage merge
+py -3.12 -m unittest discover -s deploy/canary           # §15.5's rollout
 ```
 
-**Only the first is a §12 suite, and the other three are here anyway**, because
+**Only the first is a §12 suite, and the other six are here anyway**, because
 this file is written for someone with a checkout rather than for someone
 deciding what to test. The scaffold's tests exercise a developer tool; the
-chart gate renders `deploy/helm/` and asserts what comes out (§15.3); and the
+chart gate renders `deploy/helm/` and asserts what comes out (§15.3); the
 observability gate pairs §13.6's alerts with §13.9's runbooks both ways and
-checks that every metric a loaded rule reads is one something publishes. None
+checks that every metric a loaded rule reads is one something publishes; and
+PR-25's three cover the pipeline's own inventories, the coverage merge, and
+§15.5's rollout arithmetic. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
 
@@ -245,10 +251,18 @@ Three things about that filter are deliberate:
   ([Appendix B](backend-architecture/appendix-b-licences.md)); a coverage
   figure is not worth a new dependency.
 
-The run writes a single `*.cobertura.xml` under `TestResults/<guid>/` — the
-collector merges every test project's data into one attachment — and the
-`line-rate` attribute on its `<coverage>` element is the figure, with
-`<package name="…">` naming each assembly.
+**A run without `--logger trx` writes a single `*.cobertura.xml` under
+`TestResults/<guid>/`**, because the collector merges every test project's
+data into one attachment. That is the layout the reporter used to assume, and
+the commands above are not it: the stage gate needs TRX, and the TRX logger
+makes each test project write its own partial attachment beside the merged one.
+So the reporter unions whatever it finds across both stage directories rather
+than reading a file, and the figure is `lines-covered / lines-valid` over that
+union — with `<package name="…">` naming each assembly, as before.
+
+**Do not reason from the single-file layout.** Both are real and which one you
+get depends on a flag several paragraphs away; the union is correct under
+either, which is why it is what ships.
 
 > **CI runs this as a second step over the *complement* of the architecture
 > gates, and that seam is instrumentation rather than preference.** §4.2's

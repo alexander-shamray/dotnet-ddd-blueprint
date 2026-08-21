@@ -423,8 +423,8 @@ summed a local `dotnet test Platform.slnx` the same way, which is the same
 arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
-there are four suites now — see *The commands* below, which is where the
-current set lives. That one: `py -3.12 -m unittest` in `tools/new-service` runs
+there are seven suites now — see *The commands* below, which is where the
+current set lives, and which is the only place a count of them belongs. That one: `py -3.12 -m unittest` in `tools/new-service` runs
 81, and CI has a `scaffold` job for them beside `licence-gate`.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
@@ -623,8 +623,11 @@ own line rather than sending a reader to a file that does not hold it.
   because a list can only be compared for the entries it already contains. **A
   gate cannot see a read it was never told about.** The fix is a test whose
   subject is the *reads* — the same shape as asserting a parser found anything
-  at all — and it is owed by every copy of this pattern, not just the one that
-  was caught.
+  at all — and it was owed by every copy of this pattern rather than by the one
+  that was caught. **All three have it now**: `canary.py`'s in its suite,
+  `check.py`'s as a check of its own, and `smoke.sh`'s over its own `$ROOT/…`
+  literals. Each was observed red against a removed entry. A fourth copy of
+  `SOURCE_INPUTS` arrives owing the same test.
 - **A `helm upgrade --install` of a new release inherits nothing.** A second
   release of the same chart takes the chart's defaults for every value the
   environment overlay would have supplied — authority, OTLP endpoint, database

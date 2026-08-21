@@ -123,9 +123,10 @@ jobs:
           # be near 19 and the scale is a no-op, which hides the hole rather
           # than closing it.
           #
-          # Raising the floor is what makes the number stick. It is restored
-          # on both exits below, because a service left with minReplicas 19 is
-          # a rollout that silently resized production.
+          # Raising the floor is what makes the number stick, and restoring it
+          # is owed FROM THE MOMENT IT IS RAISED. The floor is recorded in
+          # GITHUB_ENV before the patch, and the `if: always()` step at the end
+          # of this job is what puts it back — see the argument there.
           FLOOR=$(kubectl get hpa "$WORKLOAD" -n "$NAMESPACE" \
             -o jsonpath='{.spec.minReplicas}' 2>/dev/null || echo "")
           echo "HPA_FLOOR=$FLOOR" >> "$GITHUB_ENV"
@@ -142,25 +143,6 @@ jobs:
       - name: Climb the ladder
         run: |
           set -euo pipefail
-
-          # Restoring the autoscaler's floor is owed on EVERY exit, and a
-          # `trap` rather than a call at each one is the difference between
-          # "owed on both outcomes" and "owed however this step ends".
-          #
-          # The two outcomes are the easy half — promote and rollback both
-          # reach a line that could call this. The half that gets missed is
-          # `set -e`: a `helm upgrade` that fails mid-ladder, a Prometheus that
-          # cannot be reached, a `kubectl` that times out. Each of those aborts
-          # the step between the scale-up and either exit, and a service left
-          # at minReplicas 19 is a rollout that silently resized production and
-          # then reported a failure about something else entirely.
-          restore_floor() {
-            if [ -n "${HPA_FLOOR:-}" ]; then
-              kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
-                --type=merge -p "{\"spec\":{\"minReplicas\":$HPA_FLOOR}}" || true
-            fi
-          }
-          trap restore_floor EXIT
 
           STEPS=$(python deploy/canary/canary.py steps)
           STABLE=$(kubectl get deployment "$WORKLOAD" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
@@ -233,3 +215,32 @@ jobs:
         env:
           WORKLOAD: ${{ inputs.workload }}
           TAG: ${{ inputs.tag }}
+
+      # ONE mechanism, at the end, for every path — and that is the third
+      # attempt at this.
+      #
+      # Calling a restore at each of the two outcomes covered promote and
+      # rollback and missed `set -e`. Moving it onto a `trap EXIT` covered
+      # everything the climb step could do and missed the step BEFORE it: the
+      # scale-up is where the floor is raised, and a `kubectl` that fails there
+      # skips the climb step entirely, because Actions defaults every step to
+      # `if: success()`. Each fix was correct about the case it named and
+      # scoped to the wrong unit.
+      #
+      # `if: always()` is scoped to the JOB, which is the unit the floor is
+      # actually raised for. It restores after a promote, after a rollback,
+      # after a failure in either step, and after a cancellation — and it does
+      # nothing at all when HPA_FLOOR is unset, which is the case where no
+      # autoscaler existed to patch.
+      #
+      # A service left at minReplicas 19 is a rollout that silently resized
+      # production and then reported a failure about something else.
+      - name: Put the autoscaler's floor back
+        if: always()
+        run: |
+          if [ -n "${HPA_FLOOR:-}" ]; then
+            kubectl patch hpa "$WORKLOAD" -n "$NAMESPACE" \
+              --type=merge -p "{\"spec\":{\"minReplicas\":$HPA_FLOOR}}" || true
+          fi
+        env:
+          WORKLOAD: ${{ inputs.workload }}

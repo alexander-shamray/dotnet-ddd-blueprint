@@ -275,13 +275,27 @@ build — and `helm upgrade` then has no tag to pass. Left to the chart default
 it would resolve to `image.tag: ""` (§15.3) and roll whatever that means, which
 is a version nobody chose in a job nobody thought was a release.
 
+**The release is named for the workload, not for the service**, and the two
+had drifted: this sample read `helm get values ordering` while
+`deploy/helm/README.md` installs `catalog-api` and `platform/values.yaml`
+argues its ownership case with `catalog-api`. PR-25's canary made the
+disagreement load-bearing rather than cosmetic — that rollout drives
+`helm get values`, `helm upgrade --install` **and**
+`kubectl scale deployment` from one string, and the last of those must be the
+Kubernetes object name (`workload.name`). A release called `ordering` would
+make `helm get values ordering-api` empty, and the canary would install
+against chart defaults: a pod pointing at the wrong authority and the wrong
+database, which is precisely the failure driving the canary from the stable
+release's values exists to prevent. So the release name *is* `workload.name`,
+here and in §15.3, and one identifier does both jobs.
+
 The tag already in the cluster is the only correct answer, so read it back:
 
 ```yaml
 - name: Resolve the running tag
   if: steps.changes.outputs.deploy == 'true' && steps.changes.outputs.ordering == 'false'
   run: |
-    TAG=$(helm get values ordering -n "$NAMESPACE" -o json | jq -r '.image.tag')
+    TAG=$(helm get values ordering-api -n "$NAMESPACE" -o json | jq -r '.image.tag')
     # Fail rather than default. A config deploy that cannot say which image is
     # running is a config deploy that must not proceed.
     [ -n "$TAG" ] && [ "$TAG" != "null" ] || exit 1
@@ -469,8 +483,9 @@ Each service gets a Helm chart; an umbrella chart deploys the platform.
 > immediately below.** Production is several per-service releases sharing one
 > namespace, and that is fine — they own disjoint sets of objects. The conflict
 > is overlap, not co-tenancy. **§15.1 settles which one production
-> uses**: its config-only deploy reads `helm get values ordering`, a per-service
-> release by name, because the pipeline builds and deploys per service. The
+> uses**: its config-only deploy reads `helm get values ordering-api`, a
+> per-service release by name, because the pipeline builds and deploys per
+> service. The
 > umbrella's job is standing an environment up *whole* — a fresh cluster, a
 > review environment — where one command is the point and nothing deploys
 > independently afterwards. Nothing in a render can catch a mix; the conflict

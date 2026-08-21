@@ -277,10 +277,13 @@ class SourceInputTests(unittest.TestCase):
         source = Path(canary.__file__).read_text(encoding="utf-8")
         found = set()
         for first, second in self.READ.findall(source):
-            # `deploy` alone is not a declarable input -- deploy/compose must
-            # NOT trigger this gate -- so a read under it is recorded with its
-            # subtree. Anything else is recorded at its top level.
-            found.add(f"{first}/{second}" if first == "deploy" and second else first)
+            # Two segments where there are two, because the declarable unit is
+            # not always the top level: `deploy` is too wide to be correct,
+            # since deploy/compose must not trigger this gate. The assertion
+            # below accepts a declared entry that is a prefix, so a
+            # one-segment declaration still covers a two-segment read where
+            # that is what somebody meant. Same rule as check.py's copy.
+            found.add(f"{first}/{second}" if second else first)
         return found
 
     def test_the_scan_finds_the_reads_it_is_checking(self) -> None:

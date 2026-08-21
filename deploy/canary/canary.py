@@ -21,7 +21,7 @@ gate that needs a `pip install` is a gate that gets skipped.
 
     py -3.12 deploy/canary/canary.py check
     py -3.12 deploy/canary/canary.py plan --workload catalog-api --stable 19 --step 0
-    py -3.12 deploy/canary/canary.py analyse --plan-file readings.json
+    py -3.12 deploy/canary/canary.py analyse --readings readings.json
 """
 
 from __future__ import annotations
@@ -65,8 +65,17 @@ WORKFLOW = ROOT / WORKFLOW_PATH
 # serving traffic on nobody's authority. The reason this is affordable is the
 # shape of the mechanism rather than optimism about the readings. The canary is
 # a SECOND Deployment and the stable one is never touched (ADR-022), so
-# rollback costs the canary's own pods and nothing else -- no `helm rollback`,
-# no image change on the pods serving the other 95%, and no schema to undo.
+# rollback costs the canary's own pods and nothing else -- no `helm rollback`
+# and no image change on the pods serving the other 95%.
+#
+# NOT "and no schema to undo", which this comment said and ADR-022 denies: the
+# canary release runs §7.4's migration hook, because it is the first thing
+# carrying the new image, and a rollback removes the pods and LEAVES THE SCHEMA
+# MIGRATED. What makes that survivable is §15.5's backward-compatibility
+# requirement, which ADR-022 sharpens rather than relaxes -- a cheap rollback is
+# worth nothing against an incompatible migration. The pods are the cheap half;
+# the schema is not a half this mechanism buys at all.
+#
 # When rollback is cheap, every doubt resolves to it.
 PROMOTE = "promote"
 ROLLBACK = "rollback"

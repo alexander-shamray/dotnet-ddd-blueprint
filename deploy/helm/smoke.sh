@@ -222,6 +222,51 @@ for input in $SOURCE_INPUTS; do
     check "the push filter covers $input" covered "$input" "$OUT/push-paths.txt"
 done
 
+# AND THE OTHER DIRECTION, which is the half that stays green when the list is
+# SHORT rather than wrong.
+#
+# The loop above can only ask the workflow about entries SOURCE_INPUTS already
+# contains, so a path this script reads and nobody declared is invisible from
+# both sides. `deploy/canary/canary.py` shipped exactly that — two entries
+# declared, three paths opened, trigger assertion green throughout — and
+# CLAUDE.md states the fix as owed by every copy of this pattern rather than by
+# the copy that was caught. This is that debt paid here.
+#
+# The subject is this script's own source: every `$ROOT/…` path it names must
+# be covered by a declared entry — the WHOLE path, not a prefix of it, because
+# the entries here are deeper than a top-level segment
+# (`src/Gateway/Gateway.Api/appsettings.json` is a file, not a tree).
+#
+# Two kinds of match are skipped, and neither hides a gap:
+#
+#   * anything ending in `/` is an interpolation prefix rather than a path —
+#     `$ROOT/src/Services/$chart` is built per chart, and the concrete forms it
+#     builds (`src/Services/Catalog`, `src/Services/Ordering`) are declared;
+#   * `deploy/helm` is this script's OWN tree, and SOURCE_INPUTS is by
+#     definition the paths outside it. The workflow file is check 7's subject
+#     rather than an input to it.
+grep -oE '\$ROOT/[A-Za-z0-9_./-]+' "$0" | sed -E 's|^\$ROOT/||' | sort -u >"$OUT/reads.txt"
+
+if [ ! -s "$OUT/reads.txt" ]; then
+    # Subject first: a scan that found nothing would pass the loop below
+    # against any list at all, which is this gate's own most-repeated failure
+    # turned on itself.
+    fail 'found no $ROOT-relative reads in smoke.sh — the scan is broken, not the list'
+else
+    while read -r path; do
+        case "$path" in
+            */|deploy/helm|deploy/helm/*|.github/workflows/helm.yml) continue ;;
+        esac
+        matched=no
+        for input in $SOURCE_INPUTS; do
+            case "$path" in
+                "$input"|"$input"/*) matched=yes ;;
+            esac
+        done
+        check "SOURCE_INPUTS declares $path, which this script reads" test "$matched" = yes
+    done <"$OUT/reads.txt"
+fi
+
 # --------------------------------------------------------------------------
 section 'Resolving dependencies'
 # --------------------------------------------------------------------------
@@ -988,6 +1033,32 @@ for chart in $SERVICE_CHARTS; do
         grep -q 'OTEL_RESOURCE_ATTRIBUTES: "deployment.track=canary"' "$OUT/$chart-canary.yaml"
     check "$chart: the stable release declares deployment.track=stable" \
         grep -q 'OTEL_RESOURCE_ATTRIBUTES: "deployment.track=stable"' "$OUT/$chart.yaml"
+done
+
+# ADR-022's load-bearing consequence, and nothing above asserts it.
+#
+# The ADR says the canary release runs §7.4's hook, because it is the first
+# thing carrying the new image — and therefore that a rollback removes the pods
+# and LEAVES THE SCHEMA MIGRATED, which is what makes §15.5's
+# backward-compatibility requirement sharper rather than softer. The templates
+# do that today only because `_migration-job.tpl` has no canary guard. A later
+# `if not canary` would render nothing, break the ADR, and pass every
+# assertion in the section above — the gate-coverage failure this repository
+# names as its most-repeated, on the newest surface in this tree.
+#
+# Both directions, on the same reasoning as the migration-template check
+# further up: a chart with a migrator runs the hook on both tracks, and a
+# chart without one runs it on neither.
+for chart in $MIGRATOR_CHARTS; do
+    check "$chart: the canary runs the migration hook (ADR-022)" \
+        test "$(count '^kind: Job$' "$OUT/$chart-canary.yaml")" -eq 1
+    check "$chart: and it is the same hook the stable release runs" \
+        test "$(count '"helm.sh/hook": pre-install,pre-upgrade' "$OUT/$chart-canary.yaml")" -eq 1
+done
+
+for chart in $DATABASELESS_CHARTS; do
+    check "$chart: the canary renders no migration Job either" \
+        test "$(count '^kind: Job$' "$OUT/$chart-canary.yaml")" -eq 0
 done
 
 # The rollout plan names a chart per workload, and a plan pointing at a chart

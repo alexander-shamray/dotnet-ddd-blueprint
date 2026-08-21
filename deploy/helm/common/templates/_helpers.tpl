@@ -122,8 +122,15 @@ app.kubernetes.io/part-of: commerce
 **The canary is a SECOND RELEASE of the same chart**, differing in
 `canary.enabled`, its replica count and its image tag. The stable release is
 never touched, which is what makes a rollback cost the canary's own pods and
-nothing else — no `helm rollback`, no image change on the pods serving the
-rest, and no schema to undo (ADR-022).
+nothing else — no `helm rollback`, and no image change on the pods serving the
+rest (ADR-022).
+
+**The schema is not part of that, and this comment used to say it was.** The
+canary release runs §7.4's migration hook — it is the first thing carrying the
+new image — so a rollback removes the pods and leaves the schema migrated.
+ADR-022 says so in its own consequences; what makes it survivable is §15.5's
+requirement that every migration be backward compatible with the previous
+release, which the cheap rollback does not buy and does not excuse.
 
 Traffic splits because BOTH tracks answer to the SAME Service: the selector
 above carries the workload name and nothing about the track, so kube-proxy
