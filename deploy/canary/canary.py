@@ -113,7 +113,24 @@ def load_plan(path: Path = PLAN_PATH) -> dict:
 # The weight arithmetic
 # --------------------------------------------------------------------------
 
-def validate_tag(tag: str) -> None:
+def migration_prefix(workload: str, plan_document: dict, root: Path = ROOT) -> str | None:
+    """The `<workload>-migrate-` a Job name would start with, where there is one.
+
+    None for a chart that renders no migration Job — the gateway and the BFF
+    own no database (§10.1, §15.3), so their tags are bounded only by the label
+    length. Derived from the templates on disk rather than listed, because a
+    sixth service's chart gains a migrator by having the file.
+    """
+    workloads = entries(plan_document.get("workloads", {}))
+    chart = workloads.get(workload, {}).get("chart")
+    if not chart:
+        return None
+    if not (root / "deploy" / "helm" / chart / "templates" / "migrate-job.yaml").is_file():
+        return None
+    return f"{workload}-migrate-"
+
+
+def validate_tag(tag: str, job_prefix: str | None = None) -> None:
     """Refuse a tag Helm's `--set-string` would read as more than a tag.
 
     **`--set-string image.tag="$TAG"` is not a single assignment**, and that is
@@ -152,6 +169,27 @@ def validate_tag(tag: str) -> None:
                 "(§15.3) — which also excludes the comma and equals that Helm's "
                 "--set-string would read as a second assignment"
             )
+
+    # AND THE MIGRATION JOB'S NAME, which is a tighter budget than the label's
+    # on any chart that has one. `_migration-job.tpl` derives
+    # `<workload>-migrate-<tag>` and refuses it past 63 — correctly, and at
+    # RENDER time, which on this path is after the stable track has already
+    # been scaled to nineteen. Sixty-three characters is a tag this preflight
+    # accepted and the chart then rejected, which is the preflight failing at
+    # the one job it has: to move that refusal in front of the scale-up.
+    #
+    # `catalog-api-migrate-` costs 20 and `ordering-api-migrate-` 21, leaving
+    # 43 and 42. Derived here rather than written down, so a workload renamed
+    # in canary.json moves its own budget with it.
+    if job_prefix is not None and len(job_prefix) + len(tag) > 63:
+        raise PlanError(
+            f"image tag {tag!r} is {len(tag)} characters, and the migration Job "
+            f"would be named {job_prefix + tag!r} at {len(job_prefix) + len(tag)}. "
+            "Kubernetes copies that onto every pod as the `job-name` label, which "
+            f"may not exceed 63, so this workload allows {63 - len(job_prefix)} "
+            "(§7.4). Refused here rather than by `helm upgrade` after the stable "
+            "track has been scaled up"
+        )
 
 
 def _ceil_div(numerator: int, denominator: int) -> int:
@@ -721,6 +759,7 @@ def main(argv: list[str]) -> int:
 
     tag = sub.add_parser("validate-tag", help="refuse a tag Helm would read as two assignments")
     tag.add_argument("--value", required=True)
+    tag.add_argument("--workload", help="apply that workload's migration Job name budget too")
 
     # Separate from `plan` on purpose: the chart a workload deploys is a fact
     # about the plan, and `plan` REFUSES when the step's weight is not
@@ -761,8 +800,9 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "validate-tag":
+        prefix = migration_prefix(args.workload, document) if args.workload else None
         try:
-            validate_tag(args.value)
+            validate_tag(args.value, prefix)
         except PlanError as error:
             print(f"canary: {error}", file=sys.stderr)
             return 1

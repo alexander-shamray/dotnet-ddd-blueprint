@@ -142,10 +142,17 @@ jobs:
       # The rule is `commerce.tag`'s, so the two cannot disagree, and it is
       # tested — a regex inline here would be the one part of this file nothing
       # could exercise.
+      #
+      # `--workload` because the budget is not the same for every chart: a
+      # workload with a migrator derives `<workload>-migrate-<tag>`, which
+      # Kubernetes stamps onto every pod as a label and refuses past 63. The
+      # chart already checks it — at RENDER time, which on this path is after
+      # the stable track has been scaled to nineteen.
       - name: The tag has to be a tag
-        run: python deploy/canary/canary.py validate-tag --value "$TAG"
+        run: python deploy/canary/canary.py validate-tag --value "$TAG" --workload "$WORKLOAD"
         env:
           TAG: ${{ inputs.tag }}
+          WORKLOAD: ${{ inputs.workload }}
 
       - name: The first rung has a price, and it is paid before anything rolls
         run: |

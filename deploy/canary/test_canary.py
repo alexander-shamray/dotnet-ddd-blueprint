@@ -162,6 +162,36 @@ class TagTests(unittest.TestCase):
                 with self.assertRaises(canary.PlanError):
                     canary.validate_tag(tag)
 
+    def test_a_migrator_workload_has_a_tighter_budget(self) -> None:
+        """63 is the LABEL's budget and not the Job name's.
+
+        `_migration-job.tpl` derives `<workload>-migrate-<tag>` and refuses it
+        past 63 — correctly, and at render time, which on this path is after
+        the stable track has been scaled to nineteen. A 63-character tag was
+        accepted here and rejected there, which is this preflight failing at
+        the one job it has.
+        """
+        plan = canary.load_plan()
+        prefix = canary.migration_prefix("catalog-api", plan)
+        self.assertEqual(prefix, "catalog-api-migrate-")
+
+        canary.validate_tag("a" * (63 - len(prefix)), prefix)
+        with self.assertRaises(canary.PlanError) as raised:
+            canary.validate_tag("a" * (64 - len(prefix)), prefix)
+
+        self.assertIn("job-name", str(raised.exception))
+
+    def test_a_databaseless_workload_has_no_migration_budget(self) -> None:
+        """The gateway and the BFF own no database (§10.1), so their charts
+        render no Job and their tags are bounded only by the label."""
+        plan = canary.load_plan()
+
+        for workload in ("gateway", "web-bff"):
+            with self.subTest(workload=workload):
+                self.assertIsNone(canary.migration_prefix(workload, plan))
+
+        canary.validate_tag("a" * 63, canary.migration_prefix("gateway", plan))
+
     def test_length_and_emptiness(self) -> None:
         with self.assertRaises(canary.PlanError):
             canary.validate_tag("")

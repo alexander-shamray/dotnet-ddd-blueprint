@@ -560,6 +560,11 @@ domain-layer coverage. Six of its decisions bind what comes after.
 Two smaller things are worth carrying. **Coverage is reported and never
 gated** — §12.9 calls it a diagnostic, and a diagnostic wired to a build
 failure stops being read and starts being satisfied; the threshold is PR-25's.
+**PR-25 declined it**, on the first half of that same sentence, so what this
+entry deferred is settled rather than still owed — see PR-25's block above.
+The reasoning here is left exactly as it was written, and the outcome is
+recorded beside it: that is the log's rule about a live claim restated inside
+an argument, and this is its second instance after PR-10's compose timeout.
 The filter is a *pattern*, `.*\.Domain\.dll$`, so every later service's Domain
 joins it the day it exists rather than waiting for someone to edit a list. And
 the collector is the one `Microsoft.NET.Test.Sdk` already carries, so the
