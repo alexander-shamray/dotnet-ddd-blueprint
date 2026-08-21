@@ -28,7 +28,12 @@ name: Helm
 #     slow-starting pods;
 #   - .gitattributes pins this tree to LF, and without it a CRLF template
 #     renders a CR onto every line and the anchored greps below match nothing
-#     on a Linux runner. A change removing that rule must run this gate.
+#     on a Linux runner. A change removing that rule must run this gate;
+#   - deploy/canary/canary.json names a chart per workload, and smoke.sh
+#     asserts every service chart appears in it. A rollout pointing at a chart
+#     that cannot render a canary track is a deploy that fails after the
+#     scale-up, so the two halves are asserted against each other here rather
+#     than discovered there (§15.5, PR-25).
 on:
   pull_request:
     paths:

@@ -284,7 +284,7 @@ def check_images(root: Path = ROOT) -> list[str]:
     for dockerfile in sorted(on_disk - declared):
         problems.append(
             f"{dockerfile} is built by no entry in ci.yml's images matrix. "
-            "§15.1 builds an image per changed service, and one nothing names "
+            "§15.1 builds every image a changed service ships, and one nothing names "
             "is one CI never builds -- which surfaces on the next compose pull "
             "request rather than on the change that broke it"
         )

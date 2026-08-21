@@ -31,7 +31,8 @@ dependent goes first.
 > **The diagram is the target pipeline, and this repository runs the left half
 > of it.** Everything up to and including the image build is live since PR-25:
 > the scan, the fork, the build, the three test stages and one `docker build`
-> per changed service. **Signing is not** — it needs a registry and a key this
+> per changed service — two, where the service has a migrator (§15.2).
+> **Signing is not** — it needs a registry and a key this
 > repository has neither of, so what runs is the half that can run rather than
 > a step that would have to be faked. Nor is any `Deploy:` node: there is no
 > dev, staging or production environment, which is why §15.5's canary is
@@ -87,9 +88,18 @@ make a monorepo practical at this size:
         - 'src/Gateway/**'
       # The BFF is a deployable too, with its own image, chart and the
       # platform's only client secret.
+      #
+      # AND CATALOG'S PROTO — the one entry here that reaches into another
+      # service's tree. Web.Bff compiles `pricing.proto` as a LINKED source
+      # file (§9.7) and its Dockerfile copies that path, so a proto-only
+      # change alters what the BFF ships while matching only `catalog`. That
+      # is the rule below applied to the one host that compiles another
+      # service's file, and it is easy to omit precisely because the filter
+      # otherwise reads as "this service's own tree".
       bff:
         - *shared
         - 'src/BFF/**'
+        - 'src/Services/Catalog/Catalog.Api/Protos/**'
       # A chart or values change produces no new image and must still reach
       # the cluster. See below — this path needs a tag it did not build.
       #
@@ -332,7 +342,8 @@ WORKDIR /src
 # simply not restored, and the --no-restore publish below then fails with
 # NETSDK1004 naming a project this file never mentions. So a new
 # ProjectReference anywhere in the chain is a line here too, and §15.1's
-# `images` job is what says so — it builds one image per changed service, so
+# `images` job is what says so — it builds every image a changed service
+# ships, api and migrator alike, so
 # a missing line fails on the pull request that added the reference rather
 # than on the next compose one.
 COPY global.json Directory.Build.props Directory.Packages.props ./

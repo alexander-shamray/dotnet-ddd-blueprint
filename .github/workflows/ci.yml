@@ -245,6 +245,13 @@ jobs:
       # and because the coverage figure is the union of the two (§12.9) and
       # wants one place to be merged.
       #
+      # The three filters are exhaustive and disjoint by construction, so the
+      # counts sum to the whole suite — and the stage gate below is what turns
+      # that from a claim into a check, in both directions: every test project
+      # ran in some stage, and no test ran in two. `docs/testing.md`,
+      # `pipeline_gate.py` and its suite all quote this sentence as this file's,
+      # which it stopped being when PR-25 rewrote the block around it.
+      #
       # `--logger trx` is what the stage gate counts from, and it is not free:
       # it changes where the collector writes, so each stage now leaves the
       # run's merged attachment AND one partial per test project. The reporter
