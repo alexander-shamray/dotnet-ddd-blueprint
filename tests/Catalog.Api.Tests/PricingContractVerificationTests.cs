@@ -31,7 +31,7 @@ namespace Catalog.Api.Tests;
 /// a broker for the bus to connect to and the real host over them. That is
 /// <c>ServiceFixture</c>, and it is already here — homing this in the platform
 /// suite would give a sixth project a container set (§12.4's stated price) to
-/// run five tests that Catalog's own suite can run for nothing. §12.6's contract
+/// run six tests that Catalog's own suite can run for nothing. §12.6's contract
 /// tests stay where they are; those are about the shape of the contract
 /// assembly, and this is about one service honouring one consumer.
 /// </para>

@@ -172,7 +172,7 @@ flowchart TD
     P22 --> P25
     P17 --> P25
     P17 --> P27[27 Gateway compression + size limits]
-    P25 --> P26[26 Optional: Pact]
+    P25 --> P26[26 Optional: Consumer-driven contract]
 ```
 
 The graph carries every edge in the tables above and no others. It is a

@@ -70,7 +70,18 @@ message ProductPrice {
   // not the contract's until the contract says so.
   string amount = 3;
 
-  // Echoed back rather than assumed from the request, so a reply is
-  // self-describing in a log or a cache entry.
+  // This amount's own label, so a reply is self-describing in a log or a cache
+  // entry rather than meaningful only beside the request that produced it.
+  //
+  // COMPARE it case-insensitively; do not assume the spelling you sent. It
+  // names the same currency the request asked for and may differ from it in
+  // case, because a producer is free to normalise — Catalog stores one
+  // canonical spelling per product and projects that, so "gbp" is answered
+  // "GBP". The earlier wording here was "echoed back rather than assumed from
+  // the request", which was about the field being PRESENT and read as though
+  // the value were a copy of the request: a consumer built on that reading
+  // compares ordinally and breaks on the first customer who types a lower-case
+  // currency. PR-26 found exactly that, in a stub rather than in production,
+  // and this comment is where the ambiguity was.
   string currency = 4;
 }
