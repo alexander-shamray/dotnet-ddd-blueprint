@@ -64,6 +64,18 @@ jobs:
         working-directory: .github/pipeline-gate
         run: python -m unittest
 
+      # The coverage reporter's suite runs HERE rather than beside the
+      # reporter, and the reason is the one licence-gate and canary already
+      # follow: test the tool, then run it. It gained a suite because a wrong
+      # merge is silent — a colliding key or a `max` that should have been a
+      # sum prints a plausible figure and nothing goes red — so running the
+      # reporter without its suite is the one arrangement that defeats the
+      # argument for having written it. Stdlib, no restore, so it belongs in
+      # the fast job rather than behind the build.
+      - name: Test the coverage reporter
+        working-directory: .github/coverage
+        run: python -m unittest
+
       - name: Every deployable is matched by a path filter
         run: python .github/pipeline-gate/pipeline_gate.py filters
 
@@ -152,9 +164,20 @@ jobs:
               - 'src/Gateway/**'
             # The BFF is a deployable too, with its own image, chart and the
             # platform's only client secret.
+            #
+            # AND CATALOG'S PROTO, which is the one place in this list where a
+            # service's filter reaches into another service's tree. Web.Bff
+            # compiles `pricing.proto` as a LINKED source file (§9.7) and its
+            # Dockerfile copies that path, so a proto-only change alters what
+            # the BFF ships while matching only `catalog`. §15.1's own rule is
+            # that if changing a file can change what a service ships, it
+            # belongs in that service's filter — and `pipeline-gate filters`
+            # structurally cannot see this, because it asks whether a
+            # deployable is reachable rather than whether a filter is complete.
             bff:
               - *shared
               - 'src/BFF/**'
+              - 'src/Services/Catalog/Catalog.Api/Protos/**'
             # A chart or values change produces no new image and must still
             # reach the cluster (§15.1's "a config-only deploy needs a tag it
             # did not build").

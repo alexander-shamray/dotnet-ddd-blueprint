@@ -636,6 +636,13 @@ def main(argv: list[str]) -> int:
 
     sub.add_parser("steps", help="how many rungs the ladder has")
 
+    # Separate from `plan` on purpose: the chart a workload deploys is a fact
+    # about the plan, and `plan` REFUSES when the step's weight is not
+    # expressible at the current replica count. Asking it for a chart would
+    # make resolving the chart depend on the arithmetic succeeding.
+    chart = sub.add_parser("chart", help="the chart directory a workload deploys")
+    chart.add_argument("--workload", required=True)
+
     planner = sub.add_parser("plan", help="canary replicas for one step")
     planner.add_argument("--workload", required=True)
     planner.add_argument("--stable", type=int, required=True)
@@ -665,6 +672,14 @@ def main(argv: list[str]) -> int:
 
     if args.command == "steps":
         print(len(document["steps"]))
+        return 0
+
+    if args.command == "chart":
+        workloads = entries(document["workloads"])
+        if args.workload not in workloads:
+            print(f"canary: no workload {args.workload!r} in the plan", file=sys.stderr)
+            return 1
+        print(workloads[args.workload]["chart"])
         return 0
 
     if args.command == "required":

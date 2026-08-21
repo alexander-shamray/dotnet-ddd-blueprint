@@ -108,10 +108,10 @@ jobs:
           # the requested weight the served weight, and it is deliberate rather
           # than implicit -- `canary.py plan` refuses instead of rounding.
           #
-          # §15.3's autoscaling.maxReplicas is 20, which is exactly this 19
-          # plus one canary. The two numbers were chosen independently and the
-          # fit is worth knowing: at the chart's ceiling, 5% is the finest
-          # weight the platform can express at all.
+          # §15.3's autoscaling.maxReplicas is 20 on the three service charts,
+          # exactly this 19 plus one canary — chosen independently, and worth
+          # knowing. It is NOT platform-wide: the gateway's is 30, so there the
+          # 19 is what the weight costs rather than all the chart allows.
           #
           # **THE HPA'S FLOOR MOVES FIRST, and a `kubectl scale` alone would
           # not have held.** These charts enable an autoscaler on the stable
@@ -147,6 +147,15 @@ jobs:
           STEPS=$(python deploy/canary/canary.py steps)
           STABLE=$(kubectl get deployment "$WORKLOAD" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
 
+          # `deploy/helm/*/charts/` is gitignored, and every service chart
+          # depends on `file://../common`. Without this, the install below is
+          # `found in Chart.yaml, but missing in charts/ directory:
+          # commerce-common` and the canary never reaches a pod. `smoke.sh`
+          # re-resolves on every run and the README's first setup command is
+          # this one; the workflow was the copy that did not.
+          CHART_DIR="deploy/helm/$(python deploy/canary/canary.py chart --workload "$WORKLOAD")"
+          helm dependency update "$CHART_DIR"
+
           for STEP in $(seq 0 $((STEPS - 1))); do
             # `plan` prints CANARY_* assignments rather than JSON so this stays
             # a shell script instead of five inline `python -c` invocations,
@@ -181,6 +190,20 @@ jobs:
             # ratio, so a canary that scales itself is a canary whose blast
             # radius nobody chose.
             helm get values "$WORKLOAD" -n "$NAMESPACE" -o yaml > stable-values.yaml
+            # `--timeout 20m` because §15.1's callout, deploy/helm/README.md
+            # and docs/runbooks/migration-failure.md all state the same rule:
+            # Helm blocks on a hook whatever `--wait` says, its default is five
+            # minutes, and MigrationJobFailed needs sixteen — so 20m > 16m is
+            # the constraint. ADR-022 makes the CANARY release the one that
+            # runs §7.4's hook, which is precisely why this command is the one
+            # that must not inherit the default.
+            #
+            # `--set autoscaling.enabled=false` is NOT belt and braces: see
+            # _autoscaling.tpl. The values inherited from the stable release
+            # have the HPA on, and `_deployment.tpl` omits `replicas` whenever
+            # it is — so without this flag the canary Deployment carries no
+            # replica count and the API server defaults it to one, making
+            # every rung of the ladder a single pod.
             helm upgrade --install "$WORKLOAD-canary" "deploy/helm/$CANARY_CHART" \
               -n "$NAMESPACE" \
               -f stable-values.yaml \
@@ -188,12 +211,20 @@ jobs:
               --set replicaCount="$CANARY_CANARY_REPLICAS" \
               --set autoscaling.enabled=false \
               --set image.tag="$TAG" \
-              --wait
+              --wait --timeout 20m
 
             if [ "$CANARY_FINAL" = "True" ]; then
               echo "The canary is the release; promoting the tag onto the stable release."
-              helm upgrade "$WORKLOAD" -n "$NAMESPACE" \
-                --reuse-values --set image.tag="$TAG" --wait
+              # THE CHART ARGUMENT IS REQUIRED. `helm upgrade` is
+              # `[RELEASE] [CHART]`, and `--reuse-values` reuses the values,
+              # not the chart — without it this is
+              # `Error: "helm upgrade" requires 2 arguments`, at cutover, with
+              # the canary still serving. The ladder climbs fine and then
+              # cannot finish, which is the worst place in this file to fail.
+              helm upgrade "$WORKLOAD" "deploy/helm/$CANARY_CHART" \
+                -n "$NAMESPACE" \
+                --reuse-values --set image.tag="$TAG" \
+                --wait --timeout 20m
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
               break
             fi

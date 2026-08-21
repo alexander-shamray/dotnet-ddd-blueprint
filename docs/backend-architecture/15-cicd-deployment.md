@@ -331,9 +331,10 @@ WORKDIR /src
 # project's own obj/project.assets.json; a csproj absent when it runs is
 # simply not restored, and the --no-restore publish below then fails with
 # NETSDK1004 naming a project this file never mentions. So a new
-# ProjectReference anywhere in the chain is a line here too, and no CI job
-# says so — the compose smoke that builds these images is path-filtered on
-# deploy/compose/**, and a reference lands under src/.
+# ProjectReference anywhere in the chain is a line here too, and §15.1's
+# `images` job is what says so — it builds one image per changed service, so
+# a missing line fails on the pull request that added the reference rather
+# than on the next compose one.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
 COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/
@@ -1143,8 +1144,11 @@ naming the stable replica count that would satisfy the step. At §15.3's
 is unreachable until the stable track is scaled to **19** — which the rollout
 does, deliberately and before anything rolls, rather than quietly serving five
 times the blast radius under a label that says 5%. `autoscaling.maxReplicas` is
-20, so 19 plus one canary is exactly the chart's ceiling; the smallest
-configuration in which 5% is expressible is the largest one the chart allows.
+20 on the three service charts, so on those 19 plus one canary is exactly the
+ceiling. **The gateway's is 30** — every external request passes through it —
+so there 19 is simply what 5% needs rather than all the chart allows, and its
+autoscaler can still climb past the canary's stable count during a dwell. The
+19 is a property of the weight, not of every HPA.
 
 **The two tracks are told apart by `deployment.track`**, a resource attribute
 the chart supplies through `OTEL_RESOURCE_ATTRIBUTES` (§15.4).

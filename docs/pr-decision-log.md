@@ -118,7 +118,8 @@ one pod overshoots, naming the 19 stable replicas that would satisfy the step.
 **The alternative was one line and is the whole failure mode**: round to the
 nearest expressible weight, and a step labelled 5% serves five times the blast
 radius anybody authorised, in a rollout whose logs say 5%.
-`autoscaling.maxReplicas` is 20, which is exactly 19 plus one canary — the
+`autoscaling.maxReplicas` is 20 on the three service charts, exactly 19
+plus one canary — the
 smallest configuration in which the first rung is real is the largest the chart
 allows, and neither number was chosen with the other in mind.
 

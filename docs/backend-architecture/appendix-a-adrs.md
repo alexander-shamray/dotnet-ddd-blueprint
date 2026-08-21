@@ -536,9 +536,15 @@ What it costs is the 5% rung. With [§15.3](15-cicd-deployment.md)'s
 `replicaCount: 3`, one canary pod already serves 25% — five times what §15.5's
 first step asks for — so 5% requires **19 stable replicas**, and the rollout
 scales up to that before anything rolls. The chart's own
-`autoscaling.maxReplicas` is 20, which is exactly 19 plus one canary: the
-smallest configuration in which 5% is expressible is the largest one the chart
-allows, and neither number was chosen with the other in mind.
+`autoscaling.maxReplicas` is 20 on the three service charts, which is exactly
+19 plus one canary — on those, the smallest configuration in which 5% is
+expressible is the largest the chart allows, and neither number was chosen with
+the other in mind. **It is not a platform-wide coincidence**: the gateway's
+ceiling is 30, because every external request passes through it, so there the
+19 is what the weight costs and nothing more. The rollout's scale-up fits under
+either, and the gateway's autoscaler can still climb above the count the step
+was planned against — which is a residual of raising a floor rather than
+pinning a replica count.
 
 **Consequences.** The Deployment's `matchLabels` gains
 `app.kubernetes.io/track`, and **that field is immutable** — so this is a

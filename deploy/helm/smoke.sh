@@ -1013,6 +1013,17 @@ for chart in $SERVICE_CHARTS; do
     check "$chart: the canary Deployment is named $name-canary" \
         grep -q "^  name: $name-canary\$" "$OUT/$chart-canary.yaml"
 
+    # THE REPLICA COUNT HAS TO REACH THE SPEC, and nothing else here would
+    # notice if it did not. `_deployment.tpl` omits `replicas` whenever
+    # `autoscaling.enabled` is true, so a canary installed from the stable
+    # release's values without `--set autoscaling.enabled=false` renders no
+    # replica count and the API server defaults it to one — every rung of the
+    # ladder a single pod, reported as the weight `plan` computed. The render
+    # above passes the flag exactly as the rollout does; this asserts the flag
+    # is what it is passed for.
+    check "$chart: the canary Deployment carries a replica count" \
+        grep -q '^  replicas: ' "$OUT/$chart-canary.yaml"
+
     # The ConfigMap too — same rule, and the mount has to follow the rename or
     # the pod sits in CreateContainerConfigError. Asserted as agreement between
     # the two halves rather than against a literal, which is the shape PR-23

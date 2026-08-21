@@ -1,9 +1,22 @@
 {{- /*
 Not on the canary release, and for a reason beyond the shared object name: the
 served weight IS the replica ratio, so an autoscaler on either track moves the
-blast radius underneath the analysis that is judging it. The rollout sets
-`autoscaling.enabled=false` on the canary explicitly as well — belt and braces,
-because a canary that scaled itself would be a step whose weight nobody chose.
+blast radius underneath the analysis that is judging it.
+
+**The rollout ALSO passes `--set autoscaling.enabled=false`, and that flag is
+load-bearing rather than belt and braces** — this comment said the second and
+taught the opposite of what the flag does. Suppressing the HPA object is only
+half of what `autoscaling.enabled` controls: `_deployment.tpl` omits
+`replicas` entirely whenever it is true, deliberately, so the autoscaler owns
+the field. The canary installs with `-f` from the STABLE release's values,
+where the HPA is on — so without the flag the canary Deployment carries no
+replica count at all and the API server defaults it to **one**. Every rung of
+the ladder would then be a single pod, and `--set replicaCount=6` at 50% would
+be a no-op that reports success.
+
+`smoke.sh` asserts the rendered canary carries `replicas:` for that reason;
+removing the flag "because the template already suppresses the HPA" is the
+change that assertion exists to stop.
 */}}
 {{- define "commerce.hpa" -}}
 {{- if and .Values.autoscaling.enabled (not .Values.canary.enabled) -}}

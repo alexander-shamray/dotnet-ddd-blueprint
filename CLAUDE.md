@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..021),
+                             15-cicd-deployment, appendix A (ADR-001..022),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -734,8 +734,10 @@ A newer one is the hazard, not an older one — it accepts APIs 3.12 does not, s
 the local suite goes green on code the runner cannot execute.
 `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly that way. The
 scaffold *script* is a different matter: running it is not a test of the floor,
-so plain `python` is fine there. 3.12 is installed here, so both Python suites
-— `tools/new-service` and `.github/licence-gate` — can be run against it.
+so plain `python` is fine there. 3.12 is installed here, so **every** Python
+suite can be run against it — the set is the one *The commands* lists, plus
+`.github/licence-gate`, and it is not enumerated a second time here for the
+reason that sentence gives.
 
 **`dotnet test` requires Docker from PR-08**, and the container tests are still
 never *skipped* when it is absent: a skip on a missing daemon **fails open**, so
@@ -770,8 +772,10 @@ propagation was measured before the design was trusted.
 with its own collection and therefore its own container set (§12.4's stated
 price). The last is the odd one: most of its tests need no container, one class
 needs a Keycloak, so the suite is fast and then pays for an identity provider
-once — 59 tests of 63 on the fast side, which is the clearest case in the repo
-for categorising a collection rather than a project.
+once — 62 tests of 66 on the fast side, which is the clearest case in the repo
+for categorising a collection rather than a project. (Measured from the stage
+TRX, not counted by eye: `docs/testing.md` had it right and this line was three
+short on both halves of the same split.)
 `Ordering.Application.Tests` is deliberately not among them — its handler
 tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
 `HttpContextCurrentUser` and a handler resolved in a bare scope has no

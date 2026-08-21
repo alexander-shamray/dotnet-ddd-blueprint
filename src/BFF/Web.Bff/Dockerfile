@@ -13,9 +13,15 @@ WORKDIR /src
 # fails four steps later rather than here.** dotnet restore writes each
 # project's own obj/project.assets.json; a csproj absent when it runs is not
 # restored, and the --no-restore publish then fails with NETSDK1004 naming a
-# project this file never mentions. Nothing in CI catches it: the compose smoke
-# is the only job that builds these images and it is path-filtered on
-# deploy/compose/**, while a new ProjectReference lands under src/.
+# project this file never mentions. **CI catches it since PR-25**: ci.yml's
+# `images` job builds one image per changed service, so a missing line here
+# fails `docker build` on the pull request that added the reference. It used to
+# surface only on the next compose pull request, that smoke being path-filtered
+# on deploy/compose/** while a reference lands under src/.
+#
+# What that job does NOT close is a filter that never fires. The `bff` filter
+# has to name every path this image copies — including Catalog's proto, which
+# is why it reaches into another service's tree (§15.1).
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/BuildingBlocks/Common.Domain/Common.Domain.csproj src/BuildingBlocks/Common.Domain/
 COPY src/BuildingBlocks/Common.Application/Common.Application.csproj src/BuildingBlocks/Common.Application/
