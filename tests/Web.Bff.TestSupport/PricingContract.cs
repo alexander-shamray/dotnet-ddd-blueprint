@@ -221,9 +221,19 @@ public static class PricingContract
     }
 
     /// <summary>
-    /// The request this interaction makes, built once so that the stub and the
-    /// real provider are asked the identical question.
+    /// This interaction as a <c>GetPricesRequest</c> — the <b>provider</b>
+    /// suite's message, and only its.
     /// </summary>
+    /// <remarks>
+    /// <b>What both sides share is <see cref="RequestedIds"/>, not this.</b> The
+    /// question — which products, in which currency — is built once and asked of
+    /// the stub and the real service alike. The gRPC message is not: the
+    /// consumer suite hands the same ids to the screen as a query string and
+    /// lets <c>CheckoutEndpoints</c> construct its own, because its whole job is
+    /// to establish that the request the ENDPOINT builds is the one this
+    /// contract describes. Building it here for that side too would verify the
+    /// contract against itself.
+    /// </remarks>
     public static GetPricesRequest Request(
         PricingInteraction interaction,
         IReadOnlyDictionary<string, Guid> published)

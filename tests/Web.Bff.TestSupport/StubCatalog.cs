@@ -251,10 +251,20 @@ public sealed class StubCatalog : IAsyncLifetime
             if (stub.FailNextWith.TryDequeue(out StatusCode failure))
                 throw new RpcException(new Status(failure, "stubbed failure"));
 
-            // Everything below this line is Catalog's OWN behaviour rather than
-            // a test artifice, and PricingContract is what says so: a divergence
-            // here is a suite proving the BFF works against a Catalog that does
-            // not exist.
+            // The DEFAULTS below this line are Catalog's own behaviour, and
+            // PricingContract is what says so: a divergence in one of them is a
+            // suite proving the BFF works against a Catalog that does not exist.
+            // The ceiling, the case-insensitive currency filter, the "F4" scale
+            // and the stored spelling are all in that group.
+            //
+            // They are not the only thing below it. RawAmount, RawCurrency,
+            // AlsoAnswerWith and DuplicateEveryPrice each OVERRIDE one of those
+            // defaults with a reply the contract forbids, which is what
+            // QuoteEndpointTests drives the endpoint's refusals with. Each says
+            // so on its own property. So the line separates a default from a
+            // fault, not a region of this method from another — and every one of
+            // the overrides is opt-in, so a test that sets none of them gets the
+            // faithful model.
 
             // GetPricesValidator's ceiling, which the stub did not have until
             // the contract named it. CheckoutEndpoints deliberately holds no
