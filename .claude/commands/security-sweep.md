@@ -1,7 +1,7 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*), Bash(cygpath:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -27,18 +27,16 @@ and `mktemp -d` is the same choice `grok-review.sh` already makes for this
 reason:
 
 Each capturing line leads with the verb its grant names — `Bash(mktemp:*)`,
-`Bash(cygpath:*)` and `Bash(git rev-parse:*)` prefix-match the command string,
-and a `work=$(cygpath …)` assignment starts with `work=`, not `cygpath`. Capture
-each output into the named variable, the same discipline the File step uses for
-`--body-file`:
+`Bash(git rev-parse:*)` and `Bash(git worktree list:*)` prefix-match the command
+string, and a `work=$(git worktree list …)` assignment starts with `work=`, not
+`git`. Capture each output into the named variable, the same discipline the File
+step uses for `--body-file`:
 
 ```bash
 mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $posix
-cygpath -m "<the path just printed>"                 # host-native — capture it as $work
-                                                     # …unless cygpath is absent: skip this ONE line
-                                                     # and $work is $posix. Never leave it unset.
 git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
 bash .claude/scripts/git-worktree-detach.sh "$posix" "$pinned"   # pin that exact commit, never HEAD re-resolved
+git worktree list                                    # the new row's path IS $work — host-native, from git
 ```
 
 **`$work` is the host-native spelling and `$posix` is the shell's — two strings
@@ -46,21 +44,33 @@ for one directory, and on some hosts two directories.** Under MSYS or Git Bash
 `mktemp` prints a POSIX path, while the built-in readers and every subagent
 resolve host-native ones; `/tmp` can be one directory for the shell and quite
 another for them, which is not a rounding error but a different tree with
-different contents. So both worktree helpers take `$posix` — they are shell
-scripts, so git receives the argument through MSYS conversion and the shape
-check each makes against `secsweep-` plus six characters is performed on the
-spelling it was written for — while every `Read`, `Grep`, `Glob` and Agent
-prompt below takes `$work`. The two variables are not interchangeable in either
-direction, and the split runs the whole length of the command: shell in one
-column, readers in the other. **Where `cygpath` does not exist the second line
-is skipped rather than run and failed**, and `$work` is `$posix` unchanged — the
-branch `grok-review.sh`'s `host_path()` spells with `command -v`. That verb is
-not in the grant, and a `work=$(cygpath …)` assignment would not lead with the
-verb its grant names, so the branch lives in the block above as a line the
-procedure says to skip rather than as a conditional it cannot express. It is the
-one line there that *Never fail open* does not govern, because a line
-deliberately skipped did not fail — and stating that is what keeps a
-container-layout run from having two instructions it cannot both obey.
+different contents. So the helper takes `$posix` — it is a shell script, so git
+receives the argument through MSYS conversion and its `secsweep-` shape check
+runs on the spelling it was written for — while every `Read`, `Grep`, `Glob`
+and Agent prompt below takes `$work`.
+
+**`$work` comes from `git worktree list`, and that is the whole translation
+step.** Git prints its own worktrees in the host's native spelling with forward
+slashes — `D:/tmp/alexa/secsweep-nlPuf1` for a root the shell called
+`/tmp/secsweep-nlPuf1`, measured on this repository rather than assumed — and
+the readers resolve that. The row to read is the one whose path ends in the
+`secsweep-` basename `mktemp` just printed; it is also the only detached row,
+which is the cross-check when a previous sweep left one behind.
+
+**No `cygpath`, deliberately, and the reason is this repository's most-repeated
+grant lesson.** `cygpath -m` is the obvious translation and it was the first
+version of this fix. But a permission rule is a prefix match, so
+`Bash(cygpath:*)` also buys `cygpath -f <file>`, which reads pathnames from an
+arbitrary file and prints them — `printf 'hunter2' > f; cygpath -f f` prints
+`hunter2`, measured, not reasoned. That is a **shell reader**, and it lands in
+a command whose own binding rule says shell readers were deliberately excluded
+because none of them can be pointed at `$work` under the grant. The grant would
+have contradicted the paragraph three below it.
+
+`git worktree list` is already in the grant, reads nothing but git's own
+metadata, and takes no argument at all — so there is no flag for a prefix rule
+to fail to exclude. It also removes a conditional: there is no host where this
+line is skipped, because git always knows how to spell its own worktree.
 
 **`$work` is never unset, and that is the half with teeth.** Left unset, the
 readable-root proof below degrades from `$work/Platform.slnx` to a
@@ -68,9 +78,7 @@ workspace-relative `Platform.slnx` — which this repository has at its root —
 the check passes against the caller's tree and reports a snapshot it never
 opened. That is the precise fail-open the named-file assertion exists to close,
 reintroduced by an unbound variable, so the proof takes an **absolute** path or
-it is not the proof. `-m` rather than `-w` deliberately: it yields forward
-slashes, which the readers accept and which survive interpolation into a prompt,
-where a backslash spelling does not.
+it is not the proof.
 
 **Pin the resolved commit, not `HEAD` a second time.** Reading `HEAD` once for a
 summary and again for `git worktree add` are two calls, and in a repo worked by

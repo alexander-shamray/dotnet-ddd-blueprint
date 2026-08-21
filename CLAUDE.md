@@ -584,13 +584,16 @@ own line rather than sending a reader to a file that does not hold it.
   resolve.** Under MSYS the two halves of this session disagree: `mktemp -d`
   prints a POSIX path, `Read`/`Grep`/`Glob` and every subagent resolve
   host-native ones, and on this host `/tmp` is `D:\tmp\alexa` for the shell and
-  `C:\tmp` for the readers — different directories, both populated. Translate
-  with `cygpath -m` at the point of capture and keep the two spellings in named
-  variables — and write the no-`cygpath` host into the procedure as a **skipped
-  line**, never as prose beside an unconditional one, or a container layout gets
-  two instructions it cannot both obey and the unbound variable turns the next
-  absolute path into a relative one. The failure is silent in the direction
-  that matters: a
+  `C:\tmp` for the readers — different directories, both populated. Ask a
+  tool that already knows the host spelling rather than converting one:
+  `git worktree list` prints `D:/tmp/alexa/secsweep-nlPuf1` for a root the shell
+  called `/tmp/secsweep-nlPuf1`, needs no argument, and is usually already
+  granted. `cygpath -m` is the obvious answer and the wrong one — a prefix grant
+  of it also buys `cygpath -f <file>`, which prints an arbitrary file, so the
+  translation smuggles in a shell reader. Keep both spellings in named variables
+  and never leave the reader-side one unset: unbound, it turns the next absolute
+  path into a workspace-relative one, which is how a check passes against the
+  caller. The failure is silent in the direction that matters: a
   `Glob` **pattern** under an unresolvable root returns `No files found`, which
   is exactly what a clean scope returns. Only the `path=` form errors. The
   divergence was already diagnosed twice in-tree for *subprocesses*
