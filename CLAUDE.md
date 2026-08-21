@@ -586,10 +586,13 @@ own line rather than sending a reader to a file that does not hold it.
   host-native ones, and on this host `/tmp` is `D:\tmp\alexa` for the shell and
   `C:\tmp` for the readers — different directories, both populated. Ask a
   tool that already knows the host spelling rather than converting one:
-  `git worktree list` prints `D:/tmp/alexa/secsweep-nlPuf1` for a root the shell
-  called `/tmp/secsweep-nlPuf1`, needs no argument, and is usually already
-  granted. `cygpath -m` is the obvious answer and the wrong one — a prefix grant
-  of it also buys `cygpath -f <file>`, which prints an arbitrary file, so the
+  `git worktree list --porcelain` prints `D:/tmp/alexa/secsweep-nlPuf1` for a
+  root the shell called `/tmp/secsweep-nlPuf1`, is usually already granted, and
+  has no flag that takes a path. Take `--porcelain` and not the default: the
+  aligned form repads every row when a longer path joins, so a set difference
+  over it reports them all as new. `cygpath -m` is the obvious answer and the
+  wrong one — a prefix grant of it also buys `cygpath -f <file>`, which prints
+  an arbitrary file, so the
   translation smuggles in a shell reader. Keep both spellings in named variables
   and never leave the reader-side one unset: unbound, it turns the next absolute
   path into a workspace-relative one, which is how a check passes against the

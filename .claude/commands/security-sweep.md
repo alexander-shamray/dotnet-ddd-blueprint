@@ -35,9 +35,9 @@ step uses for `--body-file`:
 ```bash
 mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir — capture it as $posix
 git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
-git worktree list                                    # BEFORE — capture the paths as $before
+git worktree list --porcelain                        # BEFORE — capture the worktree records as $before
 bash .claude/scripts/git-worktree-detach.sh "$posix" "$pinned"   # pin that exact commit, never HEAD re-resolved
-git worktree list                                    # AFTER — the row absent from $before IS $work
+git worktree list --porcelain                        # AFTER — the `worktree ` line absent from $before IS $work
 ```
 
 **`$work` is the host-native spelling and `$posix` is the shell's — two strings
@@ -54,10 +54,22 @@ and Agent prompt below takes `$work`.
 step.** Git prints its own worktrees in the host's native spelling with forward
 slashes — `D:/tmp/alexa/secsweep-nlPuf1` for a root the shell called
 `/tmp/secsweep-nlPuf1`, measured on this repository rather than assumed — and
-the readers resolve that. **The row to read is the one that was not there a
+the readers resolve that. **The record to read is the one that was not there a
 moment ago** — hence two listings, and the difference between them. Then check
 that its path ends in the `secsweep-` basename `mktemp` just printed, which
 turns a single selector into an agreement between two.
+
+**`--porcelain`, and it is the difference between a set and a table.** The
+default output is column-aligned for a human, so adding a longer path *repads
+every existing row* — this repository produced exactly that while the fix was
+being written, `C:/dev/ashamray             611d97e` becoming
+`C:/dev/ashamray               611d97e` when a `D:/tmp/...` row arrived. A
+textual difference over those lines reports **every** row as new, so the
+selector that was supposed to yield one answer yields all of them. Porcelain
+emits one `worktree <path>` record per line with no padding and no alignment,
+which is a set the difference can actually be taken over. It also settles paths
+containing spaces, where the aligned first column is ambiguous and the record
+form is not.
 
 **Neither half is sufficient alone, and both weaker versions were written
 before this one.** Detachment is not a cross-check: a worktree an earlier sweep
@@ -85,10 +97,14 @@ a command whose own binding rule says shell readers were deliberately excluded
 because none of them can be pointed at `$work` under the grant. The grant would
 have contradicted the paragraph three below it.
 
-`git worktree list` is already in the grant, reads nothing but git's own
-metadata, and takes no argument at all — so there is no flag for a prefix rule
-to fail to exclude. It also removes a conditional: there is no host where this
-line is skipped, because git always knows how to spell its own worktree.
+`git worktree list` is already in the grant and reads nothing but git's own
+metadata. Its **entire** flag surface is `--porcelain`, `-v`, `-z` and
+`--expire <date>` — output formatting and one annotation filter, checked with
+`git worktree list -h` rather than assumed. Not one of them takes a path or
+opens a file, so the prefix grant `Bash(git worktree list:*)` buys no reader,
+which is the property `cygpath` could not offer. It also removes a conditional:
+there is no host where this line is skipped, because git always knows how to
+spell its own worktree.
 
 **`$work` is never unset, and that is the half with teeth.** Left unset, the
 readable-root proof below degrades from `$work/Platform.slnx` to a
