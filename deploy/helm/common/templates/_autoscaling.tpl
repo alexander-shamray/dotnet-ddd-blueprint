@@ -56,6 +56,14 @@ selector is `commerce.selectorLabels`, which matches both tracks — so the one
 the stable release owns already protects the canary's pods, and that is
 correct: they serve the same Service and a drain that took them all is the same
 outage either way.
+
+**What it does NOT protect is the canary's weight**, and that is worth saying
+where the selector is. Matching both tracks means it constrains the TOTAL, so
+during §15.5's ladder a voluntary disruption can evict stable pods and leave
+the canary serving more than its rung asked for — the ceiling `canary.py plan`
+enforces is an arithmetic one, not one Kubernetes maintains. ADR-022 records
+the residual, the reason a temporary stable-track budget is deferred, and why
+the verdict is unaffected: `analyse` reads what each track actually did.
 */}}
 {{- define "commerce.pdb" -}}
 {{- if and .Values.podDisruptionBudget.enabled (not .Values.canary.enabled) -}}

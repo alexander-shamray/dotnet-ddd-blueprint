@@ -60,6 +60,14 @@ every chart and asserts what comes out.
   in one surfaces as a failed query at the end of a ten-minute dwell — which
   the verdict reads as an absent series and therefore as a rollback, so it
   fails safe and slowly rather than unsafely.
+- **It does not hold the weight against a voluntary disruption.** The
+  PodDisruptionBudget belongs to the stable release and its selector matches
+  both tracks, so it constrains the total rather than the stable count: a node
+  drain during a dwell can evict stable pods and leave the canary serving more
+  than the rung asked for. The verdict is still measured rather than assumed —
+  `analyse` reads both tracks' real numbers — so the cost is exposure for one
+  dwell, not a wrong decision. ADR-022 records why the temporary stable-track
+  budget that would fix it is deferred.
 - **It does not establish that a replica ratio is a traffic ratio.** kube-proxy
   spreads *connections*, not requests. Keep-alive, HTTP/2 multiplexing to the
   gRPC listener, or a client that opens one connection and holds it will all

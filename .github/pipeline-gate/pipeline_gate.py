@@ -297,14 +297,14 @@ def check_images(root: Path = ROOT) -> list[str]:
             "selected and not on the change that renamed it"
         )
 
-    # And the filter each entry reads back has to be one that exists.
-    defined = set(re.findall(r"^\s{12}([a-z][a-z0-9-]*):\s*$", text, re.MULTILINE))
-    if not defined:
+    # And the filter each entry reads back has to be one that exists...
+    by_filter = read_filters_by_name(text)
+    if not by_filter:
         problems.append(
-            "found no filter names in the paths-filter block: the check below "
-            "would pass vacuously"
+            "found no filter names in the paths-filter block: the two checks "
+            "below would pass vacuously"
         )
-    for name in sorted({filter_name for filter_name, _ in matrix} - defined):
+    for name in sorted({filter_name for filter_name, _ in matrix} - set(by_filter)):
         problems.append(
             f"ci.yml's images matrix reads the filter {name!r}, which the "
             "paths-filter step does not define. A GitHub expression indexing a "
@@ -312,7 +312,71 @@ def check_images(root: Path = ROOT) -> list[str]:
             "always false and the job reports success having built nothing"
         )
 
+    # ...and it has to be the RIGHT one, which the check above cannot see.
+    #
+    # Pairing `src/Gateway/Gateway.Api/Dockerfile` with `filter: catalog` names
+    # a filter that exists, builds a Dockerfile that exists, and passes both
+    # directions of the inventory — while a gateway-only change builds no
+    # gateway image and a Catalog change builds one nobody asked for. The
+    # entry is well-formed and wired to the wrong thing, which is the failure
+    # neither an existence check nor a name check can reach.
+    for filter_name, dockerfile in sorted(matrix):
+        patterns = by_filter.get(filter_name)
+        if patterns is None:
+            continue
+        if not any(_matches(pattern, dockerfile) for pattern in patterns):
+            problems.append(
+                f"ci.yml's images matrix builds {dockerfile} under the filter "
+                f"{filter_name!r}, whose patterns do not match that path. The "
+                "entry is well-formed and wired to the wrong service: a change "
+                "to it rebuilds the wrong image, and the right one is never "
+                "built at all"
+            )
+
     return problems
+
+
+def read_filters_by_name(workflow_text: str) -> dict[str, list[str]]:
+    """The paths-filter block as {filter: [its own patterns]}.
+
+    `read_filters` flattens, which is all the `filters` check needs — it asks
+    whether a directory is reachable by ANY filter. Pairing needs to know
+    which, so this keeps them apart. A `*shared` alias line carries no quoted
+    pattern and is skipped, and that costs nothing here: every Dockerfile lives
+    under its own service's tree, never under `shared`.
+    """
+    lines = workflow_text.splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)filters:\s*\|", line)
+        if match:
+            break
+    else:
+        return {}
+
+    indent = len(match.group(1))
+    found: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in lines[index + 1:]:
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent and not line.lstrip().startswith("#"):
+            break
+        if header := re.match(r"^\s+([a-z][a-z0-9-]*):\s*(?:&\w+)?\s*$", line):
+            current = header.group(1)
+            found.setdefault(current, [])
+        elif pattern := re.match(r"\s*-\s*'([^']+)'", line):
+            if current:
+                found[current].append(pattern.group(1))
+    return found
+
+
+def _matches(pattern: str, path: str) -> bool:
+    """Whether one filter pattern selects a concrete file path."""
+    if pattern.startswith("!"):
+        return False
+    if pattern.endswith("/**"):
+        return path.startswith(pattern[:-2])
+    return pattern == path
 
 
 # --------------------------------------------------------------------------

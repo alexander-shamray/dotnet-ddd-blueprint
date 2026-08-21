@@ -582,6 +582,29 @@ migrated. That is exactly the case §15.5 calls unrecoverable if the migration
 was not backward compatible, and the cheap rollback this decision buys is worth
 nothing against an incompatible one.
 
+**The weight is a ceiling under ordinary operation, and a voluntary disruption
+can exceed it.** The PodDisruptionBudget is the stable release's and its
+selector matches both tracks, which is right — the pods serve one Service — but
+it constrains the *total*. At the 5% rung that is 19 stable and one canary
+against a `minAvailable` well below twenty, so a node drain during a dwell can
+evict stable pods and leave the canary serving far more than the rung asked
+for.
+
+Two things bound what that costs, and neither makes it disappear. **The verdict
+is measured rather than assumed**: `analyse` reads both tracks' real error rate
+and p99, so an exceeded weight means more exposure for one dwell, not a wrong
+decision about the release. And the disruption is voluntary, so it is somebody
+draining a node rather than something the rollout does.
+
+The fix — a temporary stable-track budget, created for the ladder and removed
+with the rest — is **deliberately not taken here**, and the reason is the shape
+of this workflow rather than the size of the change. It is a fourth object for
+a cleanup path that has already had three defects found in it, added to a
+rollout no one has run; guarding a voluntary-disruption edge by enlarging the
+surface that must be undone on every failure is the wrong trade until there is
+a cluster to observe either behaviour on. Recorded rather than fixed, on the
+terms this ADR already uses for the connection-spreading premise below.
+
 **Not verified against a cluster.** `deploy/canary/canary.py` has a suite and
 `deploy/helm/smoke.sh` renders the canary track and asserts what comes out, but
 both stop at the manifest. Whether kube-proxy's spread actually approximates

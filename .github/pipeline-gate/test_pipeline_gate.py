@@ -215,6 +215,36 @@ class ImageTests(Fixture):
         self.assertEqual(len(problems), 1)
         self.assertIn("'edge'", problems[0])
 
+    def test_a_dockerfile_paired_with_the_wrong_filter_is_caught(self) -> None:
+        """The failure neither direction of the inventory can reach.
+
+        Pairing the gateway's Dockerfile with `filter: catalog` names a filter
+        that exists and builds a Dockerfile that exists — both directions pass,
+        and the name check passes too, because the name is real. What is wrong
+        is the wiring: a gateway-only change then builds no gateway image, and
+        a Catalog change builds one nobody asked for. Well-formed and pointed
+        at the wrong service.
+        """
+        self.write(WORKFLOW.replace(
+            "          - filter: gateway\n            image: gateway",
+            "          - filter: catalog\n            image: gateway"))
+
+        problems = pipeline_gate.check_images(self.root)
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("wired to the wrong service", problems[0])
+
+    def test_the_filter_parser_keeps_them_apart(self) -> None:
+        """The subject of the check above. `read_filters` flattens, which is
+        right for asking whether a directory is reachable by ANY filter and
+        useless for asking which — a parser that returned one bag would make
+        every pairing look correct."""
+        by_name = pipeline_gate.read_filters_by_name(WORKFLOW)
+
+        self.assertEqual(sorted(by_name), ["catalog", "deploy", "gateway", "shared"])
+        self.assertIn("src/Gateway/**", by_name["gateway"])
+        self.assertNotIn("src/Gateway/**", by_name["catalog"])
+
     def test_an_unparsed_matrix_fails_rather_than_passing_empty(self) -> None:
         """The gate's own subject again, from the images side."""
         self.write(WORKFLOW.replace("dockerfile:", "file:"))
