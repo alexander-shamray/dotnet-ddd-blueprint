@@ -297,8 +297,17 @@ jobs:
             # It EXITS NON-ZERO when the requested weight is not expressible at
             # the current replica count, and `set -e` is what makes that a
             # stopped rollout rather than a stale plan reused.
-            eval "$(python deploy/canary/canary.py plan \
-              --workload "$WORKLOAD" --stable "$STABLE" --step "$STEP")"
+            # ASSIGN, THEN EVAL. `eval "$(cmd)"` swallows a failed cmd: the
+            # substitution yields an empty string, `eval ""` returns success,
+            # and `set -e` never fires — so `plan` REFUSING a weight it cannot
+            # express, which is the mechanism this whole rollout is built
+            # around, would have been silently ignored and the loop would have
+            # carried the previous rung's CANARY_* values into this one. A
+            # plain assignment propagates the substitution's status, so the
+            # refusal stops the rollout as it was always meant to.
+            PLAN=$(python deploy/canary/canary.py plan \
+              --workload "$WORKLOAD" --stable "$STABLE" --step "$STEP")
+            eval "$PLAN"
 
             # THE LAST RUNG IS HANDLED BEFORE THE CANARY IS TOUCHED, because
             # 100% is not a weight — `plan` says so in its own docstring and

@@ -312,6 +312,31 @@ def check_images(root: Path = ROOT) -> list[str]:
             "always false and the job reports success having built nothing"
         )
 
+    # ...and the `changes` job has to EXPORT it, which defining the filter does
+    # not do.
+    #
+    # `needs.changes.outputs.gateway` reads a job output, and a job output
+    # exists only because an `outputs:` entry maps it from the step. Delete
+    # that one line and the filter still exists, this gate still passes, and a
+    # gateway-only change makes the images job's own `if` false — every gateway
+    # build skipped, with the inventory intact and the name defined. The
+    # unconditional guard step inside the job catches this for a leg that runs;
+    # it cannot catch a job that never starts.
+    exported = read_job_outputs(text, "changes")
+    if not exported:
+        problems.append(
+            "found no outputs on the changes job: the check below would pass "
+            "vacuously"
+        )
+    for name in sorted({filter_name for filter_name, _ in matrix} - exported):
+        if name in by_filter:
+            problems.append(
+                f"ci.yml's changes job defines the filter {name!r} and does not "
+                "export it as a job output, so `needs.changes.outputs."
+                f"{name}` is empty. The images job's condition is then false "
+                "and every image under that filter is silently skipped"
+            )
+
     # ...and it has to be the RIGHT one, which the check above cannot see.
     #
     # Pairing `src/Gateway/Gateway.Api/Dockerfile` with `filter: catalog` names
@@ -334,6 +359,38 @@ def check_images(root: Path = ROOT) -> list[str]:
             )
 
     return problems
+
+
+def read_job_outputs(workflow_text: str, job: str) -> set[str]:
+    """The names one job exports under `outputs:`.
+
+    A filter and a job output are different things — the first is
+    `dorny/paths-filter`'s, the second is the workflow's — and only the second
+    is what `needs.<job>.outputs.<name>` reads. Text again, for the reason
+    every parser in this file is: no dependency, and the block is unambiguous
+    at its own indentation.
+    """
+    lines = workflow_text.splitlines()
+    for index, line in enumerate(lines):
+        if re.match(rf"^\s{{2}}{re.escape(job)}:\s*$", line):
+            break
+    else:
+        return set()
+
+    found: set[str] = set()
+    inside = False
+    for line in lines[index + 1:]:
+        if re.match(r"^\s{2}\S", line):          # the next job
+            break
+        if re.match(r"^\s{4}outputs:\s*$", line):
+            inside = True
+            continue
+        if inside:
+            if name := re.match(r"^\s{6}([a-z][a-z0-9-]*):\s*\S", line):
+                found.add(name.group(1))
+            elif line.strip() and not line.startswith(" " * 6):
+                inside = False
+    return found
 
 
 def read_filters_by_name(workflow_text: str) -> dict[str, list[str]]:

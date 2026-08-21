@@ -46,6 +46,10 @@ jobs:
               - 'deploy/**'
               - '!deploy/compose/**'
 
+    outputs:
+      catalog: ${{ steps.changes.outputs.catalog }}
+      gateway: ${{ steps.changes.outputs.gateway }}
+
   images:
     strategy:
       matrix:
@@ -233,6 +237,25 @@ class ImageTests(Fixture):
 
         self.assertEqual(len(problems), 1)
         self.assertIn("wired to the wrong service", problems[0])
+
+    def test_a_filter_the_changes_job_does_not_export_is_caught(self) -> None:
+        """Defining a filter and exporting it are two different things.
+
+        `needs.changes.outputs.gateway` reads a JOB output, which exists only
+        because an `outputs:` entry maps it from the step. Delete that one line
+        and the filter still exists, both inventory directions still pass, the
+        name check still passes — and a gateway-only change makes the images
+        job's own condition false, so every gateway build is skipped. The
+        unconditional guard step inside the job catches this for a leg that
+        runs; it cannot catch a job that never starts.
+        """
+        self.write(WORKFLOW.replace(
+            "      gateway: ${{ steps.changes.outputs.gateway }}\n", ""))
+
+        problems = pipeline_gate.check_images(self.root)
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("does not export it", problems[0])
 
     def test_the_filter_parser_keeps_them_apart(self) -> None:
         """The subject of the check above. `read_filters` flattens, which is

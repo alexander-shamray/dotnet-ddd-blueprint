@@ -217,12 +217,16 @@ awk '/^  pull_request:/ { p = 1 } p && /^      - / { print } /^  push:/ { p = 0 
 awk '/^  push:/ { p = 1 } p && /^      - / { print }' \
     "$ROOT/.github/workflows/helm.yml" >"$OUT/push-paths.txt"
 
-# THE WORKFLOW'S OWN PATH IS ON THIS LIST, and leaving it off made the check
-# unable to protect itself: with `.github/workflows/helm.yml` removed from both
-# trigger lists, a change to those very lists no longer runs the gate that
-# validates them. `deploy/observability/check.py` has required its own path
-# since it was written; this copy inherited the pattern without that part.
-for input in $SOURCE_INPUTS .github/workflows/helm.yml; do
+# THE WORKFLOW'S OWN PATH AND THIS GATE'S OWN TREE ARE BOTH ON THIS LIST, and
+# each was missing in turn. Without the workflow, removing it from both trigger
+# lists means a change to those very lists no longer runs the gate validating
+# them. Without `deploy/helm`, removing THAT means a chart edit — or an edit to
+# this script — does not run the gate either: the tree holding the thing being
+# checked, gone from the triggers, with every assertion still green.
+#
+# `deploy/observability/check.py` has required both since it was written; this
+# copy inherited the pattern one piece at a time.
+for input in $SOURCE_INPUTS deploy/helm .github/workflows/helm.yml; do
     check "the pull_request filter covers $input" covered "$input" "$OUT/pr-paths.txt"
     check "the push filter covers $input" covered "$input" "$OUT/push-paths.txt"
 done

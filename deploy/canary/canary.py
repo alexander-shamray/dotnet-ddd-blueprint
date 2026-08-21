@@ -723,13 +723,18 @@ def _workflow_covers_inputs() -> list[str]:
     failures = []
     for index, block in enumerate(blocks):
         patterns = re.findall(r"-\s*'([^']+)'", block)
-        # THE WORKFLOW'S OWN PATH IS REQUIRED TOO, and leaving it out made this
-        # check unable to protect itself: with `.github/workflows/deploy.yml`
-        # removed from both trigger lists, a change to those very lists no
-        # longer runs the gate that validates them. `check.py` has required its
-        # own path since it was written; this copy inherited the pattern and
-        # not that part of it.
-        for entry in SOURCE_INPUTS + [WORKFLOW_PATH]:
+        # THE WORKFLOW'S OWN PATH AND THIS GATE'S OWN TREE ARE BOTH REQUIRED,
+        # and each was missing in turn. Without the workflow, removing it from
+        # both trigger lists means a change to those very lists no longer runs
+        # the gate validating them. Without `deploy/canary`, removing THAT
+        # means an edit to `canary.py`, `canary.json` or the suite does not run
+        # the gate either — the tree that holds the thing being checked, gone
+        # from the triggers, with the check still green.
+        #
+        # `check.py` has required both since it was written
+        # (`SOURCE_INPUTS + ["deploy/observability", WORKFLOW_PATH]`); this
+        # copy inherited the pattern one piece at a time.
+        for entry in SOURCE_INPUTS + ["deploy/canary", WORKFLOW_PATH]:
             if not any(p == entry or p == f"{entry}/**" for p in patterns):
                 failures.append(
                     f"{WORKFLOW_PATH} trigger {index + 1} does not cover "
