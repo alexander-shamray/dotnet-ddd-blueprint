@@ -506,6 +506,18 @@ the canary's own pods and nothing else.
 The two tracks are told apart in the telemetry by a `deployment.track` resource
 attribute, supplied through `OTEL_RESOURCE_ATTRIBUTES` from the chart.
 
+> **A resource attribute is not a metric label, and the collector is what
+> bridges them.** Under the standard OTLP-to-Prometheus mapping only
+> `service.name`, `service.namespace` and `service.instance.id` become labels
+> on each series; everything else lands in `target_info`. So a query filtering
+> `deployment_track="canary"` matches nothing unless the collector copies the
+> attribute onto the datapoint — and matching nothing is read here as an absent
+> series, which rolls back. **Every rung, every time, on a canary behaving
+> perfectly.** [§14.1](14-local-development.md)'s collector does it with a
+> `transform` processor over one attribute; **the deployed collector must do
+> the same**, and that is a requirement on an environment this repository does
+> not contain rather than something its gates can check.
+
 **Why.** §15.5 specifies the behaviour and no chapter had chosen a mechanism,
 so building the rollout was what forced the choice. Three were live.
 

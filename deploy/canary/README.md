@@ -67,6 +67,16 @@ every chart and asserts what comes out.
   ADR-022 names it as owed.
 - **It cannot see an ad-hoc `--set` at deploy time**, the same reach
   `deploy/helm/README.md` states for the chart gate.
+- **It does not establish that `deployment_track` is a label on the deployed
+  backend's series.** `deployment.track` is a *resource* attribute, and the
+  standard OTLP-to-Prometheus mapping puts only `service.name`,
+  `service.namespace` and `service.instance.id` on each series — the rest go to
+  `target_info`. §14.1's collector copies this one attribute onto the datapoint
+  with a `transform` processor, and **the deployed collector must do the
+  same**. Without it every query matches nothing, which this reads as an absent
+  series and rolls back: every rung, on a healthy canary. The requirement is in
+  ADR-022; nothing here can check it, because the cluster's collector is not in
+  this repository.
 
 ## The two things worth knowing before reading the code
 

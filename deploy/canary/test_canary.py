@@ -196,17 +196,26 @@ class VerdictTests(unittest.TestCase):
 
         self.assertEqual(verdict["decision"], canary.PROMOTE)
 
-    def test_a_missing_baseline_does_not_invent_a_regression(self) -> None:
-        """Asymmetric with the canary's own absence, and deliberately so: no
-        canary reading means the new version is unobserved, while no baseline
-        means there is nothing to compare against. The absolute checks still
-        ran."""
+    def test_a_missing_baseline_rolls_back(self) -> None:
+        """This used to assert PROMOTE, on the argument that the canary's own
+        absence means the new version is unobserved while the baseline's only
+        means there is nothing to compare against.
+
+        That held while an absent series was ambiguous, and it is not: the
+        stable track serves the MAJORITY of traffic at every rung, and since
+        the error-rate numerator is coalesced a query only returns nothing when
+        the denominator is empty — no requests at all. Skipping the check there
+        removed regression detection at exactly the moment the monitoring was
+        failing on the larger half of the traffic. The rule is now uniform:
+        any absent reading is a rollback.
+        """
         verdict = canary.analyse(
             readings(baseline={"errorRate": None, "latencyP99Seconds": None}),
             THRESHOLDS,
         )
 
-        self.assertEqual(verdict["decision"], canary.PROMOTE)
+        self.assertEqual(verdict["decision"], canary.ROLLBACK)
+        self.assertIn("stable-track", verdict["reason"])
 
     def test_the_reason_survives_every_verdict(self) -> None:
         """The rollout prints this and nothing else. A decision with an empty

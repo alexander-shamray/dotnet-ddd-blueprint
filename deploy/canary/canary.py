@@ -339,16 +339,29 @@ def _regression(
     factor: float,
     fmt: str,
 ) -> list[str]:
-    """One metric's relative check, or nothing when it does not apply.
+    """One metric's relative check.
 
-    A missing BASELINE is not a rollback and a missing canary reading is, which
-    looks asymmetric and is not. The canary's own absence means the new version
-    is not being observed. The baseline's absence means there is nothing to
-    compare against — the absolute checks above still ran, and inventing a
-    regression against a number nobody has is worse than declining to.
+    **A missing baseline is a rollback, and it used to be a skip.** The
+    argument for skipping was that the canary's own absence means the new
+    version is unobserved while the baseline's means there is nothing to
+    compare against — the absolute checks having already run. That reasoning
+    survived only while an absent series was ambiguous.
+
+    It is not, for two reasons that arrived together. The stable track serves
+    the MAJORITY of traffic at every rung of §15.5's ladder, so its series
+    going missing is not a quiet edge case, it is the monitoring failing on the
+    larger half. And since the error-rate numerator is coalesced, a query only
+    returns nothing when the DENOMINATOR is empty — no requests at all — which
+    for the stable track during a canary means something is badly wrong.
+
+    Skipping quietly removed regression detection at exactly that moment, which
+    is the one thing the relative check exists for. Treating it as a rollback
+    also makes the rule uniform and therefore statable: **any absent reading is
+    a rollback**, with no exception to remember.
     """
     if baseline_value is None:
-        return []
+        return [f"no stable-track reading for {label}: the majority of traffic "
+                "is unobserved, so a regression against it cannot be ruled out"]
     if canary_value <= floor:
         return []
     if canary_value <= baseline_value * factor:

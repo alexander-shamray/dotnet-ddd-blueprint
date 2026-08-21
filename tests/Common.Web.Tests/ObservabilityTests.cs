@@ -226,8 +226,20 @@ public class ObservabilityTests
             .Attributes
             .ToDictionary(a => a.Key, a => a.Value);
 
-        // Prometheus renders this as `deployment_track`, which is what
-        // deploy/canary/canary.json's queries select on.
+        // THIS PROVES THE ATTRIBUTE REACHES THE RESOURCE, AND NOTHING BEYOND
+        // THAT. It used to say "Prometheus renders this as
+        // `deployment_track`", which is a claim about the collector rather
+        // than about this host: under the standard OTLP-to-Prometheus mapping
+        // only service.name, service.namespace and service.instance.id become
+        // labels on each series, and every other resource attribute goes to
+        // `target_info`. §14.1's collector copies this one onto the datapoint
+        // with a `transform` processor and the deployed collector must too
+        // (ADR-022) — without which canary.json's queries match nothing, which
+        // the rollout reads as an absent series and rolls back.
+        //
+        // A test can only assert its own half, and saying so is the point:
+        // the other half is a requirement on an environment, recorded where a
+        // person configuring one will find it.
         attributes["deployment.track"].ShouldBe("canary");
 
         // And the attributes AddObservability sets itself survive alongside

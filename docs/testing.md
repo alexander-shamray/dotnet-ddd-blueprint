@@ -166,10 +166,23 @@ on this repository they are **18**, **606** and **171**, summing to the 795 the
 whole suite runs — which is the arithmetic the callout below asks for.
 
 ```bash
-dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests"
-dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration"
-dotnet test Platform.slnx --filter "Category=Integration"
+dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests" \
+    --logger trx --results-directory ./TestResults/architecture
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration" \
+    --logger trx --results-directory ./TestResults/unit
+dotnet test Platform.slnx --filter "Category=Integration" \
+    --logger trx --results-directory ./TestResults/integration
+
+py -3.12 .github/pipeline-gate/pipeline_gate.py stages \
+    ./TestResults/architecture ./TestResults/unit ./TestResults/integration
 ```
+
+**The logger and the directories are not decoration here either.** The gate
+counts from TRX and looks for those three directory names, so a bare
+`dotnet test` runs the stages and leaves it nothing to read — following this
+file without them produced three green runs and a gate that could not be run
+at all. Both halves of the split are stated because the gate is what makes the
+counts above a check rather than a claim.
 
 **Separate steps in one job, not separate jobs**, and both halves of that are
 deliberate: a job boundary would mean shipping the build output between runners
