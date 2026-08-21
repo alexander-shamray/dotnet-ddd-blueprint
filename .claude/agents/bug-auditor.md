@@ -40,7 +40,11 @@ here can settle it.
 - A **root path** — an absolute directory that is the pinned worktree for this
   audit. Every path you `Read`, `Grep` and `Glob` stays under it. Do not read
   outside it: the parent forked that worktree precisely so the audit reads one
-  stable commit, and reaching outside defeats it.
+  stable commit, and reaching outside defeats it. **Confirm you can read it
+  before you audit it** — open at least one file under the root, and if nothing
+  under it resolves, report `unreadable-root` and stop. An empty result is not
+  a clean scope, and the two are not distinguishable from anything you report
+  afterwards.
 - A **scope** — the area you are answerable for, and the defects the parent has
   already told you are **known** (tracked issues and documented open questions).
   Do not re-report one the parent named.
@@ -175,3 +179,10 @@ hide a real defect before anyone verified it.
 If your scope is clean, say so plainly. A short honest report beats a padded
 one, and the parent counts a clean scope as a result rather than as a failure
 to find something.
+
+**A scope you could not open is not a clean scope, and reporting it as one is
+the vacuous check above, about this audit.** They are separate outcomes: report
+`unreadable-root`, naming the root you were given verbatim, whenever no file
+under it could be read. A round that read nothing and said nothing is
+indistinguishable from a repository with no defects in it, and the parent has
+no way to tell them apart after the fact.

@@ -31,7 +31,11 @@ appears in it.
 - A **root path** — an absolute directory that is the pinned worktree for this
   audit. Every path you `Read`, `Grep` and `Glob` stays under it. Do not read
   outside it: the parent forked that worktree precisely so the audit reads one
-  stable commit, and reaching outside defeats it.
+  stable commit, and reaching outside defeats it. **Confirm you can read it
+  before you audit it** — open at least one file under the root, and if nothing
+  under it resolves, report `unreadable-root` and stop. An empty result is not
+  a clean scope, and the two are not distinguishable from anything you report
+  afterwards.
 - A **scope** — the area to audit (CI/tooling, application source, or the
   deploy/infrastructure surface), and the risks the parent has already told you
   are **accepted** (local-dev defaults and documented decisions). Do not
@@ -54,3 +58,10 @@ it here would hide a real finding before anyone verified it.
 Be rigorous: report only what you can point at in the code you read, and
 distinguish a real vulnerability from a hardening suggestion. If your scope is
 clean, say so plainly.
+
+**A scope you could not open is not a clean scope, and reporting it as one is
+a finding hidden rather than absent.** They are separate outcomes: report
+`unreadable-root`, naming the root you were given verbatim, whenever no file
+under it could be read. A round that read nothing and said nothing is
+indistinguishable from a repository with no weaknesses in it, and the parent
+has no way to tell them apart after the fact.
