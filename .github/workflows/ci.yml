@@ -146,6 +146,11 @@ jobs:
               # `dotnet build`, and without this line a change to it rebuilds
               # no image at all.
               - '.dockerignore'
+              # Copied into the publish stage by all six application
+              # Dockerfiles, and ADR-019 makes it a build INPUT rather than an
+              # editor hint: a change to it alters what every image compiles
+              # with, and the solution build cannot see the Docker context.
+              - '.editorconfig'
               - 'src/BuildingBlocks/**'
               # The contract suite (§12.6) guards compatibility BETWEEN
               # services, so it belongs to all of them. Owned by none, it would

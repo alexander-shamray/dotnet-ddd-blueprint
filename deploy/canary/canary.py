@@ -113,6 +113,47 @@ def load_plan(path: Path = PLAN_PATH) -> dict:
 # The weight arithmetic
 # --------------------------------------------------------------------------
 
+def validate_tag(tag: str) -> None:
+    """Refuse a tag Helm's `--set-string` would read as more than a tag.
+
+    **`--set-string image.tag="$TAG"` is not a single assignment**, and that is
+    the finding this exists for. Helm parses the right-hand side with `strvals`,
+    where a COMMA separates assignments — so
+    `deadbeef,image.registry=attacker.example` sets a perfectly valid
+    `image.tag` AND overrides the registry, for the canary and the promotion
+    alike. `commerce.tag`'s render-time validation passes, because by then the
+    tag really is `deadbeef`; the injected key rode in beside it.
+
+    This is CLAUDE.md's own lesson about a value crossing between two systems'
+    alphabets, one release later: the tag is validated against Kubernetes'
+    alphabet at render time and reaches Helm's parser before that.
+    **Validate against the intersection, at the boundary the value enters.**
+
+    The rule is `commerce.tag`'s, deliberately — dot-separated DNS-1123 labels,
+    63 characters at most — because a second, looser alphabet here would let
+    something through that the chart then rejects mid-`helm upgrade`. It admits
+    no comma, no equals and no whitespace, which is what closes the injection;
+    that is a consequence of matching the chart rather than a rule of its own,
+    and it is the reason this cannot be relaxed independently.
+    """
+    if not tag:
+        raise PlanError("image tag is empty: §15.3 refuses a deploy that cannot name its image")
+    if len(tag) > 63:
+        raise PlanError(
+            f"image tag is {len(tag)} characters. It becomes "
+            "app.kubernetes.io/version, and a label value may not exceed 63 (§15.3)"
+        )
+    for segment in tag.split("."):
+        if not re.fullmatch(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?", segment):
+            raise PlanError(
+                f"image tag {tag!r} is not usable: the segment {segment!r} is not a "
+                "DNS-1123 label. Each dot-separated segment must be lowercase "
+                "alphanumerics and dashes, starting and ending alphanumeric "
+                "(§15.3) — which also excludes the comma and equals that Helm's "
+                "--set-string would read as a second assignment"
+            )
+
+
 def _ceil_div(numerator: int, denominator: int) -> int:
     """Integer ceiling division, because `math.ceil` on a float lies here.
 
@@ -678,6 +719,9 @@ def main(argv: list[str]) -> int:
 
     sub.add_parser("steps", help="how many rungs the ladder has")
 
+    tag = sub.add_parser("validate-tag", help="refuse a tag Helm would read as two assignments")
+    tag.add_argument("--value", required=True)
+
     # Separate from `plan` on purpose: the chart a workload deploys is a fact
     # about the plan, and `plan` REFUSES when the step's weight is not
     # expressible at the current replica count. Asking it for a chart would
@@ -714,6 +758,15 @@ def main(argv: list[str]) -> int:
 
     if args.command == "steps":
         print(len(document["steps"]))
+        return 0
+
+    if args.command == "validate-tag":
+        try:
+            validate_tag(args.value)
+        except PlanError as error:
+            print(f"canary: {error}", file=sys.stderr)
+            return 1
+        print(args.value)
         return 0
 
     if args.command == "chart":

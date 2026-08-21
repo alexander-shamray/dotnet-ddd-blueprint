@@ -124,6 +124,53 @@ class WeightTests(unittest.TestCase):
                 canary.plan(weight, stable_replicas=19, overshoot_points=0)
 
 
+class TagTests(unittest.TestCase):
+    """The tag as Helm's parser would read it, not as Kubernetes would.
+
+    `--set-string image.tag="$TAG"` is parsed by `strvals`, where a comma
+    separates assignments — so the injection below sets a valid `image.tag`
+    AND a registry, and the chart's render-time validation passes because by
+    then the tag really is `deadbeef`.
+    """
+
+    def test_ordinary_tags_are_accepted(self) -> None:
+        for tag in ("deadbeef", "1.2.3", "v1-2-3", "a" * 63,
+                    "0123456789abcdef0123456789abcdef01234567"):
+            with self.subTest(tag=tag):
+                canary.validate_tag(tag)
+
+    def test_a_comma_is_a_second_assignment_and_is_refused(self) -> None:
+        """The finding, exactly as reported."""
+        with self.assertRaises(canary.PlanError) as raised:
+            canary.validate_tag("deadbeef,image.registry=attacker.example")
+
+        self.assertIn("--set-string", str(raised.exception))
+
+    def test_the_other_strvals_metacharacters_are_refused(self) -> None:
+        for tag in ("a=b", "a b", "a{b}", "a[0]", "a\\,b", "a\nb"):
+            with self.subTest(tag=tag):
+                with self.assertRaises(canary.PlanError):
+                    canary.validate_tag(tag)
+
+    def test_it_matches_the_chart_rather_than_inventing_an_alphabet(self) -> None:
+        """`commerce.tag` refuses these three by name, and a looser rule here
+        would pass something the chart then rejects mid-`helm upgrade` — after
+        the release has started, which is the failure that validation exists to
+        move earlier."""
+        for tag in ("Release_1", "release..1", "release.-1"):
+            with self.subTest(tag=tag):
+                with self.assertRaises(canary.PlanError):
+                    canary.validate_tag(tag)
+
+    def test_length_and_emptiness(self) -> None:
+        with self.assertRaises(canary.PlanError):
+            canary.validate_tag("")
+        with self.assertRaises(canary.PlanError) as raised:
+            canary.validate_tag("a" * 64)
+
+        self.assertIn("63", str(raised.exception))
+
+
 class VerdictTests(unittest.TestCase):
     def test_a_healthy_step_promotes(self) -> None:
         verdict = canary.analyse(readings(), THRESHOLDS)

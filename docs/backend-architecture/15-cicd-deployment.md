@@ -66,6 +66,9 @@ make a monorepo practical at this size:
         # un-excluding a local secret is one with credentials in it. Neither is
         # visible to `dotnet build`.
         - '.dockerignore'
+        # Copied into the publish stage by every application Dockerfile, and
+        # ADR-019 makes it a build input rather than an editor hint.
+        - '.editorconfig'
         - 'src/BuildingBlocks/**'
         # The contract suite (§12.6) guards compatibility BETWEEN services, so
         # it belongs to all of them. Owned by none, it would run for none.
