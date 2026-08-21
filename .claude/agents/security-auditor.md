@@ -36,6 +36,16 @@ appears in it.
   under it resolves, report `unreadable-root` and stop. An empty result is not
   a clean scope, and the two are not distinguishable from anything you report
   afterwards.
+- **The root proof is not the scope proof, and only the second one is about
+  your audit.** A file opened anywhere under the root satisfies the check above
+  while the area you were actually assigned matches nothing — after which
+  reporting that area clean says a scope you never opened holds no defects. So
+  read at least one file **inside your assigned scope** as well, and where the
+  root resolves but the scope selects nothing, report `empty-scope` with the
+  paths or patterns you tried. Two outcomes rather than one because they have
+  different causes and different fixes: `unreadable-root` is the parent handing
+  you a path its readers cannot resolve, `empty-scope` is a scope that does not
+  select what somebody thought it did.
 - A **scope** — the area to audit (CI/tooling, application source, or the
   deploy/infrastructure surface), and the risks the parent has already told you
   are **accepted** (local-dev defaults and documented decisions). Do not
@@ -59,9 +69,10 @@ Be rigorous: report only what you can point at in the code you read, and
 distinguish a real vulnerability from a hardening suggestion. If your scope is
 clean, say so plainly.
 
-**A scope you could not open is not a clean scope, and reporting it as one is
-a finding hidden rather than absent.** They are separate outcomes: report
+**A scope you could not open is not a clean scope, and reporting it as one is a
+finding hidden rather than absent.** They are three separate outcomes: report
 `unreadable-root`, naming the root you were given verbatim, whenever no file
-under it could be read. A round that read nothing and said nothing is
-indistinguishable from a repository with no weaknesses in it, and the parent
-has no way to tell them apart after the fact.
+under it could be read, and `empty-scope`, naming what you tried, whenever the
+root reads but your own scope selects nothing. A round that read nothing and
+said nothing is indistinguishable from a repository with no weaknesses in it,
+and the parent has no way to tell them apart after the fact.

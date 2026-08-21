@@ -199,8 +199,12 @@ step.** Git prints its own worktrees in the host's native spelling with forward
 slashes — `D:/tmp/alexa/secsweep-nlPuf1` for a root the shell called
 `/tmp/secsweep-nlPuf1`, measured on this repository rather than assumed — and
 the readers resolve that. The row to read is the one whose path ends in the
-`secsweep-` basename `mktemp` just printed; it is also the only detached row,
-which is the cross-check when a previous sweep left one behind.
+`secsweep-` basename `mktemp` just printed — that basename and nothing else.
+Detachment is **not** a usable cross-check, and the first draft of this
+paragraph offered it as one: a worktree an earlier sweep abandoned is also
+detached, and so is the caller's own checkout when the sweep runs from a
+detached HEAD, so the property fails in exactly the case it was offered for.
+The basename is unique because `mktemp` just minted it.
 
 **No `cygpath`, deliberately, and the reason is this repository's most-repeated
 grant lesson.** `cygpath -m` is the obvious translation and it was the first
@@ -591,16 +595,18 @@ between runs; this command files and does not fix. So:
   defect-free at seven.
 
 **Never fail open.** A round that errored — a subagent that died, a `gh` call
-that failed, an auditor reporting `unreadable-root` — is not a clean round.
+that failed, an auditor reporting `unreadable-root` or `empty-scope` — is not a
+clean round.
 Report the error and let the user decide; do not count a review that did not
 happen as a review that found nothing. This is the same rule that made the Grok
 loop trust the verdict check over the exit code: a review that never ran cannot
 report as clean.
 
-**The third of those is the one that arrives looking like success.** A dead
-subagent and a failed `gh` call both surface as errors; an auditor handed a
-root it cannot resolve returns an ordinary, well-formed, empty report, and an
-empty report is what a clean scope returns too. That is why the root is proved
+**The last two are the ones that arrive looking like success.** A dead subagent
+and a failed `gh` call both surface as errors; an auditor handed a root it
+cannot resolve — or a scope that selects nothing inside a root that reads
+perfectly well — returns an ordinary, well-formed, empty report, and an empty
+report is what a clean scope returns too. That is why the root is proved
 readable before the fan-out and why the auditors have an outcome for it — the
 error has to be manufactured, because nothing about the failure produces one on
 its own.
