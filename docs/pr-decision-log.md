@@ -95,14 +95,18 @@ argued.** `CheckoutEndpoints` compares a reply's currency to the request's with
 `OrdinalIgnoreCase`, and the comment beside it says why: a producer's invariant
 is not a consumer's guarantee. Because the stub echoed the request, that
 comparison had never once been handed two spellings to reconcile. Tightening it
-to `Ordinal` and running the suite left **all 62 of `Web.Bff.Tests`' pre-PR
-tests passing** — over a change that answers 500 to every lower-case currency a
-customer types, since Catalog projects its own upper-cased column. So the
+to `Ordinal` and running `Category!=Integration` over that project left **all
+62 of its pre-PR container-free tests passing** — over a change that answers
+500 to every lower-case currency a customer types, since Catalog projects its
+own upper-cased column. **62 is the fast half, not the suite's 66**, and the
+distinction is worth keeping rather than rounding up: the four it leaves out
+drive the same endpoint through the same stub, so they would have been green
+too — and they were not run, so they are not counted. So the
 failure mode a double creates is worse than staleness: **a guard written for the
 provider's real behaviour becomes untestable**, because the double never
 produces the input the guard exists for. The counterfactual was run twice, once
 against the branch's contract test (fails, exactly one interaction) and once
-against `main`'s suite (passes, all 62).
+against `main`'s fast half (passes, all 62).
 
 **Then the mechanism the plan named turned out not to reach the relationship the
 plan made it conditional on.** Appendix C said Pact. PactNet 5.0.1 ships HTTP

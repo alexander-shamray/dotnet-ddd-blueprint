@@ -251,11 +251,25 @@ public static class PricingContract
     /// needs only that the two agree.
     /// </para>
     /// <para>
-    /// <b>Every check here has a counterpart in <c>CheckoutEndpoints</c>, and
-    /// that is deliberate rather than duplication.</b> The endpoint refuses a
-    /// reply that breaks any of them, so this is the same tolerance stated as an
-    /// expectation instead of as a defence — which is what lets the provider be
-    /// held to it before a screen is.
+    /// <b>Four of these checks are also defences in <c>CheckoutEndpoints</c>,
+    /// and the rest are expectations of Catalog that no screen enforces.</b> The
+    /// endpoint refuses a malformed amount, a negative one, a currency that
+    /// disagrees with the request, and an id it did not ask about or has already
+    /// been answered — each a 500, because each would otherwise produce a wrong
+    /// quote. Those four are the same tolerance stated as an expectation instead
+    /// of as a defence, which is what lets the provider be held to it before a
+    /// screen is.
+    /// </para>
+    /// <para>
+    /// <b>The others have no counterpart, and that is the half a contract is
+    /// for.</b> A product the contract says is absent and the reply prices, one
+    /// it says is priced and the reply omits, a name that is not the published
+    /// one, an amount that is not the published price — the endpoint answers 200
+    /// to every one of them, quoting a line or reporting it in
+    /// <c>QuoteResponse.Unpriced</c>. It has no published price to compare
+    /// against and no reason to refuse a customer a quote over it. Only a test
+    /// that knows what was published can see any of it, which is exactly why the
+    /// contract carries them and the screen does not.
     /// </para>
     /// </remarks>
     /// <exception cref="PricingContractException">
@@ -280,10 +294,23 @@ public static class PricingContract
 
         foreach (ProductPrice price in reply.Price)
         {
-            // Canonical D-form, which is what the request carried and what the
-            // consumer parses the echo back with. A reply the consumer cannot
-            // match to a line of the basket it sent is unusable whatever else
-            // is right about it.
+            // Canonical D-form, which is what the request carried and what
+            // pricing.proto states — the rule PricingService already enforces on
+            // the way in, on the stated grounds that accepting more than the
+            // contract says is how two ends stop agreeing about what it is.
+            //
+            // STRICTER THAN THE ENDPOINT, deliberately. CheckoutEndpoints parses
+            // the echo with Guid.Parse, which also takes the N, B and P forms, so
+            // a braced id would price correctly there and fail here. That
+            // asymmetry is the design rather than a gap: the endpoint refuses
+            // what would make a quote WRONG and tolerates what would merely make
+            // it unusual, because a customer losing a basket is a worse outcome
+            // than a log line in an odd shape. The contract is where an odd shape
+            // is caught, one release before it costs anything.
+            //
+            // Tightening the endpoint to match was the alternative and is
+            // rejected: it converts a detectable contract violation into a 500
+            // for a value that is not even wrong.
             if (!Guid.TryParseExact(price.ProductId, "D", out Guid productId))
             {
                 throw new PricingContractException(

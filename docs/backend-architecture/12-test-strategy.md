@@ -1994,8 +1994,10 @@ stored one, formatted amounts at the test's scale rather than the column's
 > to the request's with `OrdinalIgnoreCase`, precisely because Catalog answers
 > `GBP` to a request for `gbp`. Because the stub echoed the request, the
 > comparison had never once been handed two spellings — so tightening it to
-> `Ordinal` left every one of that suite's 62 pre-PR tests green, over a change
-> that would answer 500 to every lower-case currency a customer typed.
+> `Ordinal` left every one of that suite's 62 pre-PR tests that need no
+> container green, over a change that would answer 500 to every lower-case
+> currency a customer typed. That is the fast half rather than the whole
+> suite, which is 66; the four that want a Keycloak were not run.
 
 So the consumer writes down what it needs, and the provider is verified against
 it. The expectations are **one file** — `PricingContract.cs`, in the consumer's

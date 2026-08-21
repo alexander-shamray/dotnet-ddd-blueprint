@@ -708,9 +708,11 @@ service no consumer calls is an expectation nobody holds.
 > asserted.** `CheckoutEndpoints` compares a reply's currency to the request's
 > with `OrdinalIgnoreCase`; `StubCatalog` echoed the *request's* spelling, so
 > the comparison had never once been given two spellings to reconcile. Tightened
-> to `Ordinal`, all 62 of `Web.Bff.Tests`' pre-PR tests still passed — while
-> production would answer 500 on every lower-case currency a customer typed,
-> because Catalog projects its own upper-cased column. Three more divergences
+> to `Ordinal`, all 62 of `Web.Bff.Tests`' pre-PR tests that need no container
+> still passed — while production would answer 500 on every lower-case currency
+> a customer typed, because Catalog projects its own upper-cased column. **62 is
+> the fast half and not the suite**: the four tests that want a Keycloak were
+> not in the run, and nothing here claims they were. Three more divergences
 > sat beside it: the stub filtered currency case-sensitively where Catalog does
 > not, formatted amounts at the test's own scale rather than the column's
 > `decimal(19,4)`, and enforced no ceiling at all. **A hand-written stub is a
