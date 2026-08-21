@@ -22,7 +22,7 @@
 | Edge configuration | The route file of §10.2 against the host that loaded it, and §10.1's edge behaviours — compression and the body ceiling | `WebApplicationFactory` + a stub destination on loopback — no containers, and `UseKestrel` where the property under test is the server's own | < 1 s | One suite | `Gateway.Api.Tests` |
 | Outbound hop | §9.7's one synchronous call: the timeout hierarchy read off the built host, the credential handler's position inside the resilience pipeline, and §11.5's realm | `WebApplicationFactory` + a real gRPC server on loopback; one class also runs a real Keycloak | < 1 s, and seconds for the Keycloak class | One suite | `Web.Bff.Tests` |
 | Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
-| Contract | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
+| Contract shape | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
 **Neither is there an "all services in containers" level, nor an E2E one.** Both
 are rows that get written into a strategy and never built — the second needs a
@@ -41,9 +41,13 @@ asserts. §12.5's traps price that and name the correctness hazard that comes
 with it, and between them they are the reason these tests are "a few" rather
 than hundreds. **Contract compatibility** —
 does the message one service publishes still mean what its consumers expect —
-is a reflection test over the contract assembly, and it is the one thing
-genuinely between services, which is why `Platform.IntegrationTests` exists
-and holds nothing else.
+is a reflection test over the contract assembly, and it is why
+`Platform.IntegrationTests` exists and holds nothing else. It is **not the
+only thing genuinely between services** — §9.7's one synchronous hop is the
+other, and §12.6 tests the two in almost opposite ways. The hop is
+deliberately not in this suite: a contract over it needs the provider
+running, so it lives in the provider's own suite rather than buying a sixth
+project a container set.
 
 What no level above covers is whether the *deployed* system responds under load
 and against real infrastructure. That is the **k6 run against staging**
@@ -1997,7 +2001,8 @@ stored one, formatted amounts at the test's scale rather than the column's
 > `Ordinal` left every one of that suite's 62 pre-PR tests that need no
 > container green, over a change that would answer 500 to every lower-case
 > currency a customer typed. That is the fast half rather than the whole
-> suite, which is 66; the four that want a Keycloak were not run.
+> suite, which was 66 before this PR and is 77 after it; the four that want
+> a Keycloak were not run.
 
 So the consumer writes down what it needs, and the provider is verified against
 it. The expectations are **one file** — `PricingContract.cs`, in the consumer's

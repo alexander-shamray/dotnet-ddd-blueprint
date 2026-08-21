@@ -2719,8 +2719,10 @@ has the mechanism, which is a linked file rather than Pact.
 > was the currency: it echoed the *request's* spelling where Catalog projects
 > its own stored one, so the endpoint's case-insensitive comparison had never
 > been handed two spellings to reconcile — and tightening it to an ordinal
-> comparison left the whole suite green over a change that answers 500 to every
-> lower-case currency a customer types. **A synchronous hop is the one place a
+> comparison left all 62 of that suite's pre-PR container-free tests green
+> over a change that answers 500 to every lower-case currency a customer
+> types. The fast half, not the 66 it then ran; the four that want a Keycloak
+> were not in that run. **A synchronous hop is the one place a
 > peer's behaviour is load-bearing rather than eventual**, which is why this is
 > where the platform spends a contract.
 

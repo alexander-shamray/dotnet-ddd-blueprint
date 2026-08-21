@@ -689,10 +689,10 @@ own line rather than sending a reader to a file that does not hold it.
   *for* the provider's real behaviour becomes untestable, since the double never
   produces the input the guard exists for. Measured here — the BFF's
   case-insensitive currency comparison could be tightened to `Ordinal` with all
-  62 of that suite's container-free tests still passing — the fast half, not
-  the 66 the suite runs — over a change that answers 500 to every lower-case
-  currency in production. **Ask what would falsify the double,
-  not whether its suite is green.**
+  62 of that suite's container-free tests still passing — the fast half of the
+  66 it ran before this PR, not the 77 it runs now — over a change that
+  answers 500 to every lower-case currency in production. **Ask what would
+  falsify the double, not whether its suite is green.**
 - **A tool a plan names may not reach the case the plan made it conditional
   on.** Appendix C made Pact conditional on a consumer relationship becoming
   contentious; the relationship that did is gRPC, and PactNet ships HTTP and
