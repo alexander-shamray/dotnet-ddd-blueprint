@@ -71,6 +71,24 @@ which is a set the difference can actually be taken over. It also settles paths
 containing spaces, where the aligned first column is ambiguous and the record
 form is not.
 
+**A path git had to quote is a root that could not be established — stop.**
+Porcelain without `-z` C-quotes a pathname containing unusual bytes, and a
+non-ASCII `TMPDIR` is the ordinary way to get one: a Windows account name
+outside ASCII puts one straight into `mktemp`'s output. The record then reads
+`worktree "C:/Users/ZoÃ«/..."`, and that string is a *representation*
+rather than a path, so handing it to the readers fails the proof below. Treat a
+record whose path begins with a double quote as the same class as a root that
+does not resolve, reported under *Never fail open*.
+
+**`-z` is the machine answer and is deliberately not taken here.** It emits
+verbatim pathnames, which is exactly right — and it emits them NUL-separated in
+a single line, measured rather than assumed:
+`worktree C:/dev/ashamray^@HEAD 611d97e…^@branch refs/heads/main^@^@`. A
+terminal capture strips the separators, so the records run together and the
+path abuts the `HEAD` line with nothing between them; the fix would cost more
+than the defect. Stopping on a quoted path is fail-closed and needs no parsing,
+where the alternative is a parse this consumer cannot reliably perform.
+
 **Neither half is sufficient alone, and both weaker versions were written
 before this one.** Detachment is not a cross-check: a worktree an earlier sweep
 abandoned is also detached, and so is the caller's own checkout when the sweep
@@ -352,8 +370,8 @@ files and does not fix. So:
   at seven.
 
 **Never fail open.** A round that errored — a subagent that died, a `gh` call
-that failed, an auditor reporting `unreadable-root` or `empty-scope` — is not a
-clean round.
+that failed, an auditor reporting `unreadable-root` or `empty-scope`, a
+worktree path git had to quote — is not a clean round.
 Report the error and let the user decide; do not count a review that did not
 happen as a review that found nothing. This is the same rule that made the Grok
 loop trust the verdict check over the exit code: a review that never ran cannot
