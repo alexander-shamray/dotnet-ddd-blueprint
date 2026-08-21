@@ -345,16 +345,47 @@ public interface IIdempotentCommand
 ```
 
 ```csharp
-public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore store)
+public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore store, ICurrentUser currentUser)
     : IPipelineBehavior<TCommand, TResult>
     where TCommand : ICommand<TResult>, IIdempotentCommand
+    where TResult : Result
 {
     private static readonly TimeSpan Retention = TimeSpan.FromHours(24);
+
+    // "null" and not the empty string. IdempotencyEntry carries a Payload the
+    // store has to tell apart from the in-progress marker it wrote on the
+    // claim, and an empty string is the value an implementation is likeliest to
+    // read as absent — which would replay every void-shaped command as
+    // ConcurrentRequestException for a day. This is valid JSON and unambiguous.
+    private const string NoValue = "null";
+
+    // Result and Result<T> are the whole universe (Appendix D.5), and the two
+    // members after this one depend on that. A static field on a generic type
+    // has one instance per CLOSED type, so all three are resolved once per
+    // (TCommand, TResult) pair rather than once per command, and they run in
+    // declaration order.
+    private static readonly Type? ValueType = ValueTypeOf();
+
+    private static readonly PropertyInfo? ValueProperty =
+        ValueType is null ? null : typeof(TResult).GetProperty(nameof(Result<object>.Value));
+
+    // Result.Success<T>, closed over that value type. The factory and not the
+    // constructor: the constructor is internal precisely so that nothing can
+    // assemble a result reporting success while carrying an error
+    // (Appendix D.5), and reflecting past it to save a MakeGenericMethod would
+    // spend the guarantee the type exists for.
+    private static readonly MethodInfo? SuccessOfValue = ValueType is null
+        ? null
+        : typeof(Result)
+            .GetMethod(nameof(Result.Success), 1, [Type.MakeGenericMethodParameter(0)])!
+            .MakeGenericMethod(ValueType);
 
     public async Task<TResult> HandleAsync(TCommand command, NextDelegate<TResult> next, CancellationToken ct)
     {
         // Key shape only — the store owns the service prefix and namespace.
-        string key = $"{typeof(TCommand).Name}:{command.CommandId}";
+        // The subject segment is not decoration: see "A claimed key belongs to
+        // one subject" below.
+        string key = $"{Subject()}:{typeof(TCommand).Name}:{command.CommandId}";
 
         if (!await store.TryClaimAsync(key, Retention, ct))
         {
@@ -363,24 +394,215 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             if (existing is null || existing.InProgress)
                 throw new ConcurrentRequestException(command.CommandId);
 
-            return JsonSerializer.Deserialize<TResult>(existing.Payload!)!;
+            return Replay(existing.Payload!);
         }
+
+        TResult result;
 
         try
         {
-            TResult result = await next();
-            await store.CompleteAsync(key, JsonSerializer.Serialize(result), Retention, ct);
-            return result;
+            result = await next();
         }
         catch
         {
-            // Release the claim so the caller may legitimately retry.
-            await store.ReleaseAsync(key, ct);
+            // Release for a fault raised INSIDE next(), and nowhere else.
+            // §6.3's ExecuteAsync disposes the transaction on the way out,
+            // which rolls it back, so nothing this command wrote survives and
+            // the caller may legitimately retry.
+            await store.ReleaseAsync(key, CancellationToken.None);
             throw;
         }
+
+        if (result.IsFailure)
+        {
+            // A refusal is rolled back by the same mechanism rather than by
+            // §6.3 declining to save — see "A failed Result releases the claim"
+            // below, which is where that distinction is argued.
+            await store.ReleaseAsync(key, CancellationToken.None);
+            return result;
+        }
+
+        await store.CompleteAsync(key, Capture(result), Retention, CancellationToken.None);
+        return result;
+    }
+
+    // The claim belongs to one subject, bound from the principal and never from
+    // the command (§11.4). IsAuthenticated is false for BOTH a message-borne
+    // command and an anonymous HTTP request (Appendix D.1), so this segment is
+    // shared rather than unique — which is a residual, argued below, not a
+    // detail. It cannot collide with an authenticated subject: the alternative
+    // is a Guid rendered "D", and no Guid spells a word.
+    private string Subject() => currentUser.IsAuthenticated ? currentUser.Id.ToString() : "system";
+
+    // Only a success is ever stored, and what is stored is its VALUE — never
+    // the Result around it. Neither direction of that round trip works — see
+    // "Trap — JSON round-tripping the Result itself" for the measurement.
+    private static string Capture(TResult result) =>
+        ValueType is null
+            ? NoValue
+            : JsonSerializer.Serialize(ValueProperty!.GetValue(result), ValueType);
+
+    private static TResult Replay(string payload)
+    {
+        // (TResult)Result.Success() is legal C# under the constraint above and
+        // throws InvalidCastException at run time for every TResult that is not
+        // exactly Result — the compiler accepts it because Result is TResult's
+        // effective base class, and the runtime refuses a base instance where a
+        // derived one is required. The guard is what makes it safe, not an
+        // optimisation, and removing it fails only at the first replay.
+        if (ValueType is null)
+            return (TResult)Result.Success();
+
+        object? value = JsonSerializer.Deserialize(payload, ValueType);
+        return (TResult)SuccessOfValue!.Invoke(null, [value])!;
+    }
+
+    private static Type? ValueTypeOf()
+    {
+        if (typeof(TResult) == typeof(Result))
+            return null;
+
+        if (typeof(TResult).IsGenericType && typeof(TResult).GetGenericTypeDefinition() == typeof(Result<>))
+            return typeof(TResult).GetGenericArguments()[0];
+
+        // Unreachable while Result<T> is sealed and Result's constructor is
+        // private protected — a third shape could only be declared inside
+        // Common.Application. Stated rather than assumed: the obvious body
+        // indexes GetGenericArguments() directly, and on a third shape that
+        // throws IndexOutOfRangeException from a static constructor, which
+        // surfaces as a TypeInitializationException naming nothing useful.
+        throw new NotSupportedException(
+            $"{typeof(TResult).Name} is neither Result nor Result<T>, so no stored outcome " +
+            "can be rebuilt for it. A third Result shape is a change to this behaviour.");
     }
 }
 ```
+
+> **A claimed key belongs to one subject, and that is the invariant rather than
+> the key shape.** `CommandId` is client-generated, and §8.3's store prefix is
+> `{service}:idem:` — shared by every caller of the service. A key built from
+> the command type and that value alone is therefore entirely caller-controlled,
+> so caller A can name victim B's key, deliberately or by deriving the value
+> from a request-body hash, which is a common and recommended client
+> implementation of an idempotency key. If B's command has completed, A takes
+> the replay branch and is handed **B's result** — B's order id — and the
+> handler never runs, so none of §11.4's checks run either: they live *inside*
+> the handler this branch skips. If B's command is still in flight, A instead
+> holds the key and B is denied a legitimate operation for the whole 24-hour
+> retention. Neither path touches the caller's identity at any point.
+
+> **The invariant holds for authenticated callers and for nobody else, and that
+> is this section's largest residual.** `ICurrentUser.IsAuthenticated` is false
+> for a message-borne command *and* for an anonymous HTTP request — the port
+> says so in as many words (Appendix D.1), and §11.4's
+> `IsAuthenticated => Caller is not null` is what implements it. So `"system"`
+> is not one caller: it is every caller who is not one. Two consequences, and
+> the first is a rule rather than an observation:
+>
+> - **An idempotent command's endpoint must require authentication.** On an
+>   anonymous endpoint — and this platform has them, §10.2's listing is one —
+>   the collision described above is fully reachable *between anonymous
+>   callers*, which is the defect the subject segment was added to close,
+>   surviving inside the fix for it.
+> - **The message path shares one bucket by construction**, because §9.4's
+>   broker has a single principal. Every sender of every command type claims
+>   under `"system"`. That is not made worse by anything here, and it is not
+>   made better either: §11.4 records the message path's subject as an open
+>   question, and an exclusion from a rule is not a decision about what to do
+>   instead. Naming a fixed segment is the smallest thing that keeps a
+>   principal-less command from claiming under no subject at all.
+
+> **Trap — JSON round-tripping the `Result` itself.** It is the obvious body for
+> both halves and it cannot work in either direction. `System.Text.Json`
+> serialises public get-only properties by default (`IgnoreReadOnlyProperties`
+> is false), so it reads every accessor a `Result` has — and on a success
+> `Error` throws by design (Appendix D.5) while on a failure `Value` does.
+> Coming back is worse: `Result`'s constructor is `private protected` and
+> `Result<T>`'s is `internal`, so there is nothing for the serialiser to call
+> and it raises `NotSupportedException`.
+>
+> **Measured against the shipped type, not inferred from the documentation.** Of
+> the four shapes a handler can return, exactly **one** survives
+> `JsonSerializer.Serialize` — the non-generic *failure*, which is the one shape
+> this behaviour never stores. `Result.Success()`, `Result.Success<T>(v)` and
+> `Result.Failure<T>(e)` all throw `InvalidOperationException` carrying the
+> accessor's own message. So the naive body fails on the ordinary success path
+> rather than under an unusual fault, and it fails *after* §6.3 has committed:
+> the caller sees 500 for an order that exists, and a retry of the same
+> `CommandId` places a second one. **A protection that produces the duplicate
+> write it was added to prevent.**
+>
+> Adding a `[JsonConstructor]` and non-throwing accessors to `Result` is the
+> other way out and is refused: §5.3's always-valid argument and Appendix D.5's
+> contract are what make the throwing accessors correct, and a public
+> constructor would let a result report success while carrying an error.
+
+> **The value is serialised with default options and no converters, which is a
+> constraint on what an idempotent command may return.** §4.2 registers
+> `MoneyJsonConverter` into `OutboxJson` precisely because `Money` has a private
+> constructor and without it "deserialises to a zero amount and a null currency
+> and nothing says so". This behaviour composes no options at all, so a
+> `Result<Money>` would satisfy every constraint above, serialise, and replay a
+> zero-amount `Money` on a path that answers 200. Return a primitive, a `Guid`
+> or a DTO — never a domain value object. The reflection test below gates it.
+
+**Release is decided per case, and the cases are not symmetrical.** The `try`
+covers `next()` and nothing else, and the three store calls divide like this:
+
+| | |
+|---|---|
+| `next()` throws | **Release.** §6.3's `ExecuteAsync` disposes the transaction on the way out, which rolls it back — so nothing survives and a retry is owed |
+| Handler returns a failed `Result` | **Release**, for the same reason and not for the one §6.3's comment suggests — see below |
+| `CompleteAsync` throws | **Hold.** The work is durable; the retry meets `ConcurrentRequestException` until the key expires, which is a delay rather than a duplicate |
+| `TryClaimAsync` throws | **Nothing to decide, and this is the case with no good answer.** The `SET NX` may have succeeded on the server, so the key can be held for a day for work that never ran, and no retry gets past it |
+
+The two `ReleaseAsync` calls and the `CompleteAsync` all pass
+`CancellationToken.None`, and for two different reasons rather than one. After
+`next()` returns, the caller's token stopped meaning anything the moment the
+transaction committed, and passing it would abandon the store write at exactly
+the moment it is owed. In the `catch` nothing committed — but the commonest
+reason to be there at all is the caller's own cancellation, and honouring the
+token would abandon the release and leak the claim for a day.
+
+> **`ReleaseAsync` throwing is not handled, and the two sites fail
+> differently.** In the `catch`, an exception from the release means `throw;`
+> is never reached
+> and the original fault is **destroyed rather than wrapped** — the caller sees
+> a Redis error instead of the domain one. In the failure branch it turns a
+> business refusal into a 500. Both are the store's failure mode surfacing
+> through the behaviour, and both argue for the release being best-effort
+> **in the implementation**, where there is a logger to say it happened; a
+> swallowed exception here would be a silence with nothing to report it.
+
+**A failed `Result` releases the claim, and that is a decision rather than
+tidiness.** The reason is not the one §6.3's comment reaches for first.
+Declining to `SaveChanges` is not by itself enough — `EfUnitOfWork` says so in
+its own comment, because `ExecuteRawAsync` writes on the transaction's
+connection immediately and only a rollback undoes that. What makes a refusal
+safe is that `ExecuteAsync` disposes an uncommitted transaction, which rolls it
+back. Given that, there is no outcome worth replaying, and holding the key
+would replay a *refusal* — to the caller who fixed their request and retried
+under the same `Idempotency-Key`, and after the condition that caused it
+(`ProductsUnavailable`, say) has cleared. The cost accepted in exchange is that
+a client hammering a failing command re-runs the work each time, which is safe
+precisely because nothing commits.
+
+> **One dispatch is outside every argument above, and it is named rather than
+> assumed away.** §6.3 opens no transaction when one is already active, so on a
+> nested dispatch it returns `next()` without reaching the `IsFailure` test and
+> without calling `SaveChangesAsync` — the *outer* command's transaction decides
+> what happens to the rows, and it is still open when this behaviour makes up
+> its mind. Both sides break. A nested refusal may have written rows the outer
+> command goes on to commit, so releasing lets a retry write them twice; and a
+> nested *success* is completed here for 24 hours against work the outer
+> transaction may still roll back, so a retry replays a success for an order
+> that does not exist — which is worse than the duplicate, because the client
+> cannot see it. `IdempotencyBehavior` is registered outside
+> `TransactionBehavior` (§6.3), so a nested idempotent command genuinely lands
+> inside its parent's transaction. Nothing in this blueprint dispatches a
+> command from inside a handler, so the case is **unreached rather than
+> handled**; a service that starts to needs this behaviour to decline nested
+> dispatches outright, and this is the paragraph that changes when it does.
 
 The Redis implementation lives in Infrastructure and is where the two §8.1
 constraints are satisfied — §8.3's `RedisKeys` supplies the `{service}:idem:`
@@ -430,6 +652,70 @@ public void Commands_carrying_a_CommandId_declare_IIdempotentCommand()
         "and is not — IdempotencyBehavior is constrained on the interface, not the field.");
 }
 ```
+
+**The constraint on `TResult` is a second way to fail open, and it needs its own
+test for the reason the first one does.** A container drops an open generic
+whose constraints the closed type fails (§6.3). Measured on the pin this
+platform uses: `GetServices` returns an **empty sequence** with no diagnostic —
+as do `GetRequiredService<IEnumerable<T>>` and constructor injection — and
+`ValidateOnBuild` stays silent about open generics entirely. So a command that
+opts in and returns something else is not a build error and not a startup
+error; it is a pipeline that runs one behaviour shorter, which is
+indistinguishable from a pipeline that never had one.
+
+```csharp
+[Fact]
+public void Idempotent_commands_return_a_replayable_Result()
+{
+    (Type Command, Type Result)[] candidates =
+    [
+        .. typeof(PlaceOrderCommand).Assembly
+            .GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false })
+            .Where(typeof(IIdempotentCommand).IsAssignableFrom)
+            .SelectMany(t => t
+                .GetInterfaces()
+                .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>))
+                .Select(i => (Command: t, Result: i.GetGenericArguments()[0])))
+    ];
+
+    // The gate's own subject, asserted before anything it found. Both checks
+    // below are ShouldBeEmpty, which is green when the chain above selected
+    // NOTHING — the one reason a gate must never pass, and the failure this
+    // repository repeats most often.
+    candidates.ShouldNotBeEmpty(
+        "no command in this assembly implements IIdempotentCommand, so this test is " +
+        "looking at nothing — the interface has been renamed, moved, or not yet applied.");
+
+    candidates
+        .Where(pair => !typeof(Result).IsAssignableFrom(pair.Result))
+        .Select(pair => $"{pair.Command.Name} -> {pair.Result.Name}")
+        .ShouldBeEmpty(
+            "IdempotencyBehavior is constrained to TResult : Result, and the container " +
+            "silently omits an open generic whose constraints do not hold (§6.3) — so a " +
+            "command opting in with any other result type is never protected, and nothing " +
+            "says so at build time or at startup.");
+
+    candidates
+        .Where(pair => pair.Result.IsGenericType)
+        .Select(pair => (pair.Command, Value: pair.Result.GetGenericArguments()[0]))
+        .Where(pair => pair.Value.Assembly.GetName().Name!.EndsWith(".Domain"))
+        .Select(pair => $"{pair.Command.Name} -> Result<{pair.Value.Name}>")
+        .ShouldBeEmpty(
+            "the stored payload is the success VALUE, serialised with default options and " +
+            "no converters. Money has a private constructor, so it round-trips to a zero " +
+            "amount and a null currency and nothing says so (§4.2) — an idempotent command " +
+            "returns a primitive, a Guid or a DTO, never a domain value object.");
+}
+```
+
+**The third assertion uses the same `.Domain` suffix predicate §4.2's own
+dependency gate does**, and for the same reason: it names no service, so it
+survives §4.5's scaffold renaming the template's name inside whatever it
+renders. It is a proxy rather than a proof — a DTO with a private constructor
+would pass it — but it catches the case that actually exists in this
+repository, and a proxy that names its own limit beats a gate that reads as
+complete.
 
 > **Two connections, not one.** The cache multiplexer points at the instance
 > running `allkeys-lru`; the coordination multiplexer points at the
