@@ -130,7 +130,9 @@ arbitrary file and prints them — `printf 'hunter2' > f; cygpath -f f` prints
 `hunter2`, measured, not reasoned. That is a **shell reader**, and it lands in
 a command whose own binding rule says shell readers were deliberately excluded
 because none of them can be pointed at `$work` under the grant. The grant would
-have contradicted the paragraph three below it.
+have contradicted **Binding the reads to `$work`** below — named rather than
+counted, because a positional pointer is falsified by the next insertion above
+it, and this one was already short when it was written.
 
 `git worktree list` is already in the grant and reads nothing but git's own
 metadata. Its **entire** flag surface is `--porcelain`, `-v`, `-z` and

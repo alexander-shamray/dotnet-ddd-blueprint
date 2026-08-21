@@ -36,16 +36,16 @@ appears in it.
   under it resolves, report `unreadable-root` and stop. An empty result is not
   a clean scope, and the two are not distinguishable from anything you report
   afterwards.
-- **The root proof is not the scope proof, and only the second one is about
-  your audit.** A file opened anywhere under the root satisfies the check above
-  while the area you were actually assigned matches nothing — after which
-  reporting that area clean says a scope you never opened holds no defects. So
-  read at least one file **inside your assigned scope** as well, and where the
-  root resolves but the scope selects nothing, report `empty-scope` with the
-  paths or patterns you tried. Two outcomes rather than one because they have
-  different causes and different fixes: `unreadable-root` is the parent handing
-  you a path its readers cannot resolve, `empty-scope` is a scope that does not
-  select what somebody thought it did.
+- **The root proof is not the scope proof, and only the second one is about your
+  audit.** A file opened anywhere under the root satisfies the check above while
+  the area you were actually assigned matches nothing — after which reporting
+  that area clean says a scope you never opened holds no weaknesses. So read at
+  least one file **inside your assigned scope** as well, and where the root
+  resolves but the scope selects nothing, report `empty-scope` with the paths or
+  patterns you tried. Two outcomes rather than one because they have different
+  causes and different fixes: `unreadable-root` is the parent handing you a path
+  its readers cannot resolve, `empty-scope` is a scope that does not select what
+  somebody thought it did.
 - A **scope** — the area to audit (CI/tooling, application source, or the
   deploy/infrastructure surface), and the risks the parent has already told you
   are **accepted** (local-dev defaults and documented decisions). Do not
