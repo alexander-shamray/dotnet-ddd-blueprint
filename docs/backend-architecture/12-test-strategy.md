@@ -738,14 +738,79 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         Result<Guid> first = await dispatcher.SendAsync(command);
         Result<Guid> second = await dispatcher.SendAsync(command);
 
+        // Served ENTIRELY by the replay branch (§8.5) — the handler runs once,
+        // so this value is the stored one rebuilt through Result.Success<T>
+        // rather than a second handler's return. Both assertions are needed:
+        // the count alone passes against a behaviour that claims the key and
+        // then throws, and the equality alone passes against one that never
+        // claimed it if the handler happens to be deterministic.
         second.Value.ShouldBe(first.Value);
 
         OrderingDbContext db =
             scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
         (await db.Orders.CountAsync()).ShouldBe(1);
     }
+
+    [Fact]
+    public async Task A_command_id_claimed_by_one_customer_does_not_replay_to_another()
+    {
+        PlaceOrderCommand command =
+            CommandBuilder.PlaceOrder() with { CommandId = Guid.CreateVersion7() };
+
+        // The same command, the same CommandId, two principals. Nothing about
+        // the request distinguishes them, which is the point: CommandId is
+        // client-generated, so this is the collision a second caller can
+        // arrange (§8.5).
+        Result<Guid> mine = await fixture.DispatchAsync(
+            command,
+            Principals.Authenticated(SeedData.CustomerId));
+        Result<Guid> theirs = await fixture.DispatchAsync(
+            command,
+            Principals.Authenticated(Guid.CreateVersion7()));
+
+        // Not "both succeeded" — that is true of an unscoped key too, because
+        // the second caller is handed the FIRST caller's order id and reads it
+        // as a success. The assertion has to be that they are different orders.
+        theirs.Value.ShouldNotBe(mine.Value);
+
+        // And the third dispatch is what makes the second one mean anything.
+        // Two different ids prove only that SOMETHING varies per caller — a key
+        // scoped by a correlation id, or no IdempotencyBehavior registered at
+        // all, produces them just as well. Replaying the FIRST subject's own
+        // claim is what says the varying segment is the subject.
+        Result<Guid> mineAgain = await fixture.DispatchAsync(
+            command,
+            Principals.Authenticated(SeedData.CustomerId));
+
+        mineAgain.Value.ShouldBe(mine.Value);
+
+        // CreateScope, not the root provider: OrderingDbContext is scoped, and
+        // DispatchAsync opened and closed its own scopes above. Resolving it
+        // from Factory.Services directly throws under ValidateScopes and, where
+        // that is off, hands back a context living as long as the host.
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db =
+            scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        (await db.Orders.CountAsync()).ShouldBe(2);
+    }
 }
 ```
+
+`A_command_id_claimed_by_one_customer_does_not_replay_to_another` is the one
+test here whose failure is a **disclosure** rather than a defect: an unscoped
+key does not throw, log or answer slowly — it answers 200 with another
+customer's order id, past every §11.4 check, because the replay branch skips
+the handler those checks live in. That is why the assertion is `ShouldNotBe`
+against the first caller's value and not `IsSuccess.ShouldBeTrue()`.
+
+**Three dispatches rather than two, and the third is the one that carries the
+claim.** `ShouldNotBe` establishes only that the key varies with *something*;
+a key scoped by a correlation id would satisfy it, and so would a pipeline with
+no `IdempotencyBehavior` in it at all — which is exactly the fail-open §8.5's
+reflection test exists for. Returning to the first subject and getting the
+first order back is what identifies the varying segment as the subject. The row
+count sits beside all three: two callers, two orders, and the replay adds
+none.
 
 The dispatcher gets its own tests, driven explicitly rather than by waiting on a
 timer. These are the ones that cover the behaviour §13.6 alerts on — per-row
