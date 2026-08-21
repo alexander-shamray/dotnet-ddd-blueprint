@@ -26,8 +26,8 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
         await _catalog.InitializeAsync();
 
         _factory = new BffFactory { PricingAddress = _catalog.Address };
-        _catalog.Prices[Chair] = ("Chair", 49.99m);
-        _catalog.Prices[Desk] = ("Desk", 120.50m);
+        _catalog.Prices[Chair] = ("Chair", 49.99m, "GBP");
+        _catalog.Prices[Desk] = ("Desk", 120.50m, "GBP");
     }
 
     public async ValueTask DisposeAsync()
@@ -210,7 +210,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     [Fact]
     public async Task A_price_for_a_product_nobody_asked_about_stays_a_500()
     {
-        _catalog.Prices[Desk] = ("Desk", 120.50m);
+        _catalog.Prices[Desk] = ("Desk", 120.50m, "GBP");
         _catalog.AlsoAnswerWith.Add(Desk);
 
         using HttpClient client = Caller();
