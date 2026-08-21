@@ -182,7 +182,7 @@ mktemp -d "${TMPDIR:-/tmp}/secsweep-XXXXXX"          # prints a writable dir —
 git rev-parse HEAD                                   # the immutable commit — capture it as $pinned
 git worktree list --porcelain                        # BEFORE — capture the worktree records as $before
 bash .claude/scripts/git-worktree-detach.sh "$posix" "$pinned"   # pin that exact commit, never HEAD re-resolved
-git worktree list --porcelain                        # AFTER — the `worktree ` line absent from $before IS $work
+git worktree list --porcelain                        # AFTER — the new `worktree ` line, prefix stripped, IS $work
 ```
 
 **`$work` is the host-native spelling and `$posix` is the shell's — two strings
@@ -203,6 +203,23 @@ the readers resolve that. **The record to read is the one that was not there a
 moment ago** — hence two listings, and the difference between them. Then check
 that its path ends in the `secsweep-` basename `mktemp` just printed, which
 turns a single selector into an agreement between two.
+
+**Porcelain is a labelled record, so `$work` is the path field and not the
+line.** The format is three lines per worktree —
+
+```
+worktree D:/tmp/alexa/secsweep-nlPuf1
+HEAD 34bb526dd8e01aac01275b05530937275427f7e9
+detached
+```
+
+— so compare the **`worktree `-prefixed lines only**, and strip that prefix
+before anything reads `$work`. Both halves matter and each fails differently.
+Left unstripped, `$work` is `worktree D:/…` and `$work/Platform.slnx` cannot
+resolve, which stops the sweep. Compared over the whole dump, a new detached
+worktree contributes a `worktree ` line **and** a `detached` line — two records,
+not one — so "exactly one appeared" is true of the prefixed lines and false of
+everything else.
 
 **`--porcelain`, and it is the difference between a set and a table.** The
 default output is column-aligned for a human, so adding a longer path *repads
@@ -247,8 +264,8 @@ it and the auditors read a commit nobody pinned. A wrong snapshot, silently,
 which is the failure this whole section exists to prevent.
 
 The set difference is what makes the answer positive rather than merely
-plausible: exactly one row appears between the two listings, and it is the one
-the helper just created.
+plausible: exactly one `worktree ` line appears between the two listings, and it
+is the one the helper just created.
 
 **No `cygpath`, deliberately, and the reason is this repository's most-repeated
 grant lesson.** `cygpath -m` is the obvious translation and it was the first
@@ -650,7 +667,8 @@ happen as a review that found nothing. This is the same rule that made the Grok
 loop trust the verdict check over the exit code: a review that never ran cannot
 report as clean.
 
-**The last two are the ones that arrive looking like success.** A dead subagent
+**`unreadable-root` and `empty-scope` are the ones that arrive looking like
+success.** A dead subagent
 and a failed `gh` call both surface as errors; an auditor handed a root it
 cannot resolve — or a scope that selects nothing inside a root that reads
 perfectly well — returns an ordinary, well-formed, empty report, and an empty
