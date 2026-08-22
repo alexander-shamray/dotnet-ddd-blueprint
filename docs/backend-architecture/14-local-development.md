@@ -362,19 +362,39 @@ dotnet run --project src/Services/Ordering/Ordering.Api
 ```
 
 **A host process reads none of the container `environment:` blocks, so every
-key a service throws without has to be supplied to it.** Three do that today,
-each named by the registration that reads it — `ConnectionStrings__<Service>`
-(§7.1's runtime key, `AddSqlServer`), `ConnectionStrings__RabbitMq` (§9's bus)
-and `Identity__Authority` ([§11.3](11-identity-authorization.md), read eagerly
-by `AddJwtAuthentication`). The values differ from the container ones only in
-the host name, because the compose file publishes each port:
+key a service throws without has to be supplied to it.** **Five** do that
+today, each named by the registration that reads it —
+`ConnectionStrings__<Service>` (§7.1's runtime key, `AddSqlServer`),
+`ConnectionStrings__RabbitMq` (§9's bus), `Identity__Authority`
+([§11.3](11-identity-authorization.md), read eagerly by
+`AddJwtAuthentication`), and the two Redis connections
+([§8.1](08-caching-redis.md), read eagerly by `AddRedisConnections`). The
+values differ from the container ones only in the host name and, for the
+second Redis instance, the port — because the compose file publishes each one:
 
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Ordering='Server=localhost;Database=Ordering;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
 export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
+export ConnectionStrings__RedisCache='localhost:6379'
+export ConnectionStrings__RedisCoordination='localhost:6380'
 ```
+
+> **The two Redis ports differ here and are identical in the compose blocks,
+> and getting that backwards is a connection to the wrong instance rather than
+> an error.** Both containers listen on Redis's own 6379, so inside the network
+> the addresses differ only by host name; the published ports are 6379 and
+> **6380**, so on the host they differ only by port. A block copied from the
+> compose file would point both connections at the cache — the same defect the
+> chart's key guard refuses at render time (§15.3), arriving where nothing
+> checks it.
+>
+> **This block said three keys until §8.5's PR gave `AddRedisConnections` its
+> first callers.** It reads both connection strings eagerly and throws naming
+> the missing one, so the `dotnet run` above exited before startup for anyone
+> following the instructions — the failure §14.1's own rule predicts, in the
+> half of the chapter that rule does not cover.
 
 **The key is the service's own**, and the block above is `Ordering.Api`'s
 because that is the host the fence names. `AddOrderingInfrastructure` reads
