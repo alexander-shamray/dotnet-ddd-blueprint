@@ -1831,9 +1831,18 @@ both `gh pr view --json` feeds are unfiltered by construction, while `ship.md`
 filters the same data by author. **Not "on `Copilot` authorship", which is the
 shorthand this very change set retired one file over**: step 6 filters two
 feeds by two *different* logins — inline comments on `Copilot`, review bodies
-on `copilot-pull-request-reviewer` — and the issue-comment REST spelling
-appears in neither. Treating those as one identity is exactly what let a
-two-string allow-list look complete. The command now states the
+on `copilot-pull-request-reviewer` — and issue comments on neither, because
+step 6 does not read that feed at all. Treating the two it does read as one
+identity is exactly what let a two-string allow-list look complete.
+
+**`copilot-pull-request-reviewer[bot]` is REST's spelling and belongs to no
+feed either command uses**, which is measured rather than reasoned: it comes
+from `/pulls/{n}/reviews`, while the one REST endpoint in play —
+`/pulls/{n}/comments`, behind `pr-review-comments.sh` — reports `Copilot`, and
+both `gh pr view --json` feeds are GraphQL and report
+`copilot-pull-request-reviewer`. An earlier revision of this paragraph called
+the issue-comment login the REST spelling; `gh pr view` loads `reviews` and
+`comments` through one exporter, so that could never have been true. The command now states the
 filter and reports the count it dropped, but that is prose — the enforceable
 version is an author filter inside the helper, which is a human's edit made
 with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run
