@@ -2,6 +2,7 @@ using Catalog.TestSupport.Outbox;
 using Common.Application;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Common.Infrastructure.Redis;
 using Common.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -17,7 +18,11 @@ namespace Catalog.TestSupport;
 /// resolve, the container suite at running containers — so what differs
 /// between them is the infrastructure and not the wiring.
 /// </summary>
-public class CatalogApiFactory(string connectionString, string rabbitConnectionString)
+public class CatalogApiFactory(
+    string connectionString,
+    string rabbitConnectionString,
+    string? redisCacheConnectionString = null,
+    string? redisCoordinationConnectionString = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>
@@ -39,6 +44,27 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
     public const string UnreachableAuthority = "https://identity.invalid/realms/test";
 
     /// <summary>
+    /// The Redis address a host takes when the caller supplies none, on
+    /// <see cref="UnreachableAuthority"/>'s terms and for the same reason:
+    /// <c>AddRedisConnections</c> reads both keys eagerly and throws naming
+    /// the missing one, so every host over this <c>Program</c> needs both,
+    /// reachable or not.
+    /// </summary>
+    /// <remarks>
+    /// <b>Unreachable is safe here in a way it would not be for SQL</b>, and
+    /// the difference is worth stating rather than relying on.
+    /// <c>AddRedisConnections</c> forces <c>AbortOnConnectFail = false</c>
+    /// (§8.1's "degrade, don't die"), so the multiplexer is constructed
+    /// without a round trip and retries in the background — and it is
+    /// constructed lazily, on the first resolve, which no host-smoke test
+    /// reaches. A suite that actually exercises §8.5's store passes a running
+    /// container instead; <c>.invalid</c> is reserved and never resolves, so
+    /// one that forgets to fails loudly rather than reaching a developer's own
+    /// Redis on localhost.
+    /// </remarks>
+    public const string UnreachableRedis = "redis.invalid:6379";
+
+    /// <summary>
     /// The RUNTIME connection of §7.1, and only that one. The host has no
     /// business reading <c>CatalogMigrator</c>, and a fixture that supplied
     /// both would hide it if it started. The bus key is required because
@@ -49,6 +75,12 @@ public class CatalogApiFactory(string connectionString, string rabbitConnectionS
         builder
             .UseSetting("ConnectionStrings:Catalog", connectionString)
             .UseSetting("ConnectionStrings:RabbitMq", rabbitConnectionString)
+            .UseSetting(
+                $"ConnectionStrings:{RedisConnections.Cache}",
+                redisCacheConnectionString ?? UnreachableRedis)
+            .UseSetting(
+                $"ConnectionStrings:{RedisConnections.Coordination}",
+                redisCoordinationConnectionString ?? UnreachableRedis)
             .UseSetting(AuthenticationExtensions.AuthorityKey, UnreachableAuthority)
             .ConfigureServices(services =>
             {

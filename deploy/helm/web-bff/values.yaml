@@ -92,6 +92,12 @@ database:
 broker:
   enabled: false
 
+# §8.1's Redis connections, and this host takes neither. Written down rather
+# than omitted, on database and broker's terms (§15.3): a capability is a claim
+# a chart makes, not one to infer from a missing key.
+redis:
+  enabled: false
+
 observability:
   otlpEndpoint: http://otel-collector.observability:4317
 

@@ -7,6 +7,7 @@ using Common.Contracts.Catalog.V1;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Common.Infrastructure.Redis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -109,6 +110,25 @@ public static class DependencyInjection
         // §13.3's projection lag, on the Commerce.Messaging meter
         // AddObservability already collects.
         services.AddSingleton<MessagingMetrics>();
+
+        // §8's two connections, and the first host to take them. PR-12 built
+        // AddRedisConnections and nothing called it; the seat §8.5's behaviour
+        // fills is what finally reads a key, so the wiring joins here on the
+        // rule every other line in this method follows — a registration
+        // arrives with the code that consumes it.
+        //
+        // It brings §8.2's HybridCache stack with it, which nothing in this
+        // service reads yet. That is deliberate rather than overlooked: the
+        // method is one call by design (§8.2), so a service either has Redis
+        // or does not, and half-having it is the state that produces a cache
+        // silently reading the database.
+        //
+        // Both connection strings are read EAGERLY and throw when absent, so
+        // this line is what a missing key stops — the host will not start.
+        // Compose and the Helm charts gained both in the same change; a
+        // deployment that did not would crash-loop rather than run
+        // unprotected.
+        services.AddRedisConnections(configuration);
 
         // The bus (§9). Its readiness needs no line below: AddMassTransit
         // registers the bus health check itself — "masstransit-bus", tagged
