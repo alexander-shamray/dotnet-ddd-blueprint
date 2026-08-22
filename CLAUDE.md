@@ -1790,8 +1790,11 @@ as long as the frontmatter rows had. The lesson survives with its converse
 attached: frontmatter is the grant nobody reads twice, and the global file is
 the one everybody assumes somebody else already read.
 
-**Four grants remain wider than the operations they buy**, and all four are
-known residuals rather than oversights. Two are `/ship`'s:
+**Five grants remain wider than the operations they buy**, and all five are
+known residuals rather than oversights. **This paragraph is the inventory and
+no command file keeps a second total** — `ship.md`'s callout carried one, and
+it went stale the moment a branch pinned that file's fetch grant. Two are
+`/ship`'s:
 `Bash(git worktree remove:*)` admits the `-f` that discards work, and
 `Bash(gh pr merge --merge:*)` admits a trailing `--admin` that merges past
 failing checks. Helpers are owed for both; until someone with the
@@ -1815,7 +1818,20 @@ with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run
 `/ship`'s Copilot loop unattended on a PR that outside contributors can comment
 on.
 
-**A fifth thing is a gap in the mechanism rather than in a grant.** Pinning a
+The fifth is **`git push` under the two sweeps**, and it is the one that looks
+closed and is not. Both commands state a read-only boundary, and both used to
+close it with "no `git push` is granted either, so the branch cannot move" —
+which reads an *absence* as a control, the exact rule the sentence beside it
+had just retired. `.claude/settings.json` **allows** `Bash(git push origin:*)`
+and `Bash(git push -u origin:*)` globally, so a push of the current branch does
+not prompt at all; only force-pushes and pushes to `main` are denied. Naming
+`git push` in each sweep's `disallowed-tools` is the obvious fix and is
+**unverified**: that key's `Bash(...)` form has never been measured here — the
+`Agent(...)` form is what was — and a nested `claude -p` probe could not
+separate a rejected pattern from a command that failed to load. Both files now
+state the residual instead of claiming the control.
+
+**A sixth thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
 the harness has no "only this type" allow — so `security-sweep.md` and
 `bug-sweep.md` each enumerate the registered types that hold a shell, an editor

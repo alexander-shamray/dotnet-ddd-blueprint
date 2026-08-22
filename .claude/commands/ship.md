@@ -565,8 +565,15 @@ same argument as never calling a branch clean because asking failed.
    remove is left where it is and named in the report; do not reach for `-f`,
    which is the one spelling that discards somebody's work.
 
-   > **Two grants in this file are wider than the operations they buy, and both
-   > are known residuals rather than oversights.** A prefix rule cannot exclude
+   > **Some grants in this file are wider than the operations they buy, and
+   > every one is a known residual rather than an oversight.** `CLAUDE.md`
+   > keeps the count and the inventory; this callout keeps the argument for the
+   > two that bite hardest here, and deliberately states no total of its own —
+   > a second tally is the drift this repository has closed three times
+   > already, and it went stale in exactly that way when a later branch pinned
+   > this file's fetch grant.
+   >
+   > A prefix rule cannot exclude
    > a *trailing* flag — the argument the push rules already make — so
    > `Bash(git worktree remove:*)` admits the `-f` this file forbids, and
    > `Bash(gh pr merge --merge:*)` admits a trailing `--admin`, which merges

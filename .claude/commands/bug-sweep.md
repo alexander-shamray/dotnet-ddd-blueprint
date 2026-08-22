@@ -617,10 +617,12 @@ agent profile's argument does not cover this.
 Three things narrow it and none of them closes it. The path check at the head
 of step 2 drops any candidate citing a path outside `$work` before the code is
 opened. The mutations available are three, each with a stated rule — `--repo`
-for this repository, never `--force`, and the temp-path shape. And there is no
-`Write`, no `Edit` and no `git push`, so no file and no branch can move
-whatever the parent is persuaded of; the unbounded part is *what an issue says
-and where it is filed*.
+for this repository, never `--force`, and the temp-path shape. `Write` and
+`Edit` are **denied**, so no file's contents can be altered whatever the parent
+is persuaded of. **The branch is a residual rather than a control**:
+`git push origin` is globally allowed and this command does not deny it,
+argued in full below. The unbounded part is *what an issue says and where it is
+filed*.
 
 Closing it properly is infrastructure rather than prose, and there are two
 directions. Helpers that pin the repository and the label name would leave the
@@ -703,8 +705,17 @@ enforcing half is `disallowed-tools`, not the absence of an entry in
 restrict which tools are available: every tool remains callable", so omitting
 `Write` and `Edit` never withheld them. They are now **named in
 `disallowed-tools`**, which removes them from the pool outright, so no file's
-**contents** can be altered; no `git push` is granted either, so the branch
-cannot move. A `Write` grant for issue bodies was
+**contents** can be altered.
+
+**`git push` is a different case and this paragraph used to get it wrong** —
+see `/security-sweep`'s copy for the whole argument, which is the same one
+twice. It is not in `disallowed-tools`, omitting it withholds nothing, and
+`.claude/settings.json` **allows** `Bash(git push origin:*)` globally, so a
+push of the current branch does not even prompt. Naming it in
+`disallowed-tools` is the obvious fix and is not taken here: the `Bash(...)`
+form in that key is unverified, and an unverified deny described as a closed
+hole is the mistake `CLAUDE.md` records against the narrowed `git reset` grant.
+**The residual stands, named.** A `Write` grant for issue bodies was
 refused here for the reason `/security-sweep` records after trying one: it would
 re-open source editing, and a read-only claim resting on prose while the grant
 permits writing every undenied path is unenforced. Bodies go through

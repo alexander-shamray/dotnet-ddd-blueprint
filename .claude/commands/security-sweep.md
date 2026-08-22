@@ -351,8 +351,10 @@ Containment is deferred, not achieved.
 Three things narrow it and none closes it: the path check at the head of step 2
 drops a candidate citing anything outside `$work` before the code is opened;
 the three available mutations each carry a stated rule (`--repo`, never
-`--force`, the temp-path shape); and with no `Write`, no `Edit` and no
-`git push`, no file and no branch can move. What is unbounded is what an issue
+`--force`, the temp-path shape); and with `Write` and `Edit` **denied**, no
+file's contents can be altered. **The branch is a residual rather than a
+control** — `git push origin` is globally allowed and this command does not
+deny it, argued in full below. What is unbounded is what an issue
 says and where it is filed. Closing it means helpers that pin the repository
 and label so no free parameter remains, or a verify stage returning a
 structured verdict the parent files on without composing a body from text it
@@ -437,8 +439,28 @@ permission settings still govern tools that are not listed". So *omitting*
 `Write` and `Edit` never withheld them; it only meant they would have gone to
 whatever the session's permission mode does with an unlisted tool, which under
 an auto or bypassing mode is silently yes. They are now **named in
-`disallowed-tools`**, which removes them from the pool outright, and no
-`git push` is granted either, so the branch cannot move. A
+`disallowed-tools`**, which removes them from the pool outright, so no file's
+**contents** can be altered.
+
+**`git push` is a different case and this paragraph used to get it wrong.** It
+is not in `disallowed-tools`, and omitting it withholds nothing — which is the
+very rule the sentence above just established. It is worse than unlisted:
+`.claude/settings.json` **allows** `Bash(git push origin:*)` and
+`Bash(git push -u origin:*)` globally, so a push of the current branch does not
+even prompt. Force-pushes and pushes to `main` are denied by name; an ordinary
+push is not. So "no branch can move" was false, and it was false in exactly the
+way this section exists to warn about — reading an absence as a control.
+
+**Naming `git push` in `disallowed-tools` is the obvious fix and is not taken
+here, because the form is unverified.** `CLAUDE.md`'s record that
+`disallowed-tools` removes a tool from the pool rests on an `Agent(...)`
+measurement; no command in this repository has ever put a `Bash(...)` pattern
+in that key, and a nested `claude -p` probe could not separate "the harness
+rejects the pattern" from "the probe failed to load". Writing an unverified
+deny and describing it as closing the hole is the precise mistake `CLAUDE.md`
+records against the narrowed `git reset` grant — the git behaviour was
+verified and the *matching* was not. **The residual stands, named, until
+someone measures the Bash form.** A
 `Write` grant for issue bodies was tried and removed precisely because it would
 have re-opened source editing — a read-only claim resting on prose while the
 grant permits writing every undenied path is unenforced, which for a security
