@@ -30,10 +30,15 @@ public class CommandMapperTests
 {
     private static readonly Guid Order = Guid.Parse("8b3a5c21-4d7e-4f19-8c62-3e5a7b9d1c04");
 
-    public static TheoryData<string> ReviewReasonCodes()
+    /// <summary>
+    /// Read off the class rather than listed here, which is what makes this
+    /// suite a check on the mapper rather than a third copy of the vocabulary.
+    /// Both directions below start from it, which is the point: a single
+    /// reflection query means the two assertions cannot disagree about what
+    /// "declared" is.
+    /// </summary>
+    private static string[] DeclaredCodes()
     {
-        // Read off the class rather than listed here, which is what makes this
-        // a check on the mapper rather than a third copy of the vocabulary.
         string[] codes =
         [
             .. typeof(ReviewReasons)
@@ -48,8 +53,13 @@ public class CommandMapperTests
         // fourth reason does not fail a test that has no opinion about it.
         codes.Length.ShouldBeGreaterThanOrEqualTo(3);
 
+        return codes;
+    }
+
+    public static TheoryData<string> ReviewReasonCodes()
+    {
         TheoryData<string> data = [];
-        foreach (string code in codes)
+        foreach (string code in DeclaredCodes())
             data.Add(code);
 
         return data;
@@ -65,6 +75,18 @@ public class CommandMapperTests
 
         mapped.OrderId.ShouldBe(Order);
         mapped.Reason.ShouldBe(code);
+    }
+
+    [Fact]
+    public void The_mapper_accepts_exactly_the_codes_the_vocabulary_declares()
+    {
+        // The direction the theory above cannot reach. It walks
+        // ReviewReasons and asserts each code is accepted, which stays green
+        // while FlagOrderForReviewMapper.Known holds a fourth code the class
+        // no longer declares — a vocabulary this service accepts and nothing
+        // produces. Set equality is what fails from either side, and it is
+        // the claim this file's summary has always made.
+        FlagOrderForReviewMapper.Known.ShouldBe(DeclaredCodes(), ignoreOrder: true);
     }
 
     [Fact]

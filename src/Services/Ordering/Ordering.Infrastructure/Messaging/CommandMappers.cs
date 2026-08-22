@@ -121,8 +121,17 @@ public sealed class FlagOrderForReviewMapper
     /// two, which fails from either side. <c>CancellationReasons</c> one file
     /// over parses rather than lists and is the shape this cannot take, since
     /// a review reason maps to no domain type.
+    /// <para>
+    /// <b>Public because that test is its only other reader, and until this
+    /// change it could not be written.</b> A private set left the suite able
+    /// to assert one direction — every declared reason is accepted — which
+    /// passes unchanged while a stale code sits here that
+    /// <see cref="ReviewReasons"/> no longer declares. One access modifier is
+    /// a smaller commitment than an <c>InternalsVisibleTo</c> naming the
+    /// consumer, which is the trade <c>MetricsInitialiser</c> already makes.
+    /// </para>
     /// </remarks>
-    private static readonly FrozenSet<string> Known = FrozenSet.Create(
+    public static readonly FrozenSet<string> Known = FrozenSet.Create(
         StringComparer.Ordinal,
         ReviewReasons.NotDespatched,
         ReviewReasons.StockNotReleased,
