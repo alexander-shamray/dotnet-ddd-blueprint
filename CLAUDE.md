@@ -1764,11 +1764,29 @@ allow.
 including the middle.** `Bash(git *--output*)` refuses `git log`, `git diff`
 and `git show` carrying `--output` anywhere in the argument list, and leaves
 plain `git log` alone — both halves measured, because a deny that blocked the
-command outright would read the same from the failing side. That is what
-closes the three read grants above without removing them, and removing them
-would have bought nothing anyway: the harness treats read-only forms of `git`
-as promptless built-ins whatever the allow list says, and its own note is that
-"to require a prompt for one of these commands, add an `ask` or `deny` rule".
+command outright would read the same from the failing side. Removing the three
+read grants instead would have bought nothing: the harness treats read-only
+forms of `git` as promptless built-ins whatever the allow list says, and its
+own note is that "to require a prompt for one of these commands, add an `ask`
+or `deny` rule".
+
+**It raises the cost of the naive spelling and it is not a boundary**, and the
+distinction is the whole of the reset-grant lesson one paragraph up. A
+permission rule matches the command *string*; the shell reassembles adjacent
+quoted fragments before `exec`, so `--out''put=<path>` reaches `git` as
+`--output=<path>` while never presenting contiguous `--output` to the matcher.
+Copilot raised this against the rule as shipped and it is accepted. **The
+concatenation itself was not verified here** — the probe was refused by the
+classifier layer, which is a second net worth noting and not evidence — so
+this rests on documented quote-removal semantics rather than on a measurement,
+and it is written down that way.
+
+**What would close it is what closed every comparable case: a helper that
+spells its own flags**, or a rule over the executed argv rather than the typed
+string. Neither exists, `.claude/scripts/**` is edit-denied to the session, and
+so the deny stays as a speed bump with its limit stated. **A substring deny
+over a shell command string can never be more than that**, which is the
+generalisation worth carrying past this one flag.
 
 **The `::` in a value collides with the `:*` suffix syntax, and the collision
 fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
@@ -1808,7 +1826,7 @@ as long as the frontmatter rows had. The lesson survives with its converse
 attached: frontmatter is the grant nobody reads twice, and the global file is
 the one everybody assumes somebody else already read.
 
-**Five grants remain wider than the operations they buy**, and all five are
+**Six grants remain wider than the operations they buy**, and all six are
 known residuals rather than oversights. **This paragraph is the inventory and
 no command file keeps a second total** — `ship.md`'s callout carried one, and
 it went stale the moment a branch pinned that file's fetch grant. Two are
@@ -1863,7 +1881,14 @@ not prompt at all; only force-pushes and pushes to `main` are denied. Naming
 separate a rejected pattern from a command that failed to load. Both files now
 state the residual instead of claiming the control.
 
-**A sixth thing is a gap in the mechanism rather than in a grant.** Pinning a
+The sixth is the **`--output` deny itself**, which is the inventory's one
+entry that is a *deny* rather than an allow — and it is here because a deny
+over a command string is defeated by shell quoting, as the paragraph above
+records. It closes the naive spelling and nothing more. The three read grants
+it guards stay, because removing them buys nothing against a promptless
+built-in.
+
+**A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
 the harness has no "only this type" allow — so `security-sweep.md` and
 `bug-sweep.md` each enumerate the registered types that hold a shell, an editor
