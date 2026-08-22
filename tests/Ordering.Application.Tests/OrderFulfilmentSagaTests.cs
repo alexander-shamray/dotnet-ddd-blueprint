@@ -58,9 +58,11 @@ public class OrderFulfilmentSagaTests
     /// <b>Measured by deleting both lines: 11 of the 13 tests this file held
     /// when the measurement was taken fail, and every one of them fails as a
     /// TIMEOUT rather than as an error.</b> The count is left as measured
-    /// rather than rescaled to the 20 tests here now — a ratio nobody re-ran
+    /// rather than rescaled to the 23 tests here now — a ratio nobody re-ran
     /// is not evidence about a suite that has since grown.
-    /// The two survivors are the structural pair at the bottom, which
+    /// The two survivors are the structural pair the file then ended with —
+    /// there is a third beside them now, and it would survive the same way.
+    /// They
     /// construct the state machine and never start a bus — correctly, and
     /// worth knowing, because they are the two that would keep a deleted
     /// registration looking half-covered. What the eleven do not do is say
@@ -948,9 +950,11 @@ public class OrderFulfilmentSagaTests
         //
         // What the machine's own declaration can say is whether the branch is
         // there. Compensating is the state where that matters: it is reachable
-        // from AwaitingStock and AwaitingPayment, so five of the eight declared
+        // from AwaitingStock and AwaitingPayment, so six of the eight declared
         // events can arrive, and the comment beside it claims none is left to
-        // the catch-all. PaymentDeclined was missing from that enumeration.
+        // the catch-all. PaymentDeclined was the sixth, and was missing from
+        // that enumeration — which is also why this count read five until the
+        // assertion below was added under it.
         OrderFulfilmentSaga saga = new();
 
         string[] accepted = [.. saga.NextEvents(saga.Compensating).Select(e => e.Name)];

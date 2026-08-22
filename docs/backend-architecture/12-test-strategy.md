@@ -1893,9 +1893,19 @@ public async Task Commands_are_sent_and_events_are_published()
 > ([§9.6](09-messaging.md)), and the suite that proved a stale timeout
 > "changes nothing" was green against both outcomes for as long as it existed.
 > A test whose subject is absorption has to read
-> `harness.Consumed.Select<T>(spent).Select(m => m.Exception)` and assert it is
-> empty — and on the cancelled token, for the reason above, or the read spends
-> the shared bound and every assertion after it answers falsely.
+> `harness.Consumed.Select<T>(spent).Select(m => m.Exception)` and assert every
+> element is **null** — and on the cancelled token, for the reason above, or
+> the read spends the shared bound and every assertion after it answers
+> falsely.
+>
+> **Null, not empty, and the difference is the whole test.** This passage said
+> empty until PR-27's saga suite compiled it: `Consumed` records one entry per
+> delivery whatever the outcome, and `Exception` is null on a clean one — so
+> the sequence has an element per absorbed message and an emptiness assertion
+> fails on exactly the result the test exists to prove. `ShouldAllBe(e => e ==
+> null)` is what the suite runs. An assertion that cannot pass is a less
+> expensive defect than one that cannot fail, but it is still a sample nobody
+> executed.
 
 > **A missing scheduler fails this suite in the costume the traps above
 > describe, which is why the registration is spelled out rather than trimmed.**

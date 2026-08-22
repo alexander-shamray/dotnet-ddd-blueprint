@@ -93,9 +93,19 @@ internal static class SagaContracts
     /// </summary>
     /// <remarks>
     /// The reason is a parameter because both origins reach the saga through
-    /// this one type: <c>customer_request</c> from §11.4's endpoint, and every
-    /// <see cref="CancelReasons"/> code the saga itself sent on
+    /// this one type: §11.4's endpoint, and the code the saga itself sent on
     /// <c>CancelOrder</c>, echoed back by the aggregate it cancelled.
+    /// <para>
+    /// <b>The code does not say which origin it came from, and an earlier
+    /// revision of these remarks taught that it did.</b> It paired
+    /// <c>customer_request</c> with the endpoint and everything else with the
+    /// saga; <c>CancellationReasons.TryParse</c> accepts all five
+    /// <see cref="CancelReasons"/> codes, so the endpoint may send any of
+    /// them, and the saga sends whichever its own transition recorded. A
+    /// double that teaches a discriminator the real contract does not have is
+    /// the failure PR-26 named — so this is stated rather than left to be
+    /// inferred from the parameter.
+    /// </para>
     /// </remarks>
     internal static OrderCancelled OrderCancelled(Guid orderId, Guid customerId, string reason) => new()
     {

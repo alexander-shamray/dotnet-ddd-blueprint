@@ -5,15 +5,18 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 /// <summary>
 /// §9.6's one command that changes no business state. It writes an operations
 /// row and stops, and no aggregate is loaded — but <b>not</b> because nothing
-/// about the order changed. What the three reasons share is narrower than
+/// about the order changed. What the four reasons share is narrower than
 /// that: a human now has work the platform has no contract to do, and that is
 /// a fact about operations rather than about the order.
 ///
-/// Two of the reasons are a wait that ran out, where the order's own state
-/// genuinely has not moved. The third, <c>cancelled_after_payment</c>, exists
-/// precisely BECAUSE the order changed — it was cancelled with money already
-/// authorised, and §3.2 gives Payments no refund command. Reading "the process
-/// stalled" onto that row describes the opposite of what happened.
+/// Two of them are a wait that ran out, where the order's own state genuinely
+/// has not moved. The other two — <c>cancelled_after_payment</c> and
+/// <c>cancelled_after_confirmation</c> — exist precisely BECAUSE the order
+/// changed: it was cancelled with money already authorised, and §3.2 gives
+/// Payments no refund command. Reading "the process stalled" onto either row
+/// describes the opposite of what happened. They are two codes rather than one
+/// because the operator's first step differs, and
+/// <c>ordering.OrderReviews</c> persists no saga state to tell them apart.
 /// </summary>
 /// <remarks>
 /// <b>Written through <see cref="IUnitOfWork"/>, not a second connection.</b>

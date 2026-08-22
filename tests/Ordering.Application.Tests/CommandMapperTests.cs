@@ -48,9 +48,11 @@ public class CommandMapperTests
         ];
 
         // The gate-coverage rule: a reflection query that silently matches
-        // nothing passes every assertion under it. Three today, and the number
-        // is asserted as a floor rather than as an equality so that adding a
-        // fourth reason does not fail a test that has no opinion about it.
+        // nothing passes every assertion under it. Four today, and the floor
+        // stays at three deliberately — its job is anti-vacuity, not a census,
+        // and raising it with every addition would make it a second count to
+        // keep current for no gain. What pins the exact set is the agreement
+        // test below, which compares this list against the mapper's own.
         codes.Length.ShouldBeGreaterThanOrEqualTo(3);
 
         return codes;

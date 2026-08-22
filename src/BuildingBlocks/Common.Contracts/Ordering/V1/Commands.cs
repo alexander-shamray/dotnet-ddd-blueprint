@@ -101,7 +101,12 @@ public static class ReviewReasons
     /// A customer cancelled an order whose payment was already authorised.
     /// </summary>
     /// <remarks>
-    /// <b>The one cancellation the saga cannot compensate.</b> Undoing an
+    /// <b>The cancellation the saga cannot compensate, raised from
+    /// <c>Compensating</c>.</b> It was the only one until
+    /// <see cref="CancelledAfterConfirmation"/> was split out of it, and that
+    /// one is the same money problem from <c>Confirmed</c> — so neither is
+    /// unique in what it cannot undo, and the state each is raised from is the
+    /// whole of the difference. Undoing an
     /// authorisation is a refund, and §3.2 closes Payments' Accepts column at
     /// <c>AuthorisePayment</c> — so the workflow escalates instead of
     /// compensating, on the same argument the despatch timeout makes: a wait
@@ -127,7 +132,7 @@ public static class ReviewReasons
     /// its state is gone.
     /// <para>
     /// What separates them: this one means the order reached <c>Confirmed</c>,
-    /// so **Shipping may still despatch it** and stopping that is the first
+    /// so <b>Shipping may still despatch it</b> and stopping that is the first
     /// step. <see cref="CancelledAfterPayment"/> means compensation was already
     /// under way — there is no despatch to stop and a <c>ReleaseStock</c> is in
     /// flight. The runbook has always described these as two procedures; until

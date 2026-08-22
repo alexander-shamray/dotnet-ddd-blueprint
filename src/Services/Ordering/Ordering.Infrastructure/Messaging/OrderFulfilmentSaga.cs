@@ -138,9 +138,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // too, and the later placement then starts a live saga for an order
         // the aggregate has already cancelled. §9.4 orders nothing, and the
         // dispatcher's READPAST claim plus a retried publish are two ordinary
-        // ways to get there. Telling the two apart is possible — Reason is a
-        // CancelReasons code and only the customer's is customer_request — and
-        // it is a §9.6 decision rather than a line to change here.
+        // ways to get there.
+        //
+        // **Telling the two apart is NOT possible from the message, and an
+        // earlier revision of this comment said it was.** It read Reason as
+        // the discriminator, on the premise that only a customer's
+        // cancellation carries customer_request. §11.4's endpoint parses the
+        // whole CancellationReasons map — all five CancelReasons codes — so a
+        // caller may send payment_declined and a saga-caused cancellation may
+        // carry customer_request when that is what the saga sent. The
+        // contract carries no origin field either. So #123 needs an added
+        // discriminator (a §9.2 version bump, with consumers on the other
+        // side) or a narrower endpoint vocabulary, and both are §9.6
+        // decisions rather than a line to change here.
         Event(
             () => OrderCancelled,
             x =>

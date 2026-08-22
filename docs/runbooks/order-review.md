@@ -15,8 +15,9 @@
 ## What it means
 
 A saga reached something it could not compensate and escalated (§9.6) — two
-of the three reasons are a wait that ran out, and the third is a cancellation
-the platform has no contract to undo.
+of the four reasons are a wait that ran out, and the other two are a
+cancellation the platform has no contract to undo, split by the state it was
+raised from because the procedures differ.
 
 **Check whether the saga is still running before you work the row**, because
 that is not the same answer for every reason and an earlier version of this
@@ -27,7 +28,7 @@ page assumed it was:
 | `not_despatched` | Finalised. The state row is gone and this row is the only trace |
 | `stock_not_released` | Finalised, on the release timeout |
 | `cancelled_after_confirmation` | Finalised — cancelled after despatch was being waited for |
-| `cancelled_after_payment` | **Still running.** Raised mid-wait when an authorisation lands after a cancellation, and the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`. A `stock_not_released` row may join it |
+| `cancelled_after_payment` | **The only one that can still be running — but usually is not.** Raised mid-wait when an authorisation lands after a cancellation, and the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`; both are well inside the hour this alerts on, so by the time you read the row it has normally finalised. Check, and branch. A `stock_not_released` row may join it |
 
 For the finalised cases [`stuck-saga.md`](stuck-saga.md) will not catch this,
 which is why §13.6 gives it a row of its own rather than folding it into the
@@ -140,21 +141,37 @@ the state row is gone by design and no timeout is pending.
    the order's own state will say so — §5.4 refuses to cancel a `Shipped`
    order, so a row here means the aggregate was cancelled before despatch.
 
-#### From `Compensating` — the saga is still running
+#### From `Compensating` — the saga may still be running, and usually is not
 
 The customer cancelled while stock was held, and the authorisation landed
 afterwards. **There is no despatch to stop** — the order never reached
-`Confirmed` — and `ReleaseStock` is already in flight.
+`Confirmed`.
 
-2. **Leave the reservation alone.** The machine is waiting on `StockReleased`
-   and will cancel the order when it arrives. Releasing by hand races it.
-3. **Give it the ten-minute `ReleaseTimeout` before treating stock as stuck.**
-   If that expires the saga raises a second row, `stock_not_released`, and
-   [that section](#stock_not_released) is the procedure — the two rows are one
-   incident. **The saga-age alert will not have fired**, and this line said the
-   opposite: the `ReleaseTimeout` transition finalises the instance at ten
-   minutes, so by the hour that alert measures there is no saga left to be old.
-   It fires only if that timeout never arrives either.
+**This row is raised mid-wait, which is what makes it the only one where the
+instance can still exist — but the wait is short and the alert is not.** Both
+of `Compensating`'s exits, `StockReleased` and the ten-minute `ReleaseTimeout`,
+land well inside the hour this alerts on, so the ordinary case is a finalised
+saga. An earlier version of this section asserted a live instance in its
+heading and then explained two paragraphs down that there would not be one.
+**So step 2 is a branch, not an instruction**:
+
+2. **Look for the instance**, by `CorrelationId = OrderId` in the saga state
+   table.
+   - **Gone** — the ordinary case. Compensation completed and the reservation
+     is already released; nothing about stock needs doing, and step 1's refund
+     is the whole of the work.
+   - **Still there** — both exits failed, which is its own incident. **Leave
+     the reservation alone**: the machine is waiting on `StockReleased` and
+     will cancel the order when it arrives, and releasing by hand races it.
+3. **Only for a live instance, give it the ten-minute `ReleaseTimeout` before
+   treating stock as stuck.** If that expires the saga raises a second row,
+   `stock_not_released`, and [that section](#stock_not_released) is the
+   procedure — the two rows are one incident. **The saga-age alert will not
+   have fired**, and this line said the opposite: the `ReleaseTimeout`
+   transition finalises the instance at ten minutes, so by the hour that alert
+   measures there is no saga left to be old. It fires only if that timeout
+   never arrives either — which is the same condition that leaves an instance
+   for step 2 to find.
 
 ## Resolving
 

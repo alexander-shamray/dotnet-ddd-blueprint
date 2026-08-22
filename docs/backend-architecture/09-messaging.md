@@ -1916,7 +1916,7 @@ stateDiagram-v2
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
     Compensating --> Compensating : PaymentAuthorised → FlagOrderForReview cancelled_after_payment
-    Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed → absorbed
+    Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed, PaymentDeclined → absorbed
 
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
@@ -2298,7 +2298,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotDespatched))
                 .Finalize(),
 
-            // The one cancellation this machine cannot compensate: the card is
+            // A cancellation this machine cannot compensate: the card is
             // authorised, and undoing that is a refund §3.2 gives Payments no
             // contract to accept. So it escalates and finalises, on the
             // despatch timeout's own argument. Unscheduling matters more than
@@ -2311,9 +2311,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // are worked.
             When(OrderCancelled)
                 .Unschedule(DespatchTimeout)
+                // A different code from Compensating's, and the row is all an
+                // operator gets: ordering.OrderReviews persists (OrderId,
+                // Reason, RaisedAt), and the saga has usually finalised before
+                // the one-hour alert, so its state is gone. The two procedures
+                // differ at the first step — from here the order reached
+                // Confirmed, so Shipping may still despatch it.
                 .Send(
                     OrderingQueue,
-                    ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.CancelledAfterPayment))
+                    ctx => new FlagOrderForReview(
+                        ctx.Saga.OrderId,
+                        ReviewReasons.CancelledAfterConfirmation))
                 .Finalize());
 
         During(
@@ -2370,7 +2378,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // already in flight when either lands — and both are written for
             // the same reason as the line above.
             Ignore(StockReserved),
-            Ignore(StockReservationFailed));
+            Ignore(StockReservationFailed),
+
+            // The payment verdict the OrderCancelled transition above made
+            // reachable. Arriving in Compensating from AwaitingPayment used to
+            // mean the authorisation had already answered; cancelling in
+            // AwaitingPayment gets here with it still outstanding, so either
+            // verdict can land. PaymentAuthorised is handled above and escalates
+            // because money moved; a decline means none did, which is where
+            // compensation was heading anyway — so nothing for a human to do.
+            Ignore(PaymentDeclined));
 
         SetCompletedWhenFinalized();
     }
@@ -2416,9 +2433,14 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > configuration fault traded against a routine one, and it is only acceptable
 > because every event this machine declares is handled in every state it can
 > reach one in. `Compensating` is where that is load-bearing, and it writes out
-> all four rather than leaning on this callback: `Ignore(OrderCancelled)`,
-> `When(PaymentAuthorised)`, `Ignore(StockReserved)` and
-> `Ignore(StockReservationFailed)`.
+> all five rather than leaning on this callback: `Ignore(OrderCancelled)`,
+> `When(PaymentAuthorised)`, `Ignore(StockReserved)`,
+> `Ignore(StockReservationFailed)` and `Ignore(PaymentDeclined)`. **The last
+> was missing while this passage claimed the list was complete**, which is the
+> failure mode the claim exists to prevent: an enumeration asserting its own
+> completeness is worth nothing unless something checks it, so a structural
+> test now reads the machine's declared next-events for that state rather than
+> trusting the list here.
 
 > **A missing instance is a different mechanism, and it is silent.**
 > `OnUnhandledEvent` governs an event that reaches an instance in a state that
