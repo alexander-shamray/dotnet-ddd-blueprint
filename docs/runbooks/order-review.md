@@ -28,7 +28,7 @@ page assumed it was:
 | `not_despatched` | Finalised. The state row is gone and this row is the only trace |
 | `stock_not_released` | Finalised, on the release timeout |
 | `cancelled_after_confirmation` | Finalised — cancelled after despatch was being waited for |
-| `cancelled_after_payment` | **The only one that can still be running — but usually is not.** Raised mid-wait when an authorisation lands after a cancellation, and the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`; both are well inside the hour this alerts on, so by the time you read the row it has normally finalised. Check, and branch. A `stock_not_released` row may join it |
+| `cancelled_after_payment` | **The only one that can still be running — but usually is not.** Raised mid-wait when an authorisation lands after compensation has BEGUN — which is not the same as after a cancellation: `Compensating` is also reached from `PaymentDeclined` and the fifteen-minute payment timeout, where no `OrderCancelled` exists yet. The instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`; both are well inside the hour this alerts on, so by the time you read the row it has normally finalised. Check, and branch. A `stock_not_released` row may join it |
 
 For the finalised cases [`stuck-saga.md`](stuck-saga.md) will not catch this,
 which is why §13.6 gives it a row of its own rather than folding it into the
@@ -135,6 +135,16 @@ survives contact with [§9.4](../backend-architecture/09-messaging.md):
 So the event is published on every path that raises either code, and on no
 path can you infer from the code whether Payments has acted. **Check, on
 both.**
+
+**"Published on every path" assumes the saga gets out of `Compensating`,
+and step 2 is where you find out whether it did.** Both exits finalise —
+`StockReleased`, and the ten-minute `ReleaseTimeout` — so an instance still
+live at the hour this alerts on has had neither, which means the cancellation
+has not been sent and will not be until someone intervenes. **Do not wait for
+a cancellation in that case**: a live instance past its own timeout is a
+scheduler incident ([`stuck-saga.md`](stuck-saga.md)), and the authorisation
+is outstanding for as long as it lasts. Refund by hand and treat the saga as
+the separate incident it is.
 
 **What actually separates the two is Shipping.**
 `cancelled_after_confirmation` means the order reached `Confirmed`, so a

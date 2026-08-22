@@ -44,13 +44,25 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// Escalate an order to a human (§9.6) — the path for anything the workflow
 /// cannot resolve itself. <b>Two of its four reasons are a wait with no
 /// automatic compensation and two are not</b>, and this summary said only the
-/// first until the second arrived: a cancellation landing after an
-/// authorisation is not a timeout, and §3.2 gives <i>Ordering</i> no refund
-/// command to answer it with — which is not the same as no automatic refund,
-/// since §3.2 has Payments consume <c>OrderCancelled</c> and void an
-/// authorisation already taken. The two codes differ on whether that path
-/// could have reached the authorisation at all; <see cref="ReviewReasons"/>
-/// carries the distinction.
+/// first until the second arrived.
+/// <para>
+/// The shared condition of the other two is <b>authorised money in a workflow
+/// whose outcome is cancellation</b> — deliberately not "a cancellation landing
+/// after an authorisation", which this used to say and which describes only
+/// <see cref="ReviewReasons.CancelledAfterConfirmation"/>. On
+/// <see cref="ReviewReasons.CancelledAfterPayment"/> the authorisation is the
+/// <i>later</i> event, and on two of that code's four doors — a decline and a
+/// payment timeout — no cancellation exists at all when it is raised.
+/// </para>
+/// <para>
+/// §3.2 gives <i>Ordering</i> no refund command to answer that with, which is
+/// not the same as no automatic refund: §3.2 has Payments consume
+/// <c>OrderCancelled</c> and void an authorisation already taken. <b>Which of
+/// the two codes gets that refund is not predictable</b>, and this summary
+/// carried the claim that it is until §9.4's ordering was read — so
+/// <see cref="ReviewReasons"/> distinguishes them by the state each is raised
+/// from, and the runbook checks for a refund on both.
+/// </para>
 /// </summary>
 /// <remarks>
 /// This does <b>not</b> touch the <c>Order</c> aggregate, and the reason is

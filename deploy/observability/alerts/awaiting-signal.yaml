@@ -79,8 +79,14 @@ groups:
           runbook_url: docs/runbooks/stuck-saga.md
 
       # Owed: ordering.order_reviews.oldest.age, over ordering.OrderReviews.
-      # StuckSaga above will not catch this, and §13.6 gives it a row of its
-      # own for that reason — but "the saga has already finalised" is a
+      # StuckSaga above usually will not catch this, and §13.6 gives it a row
+      # of its own for that reason. NOT because it never could: a
+      # Compensating instance that survived an hour is exactly what StuckSaga
+      # measures, and this comment said "will not" flatly while the lines
+      # below described the case where it does. What makes the separate row
+      # necessary is that the saga is normally FINALISED before its review
+      # row ages to an hour, so there is no instance left to be stuck — but
+      # "the saga has already finalised" is a
       # property of the REASON, not of the row, and this comment used to state
       # it as though it were universal. cancelled_after_payment is raised
       # mid-wait from Compensating and can sit beside a live instance; every

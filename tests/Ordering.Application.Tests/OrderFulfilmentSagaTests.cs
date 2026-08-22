@@ -421,10 +421,27 @@ public class OrderFulfilmentSagaTests
         // filter writes its row after the consumer returns, so a crash between
         // the saga state committing and that write leaves the next delivery
         // free to land on an instance that has moved on. "Not applicable" is
-        // OnUnhandledEvent(x => x.Ignore()) and not a default that throws:
+        // the OnUnhandledEvent callback and not a default that throws:
         // without it, six attempts of §9.8's retry policy end in the error
         // queue §13.6 pages on, for a duplicate the design considers correctly
         // absorbed.
+        //
+        // **This covers the post-flush half of that window and nothing else
+        // (#128).** It republishes after the first delivery has completed, so
+        // the in-memory outbox has already flushed and the commands really
+        // did go out — which is what makes the second delivery a genuine
+        // duplicate. The other half is a crash BEFORE that flush, where the
+        // instance is advanced and its commands were never sent; there the
+        // redelivery is the last thing that could notice, and the callback
+        // ignores it just the same. The harness cannot express an interrupt
+        // between the repository commit and the flush, so no test here
+        // reaches it — stated rather than left for a reader to infer from a
+        // green suite, which is exactly what this file got wrong once before
+        // by asserting an effect instead of the absence of an exception.
+        //
+        // The callback logs before ignoring for that reason. This test does
+        // not assert the log line: it is a diagnostic, not the behaviour
+        // under test, and #128 is where the durable fix lives.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {

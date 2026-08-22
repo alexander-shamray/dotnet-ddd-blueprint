@@ -3,6 +3,7 @@ using Common.Contracts.Ordering.V1;
 using Common.Contracts.Payments.V1;
 using Common.Contracts.Shipping.V1;
 using MassTransit;
+using MassTransit.Logging;
 using static Ordering.Infrastructure.Messaging.Endpoints;
 
 namespace Ordering.Infrastructure.Messaging;
@@ -101,14 +102,49 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // whose token id no longer matches the instance, which is why
         // ADR-021's uncancellable timeouts were harmless while this was not.
         //
-        // What it costs is stated rather than discovered later: an event
-        // genuinely misrouted to this queue is now silent. That is a
-        // configuration fault, and it is traded for a routine one — and the
-        // trade is only safe because every event this machine declares is
-        // handled in every state it can reach one in, including the
-        // Ignore(OrderCancelled) below, which is written rather than left to
-        // this callback.
-        OnUnhandledEvent(x => x.Ignore());
+        // **The window above has two halves and an earlier version of this
+        // comment called both of them absorbed. Only one is (#128).** §9.8
+        // puts UseInMemoryOutbox INSIDE the inbox filter, and it flushes its
+        // buffered sends after the inner pipeline returns — which is after
+        // the repository has committed the instance. So a crash in this
+        // window is either:
+        //
+        //   * after the flush — the commands went out, the state advanced,
+        //     and the redelivery really is a duplicate with nothing left to
+        //     do; or
+        //   * BEFORE the flush — the state advanced and its commands were
+        //     never sent. The redelivery is then not a duplicate at all: it
+        //     is the last chance anything has to notice that an
+        //     AuthorisePayment or a ReleaseStock is missing, and the
+        //     scheduled timeout that would have rescued the order was
+        //     buffered in the same flush and lost with it.
+        //
+        // Nothing here can tell them apart, so Ignore() alone would make the
+        // second silent and permanent. It is not a new hole — an in-memory
+        // outbox beside an EF saga repository is a dual write, and that
+        // predates this branch — but the default it replaces raised
+        // UnhandledEventException, so this callback is what would remove the
+        // only signal it had. #128 carries the real fix, which is
+        // AddEntityFrameworkOutbox/UseBusOutbox persisting the sends with the
+        // instance in one transaction.
+        //
+        // So it is LOUD and then ignored: the error queue stops being spent
+        // on a transition that can never become applicable, and the event
+        // still leaves a record naming itself and the state it arrived in.
+        // A misrouted event — the other way in, and a configuration fault —
+        // lands in the same line rather than vanishing.
+        OnUnhandledEvent(x =>
+        {
+            LogContext.Warning?.Log(
+                "Saga {CorrelationId} ignored {EventName} in state {State}: no transition accepts it. "
+                + "If this followed a restart, commands buffered by the in-memory outbox may have been "
+                + "lost with it (#128).",
+                x.Saga.CorrelationId,
+                x.Event.Name,
+                x.CurrentState);
+
+            return x.Ignore();
+        });
 
         // Correlated on the order in every case, which is also what §9.3's
         // mapper sets CorrelationId to — so one id follows the workflow across

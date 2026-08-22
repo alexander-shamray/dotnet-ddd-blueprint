@@ -732,6 +732,12 @@ own line rather than sending a reader to a file that does not hold it.
   filter records it only after the consumer returns, so a crash between the
   saga state committing and that write is the window. Narrow, and the whole
   justification for the callback, which is why naming it exactly is the point.
+  **And naming it exactly was still not exact enough**: the in-memory outbox
+  flushes inside that window, so half of it is a crash with the instance
+  advanced and its commands unsent — not a duplicate, but the last delivery
+  that could notice. A callback that ignores silently converts a loud loss
+  into a quiet one; this one logs first, and #128 carries the durable fix.
+  **A window named to one boundary can still contain a second one.**
   The suite was green throughout, because `harness.Consumed` records a delivery
   whether the pipeline returned or threw: "no transition ran" is what a fault
   looks like from every assertion in a saga test. **Assert the absence of the

@@ -2118,7 +2118,18 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // Without this line MassTransit raises UnhandledEventException, §9.8's
         // retry policy spends six attempts on a transition that can never
         // apply, and the message reaches the error queue §13.6 pages on.
-        OnUnhandledEvent(x => x.Ignore());
+        OnUnhandledEvent(x =>
+        {
+            LogContext.Warning?.Log(
+                "Saga {CorrelationId} ignored {EventName} in state {State}: no transition accepts it. "
+                + "If this followed a restart, commands buffered by the in-memory outbox may have been "
+                + "lost with it (#128).",
+                x.Saga.CorrelationId,
+                x.Event.Name,
+                x.CurrentState);
+
+            return x.Ignore();
+        });
 
         Event(() => OrderPlaced, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
@@ -2471,10 +2482,26 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > crash between the saga state committing and that write leaves the event
 > unrecorded and the next delivery finds the instance already moved on.
 >
-> **The cost is that a genuinely misrouted event is now silent.** That is a
-> configuration fault traded against a routine one, and it is only acceptable
-> because every event this machine declares is handled in every state it can
-> reach one in. `Compensating` is where that is load-bearing, and it writes out
+> **That window has two halves and this passage described one of them.**
+> `UseInMemoryOutbox` sits *inside* the inbox filter and flushes its buffered
+> sends after the inner pipeline returns — which is after the repository has
+> committed. So a crash there is either after the flush, where the commands
+> went out and the redelivery really is a duplicate, or **before** it, where
+> the instance advanced and its commands were never sent. In the second the
+> redelivery is not a duplicate at all: it is the last thing that could
+> notice, and the scheduled timeout that would have rescued the order was
+> buffered in the same flush. Nothing in the machine can tell them apart, so
+> the callback **logs before it ignores** — the error queue stops being spent
+> on a transition that can never apply, and the case still leaves a record.
+> [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
+> carries the real fix, which is persisting the sends with the instance
+> (`UseBusOutbox`) rather than beside it.
+>
+> **The other cost is that a genuinely misrouted event is not a fault.** That
+> is a configuration problem traded against a routine one, and it is only
+> acceptable because every event this machine declares is handled in every
+> state it can reach one in. `Compensating` is where that is load-bearing,
+> and it writes out
 > all five rather than leaning on this callback: `Ignore(OrderCancelled)`,
 > `When(PaymentAuthorised)`, `Ignore(StockReserved)`,
 > `Ignore(StockReservationFailed)` and `Ignore(PaymentDeclined)`. **The last

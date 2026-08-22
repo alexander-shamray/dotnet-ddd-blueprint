@@ -875,8 +875,15 @@ after.
     reaches an advanced instance is the one whose inbox row was never written —
     `InboxFilter` adds its row after the inner pipe returns, so the window is a
     crash between the saga state committing and that second `SaveChangesAsync`.
-    `OnUnhandledEvent(x => x.Ignore())` is
-    the line that was missing. Reproduced first: a redelivered `StockReserved`
+    An `OnUnhandledEvent` callback is the line that was missing.
+    **It logs before it ignores, and this entry recorded a bare `Ignore()`
+    until a review read what happens inside that window.** `UseInMemoryOutbox`
+    flushes after the inner pipeline returns, so the window contains the
+    moment the instance is committed and its commands are not yet sent — a
+    crash there loses them, and a bare `Ignore()` would make that permanent
+    and silent by suppressing the only delivery left to notice. #128 carries
+    the fix (`UseBusOutbox`); the log line is what keeps the case observable
+    until then. Reproduced first: a redelivered `StockReserved`
     in `AwaitingPayment` came back as `NotAcceptedStateMachineException`. A
     stale **timeout** never did — a scheduled message whose token id no longer
     matches the instance is discarded before the machine is asked, which is why
