@@ -614,15 +614,15 @@ is that untrusted text reaches the one stage that can mutate, *after* the
 isolated stage has finished. Containment is deferred, not achieved, and the
 agent profile's argument does not cover this.
 
-Three things narrow it and none of them closes it. The path check at the head
-of step 2 drops any candidate citing a path outside `$work` before the code is
+Three things narrow it and none of them closes it. The path check at the head of
+step 2 drops any candidate citing a path outside `$work` before the code is
 opened. The mutations available are three, each with a stated rule — `--repo`
 for this repository, never `--force`, and the temp-path shape. `Write` and
-`Edit` are **denied**, so no file's contents can be altered whatever the parent
-is persuaded of. **The branch is a residual rather than a control**:
-`git push origin` is globally allowed and this command does not deny it,
-argued in full below. The unbounded part is *what an issue says and where it is
-filed*.
+`Edit` are **denied**, which closes the editing tools and not the class: `Bash`
+remains granted, and a redirection through it writes what `Edit(...)` refuses —
+argued in full below. **The branch is a residual rather than a control**: `git
+push origin` is globally allowed and this command does not deny it, argued in
+full below. The unbounded part is *what an issue says and where it is filed*.
 
 Closing it properly is infrastructure rather than prose, and there are two
 directions. Helpers that pin the repository and the label name would leave the
@@ -704,8 +704,24 @@ enforcing half is `disallowed-tools`, not the absence of an entry in
 `allowed-tools`.** The harness documents that `allowed-tools` "does not
 restrict which tools are available: every tool remains callable", so omitting
 `Write` and `Edit` never withheld them. They are now **named in
-`disallowed-tools`**, which removes them from the pool outright, so no file's
-**contents** can be altered.
+`disallowed-tools`**, which removes them from the pool outright — so no file's
+**contents** can be altered *by a tool whose job is editing*.
+
+**That is narrower than "read-only", and the gap is `Bash`.** Both commands
+grant `Bash(...)` forms, and `CLAUDE.md` records the consequence a hundred
+lines from where these denies were written: the `Edit` deny list is defence in
+depth because **`Bash` redirection can still write a file**. A `>` in an
+allowed command, or an interpreter reached through one, alters source that
+`Edit(...)` refuses — and under a bypassing permission mode an *unlisted* tool
+is silently available too, which is the premise stated at the top of this
+section. So the denies raise the cost and do not close the class.
+
+**The honest boundary is the worktree, not the tool list.** What actually
+bounds this command is that it audits a detached copy under a temp root and
+files issues; the tool denies stop the obvious path and the shape checks stop
+the cited-path one. A capability boundary that refuses arbitrary `Bash` is what
+"no file's contents can be altered" would need, and no grant here expresses
+one.
 
 **`git push` is a different case and this paragraph used to get it wrong** —
 see `/security-sweep`'s copy for the whole argument, which is the same one

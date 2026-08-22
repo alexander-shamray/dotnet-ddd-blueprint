@@ -49,9 +49,17 @@ attacker-influenced twice over: `$ARGUMENTS` is a pasted code form, and the
 sweep reads `docs/**` and `src/**`, which a PR author controls.
 
 A throwaway script is still the right tool for a genuinely structural sweep.
-Write it into the scratchpad and run it — the run prompts, which is the point,
-and one approval per pass is the whole cost. What is no longer available is a
-pass that writes and executes a script **without anyone seeing it**.
+Write it into the scratchpad and run it — under the default permission mode the
+run prompts, and one approval per pass is the whole cost.
+
+**The prompt is not the boundary, and this paragraph should not be read as
+claiming it is.** Dropping the grant removes *command-level auto-approval*;
+what an unlisted tool then does is the active permission mode's decision, and
+under a bypassing mode it runs silently — the same premise `CLAUDE.md` states
+for the sweeps' denies. So what this change buys is that the interpreter is no
+longer pre-approved by this command, not that a human sees every run. A command
+that needed the stronger property would have to refuse those modes, and none
+here does.
 
 **Confirm each hit by reading it.** The recurring false positives are real and
 they repeat: `})` closing a lambda mid-chain is a continuation, not a chain

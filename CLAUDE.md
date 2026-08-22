@@ -443,8 +443,9 @@ arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
 there are eight suites now — see *The commands* below, which is where the
-current set lives, and which is the only place a count of them belongs. That one: `py -3.12 -m unittest` in `tools/new-service` runs
-81, and CI has a `scaffold` job for them beside `licence-gate`.
+current set lives, and which is the only place a count of them belongs. That
+one: `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a
+`scaffold` job for them beside `licence-gate`.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
 gate was observed red against a deliberately added forbidden reference before
@@ -1791,11 +1792,11 @@ no-argument invocation and nothing else. Whether that closes
 reset-grant paragraph above — **an allow rule is a prefix match** — which has
 never been measured for the no-wildcard case. (Named rather than counted: a
 numbered offset inside a section still being edited is how this repository's
-callout totals used to rot.) If that holds for a grant without `:*` as well, the pull side
-is still open and belongs in the residual inventory rather than in this
-paragraph. Nobody has run the probe. Until someone does, treat the pull grant
-as *narrowed, not proven* — the two words this repository keeps having to tell
-apart.
+callout totals used to rot.) If that holds for a grant without `:*` as well, the
+pull side is still open and belongs in the residual inventory rather than in
+this paragraph. Nobody has run the probe. Until someone does, treat the pull
+grant as *narrowed, not proven* — the two words this repository keeps having to
+tell apart.
 
 **A command's frontmatter is a grant like any other, and it is the one nobody
 reads twice.** The first five rows above were all found in command frontmatter,
@@ -1842,12 +1843,12 @@ from `/pulls/{n}/reviews`, while the one REST endpoint in play —
 both `gh pr view --json` feeds are GraphQL and report
 `copilot-pull-request-reviewer`. An earlier revision of this paragraph called
 the issue-comment login the REST spelling; `gh pr view` loads `reviews` and
-`comments` through one exporter, so that could never have been true. The command now states the
-filter and reports the count it dropped, but that is prose — the enforceable
-version is an author filter inside the helper, which is a human's edit made
-with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run
-`/ship`'s Copilot loop unattended on a PR that outside contributors can comment
-on.
+`comments` through one exporter, so that could never have been true. The command
+now states the filter and reports the count it dropped, but that is prose — the
+enforceable version is an author filter inside the helper, which is a human's
+edit made with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do
+not run `/ship`'s Copilot loop unattended on a PR that outside contributors can
+comment on.
 
 The fifth is **`git push` under the two sweeps**, and it is the one that looks
 closed and is not. Both commands state a read-only boundary, and both used to
