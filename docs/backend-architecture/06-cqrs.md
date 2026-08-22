@@ -1008,7 +1008,7 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
         SELECT TOP (@Take)
             OrderId   = o.Id,
             Status    = o.Status,
-            Total     = o.TotalAmount,
+            Total     = SUM(l.UnitPriceAmount * l.Quantity),
             Currency  = o.Currency,
             LineCount = COUNT(l.Id),
             PlacedAt  = o.PlacedAt
@@ -1019,7 +1019,7 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
             AND (@AfterPlacedAt IS NULL
                 OR o.PlacedAt < @AfterPlacedAt
                 OR (o.PlacedAt = @AfterPlacedAt AND o.Id < @AfterId))
-        GROUP BY o.Id, o.Status, o.TotalAmount, o.Currency, o.PlacedAt
+        GROUP BY o.Id, o.Status, o.Currency, o.PlacedAt
         ORDER BY o.PlacedAt DESC, o.Id DESC;
         """;
 
@@ -1054,6 +1054,21 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
     }
 }
 ```
+
+> **The total is summed from the lines because the write model stores none.**
+> `Order.Total` is derived — `builder.Ignore(o => o.Total); // Computed, not
+> stored.` in [§7.2](07-persistence.md) — so `ordering.Orders` has no
+> `TotalAmount` column and selecting one is `Invalid column name`, not a slow
+> query. The `GROUP BY` that `LineCount` already requires is what supplies it,
+> which is the level-1 bargain in one line: every read re-derives what the
+> write side chose not to keep.
+>
+> **A `TotalAmount` column does exist, one section down and on a different
+> table.** §6.6's `OrderSummaries` stores it, written once at projection time,
+> and that near-miss is why the rule is stated here rather than left to be
+> inferred: the cheap-looking repair is to add the column to `ordering.Orders`,
+> which contradicts §7.2 and gives the aggregate a second, storable total to
+> disagree with its own.
 
 > **Decision — cursor pagination is the default; `page`/`pageSize` is not.** See [ADR-016](appendix-a-adrs.md#adr-016--cursor-pagination-by-default).
 > `OFFSET @n ROWS` requires SQL Server to produce and discard every skipped row,
