@@ -1769,6 +1769,31 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
 > this chapter. The lifecycle direction is the one that loses a *status*, and
 > that is the direction a column is spent on.
 
+> **This patch can never fill a name on a new order, and that is a defect in
+> the design rather than in the statement — see
+> [#121](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/121).**
+> The writer inserts `name` and `thumb` empty and leaves them for "a later
+> `ProductPublished`"; no later one comes. A product must be published before
+> it can be ordered — `PlaceOrder` reads `ordering.ProductPrices`, which
+> `ProductPublished` fills — so that event is always consumed *before* the
+> summary row exists, and the statement below only touches summaries that
+> already contain the product. **In the normal flow every summary carries empty
+> names**, which is the payload this section exists to deliver.
+>
+> The same shape makes the per-product staleness worse than it reads: with
+> names never filled at insert, a discarded out-of-order `ProductPublished` is
+> not a missed rename but a name that is never set at all.
+>
+> **Ordering already receives what it needs and discards it.**
+> `ProductPublished` carries `Name` and `ThumbnailUrl`, and
+> `ProductPriceProjection` keeps neither. The fix wants no new contract and no
+> new subscription — a product-level table, on `ProductWithdrawals`' own
+> precedent — and #121 carries the shape, including the question of whether the
+> JSON copy should exist at all once the name is local.
+>
+> **Read the rest of this slice as the mechanism it demonstrates, not as a
+> design to copy**, until that is settled.
+
 > **This handler is the expensive one, and the reason to think twice before
 > denormalising a name.** `OrderPlacedDomainEvent` writes one row; a single
 > `ProductPublished` scans every summary that ever contained that product.
