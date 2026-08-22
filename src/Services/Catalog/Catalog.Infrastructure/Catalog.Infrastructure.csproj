@@ -32,9 +32,13 @@
     <ProjectReference Include="..\Catalog.Application\Catalog.Application.csproj" />
     <!-- §9.4's outbox: the entity this assembly maps, the type map, the
          metrics and the dispatcher it hosts. PR-14's edge, and the reason
-         Common.Infrastructure stopped being a project no service referenced —
-         PR-12's Redis helpers are still nobody's dependency here, and the
-         first service to wire them will not need a new reference. -->
+         Common.Infrastructure stopped being a project no service referenced.
+         §8's Redis helpers ride in on this same reference and are now used
+         rather than merely available — AddRedisConnections and
+         RedisIdempotencyStore are wired in DependencyInjection.cs. This
+         comment said they were "still nobody's dependency" and that the first
+         service to wire them would need no new reference; the second half was
+         right and is why nothing here changed but the sentence. -->
     <ProjectReference Include="..\..\..\BuildingBlocks\Common.Infrastructure\Common.Infrastructure.csproj" />
     <!-- typeof(ProductPublished).Assembly, the Broker lane's half of
          MessageTypeSource. Transitive through Catalog.Application, named

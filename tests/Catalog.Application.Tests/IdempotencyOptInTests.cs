@@ -67,30 +67,60 @@ public class IdempotencyOptInTests
     }
 
     [Fact]
-    public void Every_idempotent_command_returns_a_Result()
+    public void Idempotent_commands_return_a_result_shape_the_behaviour_rebuilds()
     {
-        // The second constraint, and until this test the behaviour's own
-        // remarks claimed a gate that did not exist. `where TResult : Result`
-        // fails open exactly as the interface constraint does: a command
-        // declaring IIdempotentCommand and returning something else is a
-        // registration the container silently omits, so the opt-in is written,
-        // read as done, and never applied.
-        //
-        // Appendix D.5 makes Result and Result<T> the whole universe, so this
-        // is a floor rather than a restriction — and it is the floor that has
-        // to be asserted, because nothing in the compiler connects the
-        // interface to the return type.
-        foreach (Type command in Idempotent())
-        {
-            Type result = command
-                .GetInterfaces()
-                .First(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>))
-                .GetGenericArguments()[0];
+        // §8.5's gate, and it is written to what the BEHAVIOUR accepts rather
+        // than to what the container's constraint accepts. An earlier revision
+        // of this test asked `typeof(Result).IsAssignableFrom(result)`, which
+        // is the constraint's own question — and §8.5 says in as many words
+        // that a gate written that way "would pass a command the behaviour
+        // cannot serve and leave it to fail on first use". The chapter
+        // specified all three assertions below; this file implemented one.
+        (Type Command, Type Result)[] candidates =
+        [
+            .. Commands()
+                .Where(typeof(IIdempotentCommand).IsAssignableFrom)
+                .SelectMany(t => t
+                    .GetInterfaces()
+                    .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>))
+                    .Select(i => (Command: t, Result: i.GetGenericArguments()[0])))
+        ];
 
-            typeof(Result).IsAssignableFrom(result).ShouldBeTrue(
-                $"{command.Name} opts into idempotency and returns {result.Name}, which is not a Result — " +
-                "so IdempotencyBehavior's second constraint drops the registration and it runs unprotected (§8.5)");
-        }
+        // The gate's own subject, asserted before anything it found. Both
+        // checks below are ShouldBeEmpty, which is green when the chain above
+        // selected NOTHING — the one reason a gate must never pass.
+        candidates.ShouldNotBeEmpty(
+            "no command in this assembly implements IIdempotentCommand, so this test is " +
+            "looking at nothing — the interface has been renamed, moved, or not yet applied.");
+
+        // Exactly the two shapes ValueTypeOf accepts, not every subtype of
+        // Result. A third shape is unconstructible outside Common.Application
+        // today — Result<T> is sealed and Result's constructor is private
+        // protected — so this assertion is a floor against that changing
+        // rather than a live catch, and it is the cheaper half.
+        candidates
+            .Where(pair => pair.Result != typeof(Result) &&
+                !(pair.Result.IsGenericType && pair.Result.GetGenericTypeDefinition() == typeof(Result<>)))
+            .Select(pair => $"{pair.Command.Name} -> {pair.Result.Name}")
+            .ShouldBeEmpty(
+                "IdempotencyBehavior is constrained to TResult : Result and rebuilds only Result " +
+                "or Result<T>. The container silently omits an open generic whose constraints do " +
+                "not hold (§6.3), and ValueTypeOf refuses any third shape — so a command opting " +
+                "in with anything else is either never protected or fails at its first dispatch, " +
+                "and nothing says so at build time or at startup.");
+
+        // The half with teeth. Result<Money> is constructible today, passes
+        // every check above, and corrupts in silence on replay.
+        candidates
+            .Where(pair => pair.Result.IsGenericType)
+            .Select(pair => (pair.Command, Value: pair.Result.GetGenericArguments()[0]))
+            .Where(pair => pair.Value.Assembly.GetName().Name!.EndsWith(".Domain", StringComparison.Ordinal))
+            .Select(pair => $"{pair.Command.Name} -> Result<{pair.Value.Name}>")
+            .ShouldBeEmpty(
+                "the stored payload is the success VALUE, serialised with default options and " +
+                "no converters. Money has a private constructor, so it round-trips to a zero " +
+                "amount and a null currency and nothing says so (§4.2) — an idempotent command " +
+                "returns a primitive, a Guid or a DTO, never a domain value object.");
     }
 
     [Fact]

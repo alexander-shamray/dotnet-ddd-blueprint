@@ -642,6 +642,28 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             '            + "form, which is what keeps a vacuous gate from quietly '
             'becoming a permanent one.");\n',
         ),
+        # And a THIRD, for the same reason again — which is the argument for
+        # keeping these as data rather than as a rule someone reapplies. §8.5's
+        # shape gate opens with its own anti-vacuity floor over `candidates`,
+        # and a rendered service has none, so the floor fails on a tree that is
+        # correct exactly as the two above would. The count is what makes the
+        # point: every anti-vacuity floor added to a template file is owed an
+        # entry here, and the third was owed the moment the gate was rewritten
+        # to §8.5's specified form.
+        (
+            "        candidates.ShouldNotBeEmpty(\n"
+            '            "no command in this assembly implements IIdempotentCommand, '
+            'so this test is " +\n'
+            '            "looking at nothing — the interface has been renamed, '
+            'moved, or not yet applied.");\n',
+            "        candidates.ShouldBeEmpty(\n"
+            '            "This service opts no command into idempotency yet, so the '
+            'two shape checks below " +\n'
+            '            "are vacuous. The day it does, this test fails — restore '
+            'the ShouldNotBeEmpty " +\n'
+            '            "form, which is what keeps a vacuous gate from quietly '
+            'becoming a permanent one.");\n',
+        ),
     ),
     "tests/Catalog.Application.Tests/ArchitectureTests.cs": (
         ("using Catalog.Domain.Products;\n", "using Catalog.Domain;\n"),

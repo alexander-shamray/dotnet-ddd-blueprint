@@ -42,7 +42,10 @@
     <ProjectReference Include="..\Ordering.Application\Ordering.Application.csproj" />
     <!-- §9.4's outbox: the entity this assembly maps, the type map, the
          metrics and the dispatcher it hosts. §8's Redis helpers ride in on
-         the same reference, so wiring a cache later costs no new one. -->
+         the same reference, and this PR is the "later" that sentence deferred
+         to — AddRedisConnections and RedisIdempotencyStore are wired in
+         DependencyInjection.cs, and it cost no new reference exactly as
+         predicted. -->
     <ProjectReference Include="..\..\..\BuildingBlocks\Common.Infrastructure\Common.Infrastructure.csproj" />
     <!-- MessageTypeSource's Broker half. Named through IIntegrationEvent
          until this service has a contract of its own, at which point the

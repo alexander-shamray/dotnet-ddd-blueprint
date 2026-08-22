@@ -870,10 +870,12 @@ every allowed value type, which is §12.6's
 `Every_contract_round_trips_through_the_bus_serialiser` one layer over and is
 owed if this list ever grows past the primitives §6.4 uses.
 
-**Neither reflection test reaches the behaviour, and §12.4's two integration
-tests reach only half of it.** Both dispatch `PlaceOrderCommand`, so every
-assertion they make is about `Result<Guid>` on the success path: the release
-decisions are unobserved, and so is the void-shaped replay. Moving
+**Neither reflection test reaches the behaviour, and the integration tests
+reach only part of it.** A third one crosses the replay path end to end —
+`Catalog.Api.Tests` posts the same `CommandId` twice through a real Redis and
+asserts one product and one identical response — but every integration
+assertion here is still about the **success** path and about `Result<Guid>`:
+the release decisions are unobserved, and so is the void-shaped replay. Moving
 `CompleteAsync` back inside the `try` — undoing this section's answer to the
 release question — leaves all of them green. So the behaviour gets its own
 suite against a recording store, in `Common.Application.Tests` beside §6.3's,
@@ -885,14 +887,37 @@ public class IdempotencyBehaviorTests
     // One record per outcome, rather than sentinel CommandIds: the key is
     // built from CommandId, so overloading it to select a handler would make
     // every key assertion depend on which branch the test wanted.
-    private sealed record Place(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
-    private sealed record Refuse(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
-    private sealed record Explode(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
+    //
+    // Each declares OperationName because the interface's member is `static
+    // abstract` — the compiler refuses a command that supplies none, which is
+    // the whole point of declaring it there rather than reading it off the
+    // type. A test double is not exempt from a constraint whose value is that
+    // nobody can forget it, and these four are the shortest demonstration of
+    // that in the chapter. Distinct values, for the same reason a service's
+    // gate asserts distinctness: two of these sharing one would share a
+    // keyspace across the suite.
+    private sealed record Place(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.place";
+    }
+
+    private sealed record Refuse(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.refuse";
+    }
+
+    private sealed record Explode(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.explode";
+    }
 
     // The void shape is not a curiosity: it is the branch returning
     // (TResult)Result.Success() and the one storing the "null" sentinel, and
     // §12.4 has no command with it.
-    private sealed record Cancel(Guid CommandId) : ICommand<Result>, IIdempotentCommand;
+    private sealed record Cancel(Guid CommandId) : ICommand<Result>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.cancel";
+    }
 
     [Fact]
     public async Task A_successful_command_completes_the_claim_and_never_releases()
