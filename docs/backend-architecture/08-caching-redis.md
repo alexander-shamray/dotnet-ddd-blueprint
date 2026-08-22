@@ -386,7 +386,9 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
     {
         // Key shape only — the store owns the service prefix and namespace.
         // The subject segment is not decoration: see "A claimed key belongs to
-        // one subject" below.
+        // one subject" below. Nor is the type name free — see "Renaming a
+        // command changes its keys", which is the reason it is not FullName
+        // either.
         string key = $"{Subject()}:{typeof(TCommand).Name}:{command.CommandId}";
 
         if (!await store.TryClaimAsync(key, Retention, ct))
@@ -590,6 +592,28 @@ the moment it is owed. In the `catch` the commonest reason to be there at all
 is the caller's own cancellation, and honouring the token would abandon the
 release and leak the claim for a day — so `None` is right there too, whether or
 not the transaction committed, which the next callout is about.
+
+> **Renaming a command changes its keys, and a rolling deployment is where
+> that costs a duplicate write.** The operation segment is
+> `typeof(TCommand).Name`, so `PlaceOrderCommand` → `SubmitOrderCommand` is a
+> new key for the same `CommandId`. During a rollout both versions are serving:
+> the old pods claim under the old name, the new pods under the new one, and a
+> client retrying one `CommandId` is protected by neither — it places two
+> orders. The window is not the rollout but the **retention**, because an entry
+> written before the rename stays claimable for 24 hours after it.
+>
+> `FullName` does not fix this and is worth ruling out explicitly: it addresses
+> a collision between two same-named commands in different namespaces, which is
+> a different problem, and it makes the key *more* fragile by binding the
+> namespace to it as well. The fix is an explicit discriminator the refactor
+> cannot silently change — a `static abstract` member on `IIdempotentCommand`
+> is the shape C# 14 makes cheapest, since the compiler then refuses a command
+> that does not supply one — or, failing that, a stated dual-read across a
+> rename. **Neither is written here**: this section specifies the mechanism
+> that #40, #70 and #84 are about, and a member on the opted-in interface is a
+> change to the contract every command implements rather than to the behaviour.
+> Until one is taken, **renaming an idempotent command is a migration**, and
+> this paragraph is the only thing saying so.
 
 > **The lost commit acknowledgement is the one fault the `catch` gets wrong,
 > and it is this section's debt rather than a new finding.** If `CommitAsync`
