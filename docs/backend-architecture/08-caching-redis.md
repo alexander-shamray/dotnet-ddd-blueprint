@@ -295,7 +295,10 @@ public sealed class PriceChangedCacheInvalidator(HybridCache cache)
 ## 8.5 Idempotency keys
 
 Every non-idempotent write command carries a client-generated `CommandId`, and
-the key is claimed atomically before any work happens.
+the key is claimed atomically before any work happens. What that buys is **at
+most one commit per key, except across a lost commit acknowledgement** — and
+the exception is this section's own residual, argued below rather than left to
+a reader to discover, because it is the one case the behaviour cannot see.
 
 **It is a field on the command, not an `Idempotency-Key` header**, and the
 reason is the dependency rule rather than taste. `IdempotencyBehavior` runs in
@@ -790,7 +793,7 @@ public void Idempotent_commands_return_a_replayable_Result()
     candidates
         .Where(pair => pair.Result.IsGenericType)
         .Select(pair => (pair.Command, Value: pair.Result.GetGenericArguments()[0]))
-        .Where(pair => pair.Value.Assembly.GetName().Name!.EndsWith(".Domain"))
+        .Where(pair => pair.Value.Assembly.GetName().Name!.EndsWith(".Domain", StringComparison.Ordinal))
         .Select(pair => $"{pair.Command.Name} -> Result<{pair.Value.Name}>")
         .ShouldBeEmpty(
             "the stored payload is the success VALUE, serialised with default options and " +
@@ -878,12 +881,22 @@ public class IdempotencyBehaviorTests
     [Fact]
     public async Task A_failed_Result_releases_the_claim_and_is_returned_rather_than_thrown()
     {
+        // Cancelled, because this release is the THIRD CancellationToken.None
+        // call and the two tests below reach only the other two. Driven with
+        // the default token, switching this one branch back to ct leaves every
+        // assertion in the suite green.
         RecordingStore store = new();
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
 
-        Result<Guid> result = await Dispatch<Result<Guid>>(store, new Refuse(Guid.CreateVersion7()));
+        Result<Guid> result = await Dispatch<Result<Guid>>(
+            store,
+            new Refuse(Guid.CreateVersion7()),
+            ct: cancelled.Token);
 
         result.IsFailure.ShouldBeTrue();
         store.Calls.ShouldBe(["claim", "release"]);
+        store.Tokens["release"].ShouldBe(CancellationToken.None);
     }
 
     [Fact]

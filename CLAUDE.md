@@ -991,9 +991,13 @@ Run `/validate-blueprint` after any substantive edit.
   that 194 before the pull request merged. **A number that goes stale twice
   inside one PR is not a number that recounting fixes.**
 
-  What never drifted is 15 and 8, and the reason is the whole lesson: those
-  are the figures a reader checks, and the residual nobody looks at is the one
-  that rots. So the two named forms keep their counts and the total is gone —
+  What holds is the two named counts, and the branch that added a sixteenth
+  `Trap` is the first test of that. This paragraph used to say *what never
+  drifted is 15 and 8*; `Trap` has now moved once, and the lesson survives the
+  movement rather than being refuted by it — those are the figures a reader
+  checks, so the change was caught and reconciled inside the PR that caused it,
+  where the residual nobody looks at is the one that rots unnoticed. Keep them
+  current when a callout is added; do not bring the total back —
   `CLAUDE.md` makes the same argument about its own line count at the top of
   this file, and `deploy/observability/README.md` about its rule counts.
 

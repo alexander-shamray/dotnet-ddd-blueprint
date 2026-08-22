@@ -1965,7 +1965,7 @@ public class ContractTests
         typeof(OrderPlaced).Assembly
             .GetReferencedAssemblies()
             .Select(a => a.Name!)
-            .ShouldNotContain(name => name.EndsWith(".Domain"));
+            .ShouldNotContain(name => name.EndsWith(".Domain", StringComparison.Ordinal));
     }
 
     [Fact]
