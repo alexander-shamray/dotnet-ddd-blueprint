@@ -1915,6 +1915,7 @@ stateDiagram-v2
 
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
+    Compensating --> Compensating : PaymentAuthorised → FlagOrderForReview cancelled_after_payment
 
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
@@ -2252,10 +2253,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating),
 
-            // Stock is held and AuthorisePayment has gone. This transition
-            // happens INSTEAD of the one that charges, which is the whole
-            // point: the decline branch's compensation, under the customer's
-            // own reason.
+            // Stock is held and AuthorisePayment HAS ALREADY GONE — entering
+            // this state is what sends it. So this does NOT stop a charge, and
+            // an earlier revision of this comment said it happened "instead of
+            // the one that charges", which is backwards. What it is, is the
+            // decline branch's compensation under the customer's own reason.
+            // Whether the authorisation completes is Payments' race; if it
+            // does, Compensating escalates it below.
             When(OrderCancelled)
                 .Unschedule(PaymentTimeout)
                 .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
@@ -2321,6 +2325,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
                 .Finalize(),
 
+            // The money arriving after the cancellation was already the
+            // outcome, and the one event this state must not be quiet about.
+            // Compensating is reachable from AwaitingPayment, where
+            // AuthorisePayment has already been sent — so an authorisation can
+            // still land here, and §3.2 gives Payments no refund command.
+            //
+            // Left unwritten it falls to OnUnhandledEvent and is IGNORED: the
+            // catch-all that keeps redeliveries out of the error queue would
+            // silently swallow the case Confirmed escalates one state over.
+            // No Finalize — StockReleased and ReleaseTimeout still own the
+            // exit; this adds the review row and nothing else.
+            When(PaymentAuthorised)
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(
+                        ctx.Saga.OrderId,
+                        ReviewReasons.CancelledAfterPayment)),
+
             // Written, not left to OnUnhandledEvent, because a reader cannot
             // tell a decision from an omission. Reaching Compensating means a
             // cancellation is already the outcome, so the customer's request
@@ -2365,8 +2387,18 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > **The cost is that a genuinely misrouted event is now silent.** That is a
 > configuration fault traded against a routine one, and it is only acceptable
 > because every event this machine declares is handled in every state it can
-> reach one in — `Ignore(OrderCancelled)` in `Compensating` is written out for
-> exactly that reason rather than left to this callback.
+> reach one in — `Ignore(OrderCancelled)` and `When(PaymentAuthorised)` in
+> `Compensating` are both written out for exactly that reason rather than left
+> to this callback.
+>
+> **That claim was false when this callback was first added, and the review
+> that caught it is worth recording.** `Compensating` is reachable from
+> `AwaitingPayment`, where `AuthorisePayment` has already been sent, and it had
+> no `PaymentAuthorised` transition — so the catch-all swallowed an
+> authorisation landing after a cancellation, which is precisely the case
+> `Confirmed` escalates as `cancelled_after_payment`. A callback justified by
+> an invariant is only as good as the invariant, and nothing enforces this one
+> but reading the machine against its own event declarations.
 
 > **A cancellation has two origins and the saga used to see one.** The saga's
 > own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
@@ -2382,9 +2414,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | State | What is at stake | The transition |
 > |---|---|---|
 > | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, `customer_request` |
-> | `AwaitingPayment` | Stock held, nothing charged | The decline branch's compensation, `customer_request` |
+> | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, `customer_request` — this does not stop the charge |
 > | `Confirmed` | The card is authorised | Escalate — `cancelled_after_payment` — and finalise |
-> | `Compensating` | A cancellation is already the outcome | `Ignore`; both exits cancel the order anyway |
+> | `Compensating` | A cancellation is already the outcome — but the money may still land | `Ignore(OrderCancelled)`; both exits cancel the order anyway. `PaymentAuthorised` escalates `cancelled_after_payment` |
 >
 > **`Confirmed` is a gap this states rather than closes.** Undoing an
 > authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
