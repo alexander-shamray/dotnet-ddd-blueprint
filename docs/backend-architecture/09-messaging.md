@@ -1925,9 +1925,10 @@ stateDiagram-v2
 
 `OrderCancelled` is the **second** arrow coming from this service, and
 `OrderPlaced` is the first — [§3.2](03-bounded-contexts.md) lists both in
-Ordering's own Consumes column, for the same reason: a fact Ordering publishes is also
-a fact its workflow has to react to. `Compensating` ignores it explicitly, so
-the machine has a branch for it in every state it can reach one in.
+Ordering's own Consumes column, for the same reason: a fact Ordering
+publishes is also a fact its workflow has to react to. `Compensating`
+ignores it explicitly, so the machine has a branch for it in every state it
+can reach one in.
 
 The diagram has exactly the states the machine declares and no others. Earlier
 it showed `Cancelled` and `Shipped` as states; they are terminal *outcomes*, and
