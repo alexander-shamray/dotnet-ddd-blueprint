@@ -515,7 +515,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // It is the same family as #123 and #124: the branch made the race
             // reachable by giving AwaitingStock a cancellation, and the
             // stranding itself is what the StockTimeout branch has always
-            // done. Worked from ordering.OrderReviews until then.
+            // done.
+            //
+            // **And nothing surfaces it until then**, which is the sharper
+            // half. This line said the case is "worked from
+            // ordering.OrderReviews", contradicting the paragraph above it
+            // in the same breath: that paragraph says the stranding is
+            // SILENT, and this path sends no FlagOrderForReview at all.
+            // stock_not_released is ReleaseTimeout's code, raised when a
+            // release does not complete — and here it completed, as a no-op.
+            // So there is no row, no alert and no signal, and #125's own
+            // body already said so while this comment did not.
             //
             // Written for the same reason as the line above, and they were the
             // last two events left on the catch-all. §9.6's trap justifies
