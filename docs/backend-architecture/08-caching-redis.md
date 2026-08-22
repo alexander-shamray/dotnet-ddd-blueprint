@@ -372,10 +372,11 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
     // Result.Success<T>, closed over that value type — and the factory rather
     // than the constructor for a weaker reason than it looks. The constructor
     // is INTERNAL and this behaviour is in the same assembly, so it is
-    // reachable; what the factory adds is the null guard on the failure path
-    // and the type's own stated construction API (Appendix D.5). The state
-    // invariant needs neither: IsSuccess is defined as the absence of an
-    // error, so success-carrying-an-error is unreachable by any route.
+    // reachable, and Success<T> guards nothing the constructor does not: it is
+    // `=> new(value, null)`. What it is, is the type's stated construction API
+    // (Appendix D.5), and that is the whole of the reason. The state invariant
+    // needs neither: IsSuccess is defined as the absence of an error, so
+    // success-carrying-an-error is unreachable by any route.
     private static readonly MethodInfo? SuccessOfValue = ValueType is null
         ? null
         : typeof(Result)
@@ -902,6 +903,41 @@ public class IdempotencyBehaviorTests
     }
 
     [Fact]
+    public async Task Every_store_write_after_next_ignores_the_caller_token()
+    {
+        // The three CancellationToken.None calls are the section's argument in
+        // code, and nothing above observes them: a behaviour forwarding ct
+        // satisfies every other test here. RecordingStore records the token it
+        // was handed alongside the call name, which is what makes this
+        // assertable at all.
+        RecordingStore store = new();
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        await Dispatch<Result<Guid>>(store, new Place(Guid.CreateVersion7()), ct: cancelled.Token);
+
+        store.Tokens["complete"].ShouldBe(
+            CancellationToken.None,
+            "the caller's token stopped meaning anything once the transaction committed");
+    }
+
+    [Fact]
+    public async Task A_release_ignores_the_caller_token_too()
+    {
+        // The catch is reached BY cancellation more often than by anything
+        // else, so honouring ct here would abandon the release at exactly the
+        // moment it is owed and leak the claim for the whole retention.
+        RecordingStore store = new();
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        await Should.ThrowAsync<HandlerFailure>(
+            () => Dispatch<Result<Guid>>(store, new Explode(Guid.CreateVersion7()), ct: cancelled.Token));
+
+        store.Tokens["release"].ShouldBe(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task The_claimed_key_carries_the_subject()
     {
         RecordingStore store = new();
@@ -924,14 +960,23 @@ public class IdempotencyBehaviorTests
 }
 ```
 
+`RecordingStore.Tokens` is what makes the last two assertable: the call name
+maps to the token that call was handed, so "passes `None`" is a claim about the
+argument rather than about the prose beside it. Without it the three
+`CancellationToken.None` calls are unobserved, and an implementation forwarding
+`ct` throughout passes every other test in the suite — which is this
+repository's most-repeated failure wearing its narrowest disguise.
+
 The doubles are all local to the suite, because
 `Common.Application.Tests` references no service: `RecordingStore` is a
 dictionary of entries plus a `Calls` list each member appends to, a `FailOn`
 that throws `StoreFailure` from the named call, and `LastKey`;
 `CountingHandlers` counts what ran; `Authenticated(subject)` and `Anonymous`
-are two-line `ICurrentUser` stubs. §12.4's `Principals` and `SeedData` are
-Ordering's and cannot be reached from here — §4.3 permits one assembly across
-a service boundary and a test helper is not it.
+are two-line `ICurrentUser` stubs. `Dispatch` takes an optional `ct` so the two
+cancellation cases can hand the pipeline a token that is already cancelled.
+§12.4's `Principals` and `SeedData` are Ordering's and cannot be reached from
+here — §4.3 permits one assembly across a service boundary and a test helper is
+not it.
 
 **Asserting on the sequence rather than on a count** is what §6.3's suite
 already does with its `PipelineLog`, and it is what makes
