@@ -396,15 +396,24 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "         comment said they were \"still nobody's dependency\" and that the first\n"
             "         service to wire them would need no new reference; the second half was\n"
             "         right and is why nothing here changed but the sentence. -->\n",
-            # The rendered service wires no Redis, so it gets the forward-looking
-            # form rather than Catalog's history. Both halves of this pair moved
-            # in §8.5's PR: the anchor because Catalog's comment was corrected,
-            # and this text because "wiring a cache later" no longer names
-            # everything the reference buys — §8.5's store rides in on it too.
+            # THE RENDERED SERVICE DOES WIRE REDIS, and this comment said it did
+            # not. DependencyInjection.cs is a template file and no edit removes
+            # `services.AddRedisConnections(configuration)`, so a scaffolded
+            # service registers the connections, the lock factory and §8.5's
+            # store on the day it is created — which is why its compose block
+            # carries both ConnectionStrings__Redis* keys and why it starts at
+            # all. AddRedisConnections reads both eagerly and throws naming the
+            # missing one.
+            #
+            # Redis is therefore part of the empty-service BASELINE rather than
+            # something a first slice adds, and the text below now says so. The
+            # wrong version was not merely stale prose: it described the one
+            # arrangement under which a rendered service would fail to start.
             "    <!-- §9.4's outbox: the entity this assembly maps, the type map, the\n"
             "         metrics and the dispatcher it hosts. §8's Redis helpers ride in on\n"
-            "         the same reference, so wiring a cache — or §8.5's idempotency\n"
-            "         store — later costs no new one. -->\n",
+            "         the same reference and are wired from the start — the connections,\n"
+            "         the lock factory and §8.5's idempotency store — so a first cache\n"
+            "         read costs no new reference and no new registration. -->\n",
         ),
         (
             "    <!-- typeof(ProductPublished).Assembly, the Broker lane's half of\n"

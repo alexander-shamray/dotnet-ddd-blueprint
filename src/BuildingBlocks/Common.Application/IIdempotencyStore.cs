@@ -32,6 +32,17 @@ public interface IIdempotencyStore
     /// implementation admits two callers between the two operations, which is
     /// the race this behaviour exists to lose exactly once — Redis spells it
     /// <c>SET NX</c>.
+    /// <para>
+    /// <b>A claim carries no identity, and #127 is what that costs.</b> This
+    /// returns whether the key was taken and not <i>which</i> attempt took it,
+    /// so <see cref="CompleteAsync"/> and <see cref="ReleaseAsync"/> cannot
+    /// prove they still own what they are writing to. An attempt outliving
+    /// <paramref name="retention"/> can therefore overwrite or delete its
+    /// successor's live claim. Nothing here bounds the retention against a
+    /// handler's runtime — the shipped caller passes 24 hours, which makes it
+    /// unreachable rather than handled, and a caller passing seconds would not
+    /// be doing anything this contract forbids.
+    /// </para>
     /// </remarks>
     Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct);
 

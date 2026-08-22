@@ -89,6 +89,21 @@ internal sealed class RedisIdempotencyStore(
         // attempt may run; this one measures how long the answer stays
         // replayable, and starting it at the commit is what makes the stated
         // 24 hours the retention a caller actually gets.
+        //
+        // **Unconditional also means UNOWNED, and that is #127.** Every claim
+        // writes the same InProgressMarker, so this write cannot prove the
+        // key it overwrites is still the one this attempt claimed. An attempt
+        // that outlived its own claim clobbers whatever its successor put
+        // there. Not reachable as shipped — the only caller passes a 24-hour
+        // TTL and SET NX blocks a second claim while any value is present, so
+        // it needs a handler running longer than a day — but nothing in the
+        // port's contract says the retention must outlast a handler, and a
+        // caller passing seconds gets the race with no diagnostic.
+        //
+        // RedisDistributedLock, one file over on this same connection, is
+        // token-checked for exactly this reason. The asymmetry is the part
+        // worth naming: a reader who has read that script will assume this
+        // class does the same.
         await redis
             .GetDatabase()
             .StringSetAsync(keys.Idempotency(key), payload, retention);
@@ -103,6 +118,10 @@ internal sealed class RedisIdempotencyStore(
         // — the commonest reason to be releasing at all is the caller's own
         // cancellation, and honouring the token would abandon the release and
         // leak the claim for a day.
+        // Unowned in the same way CompleteAsync is, and worse in kind: this
+        // one DELETES. See #127 and the comment above — same reachability,
+        // same remedy, which is a compare-and-delete on a per-claim token
+        // exactly as RedisDistributedLock.ReleaseScript does it.
         try
         {
             await redis.GetDatabase().KeyDeleteAsync(keys.Idempotency(key));
