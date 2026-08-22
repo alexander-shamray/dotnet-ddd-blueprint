@@ -79,8 +79,7 @@ public class ConcurrentRequestExceptionHandlerTests
         // The framework message names it, and the caller sent it — so echoing
         // it tells them nothing while putting half of a key whose other
         // segment is the subject (§8.5) onto the wire.
-        body.RootElement.GetProperty("detail").GetString()!
-            .ShouldNotContain(CommandId.ToString());
+        body.RootElement.GetProperty("detail").GetString()!.ShouldNotContain(CommandId.ToString());
     }
 
     [Fact]

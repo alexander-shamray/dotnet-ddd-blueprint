@@ -133,10 +133,11 @@ public class AuthorizationPolicyTests(HostSmokeTests.UnreachableInfrastructureFa
         // disagreeing with the host.
         Endpoint[] idempotent =
         [
-            .. Endpoints.Where(e => e.Metadata
-                .GetMetadata<MethodInfo>()?
-                .GetParameters()
-                .Any(p => typeof(IIdempotentCommand).IsAssignableFrom(p.ParameterType)) == true)
+            .. Endpoints
+                .Where(e => e.Metadata
+                    .GetMetadata<MethodInfo>()?
+                    .GetParameters()
+                    .Any(p => typeof(IIdempotentCommand).IsAssignableFrom(p.ParameterType)) == true)
         ];
 
         // The gate's own subject. Both assertions below are over a sequence, so
