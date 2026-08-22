@@ -94,13 +94,17 @@ groups:
             It has already finalised, so the saga-age alert will not catch it.
           runbook_url: docs/runbooks/order-review.md
 
-      # OWED TWICE OVER, AND THE SECOND IS THE ONE NO GATE HERE CAN WATCH.
+      # OWED AN INSTRUMENT, AND IT IS THE ONE NO GATE HERE CAN WATCH.
       #
-      # First: no host calls AddRedisConnections, so nothing constructs a
-      # HybridCache. §15.4 records that absence from the secrets side, where the
-      # two Redis rows are conditional on a consumer existing.
+      # This said "owed twice over" and named a missing consumer first. That
+      # half is closed: §8.5's PR gave AddRedisConnections its first callers in
+      # Catalog and Ordering, so a HybridCache IS constructed in both hosts.
+      # §15.4's two Redis rows are conditional on a consumer existing and the
+      # condition is now met. What is still owed is the instrument, below —
+      # and the note under it already said wiring Redis would not supply it,
+      # so this file half-anticipated its own correction.
       #
-      # Second, and measured against the pinned package rather than assumed:
+      # Measured against the pinned package rather than assumed:
       # Microsoft.Extensions.Caching.Hybrid 10.0.0 references
       # System.Diagnostics.Tracing and NOT System.Diagnostics.Metrics. It
       # reports through HybridCacheEventSource with PollingCounter — that is

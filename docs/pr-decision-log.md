@@ -446,8 +446,10 @@ review queue have no gauge over their tables, `orders.placed` waits on
 `OrderMetrics` and §6.6's `OrderSummaries` projection, and the cache ratio waits
 on **an instrument and a consumer both** — §13.2 registers the HybridCache
 meter, `Microsoft.Extensions.Caching.Hybrid` 10.0.0 publishes no meter at all
-(EventCounters, via `HybridCacheEventSource`), and no host calls
-`AddRedisConnections` either.
+(EventCounters, via `HybridCacheEventSource`), and no host called
+`AddRedisConnections` either. **The consumer half closed with PR-28 and the
+alert did not move**, which is the correction below arriving in fact rather
+than in argument: the instrument was always the binding constraint.
 
 **That last row was first recorded here as owed a *consumer* rather than an
 instrument, and the correction is kept rather than overwritten**, because the
@@ -612,8 +614,10 @@ than by building, and marked as such.
   already warns about. Supplying credentials no code path sends merely
   provisions something to rotate; a `secretKeyRef` naming a Secret nobody
   created is a pod stuck in `CreateContainerConfigError` and a service that
-  never starts. No host calls `AddRedisConnections`, so both rows are now
-  conditional on the consumer existing. The rule that resolved it is §14.1's,
+  never starts. No host called `AddRedisConnections` at the time, so both rows
+  were made conditional on the consumer existing — a condition PR-28 then met
+  for Catalog and Ordering, which is what put the two keys in the charts. The
+  rule that resolved it is §14.1's,
   applied one deployment target over — **a key joins when a host's code reads
   it** — and it is the same rule that keeps the charts' environment identical
   in shape to the Compose blocks'.

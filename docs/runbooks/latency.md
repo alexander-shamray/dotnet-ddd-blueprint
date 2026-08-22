@@ -62,9 +62,13 @@ a caller pages deep with a sort the index does not cover.
 ### A cold or missing cache
 
 If the path reads through HybridCache, a hit-ratio collapse presents as latency
-before it presents as anything else. See [`redis-cold.md`](redis-cold.md) —
-though note that no host in this solution calls `AddRedisConnections` yet, so
-today this branch is theory rather than a live cause.
+before it presents as anything else. See [`redis-cold.md`](redis-cold.md).
+
+**This branch is still theory today, and for a narrower reason than it used to
+give.** The old sentence said no host calls `AddRedisConnections`; §8.5's PR
+made Catalog and Ordering the first callers, so a `HybridCache` is constructed
+in both. What no code path does yet is *read* it — so there is no cache-backed
+query whose miss could show up here.
 
 ### A slow peer
 

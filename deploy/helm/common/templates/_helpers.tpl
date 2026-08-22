@@ -295,13 +295,17 @@ The secret half of the same table, and the rule that decides what is in either:
 a variable joins when a host's code READS it, and not before.
 
 That is the rule §14.1's Compose blocks already state — "an env var nothing
-reads is the container form of an unused registration" — and it is why there
-are no Redis keys here. §15.4's inventory marks `ConnectionStrings__RedisCache`
-and `ConnectionStrings__RedisCoordination` required *once a host reads a cache*,
-and none does — nothing calls `AddRedisConnections` yet. Supplying them anyway
-would demand two Secrets exist before any pod can start, for values nothing
-reads. They join with the PR whose code reads them, exactly as
+reads is the container form of an unused registration". §15.4's inventory marks
+`ConnectionStrings__RedisCache` and `ConnectionStrings__RedisCoordination`
+required *once a host reads a cache*, and **that condition is now met**:
+§8.5's PR gave `AddRedisConnections` its first callers, in Catalog and
+Ordering. So the two keys are rendered below, under `redis.enabled`, exactly as
 `Identity__Authority` joined with PR-16.
+
+**This paragraph said the opposite in the branch that added them**, which is
+the drift the rule above exists to prevent arriving inside the file it governs:
+the keys went in eighty lines down and the comment explaining their absence
+stayed where it was.
 
 Secrets are REFERENCED, never rendered. External Secrets Operator owns the
 Secret objects (§15.4); a chart that templated a connection string would put a
@@ -369,6 +373,17 @@ key is the other half, mounted into the migration Job and nowhere else.
       key: {{ include "commerce.require" (list .Values.broker.secretRef.key "broker.secretRef.key is required when broker.enabled.") | quote }}
 {{- end }}
 {{- if .Values.redis.enabled }}
+{{- if eq (.Values.redis.secretRef.cacheKey | toString) (.Values.redis.secretRef.coordinationKey | toString) }}
+{{- fail "redis.secretRef.cacheKey and redis.secretRef.coordinationKey are the same key. The two instances have different eviction policies (§8.1) — one key points both connections at the same server, and if that is the allkeys-lru instance then §8.5's idempotency claims are evicted under exactly the memory pressure that makes a duplicate write hardest to reproduce. A capability is a fact about the code, not an environment setting." }}
+{{- end }}
+{{- /*
+The guard above was argued in the comment below and not written, until a review
+asked what enforced it. Nothing did: the smoke test renders this repository's
+own values, which differ, so every render was green and a production overlay
+setting both to the cache key would have been too. **An argument in a comment
+is not a control**, and the failure it describes is the one that cannot be
+reproduced afterwards — an evicted claim leaves no trace of having existed.
+*/}}
 {{- /*
 §8.1's two connections, and BOTH are required even where only one is read.
 AddRedisConnections is one call by design (§8.2) and reads both eagerly, so a

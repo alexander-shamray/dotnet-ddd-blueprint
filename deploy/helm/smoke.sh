@@ -855,6 +855,14 @@ refuses_chart catalog 'disabling redis the chart is configured for fails the ren
     'redis.enabled is false' --set redis.enabled=false
 refuses_chart catalog 'clearing the coordination Secret key fails the render' \
     'redis.secretRef.coordinationKey is required' --set-string 'redis.secretRef.coordinationKey='
+# The two keys being PRESENT is not the same claim as their being DIFFERENT,
+# and only the first had a test. This repository's own values differ, so every
+# render was green while a production overlay pointing both connections at the
+# allkeys-lru instance would have rendered green too — and an evicted
+# idempotency claim leaves no trace of having existed, so the failure is the
+# kind nobody reproduces afterwards.
+refuses_chart catalog 'pointing both Redis connections at one Secret key fails the render' \n    'are the same key' --set-string 'redis.secretRef.coordinationKey=cache-connection-string'
+
 refuses_chart catalog 'clearing the migrator image fails the render' \
     'image.migrator is required' --set-string 'image.migrator='
 
