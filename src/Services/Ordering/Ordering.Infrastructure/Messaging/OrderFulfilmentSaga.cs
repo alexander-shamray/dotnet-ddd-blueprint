@@ -125,6 +125,20 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // aggregate then publishes arrives at a queue whose instance has just
         // been deleted. Stated rather than inherited — a default that changed
         // would turn every cancelled order into an error-queue entry.
+        //
+        // **It states the default rather than changing it, and the difference
+        // is measured**: a non-initial event correlating to no instance is
+        // consumed CLEANLY — no transition, no fault, nothing on §13.6's
+        // pager. A test pins that, because the residual below depends on it.
+        //
+        // **The residual is #123 and this line is where it lives.** A CUSTOMER
+        // cancellation that overtakes its own OrderPlaced is discarded here
+        // too, and the later placement then starts a live saga for an order
+        // the aggregate has already cancelled. §9.4 orders nothing, and the
+        // dispatcher's READPAST claim plus a retried publish are two ordinary
+        // ways to get there. Telling the two apart is possible — Reason is a
+        // CancelReasons code and only the customer's is customer_request — and
+        // it is a §9.6 decision rather than a line to change here.
         Event(
             () => OrderCancelled,
             x =>
@@ -386,6 +400,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // No Finalize: the saga is still waiting on StockReleased, and the
             // exits below own the cancellation. This adds the review row and
             // nothing else.
+            //
+            // **It covers one interleaving of two, and the other is #124.** If
+            // StockReleased lands FIRST the exit above finalises, the instance
+            // is deleted, and an authorisation still in flight then correlates
+            // to nothing — discarded in silence, by the same default the
+            // OnMissingInstance comment above measures. Inventory answering
+            // promptly while a PSP is slow is the expected case rather than the
+            // degenerate one, so this is a real hole and not a corner. Closing
+            // it means Compensating waiting on both outstanding results, which
+            // is a change to the shape of the machine.
             When(PaymentAuthorised)
                 .Send(
                     OrderingQueue,

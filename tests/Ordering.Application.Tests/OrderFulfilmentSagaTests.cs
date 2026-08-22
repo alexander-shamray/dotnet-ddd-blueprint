@@ -902,4 +902,41 @@ public class OrderFulfilmentSagaTests
         // schedule left behind by a wait state that was removed.
         schedules.Length.ShouldBe(saga.States.Count(s => s.Name is not ("Initial" or "Final")));
     }
+
+    [Fact]
+    public async Task An_event_for_an_order_with_no_instance_is_discarded_in_silence()
+    {
+        // **Measured, because two review findings turn on it and neither the
+        // chapter nor this file said which way it goes.** MassTransit's
+        // policy for a NON-INITIAL event that correlates to no instance is
+        // not the same thing as OnUnhandledEvent, which governs an event that
+        // reaches an instance in a state that does not handle it. This is the
+        // other one, and the default is to consume the message CLEANLY and
+        // drop it: no transition, no fault, no error-queue entry, nothing on
+        // §13.6's pager.
+        //
+        // That default is what makes OrderCancelled's explicit Discard cheap
+        // — it states the routine echo rather than changing anything — and it
+        // is also what makes the two races in #123 and #124 silent rather
+        // than loud. Pinning it here means the day a MassTransit upgrade
+        // changes the default, this suite says so instead of the residual
+        // quietly closing itself.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orphan = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orphan, "auth-1"));
+
+            (await Consumed<PaymentAuthorised>(harness, m => m.OrderId == orphan)).ShouldBeTrue();
+
+            ConsumeFaults<PaymentAuthorised>(harness).ShouldAllBe(e => e == null);
+
+            // And nothing was escalated, which is the half that matters: the
+            // Compensating transition one state over exists precisely to turn
+            // this event into a review row, and it cannot run for an instance
+            // that is gone.
+            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orphan)).ShouldBeFalse();
+        }
+    }
 }

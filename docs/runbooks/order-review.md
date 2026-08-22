@@ -144,7 +144,10 @@ afterwards. **There is no despatch to stop** — the order never reached
 3. **Give it the ten-minute `ReleaseTimeout` before treating stock as stuck.**
    If that expires the saga raises a second row, `stock_not_released`, and
    [that section](#stock_not_released) is the procedure — the two rows are one
-   incident, and the saga-age alert will have fired as well.
+   incident. **The saga-age alert will not have fired**, and this line said the
+   opposite: the `ReleaseTimeout` transition finalises the instance at ten
+   minutes, so by the hour that alert measures there is no saga left to be old.
+   It fires only if that timeout never arrives either.
 
 ## Resolving
 

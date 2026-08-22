@@ -2410,6 +2410,25 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > all four rather than leaning on this callback: `Ignore(OrderCancelled)`,
 > `When(PaymentAuthorised)`, `Ignore(StockReserved)` and
 > `Ignore(StockReservationFailed)`.
+
+> **A missing instance is a different mechanism, and it is silent.**
+> `OnUnhandledEvent` governs an event that reaches an instance in a state that
+> does not handle it. An event that correlates to **no instance at all** never
+> reaches the machine, and MassTransit's default for a non-initial event there
+> is to consume it cleanly — no transition, no fault, no error-queue entry, so
+> §13.6's threshold-at-zero alert never sees it. Measured rather than read, and
+> the two were run together in review until it was.
+>
+> **Two consequences are open and are named rather than implied.** A customer's
+> `OrderCancelled` overtaking its own `OrderPlaced` is dropped, and the later
+> placement starts a live saga for an order the write model has already
+> cancelled — §9.4 orders nothing, and a retried publish is enough to get there.
+> And `Compensating`'s `When(PaymentAuthorised)` covers only the interleaving
+> where the money beats the stock release; the other way round the saga has
+> already finalised, so the authorisation lands on nothing and the
+> `cancelled_after_payment` row this section provides for is never raised.
+> Both are lifetime questions rather than transition questions: the handler
+> exists and the instance does not.
 >
 > **That claim was false when this callback was first added, and it took three
 > passes to make it true — which is the more useful half of the story.** First
