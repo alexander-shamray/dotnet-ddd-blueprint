@@ -754,6 +754,134 @@ would pass it — but it catches the case that actually exists in this
 repository, and a proxy that names its own limit beats a gate that reads as
 complete.
 
+**Neither reflection test reaches the behaviour, and §12.4's two integration
+tests reach only half of it.** Both dispatch `PlaceOrderCommand`, so every
+assertion they make is about `Result<Guid>` on the success path: the release
+decisions are unobserved, and so is the void-shaped replay. Moving
+`CompleteAsync` back inside the `try` — undoing this section's answer to the
+release question — leaves all of them green. So the behaviour gets its own
+suite against a recording store, in `Common.Application.Tests` beside §6.3's,
+where a store that fails on demand costs nothing:
+
+```csharp
+public class IdempotencyBehaviorTests
+{
+    // One record per outcome, rather than sentinel CommandIds: the key is
+    // built from CommandId, so overloading it to select a handler would make
+    // every key assertion depend on which branch the test wanted.
+    private sealed record Place(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
+    private sealed record Refuse(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
+    private sealed record Explode(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
+
+    // The void shape is not a curiosity: it is the branch returning
+    // (TResult)Result.Success() and the one storing the "null" sentinel, and
+    // §12.4 has no command with it.
+    private sealed record Cancel(Guid CommandId) : ICommand<Result>, IIdempotentCommand;
+
+    [Fact]
+    public async Task A_successful_command_completes_the_claim_and_never_releases()
+    {
+        RecordingStore store = new();
+
+        Result<Guid> result = await Dispatch<Result<Guid>>(store, new Place(Guid.CreateVersion7()));
+
+        result.IsSuccess.ShouldBeTrue();
+        store.Calls.ShouldBe(["claim", "complete"]);
+    }
+
+    [Fact]
+    public async Task A_CompleteAsync_failure_leaves_the_claim_standing()
+    {
+        // §8.5's answer to the release question, and the only test that fails
+        // when it is reversed. By the time CompleteAsync runs the work is
+        // durable, so releasing here is what lets a retry write it twice —
+        // and every §12.4 test stays green through that change.
+        RecordingStore store = new() { FailOn = "complete" };
+
+        await Should.ThrowAsync<StoreFailure>(
+            () => Dispatch<Result<Guid>>(store, new Place(Guid.CreateVersion7())));
+
+        store.Calls.ShouldBe(
+            ["claim", "complete"],
+            "no release: the transaction committed before CompleteAsync was called");
+    }
+
+    [Fact]
+    public async Task A_thrown_handler_releases_the_claim_and_rethrows_the_original()
+    {
+        RecordingStore store = new();
+
+        HandlerFailure thrown = await Should.ThrowAsync<HandlerFailure>(
+            () => Dispatch<Result<Guid>>(store, new Explode(Guid.CreateVersion7())));
+
+        thrown.Message.ShouldBe(HandlerFailure.Text, "the store's fault must not replace the handler's");
+        store.Calls.ShouldBe(["claim", "release"]);
+    }
+
+    [Fact]
+    public async Task A_failed_Result_releases_the_claim_and_is_returned_rather_than_thrown()
+    {
+        RecordingStore store = new();
+
+        Result<Guid> result = await Dispatch<Result<Guid>>(store, new Refuse(Guid.CreateVersion7()));
+
+        result.IsFailure.ShouldBeTrue();
+        store.Calls.ShouldBe(["claim", "release"]);
+    }
+
+    [Fact]
+    public async Task A_void_shaped_command_replays_without_running_its_handler_twice()
+    {
+        RecordingStore store = new();
+        CountingHandlers handlers = new();
+        var command = new Cancel(Guid.CreateVersion7());
+
+        Result first = await Dispatch<Result>(store, command, handlers: handlers);
+        Result second = await Dispatch<Result>(store, command, handlers: handlers);
+
+        first.IsSuccess.ShouldBeTrue();
+        second.IsSuccess.ShouldBeTrue();
+        handlers.CancelCount.ShouldBe(1, "the second dispatch is served by Replay, not by the handler");
+        store.Calls.ShouldBe(["claim", "complete", "claim", "get"]);
+    }
+
+    [Fact]
+    public async Task The_claimed_key_carries_the_subject()
+    {
+        RecordingStore store = new();
+        Guid subject = Guid.CreateVersion7();
+
+        await Dispatch<Result<Guid>>(store, new Place(Guid.CreateVersion7()), Authenticated(subject));
+
+        store.LastKey.ShouldStartWith($"{subject}:");
+    }
+
+    [Fact]
+    public async Task An_unauthenticated_caller_claims_under_the_system_segment()
+    {
+        RecordingStore store = new();
+
+        await Dispatch<Result<Guid>>(store, new Place(Guid.CreateVersion7()), Anonymous);
+
+        store.LastKey.ShouldStartWith("system:");
+    }
+}
+```
+
+The doubles are all local to the suite, because
+`Common.Application.Tests` references no service: `RecordingStore` is a
+dictionary of entries plus a `Calls` list each member appends to, a `FailOn`
+that throws `StoreFailure` from the named call, and `LastKey`;
+`CountingHandlers` counts what ran; `Authenticated(subject)` and `Anonymous`
+are two-line `ICurrentUser` stubs. §12.4's `Principals` and `SeedData` are
+Ordering's and cannot be reached from here — §4.3 permits one assembly across
+a service boundary and a test helper is not it.
+
+**Asserting on the sequence rather than on a count** is what §6.3's suite
+already does with its `PipelineLog`, and it is what makes
+`["claim", "complete"]` say that no release happened at all rather than that
+one did not happen *twice*.
+
 > **Two connections, not one.** The cache multiplexer points at the instance
 > running `allkeys-lru`; the coordination multiplexer points at the
 > `noeviction` instance holding locks, idempotency keys and the denylist.
