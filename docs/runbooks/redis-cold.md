@@ -22,12 +22,15 @@
 > is exactly the trap §13.6 warns about, and the `AddMeter` line is what makes
 > it look wired.
 >
-> The consumer half is closed. Catalog and Ordering both call
-> `AddRedisConnections` since §8.5's PR, so a `HybridCache` is constructed in
-> each; §15.4's two Redis rows are conditional on a consumer existing and that
-> condition is now met. **What has not happened is anything *reading* the
-> cache**, which is a third thing and is not what the alert is waiting on — a
-> meter with no publisher reports nothing whether or not the cache is used.
+> The consumer half is closed as §15.4 measures it: Catalog and Ordering both
+> call `AddRedisConnections` since §8.5's PR, so both hosts REGISTER the
+> cache stack and the two Redis rows are required. **Registering is not
+> constructing**, and an earlier revision of this callout said a `HybridCache`
+> was constructed in each: DI builds a singleton when something resolves it,
+> and nothing in `src/` injects one. So there are three states here, not two —
+> no caller, a caller, and a cache anything actually reads — and the alert is
+> waiting on none of them. A meter with no publisher reports nothing whichever
+> state holds.
 >
 > So the signal needs an **instrument**: an EventCounters-to-OTel bridge, or a
 > package version that publishes a meter. Taking the cache was necessary and

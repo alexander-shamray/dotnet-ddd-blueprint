@@ -553,21 +553,35 @@ for chart in $SERVICE_CHARTS; do
         test "$has_template" = "$has_image"
 done
 
-# MIGRATOR_CHARTS, not SERVICE_CHARTS: the gateway and the BFF own no Redis
-# (§10.1, §15.4), and their half is already asserted the other way above —
-# "mounts no connection string at all", which fails if either key appears.
-for chart in $MIGRATOR_CHARTS; do
-    check "$chart mounts both of §8.1's Redis connections" \
-        test "$(count '^ *- name: ConnectionStrings__Redis' "$OUT/$chart.yaml")" -eq 2
+# DRIVEN FROM THE CHART'S OWN redis BLOCK, over every service chart — and it
+# used to iterate MIGRATOR_CHARTS and demand two keys unconditionally, which
+# is a rule about DATABASES applied to a question about REDIS.
+#
+# Tightening the source-detection gate above is what exposed it: that gate now
+# permits a database-backed chart whose code calls no AddRedisConnections, and
+# requires it to declare no redis — while this loop still demanded two Redis
+# variables from every migrator chart. The next such service could satisfy
+# neither gate, and the gateway and BFF were never compared to their source at
+# all. Two gates disagreeing about the same fact is worse than one gate.
+#
+# So the expected count is 0 or 2, read from `declares`, over SERVICE_CHARTS.
+# Never 1: the two connections are provisioned together and a chart carrying
+# one is a pod that resolves the other to null at startup.
+for chart in $SERVICE_CHARTS; do
+    if declares "$chart" redis; then expected=2; else expected=0; fi
+    check "$chart declares redis=$(declares "$chart" redis && echo yes || echo no), so it mounts $expected of §8.1's connections" \
+        test "$(count '^ *- name: ConnectionStrings__Redis' "$OUT/$chart.yaml")" -eq "$expected"
     # THE TWO KEYS MUST DIFFER, and this is the assertion that would have
     # caught the likeliest wiring mistake. Both instances are provisioned
     # together and named alike, so one Secret key copied onto both rows renders
     # cleanly, passes the count above, and points §8.5's idempotency claims at
     # the allkeys-lru instance §8.1 exists to keep them off. Counting the rows
     # cannot see that; comparing the keys can.
-    check "$chart: the cache and coordination connections read different Secret keys" \
-        test "$(awk '/- name: ConnectionStrings__Redis/ { want = 1; next }
-                     want && /key: / { print $2; want = 0 }' "$OUT/$chart.yaml" | sort -u | wc -l)" -eq 2
+    if [ "$expected" -eq 2 ]; then
+        check "$chart: the cache and coordination connections read different Secret keys" \
+            test "$(awk '/- name: ConnectionStrings__Redis/ { want = 1; next }
+                         want && /key: / { print $2; want = 0 }' "$OUT/$chart.yaml" | sort -u | wc -l)" -eq 2
+    fi
 done
 
 # --------------------------------------------------------------------------

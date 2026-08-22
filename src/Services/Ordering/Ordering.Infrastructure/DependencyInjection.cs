@@ -274,11 +274,11 @@ public static class DependencyInjection
             .AddHealthChecks()
             .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
             .AddRedis(
-                configuration.GetConnectionString("RedisCache")!,
+                configuration.GetConnectionString(RedisConnections.Cache)!,
                 name: "redis-cache",
                 tags: ["ready"])
             .AddRedis(
-                configuration.GetConnectionString("RedisCoordination")!,
+                configuration.GetConnectionString(RedisConnections.Coordination)!,
                 name: "redis-coordination",
                 tags: ["ready"]);
 

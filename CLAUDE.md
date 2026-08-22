@@ -442,7 +442,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 852 tests — so the build rules and the drift rules below
+and `dotnet test` runs 854 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -768,7 +768,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 665 of 852, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 667 of 854, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -847,13 +847,13 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 665 of
-the 852 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 667 of
+the 854 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 187, needing the daemon exactly as
 before.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (647) and integration (187), which is the 665 above split at the
+(18), unit (649) and integration (187), which is the 667 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.

@@ -66,9 +66,11 @@ before it presents as anything else. See [`redis-cold.md`](redis-cold.md).
 
 **This branch is still theory today, and for a narrower reason than it used to
 give.** The old sentence said no host calls `AddRedisConnections`; §8.5's PR
-made Catalog and Ordering the first callers, so a `HybridCache` is constructed
-in both. What no code path does yet is *read* it — so there is no cache-backed
-query whose miss could show up here.
+made Catalog and Ordering the first callers, so both hosts register the cache
+stack. **Registering is not constructing** — nothing in `src/` resolves
+`HybridCache`, so no cache object is built either — and what no code path does
+is *read* one. Either way there is no cache-backed query whose miss could show
+up here.
 
 ### A slow peer
 

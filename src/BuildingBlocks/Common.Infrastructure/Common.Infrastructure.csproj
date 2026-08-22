@@ -3,11 +3,15 @@
   <!--
     Settings come from Directory.Build.props (§4.4).
 
-    PR-14's outbox drew the edges this comment used to say it would. The Redis
-    helpers still name no domain or application type; the Outbox folder names
-    all three — IDbConnectionFactory and OutboxLane from Common.Application,
-    IDomainEvent from Common.Domain, IIntegrationEvent from Common.Contracts,
-    the last two because MessageTypeMap selects on exactly that pair.
+    PR-14's outbox drew the edges this comment used to say it would, and
+    §8.5's PR widened one of them. The Outbox folder names all three —
+    IDbConnectionFactory and OutboxLane from Common.Application, IDomainEvent
+    from Common.Domain, IIntegrationEvent from Common.Contracts, the last two
+    because MessageTypeMap selects on exactly that pair.
+
+    The Redis folder names an application type as well now, and this comment
+    said it named none: RedisIdempotencyStore implements IIdempotencyStore,
+    which is Common.Application's port (§8.5). It still names no DOMAIN type.
 
     MassTransit arrives with them, and it is the first common code to name one
     of its types: IPublishEndpoint, on the Broker half of DeliverAsync. Until

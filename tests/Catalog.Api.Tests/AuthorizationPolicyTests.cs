@@ -1,3 +1,5 @@
+using Common.Application;
+using System.Reflection;
 using Catalog.TestSupport;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -107,6 +109,55 @@ public class AuthorizationPolicyTests(HostSmokeTests.UnreachableInfrastructureFa
             .GetOrderedMetadata<IAuthorizeData>()
             .Select(a => a.Policy)
             .ShouldContain(CatalogPermissions.Write);
+    }
+
+    [Fact]
+    public void Every_idempotent_command_reaches_this_service_through_an_authenticated_endpoint()
+    {
+        // §8.5's rule, and until this test it was a claim IIdempotentCommand's
+        // own remarks made about a gate that did not exist: "a test asserts it
+        // of every command declaring this". Nothing did. The two
+        // IdempotencyOptInTests suites read command SHAPE — the interface, the
+        // result type, the operation name — and none of them can see an
+        // endpoint.
+        //
+        // What the rule protects: ICurrentUser.IsAuthenticated is false for an
+        // anonymous HTTP request, so its subject falls back to the shared
+        // "system" segment. Two anonymous callers reusing one CommandId then
+        // collide inside the mechanism that exists to keep them apart, and the
+        // second is served the first's stored result. An endpoint marked
+        // AllowAnonymous is all it takes.
+        //
+        // Read off the built endpoints for AuthorizationPolicyTests' own
+        // reason: a list beside the registrations would agree with itself while
+        // disagreeing with the host.
+        Endpoint[] idempotent =
+        [
+            .. Endpoints.Where(e => e.Metadata
+                .GetMetadata<MethodInfo>()?
+                .GetParameters()
+                .Any(p => typeof(IIdempotentCommand).IsAssignableFrom(p.ParameterType)) == true)
+        ];
+
+        // The gate's own subject. Both assertions below are over a sequence, so
+        // an empty one passes them — and this selector depends on minimal APIs
+        // putting the handler's MethodInfo in endpoint metadata, which is a
+        // framework detail rather than a contract.
+        idempotent.ShouldNotBeEmpty(
+            "this service declares an idempotent command bound to an endpoint; the selector found none");
+
+        foreach (Endpoint endpoint in idempotent)
+        {
+            endpoint.Metadata.GetMetadata<IAllowAnonymous>().ShouldBeNull(
+                $"{endpoint.DisplayName} takes an idempotent command and allows anonymous callers, " +
+                "so every one of them claims under the shared system subject (§8.5)");
+
+            endpoint.Metadata
+                .GetOrderedMetadata<IAuthorizeData>()
+                .ShouldNotBeEmpty(
+                    $"{endpoint.DisplayName} takes an idempotent command and requires no authorization, " +
+                    "so the caller has no subject to key on (§8.5)");
+        }
     }
 
     private Endpoint Single(string name) =>

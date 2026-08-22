@@ -23,7 +23,10 @@ namespace Common.Application;
 /// <b>The second constraint fails open the same way and is easier to miss.</b>
 /// <c>where TResult : Result</c> means a command returning anything else is
 /// unprotected too. Nothing here can detect that; the gate is in the test
-/// suite — <c>Every_idempotent_command_returns_a_Result</c>, one per service.
+/// suite — <c>Idempotent_commands_return_a_result_shape_the_behaviour_rebuilds</c>,
+/// one per service, named for the shape rather than for replayability
+/// because §8.5 makes that distinction and the test only establishes the
+/// first.
 /// <b>This sentence named a gate that did not exist until a review asked for
 /// it</b>, which is the failure it was written to prevent, arriving in the
 /// comment rather than in the code: both suites checked the interface opt-in

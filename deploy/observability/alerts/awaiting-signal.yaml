@@ -97,12 +97,20 @@ groups:
       # OWED AN INSTRUMENT, AND IT IS THE ONE NO GATE HERE CAN WATCH.
       #
       # This said "owed twice over" and named a missing consumer first. That
-      # half is closed: §8.5's PR gave AddRedisConnections its first callers in
-      # Catalog and Ordering, so a HybridCache IS constructed in both hosts.
-      # §15.4's two Redis rows are conditional on a consumer existing and the
-      # condition is now met. What is still owed is the instrument, below —
-      # and the note under it already said wiring Redis would not supply it,
-      # so this file half-anticipated its own correction.
+      # half is closed at the level §15.4 asks about: §8.5's PR gave
+      # AddRedisConnections its first callers in Catalog and Ordering, so both
+      # hosts REGISTER the cache stack and the two Redis rows are required.
+      #
+      # A correction on top of that correction: registering is not
+      # constructing. This comment said a HybridCache "IS constructed in both
+      # hosts", and DI builds a singleton when something resolves it — nothing
+      # in src/ injects HybridCache at all. So no cache object exists, which
+      # is a THIRD state after "no caller" and "a caller", and none of the
+      # three is what this alert waits on.
+      #
+      # What is still owed is the instrument, below — and the note under it
+      # already said wiring Redis would not supply it, so this file
+      # half-anticipated its own correction.
       #
       # Measured against the pinned package rather than assumed:
       # Microsoft.Extensions.Caching.Hybrid 10.0.0 references

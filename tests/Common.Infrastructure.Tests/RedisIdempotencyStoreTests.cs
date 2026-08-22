@@ -170,14 +170,32 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         claimTtl.ShouldNotBeNull();
         claimTtl.Value.ShouldBeLessThanOrEqualTo(Retention);
 
-        // And CompleteAsync re-arms it rather than inheriting what the claim
+        // And CompleteAsync RE-ARMS it rather than inheriting what the claim
         // had left: the claim's window measures how long an attempt may run,
         // this one how long the answer stays replayable.
+        //
+        // **The key is expired down first, and without that this test proves
+        // nothing.** It used to assert only that the completed TTL was above
+        // zero — which a freshly claimed key satisfies with almost the whole
+        // retention still on it, so the assertion passed just as well if
+        // CompleteAsync had preserved the claim's expiry. An assertion that
+        // cannot fail is worse than none, because it is the line a reader
+        // trusts instead of checking.
+        await database.KeyExpireAsync("ttl:idem:expiring", TimeSpan.FromSeconds(5));
+
+        TimeSpan? shortened = await database.KeyTimeToLiveAsync("ttl:idem:expiring");
+        shortened!.Value.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+
         await store.CompleteAsync("expiring", "null", Retention, TestContext.Current.CancellationToken);
 
         TimeSpan? completedTtl = await database.KeyTimeToLiveAsync("ttl:idem:expiring");
         completedTtl.ShouldNotBeNull();
-        completedTtl.Value.ShouldBeGreaterThan(TimeSpan.Zero);
+
+        // Back near the full retention rather than merely non-zero. The
+        // bound is loose on the low side only — anything above the five
+        // seconds just set proves the write re-armed rather than inherited.
+        completedTtl.Value.ShouldBeGreaterThan(TimeSpan.FromMinutes(1));
+        completedTtl.Value.ShouldBeLessThanOrEqualTo(Retention);
     }
 
     [Fact]
