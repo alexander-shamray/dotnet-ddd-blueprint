@@ -1902,10 +1902,18 @@ public sealed record OrderSummaryDto(
 // literals no compiler reads. An attribute is what ties the wire name to the
 // SQL path; a rename here then costs nothing, where without one it would leave
 // the patch writing a member nobody deserialises.
+//
+// Thumb is NULLABLE and Name is not, which is not an oversight in either
+// direction. ProductPublished.ThumbnailUrl is `string?` — a product may
+// genuinely have no image — and SQL Server's JSON_MODIFY in lax mode DELETES
+// the key when the value is null rather than writing a JSON null. So the patch
+// leaves `thumb` absent, and an absent member deserialises to null however the
+// property is declared. A non-nullable `string` there is a promise the storage
+// layer breaks silently.
 public sealed record SummaryProduct(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("thumb")] string Thumb);
+    [property: JsonPropertyName("thumb")] string? Thumb);
 
 public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, ICurrentUser currentUser)
     : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
