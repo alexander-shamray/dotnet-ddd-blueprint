@@ -1968,10 +1968,12 @@ public sealed record CancelOrder(Guid OrderId, string Reason);
 // ShipmentDispatched directly. The aggregate still enforces the transition.
 public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 
-// Escalation path for a wait with no automatic compensation (§9.6). This does
-// NOT touch the Order aggregate: the order's own state has not changed, and
-// "a human should look at this" is a fact about the process, not about the
-// order. It lands in an operations table instead.
+// Escalation path for work this platform has no contract to do (§9.6) — a
+// wait that ran out, or a cancellation with money already authorised. This
+// does NOT touch the Order aggregate, because "a human should look at this"
+// is a fact about operations rather than about the order; NOT because the
+// order is unchanged, which is true of the timeouts and false of
+// cancelled_after_payment. It lands in an operations table instead.
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
 
 public static class ReviewReasons
@@ -2399,9 +2401,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 ### Where an escalation lands
 
 `FlagOrderForReview` is the one command here that changes no business state. Its
-handler writes an operations row and stops — no aggregate is loaded, because
-nothing about the order has changed. What changed is that the *process* stalled,
-and that is not a fact the domain model should carry:
+handler writes an operations row and stops, and no aggregate is loaded — but
+**not** because nothing about the order changed. What the reasons share is
+narrower: a human now has work this platform has no contract to do, which is a
+fact about operations rather than about the order.
+
+Two of the three are a wait that ran out, where the order's own state genuinely
+has not moved. `cancelled_after_payment` is the opposite — it exists *because*
+the order changed, cancelled with money already authorised, and §3.2 gives
+Payments no refund command. A single "the process stalled" would describe that
+row backwards:
 
 ```sql
 -- A work queue, not a log. A row means "a human still needs to look at this";
@@ -2445,8 +2454,8 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork, TimeProvid
         // same thing one table over.
         //
         // Absorbed rather than upserted, deliberately: RaisedAt is when the
-        // process first stalled, and a redelivery must not move it forward —
-        // §13.6 alerts on how long a review has been outstanding.
+        // work first landed on a human, and a redelivery must not move it
+        // forward — §13.6 alerts on how long a review has been outstanding.
         await unitOfWork.ExecuteRawAsync(
             """
             INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)

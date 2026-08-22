@@ -274,10 +274,18 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .TransitionTo(Compensating),
 
             // The state this defect was worth its severity in: stock is held
-            // and AuthorisePayment has been sent or is about to be. Cancelling
-            // here compensates on the decline branch's own terms — release the
-            // reservation, wait for it, cancel. Nothing is charged, because
-            // this transition happens instead of the one that charges.
+            // and AuthorisePayment HAS ALREADY BEEN SENT — entering this state
+            // is what sends it. Cancelling here compensates on the decline
+            // branch's own terms: release the reservation, wait for it, cancel.
+            //
+            // **This transition does not stop a charge, and an earlier comment
+            // here said it did.** The authorisation request is already with
+            // Payments; whether it completes is Payments' race, and §3.2 has
+            // that service consuming OrderCancelled without specifying that it
+            // voids an authorisation in flight. What this saga guarantees is
+            // narrower and worth stating exactly: it sends no FURTHER
+            // AuthorisePayment, and if one is authorised anyway the
+            // Compensating state escalates it for a human.
             When(OrderCancelled)
                 .Unschedule(PaymentTimeout)
                 .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
@@ -348,6 +356,30 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     OrderingQueue,
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
                 .Finalize(),
+
+            // The money arriving after the cancellation was already the
+            // outcome, and it is the one event this state must NOT be quiet
+            // about. Reaching Compensating from AwaitingPayment means
+            // AuthorisePayment had already been sent, so an authorisation can
+            // still land here — and §3.2 gives Payments no refund command, so
+            // a human owns it exactly as they do one state over.
+            //
+            // This is Confirmed's cancelled_after_payment case arriving by the
+            // other door. Left unwritten it would fall to OnUnhandledEvent and
+            // be IGNORED — the catch-all this branch added for redelivery
+            // would silently swallow the case this branch's other half exists
+            // to escalate. The two fixes interacted, and only writing the
+            // transition separates them.
+            //
+            // No Finalize: the saga is still waiting on StockReleased, and the
+            // exits below own the cancellation. This adds the review row and
+            // nothing else.
+            When(PaymentAuthorised)
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(
+                        ctx.Saga.OrderId,
+                        ReviewReasons.CancelledAfterPayment)),
 
             // Written, not left to OnUnhandledEvent, and the difference is
             // whether a reader can tell a decision from an omission. Reaching

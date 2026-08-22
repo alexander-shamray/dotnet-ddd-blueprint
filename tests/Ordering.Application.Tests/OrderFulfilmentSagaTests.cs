@@ -624,11 +624,16 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
-    public async Task A_cancellation_while_awaiting_payment_releases_the_reservation_and_never_charges()
+    public async Task A_cancellation_while_awaiting_payment_compensates_and_sends_no_second_authorisation()
     {
         // Stock is held and AuthorisePayment has already gone. What must not
         // happen is a SECOND authorisation, and what must happen is the
         // decline branch's own compensation under the customer's reason.
+        //
+        // The name used to end "and never charges", which this body does not
+        // establish and this transition does not guarantee: the authorisation
+        // is already with Payments. Whether it completes is Payments' race,
+        // and the case where it does is the test below.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
@@ -659,6 +664,47 @@ public class OrderFulfilmentSagaTests
                 .Select<AuthorisePayment>(Spent())
                 .Count(m => m.Context.Message.OrderId == orderId)
                 .ShouldBe(1);
+        }
+    }
+
+    [Fact]
+    public async Task A_payment_authorised_while_compensating_escalates_rather_than_being_ignored()
+    {
+        // The case the two halves of this branch created between them.
+        // OnUnhandledEvent(Ignore) was added so a redelivered event does not
+        // page anyone — and Compensating had no PaymentAuthorised transition,
+        // so the catch-all would have swallowed the money arriving after a
+        // cancellation. That is Confirmed's cancelled_after_payment case by
+        // the other door, and §3.2 gives Payments no refund command, so
+        // silence is the one outcome it must not have.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            // In Compensating now, waiting on StockReleased — and Payments
+            // authorises anyway.
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "auth-late"));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.CancelledAfterPayment))
+                    .ShouldBeTrue();
+
+            // And it did not reach the error queue: the point is that this is
+            // handled, not merely that it is loud.
+            ConsumeFaults<PaymentAuthorised>(harness).ShouldAllBe(e => e == null);
         }
     }
 

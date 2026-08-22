@@ -4,9 +4,16 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 
 /// <summary>
 /// §9.6's one command that changes no business state. It writes an operations
-/// row and stops — no aggregate is loaded, because nothing about the order has
-/// changed. What changed is that the process stalled, and that is not a fact
-/// the domain model should carry.
+/// row and stops, and no aggregate is loaded — but <b>not</b> because nothing
+/// about the order changed. What the three reasons share is narrower than
+/// that: a human now has work the platform has no contract to do, and that is
+/// a fact about operations rather than about the order.
+///
+/// Two of the reasons are a wait that ran out, where the order's own state
+/// genuinely has not moved. The third, <c>cancelled_after_payment</c>, exists
+/// precisely BECAUSE the order changed — it was cancelled with money already
+/// authorised, and §3.2 gives Payments no refund command. Reading "the process
+/// stalled" onto that row describes the opposite of what happened.
 /// </summary>
 /// <remarks>
 /// <b>Written through <see cref="IUnitOfWork"/>, not a second connection.</b>
@@ -33,7 +40,7 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork, TimeProvid
         // range-locked has the defect it was written to fix.
         //
         // Absorbed rather than upserted, deliberately: RaisedAt is when the
-        // process first stalled, and a second delivery must not move it
+        // work first landed on a human, and a second delivery must not move it
         // forward — §13.6 alerts on how long a review has been outstanding.
         await unitOfWork.ExecuteRawAsync(
             """

@@ -45,9 +45,12 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// compensation.
 /// </summary>
 /// <remarks>
-/// This does <b>not</b> touch the <c>Order</c> aggregate: the order's own state
-/// has not changed, and "a human should look at this" is a fact about the
-/// process rather than about the order. It lands in an operations table.
+/// This does <b>not</b> touch the <c>Order</c> aggregate, and the reason is
+/// that "a human should look at this" is a fact about operations rather than
+/// about the order — not that the order is unchanged. It is unchanged for the
+/// two timeout reasons and very much changed for <c>cancelled_after_payment</c>,
+/// which is raised on an order that WAS cancelled while money was authorised.
+/// It lands in an operations table either way.
 /// </remarks>
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
 
