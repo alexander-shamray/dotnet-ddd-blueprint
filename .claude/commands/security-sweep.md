@@ -2,7 +2,7 @@
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
 allowed-tools: Read, Grep, Glob, Agent(security-auditor), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
-disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup)
+disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(bug-auditor)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -304,6 +304,16 @@ Each round is the review done once, end to end:
    so the enumeration is the only shape available and it goes stale the day
    someone adds an agent under `.claude/agents/`. Whoever adds one owes this
    line and `bug-sweep.md`'s an entry.
+
+   **It was stale on the day it was written, which is the sharper version of the
+   same point.** Both project-local agents — `security-auditor` and
+   `bug-auditor` — were registered under `.claude/agents/` and neither list
+   denied either, so each sweep could select the other's auditor. `bug-auditor`
+   is a defect auditor reporting bugs rather than security findings, so a sweep
+   run through it can return a clean *security* round having looked for
+   something else. Copilot raised it, and the lesson is that "a new type is
+   admitted by default" understated it: an inventory written by listing the
+   types you thought of omits the ones you did not, whether or not they are new.
 
    The natural cut is CI/tooling, the application source, and the
    deploy/infrastructure surface, but let the scope hint narrow it. Give each

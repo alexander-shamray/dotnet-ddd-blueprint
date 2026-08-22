@@ -2,7 +2,7 @@
 description: Loop a defect audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed critical-or-high logic or execution bug, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the outbox' or a path] — omit to sweep the whole repo"
 allowed-tools: Read, Grep, Glob, Agent(bug-auditor), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
-disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup)
+disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor)
 ---
 
 Sweep the repository for defects — code that does something other than what it
@@ -511,6 +511,16 @@ Each round is the review done once, end to end:
    so the enumeration is the only shape available and it goes stale the day
    someone adds an agent under `.claude/agents/`. Whoever adds one owes this
    line and `security-sweep.md`'s an entry.
+
+   **It was stale on the day it was written, which is the sharper version of the
+   same point.** Both project-local agents — `security-auditor` and
+   `bug-auditor` — were registered under `.claude/agents/` and neither list
+   denied either, so each sweep could select the other's auditor.
+   `security-auditor` is a security auditor, so a sweep run through it can miss
+   the logic and execution defects this command exists to find. Copilot raised
+   it, and the lesson is that "a new type is admitted by default" understated
+   it: an inventory written by listing the types you thought of omits the ones
+   you did not, whether or not they are new.
 
    The natural cut is six areas, and the scope hint narrows it:
 
