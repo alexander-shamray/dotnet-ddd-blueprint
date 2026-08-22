@@ -1,7 +1,8 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
+allowed-tools: Read, Grep, Glob, Agent(security-auditor), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
+disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -282,14 +283,27 @@ Each round is the review done once, end to end:
    verify step ran, because the audited repository is **untrusted input**. A
    tool the agent does not have cannot be turned against it.
 
-   **That property is real for the agent and not yet for the choice of agent.**
-   `allowed-tools` grants a bare `Agent`, which admits *any* registered subagent
-   type, including the general-purpose ones whose tool list is `*`. So "spawn
-   them as `security-auditor`" is enforced by this sentence and nothing else —
-   the shape the sentence above disparages. Fix: narrow the grant to this agent
-   type, verifying the syntax against the harness before writing it rather than
-   assuming, since a permission rule that does not match is inert and a
-   malformed one refuses to start.
+   **That property is now real for the choice of agent too, and the mechanism
+   is not the one it looks like.** This used to grant a bare `Agent`, which
+   admits *any* registered subagent type including the general-purpose ones
+   whose tool list is `*`, so "spawn them as `security-auditor`" was enforced
+   by that sentence and nothing else — the shape the sentence above
+   disparages.
+   The frontmatter now carries `Agent(security-auditor)` **and** a
+   `disallowed-tools` line naming every registered type that holds a shell, an
+   editor or the network. Both were needed: `allowed-tools` is an
+   **auto-approval list, not a whitelist** — the harness documents that it
+   "does not restrict which tools are available", and a measured probe
+   confirmed a `general-purpose` spawn is permitted under an
+   `allowed-tools: Agent(Explore)` grant. Only the deny refuses, and it refuses
+   by name: `Agent type 'general-purpose' has been denied by permission rule
+   'Agent(general-purpose)' from command`.
+
+   **The residual is that a deny list of agent types is an inventory, and a new
+   type is admitted by default.** The harness offers no "only this type" allow,
+   so the enumeration is the only shape available and it goes stale the day
+   someone adds an agent under `.claude/agents/`. Whoever adds one owes this
+   line and `bug-sweep.md`'s an entry.
 
    The
    natural cut is CI/tooling, the application source, and the
@@ -414,9 +428,17 @@ is to make the findings visible and tracked, not to edit source. If a finding is
 better closed than tracked (a one-line binding, a stray secret), say so in the
 round summary and leave the change to the user.
 
-**That boundary is enforced by the grant, not merely promised.** `allowed-tools`
-carries no `Write` and no `Edit`, so no file's **contents** can be altered, and
-no `git push`, so the branch cannot move. A
+**That boundary is enforced by the grant, not merely promised — and the
+enforcing half is `disallowed-tools`, not the absence of an entry in
+`allowed-tools`.** The distinction is not pedantry: `allowed-tools` is an
+auto-approval list, and the harness documents in as many words that it "does
+not restrict which tools are available: every tool remains callable, and your
+permission settings still govern tools that are not listed". So *omitting*
+`Write` and `Edit` never withheld them; it only meant they would have gone to
+whatever the session's permission mode does with an unlisted tool, which under
+an auto or bypassing mode is silently yes. They are now **named in
+`disallowed-tools`**, which removes them from the pool outright, and no
+`git push` is granted either, so the branch cannot move. A
 `Write` grant for issue bodies was tried and removed precisely because it would
 have re-opened source editing — a read-only claim resting on prose while the
 grant permits writing every undenied path is unenforced, which for a security

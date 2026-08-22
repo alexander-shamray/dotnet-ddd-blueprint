@@ -1,7 +1,8 @@
 ---
 description: Loop a defect audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed critical-or-high logic or execution bug, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the outbox' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
+allowed-tools: Read, Grep, Glob, Agent(bug-auditor), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*), Bash(mktemp:*)
+disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup)
 ---
 
 Sweep the repository for defects — code that does something other than what it
@@ -490,17 +491,26 @@ Each round is the review done once, end to end:
    verify step ran, because the audited repository is **untrusted input**. A
    tool the agent does not have cannot be turned against it.
 
-   **That property is real for the agent and not yet for the choice of agent.**
-   `allowed-tools` grants a bare `Agent`, which admits *any* registered subagent
-   type — including the general-purpose ones whose tool list is `*`. So "spawn
-   them as `bug-auditor`" is enforced by this sentence and nothing else, which
-   is precisely the shape the sentence above disparages. Picking the wrong type
-   would hand the fan-out the editing and shell tools the whole argument is
-   built on its not having. **Fix: narrow the grant to this agent type** — and
-   verify the syntax against the harness before writing it rather than
-   assuming, because a permission rule that does not match is inert and one
-   that is malformed refuses to start, both of which this repo has already paid
-   for once with `Write(...)` against `Edit(...)`.
+   **That property is now real for the choice of agent too, and the mechanism
+   is not the one it looks like.** This used to grant a bare `Agent`, which
+   admits *any* registered subagent type — including the general-purpose ones
+   whose tool list is `*` — so "spawn them as `bug-auditor`" was enforced by
+   that sentence and nothing else, which is precisely the shape the sentence
+   above disparages. Picking the wrong type would hand the fan-out the editing
+   and shell tools the whole argument is built on its not having. The
+   frontmatter now carries `Agent(bug-auditor)` **and** a `disallowed-tools`
+   line naming every registered type that holds a shell, an editor or the
+   network. Both were needed, and the reason is the trap this repo pays for
+   repeatedly: `allowed-tools` is an **auto-approval list, not a whitelist**.
+   The harness documents that it "does not restrict which tools are available",
+   and a measured probe confirmed a `general-purpose` spawn is permitted under
+   an `allowed-tools: Agent(Explore)` grant. Only the deny refuses, by name.
+
+   **The residual is that a deny list of agent types is an inventory, and a new
+   type is admitted by default.** The harness offers no "only this type" allow,
+   so the enumeration is the only shape available and it goes stale the day
+   someone adds an agent under `.claude/agents/`. Whoever adds one owes this
+   line and `security-sweep.md`'s an entry.
 
    The natural cut is six areas, and the scope hint narrows it:
 
@@ -687,9 +697,14 @@ to make the defects visible and tracked, not to edit source. If a finding is
 better closed than tracked (a one-character comparison, an argument in the wrong
 order), say so in the round summary and leave the change to the user.
 
-**That boundary is enforced by the grant, not merely promised.** `allowed-tools`
-carries no `Write` and no `Edit`, so no file's **contents** can be altered, and
-no `git push`, so the branch cannot move. A `Write` grant for issue bodies was
+**That boundary is enforced by the grant, not merely promised — and the
+enforcing half is `disallowed-tools`, not the absence of an entry in
+`allowed-tools`.** The harness documents that `allowed-tools` "does not
+restrict which tools are available: every tool remains callable", so omitting
+`Write` and `Edit` never withheld them. They are now **named in
+`disallowed-tools`**, which removes them from the pool outright, so no file's
+**contents** can be altered; no `git push` is granted either, so the branch
+cannot move. A `Write` grant for issue bodies was
 refused here for the reason `/security-sweep` records after trying one: it would
 re-open source editing, and a read-only claim resting on prose while the grant
 permits writing every undenied path is unenforced. Bodies go through
