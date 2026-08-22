@@ -102,11 +102,21 @@ next reviewer reads as settled.
 > disparages.** `pr-review-comments.sh` returns every inline comment regardless
 > of author, and the two `gh pr view` feeds are unfiltered by construction, so
 > nothing in the grant refuses a stranger's text the way
-> `Edit(.claude/scripts/**)` refuses a rewritten helper. The enforceable fix is
-> an author filter inside the helper itself, which is a human's edit made with
-> that deny lifted. Until it lands, a triage that skips this section is
-> indistinguishable from one that ran it, and the count in the report is the
-> only evidence either way.
+> `Edit(.claude/scripts/**)` refuses a rewritten helper.
+>
+> **The enforceable fix is all three feeds behind helpers, not one**, and an
+> earlier revision of this callout named only `pr-review-comments.sh`. Filtering
+> that one leaves the two `gh pr view` reads — the review bodies at step 1 and
+> the issue comments at step 3 — arriving unfiltered, and the review body is the
+> feed carrying the suppressed-comments block, which is where the findings that
+> matter have actually come from. Filtering the least important of the three
+> and calling it the fix is the shape of a control that reads as complete.
+>
+> Each would need a fixed helper that filters by author *and* returns the
+> dropped count, since the count is what makes a skipped filter visible. All of
+> that is a human's edit made with the `Edit(.claude/scripts/**)` deny lifted.
+> Until it lands, a triage that skips this section is indistinguishable from one
+> that ran it, and the count in the report is the only evidence either way.
 
 The scripts under `.claude/scripts/` are the whole of this command's API
 surface, and that is the point: a `Bash` permission rule matches a command

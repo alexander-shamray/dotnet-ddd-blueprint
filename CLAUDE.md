@@ -1816,6 +1816,18 @@ this paragraph. Nobody has run the probe. Until someone does, treat the pull
 grant as *narrowed, not proven* — the two words this repository keeps having to
 tell apart.
 
+**The probe that would settle it is not available from inside a session, and
+that is a property of the question rather than a lack of trying.** Every exact
+grant in `.claude/settings.json` — `Bash(git branch)`, `Bash(git remote -v)`
+and the rest — is a **read-only** git form, and the harness treats those as
+promptless built-ins whatever the allow list says. So a trailing argument on
+one of them runs cleanly and demonstrates nothing about prefix matching: it
+would have run either way. `git remote -v --verbose` was tried and is exactly
+that null result. A decisive probe needs an exact grant on a command the
+harness does not already wave through, which means adding a rule to a file the
+session reads at startup — so it cannot be arranged from within the session it
+would govern.
+
 **A command's frontmatter is a grant like any other, and it is the one nobody
 reads twice.** The first five rows above were all found in command frontmatter,
 and for a while that supported a second claim — that the global file had it
