@@ -774,13 +774,13 @@ public class OrderFulfilmentSagaTests
         // page anyone — and Compensating had no PaymentAuthorised transition,
         // so the catch-all would have swallowed the money arriving after a
         // cancellation. That is Confirmed's case by the other door — the same
-        // SYMPTOM under a different code, and not the same remedy: this
-        // state cannot despatch and Confirmed may, and more to the point
-        // Payments voids off OrderCancelled (§3.2), which Confirmed's
-        // transition reacts to and this authorisation arrives after. So the
-        // sibling escalates Shipping with a refund already in hand, and this
-        // one escalates the money because nothing automatic reaches it.
-        // Either way silence is the one outcome it must not have.
+        // SYMPTOM under a different code, and the difference is SHIPPING:
+        // this state cannot despatch and Confirmed may. Not the refund —
+        // Payments voids off OrderCancelled (§3.2) on both, and whether it
+        // has done so is not knowable from either state, since §9.4 orders
+        // nothing between independent consumers and on this door the
+        // cancellation has not been sent yet. Either way silence is the one
+        // outcome this transition must not have.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
@@ -829,12 +829,13 @@ public class OrderFulfilmentSagaTests
     {
         // A cancellation this machine cannot compensate ITSELF: the card is
         // authorised, and undoing that is a refund §3.2 gives Ordering no
-        // command for. It is not money left to a human, which this comment
-        // used to imply: Payments consumes OrderCancelled and voids an
+        // command for. Payments consumes OrderCancelled and voids an
         // authorisation already taken, and OrderCancelled is the event this
-        // transition fires on — so the refund is on its way and the row
-        // escalates Shipping. It escalates and finalises on the despatch
-        // timeout's own argument. What stops a false not_despatched review
+        // transition fires on — but whether that void has happened is not
+        // knowable here, because §9.4 orders nothing between Payments and
+        // this saga. What the row escalates that its sibling cannot is
+        // SHIPPING: a confirmed order may still despatch. It escalates and
+        // finalises on the despatch timeout's own argument. What stops a false not_despatched review
         // three days later is the FINALIZE, not the Unschedule beside it:
         // ADR-021's scheduler cannot cancel, so the timeout stays queued and
         // is discarded on delivery for want of an instance.

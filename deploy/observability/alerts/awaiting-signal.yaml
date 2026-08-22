@@ -100,8 +100,9 @@ groups:
             wait that ran out, or an authorisation that landed once the order
             was already being cancelled — the second is not necessarily a
             customer cancelling. Do NOT refund before reading the runbook:
-            Payments voids off OrderCancelled on its own, so on one of the two
-            cancellation codes a manual refund is the second one. The saga has
+            Payments voids off OrderCancelled on its own and nothing here
+            knows whether it has, so a manual refund may be the second one.
+            The saga has
             usually finalised by now, so the saga-age alert will not catch it
             — but check before assuming, because one reason is raised
             mid-wait. The runbook branches on all of it.

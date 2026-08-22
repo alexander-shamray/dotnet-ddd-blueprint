@@ -16,12 +16,14 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 /// Ordering no refund command to answer that with. Reading "the process
 /// stalled" onto either row describes the opposite of what happened.
 ///
-/// <b>It does not follow that a human owns the money on both.</b> §3.2 has
-/// Payments consume <c>OrderCancelled</c> and void an authorisation already
-/// taken, so <c>cancelled_after_confirmation</c> — raised by that very
-/// publication — has a refund already on its way, and what it needs a person
-/// for is Shipping. <c>cancelled_after_payment</c> is the authorisation that
-/// arrived after that event, which nothing automatic will reach.
+/// <b>Payments none the less refunds off <c>OrderCancelled</c>, which §3.2 has
+/// it consume and which voids an authorisation already taken.</b> Whether it
+/// has done so when one of these rows is read is <b>not knowable from the
+/// code</b>: §9.4 orders nothing between independent consumers, and on the
+/// decline and payment-timeout doors the cancellation has not even been sent
+/// yet — <c>CancelOrder</c> goes on <c>Compensating</c>'s exit. So the runbook
+/// checks for a refund on both codes and predicts it on neither, and what
+/// separates them is <b>Shipping</b> rather than the money.
 /// <para>
 /// <b>This said they exist BECAUSE the order was cancelled, and that is not
 /// reliably true of <c>cancelled_after_payment</c>.</b> Reached from a

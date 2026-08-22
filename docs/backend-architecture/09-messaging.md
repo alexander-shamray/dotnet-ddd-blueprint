@@ -1995,8 +1995,9 @@ public static class ReviewReasons
     // refund §3.2 gives ORDERING no command for — its Accepts column
     // closes at AuthorisePayment — so the saga escalates rather than
     // compensating. Payments refunds off OrderCancelled, which it
-    // consumes; this code is the authorisation that arrived AFTER that
-    // event, which nothing automatic reaches.
+    // consumes, and nothing here knows whether it has: §9.4 orders
+    // nothing between two consumers, and on the decline and timeout
+    // doors the cancellation has not been sent yet.
     //
     // TWO codes for that, not one, because the procedures differ and the row
     // is all an operator gets: ordering.OrderReviews persists (OrderId,
@@ -2321,9 +2322,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // A cancellation this machine cannot compensate ITSELF: the card
             // is authorised, and undoing that is a refund §3.2 gives Ordering
             // no command for. Payments voids off OrderCancelled — the event
-            // this very transition reacts to — so the money is in hand and
-            // what the row escalates is Shipping. So it escalates and
-            // finalises, on the
+            // this very transition reacts to — but §9.4 orders nothing
+            // between two consumers, so whether that void has happened is
+            // not knowable here. What the row escalates that its sibling
+            // cannot is Shipping. So it escalates and finalises, on the
             // despatch timeout's own argument. Finalize is what stops the
             // three-day DespatchExpired raising a false not_despatched
             // review: ADR-021's scheduler cannot cancel, so the Unschedule
@@ -2380,9 +2382,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // outcome, and the one event this state must not be quiet about.
             // Compensating is reachable from AwaitingPayment, where
             // AuthorisePayment has already been sent — so an authorisation can
-            // still land here — later than the OrderCancelled Payments voids
-            // against, so unlike Confirmed's case nothing automatic reaches
-            // it and §3.2 gives Ordering no refund command either.
+            // still land here. §3.2 gives Ordering no refund command, and
+            // Payments' void keys on OrderCancelled — which on this door
+            // has not been published yet, since CancelOrder goes on this
+            // state's exit. Nothing here knows whether a refund follows.
             //
             // Left unwritten it falls to OnUnhandledEvent and is IGNORED: the
             // catch-all that keeps redeliveries out of the error queue would
@@ -2542,17 +2545,25 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > decision taken in the wrong place, so the saga escalates and the review row
 > is what carries it.
 >
-> **"So the money is handed to a human" is what this said, and on this code
-> it is wrong.** §3.2 lists `OrderCancelled` in Payments' **Consumes** column,
-> gives it a `Refund` aggregate and has it publish `PaymentRefunded`; the
-> event's own contract says an authorisation already taken is voided. This
-> transition *reacts to* that publication, so the refund is already on its way
-> and a manual one is the second. What the row actually escalates is
-> **Shipping** — a confirmed order may still despatch.
-> `cancelled_after_payment` is the code where the money genuinely is owed a
-> person, because there the
-> authorisation is later than the event Payments voids against. The runbook
-> leads with checking rather than refunding for exactly this reason.
+> **"So the money is handed to a human" is what this said, and it skips a
+> step.** §3.2 lists `OrderCancelled` in Payments' **Consumes** column, gives
+> it a `Refund` aggregate and has it publish `PaymentRefunded`; the event's
+> own contract says an authorisation already taken is voided. So a refund may
+> well happen without anyone doing it — Ordering simply has no way to *ask*.
+>
+> **A second revision then predicted which code gets that refund, and that
+> is a claim about another service's delivery order.** It said this one has
+> the void on its way and `cancelled_after_payment` is beyond its reach.
+> [§9.4](09-messaging.md) orders nothing between two independent consumers, so
+> a saga seeing `OrderCancelled` says nothing about when Payments consumed it
+> — and on the decline and payment-timeout doors the cancellation has not been
+> published at all when the row is raised, because `CancelOrder` goes on
+> `Compensating`'s exit. Neither prediction holds, and the runbook checks on
+> both codes rather than expecting an answer on either.
+>
+> **What the two codes actually differ in is Shipping** — a confirmed order
+> may still despatch and a compensating one cannot. The money is what they
+> have in common.
 >
 > Two consequences follow and both are real: the reservation on a confirmed
 > order is left alone, because one being picked is not Inventory's to drop on
@@ -2591,14 +2602,15 @@ because **money is authorised and the order is not going to be delivered**,
 and §3.2 gives Ordering no refund command to answer that with. A single "the
 process stalled" would describe those rows backwards.
 
-**Nor do the two need a person for the same thing**, which a reviewer found
-this section assuming throughout. Payments consumes `OrderCancelled` and
-voids an authorisation already taken (§3.2), so
-`cancelled_after_confirmation` — raised by that very publication — has its
-refund in hand and escalates **Shipping**, while `cancelled_after_payment` is
-the authorisation that arrived after the event and escalates the **money**.
-Ordering having no refund command is true of both; it is not the reason a
-human is paged in either:
+**Nor is the money the thing that tells the two apart**, which this section
+assumed in two different directions before settling. Payments consumes
+`OrderCancelled` and voids an authorisation already taken (§3.2), so a refund
+may arrive on either code with nobody acting — and §9.4 orders nothing
+between that consumer and this saga, so neither code predicts whether it has.
+**`Shipping` is the difference**: `cancelled_after_confirmation` is raised
+from a state that may still despatch, `cancelled_after_payment` from one that
+cannot. Ordering having no refund command is true of both; it is not what
+separates them:
 
 > **The money is the invariant; the order's state is not, and this passage
 > said it was.** It read "they exist *because* the order changed, cancelled

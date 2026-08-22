@@ -134,15 +134,20 @@ public static class ReviewReasons
     /// <c>OrderCancelled</c>, which it consumes (§3.2) and which the event's
     /// own contract says voids an authorisation already taken.
     /// <para>
-    /// <b>This code is the case that path cannot reach.</b> It is raised when
-    /// an authorisation lands while the saga is already compensating, so the
-    /// authorisation is <i>later</i> than the <c>OrderCancelled</c> Payments
-    /// would have voided against — nothing automatic is coming, and a human
-    /// owns the money. <see cref="CancelledAfterConfirmation"/> is the
-    /// opposite: it is raised by the very publication Payments consumes, so
-    /// there the void is already on its way and what needs a person is
-    /// Shipping. An earlier revision of this paragraph called them "the same
-    /// money problem", which is true of the symptom and false of the remedy.
+    /// <b>Whether that void has happened is not knowable from the code, and
+    /// two revisions of this paragraph guessed in opposite directions.</b> The
+    /// first called both codes "the same money problem"; the second said this
+    /// one is beyond the automatic path while
+    /// <see cref="CancelledAfterConfirmation"/> has its refund on the way.
+    /// Neither holds. §9.4 orders nothing between two independent consumers, so
+    /// this saga's view of a cancellation says nothing about Payments' — and on
+    /// the decline and payment-timeout doors <b>no <c>OrderCancelled</c> exists
+    /// yet</b> when this row is raised, since <c>CancelOrder</c> goes on
+    /// <c>Compensating</c>'s exit. The cancellation, and the void after it, are
+    /// still to come. So the money is what the two codes have in common and
+    /// <b>Shipping</b> is what tells them apart: the sibling is raised from a
+    /// state that may still despatch and this one is not. The runbook checks
+    /// for a refund on both and predicts the answer on neither.
     /// </para>
     /// This is a <see cref="ReviewReasons"/> code and not a
     /// <see cref="CancelReasons"/> one because what needs a person is the

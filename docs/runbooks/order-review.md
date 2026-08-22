@@ -117,15 +117,31 @@ that was taken is voided". Payments refunds off the event, autonomously.
 Ordering simply has no way to *ask*, which is a different sentence from
 nobody doing it. **So the first act is never to refund.**
 
-**The two codes differ in whether that automatic path could have caught it,
-and that is the sharper reason they are two.** `cancelled_after_confirmation`
-is raised when an `OrderCancelled` reaches the saga in `Confirmed` — the same
-publication Payments consumes, so a void is already on its way and a manual
-refund is a **duplicate** until proved otherwise. `cancelled_after_payment` is
-raised when an authorisation lands while the saga is *already compensating*,
-so the authorisation is **later than** the `OrderCancelled` Payments would
-have voided against: the automatic path structurally cannot cover it, and
-this is the row where the money genuinely is owed a human.
+**Whether the void has already happened is not knowable from the code, and
+that is the whole reason step 1 is a check.** An earlier revision of this
+paragraph said `cancelled_after_confirmation` has its refund on the way while
+`cancelled_after_payment` is beyond the automatic path's reach. Neither half
+survives contact with [§9.4](../backend-architecture/09-messaging.md):
+
+- The saga seeing `OrderCancelled` before an authorisation says nothing about
+  when **Payments** consumed it. They are two independent consumers of two
+  independent messages, and §9.4 orders nothing between them — the same fact
+  that makes a release land before its own reserve (#125).
+- And on the decline and payment-timeout doors **no `OrderCancelled` has been
+  published yet** when the row is raised: `CancelOrder` goes on
+  `Compensating`'s exit, so the cancellation — and the void that follows
+  it — is still to come.
+
+So the event is published on every path that raises either code, and on no
+path can you infer from the code whether Payments has acted. **Check, on
+both.**
+
+**What actually separates the two is Shipping.**
+`cancelled_after_confirmation` means the order reached `Confirmed`, so a
+despatch may be in motion and stopping it comes first;
+`cancelled_after_payment` is raised from `Compensating`, which cannot
+despatch. That is the saga-state distinction this page has always drawn, and
+the money is what both rows have in common rather than what tells them apart.
 
 **Only one of the two is necessarily a customer cancelling**, and this
 paragraph said both were. `cancelled_after_confirmation` is raised only when
@@ -136,8 +152,8 @@ compensation starts on a cancellation, a decline **or** a fifteen-minute
 payment timeout. A slow PSP that authorises after the timeout produces that row
 with nobody having cancelled anything.
 
-**Step 1 is the same act either way and the expected answer is opposite.
-Steps 2 and 3 differ, and the code is what tells you which** —
+**Step 1 is the same either way and its answer is not predictable from the
+code. Steps 2 and 3 differ, and the code is what tells you which** —
 `cancelled_after_confirmation` from `Confirmed`, `cancelled_after_payment`
 from `Compensating`.
 
@@ -151,15 +167,22 @@ the same defect one step less obvious.
 
 1. **Find out whether Payments already refunded it, then refund only if it
    did not.** Look for a `PaymentRefunded` for this order, or read the
-   provider's own console. On `cancelled_after_confirmation` the automatic
-   void is the *expected* outcome and yours would be the second one; on
-   `cancelled_after_payment` its absence is what the row is for. An earlier
-   version of this step said "refund the authorisation" with no check, which
-   is a double refund on one of the two codes.
+   provider's own console. This is the same act on both codes and neither
+   answer is the expected one — see above — so the check is the work, not a
+   formality before the refund.
+
+   **A cancellation may still be in flight**, which is the case worth naming:
+   on `cancelled_after_payment` reached from a decline or a timeout, the
+   `CancelOrder` that triggers the void has not been sent yet when this row
+   appears. If you find no refund and no cancellation, wait for one before
+   refunding by hand rather than racing it.
+
+   An earlier version of this step said "refund the authorisation" with no
+   check at all, which is a double refund whenever Payments got there first.
 
    It is still the step with a clock on it — an authorisation left standing
-   expires or settles depending on the provider — so check quickly rather
-   than carefully.
+   expires or settles depending on the provider — so escalate rather than
+   sit on it.
 
 #### From `Confirmed` — the saga has finalised
 

@@ -373,15 +373,20 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // it publish PaymentRefunded, and lists OrderCancelled in its
             // Consumes column — the contract says an authorisation already
             // taken is voided. Payments refunds off the EVENT; Ordering just
-            // has no way to ask. And the event in question is the one this
-            // very transition is reacting to, so the void is already on its
-            // way by the same publication that raises this row.
+            // has no way to ask.
             //
-            // What is owed a human here is therefore SHIPPING, not the money:
-            // reaching Confirmed means a despatch may still happen. The
-            // runbook leads with checking that Payments did refund rather than
-            // refunding, because on this code a manual refund is the second
-            // one. Compensating's sibling is the opposite case and says so.
+            // **A second revision then said the void is already on its way
+            // here, and that is a guess about another service's delivery
+            // order.** §9.4 orders nothing between two independent consumers,
+            // so this saga seeing OrderCancelled says nothing about when
+            // Payments consumed it. Whether a refund has happened is not
+            // knowable from this state, which is why the runbook CHECKS on
+            // both codes rather than predicting either.
+            //
+            // What this transition does own is SHIPPING: reaching Confirmed
+            // means a despatch may still happen, and Compensating's sibling
+            // cannot despatch at all. That is the difference between the two
+            // codes; the money is what they have in common.
             //
             // So it escalates and finalises, on the despatch timeout's own
             // argument one row up: a wait with no automatic compensation still
@@ -461,10 +466,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // about. Reaching Compensating from AwaitingPayment means
             // AuthorisePayment had already been sent, so an authorisation can
             // still land here. §3.2 gives Ordering no refund command, and
-            // unlike Confirmed's case the automatic path cannot stand in:
-            // Payments voids against OrderCancelled, and this authorisation is
-            // LATER than that event. So a human genuinely owns this one, which
-            // is the opposite of the sibling escalation rather than the same.
+            // Payments' own void is keyed on OrderCancelled — which on the
+            // decline and timeout doors has not been PUBLISHED yet when this
+            // fires, because CancelOrder goes on this state's exit below.
+            //
+            // A revision of this comment said the authorisation is therefore
+            // beyond the automatic path's reach. It is not: the cancellation
+            // is still coming, and on the two doors where it already happened
+            // §9.4 orders nothing between Payments and this saga anyway. The
+            // honest statement is that nothing here knows, which is why the
+            // row exists and why the runbook checks rather than predicts.
             //
             // This is Confirmed's case arriving by the other door — the same
             // money problem, which is why it escalates too. It raises a
