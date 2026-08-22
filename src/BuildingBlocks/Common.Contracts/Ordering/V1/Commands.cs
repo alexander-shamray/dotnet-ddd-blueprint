@@ -98,8 +98,19 @@ public static class ReviewReasons
     public const string StockNotReleased = "stock_not_released";
 
     /// <summary>
-    /// A customer cancelled an order whose payment was already authorised.
+    /// An authorisation landed while the saga was already compensating.
     /// </summary>
+    /// <remarks>
+    /// <b>Not "a customer cancelled", which is what this summary said.</b>
+    /// §9.6 reaches <c>Compensating</c> three ways — a customer's
+    /// <c>OrderCancelled</c>, a <c>PaymentDeclined</c>, and a
+    /// <c>PaymentTimeout</c> — and the escalation fires from all of them,
+    /// because its condition is the money arriving, not the reason
+    /// compensation started. The timeout case is the one that matters
+    /// operationally: a PSP slower than fifteen minutes that then
+    /// authorises produces this row with no customer involved at all, so a
+    /// spike is a dependency signal and not a product one.
+    /// </remarks>
     /// <remarks>
     /// <b>The cancellation the saga cannot compensate, raised from
     /// <c>Compensating</c>.</b> It was the only one until

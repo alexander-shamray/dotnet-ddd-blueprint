@@ -371,10 +371,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             //
             // So it escalates and finalises, on the despatch timeout's own
             // argument one row up: a wait with no automatic compensation still
-            // ends, and a human owns what follows. Unscheduling matters more
-            // than usual — left armed, the despatch timeout raises a
-            // not_despatched review three days later for an order that was
-            // cancelled, which is a false escalation on top of a real one.
+            // ends, and a human owns what follows.
+            //
+            // **Finalize is what prevents the false not_despatched review,
+            // NOT the Unschedule beside it, and this comment credited the
+            // wrong one.** ADR-021 measured it against the tagged source:
+            // the delayed-message scheduler's CancelScheduledSend returns
+            // Task.CompletedTask on both overloads, so every Unschedule in
+            // this machine is a no-op and the three-day DespatchExpired
+            // stays queued whatever happens here. What makes its later
+            // delivery harmless is that SetCompletedWhenFinalized has
+            // deleted the instance, so it correlates to nothing and is
+            // discarded. The Unschedule stays because ADR-021 names Quartz
+            // as its own supersession and the calls become live that day.
             //
             // No ReleaseStock either, and that is deliberate: Confirmed means
             // Shipping has been asked for a despatch, and a reservation being

@@ -104,11 +104,20 @@ like any other wait.
 
 ### `cancelled_after_confirmation` and `cancelled_after_payment`
 
-A customer cancelled an order whose payment had already been authorised.
-Undoing an authorisation is a **refund**, and
+An order is being cancelled and its payment is authorised. Undoing an
+authorisation is a **refund**, and
 [§3.2](../backend-architecture/03-bounded-contexts.md) closes Payments' Accepts
 column at `AuthorisePayment` — the platform has no refund contract to send. So
 the money is always the reason these rows exist.
+
+**Only one of the two is necessarily a customer cancelling**, and this
+paragraph said both were. `cancelled_after_confirmation` is raised from
+`Confirmed`, which the saga reaches only on an `OrderCancelled` — so something
+cancelled the aggregate. `cancelled_after_payment` is raised when an
+authorisation arrives while the saga is *already compensating*, and
+compensation starts on a cancellation, a decline **or** a fifteen-minute
+payment timeout. A slow PSP that authorises after the timeout produces that row
+with nobody having cancelled anything.
 
 **Step 1 is the same either way. Steps 2 and 3 differ, and the code is what
 tells you which** — `cancelled_after_confirmation` from `Confirmed`,
@@ -129,8 +138,14 @@ the same defect one step less obvious.
 
 #### From `Confirmed` — the saga has finalised
 
-The order was confirmed and the saga was waiting on Shipping. Nothing is stuck:
-the state row is gone by design and no timeout is pending.
+The order was confirmed and the saga was waiting on Shipping. Nothing is
+stuck: the state row is gone by design.
+
+**The three-day despatch timeout IS still pending**, and this line said it was
+not. ADR-021's scheduler cannot cancel a delayed message, so the saga's
+`Unschedule` is a no-op and `DespatchExpired` is still in the broker. It is
+harmless — it will find no instance and be discarded — but "no timeout is
+pending" is the kind of claim an on-call checks against a queue depth.
 
 2. **Stop the despatch if it has not left.** The saga deliberately does *not*
    send `ReleaseStock` here: a reservation being picked is not one Inventory can
@@ -143,9 +158,13 @@ the state row is gone by design and no timeout is pending.
 
 #### From `Compensating` — the saga may still be running, and usually is not
 
-The customer cancelled while stock was held, and the authorisation landed
-afterwards. **There is no despatch to stop** — the order never reached
-`Confirmed`.
+An authorisation landed while the saga was compensating. **There is no
+despatch to stop** — the order never reached `Confirmed`.
+
+**Compensation started one of three ways and the row does not say which**: a
+customer cancellation, a declined payment, or the fifteen-minute payment
+timeout. The last is the one worth ruling out first, because it means
+Payments answered late rather than a customer changing their mind.
 
 **This row is raised mid-wait, which is what makes it the only one where the
 instance can still exist — but the wait is short and the alert is not.** Both
@@ -157,21 +176,28 @@ heading and then explained two paragraphs down that there would not be one.
 
 2. **Look for the instance**, by `CorrelationId = OrderId` in the saga state
    table.
-   - **Gone** — the ordinary case. Compensation completed and the reservation
-     is already released; nothing about stock needs doing, and step 1's refund
-     is the whole of the work.
+   - **Gone** — the ordinary case, but it does **not** by itself prove the
+     stock came back. `Compensating` has two exits and both finalise:
+     `StockReleased`, which is the reservation actually released, and the
+     ten-minute `ReleaseTimeout`, which gives up on it and raises a
+     `stock_not_released` row. **Check for that second row before deciding
+     stock needs nothing** — if it is there, the reservation may still be
+     held and [that section](#stock_not_released) is the procedure. With no
+     such row, step 1's refund is the whole of the work.
    - **Still there** — both exits failed, which is its own incident. **Leave
      the reservation alone**: the machine is waiting on `StockReleased` and
      will cancel the order when it arrives, and releasing by hand races it.
-3. **Only for a live instance, give it the ten-minute `ReleaseTimeout` before
-   treating stock as stuck.** If that expires the saga raises a second row,
-   `stock_not_released`, and [that section](#stock_not_released) is the
-   procedure — the two rows are one incident. **The saga-age alert will not
-   have fired**, and this line said the opposite: the `ReleaseTimeout`
-   transition finalises the instance at ten minutes, so by the hour that alert
-   measures there is no saga left to be old. It fires only if that timeout
-   never arrives either — which is the same condition that leaves an instance
-   for step 2 to find.
+3. **A live instance at this age has already missed its own timeout — do not
+   wait for it again.** This row alerts at one hour and `ReleaseTimeout` is
+   ten minutes, so an instance still here means the timeout never arrived,
+   which is a scheduler incident rather than a slow release:
+   [`stuck-saga.md`](stuck-saga.md) is the procedure, and **the saga-age
+   alert will have fired too** — the saga predates this row, so at one hour
+   it is over that alert's threshold as well. Two earlier versions of this
+   step were wrong in opposite directions: the first said the saga-age alert
+   would fire in the ordinary case, and the correction said it would not fire
+   at all. It does not fire for a finalised saga and it does for a live one,
+   which is the only case this step is about.
 
 ## Resolving
 
@@ -202,7 +228,16 @@ stopped publishing; `stock_not_released` in bulk means Inventory is not
 consuming `ReleaseStock`. Work the upstream service and the queue drains behind
 it, but the rows still need deleting — nothing removes them automatically.
 
-The two cancellation codes are the ones that do **not** follow that rule: their
-upstream is customers, so a spike is a product or pricing signal rather than a
-dependency, and there is no service to fix. Look at what confirmed orders are
-being cancelled *for* before treating it as an incident.
+`cancelled_after_confirmation` is the one that does **not** follow that rule:
+its upstream is customers, so a spike is a product or pricing signal rather
+than a dependency, and there is no service to fix. Look at what confirmed
+orders are being cancelled *for* before treating it as an incident.
+
+**`cancelled_after_payment` follows BOTH rules, and this section used to file
+it with the customer-driven one.** It is raised when an authorisation lands
+while the saga is compensating, and compensation starts three ways: a
+customer cancelling, a declined payment, and a **fifteen-minute payment
+timeout**. That last one is an upstream fault wearing a customer-shaped code —
+a PSP slower than the timeout that then authorises anyway. So a spike here is
+a Payments latency signal until the orders say otherwise, and the cheap
+discriminator is whether the orders carry a customer cancellation at all.

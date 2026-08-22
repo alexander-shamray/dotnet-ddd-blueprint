@@ -1982,8 +1982,11 @@ public static class ReviewReasons
 {
     public const string NotDespatched = "not_despatched";
     public const string StockNotReleased = "stock_not_released";
-    // A customer cancelled an order whose payment was already authorised.
-    // Undoing that is a refund, and §3.2 closes Payments' Accepts column at
+    // An authorisation landed while the saga was already compensating —
+    // NOT "a customer cancelled", because Compensating is reached from a
+    // cancellation, a decline and a payment timeout alike, and the
+    // escalation fires from all three. Undoing an authorisation is a
+    // refund, and §3.2 closes Payments' Accepts column at
     // AuthorisePayment — so the saga escalates instead of compensating.
     //
     // TWO codes for that, not one, because the procedures differ and the row
@@ -2309,9 +2312,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // A cancellation this machine cannot compensate: the card is
             // authorised, and undoing that is a refund §3.2 gives Payments no
             // contract to accept. So it escalates and finalises, on the
-            // despatch timeout's own argument. Unscheduling matters more than
-            // usual — left armed, that timeout raises a not_despatched review
-            // three days later for an order that was cancelled.
+            // despatch timeout's own argument. Finalize is what stops the
+            // three-day DespatchExpired raising a false not_despatched
+            // review: ADR-021's scheduler cannot cancel, so the Unschedule
+            // beside it is a no-op and the timeout stays queued — it is the
+            // deleted instance that makes the later delivery harmless.
             //
             // No ReleaseStock: Confirmed means Shipping has been asked for a
             // despatch, and a reservation being picked is not one Inventory can

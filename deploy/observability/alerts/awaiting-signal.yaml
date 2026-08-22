@@ -97,8 +97,9 @@ groups:
           summary: "An order has been awaiting manual review for over an hour"
           description: >-
             A saga escalated work this platform has no contract to do (§9.6):
-            either a wait that ran out, or a cancellation with money already
-            authorised and no refund contract to send. The saga has usually
+            either a wait that ran out, or an authorisation that landed once
+            the order was already being cancelled, with no refund contract to
+            send — the second is not necessarily a customer cancelling. The saga has usually
             finalised by now, so the saga-age alert will not catch it — but
             check before assuming, because one reason is raised mid-wait.
             The runbook branches on both.

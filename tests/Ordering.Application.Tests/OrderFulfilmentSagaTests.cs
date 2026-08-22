@@ -826,9 +826,10 @@ public class OrderFulfilmentSagaTests
         // The one cancellation this machine cannot compensate: the card is
         // authorised, and undoing that is a refund §3.2 gives Payments no
         // contract to accept. So it escalates and finalises, on the despatch
-        // timeout's own argument — and unscheduling is what stops a false
-        // not_despatched review being raised three days later for an order
-        // that was cancelled.
+        // timeout's own argument. What stops a false not_despatched review
+        // three days later is the FINALIZE, not the Unschedule beside it:
+        // ADR-021's scheduler cannot cancel, so the timeout stays queued and
+        // is discarded on delivery for want of an instance.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
