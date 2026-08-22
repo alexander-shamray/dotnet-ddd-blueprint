@@ -385,10 +385,23 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // discarded. The Unschedule stays because ADR-021 names Quartz
             // as its own supersession and the calls become live that day.
             //
-            // No ReleaseStock either, and that is deliberate: Confirmed means
-            // Shipping has been asked for a despatch, and a reservation being
+            // No ReleaseStock either, and that is deliberate: reaching
+            // Confirmed means a despatch is expected, and a reservation being
             // picked is not one Inventory can safely be told to drop. The
             // review row is where both loose ends are worked.
+            //
+            // **That argument has a hole and it is filed as #126.** This state
+            // is entered when ConfirmOrder is SENT, not when it commits, and
+            // Shipping learns nothing until the aggregate publishes
+            // OrderConfirmed. A cancellation that beats the command to the
+            // aggregate leaves the order never confirmed and Shipping never
+            // told — and this branch then withholds the release on the
+            // strength of a picking that is not happening, strands the
+            // reservation, and records a code saying the order was confirmed.
+            // ConfirmPayment throws on a cancelled order, so the same race
+            // also files ConfirmOrder in the error queue §13.6 pages on.
+            // Closing it means splitting this state on an acknowledgement, or
+            // making the branch conditional on the handoff — a §9.6 decision.
             When(OrderCancelled)
                 .Unschedule(DespatchTimeout)
                 // **A different code from Compensating's, and the row is the

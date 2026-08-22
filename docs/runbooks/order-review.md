@@ -111,9 +111,9 @@ column at `AuthorisePayment` — the platform has no refund contract to send. So
 the money is always the reason these rows exist.
 
 **Only one of the two is necessarily a customer cancelling**, and this
-paragraph said both were. `cancelled_after_confirmation` is raised from
-`Confirmed`, which the saga reaches only on an `OrderCancelled` — so something
-cancelled the aggregate. `cancelled_after_payment` is raised when an
+paragraph said both were. `cancelled_after_confirmation` is raised only when
+an `OrderCancelled` reaches the saga in `Confirmed` — so something did cancel
+the order. `cancelled_after_payment` is raised when an
 authorisation arrives while the saga is *already compensating*, and
 compensation starts on a cancellation, a decline **or** a fifteen-minute
 payment timeout. A slow PSP that authorises after the timeout produces that row
@@ -138,8 +138,21 @@ the same defect one step less obvious.
 
 #### From `Confirmed` — the saga has finalised
 
-The order was confirmed and the saga was waiting on Shipping. Nothing is
-stuck: the state row is gone by design.
+The saga confirmed the order and was waiting on Shipping. Nothing is stuck:
+the state row is gone by design.
+
+**Check the order actually confirmed before working this as a post-despatch
+cancellation.** The saga enters `Confirmed` when it *sends* `ConfirmOrder`,
+not when that command commits, and Shipping is told nothing until the
+aggregate publishes `OrderConfirmed`. A cancellation that beat the command to
+the aggregate produces this row for an order that was never confirmed — and
+then there is no despatch to stop, **and the reservation is stranded**,
+because the saga withheld `ReleaseStock` expecting a picking that never
+started. The order's own status is the check: `Cancelled` with no
+`OrderConfirmed` ever published is that race, filed as
+[#126](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/126).
+Release the reservation through Inventory's API and expect a `ConfirmOrder`
+in the error queue for the same order.
 
 **The three-day despatch timeout IS still pending**, and this line said it was
 not. ADR-021's scheduler cannot cancel a delayed message, so the saga's

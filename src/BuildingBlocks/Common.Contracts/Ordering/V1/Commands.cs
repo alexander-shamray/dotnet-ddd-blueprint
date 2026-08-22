@@ -51,9 +51,14 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// <remarks>
 /// This does <b>not</b> touch the <c>Order</c> aggregate, and the reason is
 /// that "a human should look at this" is a fact about operations rather than
-/// about the order — not that the order is unchanged. It is unchanged for the
-/// two timeout reasons and very much changed for the two cancellation ones,
-/// which are raised on an order that WAS cancelled while money was authorised.
+/// about the order — <b>not</b> that the order is unchanged, and not that it
+/// changed either. An earlier revision of this paragraph claimed the second
+/// for the two cancellation codes and it does not hold for
+/// <c>cancelled_after_payment</c>: when compensation began from a decline or
+/// a payment timeout the saga is in <c>Compensating</c> and has not yet sent
+/// <c>CancelOrder</c> — that goes on the state's exit — so a late
+/// authorisation raises this row while the order is still uncancelled.
+/// The aggregate's state is simply not what decides where the row lives.
 /// It lands in an operations table either way.
 /// </remarks>
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
@@ -123,15 +128,28 @@ public static class ReviewReasons
     /// compensating, on the same argument the despatch timeout makes: a wait
     /// with no automatic answer still ends, and a human owns what follows.
     /// This is a <see cref="ReviewReasons"/> code and not a
-    /// <see cref="CancelReasons"/> one, because the order is already cancelled
-    /// — what needs a person is the money, not the order.
+    /// <see cref="CancelReasons"/> one because what needs a person is the
+    /// money — <b>not</b> because the order is already cancelled, which this
+    /// line used to say and which is only true on one of the three paths
+    /// into <c>Compensating</c>. From a decline or a payment timeout the
+    /// <c>CancelOrder</c> is still owed at the state's exit, so this row can
+    /// precede the cancellation it is named after.
     /// </remarks>
     public const string CancelledAfterPayment = "cancelled_after_payment";
 
     /// <summary>
-    /// A customer cancelled an order that had already been confirmed and was
-    /// waiting on Shipping.
+    /// A customer cancelled an order the saga had confirmed and was waiting
+    /// on Shipping for.
     /// </summary>
+    /// <remarks>
+    /// <b>"The saga had confirmed" is weaker than "the order is confirmed",
+    /// and the difference is a filed race.</b> §9.6 enters <c>Confirmed</c>
+    /// the moment it SENDS <c>ConfirmOrder</c>, not when that command
+    /// commits — so a cancellation can beat it to the aggregate, and this
+    /// code is then raised for an order that was never confirmed and that
+    /// Shipping was never told about. See
+    /// <see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/126">#126</see>.
+    /// </remarks>
     /// <remarks>
     /// <b>Distinct from <see cref="CancelledAfterPayment"/> because the
     /// procedure is different, and the row is the only thing an operator

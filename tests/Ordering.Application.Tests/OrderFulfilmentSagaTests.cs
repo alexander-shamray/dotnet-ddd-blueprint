@@ -839,6 +839,14 @@ public class OrderFulfilmentSagaTests
             await Publish(harness, SagaContracts.StockReserved(orderId));
             await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-4"));
 
+            // Sent, and that is all this establishes — the harness registers no
+            // command consumer, so nothing confirms the aggregate and no
+            // OrderConfirmed reaches Shipping. The saga enters Confirmed on the
+            // SEND, which is the premise #126 is filed against: a cancellation
+            // beating this command to the aggregate reaches the branch below
+            // for an order that was never confirmed. This test drives the
+            // ordinary path and does not cover that race, which is stated here
+            // rather than left to be assumed from a green run.
             (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
 
             await Publish(

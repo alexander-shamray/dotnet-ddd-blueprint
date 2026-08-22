@@ -2318,10 +2318,14 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // beside it is a no-op and the timeout stays queued — it is the
             // deleted instance that makes the later delivery harmless.
             //
-            // No ReleaseStock: Confirmed means Shipping has been asked for a
-            // despatch, and a reservation being picked is not one Inventory can
-            // safely be told to drop. The review row is where both loose ends
-            // are worked.
+            // No ReleaseStock: reaching Confirmed means a despatch is
+            // expected, and a reservation being picked is not one Inventory
+            // can safely be told to drop. The review row is where both loose
+            // ends are worked.
+            //
+            // The hole in that argument is #126: this state is entered when
+            // ConfirmOrder is SENT, so a cancellation beating it to the
+            // aggregate strands a reservation nobody is picking.
             When(OrderCancelled)
                 .Unschedule(DespatchTimeout)
                 // A different code from Compensating's, and the row is all an
@@ -2555,9 +2559,17 @@ fact about operations rather than about the order.
 
 Two of the four are a wait that ran out, where the order's own state genuinely
 has not moved. The two cancellation codes are the opposite — they exist
-*because* the order changed, cancelled with money already authorised, and §3.2
-gives Payments no refund command. A single "the process stalled" would describe
-those rows backwards:
+because **money is authorised and the order is not going to be delivered**,
+and §3.2 gives Payments no refund command. A single "the process stalled"
+would describe those rows backwards:
+
+> **The money is the invariant; the order's state is not, and this passage
+> said it was.** It read "they exist *because* the order changed, cancelled
+> with money already authorised" — which does not hold for
+> `cancelled_after_payment` reached from a decline or a payment timeout. In
+> those the saga is in `Compensating` and `CancelOrder` is still owed at the
+> state's exit, so the row precedes the cancellation it is named after. A
+> reason code is evidence about the workflow, not about the aggregate.
 
 ```sql
 -- A work queue, not a log. A row means "a human still needs to look at this";

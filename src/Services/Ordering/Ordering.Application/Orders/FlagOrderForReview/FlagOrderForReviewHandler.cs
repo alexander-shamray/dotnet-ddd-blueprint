@@ -11,10 +11,18 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 ///
 /// Two of them are a wait that ran out, where the order's own state genuinely
 /// has not moved. The other two — <c>cancelled_after_payment</c> and
-/// <c>cancelled_after_confirmation</c> — exist precisely BECAUSE the order
-/// changed: it was cancelled with money already authorised, and §3.2 gives
+/// <c>cancelled_after_confirmation</c> — exist because <b>money is
+/// authorised and the order is not going to be delivered</b>, and §3.2 gives
 /// Payments no refund command. Reading "the process stalled" onto either row
-/// describes the opposite of what happened. They are two codes rather than one
+/// describes the opposite of what happened.
+/// <para>
+/// <b>This said they exist BECAUSE the order was cancelled, and that is not
+/// reliably true of <c>cancelled_after_payment</c>.</b> Reached from a
+/// decline or a payment timeout, the saga is in <c>Compensating</c> and
+/// <c>CancelOrder</c> is still owed at the state's exit — so the row can be
+/// written before the cancellation it is named after. The money is the
+/// invariant; the order's state is not.
+/// </para> They are two codes rather than one
 /// because the operator's first step differs, and
 /// <c>ordering.OrderReviews</c> persists no saga state to tell them apart.
 /// </summary>
