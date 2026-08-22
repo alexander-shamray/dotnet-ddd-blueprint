@@ -930,8 +930,16 @@ next reader wondering whether it was ever there.
     anyone reads it — so `cancelled_after_confirmation` and
     `cancelled_after_payment` are what let the runbook select without a state
     that is gone. That
-    also removes the false `not_despatched` this entry predicted, by
-    unscheduling the despatch timeout on the way out.
+    also removes the false `not_despatched` this entry predicted — **by
+    `Finalize()`, not by the `Unschedule` beside it**, which is the credit
+    this entry gave until a review checked the mechanism. Deleting the
+    instance is what leaves the timeout correlating to nothing when it
+    arrives; [ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)'s
+    scheduler returns `Task.CompletedTask` from both `CancelScheduledSend`
+    overloads, so **every `Unschedule` in this machine is a no-op** and the
+    call removes nothing. The saga and §9.6 were corrected on this branch
+    and this entry was not, which is the fix landing in the code and not in
+    the record it came from.
 - **The payment reference is accepted and goes nowhere.** `ConfirmOrder`
   carries it, `Order.ConfirmPayment` puts it on `OrderConfirmedDomainEvent` and
   stores no column, and `V1.OrderConfirmed` has no field for it — so it reaches

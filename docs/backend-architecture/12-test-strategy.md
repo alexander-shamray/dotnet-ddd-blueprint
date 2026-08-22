@@ -1898,14 +1898,19 @@ public async Task Commands_are_sent_and_events_are_published()
 > the read spends the shared bound and every assertion after it answers
 > falsely.
 >
-> **Null, not empty, and the difference is the whole test.** This passage said
-> empty until PR-27's saga suite compiled it: `Consumed` records one entry per
-> delivery whatever the outcome, and `Exception` is null on a clean one — so
-> the sequence has an element per absorbed message and an emptiness assertion
-> fails on exactly the result the test exists to prove. `ShouldAllBe(e => e ==
-> null)` is what the suite runs. An assertion that cannot pass is a less
-> expensive defect than one that cannot fail, but it is still a sample nobody
-> executed.
+> **Null, not empty, and the difference is the whole test.** `Consumed` records
+> one entry per delivery whatever the outcome, and `Exception` is null on a
+> clean one — so the sequence has an element per absorbed message, and an
+> emptiness assertion fails on exactly the result the test exists to prove.
+> `ShouldAllBe(e => e == null)` is what the suite runs.
+>
+> **This paragraph carried a PR attribution for that correction and no longer
+> does**, because none was supportable: it credited a PR that is not the saga
+> suite's, and the repair a reviewer proposed — the saga suite's own
+> number — is not supportable either. The callout is new here, and no
+> committed revision of that suite ever asserted emptiness. A claim about when
+> a repo's prose was wrong is checkable against its history, so it is worth
+> either checking or dropping; the fact above stands without it.
 
 > **A missing scheduler fails this suite in the costume the traps above
 > describe, which is why the registration is spelled out rather than trimmed.**

@@ -1973,9 +1973,15 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 // Escalation path for work this platform has no contract to do (§9.6) — a
 // wait that ran out, or a cancellation with money already authorised. This
 // does NOT touch the Order aggregate, because "a human should look at this"
-// is a fact about operations rather than about the order; NOT because the
-// order is unchanged, which is true of the timeouts and false of both
-// cancellation reasons. It lands in an operations table instead.
+// is a fact about operations rather than about the order.
+//
+// NOT because the order is unchanged — and not because it changed either,
+// which is what this comment claimed next until a review read the states.
+// cancelled_after_payment is raised from Compensating, whose exits are
+// where CancelOrder is sent, so on the decline and payment-timeout doors
+// the order is still uncancelled when the row is written. The aggregate's
+// state is simply not what decides where the row lives.
+// It lands in an operations table instead.
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
 
 public static class ReviewReasons
