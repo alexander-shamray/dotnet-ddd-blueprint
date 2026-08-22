@@ -313,9 +313,17 @@ done
 # the copy that was caught. This is that debt paid here.
 #
 # The subject is this script's own source: every `$ROOT/…` path it names must
-# be covered by a declared entry — the WHOLE path, not a prefix of it, because
-# the entries here are deeper than a top-level segment
-# (`src/Gateway/Gateway.Api/appsettings.json` is a file, not a tree).
+# be covered by a declared entry — matched as the WHOLE entry or as a directory
+# prefix of it, never as an arbitrary substring, because the entries here are
+# deeper than a top-level segment.
+#
+# BOTH KINDS ARE DECLARED and the example here named only the first. A file
+# entry (`src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs`) is matched
+# whole; a tree entry (`src/Gateway/Gateway.Api`, `src/BFF/Web.Bff`) also
+# covers the paths beneath it, which is what lets the source-agreement loop
+# grep a whole service directory against one declared input. The gateway was
+# the file example until that loop widened to every service chart and the
+# entry became a tree; the sentence describing it did not move with it.
 #
 # Two kinds of match are skipped, and neither hides a gap:
 #

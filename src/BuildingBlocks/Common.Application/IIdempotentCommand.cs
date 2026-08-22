@@ -20,6 +20,7 @@ namespace Common.Application;
 /// §8.5 states the rule, and
 /// <c>Every_idempotent_command_reaches_this_service_through_an_authenticated_endpoint</c>
 /// asserts it — one per service, in that service's <c>AuthorizationPolicyTests</c>.
+/// </para>
 /// <para>
 /// <b>"A test asserts it" is what this said, and it is a claim about a
 /// repository rather than about the rule.</b> §4.5's scaffold classes

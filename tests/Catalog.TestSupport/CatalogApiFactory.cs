@@ -54,10 +54,24 @@ public class CatalogApiFactory(
     /// <b>Unreachable is safe here in a way it would not be for SQL</b>, and
     /// the difference is worth stating rather than relying on.
     /// <c>AddRedisConnections</c> forces <c>AbortOnConnectFail = false</c>
-    /// (§8.1's "degrade, don't die"), so the multiplexer is constructed
-    /// without a round trip and retries in the background — and it is
-    /// constructed lazily, on the first resolve, which no host-smoke test
-    /// reaches. A suite that actually exercises §8.5's store passes a running
+    /// (§8.1's "degrade, don't die"), so a failed connection is <b>non-fatal</b>
+    /// rather than absent: <c>ConnectionMultiplexer.Connect</c> still attempts
+    /// it, and the flag is what keeps the throw from taking the host down.
+    /// The multiplexer then retries in the background.
+    /// <para>
+    /// <b>An earlier revision said this is never reached, on the grounds that
+    /// the multiplexer is constructed lazily and no host-smoke test resolves
+    /// one. Both halves are wrong, and this branch's own test says so.</b>
+    /// A host's <c>TelemetryHostedService</c> builds the <c>TracerProvider</c>
+    /// at startup, which runs <c>ConfigureRedisInstrumentation</c>, which calls
+    /// <c>GetRequiredKeyedService&lt;IConnectionMultiplexer&gt;</c> for
+    /// <b>both</b> connections — so every host over this factory resolves them
+    /// and attempts to reach <c>redis.invalid</c>. <c>HybridCacheRedisTests</c>
+    /// forces the same construction by hand and its comment spells out why.
+    /// What makes that harmless is the flag above, not the absence of a
+    /// resolve.
+    /// </para>
+    /// A suite that actually exercises §8.5's store passes a running
     /// container instead; <c>.invalid</c> is reserved and never resolves, so
     /// one that forgets to fails loudly rather than reaching a developer's own
     /// Redis on localhost.
