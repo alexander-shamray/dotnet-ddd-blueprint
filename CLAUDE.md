@@ -1858,10 +1858,18 @@ identity is exactly what let a two-string allow-list look complete.
 feed either command uses**, which is measured rather than reasoned: it comes
 from `/pulls/{n}/reviews`, while the one REST endpoint in play —
 `/pulls/{n}/comments`, behind `pr-review-comments.sh` — reports `Copilot`, and
-both `gh pr view --json` feeds are GraphQL and report
+the review-body feed is GraphQL and reports
 `copilot-pull-request-reviewer`. An earlier revision of this paragraph called
 the issue-comment login the REST spelling; `gh pr view` loads `reviews` and
-`comments` through one exporter, so that could never have been true. The command
+`comments` through one exporter, so that could never have been true.
+
+**What the issue-comment feed actually reports is unobserved, and a revision of
+this paragraph asserted it as measured.** Six PRs were checked — #112, #101,
+#100, #99, #98, #94 — and none carries a Copilot-authored issue comment, so the
+shared exporter says what the login *must* be and nothing has seen it. The
+login stays admitted, because admitting a spelling that never arrives costs
+nothing; it is not evidence, because an asserted measurement that never
+happened stops the next reader checking. The command
 now states the filter and reports the count it dropped, but that is prose — the
 enforceable version is an author filter inside the helper, which is a human's
 edit made with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do

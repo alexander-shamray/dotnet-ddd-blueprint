@@ -41,11 +41,24 @@ decided by the API the feed came from rather than by the reviewer.** Measured
 against PRs #112 and #101, which carry real Copilot reviews — not inferred
 from the CLI's shape:
 
-| Feed | Call | API | Author it reports |
-|---|---|---|---|
-| Review bodies | `gh pr view <n> --json reviews` | GraphQL | `copilot-pull-request-reviewer` |
-| Inline comments | `pr-review-comments.sh <n>` → `/pulls/{n}/comments` | REST | `Copilot` |
-| Issue comments | `gh pr view <n> --json comments` | GraphQL | `copilot-pull-request-reviewer` |
+| Feed | Call | API | Author it reports | Evidence |
+|---|---|---|---|---|
+| Review bodies | `gh pr view <n> --json reviews` | GraphQL | `copilot-pull-request-reviewer` | **Measured** — PRs #112, #101, #100 |
+| Inline comments | `pr-review-comments.sh <n>` → `/pulls/{n}/comments` | REST | `Copilot` | **Measured** — PRs #112, #101 |
+| Issue comments | `gh pr view <n> --json comments` | GraphQL | `copilot-pull-request-reviewer` **expected** | **Never observed** — see below |
+
+**The third row is an inference and is labelled as one**, because an earlier
+revision of this table presented it under a heading that said "measured" when
+it was not. Six PRs were checked — #112, #101, #100, #99, #98, #94 — and **not
+one carries a Copilot-authored issue comment**. So the login is what `gh pr
+view`'s shared GraphQL exporter must report if Copilot ever posts to that feed,
+and nothing here has seen it do so.
+
+Keep the row and keep the login admitted: the cost of admitting a spelling that
+never arrives is nothing, and the cost of dropping the feed is a finding nobody
+reads. But **do not cite it as evidence** — an asserted measurement that never
+happened is worse than an open question, because the next reader stops
+checking.
 
 **`gh pr view` loads `reviews` and `comments` through one GraphQL exporter**, so
 those two rows must agree — an earlier revision of this table gave the third row
