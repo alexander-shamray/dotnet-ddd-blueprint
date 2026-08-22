@@ -2425,10 +2425,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > in the wrong place, so the money is handed to a human and the review row is
 > what carries it. Two consequences follow and both are real: the reservation
 > on a confirmed order is left alone, because one being picked is not
-> Inventory's to drop on a saga's word; and a `StockReserved` that lands
-> *after* a cancellation in `AwaitingStock` is ignored, so its reservation is
-> stranded exactly as the `StockTimeout` branch's is. Both are worked from
-> `ordering.OrderReviews`, not by the machine.
+> Inventory's to drop on a saga's word.
+>
+> **A late `StockReserved` after a cancellation is a different case, and an
+> earlier revision of this callout got all three of its claims wrong.** The
+> event is ignored; the *reservation* is not stranded, because the
+> `AwaitingStock` cancel already sent `ReleaseStock` and the machine is
+> waiting on it in `Compensating`. It is not the `StockTimeout` strand either
+> — that branch cancels and finalises without a release. And neither writes an
+> `OrderReviews` row: the only review a cancel path raises is
+> `stock_not_released`, and only if `ReleaseTimeout` fires. The machine works
+> this, not a human.
 
 ### Where an escalation lands
 

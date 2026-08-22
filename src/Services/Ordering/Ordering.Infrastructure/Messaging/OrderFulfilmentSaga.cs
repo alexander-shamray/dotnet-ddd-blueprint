@@ -389,7 +389,25 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // do. The exits from this state cancel the order regardless, and
             // Order.Cancel is idempotent, so the second CancelOrder they send
             // is a no-op rather than a second cancellation.
-            Ignore(OrderCancelled));
+            Ignore(OrderCancelled),
+
+            // The two Inventory answers to a reservation this saga no longer
+            // wants, both reachable by cancelling in AwaitingStock and both
+            // designed races rather than misroutes: ReleaseStock is already in
+            // flight by the time either lands, and Compensating's own exits
+            // own the cancellation.
+            //
+            // Written for the same reason as the line above, and they were the
+            // last two events left on the catch-all. §9.6's trap justifies
+            // OnUnhandledEvent by claiming every declared event is handled in
+            // every state it can reach one in — a claim that was false for
+            // PaymentAuthorised when the callback landed and false for these
+            // two after that was fixed. Enumerating beat patching: the
+            // declared events are eight, Compensating can be reached from
+            // AwaitingStock and AwaitingPayment, and these are the ones that
+            // follow.
+            Ignore(StockReserved),
+            Ignore(StockReservationFailed));
 
         SetCompletedWhenFinalized();
     }

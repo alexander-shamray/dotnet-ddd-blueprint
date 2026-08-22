@@ -875,9 +875,12 @@ after.
     matches the instance is discarded before the machine is asked, which is why
     ADR-021's uncancellable timeouts were harmless throughout and this was not.
 
-**Five things are owed and are named rather than built.** Each is a §9.6, §5.4
-or §9.8 decision that PR-21 made *reachable* rather than one it introduced, and
-naming them is the alternative to a silent gap.
+**Five things were owed and are named rather than built — four still are.**
+Each is a §9.6, §5.4 or §9.8 decision that PR-21 made *reachable* rather than
+one it introduced, and naming them is the alternative to a silent gap. The
+second is marked Closed in place rather than deleted: an owed item that turns
+out to have been taken is part of the record, and removing it would leave the
+next reader wondering whether it was ever there.
 
 - **A stock timeout strands the reservation.** §9.6's `StockTimeout` branch
   cancels the order and finalises **without releasing stock**, so a reservation

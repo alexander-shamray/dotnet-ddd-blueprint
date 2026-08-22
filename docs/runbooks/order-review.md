@@ -16,10 +16,23 @@
 
 A saga reached something it could not compensate and escalated (§9.6) — two
 of the three reasons are a wait that ran out, and the third is a cancellation
-the platform has no contract to undo. **It has already finalised**, so
-[`stuck-saga.md`](stuck-saga.md) will not catch this — the state row is gone
-and the only trace is here. That is why §13.6 gives it a row of its own rather
-than folding it into the saga-age alert.
+the platform has no contract to undo.
+
+**Check whether the saga is still running before you work the row**, because
+that is not the same answer for every reason and an earlier version of this
+page assumed it was:
+
+| Reason | State of the saga |
+|---|---|
+| `not_despatched` | Finalised. The state row is gone and this row is the only trace |
+| `stock_not_released` | Finalised, on the release timeout |
+| `cancelled_after_payment` **from `Confirmed`** | Finalised — cancelled after despatch was being waited for |
+| `cancelled_after_payment` **from `Compensating`** | **Still running.** Raised mid-wait when an authorisation lands after a cancellation, and the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`. A `stock_not_released` row may join it |
+
+For the finalised cases [`stuck-saga.md`](stuck-saga.md) will not catch this,
+which is why §13.6 gives it a row of its own rather than folding it into the
+saga-age alert. For the last row the saga-age alert *will* fire as well, and
+the two rows are the same incident.
 
 A row means "a human still needs to look at this". The table is a **work queue,
 not a log**: there is no `ResolvedAt` column, and resolving a review means

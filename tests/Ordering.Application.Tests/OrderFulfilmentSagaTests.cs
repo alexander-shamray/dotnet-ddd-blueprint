@@ -55,8 +55,11 @@ public class OrderFulfilmentSagaTests
     /// <c>StockTimeout</c>, so the very first <c>OrderPlaced</c> reaches for a
     /// scheduler nothing put on the pipeline.
     /// <para>
-    /// <b>Measured by deleting both lines: 11 of this file's 13 tests fail,
-    /// and every one of them fails as a TIMEOUT rather than as an error.</b>
+    /// <b>Measured by deleting both lines: 11 of the 13 tests this file held
+    /// when the measurement was taken fail, and every one of them fails as a
+    /// TIMEOUT rather than as an error.</b> The count is left as measured
+    /// rather than rescaled to the 20 tests here now — a ratio nobody re-ran
+    /// is not evidence about a suite that has since grown.
     /// The two survivors are the structural pair at the bottom, which
     /// construct the state machine and never start a bus — correctly, and
     /// worth knowing, because they are the two that would keep a deleted
@@ -605,8 +608,11 @@ public class OrderFulfilmentSagaTests
             (await Consumed<StockReserved>(harness, m => m.MessageId == late.MessageId)).ShouldBeTrue();
             (await NotYetSent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
 
-            // And it is absorbed rather than filed: Compensating handles no
-            // StockReserved, so this is the ignore of §9.6 doing its work.
+            // And it is absorbed rather than filed. It used to be the
+            // OnUnhandledEvent catch-all doing this; Compensating now writes
+            // Ignore(StockReserved) explicitly, so what this asserts is a
+            // declared transition rather than a default — which is the whole
+            // difference between a decision and an omission (§9.6).
             ConsumeFaults<StockReserved>(harness).ShouldAllBe(e => e == null);
 
             await Publish(harness, SagaContracts.StockReleased(orderId));
@@ -705,6 +711,18 @@ public class OrderFulfilmentSagaTests
             // And it did not reach the error queue: the point is that this is
             // handled, not merely that it is loud.
             ConsumeFaults<PaymentAuthorised>(harness).ShouldAllBe(e => e == null);
+
+            // The saga is STILL RUNNING, and this assertion is the one that
+            // keeps the runbook honest. Confirmed's cancelled_after_payment
+            // finalises; this one is raised mid-wait, so the review row can
+            // sit beside a live instance until StockReleased or the
+            // ReleaseTimeout. A runbook written for the finalised case tells
+            // an on-call the state row is gone, and without this line nothing
+            // contradicts it.
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
         }
     }
 
