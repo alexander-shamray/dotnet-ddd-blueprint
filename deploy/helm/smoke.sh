@@ -163,6 +163,11 @@ check "exactly one chart declares client credentials (found $credentialed)" \
 # matched whichever block came first (there are five in Catalog's values), so
 # clearing the broker entirely left this gate green while claiming to check it.
 # A vacuous assertion in the file whose whole subject is vacuous assertions.
+# The invocation form of §8.2's helper, as opposed to any mention of its name.
+# Declared here so the self-test below can be written against the same string
+# the gate uses — two copies of a pattern is one of them going stale.
+CALLS_REDIS='^[[:space:]]*[^/[:space:]].*\.AddRedisConnections\('
+
 declares() {
     # declares <chart> <block> -> exit 0 when that block sets enabled: true
     awk -v want="$2" '
@@ -172,6 +177,10 @@ declares() {
         END { exit found ? 0 : 1 }
     ' "$CHARTS_DIR/$1/values.yaml"
 }
+
+# The negation, as a function rather than a `!` at the call site: `check` runs
+# its argument through "$@", which cannot carry a shell keyword.
+lacks() { ! declares "$1" "$2"; }
 
 for chart in $MIGRATOR_CHARTS; do
     svc="$(awk '/^workload:/ { w = 1 } w && /^  name: / { sub(/^  name: /, ""); print; exit }' \
@@ -190,9 +199,28 @@ for chart in $MIGRATOR_CHARTS; do
         # service whose Infrastructure calls AddRedisConnections resolves both
         # keys eagerly at startup, so a chart that does not declare redis
         # renders cleanly and produces a pod that will not start.
-        if grep -rq 'AddRedisConnections' "$src"; then
+        #
+        # THE PATTERN MATCHES AN INVOCATION, NOT A MENTION, and the difference
+        # is the whole gate. A bare 'AddRedisConnections' is satisfied by the
+        # comments that explain the call — there are three such lines per
+        # service beside the one call, some of them added by the very PR that
+        # wired Redis up — so deleting the registration left this check green
+        # and the chart's redis block unjustified. $CALLS_REDIS requires the
+        # first non-space character on the line to be something other than a
+        # slash, which is what a `//` comment can never satisfy.
+        #
+        # ASSERTED IN BOTH DIRECTIONS, because one direction is a gate that
+        # stops looking. Tightening the pattern above means a deleted
+        # registration no longer satisfies the `if`, so the check is SKIPPED
+        # rather than failed — and a chart left declaring redis for a service
+        # that reads nothing mounts a Secret reference no pod needs. The
+        # agreement is what has to hold, and it fails from either side.
+        if grep -rqE "$CALLS_REDIS" "$src"; then
             check "$chart calls AddRedisConnections in src/, so its chart declares redis" \
                 declares "$chart" redis
+        else
+            check "$chart calls no AddRedisConnections in src/, so its chart declares no redis" \
+                lacks "$chart" redis
         fi
     else
         fail "no source tree found at $src for chart $chart — the mapping, not the chart, is wrong"
@@ -201,6 +229,24 @@ done
 
 check 'the BFF binds ServiceIdentityOptions in src/, so its chart declares credentials' \
     grep -rq 'ServiceIdentityOptions' "$ROOT/src/BFF/Web.Bff"
+
+# --------------------------------------------------------------------------
+section 'The source-detection patterns select code, not prose'
+# --------------------------------------------------------------------------
+# The gate above went green on a service whose registration had been deleted,
+# because three comments per service name the helper it calls. A pattern is a
+# claim about what it selects, and the only way to establish that claim is to
+# hand it something it must REFUSE — every other run of this script feeds it a
+# tree where the answer is yes either way.
+check 'CALLS_REDIS refuses a comment that names the helper' \
+    sh -c 'printf "        // AddRedisConnections and nothing called it\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS refuses a commented-out call' \
+    sh -c 'printf "        // services.AddRedisConnections(configuration);\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS accepts the real invocation' \
+    sh -c 'printf "        services.AddRedisConnections(configuration);\n" |
+        grep -qE "$0"' "$CALLS_REDIS"
 
 # --------------------------------------------------------------------------
 section 'The workflow watches everything this script reads'
