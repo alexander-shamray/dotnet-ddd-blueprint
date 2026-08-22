@@ -41,7 +41,7 @@ used to carry `Bash(python:*)`, which is a prefix grant on a general-purpose
 interpreter: `python -c "<anything>"` was auto-approved, and one `open(…,'w')`
 reaches every path `Edit(.claude/scripts/**)` and `Edit(.remember/**)` deny,
 while one `subprocess.run` reaches every `git push --force` and `git switch -fC`
-the deny list and the five `git-*.sh` helpers exist to keep out. A rule that
+the deny list and the `git-*.sh` helpers exist to keep out. A rule that
 matches `python -c` cannot see what the interpreter then does, so the whole
 control structure this repository documents sat downstream of one line of
 frontmatter. That matters here more than in most commands because the input is

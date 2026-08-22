@@ -1776,9 +1776,24 @@ is consumed as the prefix-wildcard form and the literal becomes `git *ext:` —
 a probe of `git log -1 ext::foo` ran clean under it. Writing `Bash(git
 *ext::**)` to dodge that is rejected at startup: *"The `:*` pattern must be at
 the end."* So **`ext::` cannot be expressed in a Bash rule at all**, and the
-transport is closed on the allow side instead, by pinning the remote —
-`Bash(git fetch origin:*)`, `Bash(git pull --ff-only)`. A URL never reaches the
-repository position when a literal remote name occupies it.
+transport is closed on the allow side instead — **and the two grants do it by
+two different mechanisms, which an earlier revision of this paragraph ran
+together.**
+
+`Bash(git fetch origin:*)` **pins the remote**: a literal remote name occupies
+the repository position, so a URL never reaches it. That is the control the
+sentence describes, and it is real.
+
+`Bash(git pull --ff-only)` pins **nothing** — no remote name appears in it at
+all. What it does is drop the `:*`, so the grant is the documented
+no-argument invocation and nothing else. Whether that closes
+`git pull --ff-only ext::<cmd>` turns on a question this file states two
+paragraphs up and has not measured for the no-wildcard case: **an allow rule is
+a prefix match.** If that holds for a grant without `:*` as well, the pull side
+is still open and belongs in the residual inventory rather than in this
+paragraph. Nobody has run the probe. Until someone does, treat the pull grant
+as *narrowed, not proven* — the two words this repository keeps having to tell
+apart.
 
 **A command's frontmatter is a grant like any other, and it is the one nobody
 reads twice.** The first five rows above were all found in command frontmatter,
@@ -1811,7 +1826,12 @@ The fourth is not a git grant and is the one a reader is most likely to miss:
 **`/review-copilot` triages three comment feeds that no filter narrows by
 author.** `pr-review-comments.sh` returns every inline comment on the PR, and
 both `gh pr view --json` feeds are unfiltered by construction, while `ship.md`
-filters the same data on `Copilot` authorship. The command now states the
+filters the same data by author. **Not "on `Copilot` authorship", which is the
+shorthand this very change set retired one file over**: step 6 filters two
+feeds by two *different* logins — inline comments on `Copilot`, review bodies
+on `copilot-pull-request-reviewer` — and the issue-comment REST spelling
+appears in neither. Treating those as one identity is exactly what let a
+two-string allow-list look complete. The command now states the
 filter and reports the count it dropped, but that is prose — the enforceable
 version is an author filter inside the helper, which is a human's edit made
 with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run
