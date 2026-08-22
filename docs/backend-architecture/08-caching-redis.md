@@ -435,8 +435,8 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
     private string Subject() => currentUser.IsAuthenticated ? currentUser.Id.ToString() : "system";
 
     // Only a success is ever stored, and what is stored is its VALUE — never
-    // the Result around it. Neither direction of that round trip works — see
-    // "Trap — JSON round-tripping the Result itself" for the measurement.
+    // the Result around it. What that type does and does not survive is
+    // measured in "Trap — JSON round-tripping the Result itself".
     private static string Capture(TResult result) =>
         ValueType is null
             ? NoValue
@@ -603,7 +603,7 @@ precisely because nothing commits.
 > command from inside a **command** handler, so the case is **unreached rather
 > than handled**.
 >
-> `StockReservedHandler` (Appendix D.1) is the near miss, and naming it is
+> `StockReservedHandler` (Appendix D.4) is the near miss, and naming it is
 > cheaper than letting a reader find it: it does dispatch
 > `ConfirmStockCommand`, but it is an `IIntegrationEventHandler`, and §9.5's
 > inbox filter opens no `IUnitOfWork` transaction — it writes its row on the
