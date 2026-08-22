@@ -407,8 +407,10 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
         {
             // Release for a fault raised INSIDE next(), and nowhere else.
             // §6.3's ExecuteAsync disposes the transaction on the way out,
-            // which rolls it back, so nothing this command wrote survives and
-            // the caller may legitimately retry.
+            // which rolls it back — for every fault this in-process code can
+            // tell apart. The one it cannot is the lost commit acknowledgement
+            // below: there the work IS durable and this line permits the
+            // duplicate. Releasing is the right default and not a proof.
             await store.ReleaseAsync(key, CancellationToken.None);
             throw;
         }
@@ -551,7 +553,7 @@ covers `next()` and nothing else, and the three store calls divide like this:
 
 | | |
 |---|---|
-| `next()` throws | **Release.** §6.3's `ExecuteAsync` disposes the transaction on the way out, which rolls it back — so nothing survives and a retry is owed |
+| `next()` throws | **Release** — with one exception this code cannot detect, below. §6.3's `ExecuteAsync` disposes the transaction on the way out, which rolls it back, so for every *distinguishable* fault nothing survives and a retry is owed |
 | Handler returns a failed `Result` | **Release**, for the same reason and not for the one §6.3's comment suggests — see below |
 | `CompleteAsync` throws | **Hold.** The work is durable; the retry meets `ConcurrentRequestException` until the key expires, which is a delay rather than a duplicate |
 | `TryClaimAsync` throws | **Nothing to decide, and this is the case with no good answer.** The `SET NX` may have succeeded on the server, so the key can be held for a day for work that never ran, and no retry gets past it |
@@ -560,9 +562,35 @@ The two `ReleaseAsync` calls and the `CompleteAsync` all pass
 `CancellationToken.None`, and for two different reasons rather than one. After
 `next()` returns, the caller's token stopped meaning anything the moment the
 transaction committed, and passing it would abandon the store write at exactly
-the moment it is owed. In the `catch` nothing committed — but the commonest
-reason to be there at all is the caller's own cancellation, and honouring the
-token would abandon the release and leak the claim for a day.
+the moment it is owed. In the `catch` the commonest reason to be there at all
+is the caller's own cancellation, and honouring the token would abandon the
+release and leak the claim for a day — so `None` is right there too, whether or
+not the transaction committed, which the next callout is about.
+
+> **The lost commit acknowledgement is the one fault the `catch` gets wrong,
+> and it is this section's debt rather than a new finding.** If `CommitAsync`
+> succeeds on the server and the connection drops before the acknowledgement,
+> `next()` throws over work that is already durable — and no in-process
+> tidying can tell that apart from a fault that rolled back, which is what
+> `docs/pr-decision-log.md` records as knowingly open from PR-09. Releasing
+> there frees the key for a command that committed, so a retry writes it
+> twice: the exact outcome this behaviour exists to prevent, on the one path
+> it cannot see.
+>
+> **Redis cannot close it, and that is why the row above says "cannot detect"
+> rather than "does not happen".** `IIdempotencyStore` is outside the
+> transaction, so no claim it holds is atomic with the SQL commit. The fix is
+> an idempotency marker written **inside** the transaction, keyed on the
+> `CommandId` this interface already carries — and the decision log assigns
+> that fix to this seat rather than to §6.3's. Until it is written, the
+> guarantee here is *at most one commit per key except across a lost
+> acknowledgement*, which is weaker than the opening sentence of this section
+> and is the honest form of it.
+>
+> The residual is bounded rather than unbounded, and PR-14 is why: with the
+> outbox in place a re-run republishes the same fact, which is the
+> at-least-once delivery §9.4 promises and §9.5's inbox absorbs. A duplicate
+> **order** is not absorbed by either, which is what keeps this owed.
 
 > **`ReleaseAsync` throwing is not handled, and the two sites fail
 > differently.** In the `catch`, an exception from the release means `throw;`

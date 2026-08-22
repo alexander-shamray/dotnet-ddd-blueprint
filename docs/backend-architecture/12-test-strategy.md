@@ -740,10 +740,11 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
 
         // Served ENTIRELY by the replay branch (§8.5) — the handler runs once,
         // so this value is the stored one rebuilt through Result.Success<T>
-        // rather than a second handler's return. Both assertions are needed:
-        // the count alone passes against a behaviour that claims the key and
-        // then throws, and the equality alone passes against one that never
-        // claimed it if the handler happens to be deterministic.
+        // rather than a second handler's return. Both assertions are needed
+        // because they detect different things, not because either covers a
+        // case the other lets through: the row count catches a SECOND
+        // PERSISTED ORDER, and the equality catches a replay that returned
+        // something other than what was stored.
         second.Value.ShouldBe(first.Value);
 
         OrderingDbContext db =
