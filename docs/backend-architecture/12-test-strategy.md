@@ -1884,6 +1884,19 @@ public async Task Commands_are_sent_and_events_are_published()
 > never did — and removing it took the suite from twelve seconds to two, which
 > is the measurement that priced the habit.
 
+> **`Consumed` says a message arrived and never what happened to it.** The
+> harness records the delivery whether the pipeline returned or threw, so
+> "nothing changed" — no transition, no command sent — is exactly what a
+> saga event **faulting onto the error queue** looks like from every assertion
+> on this page. That is not a hypothetical: a state machine's default answer
+> to an event no state handles is `UnhandledEventException`
+> ([§9.6](09-messaging.md)), and the suite that proved a stale timeout
+> "changes nothing" was green against both outcomes for as long as it existed.
+> A test whose subject is absorption has to read
+> `harness.Consumed.Select<T>(spent).Select(m => m.Exception)` and assert it is
+> empty — and on the cancelled token, for the reason above, or the read spends
+> the shared bound and every assertion after it answers falsely.
+
 > **A missing scheduler fails this suite in the costume the traps above
 > describe, which is why the registration is spelled out rather than trimmed.**
 > The sample above carried neither scheduler line until PR-21 compiled it, and

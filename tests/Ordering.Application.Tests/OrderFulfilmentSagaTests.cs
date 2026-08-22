@@ -191,6 +191,33 @@ public class OrderFulfilmentSagaTests
     /// </remarks>
     private static CancellationToken Spent() => new(canceled: true);
 
+    /// <summary>
+    /// The exception each recorded consume of <typeparamref name="T"/> ended
+    /// with, or null where it ended cleanly.
+    /// </summary>
+    /// <remarks>
+    /// <b>The harness records a consume whether the pipeline threw or not</b>,
+    /// so <see cref="Consumed"/> answers "did it arrive" and never "what
+    /// happened to it". A saga event that no longer applies faults by default
+    /// (§9.6's <c>OnUnhandledEvent</c>), and every negative in this file would
+    /// stay green through it — the transition did not run, which is what the
+    /// negative asserts, and the message went to the error queue, which is
+    /// what nothing asked. Read this list after a positive has pinned the
+    /// point in time, exactly as the negatives are.
+    /// <para>
+    /// <b><see cref="Spent"/>, and it is load-bearing rather than tidy.</b>
+    /// The token-less overload enumerates until the harness's inactivity bound
+    /// — which is the harness's ONE shared bound, so a mid-test read of this
+    /// list spends it and every assertion after it answers immediately and
+    /// falsely. Measured: two of this file's cancellation tests failed on a
+    /// message the saga had never been given a chance to consume, in exactly
+    /// ten seconds, and both pass in under one with the token here.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<Exception?> ConsumeFaults<T>(ITestHarness harness)
+        where T : class =>
+        harness.Consumed.Select<T>(Spent()).Select(m => m.Exception);
+
     [Fact]
     public async Task Commands_are_sent_and_events_are_published()
     {
@@ -366,6 +393,59 @@ public class OrderFulfilmentSagaTests
             (await Consumed<StockReservationExpired>(harness, m => m.OrderId == orderId))
                 .ShouldBeTrue();
             (await NotYetSent<CancelOrder>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+
+            // "Changes nothing" has to include not faulting, and until this
+            // line the test could not fail for the reason it named: a saga
+            // event that does not apply in the current state throws by
+            // default, and the two assertions above are green either way —
+            // no transition ran, and the message went to the error queue.
+            // ADR-021 leans on this being harmless, because its scheduler
+            // cancels nothing and every order therefore keeps all of its
+            // timeouts until they fire.
+            ConsumeFaults<StockReservationExpired>(harness).ShouldAllBe(e => e == null);
+        }
+    }
+
+    [Fact]
+    public async Task A_redelivered_event_is_ignored_rather_than_faulted()
+    {
+        // §9.4 guarantees at-least-once, so the saga sees duplicates as a
+        // matter of routine. §9.8's inbox suppresses the ones that arrive with
+        // the same message id; a republished row carries a new one, and the
+        // saga's own state is what must absorb it. "Not applicable" is
+        // OnUnhandledEvent(x => x.Ignore()) and not a default that throws:
+        // without it, six attempts of §9.8's retry policy end in the error
+        // queue §13.6 pages on, for a duplicate the design considers correctly
+        // absorbed.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            // A second delivery of the same fact, with its own message id —
+            // which is what an outbox republish looks like on the wire.
+            StockReserved redelivered = SagaContracts.StockReserved(orderId);
+            await Publish(harness, redelivered);
+
+            (await Consumed<StockReserved>(harness, m => m.MessageId == redelivered.MessageId))
+                .ShouldBeTrue();
+
+            ConsumeFaults<StockReserved>(harness).ShouldAllBe(e => e == null);
+
+            // And absorbed rather than merely survived: one authorisation for
+            // one order, not two charges because the event arrived twice. Read
+            // as of now, for the reason every negative here is — the positive
+            // above is the point in time, and a waiting read would hand a late
+            // second send somewhere to hide.
+            harness.Sent
+                .Select<AuthorisePayment>(Spent())
+                .Count(m => m.Context.Message.OrderId == orderId)
+                .ShouldBe(1);
         }
     }
 
@@ -488,6 +568,220 @@ public class OrderFulfilmentSagaTests
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.StockNotReleased))
                     .ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_while_awaiting_stock_releases_the_reservation_and_never_charges()
+    {
+        // The defect this suite could not see: §11.4's endpoint cancels the
+        // AGGREGATE, and until the machine declared Event<OrderCancelled> the
+        // saga went on coordinating — reserving stock and authorising a card
+        // for an order the customer had already cancelled.
+        //
+        // ReserveStock is in flight here, so the reservation may or may not
+        // exist. Compensating is the state for exactly that: release it, and
+        // wait, because a release nobody waits on is a reservation nobody
+        // notices is stranded.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            // The race the severity was about, driven rather than argued: the
+            // reservation lands AFTER the cancellation. Nothing may charge.
+            StockReserved late = SagaContracts.StockReserved(orderId);
+            await Publish(harness, late);
+
+            (await Consumed<StockReserved>(harness, m => m.MessageId == late.MessageId)).ShouldBeTrue();
+            (await NotYetSent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+
+            // And it is absorbed rather than filed: Compensating handles no
+            // StockReserved, so this is the ignore of §9.6 doing its work.
+            ConsumeFaults<StockReserved>(harness).ShouldAllBe(e => e == null);
+
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.CustomerRequest))
+                    .ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_while_awaiting_payment_releases_the_reservation_and_never_charges()
+    {
+        // Stock is held and AuthorisePayment has already gone. What must not
+        // happen is a SECOND authorisation, and what must happen is the
+        // decline branch's own compensation under the customer's reason.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            // The reason, not just the send: Compensating reads it off the
+            // instance, so a branch that forgets to record it on entry sends a
+            // CancelOrder carrying null and an unqualified assertion passes.
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.CustomerRequest))
+                    .ShouldBeTrue();
+
+            harness.Sent
+                .Select<AuthorisePayment>(Spent())
+                .Count(m => m.Context.Message.OrderId == orderId)
+                .ShouldBe(1);
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_after_confirmation_escalates_rather_than_compensating()
+    {
+        // The one cancellation this machine cannot compensate: the card is
+        // authorised, and undoing that is a refund §3.2 gives Payments no
+        // contract to accept. So it escalates and finalises, on the despatch
+        // timeout's own argument — and unscheduling is what stops a false
+        // not_despatched review being raised three days later for an order
+        // that was cancelled.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-4"));
+
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.CancelledAfterPayment))
+                    .ShouldBeTrue();
+
+            // Not a compensation: the reservation is being picked, and telling
+            // Inventory to drop it is not this machine's call to make.
+            (await NotYetSent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_the_saga_itself_caused_finds_no_instance_and_is_discarded()
+    {
+        // The routine case, and the one that would have made this fix worse
+        // than the defect: every cancellation the saga causes ends in
+        // Finalize, so the OrderCancelled the aggregate then publishes arrives
+        // at a queue whose instance has just been deleted. A missing instance
+        // must be discarded rather than faulted, or every cancelled order
+        // files an error-queue entry and pages someone (§13.6).
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReservationFailed(orderId));
+
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.OutOfStock))
+                    .ShouldBeTrue();
+
+            OrderCancelled echo = SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.OutOfStock);
+            await Publish(harness, echo);
+
+            (await Consumed<OrderCancelled>(harness, m => m.MessageId == echo.MessageId)).ShouldBeTrue();
+
+            ConsumeFaults<OrderCancelled>(harness).ShouldAllBe(e => e == null);
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_while_compensating_changes_nothing()
+    {
+        // Compensating already ends in a cancellation, so the customer's
+        // request adds nothing to do. It is Ignored explicitly rather than
+        // left to OnUnhandledEvent, because a reader cannot tell a decision
+        // from an omission — and the assertion is that the release in flight
+        // is not disturbed.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            await Publish(harness, SagaContracts.PaymentDeclined(orderId, "do_not_honour"));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            OrderCancelled cancelled =
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest);
+            await Publish(harness, cancelled);
+
+            (await Consumed<OrderCancelled>(harness, m => m.MessageId == cancelled.MessageId))
+                .ShouldBeTrue();
+            ConsumeFaults<OrderCancelled>(harness).ShouldAllBe(e => e == null);
+
+            // Ignored means the state is untouched, not merely that nothing
+            // was sent — the compensation still has to be waiting on Inventory
+            // when the release arrives.
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            // payment_declined, not customer_request: the reason recorded on
+            // entry is the one that caused the compensation, and a cancellation
+            // arriving mid-flight must not rewrite it.
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.PaymentDeclined))
+                    .ShouldBeTrue();
+
+            harness.Sent
+                .Select<ReleaseStock>(Spent())
+                .Count(m => m.Context.Message.OrderId == orderId)
+                .ShouldBe(1);
         }
     }
 

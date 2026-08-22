@@ -193,11 +193,16 @@ public class MessagingRegistrationTests
         // invoked.
         //
         // Not the whole of §3.2's Consumes column, and the difference is the
-        // saga: six of the ten events it lists reach Ordering through the
+        // saga: seven of the eleven events it lists reach Ordering through the
         // state machine's own correlation, which registers no IConsumer<> at
         // all. Naming this "Consumes and Accepts" stated a set equality the
         // list does not satisfy — a message that would have sent whoever read
-        // it looking for six missing registrations.
+        // it looking for seven missing registrations.
+        //
+        // The eleventh is Ordering's own OrderCancelled, added when the saga
+        // gained a cancellation branch (§9.6). It changes nothing here for
+        // exactly the reason this paragraph exists: a saga event is not a
+        // consumer registration, so the set below is the same eight it was.
         //
         // This asserts the REGISTRATION and deliberately not the endpoint:
         // AddMassTransitTestHarness replaces the UsingRabbitMq callback where
@@ -249,7 +254,7 @@ public class MessagingRegistrationTests
             ignoreOrder: true,
             "these eight are every event and command §3.2 gives Ordering a CONSUMER for — a ninth is a " +
             "subscription no chapter grants, and a missing one is a handler that silently stops being " +
-            "invoked. §3.2's Consumes column is longer: the six fulfilment events reach the saga through " +
+            "invoked. §3.2's Consumes column is longer: the seven fulfilment events reach the saga through " +
             "its own correlation rather than through an IConsumer<>, which is why they are absent here " +
             "and asserted by the harness suite instead");
     }

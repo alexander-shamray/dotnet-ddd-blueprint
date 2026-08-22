@@ -14,10 +14,12 @@
 
 ## What it means
 
-A saga hit a wait it could not compensate and escalated (§9.6). **It has already
-finalised**, so [`stuck-saga.md`](stuck-saga.md) will not catch this — the state
-row is gone and the only trace is here. That is why §13.6 gives it a row of its
-own rather than folding it into the saga-age alert.
+A saga reached something it could not compensate and escalated (§9.6) — two
+of the three reasons are a wait that ran out, and the third is a cancellation
+the platform has no contract to undo. **It has already finalised**, so
+[`stuck-saga.md`](stuck-saga.md) will not catch this — the state row is gone
+and the only trace is here. That is why §13.6 gives it a row of its own rather
+than folding it into the saga-age alert.
 
 A row means "a human still needs to look at this". The table is a **work queue,
 not a log**: there is no `ResolvedAt` column, and resolving a review means
@@ -42,8 +44,10 @@ pair is impossible.
 
 ## What each reason means
 
-Only two exist, both from `ReviewReasons` in `Common.Contracts`. An unknown code
-is a bug, not a new category.
+Three exist, all from `ReviewReasons` in `Common.Contracts`. An unknown code is
+a bug, not a new category — `FlagOrderForReviewMapper` refuses one on the
+first attempt (§9.8), because `Reason` is half this table's primary key and a
+typo opens a second row nobody resolves rather than overwriting the first.
 
 ### `not_despatched`
 
@@ -80,6 +84,31 @@ like any other wait.
 3. Confirm the order really did cancel: the review row says compensation
    stalled, not that the cancellation failed.
 
+### `cancelled_after_payment`
+
+A customer cancelled an order whose payment had already been authorised. The
+saga was in `Confirmed`, waiting on Shipping; it escalated and finalised rather
+than compensating, because undoing an authorisation is a **refund** and
+[§3.2](../backend-architecture/03-bounded-contexts.md) closes Payments' Accepts
+column at `AuthorisePayment` — the platform has no refund contract to send.
+
+**The order is already cancelled. What needs a person is the money**, and
+possibly a parcel. Unlike the two above, nothing is stuck: the saga is gone by
+design and no timeout is pending.
+
+1. **Refund the authorisation**, through the provider's own console or whatever
+   process Payments' team owns. This is the whole reason the row exists, and it
+   is the step with a clock on it — an authorisation left standing expires or
+   settles depending on the provider.
+2. **Stop the despatch if it has not left.** The saga deliberately does *not*
+   send `ReleaseStock` here: a reservation being picked is not one Inventory can
+   safely be told to drop on a state machine's word. Ask Shipping, then release
+   the reservation through Inventory's own API if the parcel is still in the
+   warehouse.
+3. **If it already shipped**, this is a return rather than a cancellation, and
+   the order's own state will say so — §5.4 refuses to cancel a `Shipped`
+   order, so a row here means the aggregate was cancelled before despatch.
+
 ## Resolving
 
 **Delete the row.** That is the entire mechanism, and the absence of a
@@ -108,3 +137,8 @@ upstream fault. `not_despatched` in bulk means Shipping stopped despatching or
 stopped publishing; `stock_not_released` in bulk means Inventory is not
 consuming `ReleaseStock`. Work the upstream service and the queue drains behind
 it, but the rows still need deleting — nothing removes them automatically.
+
+`cancelled_after_payment` is the one that does **not** follow that rule: its
+upstream is customers, so a spike is a product or pricing signal rather than a
+dependency, and there is no service to fix. Look at what confirmed orders are
+being cancelled *for* before treating it as an incident.

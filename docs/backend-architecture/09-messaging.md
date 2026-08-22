@@ -1906,17 +1906,26 @@ stateDiagram-v2
     AwaitingStock --> AwaitingPayment : StockReserved
     AwaitingStock --> [*] : StockReservationFailed → CancelOrder
     AwaitingStock --> [*] : StockTimeout 5m → CancelOrder
+    AwaitingStock --> Compensating : OrderCancelled → ReleaseStock
 
     AwaitingPayment --> Confirmed : PaymentAuthorised → ConfirmOrder
     AwaitingPayment --> Compensating : PaymentDeclined → ReleaseStock
     AwaitingPayment --> Compensating : PaymentTimeout 15m → ReleaseStock
+    AwaitingPayment --> Compensating : OrderCancelled → ReleaseStock
 
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
 
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
+    Confirmed --> [*] : OrderCancelled → FlagOrderForReview
 ```
+
+`OrderCancelled` is the one arrow that comes from **this service** —
+[§3.2](03-bounded-contexts.md) lists it in Ordering's own Consumes column
+beside `OrderPlaced`, and for the same reason: a fact Ordering publishes is also
+a fact its workflow has to react to. `Compensating` ignores it explicitly, so
+the machine has a branch for it in every state it can reach one in.
 
 The diagram has exactly the states the machine declares and no others. Earlier
 it showed `Cancelled` and `Shipped` as states; they are terminal *outcomes*, and
@@ -1969,6 +1978,10 @@ public static class ReviewReasons
 {
     public const string NotDespatched = "not_despatched";
     public const string StockNotReleased = "stock_not_released";
+    // A customer cancelled an order whose payment was already authorised.
+    // Undoing that is a refund, and §3.2 closes Payments' Accepts column at
+    // AuthorisePayment — so the saga escalates instead of compensating.
+    public const string CancelledAfterPayment = "cancelled_after_payment";
 }
 
 /// <summary>
@@ -2050,6 +2063,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     public Event<StockReleased> StockReleased { get; private set; } = null!;
     public Event<ShipmentDispatched> ShipmentDispatched { get; private set; } = null!;
 
+    // Ordering's own, and the only one here that is. "Cancel this order" has
+    // two origins: the saga's own CancelOrder, always paired with Finalize, and
+    // §11.4's customer endpoint, which cancels the AGGREGATE and ends nothing.
+    // Without this the second was invisible to the machine.
+    public Event<OrderCancelled> OrderCancelled { get; private set; } = null!;
+
     // One schedule per wait. "Every wait has a timeout" is a rule the machine
     // must be able to express, not a habit to remember at each transition.
     public Schedule<OrderFulfilmentState, StockReservationExpired> StockTimeout { get; private set; } = null!;
@@ -2061,9 +2080,30 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     {
         InstanceState(x => x.CurrentState);
 
+        // "Not applicable" has to be spelled, because the default is to throw.
+        // §9.4 guarantees at-least-once, so a republished row delivers the same
+        // fact again under a NEW message id, which §9.5's inbox cannot
+        // suppress — and the copy lands on an instance that has moved on.
+        // Without this line MassTransit raises UnhandledEventException, §9.8's
+        // retry policy spends six attempts on a transition that can never
+        // apply, and the message reaches the error queue §13.6 pages on.
+        OnUnhandledEvent(x => x.Ignore());
+
         Event(() => OrderPlaced, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
         // ... remaining correlations
+
+        // Discarded when no instance exists, and this is the routine case
+        // rather than the exotic one: every cancellation the saga causes ends
+        // in Finalize, so the OrderCancelled the aggregate then publishes
+        // arrives at a queue whose instance has just been deleted.
+        Event(
+            () => OrderCancelled,
+            x =>
+            {
+                x.CorrelateById(m => m.Message.OrderId);
+                x.OnMissingInstance(m => m.Discard());
+            });
 
         Schedule(
             () => StockTimeout,
@@ -2160,7 +2200,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new CancelOrder(ctx.Saga.OrderId, CancelReasons.StockTimeout))
-                .Finalize());
+                .Finalize(),
+
+            // The customer cancelled while ReserveStock was in flight. Nothing
+            // is charged, and the reservation may or may not exist yet — so
+            // this compensates rather than finalising, which is what
+            // Compensating is for. A release nobody waits on is a reservation
+            // nobody notices is stranded.
+            When(OrderCancelled)
+                .Unschedule(StockTimeout)
+                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
+                .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
+                .TransitionTo(Compensating));
 
         During(
             AwaitingPayment,
@@ -2196,6 +2248,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx => ctx.Saga.CancelReason = CancelReasons.PaymentTimeout)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
+                .TransitionTo(Compensating),
+
+            // Stock is held and AuthorisePayment has gone. This transition
+            // happens INSTEAD of the one that charges, which is the whole
+            // point: the decline branch's compensation, under the customer's
+            // own reason.
+            When(OrderCancelled)
+                .Unschedule(PaymentTimeout)
+                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
+                .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
 
         During(
@@ -2213,6 +2276,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotDespatched))
+                .Finalize(),
+
+            // The one cancellation this machine cannot compensate: the card is
+            // authorised, and undoing that is a refund §3.2 gives Payments no
+            // contract to accept. So it escalates and finalises, on the
+            // despatch timeout's own argument. Unscheduling matters more than
+            // usual — left armed, that timeout raises a not_despatched review
+            // three days later for an order that was cancelled.
+            //
+            // No ReleaseStock: Confirmed means Shipping has been asked for a
+            // despatch, and a reservation being picked is not one Inventory can
+            // safely be told to drop. The review row is where both loose ends
+            // are worked.
+            When(OrderCancelled)
+                .Unschedule(DespatchTimeout)
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.CancelledAfterPayment))
                 .Finalize());
 
         During(
@@ -2236,7 +2317,14 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
-                .Finalize());
+                .Finalize(),
+
+            // Written, not left to OnUnhandledEvent, because a reader cannot
+            // tell a decision from an omission. Reaching Compensating means a
+            // cancellation is already the outcome, so the customer's request
+            // adds nothing to do — and both exits cancel the order anyway,
+            // which Order.Cancel absorbs idempotently (§5.4).
+            Ignore(OrderCancelled));
 
         SetCompletedWhenFinalized();
     }
@@ -2253,6 +2341,60 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 >
 > The events the saga *reacts* to — `StockReserved`, `PaymentDeclined` — are
 > genuine events and are published by their owners in the normal way.
+
+> **Trap — "not applicable" is a default that throws.** A state machine really
+> is idempotent against a redelivered non-initial event: the instance is past
+> the state that handled it and the transition no longer applies. What is easy
+> to miss is that MassTransit's way of saying "no transition applies" is
+> `UnhandledEventException`, so the message the design considers correctly
+> absorbed is retried to exhaustion and filed in the error queue
+> [§13.6](13-observability.md) pages on. `OnUnhandledEvent(x => x.Ignore())` is
+> the line that makes the comment true; without it the code and the reasoning
+> beside it describe opposite outcomes.
+>
+> **Timeouts were never the exposure, and only measuring said so.** A scheduled
+> message carries the token id the schedule was armed with, and MassTransit
+> discards one that no longer matches the instance — before the state machine
+> is asked. So ADR-021's uncancellable timeouts were harmless throughout, and
+> what actually reached the error queue was §9.4's ordinary at-least-once
+> redelivery: a republished row carries a *new* message id, so §9.5's inbox
+> cannot suppress it either.
+>
+> **The cost is that a genuinely misrouted event is now silent.** That is a
+> configuration fault traded against a routine one, and it is only acceptable
+> because every event this machine declares is handled in every state it can
+> reach one in — `Ignore(OrderCancelled)` in `Compensating` is written out for
+> exactly that reason rather than left to this callback.
+
+> **A cancellation has two origins and the saga used to see one.** The saga's
+> own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
+> with it. [§11.4](11-identity-authorization.md)'s customer endpoint cancels
+> the *aggregate* and ends nothing — so before `Event<OrderCancelled>` was
+> declared the machine went on reserving stock and authorising a card for an
+> order the customer had already cancelled, and the loud half of that failure
+> (`ConfirmOrder` refused by the aggregate) arrived **after** the money moved.
+>
+> What each state does is a different answer to one question — what has
+> already been spent:
+>
+> | State | What is at stake | The transition |
+> |---|---|---|
+> | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, `customer_request` |
+> | `AwaitingPayment` | Stock held, nothing charged | The decline branch's compensation, `customer_request` |
+> | `Confirmed` | The card is authorised | Escalate — `cancelled_after_payment` — and finalise |
+> | `Compensating` | A cancellation is already the outcome | `Ignore`; both exits cancel the order anyway |
+>
+> **`Confirmed` is a gap this states rather than closes.** Undoing an
+> authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
+> Payments' Accepts column at `AuthorisePayment` — there is no refund contract
+> to send. Inventing one inside a state machine would be a §3.2 decision taken
+> in the wrong place, so the money is handed to a human and the review row is
+> what carries it. Two consequences follow and both are real: the reservation
+> on a confirmed order is left alone, because one being picked is not
+> Inventory's to drop on a saga's word; and a `StockReserved` that lands
+> *after* a cancellation in `AwaitingStock` is ignored, so its reservation is
+> stranded exactly as the `StockTimeout` branch's is. Both are worked from
+> `ordering.OrderReviews`, not by the machine.
 
 ### Where an escalation lands
 
@@ -3125,6 +3267,15 @@ and an alert that fires routinely trains its recipients to close it — which
 costs more than the noise it was meant to surface. Keeping the queue to faults
 is what lets the threshold stay at zero, which is the only threshold nobody has
 to interpret.
+
+**Nor do inapplicable saga transitions**, and that one had to be arranged rather
+than assumed. §9.4's at-least-once delivery hands the saga endpoint duplicates
+as a matter of routine, and a duplicate under a new message id is one §9.5's
+inbox cannot suppress — so the state machine absorbing it is the whole
+mechanism. MassTransit's default way of saying "no transition applies" is to
+throw, which sends every one of those through the retry policy above and into
+this queue. §9.6's `OnUnhandledEvent(x => x.Ignore())` is what keeps the
+threshold at zero honest; the callout there states what it costs.
 
 Rejections get their own instrument instead. `MessagingMetrics.Rejected`
 (§13.3) writes `command.domain_rejected`, tagged with the message type and the

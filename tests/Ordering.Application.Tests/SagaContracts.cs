@@ -6,7 +6,7 @@ using Common.Contracts.Shipping.V1;
 namespace Ordering.Application.Tests;
 
 /// <summary>
-/// The seven events §9.6's saga reacts to, built for a test.
+/// The eight events §9.6's saga reacts to, built for a test.
 /// </summary>
 /// <remarks>
 /// <b>A builder rather than object initialisers at each call site, and §12.5
@@ -85,6 +85,25 @@ internal static class SagaContracts
         CorrelationId = orderId,
         OccurredAt = Occurred,
         OrderId = orderId
+    };
+
+    /// <summary>
+    /// The eighth, and the only one Ordering publishes itself (§3.2).
+    /// </summary>
+    /// <remarks>
+    /// The reason is a parameter because both origins reach the saga through
+    /// this one type: <c>customer_request</c> from §11.4's endpoint, and every
+    /// <see cref="CancelReasons"/> code the saga itself sent on
+    /// <c>CancelOrder</c>, echoed back by the aggregate it cancelled.
+    /// </remarks>
+    internal static OrderCancelled OrderCancelled(Guid orderId, Guid customerId, string reason) => new()
+    {
+        MessageId = Guid.CreateVersion7(),
+        CorrelationId = orderId,
+        OccurredAt = Occurred,
+        OrderId = orderId,
+        CustomerId = customerId,
+        Reason = reason
     };
 
     internal static ShipmentDispatched ShipmentDispatched(Guid orderId, string tracking) => new()

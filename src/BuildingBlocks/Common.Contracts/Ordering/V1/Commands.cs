@@ -89,4 +89,19 @@ public static class ReviewReasons
     public const string NotDespatched = "not_despatched";
 
     public const string StockNotReleased = "stock_not_released";
+
+    /// <summary>
+    /// A customer cancelled an order whose payment was already authorised.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one cancellation the saga cannot compensate.</b> Undoing an
+    /// authorisation is a refund, and §3.2 closes Payments' Accepts column at
+    /// <c>AuthorisePayment</c> — so the workflow escalates instead of
+    /// compensating, on the same argument the despatch timeout makes: a wait
+    /// with no automatic answer still ends, and a human owns what follows.
+    /// This is a <see cref="ReviewReasons"/> code and not a
+    /// <see cref="CancelReasons"/> one, because the order is already cancelled
+    /// — what needs a person is the money, not the order.
+    /// </remarks>
+    public const string CancelledAfterPayment = "cancelled_after_payment";
 }

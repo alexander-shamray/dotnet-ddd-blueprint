@@ -231,7 +231,7 @@ their declaration.
 | `PaymentAuthorised`, `PaymentRefunded` | Envelope, `OrderId`, `Reference`, `Amount` and `Currency`. The reference is an opaque provider token and stays a string everywhere; the currency travels with the amount for §9.6's reason |
 | `PaymentDeclined` | Envelope, `OrderId`, `Reason` — the **provider's** reason, deliberately not a closed vocabulary. `CancelReasons` is this platform's and is enumerated; a PSP's set is not ours to pin, so this is carried for a human and never branched on or used as a metric dimension (§9.8) |
 | `ShipmentDispatched`, `ShipmentDelivered` | Envelope, `OrderId`, `TrackingNumber`. Despatch is what the saga finalises on; delivery has only Notifications for a consumer, because it is not something a saga can coordinate or compensate |
-| `OrderCancelled` | Envelope, `OrderId`, `CustomerId`, `Reason` — the same `CancelReasons` code the saga sent on `CancelOrder`, so a cancellation is reported with the code that caused it |
+| `OrderCancelled` | Envelope, `OrderId`, `CustomerId`, `Reason` — a `CancelReasons` code. When the saga caused the cancellation it is the code the saga sent on `CancelOrder`, so the fact is reported with the reason that produced it; when §11.4's endpoint did, it is `customer_request` and no command was involved. **The saga consumes it as well as causing it** (§3.2, §9.6): the second origin is the only way a customer's cancellation reaches the workflow, and a copy arriving after the saga finalised is discarded rather than faulted |
 
 ## D.6 Framework types
 

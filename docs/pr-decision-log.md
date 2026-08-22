@@ -863,6 +863,17 @@ after.
   - The endpoint separation §9.6 argues for `ordering-stock-events` survives on
     a different reason — retry policy, not the inbox — and both chapters now
     say so.
+  - **The half that survived was true and incomplete, and a later branch
+    measured the difference.** "The transition is simply not applicable" is a
+    statement about the state machine; MassTransit's way of *saying* it is
+    `UnhandledEventException`, so every redelivered non-initial event was
+    retried six times and filed in the error queue this entry's own alert
+    argument depends on staying empty. `OnUnhandledEvent(x => x.Ignore())` is
+    the line that was missing. Reproduced first: a redelivered `StockReserved`
+    in `AwaitingPayment` came back as `NotAcceptedStateMachineException`. A
+    stale **timeout** never did — a scheduled message whose token id no longer
+    matches the instance is discarded before the machine is asked, which is why
+    ADR-021's uncancellable timeouts were harmless throughout and this was not.
 
 **Five things are owed and are named rather than built.** Each is a §9.6, §5.4
 or §9.8 decision that PR-21 made *reachable* rather than one it introduced, and
@@ -891,6 +902,16 @@ naming them is the alternative to a silent gap.
   refund contract to send. A partial fix covering `AwaitingStock` and
   `AwaitingPayment` is possible and was rejected here as a state-machine change
   §9.6 owns.
+  - **Closed, and §9.6 took the decision this entry said it owned.** The
+    machine declares `Event<OrderCancelled>` and has a branch in every state it
+    can reach one in: `AwaitingStock` and `AwaitingPayment` compensate on the
+    decline branch's own terms under `customer_request`; `Compensating`
+    `Ignore`s it, because a cancellation is already the outcome there. **The
+    refund gap is stated rather than closed** — `Confirmed` escalates with a
+    third `ReviewReasons` code, `cancelled_after_payment`, and finalises, so
+    the money reaches a person instead of a contract that does not exist. That
+    also removes the false `not_despatched` this entry predicted, by
+    unscheduling the despatch timeout on the way out.
 - **The payment reference is accepted and goes nowhere.** `ConfirmOrder`
   carries it, `Order.ConfirmPayment` puts it on `OrderConfirmedDomainEvent` and
   stores no column, and `V1.OrderConfirmed` has no field for it — so it reaches

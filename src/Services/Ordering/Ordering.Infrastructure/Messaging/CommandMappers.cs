@@ -104,20 +104,29 @@ public sealed class FlagOrderForReviewMapper
     : ICommandMessageMapper<FlagOrderForReview, FlagOrderForReviewCommand>
 {
     /// <summary>
-    /// The closed vocabulary of <see cref="ReviewReasons"/>, read off the class
-    /// rather than listed again. A second table is a second thing to forget
-    /// when a reason is added, which is the argument
-    /// <c>CancellationReasons</c> already makes one file over. The consequence
+    /// The closed vocabulary of <see cref="ReviewReasons"/>. The consequence
     /// of letting an unknown code through is sharper here than a bad value in
     /// a column: <c>Reason</c> is half the primary key of
     /// <c>ordering.OrderReviews</c>, so a typo does not overwrite an
     /// escalation — it silently opens a second one nobody resolves, and §13.6
     /// pages on any row older than an hour.
     /// </summary>
+    /// <remarks>
+    /// <b>This is a second copy of that class and it used to claim it was
+    /// not</b> — "read off the class rather than listed again" was the comment
+    /// here, over three names typed out by hand. The list stays, because a
+    /// validator whose vocabulary is derived by reflection accepts whatever
+    /// the class grows next and can never be observed refusing anything; what
+    /// closes the drift is a test whose subject is the agreement between the
+    /// two, which fails from either side. <c>CancellationReasons</c> one file
+    /// over parses rather than lists and is the shape this cannot take, since
+    /// a review reason maps to no domain type.
+    /// </remarks>
     private static readonly FrozenSet<string> Known = FrozenSet.Create(
         StringComparer.Ordinal,
         ReviewReasons.NotDespatched,
-        ReviewReasons.StockNotReleased);
+        ReviewReasons.StockNotReleased,
+        ReviewReasons.CancelledAfterPayment);
 
     public FlagOrderForReviewCommand Map(FlagOrderForReview message)
     {
