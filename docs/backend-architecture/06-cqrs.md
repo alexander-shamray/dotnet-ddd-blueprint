@@ -390,13 +390,17 @@ public void Command_behaviours_are_registered_in_the_documented_order()
 }
 ```
 
-The generic constraints do the rest of the work: `IdempotencyBehavior` requires
-`IIdempotentCommand` **and** `TResult : Result`
-([§8.5](08-caching-redis.md)), and `TransactionBehavior` requires
-`ICommand<TResult>`, so both are skipped for queries and for commands that have
-not opted in, without either behaviour needing to check. §6.5's query fails
-both of `IdempotencyBehavior`'s independently: it declares no
-`IIdempotentCommand`, and its `CursorPage<T>` derives from nothing.
+The generic constraints do the rest of the work, and they do not do the same
+work: `IdempotencyBehavior` requires `IIdempotentCommand` **and**
+`TResult : Result` ([§8.5](08-caching-redis.md)), where `TransactionBehavior`
+requires `ICommand<TResult>` and nothing else. A **query** is dropped by all
+three — §6.5's fails both of `IdempotencyBehavior`'s independently, declaring
+no `IIdempotentCommand` and returning a `CursorPage<T>` that derives from
+nothing — so it runs through neither behaviour. A **command that has not opted
+in** is dropped by `IdempotencyBehavior` alone: `CancelOrderCommand` and
+`ConfirmStockCommand` are `ICommand<Result>`, and `TransactionBehavior` still
+wraps them, which is the whole reason its constraint is `ICommand` rather than
+`IIdempotentCommand`. Neither behaviour needs to check.
 
 **The `TResult` constraint is worth its cost, and the cost is silence.** What
 needs it is the cast of a rebuilt `Result` back to `TResult` (§8.5) — not

@@ -600,9 +600,18 @@ precisely because nothing commits.
 > cannot see it. `IdempotencyBehavior` is registered outside
 > `TransactionBehavior` (§6.3), so a nested idempotent command genuinely lands
 > inside its parent's transaction. Nothing in this blueprint dispatches a
-> command from inside a handler, so the case is **unreached rather than
-> handled**; a service that starts to needs this behaviour to decline nested
-> dispatches outright, and this is the paragraph that changes when it does.
+> command from inside a **command** handler, so the case is **unreached rather
+> than handled**.
+>
+> `StockReservedHandler` (Appendix D.1) is the near miss, and naming it is
+> cheaper than letting a reader find it: it does dispatch
+> `ConfirmStockCommand`, but it is an `IIntegrationEventHandler`, and §9.5's
+> inbox filter opens no `IUnitOfWork` transaction — it writes its row on the
+> `DbContext` directly, after the consumer. So `HasActiveTransaction` is false
+> when that dispatch arrives and §6.3 opens a transaction of its own: an entry
+> point, not a nested unit. A service that puts a dispatch inside a *command*
+> handler needs this behaviour to decline nested dispatches outright, and this
+> is the paragraph that changes when it does.
 
 The Redis implementation lives in Infrastructure and is where the two §8.1
 constraints are satisfied — §8.3's `RedisKeys` supplies the `{service}:idem:`

@@ -659,11 +659,12 @@ carries none either, so the `WHERE` clause cannot be pointed at another
 customer; and `CancelOrderHandler` above resolves ownership against the loaded
 aggregate rather than against anything the caller sent.
 
-**The rule reaches past record fields** — §10.3's rate-limit partition key
-below is already one — **and [§8.5](08-caching-redis.md) is where getting it
-wrong costs the most.** An idempotency key is not a field on anything, and it is
-built from a client-generated `CommandId` — so a key that names only the command
-type and that value is one any caller can claim on another's behalf. It is
+**The rule reaches past record fields** — §10.3's rate-limit partition key,
+named above, is already one — **and [§8.5](08-caching-redis.md) is where
+getting it wrong costs the most.** An idempotency key is not a field on
+anything either, and it is built from a client-generated `CommandId` — so a key
+that names only the command type and that value is one any caller can claim on
+another's behalf. It is
 therefore scoped by `ICurrentUser.Id` for the same reason `PlaceOrderCommand`
 carries no `CustomerId`. The consequence of getting it wrong is sharper there
 than here: the replay branch returns a stored result **without running the
