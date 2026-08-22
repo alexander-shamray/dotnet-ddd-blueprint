@@ -429,7 +429,7 @@ suites, exactly as `pricing.proto` is. **Every mandatory PR in the plan has now
 landed and so has the one optional PR, so there is no next PR.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 822 tests — so the build rules and the drift rules below
+and `dotnet test` runs 824 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -755,7 +755,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 645 of 822, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 647 of 824, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -834,13 +834,13 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 645 of
-the 822 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 647 of
+the 824 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 177, needing the daemon exactly as
 before.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (627) and integration (177), which is the 645 above split at the
+(18), unit (629) and integration (177), which is the 647 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.

@@ -59,9 +59,9 @@ SOLUTION = ROOT / "Platform.slnx"
 #
 # MEASURED, not guessed: `dotnet test Platform.slnx --no-build -c Release` under
 # each stage's filter on this repository, summed over the thirteen per-project
-# totals — 18 + 627 + 177 = 822, which is the figure CLAUDE.md and
-# docs/testing.md carry and the sum docs/testing.md points at ("645 and 177
-# summing to 822", 645 being the architecture and unit stages together).
+# totals — 18 + 629 + 177 = 824, which is the figure CLAUDE.md and
+# docs/testing.md carry and the sum docs/testing.md points at ("647 and 177
+# summing to 824", 647 being the architecture and unit stages together).
 #
 # THE NUMBERS BELOW ARE NOT THOSE COUNTS, and the gap is deliberate. A floor
 # set at the measurement is a ratchet: it fails on the day somebody legitimately
@@ -72,7 +72,7 @@ SOLUTION = ROOT / "Platform.slnx"
 # checks below are what catch the small stuff, and they have no number to age.
 STAGE_FLOORS = {
     "architecture": 15,     # measured 18
-    "unit": 550,            # measured 627
+    "unit": 550,            # measured 629
     "integration": 150,     # measured 177
 }
 
