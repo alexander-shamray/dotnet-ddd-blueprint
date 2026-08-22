@@ -2382,9 +2382,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
             // The two Inventory answers to a reservation this saga no longer
             // wants. Both are reachable by cancelling in AwaitingStock, both
-            // are designed races rather than misroutes — ReleaseStock is
-            // already in flight when either lands — and both are written for
-            // the same reason as the line above.
+            // are races by design rather than misroutes, and both are written
+            // for the same reason as the line above.
+            //
+            // What this does NOT establish is that the reservation was
+            // released. §9.4 orders nothing, so Inventory may handle the
+            // release before the reserve it undoes: the release is then a
+            // no-op, the reserve creates a reservation, and the StockReserved
+            // that follows is ignored here with nothing sent after it. An
+            // earlier revision argued the case away with "ReleaseStock is
+            // already in flight", which is true and is not the same claim.
             Ignore(StockReserved),
             Ignore(StockReservationFailed),
 
@@ -2503,7 +2510,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, recording `OrderCancelled.Reason` |
 > | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, recording `OrderCancelled.Reason` — this does not stop the charge |
 > | `Confirmed` | The card is authorised | Escalate — `cancelled_after_confirmation`, its own code because Shipping may still despatch — and finalise |
-> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | **Five** written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway and `ReleaseStock` is already in flight; `When(PaymentAuthorised)` escalates `cancelled_after_payment`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow |
+> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | **Five** written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway; `When(PaymentAuthorised)` escalates `cancelled_after_payment`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation** — §9.4 orders nothing, so a release handled before its reserve is a no-op and the reservation that follows it is stranded. Named here rather than argued away, because this row used to close the case with "`ReleaseStock` is already in flight" |
 >
 > **`Confirmed` is a gap this states rather than closes.** Undoing an
 > authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes

@@ -431,7 +431,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // money problem, which is why it escalates too. It raises a
             // DIFFERENT code: Confirmed sends cancelled_after_confirmation
             // because an order that reached it may still be despatched, and
-            // this state sends cancelled_after_payment because it cannot. Left unwritten it would fall to OnUnhandledEvent and
+            // this state sends cancelled_after_payment because it cannot.
+            //
+            // Left unwritten it would fall to OnUnhandledEvent and
             // be IGNORED — the catch-all this branch added for redelivery
             // would silently swallow the case this branch's other half exists
             // to escalate. The two fixes interacted, and only writing the
@@ -469,9 +471,29 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
             // The two Inventory answers to a reservation this saga no longer
             // wants, both reachable by cancelling in AwaitingStock and both
-            // designed races rather than misroutes: ReleaseStock is already in
-            // flight by the time either lands, and Compensating's own exits
-            // own the cancellation.
+            // races by design rather than misroutes: Compensating's own exits
+            // own the cancellation, so neither answer has work left here.
+            //
+            // **"ReleaseStock is already in flight" is what this comment used
+            // to say, and in flight is not the same as effective.** §9.4
+            // orders nothing, so Inventory may handle the release BEFORE the
+            // reserve it was meant to undo — the release then finds nothing,
+            // the reserve creates a reservation afterwards, and the
+            // StockReserved that follows is ignored here with no second
+            // release sent. Worse if the no-op release's StockReleased has
+            // already finalised this instance: the late StockReserved
+            // correlates to nothing and is discarded. Either way the
+            // reservation is stranded, silently.
+            //
+            // **Filed as #125 rather than fixed here.** Closing it means
+            // modelling both outstanding stock results, or an Inventory
+            // tombstone that makes a release idempotent against a reservation
+            // that does not exist yet — a §3.2 contract decision and a §9.6
+            // state-machine one, neither of which belongs in a review round.
+            // It is the same family as #123 and #124: the branch made the race
+            // reachable by giving AwaitingStock a cancellation, and the
+            // stranding itself is what the StockTimeout branch has always
+            // done. Worked from ordering.OrderReviews until then.
             //
             // Written for the same reason as the line above, and they were the
             // last two events left on the catch-all. §9.6's trap justifies
