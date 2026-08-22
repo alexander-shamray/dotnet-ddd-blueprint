@@ -31,8 +31,12 @@ page assumed it was:
 
 For the finalised cases [`stuck-saga.md`](stuck-saga.md) will not catch this,
 which is why §13.6 gives it a row of its own rather than folding it into the
-saga-age alert. For the last row the saga-age alert *will* fire as well, and
-the two rows are the same incident.
+saga-age alert. **For the last row the saga-age alert usually will not fire
+either, and an earlier version of this page said it would.** Both thresholds
+are an hour, but `Compensating` normally ends within the ten-minute
+`ReleaseTimeout` — so by the time this row alerts the instance is long gone.
+The two alerts coincide only when `StockReleased` and that timeout have *both*
+failed to end the wait, and then they are the same incident.
 
 A row means "a human still needs to look at this". The table is a **work queue,
 not a log**: there is no `ResolvedAt` column, and resolving a review means
