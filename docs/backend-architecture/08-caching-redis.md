@@ -718,8 +718,8 @@ public void Idempotent_commands_return_a_replayable_Result()
 }
 ```
 
-**The third assertion uses the same `.Domain` suffix predicate §4.2's own
-dependency gate does**, and for the same reason: it names no service, so it
+**The third assertion uses the same `.Domain` suffix predicate §12.6's
+contract gate does**, and for the same reason: it names no service, so it
 survives §4.5's scaffold renaming the template's name inside whatever it
 renders. It is a proxy rather than a proof — a DTO with a private constructor
 would pass it — but it catches the case that actually exists in this
