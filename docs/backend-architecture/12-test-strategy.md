@@ -21,6 +21,7 @@
 | Host building block | One middleware or host extension | `TestServer` — no containers, no entry point | < 50 ms | Tens | `Common.Web.Tests` |
 | Edge configuration | The route file of §10.2 against the host that loaded it, and §10.1's edge behaviours — compression and the body ceiling | `WebApplicationFactory` + a stub destination on loopback — no containers, and `UseKestrel` where the property under test is the server's own | < 1 s | One suite | `Gateway.Api.Tests` |
 | Outbound hop | §9.7's one synchronous call: the timeout hierarchy read off the built host, the credential handler's position inside the resilience pipeline, and §11.5's realm | `WebApplicationFactory` + a real gRPC server on loopback; one class also runs a real Keycloak | < 1 s, and seconds for the Keycloak class | One suite | `Web.Bff.Tests` |
+| Pipeline behaviour | One §6.3 behaviour against recording fakes — the branches its handler-level tests cannot reach | None | < 10 ms | One suite per behaviour | `Common.Application.Tests` |
 | Saga | One whole saga, coordination only | MassTransit in-memory harness — no infrastructure | < 100 ms per positive assertion (§12.5) | A few | `*.Application.Tests` |
 | Contract shape | Every published contract against the rules it must obey | Both assemblies, reflection only | < 1 s | One suite | `Platform.IntegrationTests` |
 
@@ -738,14 +739,83 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         Result<Guid> first = await dispatcher.SendAsync(command);
         Result<Guid> second = await dispatcher.SendAsync(command);
 
+        // Served ENTIRELY by the replay branch (§8.5) — the handler runs once,
+        // so this value is the stored one rebuilt through Result.Success<T>
+        // rather than a second handler's return. Both assertions are needed
+        // because they detect different things, not because either covers a
+        // case the other lets through: the row count catches a SECOND
+        // PERSISTED ORDER, and the equality catches a replay that returned
+        // something other than what was stored.
         second.Value.ShouldBe(first.Value);
 
         OrderingDbContext db =
             scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
         (await db.Orders.CountAsync()).ShouldBe(1);
     }
+
+    [Fact]
+    public async Task A_command_id_claimed_by_one_customer_does_not_replay_to_another()
+    {
+        PlaceOrderCommand command =
+            CommandBuilder.PlaceOrder() with { CommandId = Guid.CreateVersion7() };
+
+        // The same command, the same CommandId, two principals. Nothing about
+        // the request distinguishes them, which is the point: CommandId is
+        // client-generated, so this is the collision a second caller can
+        // arrange (§8.5).
+        Result<Guid> mine = await fixture.DispatchAsync(
+            command,
+            Principals.Authenticated(SeedData.CustomerId));
+        Result<Guid> theirs = await fixture.DispatchAsync(
+            command,
+            Principals.Authenticated(Guid.CreateVersion7()));
+
+        // Not "both succeeded" — that is true of an unscoped key too, because
+        // the second caller is handed the FIRST caller's order id and reads it
+        // as a success. The assertion has to be that they are different orders.
+        theirs.Value.ShouldNotBe(mine.Value);
+
+        // And the third dispatch is what makes the second one mean anything.
+        // Two different ids prove only that SOMETHING varies per caller — a key
+        // scoped by a correlation id, or no IdempotencyBehavior registered at
+        // all, produces them just as well. Replaying the FIRST subject's own
+        // claim is what says the varying segment is the subject.
+        Result<Guid> mineAgain = await fixture.DispatchAsync(
+            command,
+            Principals.Authenticated(SeedData.CustomerId));
+
+        mineAgain.Value.ShouldBe(mine.Value);
+
+        // CreateScope, not the root provider: OrderingDbContext is scoped, and
+        // DispatchAsync opened and closed its own scopes above. Resolving it
+        // from Factory.Services directly throws under ValidateScopes and, where
+        // that is off, hands back a context living as long as the host.
+        using IServiceScope scope = fixture.Factory.Services.CreateScope();
+        OrderingDbContext db =
+            scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+        (await db.Orders.CountAsync()).ShouldBe(2);
+    }
 }
 ```
+
+`A_command_id_claimed_by_one_customer_does_not_replay_to_another` is the one
+test here whose failure is a **disclosure** rather than a defect: an unscoped
+key does not throw, log or answer slowly — it answers 200 with another
+customer's order id, to a caller authentication and the endpoint policy have
+already admitted. Those two still run on a replay; what does not is the handler,
+and with it §11.4's binding of the subject from the principal. That is why the
+assertion is `ShouldNotBe` against the first caller's value and not
+`IsSuccess.ShouldBeTrue()`.
+
+**Three dispatches rather than two, and the third is the one that carries the
+claim.** `ShouldNotBe` establishes only that the key varies with *something*;
+a key scoped by a correlation id would satisfy it, and so would a pipeline with
+no `IdempotencyBehavior` in it at all — which §6.3's registration-order test
+is what catches, since §8.5 says plainly that neither of its reflection tests
+reaches the behaviour. Returning to the first subject and getting the
+first order back is what identifies the varying segment as the subject. The row
+count sits beside all three: two callers, two orders, and the replay adds
+none.
 
 The dispatcher gets its own tests, driven explicitly rather than by waiting on a
 timer. These are the ones that cover the behaviour §13.6 alerts on — per-row
@@ -1896,7 +1966,7 @@ public class ContractTests
         typeof(OrderPlaced).Assembly
             .GetReferencedAssemblies()
             .Select(a => a.Name!)
-            .ShouldNotContain(name => name.EndsWith(".Domain"));
+            .ShouldNotContain(name => name.EndsWith(".Domain", StringComparison.Ordinal));
     }
 
     [Fact]
