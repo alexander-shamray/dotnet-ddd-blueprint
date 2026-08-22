@@ -443,8 +443,9 @@ arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
 there are eight suites now — see *The commands* below, which is where the
-current set lives, and which is the only place a count of them belongs. That one: `py -3.12 -m unittest` in `tools/new-service` runs
-81, and CI has a `scaffold` job for them beside `licence-gate`.
+current set lives, and which is the only place a count of them belongs. That
+one: `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a
+`scaffold` job for them beside `licence-gate`.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
 gate was observed red against a deliberately added forbidden reference before
@@ -1720,9 +1721,27 @@ sweeps cite this file as where the boundary and its residual are recorded. The
 reviewer also has **no .NET SDK**, so `dotnet test` is this host's gate and
 never the review's.
 
+**A grant is not a whitelist, and this is the trap under every row below.**
+`allowed-tools` is an **auto-approval list**: the harness documents that it
+"does not restrict which tools are available: every tool remains callable, and
+your permission settings still govern tools that are not listed". So *omitting*
+a tool from a command's frontmatter withholds nothing — it only decides
+whether the call prompts. Refusing a capability takes a **deny**:
+`permissions.deny` in `.claude/settings.json` for the repository, or the
+`disallowed-tools` frontmatter key for one command, which removes the named
+tools from the pool while it runs. Precedence is **deny → ask → allow**,
+first
+match wins, so a deny beats every allow including a frontmatter one.
+Measured, not read: a `general-purpose` subagent spawned fine under
+`--allowedTools "Agent(Explore)"`, and was refused under
+`--disallowedTools "Agent(general-purpose)"` with `Agent type 'general-purpose'
+has been denied by permission rule 'Agent(general-purpose)' from cliArg` — and
+again, from a command's own frontmatter, `from command`.
+
 **A helper is the answer whenever a git grant is wider than the operation it
-buys**, because **a prefix rule cannot exclude a flag**. Each of these was
-confirmed by running the offending form rather than reasoning about it:
+buys**, because **an allow rule is a prefix and cannot exclude a flag**. Each
+of these was confirmed by running the offending form rather than reasoning
+about it:
 
 | Raw grant | What it also bought |
 |---|---|
@@ -1731,26 +1750,183 @@ confirmed by running the offending form rather than reasoning about it:
 | `Bash(git checkout -b:*)` | the trailing flag — `git checkout -b <name> -f origin/main` discards tracked modifications |
 | `Bash(git branch:*)` | `git branch -fd <name>` — force and delete behind a spelling the `-d`/`-D`/`--delete` denies do not match |
 | `Bash(git reset HEAD:*)` | `git reset HEAD --hard` — the `--hard` deny matches the other word order |
+| `Bash(git log:*)`, `Bash(git diff:*)`, `Bash(git show:*)` | `--output=<path>`, which is an arbitrary file write with `--format=` choosing the bytes. Reproduced: `git log -1 --format=%s --output=<scratch>` wrote the commit subject, silently |
+| `Bash(git fetch:*)`, `Bash(git pull --ff-only:*)` | a URL in the repository position, and `ext::<cmd>` is a git transport that **runs its argument as a command** |
 
 **The reset grant does not narrow, and the attempt is the sharpest lesson
 here.** It was "fixed" to `Bash(git reset HEAD --:*)` on the reasoning that
 `--` turns a later flag into a pathspec. True of *git*, irrelevant to the
-*rule*: a permission rule is a prefix match, and `git reset HEAD --hard` starts
+*rule*: an allow rule is a prefix match, and `git reset HEAD --hard` starts
 with `git reset HEAD --`, so the narrowed grant admitted the exact command it
 excluded — while the commit message said the hole was closed. **The git
 behaviour was verified and the matching was not.** Anything whose safety
-depends on what follows a token needs a helper, not a cleverer pattern.
+depends on what follows a token needs a helper, or a **deny**, not a cleverer
+allow.
+
+**A deny is the thing an allow cannot be: `*` matches at any position in it,
+including the middle.** `Bash(git *--output*)` refuses `git log`, `git diff`
+and `git show` carrying `--output` anywhere in the argument list, and leaves
+plain `git log` alone — both halves measured, because a deny that blocked the
+command outright would read the same from the failing side. Removing the three
+read grants instead would have bought nothing: the harness treats read-only
+forms of `git` as promptless built-ins whatever the allow list says, and its
+own note is that "to require a prompt for one of these commands, add an `ask`
+or `deny` rule".
+
+**It raises the cost of the naive spelling and it is not a boundary**, and the
+distinction is the whole of the reset-grant lesson one paragraph up. A
+permission rule matches the command *string*; the shell reassembles adjacent
+quoted fragments before `exec`, so `--out''put=<path>` reaches `git` as
+`--output=<path>` while never presenting contiguous `--output` to the matcher.
+Copilot raised this against the rule as shipped and it is accepted. **The
+concatenation itself was not verified here** — the probe was refused by the
+classifier layer, which is a second net worth noting and not evidence — so
+this rests on documented quote-removal semantics rather than on a measurement,
+and it is written down that way.
+
+**What would close it is what closed every comparable case: a helper that
+spells its own flags**, or a rule over the executed argv rather than the typed
+string. Neither exists, `.claude/scripts/**` is edit-denied to the session, and
+so the deny stays as a speed bump with its limit stated. **A substring deny
+over a shell command string can never be more than that**, which is the
+generalisation worth carrying past this one flag.
+
+**The `::` in a value collides with the `:*` suffix syntax, and the collision
+fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
+passes settings validation and then matches nothing, because the trailing `:*`
+is consumed as the prefix-wildcard form and the literal becomes `git *ext:` —
+a probe of `git log -1 ext::foo` ran clean under it. Writing `Bash(git
+*ext::**)` to dodge that is rejected at startup: *"The `:*` pattern must be at
+the end."* So **`ext::` cannot be expressed in a Bash rule at all**, and the
+transport is closed on the allow side instead — **and the two grants do it by
+two different mechanisms, which an earlier revision of this paragraph ran
+together.**
+
+`Bash(git fetch origin:*)` **pins the remote**: a literal remote name occupies
+the repository position, so a URL never reaches it. That is the control the
+sentence describes, and it is real.
+
+`Bash(git pull --ff-only)` pins **nothing** — no remote name appears in it at
+all. What it does is drop the `:*`, so the grant is the documented
+no-argument invocation and nothing else. Whether that closes
+`git pull --ff-only ext::<cmd>` turns on the prefix-match rule stated in the
+reset-grant paragraph above — **an allow rule is a prefix match** — which has
+never been measured for the no-wildcard case. (Named rather than counted: a
+numbered offset inside a section still being edited is how this repository's
+callout totals used to rot.) If that holds for a grant without `:*` as well, the
+pull side is still open and belongs in the residual inventory rather than in
+this paragraph. Nobody has run the probe. Until someone does, treat the pull
+grant as *narrowed, not proven* — the two words this repository keeps having to
+tell apart.
+
+**The probe that would settle it is not available from inside a session, and
+that is a property of the question rather than a lack of trying.** Every exact
+grant in `.claude/settings.json` — `Bash(git branch)`, `Bash(git remote -v)`
+and the rest — is a **read-only** git form, and the harness treats those as
+promptless built-ins whatever the allow list says. So a trailing argument on
+one of them runs cleanly and demonstrates nothing about prefix matching: it
+would have run either way. `git remote -v --verbose` was tried and is exactly
+that null result. A decisive probe needs an exact grant on a command the
+harness does not already wave through, which means adding a rule to a file the
+session reads at startup — so it cannot be arranged from within the session it
+would govern.
 
 **A command's frontmatter is a grant like any other, and it is the one nobody
-reads twice.** All five rows above were found in command frontmatter, not in
-`.claude/settings.json` — the global file had it right all along.
+reads twice.** The first five rows above were all found in command frontmatter,
+and for a while that supported a second claim — that the global file had it
+right all along. **It did not, and the sixth row is where that broke**: the
+`--output` write primitive sat in `.claude/settings.json`'s own allow list,
+reachable from every command in the repository, and it had been read past for
+as long as the frontmatter rows had. The lesson survives with its converse
+attached: frontmatter is the grant nobody reads twice, and the global file is
+the one everybody assumes somebody else already read.
 
-**Two grants remain wider than the operations they buy**, and both are known
-residuals rather than oversights: `Bash(git worktree remove:*)` admits the `-f`
-that discards work, and `Bash(gh pr merge --merge:*)` admits a trailing
-`--admin` that merges past failing checks. Helpers are owed for both; until
-someone with the `Edit(.claude/scripts/**)` deny lifted writes them, `/ship`
-carries them by reporting its literal invocations, flags and all.
+**Six grants remain wider than the operations they buy**, and all six are
+known residuals rather than oversights. **This paragraph is the inventory and
+no command file keeps a second total** — `ship.md`'s callout carried one, and
+it went stale the moment a branch pinned that file's fetch grant. Two are
+`/ship`'s:
+`Bash(git worktree remove:*)` admits the `-f` that discards work, and
+`Bash(gh pr merge --merge:*)` admits a trailing `--admin` that merges past
+failing checks. Helpers are owed for both; until someone with the
+`Edit(.claude/scripts/**)` deny lifted writes them, `/ship` carries them by
+reporting its literal invocations, flags and all.
+
+The third is `Bash(git fetch origin:*)`, which no longer admits a URL but still
+admits a trailing flag; `--upload-pack`, `--receive-pack` and `--exec` are
+denied by name, so what is left is the flag nobody has enumerated yet. The
+honest fix is the helper the transport issue asked for — a
+`git-fetch-origin.sh` taking a branch name and nothing else.
+
+The fourth is not a git grant and is the one a reader is most likely to miss:
+**`/review-copilot` triages three comment feeds that no filter narrows by
+author.** `pr-review-comments.sh` returns every inline comment on the PR, and
+both `gh pr view --json` feeds are unfiltered by construction, while `ship.md`
+filters the same data by author. **Not "on `Copilot` authorship", which is the
+shorthand this very change set retired one file over**: step 6 filters two
+feeds by two *different* logins — inline comments on `Copilot`, review bodies
+on `copilot-pull-request-reviewer` — and issue comments on neither, because
+step 6 does not read that feed at all. Treating the two it does read as one
+identity is exactly what let a two-string allow-list look complete.
+
+**`copilot-pull-request-reviewer[bot]` is REST's spelling and belongs to no
+feed either command uses**, which is measured rather than reasoned: it comes
+from `/pulls/{n}/reviews`, while the one REST endpoint in play —
+`/pulls/{n}/comments`, behind `pr-review-comments.sh` — reports `Copilot`, and
+the review-body feed is GraphQL and reports
+`copilot-pull-request-reviewer`. An earlier revision of this paragraph called
+the issue-comment login the REST spelling; `gh pr view` loads `reviews` and
+`comments` through one exporter, so that could never have been true.
+
+**What the issue-comment feed actually reports is unobserved, and a revision of
+this paragraph asserted it as measured.** Six PRs were checked — #112, #101,
+#100, #99, #98, #94 — and none carries a Copilot-authored issue comment, so the
+shared exporter says what the login *must* be and nothing has seen it. The
+login stays admitted, because admitting a spelling that never arrives costs
+nothing; it is not evidence, because an asserted measurement that never
+happened stops the next reader checking. The command
+now states the filter and reports the count it dropped, but that is prose.
+
+**The enforceable version is all three feeds behind fixed helpers, not one**,
+and an earlier revision of this residual said "the helper" as though
+`pr-review-comments.sh` were the whole surface. It is the inline feed only; the
+two `gh pr view` reads arrive unfiltered, and the review body is the one
+carrying the suppressed-comments block — the feed every finding that mattered
+has actually come from. Filtering the least important of the three would read
+as a closed residual, which is worse than the open one. Each helper needs the
+author filter *and* the dropped count, since the count is what makes a skipped
+filter visible; all of it is a human's edit made with the
+`Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run `/ship`'s
+Copilot loop unattended on a PR that outside contributors can comment on.
+
+The fifth is **`git push` under the two sweeps**, and it is the one that looks
+closed and is not. Both commands state a read-only boundary, and both used to
+close it with "no `git push` is granted either, so the branch cannot move" —
+which reads an *absence* as a control, the exact rule the sentence beside it
+had just retired. `.claude/settings.json` **allows** `Bash(git push origin:*)`
+and `Bash(git push -u origin:*)` globally, so a push of the current branch does
+not prompt at all; only force-pushes and pushes to `main` are denied. Naming
+`git push` in each sweep's `disallowed-tools` is the obvious fix and is
+**unverified**: that key's `Bash(...)` form has never been measured here — the
+`Agent(...)` form is what was — and a nested `claude -p` probe could not
+separate a rejected pattern from a command that failed to load. Both files now
+state the residual instead of claiming the control.
+
+The sixth is the **`--output` deny itself**, which is the inventory's one
+entry that is a *deny* rather than an allow — and it is here because a deny
+over a command string is defeated by shell quoting, as the paragraph above
+records. It closes the naive spelling and nothing more. The three read grants
+it guards stay, because removing them buys nothing against a promptless
+built-in.
+
+**A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
+command to one subagent type is a **deny list of every other type**, because
+the harness has no "only this type" allow — so `security-sweep.md` and
+`bug-sweep.md` each enumerate the registered types that hold a shell, an editor
+or the network, and **a newly added agent under `.claude/agents/` is admitted
+by default** until someone adds it to both lists. That is the shape this
+repository already knows rots; it is taken here because the alternative on
+offer is prose.
 
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an
