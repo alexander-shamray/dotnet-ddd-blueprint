@@ -58,7 +58,7 @@ public class OrderFulfilmentSagaTests
     /// <b>Measured by deleting both lines: 11 of the 13 tests this file held
     /// when the measurement was taken fail, and every one of them fails as a
     /// TIMEOUT rather than as an error.</b> The count is left as measured
-    /// rather than rescaled to the 23 tests here now — a ratio nobody re-ran
+    /// rather than rescaled to the 25 tests here now — a ratio nobody re-ran
     /// is not evidence about a suite that has since grown.
     /// The two survivors are the structural pair the file then ended with —
     /// there is a third beside them now, and it would survive the same way.
@@ -685,14 +685,84 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public async Task A_cancellation_carries_its_own_reason_into_compensation_from_AwaitingStock()
+    {
+        // **The reason the branch above overwrote.** Both OrderCancelled
+        // transitions recorded CancelReasons.CustomerRequest as a literal, so
+        // Compensating's exit sent CancelOrder under a reason nobody chose —
+        // and every cancellation test in this file used customer_request, which
+        // is exactly why it survived: an assertion comparing the right answer
+        // against a hard-coded copy of the right answer cannot fail.
+        //
+        // §11.4 parses the whole five-code CancellationReasons map, so any of
+        // them can arrive here. payment_declined is chosen because it is the
+        // one a reader is most likely to assume the saga alone can produce.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.PaymentDeclined));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.PaymentDeclined))
+                    .ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_carries_its_own_reason_into_compensation_from_AwaitingPayment()
+    {
+        // The same claim one state over, and it is a separate test rather than
+        // a theory case because the two transitions are separate lines that
+        // were written together and were wrong together. A gate that pins one
+        // of a copied pair leaves the copy free to drift, which is this
+        // repository's most-repeated failure in its smallest form.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.OutOfStock));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.OutOfStock))
+                    .ShouldBeTrue();
+        }
+    }
+
+    [Fact]
     public async Task A_payment_authorised_while_compensating_escalates_rather_than_being_ignored()
     {
         // The case the two halves of this branch created between them.
         // OnUnhandledEvent(Ignore) was added so a redelivered event does not
         // page anyone — and Compensating had no PaymentAuthorised transition,
         // so the catch-all would have swallowed the money arriving after a
-        // cancellation. That is Confirmed's cancelled_after_payment case by
-        // the other door, and §3.2 gives Payments no refund command, so
+        // cancellation. That is Confirmed's case by the other door — the same
+        // money problem under a different code, since this state cannot
+        // despatch and Confirmed may, and §3.2 gives Payments no refund command, so
         // silence is the one outcome it must not have.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
@@ -724,8 +794,8 @@ public class OrderFulfilmentSagaTests
             ConsumeFaults<PaymentAuthorised>(harness).ShouldAllBe(e => e == null);
 
             // The saga is STILL RUNNING, and this assertion is the one that
-            // keeps the runbook honest. Confirmed's cancelled_after_payment
-            // finalises; this one is raised mid-wait, so the review row can
+            // keeps the runbook honest. Confirmed's
+            // cancelled_after_confirmation finalises; this one is raised mid-wait, so the review row can
             // sit beside a live instance until StockReleased or the
             // ReleaseTimeout. A runbook written for the finalised case tells
             // an on-call the state row is gone, and without this line nothing

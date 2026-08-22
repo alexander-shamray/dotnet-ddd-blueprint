@@ -79,8 +79,14 @@ groups:
           runbook_url: docs/runbooks/stuck-saga.md
 
       # Owed: ordering.order_reviews.oldest.age, over ordering.OrderReviews.
-      # A saga that escalated has already FINALISED, so StuckSaga above will
-      # never catch this — which is why §13.6 gives it a row of its own.
+      # StuckSaga above will not catch this, and §13.6 gives it a row of its
+      # own for that reason — but "the saga has already finalised" is a
+      # property of the REASON, not of the row, and this comment used to state
+      # it as though it were universal. cancelled_after_payment is raised
+      # mid-wait from Compensating and can sit beside a live instance; every
+      # other reason is raised on the way out. The instance is nonetheless
+      # usually gone by the hour this measures, because Compensating's two
+      # exits are both well inside it.
       - alert: OrdersAwaitingReview
         expr: max by (service_name) (ordering_order_reviews_oldest_age_seconds) > 3600
         for: 5m
@@ -91,7 +97,9 @@ groups:
           summary: "An order has been awaiting manual review for over an hour"
           description: >-
             A saga hit a wait it could not compensate and escalated (§9.6).
-            It has already finalised, so the saga-age alert will not catch it.
+            It has usually finalised by now, so the saga-age alert will not
+            catch it — but check before assuming, because one reason is
+            raised mid-wait. The runbook branches on it.
           runbook_url: docs/runbooks/order-review.md
 
       # OWED TWICE OVER, AND THE SECOND IS THE ONE NO GATE HERE CAN WATCH.

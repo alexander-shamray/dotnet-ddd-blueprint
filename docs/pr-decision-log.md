@@ -915,7 +915,11 @@ next reader wondering whether it was ever there.
   - **Closed, and §9.6 took the decision this entry said it owned.** The
     machine declares `Event<OrderCancelled>` and has a branch in every state it
     can reach one in: `AwaitingStock` and `AwaitingPayment` compensate on the
-    decline branch's own terms under `customer_request`; `Compensating`
+    decline branch's own terms, recording **the event's own reason** rather
+    than a literal — both lines said `customer_request` until a later round
+    established that §11.4 accepts all five `CancelReasons` codes, so the
+    caller's reason was overwritten and `Compensating`'s exit sent
+    `CancelOrder` under a reason nobody had chosen; `Compensating`
     `Ignore`s it, because a cancellation is already the outcome there. **The
     refund gap is stated rather than closed** — `Confirmed` escalates and
     finalises, so the money reaches a person instead of a contract that does

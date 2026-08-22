@@ -270,7 +270,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // compensation a timeout for exactly that reason.
             When(OrderCancelled)
                 .Unschedule(StockTimeout)
-                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                // **The event's reason, not a literal — and this line read
+                // CancelReasons.CustomerRequest until a review asked what
+                // §11.4 actually accepts.** It parses the whole five-code
+                // CancellationReasons map, so a caller may cancel with
+                // payment_declined; hard-coding here overwrote whatever the
+                // aggregate reported and Compensating's exit then sent
+                // CancelOrder with a reason no one had chosen. The literals on
+                // the decline and timeout branches below are correct because
+                // those transitions ARE the decline and the timeout — this one
+                // is whatever arrived. CancelOrderMapper parses through the
+                // same map and refuses an unknown code, so passing the string
+                // through is exactly as safe as the literal was.
+                .Then(ctx => ctx.Saga.CancelReason = ctx.Message.Reason)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
@@ -326,7 +338,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // Compensating state escalates it for a human.
             When(OrderCancelled)
                 .Unschedule(PaymentTimeout)
-                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                // The event's reason, for the argument on the AwaitingStock
+                // branch above — the same defect was in both, because the two
+                // transitions were written together.
+                .Then(ctx => ctx.Saga.CancelReason = ctx.Message.Reason)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
@@ -412,8 +427,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // still land here — and §3.2 gives Payments no refund command, so
             // a human owns it exactly as they do one state over.
             //
-            // This is Confirmed's cancelled_after_payment case arriving by the
-            // other door. Left unwritten it would fall to OnUnhandledEvent and
+            // This is Confirmed's case arriving by the other door — the same
+            // money problem, which is why it escalates too. It raises a
+            // DIFFERENT code: Confirmed sends cancelled_after_confirmation
+            // because an order that reached it may still be despatched, and
+            // this state sends cancelled_after_payment because it cannot. Left unwritten it would fall to OnUnhandledEvent and
             // be IGNORED — the catch-all this branch added for redelivery
             // would silently swallow the case this branch's other half exists
             // to escalate. The two fixes interacted, and only writing the

@@ -2226,7 +2226,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // nobody notices is stranded.
             When(OrderCancelled)
                 .Unschedule(StockTimeout)
-                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                // The EVENT's reason, not a literal: §11.4 parses the whole
+                // five-code CancellationReasons map, so a caller may cancel
+                // with any of them and a literal here overwrites what the
+                // aggregate reported. The decline and timeout branches keep
+                // their literals because those transitions ARE the decline
+                // and the timeout.
+                .Then(ctx => ctx.Saga.CancelReason = ctx.Message.Reason)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
@@ -2276,7 +2282,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // does, Compensating escalates it below.
             When(OrderCancelled)
                 .Unschedule(PaymentTimeout)
-                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                // The event's reason, for the argument on the AwaitingStock
+                // branch above.
+                .Then(ctx => ctx.Saga.CancelReason = ctx.Message.Reason)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
@@ -2470,11 +2478,14 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 >
 > **Repairing an invariant one counter-example at a time does not establish
 > it.** What did was enumerating: eight declared events, `Compensating`
-> reachable from two states, and those four are what follow. A callback
-> justified by an invariant is only as good as the invariant, and **nothing
-> mechanical enforces this one** — no test fails when a new event joins the
-> machine without a transition here, which is the residual to close if a ninth
-> event is ever declared.
+> reachable from two states, and those **five** are what follow — a count this
+> paragraph had at four while the list above it already had five, which is the
+> defect in miniature. A callback justified by an invariant is only as good as
+> the invariant, and the invariant is now enforced by a structural test reading
+> `NextEvents(Compensating)` off the machine. **What is still not enforced is
+> the invariant one state wider**: no test fails when a ninth event joins the
+> machine without a transition in some *other* state that can reach it, which
+> is the residual that remains.
 
 > **A cancellation has two origins and the saga used to see one.** The saga's
 > own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
@@ -2489,8 +2500,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 >
 > | State | What is at stake | The transition |
 > |---|---|---|
-> | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, `customer_request` |
-> | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, `customer_request` — this does not stop the charge |
+> | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, recording `OrderCancelled.Reason` |
+> | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, recording `OrderCancelled.Reason` — this does not stop the charge |
 > | `Confirmed` | The card is authorised | Escalate — `cancelled_after_confirmation`, its own code because Shipping may still despatch — and finalise |
 > | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | **Five** written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway and `ReleaseStock` is already in flight; `When(PaymentAuthorised)` escalates `cancelled_after_payment`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow |
 >
