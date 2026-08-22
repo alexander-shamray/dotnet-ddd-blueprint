@@ -96,13 +96,15 @@ groups:
         annotations:
           summary: "An order has been awaiting manual review for over an hour"
           description: >-
-            A saga escalated work this platform has no contract to do (§9.6):
-            either a wait that ran out, or an authorisation that landed once
-            the order was already being cancelled, with no refund contract to
-            send — the second is not necessarily a customer cancelling. The saga has usually
-            finalised by now, so the saga-age alert will not catch it — but
-            check before assuming, because one reason is raised mid-wait.
-            The runbook branches on both.
+            A saga escalated work it cannot finish itself (§9.6): either a
+            wait that ran out, or an authorisation that landed once the order
+            was already being cancelled — the second is not necessarily a
+            customer cancelling. Do NOT refund before reading the runbook:
+            Payments voids off OrderCancelled on its own, so on one of the two
+            cancellation codes a manual refund is the second one. The saga has
+            usually finalised by now, so the saga-age alert will not catch it
+            — but check before assuming, because one reason is raised
+            mid-wait. The runbook branches on all of it.
           runbook_url: docs/runbooks/order-review.md
 
       # OWED TWICE OVER, AND THE SECOND IS THE ONE NO GATE HERE CAN WATCH.

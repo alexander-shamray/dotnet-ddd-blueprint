@@ -13,8 +13,15 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 /// has not moved. The other two — <c>cancelled_after_payment</c> and
 /// <c>cancelled_after_confirmation</c> — exist because <b>money is
 /// authorised and the order is not going to be delivered</b>, and §3.2 gives
-/// Payments no refund command. Reading "the process stalled" onto either row
-/// describes the opposite of what happened.
+/// Ordering no refund command to answer that with. Reading "the process
+/// stalled" onto either row describes the opposite of what happened.
+///
+/// <b>It does not follow that a human owns the money on both.</b> §3.2 has
+/// Payments consume <c>OrderCancelled</c> and void an authorisation already
+/// taken, so <c>cancelled_after_confirmation</c> — raised by that very
+/// publication — has a refund already on its way, and what it needs a person
+/// for is Shipping. <c>cancelled_after_payment</c> is the authorisation that
+/// arrived after that event, which nothing automatic will reach.
 /// <para>
 /// <b>This said they exist BECAUSE the order was cancelled, and that is not
 /// reliably true of <c>cancelled_after_payment</c>.</b> Reached from a

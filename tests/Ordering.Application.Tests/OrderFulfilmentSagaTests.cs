@@ -774,9 +774,13 @@ public class OrderFulfilmentSagaTests
         // page anyone — and Compensating had no PaymentAuthorised transition,
         // so the catch-all would have swallowed the money arriving after a
         // cancellation. That is Confirmed's case by the other door — the same
-        // money problem under a different code, since this state cannot
-        // despatch and Confirmed may, and §3.2 gives Payments no refund command, so
-        // silence is the one outcome it must not have.
+        // SYMPTOM under a different code, and not the same remedy: this
+        // state cannot despatch and Confirmed may, and more to the point
+        // Payments voids off OrderCancelled (§3.2), which Confirmed's
+        // transition reacts to and this authorisation arrives after. So the
+        // sibling escalates Shipping with a refund already in hand, and this
+        // one escalates the money because nothing automatic reaches it.
+        // Either way silence is the one outcome it must not have.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
@@ -823,9 +827,13 @@ public class OrderFulfilmentSagaTests
     [Fact]
     public async Task A_cancellation_after_confirmation_escalates_rather_than_compensating()
     {
-        // The one cancellation this machine cannot compensate: the card is
-        // authorised, and undoing that is a refund §3.2 gives Payments no
-        // contract to accept. So it escalates and finalises, on the despatch
+        // A cancellation this machine cannot compensate ITSELF: the card is
+        // authorised, and undoing that is a refund §3.2 gives Ordering no
+        // command for. It is not money left to a human, which this comment
+        // used to imply: Payments consumes OrderCancelled and voids an
+        // authorisation already taken, and OrderCancelled is the event this
+        // transition fires on — so the refund is on its way and the row
+        // escalates Shipping. It escalates and finalises on the despatch
         // timeout's own argument. What stops a false not_despatched review
         // three days later is the FINALIZE, not the Unschedule beside it:
         // ADR-021's scheduler cannot cancel, so the timeout stays queued and

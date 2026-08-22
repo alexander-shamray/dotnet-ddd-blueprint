@@ -107,8 +107,25 @@ like any other wait.
 An order is being cancelled and its payment is authorised. Undoing an
 authorisation is a **refund**, and
 [§3.2](../backend-architecture/03-bounded-contexts.md) closes Payments' Accepts
-column at `AuthorisePayment` — the platform has no refund contract to send. So
-the money is always the reason these rows exist.
+column at `AuthorisePayment` — Ordering has no refund *command* to send.
+
+**That is not the same as no automatic refund, and this page read it that
+way.** §3.2 also gives Payments a `Refund` aggregate, has it publish
+`PaymentRefunded`, and lists `OrderCancelled` in its **Consumes** column — and
+`OrderCancelled`'s own contract says in as many words that "an authorisation
+that was taken is voided". Payments refunds off the event, autonomously.
+Ordering simply has no way to *ask*, which is a different sentence from
+nobody doing it. **So the first act is never to refund.**
+
+**The two codes differ in whether that automatic path could have caught it,
+and that is the sharper reason they are two.** `cancelled_after_confirmation`
+is raised when an `OrderCancelled` reaches the saga in `Confirmed` — the same
+publication Payments consumes, so a void is already on its way and a manual
+refund is a **duplicate** until proved otherwise. `cancelled_after_payment` is
+raised when an authorisation lands while the saga is *already compensating*,
+so the authorisation is **later than** the `OrderCancelled` Payments would
+have voided against: the automatic path structurally cannot cover it, and
+this is the row where the money genuinely is owed a human.
 
 **Only one of the two is necessarily a customer cancelling**, and this
 paragraph said both were. `cancelled_after_confirmation` is raised only when
@@ -119,9 +136,10 @@ compensation starts on a cancellation, a decline **or** a fifteen-minute
 payment timeout. A slow PSP that authorises after the timeout produces that row
 with nobody having cancelled anything.
 
-**Step 1 is the same either way. Steps 2 and 3 differ, and the code is what
-tells you which** — `cancelled_after_confirmation` from `Confirmed`,
-`cancelled_after_payment` from `Compensating`.
+**Step 1 is the same act either way and the expected answer is opposite.
+Steps 2 and 3 differ, and the code is what tells you which** —
+`cancelled_after_confirmation` from `Confirmed`, `cancelled_after_payment`
+from `Compensating`.
 
 **These used to be one code, and this page selected on a saga state instead.**
 That does not work: `ordering.OrderReviews` persists `(OrderId, Reason,
@@ -131,10 +149,17 @@ earlier version had only the `Confirmed` procedure, which sent an on-call
 looking for a despatch that does not exist; keying it on a vanished state was
 the same defect one step less obvious.
 
-1. **Refund the authorisation**, through the provider's own console or whatever
-   process Payments' team owns. This is the whole reason the row exists, and it
-   is the step with a clock on it — an authorisation left standing expires or
-   settles depending on the provider.
+1. **Find out whether Payments already refunded it, then refund only if it
+   did not.** Look for a `PaymentRefunded` for this order, or read the
+   provider's own console. On `cancelled_after_confirmation` the automatic
+   void is the *expected* outcome and yours would be the second one; on
+   `cancelled_after_payment` its absence is what the row is for. An earlier
+   version of this step said "refund the authorisation" with no check, which
+   is a double refund on one of the two codes.
+
+   It is still the step with a clock on it — an authorisation left standing
+   expires or settles depending on the provider — so check quickly rather
+   than carefully.
 
 #### From `Confirmed` — the saga has finalised
 
@@ -196,7 +221,7 @@ heading and then explained two paragraphs down that there would not be one.
      `stock_not_released` row. **Check for that second row before deciding
      stock needs nothing** — if it is there, the reservation may still be
      held and [that section](#stock_not_released) is the procedure. With no
-     such row, step 1's refund is the whole of the work.
+     such row, step 1 is the whole of the work.
    - **Still there** — both exits failed, which is its own incident. **Leave
      the reservation alone**: the machine is waiting on `StockReleased` and
      will cancel the order when it arrives, and releasing by hand races it.

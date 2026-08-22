@@ -45,8 +45,12 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// cannot resolve itself. <b>Two of its four reasons are a wait with no
 /// automatic compensation and two are not</b>, and this summary said only the
 /// first until the second arrived: a cancellation landing after an
-/// authorisation is not a timeout, and §3.2 gives Payments no refund command
-/// to answer it with.
+/// authorisation is not a timeout, and §3.2 gives <i>Ordering</i> no refund
+/// command to answer it with — which is not the same as no automatic refund,
+/// since §3.2 has Payments consume <c>OrderCancelled</c> and void an
+/// authorisation already taken. The two codes differ on whether that path
+/// could have reached the authorisation at all; <see cref="ReviewReasons"/>
+/// carries the distinction.
 /// </summary>
 /// <remarks>
 /// This does <b>not</b> touch the <c>Order</c> aggregate, and the reason is
@@ -122,11 +126,24 @@ public static class ReviewReasons
     /// <see cref="CancelledAfterConfirmation"/> was split out of it, and that
     /// one is the same money problem from <c>Confirmed</c> — so neither is
     /// unique in what it cannot undo, and the state each is raised from is the
-    /// whole of the difference. Undoing an
-    /// authorisation is a refund, and §3.2 closes Payments' Accepts column at
-    /// <c>AuthorisePayment</c> — so the workflow escalates instead of
-    /// compensating, on the same argument the despatch timeout makes: a wait
-    /// with no automatic answer still ends, and a human owns what follows.
+    /// whole of the difference — and the difference is bigger than "which
+    /// state", because it decides whether the automatic refund could have
+    /// applied. Undoing an authorisation is a refund, and §3.2 closes
+    /// <i>Ordering's</i> outbound options at <c>AuthorisePayment</c>: there is
+    /// no refund command. Payments none the less refunds off
+    /// <c>OrderCancelled</c>, which it consumes (§3.2) and which the event's
+    /// own contract says voids an authorisation already taken.
+    /// <para>
+    /// <b>This code is the case that path cannot reach.</b> It is raised when
+    /// an authorisation lands while the saga is already compensating, so the
+    /// authorisation is <i>later</i> than the <c>OrderCancelled</c> Payments
+    /// would have voided against — nothing automatic is coming, and a human
+    /// owns the money. <see cref="CancelledAfterConfirmation"/> is the
+    /// opposite: it is raised by the very publication Payments consumes, so
+    /// there the void is already on its way and what needs a person is
+    /// Shipping. An earlier revision of this paragraph called them "the same
+    /// money problem", which is true of the symptom and false of the remedy.
+    /// </para>
     /// This is a <see cref="ReviewReasons"/> code and not a
     /// <see cref="CancelReasons"/> one because what needs a person is the
     /// money — <b>not</b> because the order is already cancelled, which this

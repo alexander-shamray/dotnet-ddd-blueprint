@@ -363,11 +363,25 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotDespatched))
                 .Finalize(),
 
-            // The card has been authorised, so this is the one cancellation
-            // the machine cannot compensate: undoing it is a refund, and §3.2
-            // closes Payments' Accepts column at AuthorisePayment — there is no
-            // refund contract to send. Inventing one here would be a §3.2
-            // decision taken in a state machine.
+            // The card has been authorised, and undoing that is a refund §3.2
+            // gives Ordering no command for: its Accepts column closes at
+            // AuthorisePayment. Inventing one here would be a §3.2 decision
+            // taken in a state machine.
+            //
+            // **"So the machine cannot compensate" is what this said, and it
+            // does not follow.** §3.2 gives Payments a Refund aggregate, has
+            // it publish PaymentRefunded, and lists OrderCancelled in its
+            // Consumes column — the contract says an authorisation already
+            // taken is voided. Payments refunds off the EVENT; Ordering just
+            // has no way to ask. And the event in question is the one this
+            // very transition is reacting to, so the void is already on its
+            // way by the same publication that raises this row.
+            //
+            // What is owed a human here is therefore SHIPPING, not the money:
+            // reaching Confirmed means a despatch may still happen. The
+            // runbook leads with checking that Payments did refund rather than
+            // refunding, because on this code a manual refund is the second
+            // one. Compensating's sibling is the opposite case and says so.
             //
             // So it escalates and finalises, on the despatch timeout's own
             // argument one row up: a wait with no automatic compensation still
@@ -446,8 +460,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // outcome, and it is the one event this state must NOT be quiet
             // about. Reaching Compensating from AwaitingPayment means
             // AuthorisePayment had already been sent, so an authorisation can
-            // still land here — and §3.2 gives Payments no refund command, so
-            // a human owns it exactly as they do one state over.
+            // still land here. §3.2 gives Ordering no refund command, and
+            // unlike Confirmed's case the automatic path cannot stand in:
+            // Payments voids against OrderCancelled, and this authorisation is
+            // LATER than that event. So a human genuinely owns this one, which
+            // is the opposite of the sibling escalation rather than the same.
             //
             // This is Confirmed's case arriving by the other door — the same
             // money problem, which is why it escalates too. It raises a
