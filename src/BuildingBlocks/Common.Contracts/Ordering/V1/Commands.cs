@@ -41,15 +41,19 @@ public sealed record ConfirmOrder(Guid OrderId, string PaymentReference);
 public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 
 /// <summary>
-/// Escalate an order to a human (§9.6) — the path for a wait with no automatic
-/// compensation.
+/// Escalate an order to a human (§9.6) — the path for anything the workflow
+/// cannot resolve itself. <b>Two of its four reasons are a wait with no
+/// automatic compensation and two are not</b>, and this summary said only the
+/// first until the second arrived: a cancellation landing after an
+/// authorisation is not a timeout, and §3.2 gives Payments no refund command
+/// to answer it with.
 /// </summary>
 /// <remarks>
 /// This does <b>not</b> touch the <c>Order</c> aggregate, and the reason is
 /// that "a human should look at this" is a fact about operations rather than
 /// about the order — not that the order is unchanged. It is unchanged for the
-/// two timeout reasons and very much changed for <c>cancelled_after_payment</c>,
-/// which is raised on an order that WAS cancelled while money was authorised.
+/// two timeout reasons and very much changed for the two cancellation ones,
+/// which are raised on an order that WAS cancelled while money was authorised.
 /// It lands in an operations table either way.
 /// </remarks>
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
@@ -107,4 +111,28 @@ public static class ReviewReasons
     /// — what needs a person is the money, not the order.
     /// </remarks>
     public const string CancelledAfterPayment = "cancelled_after_payment";
+
+    /// <summary>
+    /// A customer cancelled an order that had already been confirmed and was
+    /// waiting on Shipping.
+    /// </summary>
+    /// <remarks>
+    /// <b>Distinct from <see cref="CancelledAfterPayment"/> because the
+    /// procedure is different, and the row is the only thing an operator
+    /// has.</b> Both are raised by §9.6's saga on a cancellation arriving after
+    /// an authorisation, from two different states — and
+    /// <c>ordering.OrderReviews</c> persists <c>(OrderId, Reason, RaisedAt)</c>
+    /// and nothing else, so a single code makes the two indistinguishable by
+    /// the time anyone reads the queue. The saga has usually finalised by then;
+    /// its state is gone.
+    /// <para>
+    /// What separates them: this one means the order reached <c>Confirmed</c>,
+    /// so **Shipping may still despatch it** and stopping that is the first
+    /// step. <see cref="CancelledAfterPayment"/> means compensation was already
+    /// under way — there is no despatch to stop and a <c>ReleaseStock</c> is in
+    /// flight. The runbook has always described these as two procedures; until
+    /// this code existed it keyed them on a saga state nothing recorded.
+    /// </para>
+    /// </remarks>
+    public const string CancelledAfterConfirmation = "cancelled_after_confirmation";
 }

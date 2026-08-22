@@ -759,9 +759,13 @@ public class OrderFulfilmentSagaTests
                 harness,
                 SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
 
+            // The Confirmed code, not Compensating's. Both origins used to
+            // raise cancelled_after_payment and the row persists nothing else,
+            // so the runbook selected its procedure on a saga state that is
+            // gone by the time anyone reads the queue.
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
-                m.Reason == ReviewReasons.CancelledAfterPayment))
+                m.Reason == ReviewReasons.CancelledAfterConfirmation))
                     .ShouldBeTrue();
 
             // Not a compensation: the reservation is being picked, and telling
@@ -803,6 +807,62 @@ public class OrderFulfilmentSagaTests
             (await Consumed<OrderCancelled>(harness, m => m.MessageId == echo.MessageId)).ShouldBeTrue();
 
             ConsumeFaults<OrderCancelled>(harness).ShouldAllBe(e => e == null);
+        }
+    }
+
+    [Fact]
+    public async Task A_decline_arriving_after_a_cancellation_is_absorbed_rather_than_faulted()
+    {
+        // The branch the Compensating enumeration missed, and this branch is
+        // what made it reachable. Cancelling from AwaitingPayment arrives in
+        // Compensating with AuthorisePayment ALREADY SENT and unanswered, so
+        // the PSP's verdict can still be either — an authorisation, which the
+        // transition above escalates, or a decline, which is this.
+        //
+        // Absorbed rather than escalated: a decline means no money moved,
+        // which is the outcome compensation was heading for. Written as an
+        // Ignore rather than left to OnUnhandledEvent, because that catch-all
+        // is what the comment beside Compensating claims it does not lean on.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            PaymentDeclined declined = SagaContracts.PaymentDeclined(orderId, "do_not_honour");
+            await Publish(harness, declined);
+
+            (await Consumed<PaymentDeclined>(harness, m => m.MessageId == declined.MessageId))
+                .ShouldBeTrue();
+
+            // Not faulted — necessary, and measured to be insufficient.
+            // OnUnhandledEvent(x => x.Ignore()) produces the identical
+            // observable outcome, so this assertion stays green with the
+            // Ignore deleted: verified by deleting it. What it establishes is
+            // the behaviour; the structural test below is what establishes the
+            // branch was WRITTEN, which is the difference between a decision
+            // and an omission.
+            ConsumeFaults<PaymentDeclined>(harness).ShouldAllBe(e => e == null);
+
+            // And nothing escalated. A decline is not a cancelled_after_payment
+            // — there is no money for a human to chase.
+            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+
+            // The compensation is untouched and still waiting on Inventory.
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
         }
     }
 
@@ -875,6 +935,32 @@ public class OrderFulfilmentSagaTests
             .ShouldBe(
                 ["Initial", "Final", "AwaitingStock", "AwaitingPayment", "Confirmed", "Compensating"],
                 ignoreOrder: true);
+    }
+
+    [Fact]
+    public void Compensating_writes_out_every_event_it_can_receive()
+    {
+        // The structural half, and it exists because the behavioural tests
+        // above cannot supply it. OnUnhandledEvent(x => x.Ignore()) makes an
+        // unwritten branch and an explicit Ignore observably identical — no
+        // fault, no transition, nothing sent — so every one of those tests
+        // stays green when a branch is deleted. Measured, not assumed.
+        //
+        // What the machine's own declaration can say is whether the branch is
+        // there. Compensating is the state where that matters: it is reachable
+        // from AwaitingStock and AwaitingPayment, so five of the eight declared
+        // events can arrive, and the comment beside it claims none is left to
+        // the catch-all. PaymentDeclined was missing from that enumeration.
+        OrderFulfilmentSaga saga = new();
+
+        string[] accepted = [.. saga.NextEvents(saga.Compensating).Select(e => e.Name)];
+
+        accepted.ShouldContain(nameof(saga.StockReleased));
+        accepted.ShouldContain(nameof(saga.PaymentAuthorised));
+        accepted.ShouldContain(nameof(saga.PaymentDeclined));
+        accepted.ShouldContain(nameof(saga.OrderCancelled));
+        accepted.ShouldContain(nameof(saga.StockReserved));
+        accepted.ShouldContain(nameof(saga.StockReservationFailed));
     }
 
     [Fact]

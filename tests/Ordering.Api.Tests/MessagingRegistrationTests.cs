@@ -193,11 +193,17 @@ public class MessagingRegistrationTests
         // invoked.
         //
         // Not the whole of §3.2's Consumes column, and the difference is the
-        // saga: seven of the eleven events it lists reach Ordering through the
-        // state machine's own correlation, which registers no IConsumer<> at
-        // all. Naming this "Consumes and Accepts" stated a set equality the
+        // saga: seven of the eleven events it lists reach Ordering ONLY through
+        // the state machine's own correlation, which registers no IConsumer<>
+        // at all. Naming this "Consumes and Accepts" stated a set equality the
         // list does not satisfy — a message that would have sent whoever read
         // it looking for seven missing registrations.
+        //
+        // **Seven and eight are two different counts and this comment used to
+        // run them together.** The saga DECLARES eight events; seven of them
+        // are missing from the list below. The eighth is StockReserved, which
+        // has an IConsumer<> as well — two readers of one fact, argued at
+        // StockEventsQueue.
         //
         // The eleventh is Ordering's own OrderCancelled, added when the saga
         // gained a cancellation branch (§9.6). It changes nothing here for

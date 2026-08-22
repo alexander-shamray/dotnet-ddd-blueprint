@@ -1920,12 +1920,12 @@ stateDiagram-v2
 
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
-    Confirmed --> [*] : OrderCancelled → FlagOrderForReview
+    Confirmed --> [*] : OrderCancelled → FlagOrderForReview cancelled_after_confirmation
 ```
 
-`OrderCancelled` is the one arrow that comes from **this service** —
-[§3.2](03-bounded-contexts.md) lists it in Ordering's own Consumes column
-beside `OrderPlaced`, and for the same reason: a fact Ordering publishes is also
+`OrderCancelled` is the **second** arrow coming from this service, and
+`OrderPlaced` is the first — [§3.2](03-bounded-contexts.md) lists both in
+Ordering's own Consumes column, for the same reason: a fact Ordering publishes is also
 a fact its workflow has to react to. `Compensating` ignores it explicitly, so
 the machine has a branch for it in every state it can reach one in.
 
@@ -1974,8 +1974,8 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 // wait that ran out, or a cancellation with money already authorised. This
 // does NOT touch the Order aggregate, because "a human should look at this"
 // is a fact about operations rather than about the order; NOT because the
-// order is unchanged, which is true of the timeouts and false of
-// cancelled_after_payment. It lands in an operations table instead.
+// order is unchanged, which is true of the timeouts and false of both
+// cancellation reasons. It lands in an operations table instead.
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
 
 public static class ReviewReasons
@@ -1985,7 +1985,15 @@ public static class ReviewReasons
     // A customer cancelled an order whose payment was already authorised.
     // Undoing that is a refund, and §3.2 closes Payments' Accepts column at
     // AuthorisePayment — so the saga escalates instead of compensating.
+    //
+    // TWO codes for that, not one, because the procedures differ and the row
+    // is all an operator gets: ordering.OrderReviews persists (OrderId,
+    // Reason, RaisedAt), and the saga has usually finalised before the alert.
+    // From Confirmed the order may still be despatched, so stopping Shipping
+    // comes first; from Compensating there is no despatch and a ReleaseStock
+    // is already in flight.
     public const string CancelledAfterPayment = "cancelled_after_payment";
+    public const string CancelledAfterConfirmation = "cancelled_after_confirmation";
 }
 
 /// <summary>
@@ -2067,7 +2075,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     public Event<StockReleased> StockReleased { get; private set; } = null!;
     public Event<ShipmentDispatched> ShipmentDispatched { get; private set; } = null!;
 
-    // Ordering's own, and the only one here that is. "Cancel this order" has
+    // Ordering's own, and the second of two — OrderPlaced is the first.
+    // "Cancel this order" has
     // two origins: the saga's own CancelOrder, always paired with Finalize, and
     // §11.4's customer endpoint, which cancels the AGGREGATE and ends nothing.
     // Without this the second was invisible to the machine.
@@ -2460,8 +2469,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > |---|---|---|
 > | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, `customer_request` |
 > | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, `customer_request` — this does not stop the charge |
-> | `Confirmed` | The card is authorised | Escalate — `cancelled_after_payment` — and finalise |
-> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | Four written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved` and `StockReservationFailed`, since both exits cancel the order anyway and `ReleaseStock` is already in flight; `When(PaymentAuthorised)` escalates `cancelled_after_payment` |
+> | `Confirmed` | The card is authorised | Escalate — `cancelled_after_confirmation`, its own code because Shipping may still despatch — and finalise |
+> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | **Five** written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway and `ReleaseStock` is already in flight; `When(PaymentAuthorised)` escalates `cancelled_after_payment`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow |
 >
 > **`Confirmed` is a gap this states rather than closes.** Undoing an
 > authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
@@ -2490,11 +2499,11 @@ handler writes an operations row and stops, and no aggregate is loaded — but
 narrower: a human now has work this platform has no contract to do, which is a
 fact about operations rather than about the order.
 
-Two of the three are a wait that ran out, where the order's own state genuinely
-has not moved. `cancelled_after_payment` is the opposite — it exists *because*
-the order changed, cancelled with money already authorised, and §3.2 gives
-Payments no refund command. A single "the process stalled" would describe that
-row backwards:
+Two of the four are a wait that ran out, where the order's own state genuinely
+has not moved. The two cancellation codes are the opposite — they exist
+*because* the order changed, cancelled with money already authorised, and §3.2
+gives Payments no refund command. A single "the process stalled" would describe
+those rows backwards:
 
 ```sql
 -- A work queue, not a log. A row means "a human still needs to look at this";

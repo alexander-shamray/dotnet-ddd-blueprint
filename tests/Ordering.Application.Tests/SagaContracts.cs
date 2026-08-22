@@ -88,7 +88,8 @@ internal static class SagaContracts
     };
 
     /// <summary>
-    /// The eighth, and the only one Ordering publishes itself (§3.2).
+    /// The eighth, and the second of the two Ordering publishes itself —
+    /// <c>OrderPlaced</c> is the other (§3.2).
     /// </summary>
     /// <remarks>
     /// The reason is a parameter because both origins reach the saga through

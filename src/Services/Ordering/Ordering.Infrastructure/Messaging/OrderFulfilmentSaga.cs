@@ -48,10 +48,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     public Event<StockReleased> StockReleased { get; private set; } = null!;
     public Event<ShipmentDispatched> ShipmentDispatched { get; private set; } = null!;
 
-    // Ordering's own event, and the only one here that is. §3.2 already gave
-    // Ordering its own OrderPlaced for the same reason — a service is a
-    // subscriber to itself whenever a fact it publishes is also a fact its
-    // workflow has to react to.
+    // Ordering's own event, and the SECOND of the two here that are —
+    // OrderPlaced above is the other, which the sentence that used to end
+    // "and the only one here that is" contradicted in its own next clause.
+    // §3.2 gives Ordering both for the same reason: a service is a subscriber
+    // to itself whenever a fact it publishes is also a fact its workflow has
+    // to react to.
     //
     // "Cancel this order" has two origins and only one of them was reaching
     // the machine. The saga's own CancelOrder is always paired with Finalize,
@@ -355,9 +357,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // review row is where both loose ends are worked.
             When(OrderCancelled)
                 .Unschedule(DespatchTimeout)
+                // **A different code from Compensating's, and the row is the
+                // only thing an operator gets.** ordering.OrderReviews persists
+                // (OrderId, Reason, RaisedAt); the saga has usually finalised
+                // before the one-hour alert, so its state is gone. One code for
+                // both origins left the runbook selecting a procedure on a
+                // state nothing recorded — and the two procedures differ at the
+                // first step: from here the order reached Confirmed, so
+                // Shipping may still despatch it and stopping that comes first.
                 .Send(
                     OrderingQueue,
-                    ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.CancelledAfterPayment))
+                    ctx => new FlagOrderForReview(
+                        ctx.Saga.OrderId,
+                        ReviewReasons.CancelledAfterConfirmation))
                 .Finalize());
 
         During(
@@ -443,7 +455,22 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // AwaitingStock and AwaitingPayment, and these are the ones that
             // follow.
             Ignore(StockReserved),
-            Ignore(StockReservationFailed));
+            Ignore(StockReservationFailed),
+
+            // **The enumeration above missed one, and this branch is what made
+            // it reachable.** Reaching Compensating from AwaitingPayment used
+            // to mean the payment had already answered — declined, or timed
+            // out. The OrderCancelled transition this branch added arrives
+            // there with the authorisation still OUTSTANDING, so its verdict
+            // can be either: PaymentAuthorised is handled above, and a decline
+            // is this line. Left unwritten it fell to OnUnhandledEvent, which
+            // is the catch-all the comment beside it claims Compensating does
+            // not lean on.
+            //
+            // Ignored rather than escalated, unlike its sibling: a decline
+            // means no money moved, which is the outcome compensation was
+            // heading for anyway. Nothing for a human to do.
+            Ignore(PaymentDeclined));
 
         SetCompletedWhenFinalized();
     }

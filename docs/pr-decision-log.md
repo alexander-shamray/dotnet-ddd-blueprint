@@ -917,9 +917,15 @@ next reader wondering whether it was ever there.
     can reach one in: `AwaitingStock` and `AwaitingPayment` compensate on the
     decline branch's own terms under `customer_request`; `Compensating`
     `Ignore`s it, because a cancellation is already the outcome there. **The
-    refund gap is stated rather than closed** — `Confirmed` escalates with a
-    third `ReviewReasons` code, `cancelled_after_payment`, and finalises, so
-    the money reaches a person instead of a contract that does not exist. That
+    refund gap is stated rather than closed** — `Confirmed` escalates and
+    finalises, so the money reaches a person instead of a contract that does
+    not exist. **Two new `ReviewReasons` codes rather than the one this entry
+    first recorded**: a review found that `Confirmed` and `Compensating` raise
+    the same escalation for different procedures, and the row persists
+    `(OrderId, Reason, RaisedAt)` with the saga usually finalised by the time
+    anyone reads it — so `cancelled_after_confirmation` and
+    `cancelled_after_payment` are what let the runbook select without a state
+    that is gone. That
     also removes the false `not_despatched` this entry predicted, by
     unscheduling the despatch timeout on the way out.
 - **The payment reference is accepted and goes nowhere.** `ConfirmOrder`

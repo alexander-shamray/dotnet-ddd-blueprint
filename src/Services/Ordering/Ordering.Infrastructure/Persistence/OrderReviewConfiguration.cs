@@ -55,9 +55,13 @@ internal sealed class OrderReviewConfiguration : IEntityTypeConfiguration<OrderR
 
 /// <summary>
 /// A row of <see cref="OrderReviewConfiguration"/>'s table. Deliberately not a
-/// domain type: §9.6 is explicit that an escalation changes nothing about the
-/// order, so putting it in <c>Ordering.Domain</c> would make "a human should
-/// look at this" part of the model that decides what an order may do.
+/// domain type, and <b>not because the order is unchanged</b> — the two
+/// cancellation reasons are raised on an order that was cancelled with money
+/// already authorised, so that justification was false for half the vocabulary.
+/// The reason is that "a human should look at this" is an OPERATIONS fact:
+/// putting it in <c>Ordering.Domain</c> would make it part of the model that
+/// decides what an order may do, which it is not, whether or not the order
+/// moved.
 /// </summary>
 internal sealed class OrderReview
 {

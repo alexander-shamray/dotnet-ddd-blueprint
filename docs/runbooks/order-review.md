@@ -26,8 +26,8 @@ page assumed it was:
 |---|---|
 | `not_despatched` | Finalised. The state row is gone and this row is the only trace |
 | `stock_not_released` | Finalised, on the release timeout |
-| `cancelled_after_payment` **from `Confirmed`** | Finalised — cancelled after despatch was being waited for |
-| `cancelled_after_payment` **from `Compensating`** | **Still running.** Raised mid-wait when an authorisation lands after a cancellation, and the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`. A `stock_not_released` row may join it |
+| `cancelled_after_confirmation` | Finalised — cancelled after despatch was being waited for |
+| `cancelled_after_payment` | **Still running.** Raised mid-wait when an authorisation lands after a cancellation, and the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`. A `stock_not_released` row may join it |
 
 For the finalised cases [`stuck-saga.md`](stuck-saga.md) will not catch this,
 which is why §13.6 gives it a row of its own rather than folding it into the
@@ -61,7 +61,7 @@ pair is impossible.
 
 ## What each reason means
 
-Three exist, all from `ReviewReasons` in `Common.Contracts`. An unknown code is
+Four exist, all from `ReviewReasons` in `Common.Contracts`. An unknown code is
 a bug, not a new category — `FlagOrderForReviewMapper` refuses one on the
 first attempt (§9.8), because `Reason` is half this table's primary key and a
 typo opens a second row nobody resolves rather than overwriting the first.
@@ -101,18 +101,25 @@ like any other wait.
 3. Confirm the order really did cancel: the review row says compensation
    stalled, not that the cancellation failed.
 
-### `cancelled_after_payment`
+### `cancelled_after_confirmation` and `cancelled_after_payment`
 
 A customer cancelled an order whose payment had already been authorised.
 Undoing an authorisation is a **refund**, and
 [§3.2](../backend-architecture/03-bounded-contexts.md) closes Payments' Accepts
 column at `AuthorisePayment` — the platform has no refund contract to send. So
-the money is always the reason this row exists.
+the money is always the reason these rows exist.
 
-**Step 1 is the same either way. Steps 2 and 3 depend on which state raised
-it**, and an earlier version of this page had only the `Confirmed` procedure —
-which sent an on-call looking for a despatch that does not exist and a saga
-that is still running. Check the origin first, per the table at the top.
+**Step 1 is the same either way. Steps 2 and 3 differ, and the code is what
+tells you which** — `cancelled_after_confirmation` from `Confirmed`,
+`cancelled_after_payment` from `Compensating`.
+
+**These used to be one code, and this page selected on a saga state instead.**
+That does not work: `ordering.OrderReviews` persists `(OrderId, Reason,
+RaisedAt)` and nothing else, and by the hour the alert measures the saga has
+usually finalised — so the state the table above asks you to check is gone. An
+earlier version had only the `Confirmed` procedure, which sent an on-call
+looking for a despatch that does not exist; keying it on a vanished state was
+the same defect one step less obvious.
 
 1. **Refund the authorisation**, through the provider's own console or whatever
    process Payments' team owns. This is the whole reason the row exists, and it
@@ -178,7 +185,7 @@ stopped publishing; `stock_not_released` in bulk means Inventory is not
 consuming `ReleaseStock`. Work the upstream service and the queue drains behind
 it, but the rows still need deleting — nothing removes them automatically.
 
-`cancelled_after_payment` is the one that does **not** follow that rule: its
+The two cancellation codes are the ones that do **not** follow that rule: their
 upstream is customers, so a spike is a product or pricing signal rather than a
 dependency, and there is no service to fix. Look at what confirmed orders are
 being cancelled *for* before treating it as an incident.
