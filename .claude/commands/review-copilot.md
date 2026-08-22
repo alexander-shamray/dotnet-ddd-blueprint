@@ -9,8 +9,10 @@ branch.
 
 ## Fetch all three places comments hide
 
-Copilot posts as `copilot-pull-request-reviewer[bot]`, and its inline comments
-appear under the author `Copilot`. Collect:
+**One account, three logins, and which one arrives is a property of the API the
+feed came from** — the table under *So the first act on every item is to read
+its author* below names all three and is the authority. Do not rebuild the list
+from this sentence. Collect:
 
 1. **Review bodies** — `gh pr view <n> --json reviews`. The overview, and the
    `<details><summary>Suppressed comments</summary>` block, which holds findings
@@ -192,7 +194,8 @@ how many resolved, and — named individually — any left open as `Ask`.
 
 **State the author-filter count on its own line, always, including when it is
 zero.** How many items each feed returned, and how many were dropped for being
-authored by neither Copilot identity, named individually with their author. A
+authored by none of the three Copilot spellings, named individually with their
+author. A
 run that omits the line has not established it read the authors at all — the
 same reason this repository asserts what a gate is looking at rather than what
 it found — and zero is the answer a reader most needs stated, because it is

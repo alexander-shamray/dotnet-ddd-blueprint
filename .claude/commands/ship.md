@@ -573,8 +573,10 @@ same argument as never calling a branch clean because asking failed.
    > already, and it went stale in exactly that way when a later branch pinned
    > this file's fetch grant.
    >
-   > A prefix rule cannot exclude
-   > a *trailing* flag — the argument the push rules already make — so
+   > An **allow** rule cannot exclude
+   > a *trailing* flag — the argument the push rules already make, and true of
+   > the allow side only: a deny takes `*` at any position, which is how
+   > `--output` was closed. Both grants below are allows, so —
    > `Bash(git worktree remove:*)` admits the `-f` this file forbids, and
    > `Bash(gh pr merge --merge:*)` admits a trailing `--admin`, which merges
    > past the failing checks step 7 treats as a hard stop. Pinning `--merge` at
