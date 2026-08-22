@@ -627,6 +627,21 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             '            + "form, which is what keeps a vacuous gate from quietly becoming a '
             'permanent one.");\n',
         ),
+        # The same inversion, one gate down, and it is owed for the same
+        # reason: a rendered service opts no command into idempotency, so
+        # that gate's own floor would fail on a tree that is correct. It
+        # clears itself the day the service opts its first command in.
+        (
+            '        names.ShouldNotBeEmpty("Catalog declares an idempotent command; '
+            'the selector above found none");\n',
+            "        names.ShouldBeEmpty(\n"
+            '            "This service opts no command into idempotency yet, so the '
+            'check below is "\n'
+            '            + "vacuous. The day it does, this test fails — replace it '
+            'with the ShouldNotBeEmpty "\n'
+            '            + "form, which is what keeps a vacuous gate from quietly '
+            'becoming a permanent one.");\n',
+        ),
     ),
     "tests/Catalog.Application.Tests/ArchitectureTests.cs": (
         ("using Catalog.Domain.Products;\n", "using Catalog.Domain;\n"),

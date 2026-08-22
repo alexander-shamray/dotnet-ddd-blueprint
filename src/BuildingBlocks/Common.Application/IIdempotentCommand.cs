@@ -49,6 +49,17 @@ public interface IIdempotentCommand
     /// convention, and the next reader has no way to tell it was meant to be
     /// stable. Changing one is a migration, on the same terms a rename was.
     /// </para>
+    /// <para>
+    /// <b>And it must be unique within the service, which the advice above
+    /// makes easier to get wrong.</b> A domain-recognisable string is exactly
+    /// the kind two commands plausibly share, and this is a segment of a Redis
+    /// key whose other two are the subject and the caller's
+    /// <see cref="CommandId"/> — so two commands sharing one collapse into a
+    /// single keyspace, and a caller reusing a <c>CommandId</c> across them is
+    /// served the first command's stored payload, deserialised into the
+    /// second's result type. A gate per service asserts the names are
+    /// distinct; nothing in the compiler can.
+    /// </para>
     /// </remarks>
     static abstract string OperationName { get; }
 
