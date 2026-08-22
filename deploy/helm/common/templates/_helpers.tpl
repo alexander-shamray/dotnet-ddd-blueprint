@@ -297,10 +297,18 @@ a variable joins when a host's code READS it, and not before.
 That is the rule §14.1's Compose blocks already state — "an env var nothing
 reads is the container form of an unused registration". §15.4's inventory marks
 `ConnectionStrings__RedisCache` and `ConnectionStrings__RedisCoordination`
-required *once a host reads a cache*, and **that condition is now met**:
-§8.5's PR gave `AddRedisConnections` its first callers, in Catalog and
-Ordering. So the two keys are rendered below, under `redis.enabled`, exactly as
-`Identity__Authority` joined with PR-16.
+required *once the host calls `AddRedisConnections`* — **both or neither** —
+and **that condition is now met**: §8.5's PR gave that helper its first
+callers, in Catalog and Ordering. So the two keys are rendered below, under
+`redis.enabled`, exactly as `Identity__Authority` joined with PR-16.
+
+**The condition is the CALL, not a cache read, and this paragraph said "once a
+host reads a cache" until a review caught it.** The helper reads both
+connection strings eagerly, so a host that caches nothing still fails at
+startup without them — and §8.5's idempotency store reads the *coordination*
+instance, which is not a cache at all and is the `noeviction` half of §8.1's
+split. Keying the requirement on caching would leave the one key this PR
+actually made load-bearing looking optional.
 
 **This paragraph said the opposite in the branch that added them**, which is
 the drift the rule above exists to prevent arriving inside the file it governs:

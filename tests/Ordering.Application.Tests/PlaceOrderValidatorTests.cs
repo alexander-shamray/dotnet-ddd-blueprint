@@ -75,6 +75,27 @@ public class PlaceOrderValidatorTests
     }
 
     [Fact]
+    public void An_omitted_CommandId_is_refused_before_any_key_is_claimed()
+    {
+        // The guard is load-bearing and nothing else pins it: an omitted
+        // CommandId binds as Guid.Empty, which is not an ABSENT key but a
+        // single SHARED one, so every caller omitting it claims the same
+        // Redis key and the first success is replayed to all of them for a
+        // day (§8.5).
+        //
+        // Every other case in this file builds its command through
+        // WithItems, which mints a fresh id — so deleting the NotEmpty rule
+        // left the whole suite green. A rule whose only protection is that
+        // nobody deletes it is not protected.
+        PlaceOrderCommand command = WithItems(1) with { CommandId = Guid.Empty };
+
+        ValidationResult result = Validator.Validate(command);
+
+        result.IsValid.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.PropertyName == nameof(PlaceOrderCommand.CommandId));
+    }
+
+    [Fact]
     public void An_empty_order_is_refused_at_the_edge_as_well_as_in_the_domain()
     {
         // Order.Place also refuses this, and both are wanted: the domain rule

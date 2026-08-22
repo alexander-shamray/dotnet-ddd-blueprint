@@ -121,8 +121,11 @@ gateway:
   manages the cluster's namespaces.
 - ~~**Redis connection strings.**~~ **They joined, and this entry is kept
   rather than deleted because the reason it gave is the rule.** §15.4's
-  inventory requires them once a host reads a cache; §8.5's PR made Catalog and
-  Ordering the first callers of `AddRedisConnections`, so both charts now carry
+  inventory requires them once a host **calls `AddRedisConnections`** — not
+  once it reads a cache, which is what this line said until a review caught it:
+  the helper reads both connection strings eagerly, and §8.5's store reads the
+  *coordination* instance, which is not a cache. §8.5's PR made Catalog and
+  Ordering the first callers of that helper, so both charts now carry
   a `redis:` block and `_helpers.tpl` renders the two `secretKeyRef`s. A
   reference to a Secret that does not exist is still a pod that never starts —
   which is why they joined with the PR whose code reads them rather than
