@@ -1132,7 +1132,7 @@ current by projections. Two of them, serving different paths:
 
 | Table | Fed by | Read by |
 |---|---|---|
-| `ordering.OrderSummaries` | Ordering's own `OrderPlacedDomainEvent` + Catalog's `ProductPublished` | The escalated history query, below — **not** §6.5's, which stays at level 1 |
+| `ordering.OrderSummaries` | Ordering's five lifecycle events on the local lane — `OrderPlaced`, `OrderStockConfirmed`, `OrderConfirmed`, `OrderShipped`, `OrderCancelled` — plus Catalog's `ProductPublished` from the broker | The escalated history query, below — **not** §6.5's, which stays at level 1 |
 | `ordering.ProductPrices` | Catalog's `PriceChanged`, `ProductPublished`, `ProductDiscontinued` | `IProductPriceReader`, on the **write** path (§6.4) |
 
 The second is the more consequential. A read model that only backs a screen can
@@ -1145,8 +1145,9 @@ graph LR
         CMD[Command handlers] --> WDB[(Write tables<br/>Orders, OrderLines)]
         CMD --> OB[(Outbox)]
         OB -.->|local lane, after commit| PROJ[OrderSummaryProjection]
-        CAT_EV[[ProductPublished<br/>PriceChanged<br/>ProductDiscontinued]] --> PROJ
-        CAT_EV --> PP[ProductPriceProjection]
+        PUB[[ProductPublished]] --> PROJ
+        PUB --> PP[ProductPriceProjection]
+        CAT_EV[[PriceChanged<br/>ProductDiscontinued]] --> PP
         PROJ --> RDB[(OrderSummaries)]
         PP --> PDB[(ProductPrices)]
         RDB --> QRY[Query handlers]
