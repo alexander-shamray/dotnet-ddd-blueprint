@@ -602,8 +602,15 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddSingleton(
         new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly));
 
+    // All three of the source, not just its assemblies. §9.4's rename
+    // procedure records an Alias and a WriteAs on this object, and a factory
+    // that reads only Assemblies drops both — the host starts clean and the
+    // rename abandons rows on the release the procedure exists to make safe.
     services.AddSingleton(sp =>
-        new MessageTypeMap(sp.GetRequiredService<MessageTypeSource>().Assemblies));
+    {
+        MessageTypeSource source = sp.GetRequiredService<MessageTypeSource>();
+        return new MessageTypeMap(source.Assemblies, source.Aliases, source.WrittenNames);
+    });
 
     // The map's factory is lazy, and this is what makes "a duplicate name
     // fails the host" true: ValidateOnBuild checks the call site and never

@@ -516,19 +516,49 @@ The fix is a name the code chooses rather than one the runtime computes:
 namespace Common.Infrastructure.Outbox;
 
 /// <summary>
-/// The assemblies whose events may be staged. Mutable and resolved before the
-/// map, so a test host can add its own without replacing the registration —
-/// the production assemblies are always in the list (§4.2).
+/// The assemblies whose events may be staged, and the persisted-name overrides
+/// beside them. Mutable and resolved before the map, so a test host can add its
+/// own without replacing the registration — the production assemblies are
+/// always in the list (§4.2).
 /// </summary>
 public sealed class MessageTypeSource(params Assembly[] assemblies)
 {
     private readonly List<Assembly> _assemblies = [.. assemblies];
+    private readonly Dictionary<string, Type> _aliases = [];
+    private readonly Dictionary<Type, string> _written = [];
 
     public IEnumerable<Assembly> Assemblies => _assemblies;
+
+    public IReadOnlyDictionary<string, Type> Aliases => _aliases;
+
+    public IReadOnlyDictionary<Type, string> WrittenNames => _written;
 
     public MessageTypeSource Add(Assembly assembly)
     {
         _assemblies.Add(assembly);
+        return this;
+    }
+
+    /// <summary>
+    /// A name a type answered to before it was renamed, so both resolve to it
+    /// for one release. Inward only: NameOf goes on writing the current name,
+    /// which is what makes release 3 below a deletion rather than a migration
+    /// of its own.
+    /// </summary>
+    public MessageTypeSource Alias(string persistedName, Type type)
+    {
+        _aliases.Add(persistedName, type);
+        return this;
+    }
+
+    /// <summary>
+    /// Keeps writing a type's previous persisted name, so rows this instance
+    /// stages stay readable by instances that have not been replaced yet. The
+    /// other direction, and live for exactly as long.
+    /// </summary>
+    public MessageTypeSource WriteAs(Type type, string persistedName)
+    {
+        _written.Add(type, persistedName);
         return this;
     }
 }
@@ -541,10 +571,33 @@ public sealed class MessageTypeSource(params Assembly[] assemblies)
 /// </summary>
 public sealed class MessageTypeMap
 {
+    /// <summary>
+    /// The widest name the MessageType column holds, and the reason the
+    /// constant lives here rather than beside the EF configuration that spells
+    /// it: the map is what decides a type is stageable, so the map is what has
+    /// to refuse a name the column cannot keep. Read by both.
+    /// </summary>
+    public const int MaxNameLength = 300;
+
     private readonly FrozenDictionary<string, Type> _byName;
     private readonly FrozenDictionary<Type, string> _byType;
 
+    // The overloads exist because most services register no override at all,
+    // and a rename that adds one must not be a change to every call site.
     public MessageTypeMap(IEnumerable<Assembly> assemblies)
+        : this(assemblies, new Dictionary<string, Type>())
+    {
+    }
+
+    public MessageTypeMap(IEnumerable<Assembly> assemblies, IReadOnlyDictionary<string, Type> aliases)
+        : this(assemblies, aliases, new Dictionary<Type, string>())
+    {
+    }
+
+    public MessageTypeMap(
+        IEnumerable<Assembly> assemblies,
+        IReadOnlyDictionary<string, Type> aliases,
+        IReadOnlyDictionary<Type, string> writtenNames)
     {
         // FullName, not AssemblyQualifiedName: namespace and type name, no
         // version and no assembly. For contracts the namespace is already
@@ -566,6 +619,24 @@ public sealed class MessageTypeMap
                 .Select(t => (Name: t.FullName!, Type: t))
         ];
 
+        // Checked at startup, where MessageTypeMapValidator resolves the map,
+        // rather than at SaveChanges: a deep namespace with nested generic
+        // arguments passes every other guard and then fails the insert on a
+        // truncation error, with the command lost and the cause named nowhere.
+        //
+        // A loop, not FirstOrDefault: the sequence is of value tuples, so "no
+        // match" comes back as (null, null) rather than as null, and a nullable
+        // wrapper around it is never null.
+        foreach ((string Name, Type Type) pair in pairs)
+        {
+            if (pair.Name.Length > MaxNameLength)
+            {
+                throw new InvalidOperationException(
+                    $"{pair.Type.Name}'s persisted name is {pair.Name.Length} characters and the " +
+                    $"outbox column holds {MaxNameLength}. Shorten the namespace, or move the type.");
+            }
+        }
+
         IGrouping<string, (string Name, Type Type)>? clash =
             pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);
         if (clash is not null)
@@ -575,8 +646,67 @@ public sealed class MessageTypeMap
                 "column cannot distinguish them.");
         }
 
-        _byName = pairs.ToFrozenDictionary(p => p.Name, p => p.Type);
-        _byType = pairs.ToFrozenDictionary(p => p.Type, p => p.Name);
+        // Three of the five guards the callout below names. Every other name in
+        // this map is derived from a type and length checked above; an alias is
+        // typed by hand, so it is the one that can exceed the column.
+        foreach ((string Name, Type Type) alias in aliases.Select(a => (a.Key, a.Value)))
+        {
+            if (alias.Name.Length > MaxNameLength)
+            {
+                throw new InvalidOperationException(
+                    $"The alias '{alias.Name}' is {alias.Name.Length} characters and the outbox " +
+                    $"column holds {MaxNameLength}. No row can carry it.");
+            }
+
+            if (pairs.Any(p => p.Name == alias.Name))
+            {
+                throw new InvalidOperationException(
+                    $"'{alias.Name}' is an alias and also a live type name. One of them resolves " +
+                    "and which is not decidable — rename the alias or drop it.");
+            }
+
+            if (!pairs.Any(p => p.Type == alias.Type))
+            {
+                throw new InvalidOperationException(
+                    $"'{alias.Name}' aliases {alias.Type.Name}, which this map does not carry. An " +
+                    "alias names a type that is still stageable — one that is not is a row nobody " +
+                    "can deliver and a guard nobody applies.");
+            }
+        }
+
+        // An alias resolves inward, so _byName carries it and a row written
+        // before the rename still resolves. Outward is the opt-in half below.
+        _byName = pairs
+            .Select(p => (p.Name, p.Type))
+            .Concat(aliases.Select(a => (Name: a.Key, Type: a.Value)))
+            .ToFrozenDictionary(p => p.Name, p => p.Type);
+
+        // The other two guards. An overridden name must be one this map can
+        // read back, and it has to read back to THIS type — a name resolving to
+        // a different one is a substitution rather than a delivery failure, and
+        // the only one of the five with no symptom to notice.
+        foreach ((Type Type, string Name) written in writtenNames.Select(w => (w.Key, w.Value)))
+        {
+            if (!_byName.TryGetValue(written.Name, out Type? resolves))
+            {
+                throw new InvalidOperationException(
+                    $"{written.Type.Name} is written as '{written.Name}', which this map cannot " +
+                    "resolve. Alias that name to the type in the same release, or the rows this " +
+                    "instance stages are rows it cannot itself deliver.");
+            }
+
+            if (resolves != written.Type)
+            {
+                throw new InvalidOperationException(
+                    $"{written.Type.Name} is written as '{written.Name}', which resolves to " +
+                    $"{resolves.Name}. Every row staged for {written.Type.Name} would be read " +
+                    $"back as {resolves.Name} — a substitution, not a delivery failure.");
+            }
+        }
+
+        _byType = pairs.ToFrozenDictionary(
+            p => p.Type,
+            p => writtenNames.TryGetValue(p.Type, out string? written) ? written : p.Name);
     }
 
     public string NameOf(Type type) =>
@@ -626,10 +756,20 @@ that lands in the retry log with its own name in it.
 > ```csharp
 > // Release 1 — the type is now OrderPlacedDomainEvent; rows in flight say
 > // OrderPlaced. Resolve both, write the one every instance can read.
-> new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
->     .Alias("Ordering.Domain.Orders.Events.OrderPlaced", typeof(OrderPlacedDomainEvent))
->     .WriteAs(typeof(OrderPlacedDomainEvent), "Ordering.Domain.Orders.Events.OrderPlaced");
+> services.AddSingleton(
+>     new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
+>         .Alias("Ordering.Domain.Orders.Events.OrderPlaced", typeof(OrderPlacedDomainEvent))
+>         .WriteAs(typeof(OrderPlacedDomainEvent), "Ordering.Domain.Orders.Events.OrderPlaced"));
 > ```
+>
+> **The registration is half the procedure, and it is the half that used to be
+> missing.** §4.2 builds the map from `source.Assemblies`, `source.Aliases` and
+> `source.WrittenNames` — all three. A factory passing only the assemblies
+> drops both calls above on the floor: the host starts, every guard below
+> passes vacuously because there is nothing to guard, and the rename proceeds
+> to abandon rows exactly as it would have with no procedure at all. Two
+> overrides recorded on an object nobody reads is worse than none, because the
+> call sites read as the fix.
 >
 > **Release 2** drops the `WriteAs`: the new name is written, and release one's
 > instances resolve it because they already carry the renamed type — derived,
