@@ -68,6 +68,99 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-28 — the section the plan forgot, and the registration nothing called
+
+**PR-28 is not in Appendix C's original twenty-seven and had to be added to
+it.** That is a different failure from a PR being late, and it is the one worth
+carrying forward: §8.5 specified six types, §4.2's composition root showed the
+line that wires one, §6.3's pipeline gave it a seat and §12 shipped a test only
+its replay path could satisfy — while `grep -in "idempotenc"` over every row of
+the delivery plan returned nothing. Five source files and four test files
+deferred to "§8.5's PR". The deferral read as a schedule and was a dead
+reference, and it stayed invisible because PR-12 had shipped
+`RedisKeys.Idempotency`: a member named for the work, so a reader checking
+whether the idempotency work had happened found something and stopped.
+
+**A chapter that four other chapters cite is not covered by the plan merely
+because the plan is finished.** Appendix C now has an *After the plan* section
+so the next one has somewhere to go.
+
+### `AddRedisConnections` had no caller, and that is what made this PR large
+
+The behaviour resolves `IIdempotencyStore`, so it could not have started: PR-12
+built §8's whole Redis stack — two keyed connections, HybridCache, the lock
+factory, `RedisKeys` — and **wired it into no host**. So §8's deployment wiring
+landed here too: both services' Infrastructure, Compose with `service_healthy`
+dependencies, both Helm charts, both API fixtures and their two Redis
+containers.
+
+**The fixtures had said so in advance and nobody had read it as a task.**
+`ServiceFixture`'s own summary carried *"The Redis containers of §12.4's full
+shape still wait for the PR whose code reads those keys"* — a correct,
+committed statement of what was owed, sitting in the file that would have to
+change. **A comment naming what is owed is not a gate**, and this is the
+cheapest possible demonstration: it cost nothing to write and nothing noticed
+when the moment arrived.
+
+### The gate this PR added found a defect in this PR
+
+`Commands_carrying_a_CommandId_declare_IIdempotentCommand` went red on
+`PublishProductCommand`, because the field had been added and the interface had
+not. The solution compiled, every other test passed, and the command was
+dispatched with no claim at all — which is exactly the silent state §8.5
+describes and the reason the gate reads the *shape* of a command rather than
+trusting its author. **A gate is worth writing when it can fail on the change
+that introduces it.**
+
+Each gate carries its own coverage half, on the rule `CLAUDE.md` states at the
+top of its lessons list: an empty offender list is the same green whether every
+command opted in or the selector stopped matching anything.
+
+### `static abstract` was cheap here and would not have been later
+
+§8.5 had argued for a declared operation discriminator and **declined to write
+it**, on the grounds that a member on the opted-in interface is a change to the
+contract every command implements. That reasoning is sound and its premise
+expires: it is true only once the interface *has* implementors, and this PR is
+where it is declared. Deferring would have meant paying the migration later,
+against live keys, for a defect — a rename silently changing a key across a
+rolling deployment — that costs a duplicate order.
+
+**The generalisation: a deferral whose cost rises with time should be re-read
+by the PR that first makes it cheap, not honoured because it is written down.**
+
+### The store moved out of the service, and the chapter moved with it
+
+§8.5 printed `RedisIdempotencyStore` in `Ordering.Infrastructure.Idempotency`.
+It ships in `Common.Infrastructure.Redis` instead, because
+`RedisDistributedLockFactory` sits one file over on the same connection with
+the same keying and the same attribute — two per-service copies of one Redis
+interaction drift the first time either changes. §4.3's one-assembly rule is
+not in play, since every service already references that building block. The
+chapter was amended rather than the code bent to it.
+
+### What the chart gate could not have caught, and now can
+
+Both Redis keys are required together even though only the coordination one is
+read: `AddRedisConnections` is one call by design and reads both eagerly, so a
+chart supplying one renders cleanly and produces a pod that will not start.
+
+The subtler one is that the two `secretKeyRef` **keys must differ**. One key
+copied onto both rows renders cleanly, passes every count assertion, and points
+§8.5's claims at the `allkeys-lru` instance §8.1 exists to keep them off —
+evicted under exactly the memory pressure that makes a duplicate write hardest
+to reproduce. Counting rows cannot see it; comparing keys can, and the
+assertion was observed red against that exact mistake before it was trusted.
+
+### Left owed, and named rather than implied
+
+The SQL-side marker that closes the lost commit acknowledgement is still §8.5's
+debt (#113), and the stored payload still carries an implicit schema for the
+whole retention — so **changing an idempotent command's result shape is a
+migration**, on the terms a rename used to be and no longer is.
+
+---
+
 ## PR-26 — the contract a `.proto` cannot carry, and Pact's missing half
 
 PR-26 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s

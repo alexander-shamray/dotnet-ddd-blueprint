@@ -1454,7 +1454,7 @@ that cannot fire.
 |---|---|
 | Saga age | A gauge over `ordering.OrderFulfilmentStates`. §9.6 persists every saga, so the reading is a query away — there is simply no instrument over it |
 | Orders awaiting review | A gauge over `ordering.OrderReviews`, which the `IX_OrderReviews_RaisedAt` index already exists for |
-| Cache hit ratio collapse | **An instrument *and* a consumer — see the callout below.** §13.2 registers the `Microsoft.Extensions.Caching.Hybrid` meter and the package publishes no meter at all; no host calls `AddRedisConnections` either. §15.4 records the second absence from the secrets side |
+| Cache hit ratio collapse | **An instrument, and only an instrument — see the callout below.** §13.2 registers the `Microsoft.Extensions.Caching.Hybrid` meter and the package publishes no meter at all. The second half of this row used to be "no host calls `AddRedisConnections` either"; §8.5's PR wired both services, and the alert is exactly as unpublished as it was |
 | Business volume | `OrderMetrics`, which arrives with §6.6's `OrderSummaries` projection |
 
 **The third row is the one worth pausing on**, because it is the failure mode
@@ -1472,9 +1472,14 @@ move. All twelve runbooks exist regardless, per §13.9.
 > **The cache row is the one the self-clearing claim does not cover, and only
 > reading the package settled why.** The other three are owed a `Create*` call
 > the gate can see in `src/`. This one was first taken to be owed a
-> **consumer** — nothing calls `AddRedisConnections`, so nothing constructs a
-> `HybridCache` — and gating on that call was written, tested red, and then
-> removed, because the premise is false.
+> **consumer** — at the time nothing called `AddRedisConnections`, so nothing
+> constructed a `HybridCache` — and gating on that call was written, tested
+> red, and then removed, because the premise is false.
+>
+> **§8.5's PR wired Redis into Catalog and Ordering and the row did not move**,
+> which is the sharpest confirmation the removal was right: had the gate been
+> kept, it would have gone green→red on the day the connection landed and moved
+> a silent alert into the loaded file, while the meter still published nothing.
 >
 > **`Microsoft.Extensions.Caching.Hybrid` 10.0.0 publishes no `Meter`.** The
 > assembly references `System.Diagnostics.Tracing` and not

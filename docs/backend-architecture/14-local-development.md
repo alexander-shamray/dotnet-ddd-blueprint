@@ -144,15 +144,31 @@ services:
       # client credentials (§9.7, §11.5).
       Identity__Authority: "http://keycloak:8080/realms/commerce"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-      # No Redis keys, and no redis-* in depends_on below: Ordering reads
-      # neither connection yet. An environment variable nothing reads is the
-      # container form of an unused registration, and each joins with the PR
-      # whose code first reads it — the rule PR-12 set when it wired no
-      # service at all. §8.4's cache invalidation is what brings them.
+      # §8.1's two connections, joined on the rule that brought every line
+      # above: an environment variable nothing reads is the container form of
+      # an unused registration, so each waits for the PR whose code first reads
+      # it. §8.5's IdempotencyBehavior is that PR — it claims a
+      # {service}:idem: key before any protected command runs. §8.4's cache
+      # invalidation was the expected trigger and was not the one that came.
+      #
+      # BOTH, though only the coordination one is read: AddRedisConnections is
+      # a single call by design (§8.2) and reads both eagerly, so a host given
+      # one key throws naming the other.
+      #
+      # 6379 on both — the host-side ports differ (6379/6380), the
+      # container-side ports do not.
+      ConnectionStrings__RedisCache: "redis-cache:6379"
+      ConnectionStrings__RedisCoordination: "redis-coordination:6379"
     ports: [ "5101:8080" ]
     depends_on:
       ordering-migrator: { condition: service_completed_successfully }
       rabbitmq:          { condition: service_healthy }
+      # service_healthy, not service_started: AbortOnConnectFail is false
+      # (§8.1's "degrade, don't die"), so the host would start against a Redis
+      # still booting and the first protected command would fail on a claim
+      # instead — a symptom nothing connects to a container that was not ready.
+      redis-cache:        { condition: service_healthy }
+      redis-coordination: { condition: service_healthy }
       # service_healthy rather than service_started, though the API does not
       # need Keycloak to boot — JwtBearer fetches the discovery document
       # lazily. `up --wait` gates on every service's health, and the value is
