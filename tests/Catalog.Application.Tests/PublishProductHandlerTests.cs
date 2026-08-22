@@ -31,7 +31,7 @@ public sealed class PublishProductHandlerTests(ServiceFixture fixture) : IAsyncL
         IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
 
         Result<Guid> result = await dispatcher.SendAsync(
-            new PublishProductCommand("Walnut desk", "https://cdn.example/desk.jpg", 19.99m, "eur"),
+            new PublishProductCommand(Guid.CreateVersion7(), "Walnut desk", "https://cdn.example/desk.jpg", 19.99m, "eur"),
             TestContext.Current.CancellationToken);
 
         result.IsSuccess.ShouldBeTrue();
@@ -55,7 +55,7 @@ public sealed class PublishProductHandlerTests(ServiceFixture fixture) : IAsyncL
         IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
 
         Result<Guid> result = await dispatcher.SendAsync(
-            new PublishProductCommand("Walnut desk", null, 19.99m, "eur"),
+            new PublishProductCommand(Guid.CreateVersion7(), "Walnut desk", null, 19.99m, "eur"),
             TestContext.Current.CancellationToken);
 
         result.IsSuccess.ShouldBeTrue();
@@ -109,7 +109,7 @@ public sealed class PublishProductHandlerTests(ServiceFixture fixture) : IAsyncL
 
         await Should.ThrowAsync<FluentValidation.ValidationException>(() =>
             dispatcher.SendAsync(
-                new PublishProductCommand("", null, -1m, "x"),
+                new PublishProductCommand(Guid.CreateVersion7(), "", null, -1m, "x"),
                 TestContext.Current.CancellationToken));
 
         (await fixture.OutboxAsync()).ShouldBeEmpty();
@@ -173,7 +173,7 @@ public sealed class PublishProductHandlerTests(ServiceFixture fixture) : IAsyncL
 
         await Should.ThrowAsync<FluentValidation.ValidationException>(() =>
             dispatcher.SendAsync(
-                new PublishProductCommand("", null, -1m, "x"),
+                new PublishProductCommand(Guid.CreateVersion7(), "", null, -1m, "x"),
                 TestContext.Current.CancellationToken));
 
         int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");

@@ -207,6 +207,7 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
         HttpResponseMessage response = await client.PostAsJsonAsync(
             "/v1/orders",
             new PlaceOrderCommand(
+                Guid.CreateVersion7(),
                 [],
                 new AddressDto("1 Test Street", null, "Almaty", "050000", "KZ"),
                 "EURO"),
@@ -224,10 +225,17 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
         return client;
     }
 
+    /// <summary>
+    /// A fresh <c>CommandId</c> per call, and that is not incidental since
+    /// §8.5's behaviour joined the pipeline: several tests here place two
+    /// orders, and reusing one value would have the second replay the first's
+    /// result instead of running.
+    /// </summary>
     private Task<HttpResponseMessage> PlaceAsync(Guid product, int quantity = 1, string currency = "EUR") =>
         Authenticated().PostAsJsonAsync(
             "/v1/orders",
             new PlaceOrderCommand(
+                Guid.CreateVersion7(),
                 [new PlaceOrderItem(product, quantity)],
                 new AddressDto("1 Test Street", null, "Almaty", "050000", "KZ"),
                 currency),

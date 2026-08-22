@@ -14,10 +14,38 @@ namespace Ordering.Application.Orders.CancelOrder;
 /// owner is read off the loaded aggregate, so nothing the caller sends says
 /// whose order it is.
 /// <para>
-/// No <c>CommandId</c> and no <c>IIdempotentCommand</c> either, for the reason
-/// <c>PublishProductCommand</c> carries none: §6.4 warns that the field
-/// without the behaviour is unprotected, and <c>IdempotencyBehavior</c> (§8.5)
-/// does not exist yet. Both join in the PR that builds it.
+/// <b>Still no <c>CommandId</c> and no <c>IIdempotentCommand</c>, and that is
+/// now a decision rather than a wait.</b> The PR that built §8.5's behaviour
+/// opted <c>PlaceOrderCommand</c> and <c>PublishProductCommand</c> in and left
+/// this one out, on three grounds that the two ingresses above make specific
+/// to it:
+/// </para>
+/// <list type="bullet">
+/// <item><description>
+/// <b>There is nothing to duplicate.</b> <c>Order.Cancel</c> returns early on
+/// an order already <c>Cancelled</c> (§5.4) — the aggregate is idempotent, so
+/// a second dispatch changes no state and raises no second event. §8.5 buys
+/// protection where a retry creates a second <em>thing</em>; here it would buy
+/// a replayed <c>Result</c>.
+/// </description></item>
+/// <item><description>
+/// <b>The broker ingress has no subject to claim under.</b>
+/// <see cref="ICurrentUser.IsAuthenticated"/> is false for a message-borne
+/// command, so every saga-sent cancellation would claim under the shared
+/// <c>"system"</c> segment — §8.5's largest named residual, and this command
+/// is the one place in the solution that would walk straight into it.
+/// </description></item>
+/// <item><description>
+/// <b>Duplicates on that ingress are already absorbed one layer down.</b>
+/// §9.5's inbox suppresses a redelivered <c>CancelOrder</c> before the
+/// dispatcher sees it, so the behaviour would be a second answer to a question
+/// already answered.
+/// </description></item>
+/// </list>
+/// <para>
+/// Opting in is a decision and forgetting to is not meant to look like one
+/// (§8.5) — so the argument lives here, where the next reader of this record
+/// finds it, rather than in the PR that took it.
 /// </para>
 /// </remarks>
 public sealed record CancelOrderCommand(

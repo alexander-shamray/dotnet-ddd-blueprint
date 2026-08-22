@@ -118,7 +118,7 @@ public class DependencyInjectionTests
     }
 
     [Fact]
-    public void AddCatalogApplication_registers_the_three_behaviours_in_pipeline_order()
+    public void AddCatalogApplication_registers_the_four_behaviours_in_pipeline_order()
     {
         ServiceCollection services = new();
 
@@ -132,9 +132,12 @@ public class DependencyInjectionTests
             [
                 typeof(LoggingBehavior<,>),
                 typeof(ValidationBehavior<,>),
+                typeof(IdempotencyBehavior<,>),
                 typeof(TransactionBehavior<,>)
             ],
-            "three of four — IdempotencyBehavior joins with its PR, between Validation and Transaction (§6.3)");
+            "all four, in pipeline order (§6.3) — idempotency claims its key inside validation, " +
+            "so a malformed command is refused without burning one, and outside the transaction, " +
+            "so the claim is held before any work starts");
     }
 
     [Fact]

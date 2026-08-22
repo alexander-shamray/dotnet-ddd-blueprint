@@ -15,7 +15,7 @@ public class PublishProductValidatorTests
     private static readonly PublishProductValidator Validator = new();
 
     private static PublishProductCommand Valid() =>
-        new("Walnut desk", "https://cdn.example/desk.jpg", 19.99m, "EUR");
+        new(Guid.CreateVersion7(), "Walnut desk", "https://cdn.example/desk.jpg", 19.99m, "EUR");
 
     [Fact]
     public void A_valid_command_passes()

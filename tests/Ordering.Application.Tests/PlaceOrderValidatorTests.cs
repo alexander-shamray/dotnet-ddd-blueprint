@@ -18,6 +18,7 @@ public class PlaceOrderValidatorTests
 
     private static PlaceOrderCommand WithItems(int count) =>
         new(
+            Guid.CreateVersion7(),
             [.. Enumerable.Range(0, count).Select(_ => new PlaceOrderItem(Guid.CreateVersion7(), 1))],
             AnAddress(),
             "EUR");
@@ -66,7 +67,7 @@ public class PlaceOrderValidatorTests
         // the failure — and a malformed request arrives as a 500. The
         // assertion is that Validate returns rather than throws; IsValid
         // being false is the easy half.
-        PlaceOrderCommand command = new(null!, AnAddress(), "EUR");
+        PlaceOrderCommand command = new(Guid.CreateVersion7(), null!, AnAddress(), "EUR");
 
         ValidationResult result = Should.NotThrow(() => Validator.Validate(command));
 
