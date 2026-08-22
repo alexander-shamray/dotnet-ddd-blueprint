@@ -224,6 +224,16 @@ OMITTED = frozenset(
         # §11.4's callout, executed: every policy an endpoint names must
         # resolve. With no endpoint there is no policy to enumerate, and the
         # suite's own guard against passing vacuously is what fails first.
+        #
+        # IT CARRIES A SECOND GATE and dropping it drops that too: §8.5's
+        # rule that an idempotent command's endpoint must require
+        # authentication, since ICurrentUser.IsAuthenticated is false for an
+        # anonymous request and every such caller then claims under the
+        # shared "system" subject. A rendered service has neither an endpoint
+        # nor an idempotent command, so nothing is unguarded today — what
+        # would be unguarded is the first slice that adds both, which is why
+        # the inverted floor in IdempotencyOptInTests names this file in the
+        # message it fails with.
         "tests/Catalog.Api.Tests/AuthorizationPolicyTests.cs",
         # Not slice by subject — it is about EfUnitOfWork's rollback — but slice
         # by requirement: the claim is that a rejected command leaves nothing
@@ -659,7 +669,14 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             '            + "vacuous. The day it does, this test fails — replace it '
             'with the ShouldNotBeEmpty "\n'
             '            + "form, which is what keeps a vacuous gate from quietly '
-            'becoming a permanent one.");\n',
+            'becoming a permanent one. "\n'
+            '            + "RESTORE AuthorizationPolicyTests IN THE SAME CHANGE: §8.5 '
+            'requires an idempotent "\n'
+            '            + "command\'s endpoint to be authenticated, an anonymous one '
+            'collapses every caller "\n'
+            '            + "into the shared system subject, and this service dropped '
+            'that suite as a slice "\n'
+            '            + "file.");\n',
         ),
         # And a THIRD, for the same reason again — which is the argument for
         # keeping these as data rather than as a rule someone reapplies. §8.5's

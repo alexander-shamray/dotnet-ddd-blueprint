@@ -17,7 +17,25 @@ namespace Common.Application;
 /// request and for a message-borne command alike, so both claim under one
 /// shared subject — and on an anonymous endpoint the cross-caller collision the
 /// subject segment exists to close is fully reachable inside the fix for it.
-/// §8.5 states the rule; a test asserts it of every command declaring this.
+/// §8.5 states the rule, and
+/// <c>Every_idempotent_command_reaches_this_service_through_an_authenticated_endpoint</c>
+/// asserts it — one per service, in that service's <c>AuthorizationPolicyTests</c>.
+/// <para>
+/// <b>"A test asserts it" is what this said, and it is a claim about a
+/// repository rather than about the rule.</b> §4.5's scaffold classes
+/// <c>AuthorizationPolicyTests</c> as a slice file and drops it: a service
+/// with no endpoint has no policy to enumerate, and that suite's own
+/// anti-vacuity floor would fail on a tree that is correct. So a rendered
+/// service carries this rule with nothing enforcing it, and the sentence
+/// above read as though it could not.
+/// </para>
+/// <para>
+/// <b>What makes that self-clearing rather than a TODO</b> is the floor in
+/// the scaffolded <c>IdempotencyOptInTests</c>: a rendered service asserts
+/// that it opts <i>no</i> command into idempotency, so the day it opts one in
+/// that test fails — and its message names this gate as the other thing owed.
+/// The prompt therefore arrives at the moment the rule first has a subject,
+/// which is the only moment it could be acted on.
 /// </para>
 /// </remarks>
 public interface IIdempotentCommand
