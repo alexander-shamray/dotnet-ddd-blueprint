@@ -611,6 +611,18 @@ not the transaction committed, which the next callout is about.
 > orders. The window is not the rollout but the **retention**, because an entry
 > written before the rename stays claimable for 24 hours after it.
 >
+> **The stored payload has the same problem one field over, and it is worse
+> because nothing throws.** `Capture` writes the success value with default
+> options, so the entry carries an implicit schema for the whole 24-hour
+> retention. Change the shape of a result DTO and a new pod reading an old
+> pod's entry either fails to deserialise it — a 500 on a retry of work that
+> committed — or, for an added or renamed member, **silently defaults it** and
+> replays a success that is quietly wrong. Neither is visible to a rolling
+> deployment's health checks. The same two routes apply: version what is
+> stored, or state a compatibility procedure for result-shape changes. Until
+> one is taken, **changing the shape of an idempotent command's result is a
+> migration too**, on exactly the terms the rename is.
+>
 > `FullName` does not fix this and is worth ruling out explicitly: it addresses
 > a collision between two same-named commands in different namespaces, which is
 > a different problem, and it makes the key *more* fragile by binding the
@@ -781,14 +793,21 @@ public void Idempotent_commands_return_a_replayable_Result()
         "no command in this assembly implements IIdempotentCommand, so this test is " +
         "looking at nothing — the interface has been renamed, moved, or not yet applied.");
 
+    // Exactly the two shapes ValueTypeOf accepts, not every subtype of Result.
+    // The constraint is the container's question and IsAssignableFrom answers
+    // that one; the behaviour asks a narrower one and throws on a third shape,
+    // so a gate written to the constraint would pass a command the behaviour
+    // cannot serve and leave it to fail on first use.
     candidates
-        .Where(pair => !typeof(Result).IsAssignableFrom(pair.Result))
+        .Where(pair => pair.Result != typeof(Result) &&
+            !(pair.Result.IsGenericType && pair.Result.GetGenericTypeDefinition() == typeof(Result<>)))
         .Select(pair => $"{pair.Command.Name} -> {pair.Result.Name}")
         .ShouldBeEmpty(
-            "IdempotencyBehavior is constrained to TResult : Result, and the container " +
-            "silently omits an open generic whose constraints do not hold (§6.3) — so a " +
-            "command opting in with any other result type is never protected, and nothing " +
-            "says so at build time or at startup.");
+            "IdempotencyBehavior is constrained to TResult : Result and rebuilds only Result " +
+            "or Result<T>. The container silently omits an open generic whose constraints do " +
+            "not hold (§6.3), and ValueTypeOf refuses any third shape — so a command opting " +
+            "in with anything else is either never protected or fails at its first dispatch, " +
+            "and nothing says so at build time or at startup.");
 
     candidates
         .Where(pair => pair.Result.IsGenericType)
@@ -973,7 +992,10 @@ public class IdempotencyBehaviorTests
 }
 ```
 
-`RecordingStore.Tokens` is what makes the last two assertable: the call name
+`RecordingStore.Tokens` is what makes the three token assertions assertable —
+the refusal, the completion and the thrown-handler cases, named rather than
+counted, because the two subject tests were appended after this sentence was
+first written and a positional pointer would already be wrong. The call name
 maps to the token that call was handed, so "passes `None`" is a claim about the
 argument rather than about the prose beside it. Without it the three
 `CancellationToken.None` calls are unobserved, and an implementation forwarding
