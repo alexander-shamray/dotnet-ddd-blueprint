@@ -56,7 +56,9 @@ Two consequences fall out of that chain and both have bitten:
   starts** — not a pod that starts without the value. §15.4 records this as the
   reason the two Redis rows are *conditional* rather than required: marking a
   key required against a solution where no host reads it does not over-supply,
-  it stops the service.
+  it stops the service. Since §8.5's behaviour landed the condition is met for
+  Catalog and Ordering and unmet for the gateway and the BFF, so it is now a
+  question a chart answers rather than one the platform answers once.
 
 ## Environment-variable spelling
 

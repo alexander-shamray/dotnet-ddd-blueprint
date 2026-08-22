@@ -1,0 +1,68 @@
+namespace Common.Application;
+
+/// <summary>
+/// Opts a command into <see cref="IdempotencyBehavior{TCommand,TResult}"/>. Not
+/// an empty marker: the behaviour reads both members to build its key, so the
+/// interface has to carry them.
+/// </summary>
+/// <remarks>
+/// The behaviour is constrained to this, which means a command that does not
+/// declare it is simply never protected — no error, no warning, and a retry
+/// creates a second order. Opting in is a decision; forgetting to is not meant
+/// to look like one, which is why a reflection gate reads intent off the shape
+/// of the command rather than trusting the author to have opted in (§8.5).
+/// <para>
+/// <b>An idempotent command's endpoint must require authentication.</b>
+/// <see cref="ICurrentUser.IsAuthenticated"/> is false for an anonymous HTTP
+/// request and for a message-borne command alike, so both claim under one
+/// shared subject — and on an anonymous endpoint the cross-caller collision the
+/// subject segment exists to close is fully reachable inside the fix for it.
+/// §8.5 states the rule; a test asserts it of every command declaring this.
+/// </para>
+/// </remarks>
+public interface IIdempotentCommand
+{
+    /// <summary>
+    /// The operation's stable identity, and the middle segment of the key.
+    /// </summary>
+    /// <remarks>
+    /// <b>Declared rather than derived, because a refactor must not be able to
+    /// change it silently.</b> §8.5 built this segment from
+    /// <c>typeof(TCommand).Name</c>, which a rename changes — and a rolling
+    /// deployment then serves both spellings at once, so a client retrying one
+    /// <see cref="CommandId"/> is protected by neither claim and writes twice.
+    /// The exposure outlasts the rollout by the retention rather than by the
+    /// rollout, because an entry written under the old name stays claimable for
+    /// a further 24 hours.
+    /// <para>
+    /// <c>FullName</c> is the obvious alternative and is strictly worse: it
+    /// addresses a collision between two same-named commands in different
+    /// namespaces — a real but different problem — while binding the namespace
+    /// into the key as well, so moving a command between folders breaks it too.
+    /// A <c>static abstract</c> member is what C# 14 makes cheapest: the
+    /// compiler refuses a command that does not supply one, so the decision
+    /// cannot be skipped, and a rename of the type leaves the string alone.
+    /// </para>
+    /// <para>
+    /// <b>Give it a value the domain would recognise, never the type's name.</b>
+    /// A value copied from the CLR name reintroduces the coupling by
+    /// convention, and the next reader has no way to tell it was meant to be
+    /// stable. Changing one is a migration, on the same terms a rename was.
+    /// </para>
+    /// </remarks>
+    static abstract string OperationName { get; }
+
+    /// <summary>
+    /// The client-generated identity of this attempt. Two requests carrying one
+    /// value are one operation.
+    /// </summary>
+    /// <remarks>
+    /// A field on the command rather than an <c>Idempotency-Key</c> header, and
+    /// the reason is the dependency rule rather than taste: the behaviour runs
+    /// in this assembly, which knows nothing about HTTP (§4.2), so it cannot
+    /// read a header and the value has to be on the command by the time the
+    /// pipeline sees it. An endpoint may bind the header into this at the
+    /// boundary — the only layer permitted to know either name.
+    /// </remarks>
+    Guid CommandId { get; }
+}

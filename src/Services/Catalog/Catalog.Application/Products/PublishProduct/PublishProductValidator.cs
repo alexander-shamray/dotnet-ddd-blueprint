@@ -11,6 +11,12 @@ public sealed class PublishProductValidator : AbstractValidator<PublishProductCo
 {
     public PublishProductValidator()
     {
+        // An omitted CommandId binds as Guid.Empty, which is a single shared
+        // key rather than an absent one — every caller of this command would
+        // claim the same one, and the first success would be replayed to all
+        // of them for a day. Validation is the OUTER behaviour (§6.3), so this
+        // 400 is raised before any key is claimed.
+        RuleFor(x => x.CommandId).NotEmpty();
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
         RuleFor(x => x.ThumbnailUrl).MaximumLength(400);
 

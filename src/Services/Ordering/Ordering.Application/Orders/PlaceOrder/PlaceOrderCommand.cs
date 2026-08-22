@@ -16,17 +16,33 @@ namespace Ordering.Application.Orders.PlaceOrder;
 /// field in the handler is sound where it is written and one omission away
 /// from an IDOR in every slice copied from it.
 /// <para>
-/// §6.4 prints this record with a <c>CommandId</c> and
-/// <c>IIdempotentCommand</c>. Both are omitted here on
-/// <c>PublishProductCommand</c>'s terms: the chapter itself warns that the
-/// field without the behaviour is unprotected, and <c>IdempotencyBehavior</c>
-/// (§8.5) is the one seat still empty in the pipeline. The two join together.
+/// <b><c>CommandId</c> is first, and it arrived with the behaviour rather than
+/// before it.</b> §6.4 warns that the field without
+/// <c>IdempotencyBehavior</c> (§8.5) is unprotected — a client that sends one
+/// and retries would be told, by the field's presence, that the retry was
+/// safe. The two joined in the same PR for that reason.
+/// </para>
+/// <para>
+/// This is the platform's worst duplicate to suffer, which is why it is one of
+/// the first two commands to opt in: a second dispatch does not overwrite
+/// anything, it creates a second order, reserves stock for it and authorises a
+/// second payment (§9.6).
 /// </para>
 /// </remarks>
 public sealed record PlaceOrderCommand(
+    Guid CommandId,
     IReadOnlyList<PlaceOrderItem> Items,
     AddressDto ShippingAddress,
-    string Currency) : ICommand<Result<Guid>>;
+    string Currency) : ICommand<Result<Guid>>, IIdempotentCommand
+{
+    /// <summary>
+    /// Declared, never derived from the type name — a rename must not be able
+    /// to change a live key (§8.5). Spelled in the domain's vocabulary rather
+    /// than the CLR's, so that copying the type name back in reads as the
+    /// mistake it is.
+    /// </summary>
+    public static string OperationName => "ordering.order.place";
+}
 
 public sealed record PlaceOrderItem(Guid ProductId, int Quantity);
 

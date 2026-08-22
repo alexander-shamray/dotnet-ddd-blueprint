@@ -109,6 +109,7 @@ COPIED = frozenset(
         "tests/Catalog.Application.Tests/ArchitectureTests.cs",
         "tests/Catalog.Application.Tests/Catalog.Application.Tests.csproj",
         "tests/Catalog.Application.Tests/DependencyInjectionTests.cs",
+        "tests/Catalog.Application.Tests/IdempotencyOptInTests.cs",
         "tests/Catalog.Api.Tests/ArchitectureTests.cs",
         "tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj",
         "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs",
@@ -593,6 +594,38 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        string[] allowed = [\"Common.Domain\", \"System.Runtime\"];\n"
             "\n"
             "        IEnumerable<string> referenced = typeof(AssemblyMarker).Assembly\n",
+        ),
+    ),
+    # §8.5's opt-in gate travels to every service, and one of its three tests
+    # cannot travel as written. "This service declares commands; the selector
+    # found none" is the anti-vacuity half — and a scaffolded service has no
+    # commands at all until its first slice, so that assertion would fail on a
+    # tree that is perfectly correct.
+    #
+    # Deleting it is the wrong fix, and CLAUDE.md names why: a gate that
+    # silently stops covering the newest surface is this repository's
+    # most-repeated failure, and a vacuous gate with its vacuity check removed
+    # IS that failure, written down and shipped. So the assertion is INVERTED
+    # instead. The rendered service asserts it has no commands YET, which fails
+    # the day it gains one — and the failure message is the instruction to
+    # restore the real form. Self-clearing, on the same argument as
+    # deploy/observability/awaiting-signal.yaml: a list of things known to be
+    # missing needs a gate asserting they are still missing.
+    "tests/Catalog.Application.Tests/IdempotencyOptInTests.cs": (
+        (
+            "    public void The_gate_above_is_looking_at_this_service_s_commands()\n",
+            "    public void This_service_has_no_commands_for_the_gate_above_to_look_at_yet()\n",
+        ),
+        (
+            '        Commands().ShouldNotBeEmpty("Catalog declares commands; '
+            'the selector above found none");\n',
+            "        Commands().ShouldBeEmpty(\n"
+            '            "This service declares no commands yet, so the gate above is vacuous. '
+            'The day it "\n'
+            '            + "gains its first command this test fails — replace it with the '
+            'ShouldNotBeEmpty "\n'
+            '            + "form, which is what keeps a vacuous gate from quietly becoming a '
+            'permanent one.");\n',
         ),
     ),
     "tests/Catalog.Application.Tests/ArchitectureTests.cs": (

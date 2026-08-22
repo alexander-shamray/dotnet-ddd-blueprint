@@ -344,6 +344,9 @@ database its host unconditionally resolves.
 {{- if and .Values.broker.secretRef (not .Values.broker.enabled) }}
 {{- fail "broker.enabled is false but broker.secretRef is set. AddMassTransitMessaging throws without ConnectionStrings:RabbitMq (§9.3), so this renders cleanly and the host does not start." }}
 {{- end }}
+{{- if and .Values.redis.secretRef (not .Values.redis.enabled) }}
+{{- fail "redis.enabled is false but redis.secretRef is set. AddRedisConnections reads BOTH connection strings eagerly and throws naming the missing one (§8.1), so this renders cleanly and the host does not start. A capability is a fact about the code, not an environment setting." }}
+{{- end }}
 {{- if and .Values.identity.clientId (not .Values.identity.clientCredentials) }}
 {{- fail "identity.clientCredentials is false but identity.clientId is set. Web.Bff binds ServiceIdentityOptions unconditionally and ValidateOnStart refuses to boot without all three values (§15.4) — so this is a render that succeeds and a pod that never starts." }}
 {{- end }}
@@ -364,6 +367,32 @@ key is the other half, mounted into the migration Job and nowhere else.
     secretKeyRef:
       name: {{ include "commerce.require" (list .Values.broker.secretRef.name "broker.secretRef.name is required when broker.enabled: AddMassTransitMessaging throws without the connection string, so the host does not start (§9.3).") | quote }}
       key: {{ include "commerce.require" (list .Values.broker.secretRef.key "broker.secretRef.key is required when broker.enabled.") | quote }}
+{{- end }}
+{{- if .Values.redis.enabled }}
+{{- /*
+§8.1's two connections, and BOTH are required even where only one is read.
+AddRedisConnections is one call by design (§8.2) and reads both eagerly, so a
+service either has Redis or does not — half-having it is a pod that will not
+start, which is the same shape as every other guard in this file.
+
+Secrets rather than Config, unlike the authority and the OTLP endpoint above,
+and §8.1 is why: each service connects as its OWN ACL user, so the string
+carries a credential. Two references rather than one, because the two instances
+have different eviction policies and therefore different servers (§8.1) — a
+single value would let a chart point idempotency keys at the allkeys-lru
+instance, where they are evicted under exactly the memory pressure that makes
+the duplicate write hardest to reproduce.
+*/}}
+- name: ConnectionStrings__RedisCache
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "commerce.require" (list .Values.redis.secretRef.name "redis.secretRef.name is required when redis.enabled: AddRedisConnections throws without both connection strings, so the host does not start (§8.1).") | quote }}
+      key: {{ include "commerce.require" (list .Values.redis.secretRef.cacheKey "redis.secretRef.cacheKey is required when redis.enabled.") | quote }}
+- name: ConnectionStrings__RedisCoordination
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "commerce.require" (list .Values.redis.secretRef.name "redis.secretRef.name is required when redis.enabled.") | quote }}
+      key: {{ include "commerce.require" (list .Values.redis.secretRef.coordinationKey "redis.secretRef.coordinationKey is required when redis.enabled: it is the noeviction instance §8.5's idempotency claims are written to, and pointing it at the cache one is a duplicate write nobody can reproduce (§8.1).") | quote }}
 {{- end }}
 {{- if .Values.identity.clientCredentials }}
 - name: Identity__Client__ClientSecret

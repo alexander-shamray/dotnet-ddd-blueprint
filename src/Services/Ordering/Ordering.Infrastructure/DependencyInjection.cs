@@ -9,6 +9,7 @@ using Common.Contracts;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Common.Infrastructure.Redis;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -193,6 +194,15 @@ public static class DependencyInjection
         // Registered before the bus and the dispatcher, so the instruments
         // exist before the first message can be delivered against them.
         services.AddHostedService<MetricsInitialiser>();
+
+        // §8's two connections — see Catalog's copy of this line for the whole
+        // argument, which is the same one twice: PR-12 built
+        // AddRedisConnections and nothing called it until §8.5's behaviour
+        // took the fourth pipeline seat and read a key.
+        //
+        // Both connection strings are read EAGERLY and throw when absent, so
+        // this line is what a missing key stops — the host will not start.
+        services.AddRedisConnections(configuration);
 
         // The bus (§9). Its readiness needs no line below: AddMassTransit
         // registers the bus health check itself — "masstransit-bus", tagged

@@ -17,6 +17,7 @@ using DotNet.Testcontainers.Images;
 using Respawn;
 using Testcontainers.MsSql;
 using Testcontainers.RabbitMq;
+using Testcontainers.Redis;
 using Xunit;
 
 namespace Ordering.TestSupport;
@@ -31,8 +32,10 @@ namespace Ordering.TestSupport;
 /// <c>Ordering.Api.Tests</c> today, and the application suite the moment that
 /// suite gains a handler test — the two cannot reference each other, so each
 /// declares its own
-/// <c>IntegrationCollection</c> over this one type. The Redis containers of
-/// §12.4's full shape still wait for the PR whose code reads those keys.
+/// <c>IntegrationCollection</c> over this one type. §12.4's full shape is
+/// complete since §8.5's PR: the two Redis containers arrived with the
+/// behaviour whose code reads those keys, which is the same rule the broker
+/// followed.
 /// </summary>
 /// <remarks>
 /// Tests deliberately collapse the two database identities of §7.1 — the
@@ -45,6 +48,30 @@ public sealed class ServiceFixture : IAsyncLifetime
 {
     private readonly MsSqlContainer _sql = new MsSqlBuilder()
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+        .Build();
+
+    /// <summary>
+    /// §8.1's two servers, and two rather than one for §12.4's stated reason:
+    /// with a single server playing both roles, a stack accidentally wired to
+    /// the wrong connection passes every prefix, TTL and claim test while
+    /// production idempotency keys sit on an <c>allkeys-lru</c> instance —
+    /// evicted under exactly the memory pressure that makes the duplicate
+    /// write hardest to reproduce. Two servers make role-routing assertable.
+    /// </summary>
+    /// <remarks>
+    /// They joined with §8.5's PR, which is the rule this fixture already
+    /// followed for the broker: a container arrives with the code that reads
+    /// what it holds. Before that PR the host resolved no multiplexer, so a
+    /// Redis here would have been an unused registration with a startup cost.
+    /// </remarks>
+    private readonly RedisContainer _redisCache = new RedisBuilder()
+        .WithImage("redis:7-alpine")
+        .WithCommand("--maxmemory-policy", "allkeys-lru")
+        .Build();
+
+    private readonly RedisContainer _redisCoordination = new RedisBuilder()
+        .WithImage("redis:7-alpine")
+        .WithCommand("--maxmemory-policy", "noeviction")
         .Build();
 
     /// <summary>
@@ -151,7 +178,9 @@ public sealed class ServiceFixture : IAsyncLifetime
         // reported.
         await Task.WhenAll(
             _sql.StartAsync(TestContext.Current.CancellationToken),
-            _rabbit.StartAsync(TestContext.Current.CancellationToken));
+            _rabbit.StartAsync(TestContext.Current.CancellationToken),
+            _redisCache.StartAsync(TestContext.Current.CancellationToken),
+            _redisCoordination.StartAsync(TestContext.Current.CancellationToken));
 
         // The container hands out a connection to master; Ordering owns a
         // database of its own (§7.1), and MigrateAsync is what creates it.
@@ -164,7 +193,15 @@ public sealed class ServiceFixture : IAsyncLifetime
 
         FirstRunExitCode = await RunMigratorAsync(ConnectionString);
 
-        Factory = new OrderingApiFactory(ConnectionString, _rabbit.GetConnectionString());
+        // Both Redis connections, because AddRedisConnections reads both
+        // eagerly (§8.1) — and real ones rather than the factory's unreachable
+        // default, because §8.5's behaviour claims a key on every protected
+        // command this suite dispatches.
+        Factory = new OrderingApiFactory(
+            ConnectionString,
+            _rabbit.GetConnectionString(),
+            _redisCache.GetConnectionString(),
+            _redisCoordination.GetConnectionString());
 
         // A table for the transaction tests, created here and not in a
         // migration. It is a fixture of the test rather than a table of the
@@ -492,8 +529,27 @@ public sealed class ServiceFixture : IAsyncLifetime
                 // assignment earlier was the first attempt and did not close
                 // it: BrokerContextPath() and the builder chain both run
                 // before the assignment, and both can throw.
-                if (_rabbit is not null)
-                    await _rabbit.DisposeAsync();
+                try
+                {
+                    if (_rabbit is not null)
+                        await _rabbit.DisposeAsync();
+                }
+                finally
+                {
+                    // Nested on the same argument as every layer above it: a
+                    // failed broker disposal must not leave two Redis
+                    // containers running for the rest of the CI job. These
+                    // need no null guard — they are field initialisers, so
+                    // they exist before InitializeAsync can throw.
+                    try
+                    {
+                        await _redisCache.DisposeAsync();
+                    }
+                    finally
+                    {
+                        await _redisCoordination.DisposeAsync();
+                    }
+                }
             }
         }
     }

@@ -186,6 +186,14 @@ for chart in $MIGRATOR_CHARTS; do
             check "$chart resolves a connection string in src/, so its chart names one" \
                 grep -qE '^  connectionName: ' "$CHARTS_DIR/$chart/values.yaml"
         fi
+        # §8.1's two connections, read from src/ like the broker above. A
+        # service whose Infrastructure calls AddRedisConnections resolves both
+        # keys eagerly at startup, so a chart that does not declare redis
+        # renders cleanly and produces a pod that will not start.
+        if grep -rq 'AddRedisConnections' "$src"; then
+            check "$chart calls AddRedisConnections in src/, so its chart declares redis" \
+                declares "$chart" redis
+        fi
     else
         fail "no source tree found at $src for chart $chart — the mapping, not the chart, is wrong"
     fi
@@ -497,6 +505,23 @@ for chart in $SERVICE_CHARTS; do
     grep -qE '^ +migrator: ' "$CHARTS_DIR/$chart/values.yaml" && has_image=yes
     check "$chart: migration template ($has_template) and image.migrator ($has_image) agree" \
         test "$has_template" = "$has_image"
+done
+
+# MIGRATOR_CHARTS, not SERVICE_CHARTS: the gateway and the BFF own no Redis
+# (§10.1, §15.4), and their half is already asserted the other way above —
+# "mounts no connection string at all", which fails if either key appears.
+for chart in $MIGRATOR_CHARTS; do
+    check "$chart mounts both of §8.1's Redis connections" \
+        test "$(count '^ *- name: ConnectionStrings__Redis' "$OUT/$chart.yaml")" -eq 2
+    # THE TWO KEYS MUST DIFFER, and this is the assertion that would have
+    # caught the likeliest wiring mistake. Both instances are provisioned
+    # together and named alike, so one Secret key copied onto both rows renders
+    # cleanly, passes the count above, and points §8.5's idempotency claims at
+    # the allkeys-lru instance §8.1 exists to keep them off. Counting the rows
+    # cannot see that; comparing the keys can.
+    check "$chart: the cache and coordination connections read different Secret keys" \
+        test "$(awk '/- name: ConnectionStrings__Redis/ { want = 1; next }
+                     want && /key: / { print $2; want = 0 }' "$OUT/$chart.yaml" | sort -u | wc -l)" -eq 2
 done
 
 # --------------------------------------------------------------------------
@@ -826,6 +851,10 @@ refuses_chart catalog 'disabling a database the chart is configured for fails th
     'database.enabled is false' --set database.enabled=false
 refuses_chart catalog 'disabling a broker the chart is configured for fails the render' \
     'broker.enabled is false' --set broker.enabled=false
+refuses_chart catalog 'disabling redis the chart is configured for fails the render' \
+    'redis.enabled is false' --set redis.enabled=false
+refuses_chart catalog 'clearing the coordination Secret key fails the render' \
+    'redis.secretRef.coordinationKey is required' --set-string 'redis.secretRef.coordinationKey='
 refuses_chart catalog 'clearing the migrator image fails the render' \
     'image.migrator is required' --set-string 'image.migrator='
 

@@ -347,6 +347,14 @@ public sealed record IdempotencyEntry(bool InProgress, string? Payload);
 /// </summary>
 public interface IIdempotentCommand
 {
+    // The operation's identity, declared rather than derived — see "Renaming a
+    // command changes its keys" below, which is the defect this closes. A
+    // static abstract member is what makes the decision unskippable: the
+    // compiler refuses a command that supplies none, and a rename of the type
+    // leaves the string alone. Give it a value the domain would recognise;
+    // copying the CLR name back in reintroduces the coupling by convention.
+    static abstract string OperationName { get; }
+
     Guid CommandId { get; }
 }
 ```
@@ -393,11 +401,11 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
     public async Task<TResult> HandleAsync(TCommand command, NextDelegate<TResult> next, CancellationToken ct)
     {
         // Key shape only — the store owns the service prefix and namespace.
-        // The subject segment is not decoration: see "A claimed key belongs to
-        // one subject" below. Nor is the type name free — see "Renaming a
-        // command changes its keys", which is the reason it is not FullName
-        // either.
-        string key = $"{Subject()}:{typeof(TCommand).Name}:{command.CommandId}";
+        // Neither of the first two segments is decoration: the subject is
+        // argued at "A claimed key belongs to one subject" below, and the
+        // operation is declared on the command rather than read off the type
+        // for the reason "Renaming a command changes its keys" gives.
+        string key = $"{Subject()}:{TCommand.OperationName}:{command.CommandId}";
 
         if (!await store.TryClaimAsync(key, Retention, ct))
         {
@@ -606,14 +614,25 @@ is the caller's own cancellation, and honouring the token would abandon the
 release and leak the claim for a day — so `None` is right there too, whether or
 not the transaction committed, which the next callout is about.
 
-> **Renaming a command changes its keys, and a rolling deployment is where
-> that costs a duplicate write.** The operation segment is
-> `typeof(TCommand).Name`, so `PlaceOrderCommand` → `SubmitOrderCommand` is a
-> new key for the same `CommandId`. During a rollout both versions are serving:
-> the old pods claim under the old name, the new pods under the new one, and a
+> **Renaming a command would change its keys, and a rolling deployment is
+> where that costs a duplicate write — which is why the operation segment is
+> declared and not derived.** The segment was `typeof(TCommand).Name` when this
+> section was first written, so `PlaceOrderCommand` → `SubmitOrderCommand` was
+> a new key for the same `CommandId`. During a rollout both versions serve: the
+> old pods claim under the old name, the new pods under the new one, and a
 > client retrying one `CommandId` is protected by neither — it places two
 > orders. The window is not the rollout but the **retention**, because an entry
 > written before the rename stays claimable for 24 hours after it.
+>
+> `IIdempotentCommand.OperationName` closes that, and the shape is the one this
+> callout used to merely recommend: a `static abstract` member, which C# 14
+> makes cheapest because the compiler then refuses a command that does not
+> supply one. What it cannot refuse is a command that supplies its own type
+> name back, so a per-service reflection gate asserts none does. `FullName` was
+> the obvious alternative and is worth ruling out: it addresses a collision
+> between two same-named commands in different namespaces — a real but
+> different problem — while making the key *more* fragile by binding the
+> namespace to it as well.
 >
 > **The stored payload has the same problem one field over, and it is worse
 > because nothing throws.** `Capture` writes the success value with default
@@ -627,18 +646,12 @@ not the transaction committed, which the next callout is about.
 > one is taken, **changing the shape of an idempotent command's result is a
 > migration too**, on exactly the terms the rename is.
 >
-> `FullName` does not fix this and is worth ruling out explicitly: it addresses
-> a collision between two same-named commands in different namespaces, which is
-> a different problem, and it makes the key *more* fragile by binding the
-> namespace to it as well. The fix is an explicit discriminator the refactor
-> cannot silently change — a `static abstract` member on `IIdempotentCommand`
-> is the shape C# 14 makes cheapest, since the compiler then refuses a command
-> that does not supply one — or, failing that, a stated dual-read across a
-> rename. **Neither is written here**: this section specifies the mechanism
-> that #40, #70 and #84 are about, and a member on the opted-in interface is a
-> change to the contract every command implements rather than to the behaviour.
-> Until one is taken, **renaming an idempotent command is a migration**, and
-> this paragraph is the only thing saying so.
+> **The operation half is closed and the payload half is not**, and the
+> asymmetry is worth being explicit about: a discriminator was cheap to add
+> while the interface had no implementors, and a stored-payload version is a
+> change to what every completed entry holds. Until one is taken, **changing
+> the shape of an idempotent command's result is a migration**, and this
+> paragraph is the only thing saying so.
 
 > **The lost commit acknowledgement is the one fault the `catch` gets wrong,
 > and it is this section's debt rather than a new finding.** If `CommitAsync`
@@ -719,10 +732,21 @@ precisely because nothing commits.
 The Redis implementation lives in Infrastructure and is where the two §8.1
 constraints are satisfied — §8.3's `RedisKeys` supplies the `{service}:idem:`
 prefix the ACL requires, and the **coordination** connection rather than the
-cache connection, because idempotency keys must never be evicted:
+cache connection, because idempotency keys must never be evicted.
+
+**It is `Common.Infrastructure`'s and not a service's, which is the one place
+this section moved when it was built.** The obvious home is
+`Ordering.Infrastructure.Idempotency`, beside the service that uses it; what
+argues the other way is `RedisDistributedLockFactory`, which sits one file over
+on the same connection with the same keying and the same `[FromKeyedServices]`
+attribute. Two per-service copies of one Redis interaction drift the first time
+either changes, and §4.3's one-assembly rule is not in play — every service
+already references this building block. It is registered by
+`AddRedisConnections` for the same reason the lock factory is: that method is
+one call by design (§8.2), so a service either has Redis or does not:
 
 ```csharp
-namespace Ordering.Infrastructure.Idempotency;
+namespace Common.Infrastructure.Redis;
 
 internal sealed class RedisIdempotencyStore(
     [FromKeyedServices(RedisConnections.Coordination)] IConnectionMultiplexer redis,
