@@ -21,7 +21,7 @@ repeatable check; noticing by eye is not.
 | `IUnitOfWork` | §6.3 | Transaction boundary; EF sealed in Infrastructure |
 | `Error`, `ErrorType` | [§10.5](10-api-gateway.md) | `Code`, `Description`, `Type`. `Code` is a metric dimension ([§9.8](09-messaging.md)), so it is a closed set by construction |
 | `OrderErrors` | §10.5 | Ordering's catalogue — the only place an `Error` is constructed |
-| `IIdempotencyStore`, `IdempotencyEntry` | [§8.5](08-caching-redis.md) | Idempotency-key claim, Redis-backed. `CompleteAsync` is handed a **success value**, never a serialised `Result` — the type D.5 specifies serialises in one of its four states and deserialises in none |
+| `IIdempotencyStore`, `IdempotencyEntry` | [§8.5](08-caching-redis.md) | Idempotency-key claim, Redis-backed. `CompleteAsync` takes a `string`, and what it is handed is a **serialised success value** — never a serialised `Result` — the type D.5 specifies serialises in one of its four states and deserialises in none |
 | `IIdempotentCommand` | §8.5 | Opts a command into `IdempotencyBehavior`; carries `CommandId` |
 | `IDomainEventCollector` | [§7.5](07-persistence.md) | Reads the change tracker without exposing it |
 | `IDomainEventDispatcher` | §7.5 | Stages outbox rows; runs no handlers |

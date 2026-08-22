@@ -473,10 +473,15 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 
         // Unreachable while Result<T> is sealed and Result's constructor is
         // private protected — a third shape could only be declared inside
-        // Common.Application. Stated rather than assumed: the obvious body
-        // indexes GetGenericArguments() directly, and on a third shape that
-        // throws IndexOutOfRangeException from a static constructor, which
-        // surfaces as a TypeInitializationException naming nothing useful.
+        // Common.Application. Stated rather than assumed, though what it buys
+        // is narrower than it looks: this runs from a static field
+        // initialiser, so the CLR wraps it in a TypeInitializationException
+        // exactly as it would wrap the IndexOutOfRangeException the obvious
+        // body throws. The surface type is the same either way. What changes
+        // is the InnerException — a sentence naming the type and the reason,
+        // rather than an index that names neither — and moving the check off
+        // the static path to get a direct throw would cost it on every
+        // command instead of once per closed generic.
         throw new NotSupportedException(
             $"{typeof(TResult).Name} is neither Result nor Result<T>, so no stored outcome " +
             "can be rebuilt for it. A third Result shape is a change to this behaviour.");
