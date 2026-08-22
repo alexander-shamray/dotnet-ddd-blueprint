@@ -810,8 +810,9 @@ assertion is `ShouldNotBe` against the first caller's value and not
 **Three dispatches rather than two, and the third is the one that carries the
 claim.** `ShouldNotBe` establishes only that the key varies with *something*;
 a key scoped by a correlation id would satisfy it, and so would a pipeline with
-no `IdempotencyBehavior` in it at all — which is exactly the fail-open §8.5's
-reflection test exists for. Returning to the first subject and getting the
+no `IdempotencyBehavior` in it at all — which §6.3's registration-order test
+is what catches, since §8.5 says plainly that neither of its reflection tests
+reaches the behaviour. Returning to the first subject and getting the
 first order back is what identifies the varying segment as the subject. The row
 count sits beside all three: two callers, two orders, and the replay adds
 none.

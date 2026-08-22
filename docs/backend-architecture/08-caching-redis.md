@@ -296,9 +296,13 @@ public sealed class PriceChangedCacheInvalidator(HybridCache cache)
 
 Every non-idempotent write command carries a client-generated `CommandId`, and
 the key is claimed atomically before any work happens. What that buys is **at
-most one commit per key, except across a lost commit acknowledgement** — and
-the exception is this section's own residual, argued below rather than left to
-a reader to discover, because it is the one case the behaviour cannot see.
+most one commit per key within `Retention`, except across a lost commit
+acknowledgement**. Both halves of that sentence are load-bearing. The window is
+24 hours because every entry expires — completed and in-progress alike — so a
+retry arriving after expiry claims a free key and commits again with nothing
+having gone wrong; the guarantee is bounded in time rather than absolute. The
+exception is this section's own residual, argued below rather than left to a
+reader to find, because it is the one case the behaviour cannot see.
 
 **It is a field on the command, not an `Idempotency-Key` header**, and the
 reason is the dependency rule rather than taste. `IdempotencyBehavior` runs in
@@ -590,7 +594,7 @@ covers `next()` and nothing else, and the three store calls divide like this:
 |---|---|
 | `next()` throws | **Release** — with one exception this code cannot detect, below. §6.3's `ExecuteAsync` disposes the transaction on the way out, which rolls it back, so for every *distinguishable* fault nothing survives and a retry is owed |
 | Handler returns a failed `Result` | **Release**, for the same reason and not for the one §6.3's comment suggests — see below |
-| `CompleteAsync` throws | **Hold.** The work is durable; the retry meets `ConcurrentRequestException` until the key expires, which is a delay rather than a duplicate |
+| `CompleteAsync` throws | **Hold**, which postpones the duplicate rather than preventing it. The work is durable and the entry is stuck `InProgress`, so every retry meets `ConcurrentRequestException` until it expires — and the one arriving after that claims a free key and runs the command again. A day's delay is the best an out-of-transaction store can do here; only the durable marker below prevents it |
 | `TryClaimAsync` throws | **Nothing to decide, and this is the case with no good answer.** The `SET NX` may have succeeded on the server, so the key can be held for a day for work that never ran, and no retry gets past it |
 
 The two `ReleaseAsync` calls and the `CompleteAsync` all pass
@@ -651,10 +655,12 @@ not the transaction committed, which the next callout is about.
 > transaction, so no claim it holds is atomic with the SQL commit. The fix is
 > an idempotency marker written **inside** the transaction, keyed on the
 > `CommandId` this interface already carries — and the decision log assigns
-> that fix to this seat rather than to §6.3's. Until it is written, the
-> guarantee here is *at most one commit per key except across a lost
-> acknowledgement*, which is weaker than the opening sentence of this section
-> and is the honest form of it.
+> that fix to this seat rather than to §6.3's. It would close the expiry hole
+> in the same stroke: a marker inside the transaction is as durable as the row
+> it guards, where every Redis entry here has a TTL. Until it is written, the
+> opening sentence of this section is the whole guarantee — *at most one commit
+> per key within `Retention`, except across a lost acknowledgement* — and both
+> qualifiers are this behaviour's rather than somebody else's.
 >
 > The residual is bounded rather than unbounded, and PR-14 is why: with the
 > outbox in place a re-run republishes the same fact, which is the
@@ -771,7 +777,7 @@ indistinguishable from a pipeline that never had one.
 
 ```csharp
 [Fact]
-public void Idempotent_commands_return_a_replayable_Result()
+public void Idempotent_commands_return_a_result_shape_the_behaviour_rebuilds()
 {
     (Type Command, Type Result)[] candidates =
     [
@@ -829,6 +835,16 @@ renders. It is a proxy rather than a proof — a DTO with a private constructor
 would pass it — but it catches the case that actually exists in this
 repository, and a proxy that names its own limit beats a gate that reads as
 complete.
+
+**The test is named for the shape, not for replayability, and the difference is
+not pedantic.** It establishes that `TResult` is one of the two shapes
+`ValueTypeOf` rebuilds and that the value type is not a domain object. It does
+**not** establish that the value round-trips: a DTO with no deserialisable
+constructor passes it, and so does `object`, which serialises and comes back a
+`JsonElement`. Establishing the real property means round-tripping a sample of
+every allowed value type, which is §12.6's
+`Every_contract_round_trips_through_the_bus_serialiser` one layer over and is
+owed if this list ever grows past the primitives §6.4 uses.
 
 **Neither reflection test reaches the behaviour, and §12.4's two integration
 tests reach only half of it.** Both dispatch `PlaceOrderCommand`, so every
