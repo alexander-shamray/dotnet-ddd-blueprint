@@ -1717,9 +1717,27 @@ sweeps cite this file as where the boundary and its residual are recorded. The
 reviewer also has **no .NET SDK**, so `dotnet test` is this host's gate and
 never the review's.
 
+**A grant is not a whitelist, and this is the trap under every row below.**
+`allowed-tools` is an **auto-approval list**: the harness documents that it
+"does not restrict which tools are available: every tool remains callable, and
+your permission settings still govern tools that are not listed". So *omitting*
+a tool from a command's frontmatter withholds nothing — it only decides
+whether the call prompts. Refusing a capability takes a **deny**:
+`permissions.deny` in `.claude/settings.json` for the repository, or the
+`disallowed-tools` frontmatter key for one command, which removes the named
+tools from the pool while it runs. Precedence is **deny → ask → allow**,
+first
+match wins, so a deny beats every allow including a frontmatter one.
+Measured, not read: a `general-purpose` subagent spawned fine under
+`--allowedTools "Agent(Explore)"`, and was refused under
+`--disallowedTools "Agent(general-purpose)"` with `Agent type 'general-purpose'
+has been denied by permission rule 'Agent(general-purpose)' from cliArg` — and
+again, from a command's own frontmatter, `from command`.
+
 **A helper is the answer whenever a git grant is wider than the operation it
-buys**, because **a prefix rule cannot exclude a flag**. Each of these was
-confirmed by running the offending form rather than reasoning about it:
+buys**, because **an allow rule is a prefix and cannot exclude a flag**. Each
+of these was confirmed by running the offending form rather than reasoning
+about it:
 
 | Raw grant | What it also bought |
 |---|---|
@@ -1728,26 +1746,83 @@ confirmed by running the offending form rather than reasoning about it:
 | `Bash(git checkout -b:*)` | the trailing flag — `git checkout -b <name> -f origin/main` discards tracked modifications |
 | `Bash(git branch:*)` | `git branch -fd <name>` — force and delete behind a spelling the `-d`/`-D`/`--delete` denies do not match |
 | `Bash(git reset HEAD:*)` | `git reset HEAD --hard` — the `--hard` deny matches the other word order |
+| `Bash(git log:*)`, `Bash(git diff:*)`, `Bash(git show:*)` | `--output=<path>`, which is an arbitrary file write with `--format=` choosing the bytes. Reproduced: `git log -1 --format=%s --output=<scratch>` wrote the commit subject, silently |
+| `Bash(git fetch:*)`, `Bash(git pull --ff-only:*)` | a URL in the repository position, and `ext::<cmd>` is a git transport that **runs its argument as a command** |
 
 **The reset grant does not narrow, and the attempt is the sharpest lesson
 here.** It was "fixed" to `Bash(git reset HEAD --:*)` on the reasoning that
 `--` turns a later flag into a pathspec. True of *git*, irrelevant to the
-*rule*: a permission rule is a prefix match, and `git reset HEAD --hard` starts
+*rule*: an allow rule is a prefix match, and `git reset HEAD --hard` starts
 with `git reset HEAD --`, so the narrowed grant admitted the exact command it
 excluded — while the commit message said the hole was closed. **The git
 behaviour was verified and the matching was not.** Anything whose safety
-depends on what follows a token needs a helper, not a cleverer pattern.
+depends on what follows a token needs a helper, or a **deny**, not a cleverer
+allow.
+
+**A deny is the thing an allow cannot be: `*` matches at any position in it,
+including the middle.** `Bash(git *--output*)` refuses `git log`, `git diff`
+and `git show` carrying `--output` anywhere in the argument list, and leaves
+plain `git log` alone — both halves measured, because a deny that blocked the
+command outright would read the same from the failing side. That is what
+closes the three read grants above without removing them, and removing them
+would have bought nothing anyway: the harness treats read-only forms of `git`
+as promptless built-ins whatever the allow list says, and its own note is that
+"to require a prompt for one of these commands, add an `ask` or `deny` rule".
+
+**The `::` in a value collides with the `:*` suffix syntax, and the collision
+fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
+passes settings validation and then matches nothing, because the trailing `:*`
+is consumed as the prefix-wildcard form and the literal becomes `git *ext:` —
+a probe of `git log -1 ext::foo` ran clean under it. Writing `Bash(git
+*ext::**)` to dodge that is rejected at startup: *"The `:*` pattern must be at
+the end."* So **`ext::` cannot be expressed in a Bash rule at all**, and the
+transport is closed on the allow side instead, by pinning the remote —
+`Bash(git fetch origin:*)`, `Bash(git pull --ff-only)`. A URL never reaches the
+repository position when a literal remote name occupies it.
 
 **A command's frontmatter is a grant like any other, and it is the one nobody
-reads twice.** All five rows above were found in command frontmatter, not in
-`.claude/settings.json` — the global file had it right all along.
+reads twice.** The first five rows above were all found in command frontmatter,
+and for a while that supported a second claim — that the global file had it
+right all along. **It did not, and the sixth row is where that broke**: the
+`--output` write primitive sat in `.claude/settings.json`'s own allow list,
+reachable from every command in the repository, and it had been read past for
+as long as the frontmatter rows had. The lesson survives with its converse
+attached: frontmatter is the grant nobody reads twice, and the global file is
+the one everybody assumes somebody else already read.
 
-**Two grants remain wider than the operations they buy**, and both are known
-residuals rather than oversights: `Bash(git worktree remove:*)` admits the `-f`
-that discards work, and `Bash(gh pr merge --merge:*)` admits a trailing
-`--admin` that merges past failing checks. Helpers are owed for both; until
-someone with the `Edit(.claude/scripts/**)` deny lifted writes them, `/ship`
-carries them by reporting its literal invocations, flags and all.
+**Four grants remain wider than the operations they buy**, and all four are
+known residuals rather than oversights. Two are `/ship`'s:
+`Bash(git worktree remove:*)` admits the `-f` that discards work, and
+`Bash(gh pr merge --merge:*)` admits a trailing `--admin` that merges past
+failing checks. Helpers are owed for both; until someone with the
+`Edit(.claude/scripts/**)` deny lifted writes them, `/ship` carries them by
+reporting its literal invocations, flags and all.
+
+The third is `Bash(git fetch origin:*)`, which no longer admits a URL but still
+admits a trailing flag; `--upload-pack`, `--receive-pack` and `--exec` are
+denied by name, so what is left is the flag nobody has enumerated yet. The
+honest fix is the helper the transport issue asked for — a
+`git-fetch-origin.sh` taking a branch name and nothing else.
+
+The fourth is not a git grant and is the one a reader is most likely to miss:
+**`/review-copilot` triages three comment feeds that no filter narrows by
+author.** `pr-review-comments.sh` returns every inline comment on the PR, and
+both `gh pr view --json` feeds are unfiltered by construction, while `ship.md`
+filters the same data on `Copilot` authorship. The command now states the
+filter and reports the count it dropped, but that is prose — the enforceable
+version is an author filter inside the helper, which is a human's edit made
+with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run
+`/ship`'s Copilot loop unattended on a PR that outside contributors can comment
+on.
+
+**A fifth thing is a gap in the mechanism rather than in a grant.** Pinning a
+command to one subagent type is a **deny list of every other type**, because
+the harness has no "only this type" allow — so `security-sweep.md` and
+`bug-sweep.md` each enumerate the registered types that hold a shell, an editor
+or the network, and **a newly added agent under `.claude/agents/` is admitted
+by default** until someone adds it to both lists. That is the shape this
+repository already knows rots; it is taken here because the alternative on
+offer is prose.
 
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an
