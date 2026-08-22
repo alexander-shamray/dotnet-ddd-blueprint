@@ -1787,9 +1787,11 @@ sentence describes, and it is real.
 `Bash(git pull --ff-only)` pins **nothing** — no remote name appears in it at
 all. What it does is drop the `:*`, so the grant is the documented
 no-argument invocation and nothing else. Whether that closes
-`git pull --ff-only ext::<cmd>` turns on a question this file states two
-paragraphs up and has not measured for the no-wildcard case: **an allow rule is
-a prefix match.** If that holds for a grant without `:*` as well, the pull side
+`git pull --ff-only ext::<cmd>` turns on the prefix-match rule stated in the
+reset-grant paragraph above — **an allow rule is a prefix match** — which has
+never been measured for the no-wildcard case. (Named rather than counted: a
+numbered offset inside a section still being edited is how this repository's
+callout totals used to rot.) If that holds for a grant without `:*` as well, the pull side
 is still open and belongs in the residual inventory rather than in this
 paragraph. Nobody has run the probe. Until someone does, treat the pull grant
 as *narrowed, not proven* — the two words this repository keeps having to tell
