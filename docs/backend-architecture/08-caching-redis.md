@@ -369,11 +369,13 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
     private static readonly PropertyInfo? ValueProperty =
         ValueType is null ? null : typeof(TResult).GetProperty(nameof(Result<object>.Value));
 
-    // Result.Success<T>, closed over that value type. The factory and not the
-    // constructor: the constructor is internal precisely so that nothing can
-    // assemble a result reporting success while carrying an error
-    // (Appendix D.5), and reflecting past it to save a MakeGenericMethod would
-    // spend the guarantee the type exists for.
+    // Result.Success<T>, closed over that value type — and the factory rather
+    // than the constructor for a weaker reason than it looks. The constructor
+    // is INTERNAL and this behaviour is in the same assembly, so it is
+    // reachable; what the factory adds is the null guard on the failure path
+    // and the type's own stated construction API (Appendix D.5). The state
+    // invariant needs neither: IsSuccess is defined as the absence of an
+    // error, so success-carrying-an-error is unreachable by any route.
     private static readonly MethodInfo? SuccessOfValue = ValueType is null
         ? null
         : typeof(Result)
@@ -535,9 +537,16 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 > write it was added to prevent.**
 >
 > Adding a `[JsonConstructor]` and non-throwing accessors to `Result` is the
-> other way out and is refused: §5.3's always-valid argument and Appendix D.5's
-> contract are what make the throwing accessors correct, and a public
-> constructor would let a result report success while carrying an error.
+> other way out and is refused — though not for the reason that suggests
+> itself first. A public constructor could **not** produce a result reporting
+> success while carrying an error: `IsSuccess` is defined as the absence of
+> one, so that state is unreachable however the type is built. What the change
+> would actually cost is the rest of the design — non-throwing accessors turn
+> `Value` on a failure from a loud error into a silent `default`, which is
+> §5.3's always-valid argument giving way at the one place it is load-bearing,
+> and a serialiser-constructible `Result` is one any consumer may assemble by
+> hand. The throwing accessors are the contract (Appendix D.5), not an
+> obstacle to route around.
 
 > **The value is serialised with default options and no converters, which is a
 > constraint on what an idempotent command may return.** §4.2 registers
@@ -814,7 +823,10 @@ public class IdempotencyBehaviorTests
         HandlerFailure thrown = await Should.ThrowAsync<HandlerFailure>(
             () => Dispatch<Result<Guid>>(store, new Explode(Guid.CreateVersion7())));
 
-        thrown.Message.ShouldBe(HandlerFailure.Text, "the store's fault must not replace the handler's");
+        thrown.Message.ShouldBe(
+            HandlerFailure.Text,
+            "a SUCCESSFUL release is followed by rethrowing the handler's own fault — a release " +
+            "that throws destroys it instead, which is the residual above and is not tested here");
         store.Calls.ShouldBe(["claim", "release"]);
     }
 
