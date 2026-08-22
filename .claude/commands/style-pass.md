@@ -1,7 +1,7 @@
 ---
 description: Apply one code-style form corpus-wide, then record it in CLAUDE.md and .editorconfig
 argument-hint: "<the corrected form — paste the code as it should read>"
-allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(wc:*), Bash(ls:*), Bash(python:*)
+allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(wc:*), Bash(ls:*)
 ---
 
 A corrected code form has been given:
@@ -29,11 +29,29 @@ The named site is one of many. Find the rest across every fenced block in
 `docs/backend-architecture/` — and, once `src/` exists, the source too,
 because one dialect governs both.
 
-Grep gets you candidates; a short throwaway script in the scratchpad gets you
-the shape. Anything structural — bracket depth, chain heads, continuation
-columns, raw-string boundaries — needs the script, and it must track whether
-it is inside a ```csharp fence, a ```sql fence, a C# raw string literal, or
-prose, because the rules differ per context.
+Grep gets you candidates; reading them gets you the shape. Anything structural
+— bracket depth, chain heads, continuation columns, raw-string boundaries —
+has to track whether it is inside a ```csharp fence, a ```sql fence, a C# raw
+string literal, or prose, because the rules differ per context, and that
+tracking is done by reading the file rather than by a script this command can
+run unattended.
+
+**This command holds no interpreter grant, and the absence is deliberate.** It
+used to carry `Bash(python:*)`, which is a prefix grant on a general-purpose
+interpreter: `python -c "<anything>"` was auto-approved, and one `open(…,'w')`
+reaches every path `Edit(.claude/scripts/**)` and `Edit(.remember/**)` deny,
+while one `subprocess.run` reaches every `git push --force` and `git switch -fC`
+the deny list and the five `git-*.sh` helpers exist to keep out. A rule that
+matches `python -c` cannot see what the interpreter then does, so the whole
+control structure this repository documents sat downstream of one line of
+frontmatter. That matters here more than in most commands because the input is
+attacker-influenced twice over: `$ARGUMENTS` is a pasted code form, and the
+sweep reads `docs/**` and `src/**`, which a PR author controls.
+
+A throwaway script is still the right tool for a genuinely structural sweep.
+Write it into the scratchpad and run it — the run prompts, which is the point,
+and one approval per pass is the whole cost. What is no longer available is a
+pass that writes and executes a script **without anyone seeing it**.
 
 **Confirm each hit by reading it.** The recurring false positives are real and
 they repeat: `})` closing a lambda mid-chain is a continuation, not a chain
