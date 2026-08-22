@@ -1916,6 +1916,7 @@ stateDiagram-v2
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
     Compensating --> Compensating : PaymentAuthorised → FlagOrderForReview cancelled_after_payment
+    Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed → absorbed
 
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
@@ -2348,7 +2349,15 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // cancellation is already the outcome, so the customer's request
             // adds nothing to do — and both exits cancel the order anyway,
             // which Order.Cancel absorbs idempotently (§5.4).
-            Ignore(OrderCancelled));
+            Ignore(OrderCancelled),
+
+            // The two Inventory answers to a reservation this saga no longer
+            // wants. Both are reachable by cancelling in AwaitingStock, both
+            // are designed races rather than misroutes — ReleaseStock is
+            // already in flight when either lands — and both are written for
+            // the same reason as the line above.
+            Ignore(StockReserved),
+            Ignore(StockReservationFailed));
 
         SetCompletedWhenFinalized();
     }
@@ -2387,18 +2396,25 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > **The cost is that a genuinely misrouted event is now silent.** That is a
 > configuration fault traded against a routine one, and it is only acceptable
 > because every event this machine declares is handled in every state it can
-> reach one in — `Ignore(OrderCancelled)` and `When(PaymentAuthorised)` in
-> `Compensating` are both written out for exactly that reason rather than left
-> to this callback.
+> reach one in. `Compensating` is where that is load-bearing, and it writes out
+> all four rather than leaning on this callback: `Ignore(OrderCancelled)`,
+> `When(PaymentAuthorised)`, `Ignore(StockReserved)` and
+> `Ignore(StockReservationFailed)`.
 >
-> **That claim was false when this callback was first added, and the review
-> that caught it is worth recording.** `Compensating` is reachable from
-> `AwaitingPayment`, where `AuthorisePayment` has already been sent, and it had
-> no `PaymentAuthorised` transition — so the catch-all swallowed an
-> authorisation landing after a cancellation, which is precisely the case
-> `Confirmed` escalates as `cancelled_after_payment`. A callback justified by
-> an invariant is only as good as the invariant, and nothing enforces this one
-> but reading the machine against its own event declarations.
+> **That claim was false when this callback was first added, and it took three
+> passes to make it true — which is the more useful half of the story.** First
+> `PaymentAuthorised` was missing, so an authorisation landing after a
+> cancellation was swallowed rather than escalated as
+> `cancelled_after_payment`. Writing that one transition left the two Inventory
+> races still on the catch-all, reachable by cancelling in `AwaitingStock`.
+>
+> **Repairing an invariant one counter-example at a time does not establish
+> it.** What did was enumerating: eight declared events, `Compensating`
+> reachable from two states, and those four are what follow. A callback
+> justified by an invariant is only as good as the invariant, and **nothing
+> mechanical enforces this one** — no test fails when a new event joins the
+> machine without a transition here, which is the residual to close if a ninth
+> event is ever declared.
 
 > **A cancellation has two origins and the saga used to see one.** The saga's
 > own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
@@ -2416,7 +2432,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, `customer_request` |
 > | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, `customer_request` — this does not stop the charge |
 > | `Confirmed` | The card is authorised | Escalate — `cancelled_after_payment` — and finalise |
-> | `Compensating` | A cancellation is already the outcome — but the money may still land | `Ignore(OrderCancelled)`; both exits cancel the order anyway. `PaymentAuthorised` escalates `cancelled_after_payment` |
+> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | Four written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved` and `StockReservationFailed`, since both exits cancel the order anyway and `ReleaseStock` is already in flight; `When(PaymentAuthorised)` escalates `cancelled_after_payment` |
 >
 > **`Confirmed` is a gap this states rather than closes.** Undoing an
 > authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes

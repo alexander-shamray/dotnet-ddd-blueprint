@@ -99,20 +99,27 @@ like any other wait.
 
 ### `cancelled_after_payment`
 
-A customer cancelled an order whose payment had already been authorised. The
-saga was in `Confirmed`, waiting on Shipping; it escalated and finalised rather
-than compensating, because undoing an authorisation is a **refund** and
+A customer cancelled an order whose payment had already been authorised.
+Undoing an authorisation is a **refund**, and
 [§3.2](../backend-architecture/03-bounded-contexts.md) closes Payments' Accepts
-column at `AuthorisePayment` — the platform has no refund contract to send.
+column at `AuthorisePayment` — the platform has no refund contract to send. So
+the money is always the reason this row exists.
 
-**The order is already cancelled. What needs a person is the money**, and
-possibly a parcel. Unlike the two above, nothing is stuck: the saga is gone by
-design and no timeout is pending.
+**Step 1 is the same either way. Steps 2 and 3 depend on which state raised
+it**, and an earlier version of this page had only the `Confirmed` procedure —
+which sent an on-call looking for a despatch that does not exist and a saga
+that is still running. Check the origin first, per the table at the top.
 
 1. **Refund the authorisation**, through the provider's own console or whatever
    process Payments' team owns. This is the whole reason the row exists, and it
    is the step with a clock on it — an authorisation left standing expires or
    settles depending on the provider.
+
+#### From `Confirmed` — the saga has finalised
+
+The order was confirmed and the saga was waiting on Shipping. Nothing is stuck:
+the state row is gone by design and no timeout is pending.
+
 2. **Stop the despatch if it has not left.** The saga deliberately does *not*
    send `ReleaseStock` here: a reservation being picked is not one Inventory can
    safely be told to drop on a state machine's word. Ask Shipping, then release
@@ -121,6 +128,19 @@ design and no timeout is pending.
 3. **If it already shipped**, this is a return rather than a cancellation, and
    the order's own state will say so — §5.4 refuses to cancel a `Shipped`
    order, so a row here means the aggregate was cancelled before despatch.
+
+#### From `Compensating` — the saga is still running
+
+The customer cancelled while stock was held, and the authorisation landed
+afterwards. **There is no despatch to stop** — the order never reached
+`Confirmed` — and `ReleaseStock` is already in flight.
+
+2. **Leave the reservation alone.** The machine is waiting on `StockReleased`
+   and will cancel the order when it arrives. Releasing by hand races it.
+3. **Give it the ten-minute `ReleaseTimeout` before treating stock as stuck.**
+   If that expires the saga raises a second row, `stock_not_released`, and
+   [that section](#stock_not_released) is the procedure — the two rows are one
+   incident, and the saga-age alert will have fired as well.
 
 ## Resolving
 
