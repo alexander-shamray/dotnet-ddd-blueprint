@@ -389,12 +389,22 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "    <!-- §9.4's outbox: the entity this assembly maps, the type map, the\n"
             "         metrics and the dispatcher it hosts. PR-14's edge, and the reason\n"
-            "         Common.Infrastructure stopped being a project no service referenced —\n"
-            "         PR-12's Redis helpers are still nobody's dependency here, and the\n"
-            "         first service to wire them will not need a new reference. -->\n",
+            "         Common.Infrastructure stopped being a project no service referenced.\n"
+            "         §8's Redis helpers ride in on this same reference and are now used\n"
+            "         rather than merely available — AddRedisConnections and\n"
+            "         RedisIdempotencyStore are wired in DependencyInjection.cs. This\n"
+            "         comment said they were \"still nobody's dependency\" and that the first\n"
+            "         service to wire them would need no new reference; the second half was\n"
+            "         right and is why nothing here changed but the sentence. -->\n",
+            # The rendered service wires no Redis, so it gets the forward-looking
+            # form rather than Catalog's history. Both halves of this pair moved
+            # in §8.5's PR: the anchor because Catalog's comment was corrected,
+            # and this text because "wiring a cache later" no longer names
+            # everything the reference buys — §8.5's store rides in on it too.
             "    <!-- §9.4's outbox: the entity this assembly maps, the type map, the\n"
             "         metrics and the dispatcher it hosts. §8's Redis helpers ride in on\n"
-            "         the same reference, so wiring a cache later costs no new one. -->\n",
+            "         the same reference, so wiring a cache — or §8.5's idempotency\n"
+            "         store — later costs no new one. -->\n",
         ),
         (
             "    <!-- typeof(ProductPublished).Assembly, the Broker lane's half of\n"

@@ -31,7 +31,12 @@ public sealed class PublishProductHandlerTests(ServiceFixture fixture) : IAsyncL
         IDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IDispatcher>();
 
         Result<Guid> result = await dispatcher.SendAsync(
-            new PublishProductCommand(Guid.CreateVersion7(), "Walnut desk", "https://cdn.example/desk.jpg", 19.99m, "eur"),
+            new PublishProductCommand(
+                Guid.CreateVersion7(),
+                "Walnut desk",
+                "https://cdn.example/desk.jpg",
+                19.99m,
+                "eur"),
             TestContext.Current.CancellationToken);
 
         result.IsSuccess.ShouldBeTrue();
