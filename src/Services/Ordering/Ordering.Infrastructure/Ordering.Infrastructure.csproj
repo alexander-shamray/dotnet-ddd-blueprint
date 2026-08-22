@@ -18,6 +18,7 @@
          states the direct use. -->
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <PackageReference Include="AspNetCore.HealthChecks.SqlServer" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" />
     <!-- The bus (§9). The transport package; MassTransit itself rides in
          transitively at the same pinned version. No RabbitMQ health-check
          package beside it: AddMassTransit registers the bus check itself,
