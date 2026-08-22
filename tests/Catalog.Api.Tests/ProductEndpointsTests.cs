@@ -48,9 +48,22 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
         string Currency,
         DateTimeOffset PublishedAt);
 
+    /// <summary>
+    /// A fresh <c>CommandId</c> per call, and it is load-bearing rather than
+    /// incidental since §8.5's behaviour took the fourth pipeline seat: several
+    /// tests here publish twice, and one reused value would have the second
+    /// replay the first's id instead of running.
+    /// </summary>
     private Task<HttpResponseMessage> PublishAsync(string name, decimal amount = 10m) =>
         PostAsync(
-            new { Name = name, ThumbnailUrl = (string?)null, Amount = amount, Currency = "EUR" },
+            new
+            {
+                CommandId = Guid.CreateVersion7(),
+                Name = name,
+                ThumbnailUrl = (string?)null,
+                Amount = amount,
+                Currency = "EUR"
+            },
             CatalogPermissions.Write);
 
     /// <summary>

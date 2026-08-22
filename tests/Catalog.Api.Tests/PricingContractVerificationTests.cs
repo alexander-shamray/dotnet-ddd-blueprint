@@ -146,6 +146,9 @@ public sealed class PricingContractVerificationTests(ServiceFixture fixture) : I
             {
                 Content = JsonContent.Create(new
                 {
+                    // Fresh per product: the contract's Given block publishes
+                    // several, and one shared CommandId would replay the first.
+                    CommandId = Guid.CreateVersion7(),
                     product.Name,
                     ThumbnailUrl = (string?)null,
                     product.Amount,

@@ -45,7 +45,14 @@ public class EndpointSecurityTests(HostSmokeTests.UnreachableInfrastructureFacto
         HttpRequestMessage request = new(HttpMethod.Post, "/v1/catalog/products")
         {
             Content = JsonContent.Create(
-                new { Name = "Walnut desk", ThumbnailUrl = (string?)null, Amount = 10m, Currency = "EUR" })
+                new
+                {
+                    CommandId = Guid.CreateVersion7(),
+                    Name = "Walnut desk",
+                    ThumbnailUrl = (string?)null,
+                    Amount = 10m,
+                    Currency = "EUR"
+                })
         };
         request.Headers.Add(TestAuthHandler.UserHeader, Guid.CreateVersion7().ToString());
         request.Headers.Add(TestAuthHandler.PermissionsHeader, CatalogPermissions.Write);

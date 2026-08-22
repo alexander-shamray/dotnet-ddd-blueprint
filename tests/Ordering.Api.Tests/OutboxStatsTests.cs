@@ -158,7 +158,13 @@ public sealed class OutboxStatsTests(ServiceFixture fixture) : IAsyncLifetime
                         // §12.4's .invalid convention: no host runs here, so
                         // the bus never starts and nothing should be able to
                         // dial one. AddMassTransitMessaging throws without it.
-                        ["ConnectionStrings:RabbitMq"] = "amqp://guest:guest@ordering-rabbit.invalid:5672"
+                        ["ConnectionStrings:RabbitMq"] = "amqp://guest:guest@ordering-rabbit.invalid:5672",
+                        // Both read eagerly by AddRedisConnections, which
+                        // throws naming the missing one — the same reason the
+                        // bus key above is here, unreachable on the same
+                        // §12.4 convention.
+                        ["ConnectionStrings:RedisCache"] = "ordering-redis.invalid:6379",
+                        ["ConnectionStrings:RedisCoordination"] = "ordering-redis.invalid:6380"
                     })
                 .Build())
             .BuildServiceProvider();
