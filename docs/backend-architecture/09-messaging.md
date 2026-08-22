@@ -2521,15 +2521,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > on a confirmed order is left alone, because one being picked is not
 > Inventory's to drop on a saga's word.
 >
-> **A late `StockReserved` after a cancellation is a different case, and an
-> earlier revision of this callout got all three of its claims wrong.** The
-> event is ignored; the *reservation* is not stranded, because the
-> `AwaitingStock` cancel already sent `ReleaseStock` and the machine is
-> waiting on it in `Compensating`. It is not the `StockTimeout` strand either
-> — that branch cancels and finalises without a release. And neither writes an
-> `OrderReviews` row: the only review a cancel path raises is
-> `stock_not_released`, and only if `ReleaseTimeout` fires. The machine works
-> this, not a human.
+> **A late `StockReserved` after a cancellation is a different case from the
+> `StockTimeout` strand, and this callout has now been wrong about it
+> twice.** The event is ignored, and the `AwaitingStock` cancel has sent
+> `ReleaseStock`, which the machine waits on in `Compensating` — so this is
+> not the `StockTimeout` shape, where the branch cancels and finalises with no
+> release at all.
+>
+> **What that does not establish is that the reservation was released**, and
+> the previous revision of this paragraph said it did. §9.4 orders nothing, so
+> Inventory may handle the release before the reserve it undoes: the release
+> finds nothing, the reserve then creates a reservation, and the
+> `StockReserved` that follows is ignored with nothing sent after it. That is
+> **[#125](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/125)**,
+> and the sharp part is that neither path writes an `OrderReviews` row — the
+> only review a cancel path raises is `stock_not_released`, and only if
+> `ReleaseTimeout` fires, which it does not when the release completed. So
+> there is no signal, and "the machine works this, not a human" is exactly
+> the sentence that was wrong.
 
 ### Where an escalation lands
 

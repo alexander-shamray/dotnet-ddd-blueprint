@@ -96,10 +96,12 @@ groups:
         annotations:
           summary: "An order has been awaiting manual review for over an hour"
           description: >-
-            A saga hit a wait it could not compensate and escalated (§9.6).
-            It has usually finalised by now, so the saga-age alert will not
-            catch it — but check before assuming, because one reason is
-            raised mid-wait. The runbook branches on it.
+            A saga escalated work this platform has no contract to do (§9.6):
+            either a wait that ran out, or a cancellation with money already
+            authorised and no refund contract to send. The saga has usually
+            finalised by now, so the saga-age alert will not catch it — but
+            check before assuming, because one reason is raised mid-wait.
+            The runbook branches on both.
           runbook_url: docs/runbooks/order-review.md
 
       # OWED TWICE OVER, AND THE SECOND IS THE ONE NO GATE HERE CAN WATCH.

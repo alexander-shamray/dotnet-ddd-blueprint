@@ -586,7 +586,7 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
-    public async Task A_cancellation_while_awaiting_stock_releases_the_reservation_and_never_charges()
+    public async Task A_cancellation_while_awaiting_stock_requests_release_and_sends_no_authorisation()
     {
         // The defect this suite could not see: §11.4's endpoint cancels the
         // AGGREGATE, and until the machine declared Event<OrderCancelled> the
@@ -597,6 +597,19 @@ public class OrderFulfilmentSagaTests
         // exist. Compensating is the state for exactly that: release it, and
         // wait, because a release nobody waits on is a reservation nobody
         // notices is stranded.
+        //
+        // **The name says REQUESTS release, and the two words are the whole
+        // of what this harness can see.** It observes a ReleaseStock sent;
+        // whether Inventory acted on a reservation is #125, and under that
+        // ordering it may not have. A name claiming the reservation was
+        // released makes a green test look like proof of the one guarantee
+        // the implementation now says it cannot give.
+        //
+        // The trailing "and never charges" went for the same reason, and its
+        // sibling one state over lost that phrase in an earlier round: the
+        // negative below is read as of now, after a positive, so what it
+        // establishes is that no authorisation HAS been sent, not that none
+        // ever will be.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
