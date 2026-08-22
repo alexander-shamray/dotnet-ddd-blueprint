@@ -1578,10 +1578,13 @@ WHERE o.CustomerId = @CustomerId
         OR (o.PlacedAt = @AfterPlacedAt AND o.Id < @AfterId))
 ```
 
-**Column aliases are assignments, not `AS`** — `Total = o.TotalAmount`, never
-`o.TotalAmount AS Total`. The name being defined then starts the line, so a
+**Column aliases are assignments, not `AS`** — `Total = SUM(…)`, never
+`SUM(…) AS Total`. The name being defined then starts the line, so a
 projection reads as the row shape it produces, and the `=` column lines up the
-way `SET`'s does. This is the SELECT list only: `MERGE … AS target`,
+way `SET`'s does. The running example is §6.5's history query, whose total is
+summed from the order's lines: `ordering.Orders` stores no total, because the
+aggregate computes one and §7.2 declines to keep a second copy of it. This is
+the SELECT list only: `MERGE … AS target`,
 `USING (…) AS source`, `WITH claimable AS (` and `CAST(x AS varchar(10))` are
 required syntax and keep `AS`.
 

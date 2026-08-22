@@ -1132,7 +1132,7 @@ current by projections. Two of them, serving different paths:
 
 | Table | Fed by | Read by |
 |---|---|---|
-| `ordering.OrderSummaries` | Ordering's five lifecycle events on the local lane — `OrderPlaced`, `OrderStockConfirmed`, `OrderConfirmed`, `OrderShipped`, `OrderCancelled` — plus Catalog's `ProductPublished` from the broker | The escalated history query, below — **not** §6.5's, which stays at level 1 |
+| `ordering.OrderSummaries` | Ordering's five lifecycle events on the local lane — `OrderPlacedDomainEvent`, `OrderStockConfirmedDomainEvent`, `OrderConfirmedDomainEvent`, `OrderShippedDomainEvent`, `OrderCancelledDomainEvent` — plus Catalog's `ProductPublished` from the broker | The escalated history query, below — **not** §6.5's, which stays at level 1 |
 | `ordering.ProductPrices` | Catalog's `PriceChanged`, `ProductPublished`, `ProductDiscontinued` | `IProductPriceReader`, on the **write** path (§6.4) |
 
 The second is the more consequential. A read model that only backs a screen can
