@@ -1539,8 +1539,15 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
                 LineCount = e.Lines.Count,
                 // Ids are known now; name and thumbnail arrive with
                 // ProductPublished and are patched in below.
+                //
+                // SummaryProduct, not an anonymous type. The read side declares
+                // that record (below) and deserialises this column into it, so
+                // an anonymous type here is a SECOND declaration of one shape
+                // with nothing holding the two together — and the way they came
+                // apart was member casing, which binds silently rather than
+                // loudly. The callout beside the record says what that costs.
                 Products = JsonSerializer.Serialize(
-                    e.Lines.Select(l => new { id = l.ProductId.Value, name = "", thumb = "" })),
+                    e.Lines.Select(l => new SummaryProduct(l.ProductId.Value, "", ""))),
                 PlacedAt = e.OccurredAt,
                 UpdatedAt = e.OccurredAt
             });
@@ -1814,7 +1821,17 @@ public sealed record OrderSummaryDto(
     DateTimeOffset PlacedAt,
     IReadOnlyList<SummaryProduct> Products);
 
-public sealed record SummaryProduct(Guid Id, string Name, string Thumb);
+// One type for two jobs: the DTO member above, and the element the projection
+// serialises into the Products column (§6.6, above). The JSON names are PINNED
+// rather than inherited from these members, because a third place spells them
+// — the JSON_MODIFY paths in the ProductPublished handler, which are string
+// literals no compiler reads. An attribute is what ties the wire name to the
+// SQL path; a rename here then costs nothing, where without one it would leave
+// the patch writing a member nobody deserialises.
+public sealed record SummaryProduct(
+    [property: JsonPropertyName("id")] Guid Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("thumb")] string Thumb);
 
 public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, ICurrentUser currentUser)
     : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
@@ -1880,6 +1897,28 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
     }
 }
 ```
+
+> **Both sides call the no-options overload, and that is only safe because the
+> names are pinned.** The parameterless `JsonSerializer` overloads use
+> `JsonSerializerOptions.Default`, where `PropertyNameCaseInsensitive` is
+> **`false`** — the web defaults that would set it true are not in play on a
+> database column. So a `{"id": …}` written by the projection does not bind to
+> a constructor parameter called `Id`, and the failure is the quiet kind:
+> `System.Text.Json` builds the record through its parameterised constructor,
+> leaves every unmatched parameter at its default, and returns an array of
+> `Guid.Empty` with null names. No exception, no log line, and the `!` above
+> suppresses the only warning within reach of it — the whole payload §6.6
+> exists to deliver, empty, with everything green.
+>
+> **[§9.4](09-messaging.md)'s rule that both sides must agree is not satisfied
+> by both sides looking similar.** An anonymous `{ id, name, thumb }` and a
+> `record (Guid Id, string Name, string Thumb)` are as similar as two
+> declarations get and they do not agree, which is the argument for there being
+> one declaration rather than two that a reader has to compare. `OutboxJson`
+> states these same settings explicitly rather than inheriting them, for the
+> same reason, and carries the sentence worth repeating here: a payload that
+> only round-trips because matching is lenient is a payload that will not
+> survive a rename.
 
 The index from the DDL above — `(CustomerId, PlacedAt DESC)` including the
 scalar columns — serves the seek, the ordering and the cursor predicate. It is
