@@ -489,11 +489,26 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 > so caller A can name victim B's key, deliberately or by deriving the value
 > from a request-body hash, which is a common and recommended client
 > implementation of an idempotency key. If B's command has completed, A takes
-> the replay branch and is handed **B's result** — B's order id — and the
-> handler never runs, so none of §11.4's checks run either: they live *inside*
-> the handler this branch skips. If B's command is still in flight, A instead
-> holds the key and B is denied a legitimate operation for the whole 24-hour
-> retention. Neither path touches the caller's identity at any point.
+> the replay branch and is handed **B's result** — B's order id.
+>
+> **What that skips is the handler, and only what the handler does — which is
+> narrower than "authorisation" and is still the whole of §11.4's subject
+> rule.** Authentication and the endpoint's permission policy have already run
+> by the time the dispatcher is called, and they still run on a replay: A is a
+> genuine authenticated caller holding `orders:write`, which is exactly why
+> nothing refuses the request. What never happens is the handler binding
+> `currentUser.Id` — and, on a command that has one, the resource-ownership
+> check §11.4 describes. The subject is what goes missing, not the gate in
+> front of it.
+>
+> **The in-flight case belongs to whoever claimed first, and that is the
+> attacker.** `TryClaimAsync` is a `SET NX`, so the race has one winner and the
+> loser meets `ConcurrentRequestException` — but `CommandId` is A's to choose,
+> so A can take the key ahead of B and leave B, the legitimate caller, unable
+> to place the order until A's entry completes or the retention expires. If A's
+> entry does complete, B is then served **A's** result, which is the same
+> disclosure with the roles reversed. Neither path touches the caller's
+> identity at any point.
 
 > **The invariant holds for authenticated callers and for nobody else, and that
 > is this section's largest residual.** `ICurrentUser.IsAuthenticated` is false

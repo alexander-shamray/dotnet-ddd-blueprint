@@ -668,8 +668,11 @@ another's behalf. It is
 therefore scoped by `ICurrentUser.Id` for the same reason `PlaceOrderCommand`
 carries no `CustomerId`. The consequence of getting it wrong is sharper there
 than here: the replay branch returns a stored result **without running the
-handler**, and every check this section describes lives inside the handler it
-skips.
+handler**, so the subject is never bound from the principal at all. The gate in
+front of it still runs — authentication and the endpoint's policy happen before
+the dispatcher — which is what makes the failure quiet: a genuine authenticated
+caller, correctly admitted, handed a record the rule above exists to keep from
+them.
 
 **The absence is the mechanism.** Keeping the field and checking it in the
 handler — `command.CustomerId != currentUser.Id → Result.Failure` — is sound

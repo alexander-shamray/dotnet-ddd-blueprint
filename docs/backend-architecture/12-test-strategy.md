@@ -801,9 +801,11 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
 `A_command_id_claimed_by_one_customer_does_not_replay_to_another` is the one
 test here whose failure is a **disclosure** rather than a defect: an unscoped
 key does not throw, log or answer slowly — it answers 200 with another
-customer's order id, past every §11.4 check, because the replay branch skips
-the handler those checks live in. That is why the assertion is `ShouldNotBe`
-against the first caller's value and not `IsSuccess.ShouldBeTrue()`.
+customer's order id, to a caller authentication and the endpoint policy have
+already admitted. Those two still run on a replay; what does not is the handler,
+and with it §11.4's binding of the subject from the principal. That is why the
+assertion is `ShouldNotBe` against the first caller's value and not
+`IsSuccess.ShouldBeTrue()`.
 
 **Three dispatches rather than two, and the third is the one that carries the
 claim.** `ShouldNotBe` establishes only that the key varies with *something*;
