@@ -55,7 +55,7 @@ DATABASELESS_CHARTS="gateway web-bff"
 # branch has spent six findings learning that about counts and inventories, and
 # this is the same lesson applied to the gate's own inputs.
 SOURCE_INPUTS="
-src/Gateway/Gateway.Api/appsettings.json
+src/Gateway/Gateway.Api
 src/BFF/Web.Bff
 src/Services/Catalog
 src/Services/Ordering
@@ -182,10 +182,27 @@ declares() {
 # its argument through "$@", which cannot carry a shell keyword.
 lacks() { ! declares "$1" "$2"; }
 
-for chart in $MIGRATOR_CHARTS; do
-    svc="$(awk '/^workload:/ { w = 1 } w && /^  name: / { sub(/^  name: /, ""); print; exit }' \
-        "$CHARTS_DIR/$chart/values.yaml")"
-    src="$ROOT/src/Services/$(echo "${chart:0:1}" | tr '[:lower:]' '[:upper:]')${chart:1}"
+# THE MAPPING IS DATA, because two of the four trees are not under
+# src/Services at all and no capitalisation rule reaches them.
+#
+# This loop ran over MIGRATOR_CHARTS and derived the path by capitalising
+# the chart name, which silently excluded the gateway and the BFF from
+# every agreement below. Their charts were asserted to declare no redis and
+# nothing ever compared that to their source, so the day either edge host
+# started calling AddRedisConnections the checks stayed green and the pod
+# resolved a key its chart never mounted. A gate cannot fail on a
+# comparison it never makes — the same shape as a gate that cannot fail on
+# a file that is not there.
+src_of() {
+    case "$1" in
+        gateway) echo "$ROOT/src/Gateway/Gateway.Api" ;;
+        web-bff) echo "$ROOT/src/BFF/Web.Bff" ;;
+        *)       echo "$ROOT/src/Services/$(echo "${1:0:1}" | tr '[:lower:]' '[:upper:]')${1:1}" ;;
+    esac
+}
+
+for chart in $SERVICE_CHARTS; do
+    src="$(src_of "$chart")"
     if [ -d "$src" ]; then
         if grep -rq 'GetConnectionString("RabbitMq")' "$src"; then
             check "$chart reads RabbitMq in src/, so its chart declares a broker" \

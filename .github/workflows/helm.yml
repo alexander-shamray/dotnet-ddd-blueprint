@@ -14,9 +14,14 @@ name: Helm
 # The filter reaches outside deploy/helm/ on purpose, and none of it is
 # decoration — each path is an input the gate actually reads:
 #
-#   - the gateway's route file and PricingHop.cs hold the host:port literals
-#     smoke.sh asserts every rendered Service against, so renaming a YARP
-#     destination would otherwise be a green PR that breaks the next deploy;
+#   - the gateway TREE, not just its route file: smoke.sh compares every
+#     service chart against its source, and the gateway's half of that read
+#     the whole directory while this filter named one file. appsettings.json
+#     and PricingHop.cs hold the host:port literals smoke.sh asserts every
+#     rendered Service against, so renaming a YARP destination would
+#     otherwise be a green PR that breaks the next deploy — and a gateway
+#     that started calling AddRedisConnections in any other file was
+#     invisible to both the filter and the gate;
 #   - Catalog's appsettings.json declares the Kestrel endpoints those Services
 #     forward to, so moving the h2c listener off 8081 would leave a Service
 #     pointing at a closed port with every assertion still passing;
@@ -40,7 +45,7 @@ on:
       - 'deploy/helm/**'
       - '.github/workflows/helm.yml'
       - '.gitattributes'
-      - 'src/Gateway/Gateway.Api/appsettings.json'
+      - 'src/Gateway/Gateway.Api/**'
       - 'src/BFF/Web.Bff/**'
       - 'src/Services/Catalog/**'
       - 'src/Services/Ordering/**'
@@ -52,7 +57,7 @@ on:
       - 'deploy/helm/**'
       - '.github/workflows/helm.yml'
       - '.gitattributes'
-      - 'src/Gateway/Gateway.Api/appsettings.json'
+      - 'src/Gateway/Gateway.Api/**'
       - 'src/BFF/Web.Bff/**'
       - 'src/Services/Catalog/**'
       - 'src/Services/Ordering/**'

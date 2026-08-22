@@ -149,6 +149,68 @@ public class IdempotencyOptInTests
             "reconstructs the wrong result type (§8.5)");
     }
 
+    [Fact]
+    public void No_command_handler_dispatches_a_command()
+    {
+        // §8.5 names one dispatch as outside every argument it makes. A
+        // command sent from INSIDE a command handler lands in its parent's open
+        // transaction, because §6.3 opens none when one is already active — so
+        // this behaviour completes a claim for 24 hours against work the outer
+        // transaction may still roll back, and a retry then replays a success
+        // for a row that does not exist. The client cannot see that, which is
+        // what makes it worse than the duplicate it replaces.
+        //
+        // The chapter calls the case "unreached rather than handled", and that
+        // was a claim about this assembly with nothing checking it. A residual
+        // nothing re-checks is a decision rather than a deferral: the day a
+        // handler takes an IDispatcher the paragraph is silently false and the
+        // hole is live.
+        //
+        // StockReservedHandler is the near miss and is deliberately NOT caught.
+        // It does dispatch, but it is an IIntegrationEventHandler, and §9.5's
+        // InboxFilter opens no IUnitOfWork transaction — it adds its row on the
+        // DbContext after the consumer returns — so HasActiveTransaction is
+        // false when that dispatch arrives and §6.3 opens a transaction of its
+        // own. An entry point, not a nested unit.
+        //
+        // REACH: constructor parameters, which is where every handler in this
+        // solution takes its dependencies. A handler that resolves
+        // IServiceProvider and asks it for an IDispatcher is invisible here,
+        // exactly as a forbidden-but-unused reference is invisible to §4.2's
+        // gates. Late rather than absent.
+        IEnumerable<string> offenders = CommandHandlers()
+            .Where(t => t
+                .GetConstructors()
+                .SelectMany(c => c.GetParameters())
+                .Any(p => p.ParameterType == typeof(IDispatcher)))
+            .Select(t => t.Name);
+
+        offenders.ShouldBeEmpty(
+            "a command handler that dispatches puts the inner command inside the outer " +
+            "transaction, where §8.5's claim is completed against work that may still roll " +
+            "back. Closing this means IdempotencyBehavior declining nested dispatches " +
+            "outright, which is the paragraph in §8.5 that changes with it.");
+    }
+
+    [Fact]
+    public void The_nested_dispatch_gate_is_looking_at_this_service_s_handlers()
+    {
+        // The fourth anti-vacuity floor in this file. ShouldBeEmpty above is
+        // green when the selector found nothing, and this one depends on
+        // ICommandHandler<,> keeping both its shape and its assembly.
+        CommandHandlers().ShouldNotBeEmpty(
+            "Ordering declares command handlers; the selector above found none");
+    }
+
+    private static Type[] CommandHandlers() =>
+    [
+        .. Application
+            .GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false })
+            .Where(t => t.GetInterfaces().Any(i =>
+                i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommandHandler<,>)))
+    ];
+
     private static string OperationNameOf(Type command) =>
         (string)command
             .GetProperty(nameof(IIdempotentCommand.OperationName), BindingFlags.Public | BindingFlags.Static)!

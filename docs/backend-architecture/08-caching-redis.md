@@ -728,6 +728,17 @@ precisely because nothing commits.
 > point, not a nested unit. A service that puts a dispatch inside a *command*
 > handler needs this behaviour to decline nested dispatches outright, and this
 > is the paragraph that changes when it does.
+>
+> **"Unreached" is a claim about an assembly, so a gate makes it, not this
+> sentence.** `No_command_handler_dispatches_a_command` reads the constructor
+> parameters of every `ICommandHandler<,>` in the service and refuses
+> `IDispatcher` — one per service, beside the opt-in gates, and the day a
+> handler takes one the build fails here rather than the hole opening in
+> silence. Without it the paragraph above is a residual nothing re-checks,
+> which this blueprint treats as a decision rather than a deferral. Its reach
+> is the constructor: a handler that resolves `IServiceProvider` and asks it
+> for a dispatcher is invisible to it, exactly as a forbidden-but-unused
+> reference is invisible to §4.2's gates — late rather than absent.
 
 The Redis implementation lives in Infrastructure and is where the two §8.1
 constraints are satisfied — §8.3's `RedisKeys` supplies the `{service}:idem:`

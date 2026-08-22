@@ -674,6 +674,24 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             '            "form, which is what keeps a vacuous gate from quietly '
             'becoming a permanent one.");\n',
         ),
+        # And a FOURTH. §8.5's nested-dispatch gate has its own floor over
+        # CommandHandlers(), and a rendered service declares none — PR-10's
+        # slice is what brings the first handler. The gate ITSELF needs no
+        # inversion: with no handlers the offender list is empty and the
+        # assertion is correct, which is exactly why the floor beneath it
+        # has to be turned around instead.
+        (
+            "        CommandHandlers().ShouldNotBeEmpty(\n"
+            '            "Catalog declares command handlers; the selector '
+            'above found none");\n',
+            "        CommandHandlers().ShouldBeEmpty(\n"
+            '            "This service declares no command handlers yet, so the '
+            'gate above is "\n'
+            '            + "vacuous. The day it gains one this test fails — restore '
+            'the ShouldNotBeEmpty "\n'
+            '            + "form, which is what keeps a vacuous gate from quietly '
+            'becoming a permanent one.");\n',
+        ),
     ),
     "tests/Catalog.Application.Tests/ArchitectureTests.cs": (
         ("using Catalog.Domain.Products;\n", "using Catalog.Domain;\n"),
