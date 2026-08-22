@@ -516,19 +516,49 @@ The fix is a name the code chooses rather than one the runtime computes:
 namespace Common.Infrastructure.Outbox;
 
 /// <summary>
-/// The assemblies whose events may be staged. Mutable and resolved before the
-/// map, so a test host can add its own without replacing the registration —
-/// the production assemblies are always in the list (§4.2).
+/// The assemblies whose events may be staged, and the persisted-name overrides
+/// beside them. Mutable and resolved before the map, so a test host can add its
+/// own without replacing the registration — the production assemblies are
+/// always in the list (§4.2).
 /// </summary>
 public sealed class MessageTypeSource(params Assembly[] assemblies)
 {
     private readonly List<Assembly> _assemblies = [.. assemblies];
+    private readonly Dictionary<string, Type> _aliases = [];
+    private readonly Dictionary<Type, string> _written = [];
 
     public IEnumerable<Assembly> Assemblies => _assemblies;
+
+    public IReadOnlyDictionary<string, Type> Aliases => _aliases;
+
+    public IReadOnlyDictionary<Type, string> WrittenNames => _written;
 
     public MessageTypeSource Add(Assembly assembly)
     {
         _assemblies.Add(assembly);
+        return this;
+    }
+
+    /// <summary>
+    /// A name a type answered to before it was renamed, so both resolve to it
+    /// for one release. Inward only: NameOf goes on writing the current name,
+    /// which is what makes release 3 below a deletion rather than a migration
+    /// of its own.
+    /// </summary>
+    public MessageTypeSource Alias(string persistedName, Type type)
+    {
+        _aliases.Add(persistedName, type);
+        return this;
+    }
+
+    /// <summary>
+    /// Keeps writing a type's previous persisted name, so rows this instance
+    /// stages stay readable by instances that have not been replaced yet. The
+    /// other direction, and live for exactly as long.
+    /// </summary>
+    public MessageTypeSource WriteAs(Type type, string persistedName)
+    {
+        _written.Add(type, persistedName);
         return this;
     }
 }
@@ -541,10 +571,33 @@ public sealed class MessageTypeSource(params Assembly[] assemblies)
 /// </summary>
 public sealed class MessageTypeMap
 {
+    /// <summary>
+    /// The widest name the MessageType column holds, and the reason the
+    /// constant lives here rather than beside the EF configuration that spells
+    /// it: the map is what decides a type is stageable, so the map is what has
+    /// to refuse a name the column cannot keep. Read by both.
+    /// </summary>
+    public const int MaxNameLength = 300;
+
     private readonly FrozenDictionary<string, Type> _byName;
     private readonly FrozenDictionary<Type, string> _byType;
 
+    // The overloads exist because most services register no override at all,
+    // and a rename that adds one must not be a change to every call site.
     public MessageTypeMap(IEnumerable<Assembly> assemblies)
+        : this(assemblies, new Dictionary<string, Type>())
+    {
+    }
+
+    public MessageTypeMap(IEnumerable<Assembly> assemblies, IReadOnlyDictionary<string, Type> aliases)
+        : this(assemblies, aliases, new Dictionary<Type, string>())
+    {
+    }
+
+    public MessageTypeMap(
+        IEnumerable<Assembly> assemblies,
+        IReadOnlyDictionary<string, Type> aliases,
+        IReadOnlyDictionary<Type, string> writtenNames)
     {
         // FullName, not AssemblyQualifiedName: namespace and type name, no
         // version and no assembly. For contracts the namespace is already
@@ -566,6 +619,24 @@ public sealed class MessageTypeMap
                 .Select(t => (Name: t.FullName!, Type: t))
         ];
 
+        // Checked at startup, where MessageTypeMapValidator resolves the map,
+        // rather than at SaveChanges: a deep namespace with nested generic
+        // arguments passes every other guard and then fails the insert on a
+        // truncation error, with the command lost and the cause named nowhere.
+        //
+        // A loop, not FirstOrDefault: the sequence is of value tuples, so "no
+        // match" comes back as (null, null) rather than as null, and a nullable
+        // wrapper around it is never null.
+        foreach ((string Name, Type Type) pair in pairs)
+        {
+            if (pair.Name.Length > MaxNameLength)
+            {
+                throw new InvalidOperationException(
+                    $"{pair.Type.Name}'s persisted name is {pair.Name.Length} characters and the " +
+                    $"outbox column holds {MaxNameLength}. Shorten the namespace, or move the type.");
+            }
+        }
+
         IGrouping<string, (string Name, Type Type)>? clash =
             pairs.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1);
         if (clash is not null)
@@ -575,8 +646,67 @@ public sealed class MessageTypeMap
                 "column cannot distinguish them.");
         }
 
-        _byName = pairs.ToFrozenDictionary(p => p.Name, p => p.Type);
-        _byType = pairs.ToFrozenDictionary(p => p.Type, p => p.Name);
+        // Three of the five guards the callout below names. Every other name in
+        // this map is derived from a type and length checked above; an alias is
+        // typed by hand, so it is the one that can exceed the column.
+        foreach ((string Name, Type Type) alias in aliases.Select(a => (a.Key, a.Value)))
+        {
+            if (alias.Name.Length > MaxNameLength)
+            {
+                throw new InvalidOperationException(
+                    $"The alias '{alias.Name}' is {alias.Name.Length} characters and the outbox " +
+                    $"column holds {MaxNameLength}. No row can carry it.");
+            }
+
+            if (pairs.Any(p => p.Name == alias.Name))
+            {
+                throw new InvalidOperationException(
+                    $"'{alias.Name}' is an alias and also a live type name. One of them resolves " +
+                    "and which is not decidable — rename the alias or drop it.");
+            }
+
+            if (!pairs.Any(p => p.Type == alias.Type))
+            {
+                throw new InvalidOperationException(
+                    $"'{alias.Name}' aliases {alias.Type.Name}, which this map does not carry. An " +
+                    "alias names a type that is still stageable — one that is not is a row nobody " +
+                    "can deliver and a guard nobody applies.");
+            }
+        }
+
+        // An alias resolves inward, so _byName carries it and a row written
+        // before the rename still resolves. Outward is the opt-in half below.
+        _byName = pairs
+            .Select(p => (p.Name, p.Type))
+            .Concat(aliases.Select(a => (Name: a.Key, Type: a.Value)))
+            .ToFrozenDictionary(p => p.Name, p => p.Type);
+
+        // The other two guards. An overridden name must be one this map can
+        // read back, and it has to read back to THIS type — a name resolving to
+        // a different one is a substitution rather than a delivery failure, and
+        // the only one of the five with no symptom to notice.
+        foreach ((Type Type, string Name) written in writtenNames.Select(w => (w.Key, w.Value)))
+        {
+            if (!_byName.TryGetValue(written.Name, out Type? resolves))
+            {
+                throw new InvalidOperationException(
+                    $"{written.Type.Name} is written as '{written.Name}', which this map cannot " +
+                    "resolve. Alias that name to the type in the same release, or the rows this " +
+                    "instance stages are rows it cannot itself deliver.");
+            }
+
+            if (resolves != written.Type)
+            {
+                throw new InvalidOperationException(
+                    $"{written.Type.Name} is written as '{written.Name}', which resolves to " +
+                    $"{resolves.Name}. Every row staged for {written.Type.Name} would be read " +
+                    $"back as {resolves.Name} — a substitution, not a delivery failure.");
+            }
+        }
+
+        _byType = pairs.ToFrozenDictionary(
+            p => p.Type,
+            p => writtenNames.TryGetValue(p.Type, out string? written) ? written : p.Name);
     }
 
     public string NameOf(Type type) =>
@@ -626,10 +756,20 @@ that lands in the retry log with its own name in it.
 > ```csharp
 > // Release 1 — the type is now OrderPlacedDomainEvent; rows in flight say
 > // OrderPlaced. Resolve both, write the one every instance can read.
-> new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
->     .Alias("Ordering.Domain.Orders.Events.OrderPlaced", typeof(OrderPlacedDomainEvent))
->     .WriteAs(typeof(OrderPlacedDomainEvent), "Ordering.Domain.Orders.Events.OrderPlaced");
+> services.AddSingleton(
+>     new MessageTypeSource(typeof(V1.OrderPlaced).Assembly, typeof(Order).Assembly)
+>         .Alias("Ordering.Domain.Orders.Events.OrderPlaced", typeof(OrderPlacedDomainEvent))
+>         .WriteAs(typeof(OrderPlacedDomainEvent), "Ordering.Domain.Orders.Events.OrderPlaced"));
 > ```
+>
+> **The registration is half the procedure, and it is the half that used to be
+> missing.** §4.2 builds the map from `source.Assemblies`, `source.Aliases` and
+> `source.WrittenNames` — all three. A factory passing only the assemblies
+> drops both calls above on the floor: the host starts, every guard below
+> passes vacuously because there is nothing to guard, and the rename proceeds
+> to abandon rows exactly as it would have with no procedure at all. Two
+> overrides recorded on an object nobody reads is worse than none, because the
+> call sites read as the fix.
 >
 > **Release 2** drops the `WriteAs`: the new name is written, and release one's
 > instances resolve it because they already carry the renamed type — derived,
@@ -1766,17 +1906,28 @@ stateDiagram-v2
     AwaitingStock --> AwaitingPayment : StockReserved
     AwaitingStock --> [*] : StockReservationFailed → CancelOrder
     AwaitingStock --> [*] : StockTimeout 5m → CancelOrder
+    AwaitingStock --> Compensating : OrderCancelled → ReleaseStock
 
     AwaitingPayment --> Confirmed : PaymentAuthorised → ConfirmOrder
     AwaitingPayment --> Compensating : PaymentDeclined → ReleaseStock
     AwaitingPayment --> Compensating : PaymentTimeout 15m → ReleaseStock
+    AwaitingPayment --> Compensating : OrderCancelled → ReleaseStock
 
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
+    Compensating --> Compensating : PaymentAuthorised → FlagOrderForReview cancelled_after_payment
+    Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed → absorbed
 
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
+    Confirmed --> [*] : OrderCancelled → FlagOrderForReview
 ```
+
+`OrderCancelled` is the one arrow that comes from **this service** —
+[§3.2](03-bounded-contexts.md) lists it in Ordering's own Consumes column
+beside `OrderPlaced`, and for the same reason: a fact Ordering publishes is also
+a fact its workflow has to react to. `Compensating` ignores it explicitly, so
+the machine has a branch for it in every state it can reach one in.
 
 The diagram has exactly the states the machine declares and no others. Earlier
 it showed `Cancelled` and `Shipped` as states; they are terminal *outcomes*, and
@@ -1819,16 +1970,22 @@ public sealed record CancelOrder(Guid OrderId, string Reason);
 // ShipmentDispatched directly. The aggregate still enforces the transition.
 public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 
-// Escalation path for a wait with no automatic compensation (§9.6). This does
-// NOT touch the Order aggregate: the order's own state has not changed, and
-// "a human should look at this" is a fact about the process, not about the
-// order. It lands in an operations table instead.
+// Escalation path for work this platform has no contract to do (§9.6) — a
+// wait that ran out, or a cancellation with money already authorised. This
+// does NOT touch the Order aggregate, because "a human should look at this"
+// is a fact about operations rather than about the order; NOT because the
+// order is unchanged, which is true of the timeouts and false of
+// cancelled_after_payment. It lands in an operations table instead.
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
 
 public static class ReviewReasons
 {
     public const string NotDespatched = "not_despatched";
     public const string StockNotReleased = "stock_not_released";
+    // A customer cancelled an order whose payment was already authorised.
+    // Undoing that is a refund, and §3.2 closes Payments' Accepts column at
+    // AuthorisePayment — so the saga escalates instead of compensating.
+    public const string CancelledAfterPayment = "cancelled_after_payment";
 }
 
 /// <summary>
@@ -1910,6 +2067,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     public Event<StockReleased> StockReleased { get; private set; } = null!;
     public Event<ShipmentDispatched> ShipmentDispatched { get; private set; } = null!;
 
+    // Ordering's own, and the only one here that is. "Cancel this order" has
+    // two origins: the saga's own CancelOrder, always paired with Finalize, and
+    // §11.4's customer endpoint, which cancels the AGGREGATE and ends nothing.
+    // Without this the second was invisible to the machine.
+    public Event<OrderCancelled> OrderCancelled { get; private set; } = null!;
+
     // One schedule per wait. "Every wait has a timeout" is a rule the machine
     // must be able to express, not a habit to remember at each transition.
     public Schedule<OrderFulfilmentState, StockReservationExpired> StockTimeout { get; private set; } = null!;
@@ -1921,9 +2084,30 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     {
         InstanceState(x => x.CurrentState);
 
+        // "Not applicable" has to be spelled, because the default is to throw.
+        // §9.4 guarantees at-least-once, so a republished row delivers the same
+        // fact again under a NEW message id, which §9.5's inbox cannot
+        // suppress — and the copy lands on an instance that has moved on.
+        // Without this line MassTransit raises UnhandledEventException, §9.8's
+        // retry policy spends six attempts on a transition that can never
+        // apply, and the message reaches the error queue §13.6 pages on.
+        OnUnhandledEvent(x => x.Ignore());
+
         Event(() => OrderPlaced, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
         // ... remaining correlations
+
+        // Discarded when no instance exists, and this is the routine case
+        // rather than the exotic one: every cancellation the saga causes ends
+        // in Finalize, so the OrderCancelled the aggregate then publishes
+        // arrives at a queue whose instance has just been deleted.
+        Event(
+            () => OrderCancelled,
+            x =>
+            {
+                x.CorrelateById(m => m.Message.OrderId);
+                x.OnMissingInstance(m => m.Discard());
+            });
 
         Schedule(
             () => StockTimeout,
@@ -2020,7 +2204,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new CancelOrder(ctx.Saga.OrderId, CancelReasons.StockTimeout))
-                .Finalize());
+                .Finalize(),
+
+            // The customer cancelled while ReserveStock was in flight. Nothing
+            // is charged, and the reservation may or may not exist yet — so
+            // this compensates rather than finalising, which is what
+            // Compensating is for. A release nobody waits on is a reservation
+            // nobody notices is stranded.
+            When(OrderCancelled)
+                .Unschedule(StockTimeout)
+                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
+                .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
+                .TransitionTo(Compensating));
 
         During(
             AwaitingPayment,
@@ -2056,6 +2252,20 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx => ctx.Saga.CancelReason = CancelReasons.PaymentTimeout)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
+                .TransitionTo(Compensating),
+
+            // Stock is held and AuthorisePayment HAS ALREADY GONE — entering
+            // this state is what sends it. So this does NOT stop a charge, and
+            // an earlier revision of this comment said it happened "instead of
+            // the one that charges", which is backwards. What it is, is the
+            // decline branch's compensation under the customer's own reason.
+            // Whether the authorisation completes is Payments' race; if it
+            // does, Compensating escalates it below.
+            When(OrderCancelled)
+                .Unschedule(PaymentTimeout)
+                .Then(ctx => ctx.Saga.CancelReason = CancelReasons.CustomerRequest)
+                .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
+                .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
 
         During(
@@ -2073,6 +2283,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotDespatched))
+                .Finalize(),
+
+            // The one cancellation this machine cannot compensate: the card is
+            // authorised, and undoing that is a refund §3.2 gives Payments no
+            // contract to accept. So it escalates and finalises, on the
+            // despatch timeout's own argument. Unscheduling matters more than
+            // usual — left armed, that timeout raises a not_despatched review
+            // three days later for an order that was cancelled.
+            //
+            // No ReleaseStock: Confirmed means Shipping has been asked for a
+            // despatch, and a reservation being picked is not one Inventory can
+            // safely be told to drop. The review row is where both loose ends
+            // are worked.
+            When(OrderCancelled)
+                .Unschedule(DespatchTimeout)
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.CancelledAfterPayment))
                 .Finalize());
 
         During(
@@ -2096,7 +2324,40 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.StockNotReleased))
-                .Finalize());
+                .Finalize(),
+
+            // The money arriving after the cancellation was already the
+            // outcome, and the one event this state must not be quiet about.
+            // Compensating is reachable from AwaitingPayment, where
+            // AuthorisePayment has already been sent — so an authorisation can
+            // still land here, and §3.2 gives Payments no refund command.
+            //
+            // Left unwritten it falls to OnUnhandledEvent and is IGNORED: the
+            // catch-all that keeps redeliveries out of the error queue would
+            // silently swallow the case Confirmed escalates one state over.
+            // No Finalize — StockReleased and ReleaseTimeout still own the
+            // exit; this adds the review row and nothing else.
+            When(PaymentAuthorised)
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(
+                        ctx.Saga.OrderId,
+                        ReviewReasons.CancelledAfterPayment)),
+
+            // Written, not left to OnUnhandledEvent, because a reader cannot
+            // tell a decision from an omission. Reaching Compensating means a
+            // cancellation is already the outcome, so the customer's request
+            // adds nothing to do — and both exits cancel the order anyway,
+            // which Order.Cancel absorbs idempotently (§5.4).
+            Ignore(OrderCancelled),
+
+            // The two Inventory answers to a reservation this saga no longer
+            // wants. Both are reachable by cancelling in AwaitingStock, both
+            // are designed races rather than misroutes — ReleaseStock is
+            // already in flight when either lands — and both are written for
+            // the same reason as the line above.
+            Ignore(StockReserved),
+            Ignore(StockReservationFailed));
 
         SetCompletedWhenFinalized();
     }
@@ -2114,12 +2375,97 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > The events the saga *reacts* to — `StockReserved`, `PaymentDeclined` — are
 > genuine events and are published by their owners in the normal way.
 
+> **Trap — "not applicable" is a default that throws.** A state machine really
+> is idempotent against a redelivered non-initial event: the instance is past
+> the state that handled it and the transition no longer applies. What is easy
+> to miss is that MassTransit's way of saying "no transition applies" is
+> `UnhandledEventException`, so the message the design considers correctly
+> absorbed is retried to exhaustion and filed in the error queue
+> [§13.6](13-observability.md) pages on. `OnUnhandledEvent(x => x.Ignore())` is
+> the line that makes the comment true; without it the code and the reasoning
+> beside it describe opposite outcomes.
+>
+> **Timeouts were never the exposure, and only measuring said so.** A scheduled
+> message carries the token id the schedule was armed with, and MassTransit
+> discards one that no longer matches the instance — before the state machine
+> is asked. So ADR-021's uncancellable timeouts were harmless throughout, and
+> what actually reached the error queue was §9.4's ordinary at-least-once
+> redelivery: a republished row carries a *new* message id, so §9.5's inbox
+> cannot suppress it either.
+>
+> **The cost is that a genuinely misrouted event is now silent.** That is a
+> configuration fault traded against a routine one, and it is only acceptable
+> because every event this machine declares is handled in every state it can
+> reach one in. `Compensating` is where that is load-bearing, and it writes out
+> all four rather than leaning on this callback: `Ignore(OrderCancelled)`,
+> `When(PaymentAuthorised)`, `Ignore(StockReserved)` and
+> `Ignore(StockReservationFailed)`.
+>
+> **That claim was false when this callback was first added, and it took three
+> passes to make it true — which is the more useful half of the story.** First
+> `PaymentAuthorised` was missing, so an authorisation landing after a
+> cancellation was swallowed rather than escalated as
+> `cancelled_after_payment`. Writing that one transition left the two Inventory
+> races still on the catch-all, reachable by cancelling in `AwaitingStock`.
+>
+> **Repairing an invariant one counter-example at a time does not establish
+> it.** What did was enumerating: eight declared events, `Compensating`
+> reachable from two states, and those four are what follow. A callback
+> justified by an invariant is only as good as the invariant, and **nothing
+> mechanical enforces this one** — no test fails when a new event joins the
+> machine without a transition here, which is the residual to close if a ninth
+> event is ever declared.
+
+> **A cancellation has two origins and the saga used to see one.** The saga's
+> own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
+> with it. [§11.4](11-identity-authorization.md)'s customer endpoint cancels
+> the *aggregate* and ends nothing — so before `Event<OrderCancelled>` was
+> declared the machine went on reserving stock and authorising a card for an
+> order the customer had already cancelled, and the loud half of that failure
+> (`ConfirmOrder` refused by the aggregate) arrived **after** the money moved.
+>
+> What each state does is a different answer to one question — what has
+> already been spent:
+>
+> | State | What is at stake | The transition |
+> |---|---|---|
+> | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, `customer_request` |
+> | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, `customer_request` — this does not stop the charge |
+> | `Confirmed` | The card is authorised | Escalate — `cancelled_after_payment` — and finalise |
+> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | Four written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved` and `StockReservationFailed`, since both exits cancel the order anyway and `ReleaseStock` is already in flight; `When(PaymentAuthorised)` escalates `cancelled_after_payment` |
+>
+> **`Confirmed` is a gap this states rather than closes.** Undoing an
+> authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
+> Payments' Accepts column at `AuthorisePayment` — there is no refund contract
+> to send. Inventing one inside a state machine would be a §3.2 decision taken
+> in the wrong place, so the money is handed to a human and the review row is
+> what carries it. Two consequences follow and both are real: the reservation
+> on a confirmed order is left alone, because one being picked is not
+> Inventory's to drop on a saga's word.
+>
+> **A late `StockReserved` after a cancellation is a different case, and an
+> earlier revision of this callout got all three of its claims wrong.** The
+> event is ignored; the *reservation* is not stranded, because the
+> `AwaitingStock` cancel already sent `ReleaseStock` and the machine is
+> waiting on it in `Compensating`. It is not the `StockTimeout` strand either
+> — that branch cancels and finalises without a release. And neither writes an
+> `OrderReviews` row: the only review a cancel path raises is
+> `stock_not_released`, and only if `ReleaseTimeout` fires. The machine works
+> this, not a human.
+
 ### Where an escalation lands
 
 `FlagOrderForReview` is the one command here that changes no business state. Its
-handler writes an operations row and stops — no aggregate is loaded, because
-nothing about the order has changed. What changed is that the *process* stalled,
-and that is not a fact the domain model should carry:
+handler writes an operations row and stops, and no aggregate is loaded — but
+**not** because nothing about the order changed. What the reasons share is
+narrower: a human now has work this platform has no contract to do, which is a
+fact about operations rather than about the order.
+
+Two of the three are a wait that ran out, where the order's own state genuinely
+has not moved. `cancelled_after_payment` is the opposite — it exists *because*
+the order changed, cancelled with money already authorised, and §3.2 gives
+Payments no refund command. A single "the process stalled" would describe that
+row backwards:
 
 ```sql
 -- A work queue, not a log. A row means "a human still needs to look at this";
@@ -2163,8 +2509,8 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork, TimeProvid
         // same thing one table over.
         //
         // Absorbed rather than upserted, deliberately: RaisedAt is when the
-        // process first stalled, and a redelivery must not move it forward —
-        // §13.6 alerts on how long a review has been outstanding.
+        // work first landed on a human, and a redelivery must not move it
+        // forward — §13.6 alerts on how long a review has been outstanding.
         await unitOfWork.ExecuteRawAsync(
             """
             INSERT INTO ordering.OrderReviews (OrderId, Reason, RaisedAt)
@@ -2985,6 +3331,15 @@ and an alert that fires routinely trains its recipients to close it — which
 costs more than the noise it was meant to surface. Keeping the queue to faults
 is what lets the threshold stay at zero, which is the only threshold nobody has
 to interpret.
+
+**Nor do inapplicable saga transitions**, and that one had to be arranged rather
+than assumed. §9.4's at-least-once delivery hands the saga endpoint duplicates
+as a matter of routine, and a duplicate under a new message id is one §9.5's
+inbox cannot suppress — so the state machine absorbing it is the whole
+mechanism. MassTransit's default way of saying "no transition applies" is to
+throw, which sends every one of those through the retry policy above and into
+this queue. §9.6's `OnUnhandledEvent(x => x.Ignore())` is what keeps the
+threshold at zero honest; the callout there states what it costs.
 
 Rejections get their own instrument instead. `MessagingMetrics.Rejected`
 (§13.3) writes `command.domain_rejected`, tagged with the message type and the

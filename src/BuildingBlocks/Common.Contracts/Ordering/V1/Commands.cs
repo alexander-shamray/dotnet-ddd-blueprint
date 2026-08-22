@@ -45,9 +45,12 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// compensation.
 /// </summary>
 /// <remarks>
-/// This does <b>not</b> touch the <c>Order</c> aggregate: the order's own state
-/// has not changed, and "a human should look at this" is a fact about the
-/// process rather than about the order. It lands in an operations table.
+/// This does <b>not</b> touch the <c>Order</c> aggregate, and the reason is
+/// that "a human should look at this" is a fact about operations rather than
+/// about the order — not that the order is unchanged. It is unchanged for the
+/// two timeout reasons and very much changed for <c>cancelled_after_payment</c>,
+/// which is raised on an order that WAS cancelled while money was authorised.
+/// It lands in an operations table either way.
 /// </remarks>
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
 
@@ -89,4 +92,19 @@ public static class ReviewReasons
     public const string NotDespatched = "not_despatched";
 
     public const string StockNotReleased = "stock_not_released";
+
+    /// <summary>
+    /// A customer cancelled an order whose payment was already authorised.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one cancellation the saga cannot compensate.</b> Undoing an
+    /// authorisation is a refund, and §3.2 closes Payments' Accepts column at
+    /// <c>AuthorisePayment</c> — so the workflow escalates instead of
+    /// compensating, on the same argument the despatch timeout makes: a wait
+    /// with no automatic answer still ends, and a human owns what follows.
+    /// This is a <see cref="ReviewReasons"/> code and not a
+    /// <see cref="CancelReasons"/> one, because the order is already cancelled
+    /// — what needs a person is the money, not the order.
+    /// </remarks>
+    public const string CancelledAfterPayment = "cancelled_after_payment";
 }

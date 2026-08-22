@@ -429,7 +429,7 @@ suites, exactly as `pricing.proto` is. **Every mandatory PR in the plan has now
 landed and so has the one optional PR, so there is no next PR.**
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 812 tests — so the build rules and the drift rules below
+and `dotnet test` runs 822 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -719,6 +719,17 @@ own line rather than sending a reader to a file that does not hold it.
   66 it ran before this PR, not the 77 it runs now — over a change that
   answers 500 to every lower-case currency in production. **Ask what would
   falsify the double, not whether its suite is green.**
+- **A library's way of saying "this does not apply" may be to throw, and a
+  comment saying it is harmless does not make it so.** §9.6's saga was
+  documented as idempotent against a redelivered event because "the transition
+  is simply not applicable" — true of the state machine, and MassTransit's
+  spelling of it is `UnhandledEventException`, so every routine duplicate was
+  retried six times into the error queue the design depends on staying empty.
+  The suite was green throughout, because `harness.Consumed` records a delivery
+  whether the pipeline returned or threw: "no transition ran" is what a fault
+  looks like from every assertion in a saga test. **Assert the absence of the
+  exception, not the absence of the effect** — and ask what the library does
+  with the case your comment calls benign.
 - **A tool a plan names may not reach the case the plan made it conditional
   on.** Appendix C made Pact conditional on a consumer relationship becoming
   contentious; the relationship that did is gRPC, and PactNet ships HTTP and
@@ -737,7 +748,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 635 of 812, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 645 of 822, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -816,13 +827,13 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 635 of
-the 812 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 645 of
+the 822 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 177, needing the daemon exactly as
 before.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (617) and integration (177), which is the 635 above split at the
+(18), unit (627) and integration (177), which is the 645 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -968,9 +979,9 @@ Run `/validate-blueprint` after any substantive edit.
   fine. Cite the section that actually states the claim; a reference to a
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
-  admonition syntax. Two forms are named and recurring — `**Trap — …**` (16)
-  for a mistake worth naming, and `**Decision — …**` (8), which always points
-  at the ADR that records it:
+  admonition syntax. Two forms are named and recurring — `**Trap — …**`
+  (17) for a mistake worth naming, and `**Decision — …**` (8), which always
+  points at the ADR that records it:
 
   ```markdown
   > **Trap — projecting everything by default.** Each projection is a second
@@ -992,8 +1003,9 @@ Run `/validate-blueprint` after any substantive edit.
   inside one PR is not a number that recounting fixes.**
 
   What holds is the two named counts, and the branch that added a sixteenth
-  `Trap` is the first test of that. This paragraph used to say *what never
-  drifted is 15 and 8*; `Trap` has now moved once, and the lesson survives the
+  `Trap` was the first test of that; a seventeenth has since landed and was
+  reconciled the same way. This paragraph used to say *what never
+  drifted is 15 and 8*; `Trap` has now moved twice, and the lesson survives the
   movement rather than being refuted by it — those are the figures a reader
   checks, so the change was caught and reconciled inside the PR that caused it,
   where the residual nobody looks at is the one that rots unnoticed. Keep them
