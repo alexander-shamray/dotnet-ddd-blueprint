@@ -1882,11 +1882,19 @@ shared exporter says what the login *must* be and nothing has seen it. The
 login stays admitted, because admitting a spelling that never arrives costs
 nothing; it is not evidence, because an asserted measurement that never
 happened stops the next reader checking. The command
-now states the filter and reports the count it dropped, but that is prose — the
-enforceable version is an author filter inside the helper, which is a human's
-edit made with the `Edit(.claude/scripts/**)` deny lifted. Until it lands, do
-not run `/ship`'s Copilot loop unattended on a PR that outside contributors can
-comment on.
+now states the filter and reports the count it dropped, but that is prose.
+
+**The enforceable version is all three feeds behind fixed helpers, not one**,
+and an earlier revision of this residual said "the helper" as though
+`pr-review-comments.sh` were the whole surface. It is the inline feed only; the
+two `gh pr view` reads arrive unfiltered, and the review body is the one
+carrying the suppressed-comments block — the feed every finding that mattered
+has actually come from. Filtering the least important of the three would read
+as a closed residual, which is worse than the open one. Each helper needs the
+author filter *and* the dropped count, since the count is what makes a skipped
+filter visible; all of it is a human's edit made with the
+`Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run `/ship`'s
+Copilot loop unattended on a PR that outside contributors can comment on.
 
 The fifth is **`git push` under the two sweeps**, and it is the one that looks
 closed and is not. Both commands state a read-only boundary, and both used to
