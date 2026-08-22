@@ -866,9 +866,16 @@ after.
   - **The half that survived was true and incomplete, and a later branch
     measured the difference.** "The transition is simply not applicable" is a
     statement about the state machine; MassTransit's way of *saying* it is
-    `UnhandledEventException`, so every redelivered non-initial event was
-    retried six times and filed in the error queue this entry's own alert
-    argument depends on staying empty. `OnUnhandledEvent(x => x.Ignore())` is
+    `UnhandledEventException`, so a redelivered non-initial event that reached
+    the machine was retried six times and filed in the error queue this entry's
+    own alert argument depends on staying empty. **Not every redelivered
+    non-initial event**: §9.5's inbox suppresses the completed one, since
+    `OutboxMessage.Stage` persists the integration event's own message id and
+    `OutboxDispatcher` restores it onto every publish. The delivery that
+    reaches an advanced instance is the one whose inbox row was never written —
+    `InboxFilter` adds its row after the inner pipe returns, so the window is a
+    crash between the saga state committing and that second `SaveChangesAsync`.
+    `OnUnhandledEvent(x => x.Ignore())` is
     the line that was missing. Reproduced first: a redelivered `StockReserved`
     in `AwaitingPayment` came back as `NotAcceptedStateMachineException`. A
     stale **timeout** never did — a scheduled message whose token id no longer

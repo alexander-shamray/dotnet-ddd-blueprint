@@ -72,10 +72,22 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         InstanceState(x => x.CurrentState);
 
         // "Not applicable" has to be spelled, because the default is to throw.
-        // §9.4 guarantees at-least-once, so a republished row delivers the same
-        // fact a second time with a NEW message id — which §9.5's inbox cannot
-        // suppress — and the second copy lands on an instance that has already
-        // moved on. MassTransit's default unhandled-event callback raises
+        //
+        // **The path that reaches this callback is narrower than an earlier
+        // version of this comment claimed, and the narrow one is what the
+        // trade below has to be justified against.** A republished outbox row
+        // carries the SAME message id — OutboxMessage.Stage persists the
+        // integration event's own id, and OutboxDispatcher restores it onto
+        // every publish — so §9.5's inbox suppresses the ordinary completed
+        // redelivery. What it cannot suppress is a redelivery whose inbox row
+        // was never written: InboxFilter adds its row AFTER the inner pipe
+        // returns, in a second SaveChangesAsync, so a crash between the saga
+        // state committing and that write leaves the event unrecorded, and the
+        // next delivery lands on an instance that has already moved on. A
+        // producer staging one fact as two outbox rows is the other way in,
+        // and that one is a defect rather than routine.
+        //
+        // MassTransit's default unhandled-event callback raises
         // UnhandledEventException, so §9.8's retry policy spends six attempts
         // on a transition that can never become applicable and files the
         // message in the error queue §13.6 pages on. The design considers that

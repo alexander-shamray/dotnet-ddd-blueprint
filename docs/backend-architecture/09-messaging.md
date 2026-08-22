@@ -2085,9 +2085,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         InstanceState(x => x.CurrentState);
 
         // "Not applicable" has to be spelled, because the default is to throw.
-        // §9.4 guarantees at-least-once, so a republished row delivers the same
-        // fact again under a NEW message id, which §9.5's inbox cannot
-        // suppress — and the copy lands on an instance that has moved on.
+        // A republished row carries the SAME message id — the outbox persists
+        // the event's own and the dispatcher restores it on every publish — so
+        // §9.5's inbox suppresses the completed redelivery. What reaches this
+        // callback is the redelivery whose inbox row was never written: the
+        // filter adds its row after the inner pipe returns, so a crash between
+        // the saga state committing and that write lands the next delivery on
+        // an instance that has moved on.
         // Without this line MassTransit raises UnhandledEventException, §9.8's
         // retry policy spends six attempts on a transition that can never
         // apply, and the message reaches the error queue §13.6 pages on.
@@ -2389,9 +2393,15 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > message carries the token id the schedule was armed with, and MassTransit
 > discards one that no longer matches the instance — before the state machine
 > is asked. So ADR-021's uncancellable timeouts were harmless throughout, and
-> what actually reached the error queue was §9.4's ordinary at-least-once
-> redelivery: a republished row carries a *new* message id, so §9.5's inbox
-> cannot suppress it either.
+> what actually reached the error queue was a redelivery §9.5's inbox never
+> saw. **Not "a republished row carries a new message id", which is what an
+> earlier revision of this callout said and is the opposite of the mechanism
+> §9.4 specifies**: the outbox row persists the integration event's own id and
+> the dispatcher restores it onto every publish, so the completed redelivery is
+> suppressed. The one that is not is the redelivery whose inbox row was never
+> written — the filter adds its row *after* the inner pipe returns (§9.5), so a
+> crash between the saga state committing and that write leaves the event
+> unrecorded and the next delivery finds the instance already moved on.
 >
 > **The cost is that a genuinely misrouted event is now silent.** That is a
 > configuration fault traded against a routine one, and it is only acceptable
@@ -3333,10 +3343,15 @@ is what lets the threshold stay at zero, which is the only threshold nobody has
 to interpret.
 
 **Nor do inapplicable saga transitions**, and that one had to be arranged rather
-than assumed. §9.4's at-least-once delivery hands the saga endpoint duplicates
-as a matter of routine, and a duplicate under a new message id is one §9.5's
-inbox cannot suppress — so the state machine absorbing it is the whole
-mechanism. MassTransit's default way of saying "no transition applies" is to
+than assumed. §9.4's at-least-once delivery hands the saga endpoint duplicates,
+and most of them §9.5's inbox suppresses — the outbox preserves the event's
+message id across every republish, so a completed redelivery never reaches the
+machine. The one that does is the redelivery whose inbox row was never written,
+because the filter records it only after the consumer returns: the saga state
+commits, the row does not, and the next delivery finds an instance that has
+moved on. That case is rare and it is the whole justification, so the state
+machine absorbing it is the mechanism. MassTransit's default way of saying "no
+transition applies" is to
 throw, which sends every one of those through the retry policy above and into
 this queue. §9.6's `OnUnhandledEvent(x => x.Ignore())` is what keeps the
 threshold at zero honest; the callout there states what it costs.

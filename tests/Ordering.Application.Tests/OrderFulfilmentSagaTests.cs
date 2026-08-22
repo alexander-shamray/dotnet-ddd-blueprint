@@ -412,10 +412,13 @@ public class OrderFulfilmentSagaTests
     [Fact]
     public async Task A_redelivered_event_is_ignored_rather_than_faulted()
     {
-        // §9.4 guarantees at-least-once, so the saga sees duplicates as a
-        // matter of routine. §9.8's inbox suppresses the ones that arrive with
-        // the same message id; a republished row carries a new one, and the
-        // saga's own state is what must absorb it. "Not applicable" is
+        // §9.4 guarantees at-least-once, and §9.8's inbox suppresses the
+        // completed redelivery — the outbox preserves the event's message id,
+        // so a republished row arrives as the same message. What the saga's
+        // own state must absorb is the delivery the inbox never recorded: the
+        // filter writes its row after the consumer returns, so a crash between
+        // the saga state committing and that write leaves the next delivery
+        // free to land on an instance that has moved on. "Not applicable" is
         // OnUnhandledEvent(x => x.Ignore()) and not a default that throws:
         // without it, six attempts of §9.8's retry policy end in the error
         // queue §13.6 pages on, for a duplicate the design considers correctly
@@ -430,8 +433,14 @@ public class OrderFulfilmentSagaTests
 
             (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
 
-            // A second delivery of the same fact, with its own message id —
-            // which is what an outbox republish looks like on the wire.
+            // A second delivery of the same fact. It carries its own message
+            // id, and that is a property of this harness rather than of the
+            // wire: §12.5's saga suite configures no inbox at all, so the id
+            // decides nothing here and the stimulus is the state machine's
+            // input either way. **Not "what an outbox republish looks like"**,
+            // which is what this line used to say — a republish carries the
+            // id the outbox persisted, and in production it is the inbox row
+            // that fails to exist, not the id that changes.
             StockReserved redelivered = SagaContracts.StockReserved(orderId);
             await Publish(harness, redelivered);
 

@@ -723,8 +723,15 @@ own line rather than sending a reader to a file that does not hold it.
   comment saying it is harmless does not make it so.** §9.6's saga was
   documented as idempotent against a redelivered event because "the transition
   is simply not applicable" — true of the state machine, and MassTransit's
-  spelling of it is `UnhandledEventException`, so every routine duplicate was
-  retried six times into the error queue the design depends on staying empty.
+  spelling of it is `UnhandledEventException`, so a duplicate that reached the
+  machine was retried six times into the error queue the design depends on
+  staying empty. **Not "every routine duplicate", which is how this lesson was
+  first written**: §9.5's inbox suppresses the completed redelivery, because
+  the outbox persists the event's message id and restores it on every publish.
+  What gets through is the delivery whose inbox row was never written — the
+  filter records it only after the consumer returns, so a crash between the
+  saga state committing and that write is the window. Narrow, and the whole
+  justification for the callback, which is why naming it exactly is the point.
   The suite was green throughout, because `harness.Consumed` records a delivery
   whether the pipeline returned or threw: "no transition ran" is what a fault
   looks like from every assertion in a saga test. **Assert the absence of the
