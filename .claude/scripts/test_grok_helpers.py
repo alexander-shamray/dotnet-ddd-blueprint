@@ -426,26 +426,51 @@ class ReviewArgumentValidation(unittest.TestCase):
             cwd=str(SCRIPTS),
         )
 
-    def test_the_old_no_argument_form_is_refused(self):
-        # The interface changed, and a caller left on the old grant would
-        # otherwise run a review that accounts for nothing.
+    def test_the_no_argument_form_is_refused(self):
         result = self.run_review()
         self.assertEqual(2, result.returncode)
         self.assertIn("usage:", result.stderr)
 
-    def test_a_pr_number_must_be_digits(self):
-        self.assertEqual(2, self.run_review("../evil", "1", "full").returncode)
-        self.assertEqual(2, self.run_review("", "1", "full").returncode)
+    def test_the_pr_number_is_not_an_argument_at_all(self):
+        # The defect this closes: the PR was argument one, so a numeric typo —
+        # or an instruction substituting another open PR — posted the
+        # reservation there while reviewing THIS branch, leaving this branch's
+        # cap re-armed and spending someone else's slot. It is resolved from the
+        # branch now, so the old three-argument form has to be REFUSED rather
+        # than tolerated: a caller left on the old grant would otherwise pass a
+        # PR number where the slot goes.
+        result = self.run_review("134", "1", "full")
+        self.assertEqual(2, result.returncode)
+        self.assertIn("usage:", result.stderr)
+
+    def test_the_pr_is_resolved_from_the_branch_being_cloned(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        self.assertRegex(text, r'gh pr list --head "\$branch"')
+        # And it is the same `$branch` the clone is checked out to, which is the
+        # whole point — the slot and the review have to be one subject.
+        self.assertRegex(text, r'git -C "\$work/repo" checkout --quiet "\$branch"')
+        # Exactly one, with none and several both refused rather than guessed at.
+        self.assertIn("exactly one open pull request", text)
 
     def test_a_slot_outside_the_cap_is_refused(self):
         for slot in ("0", "13", "12.0", "-1", "1 2"):
             with self.subTest(slot=slot):
-                self.assertEqual(2, self.run_review("42", slot, "full").returncode)
+                self.assertEqual(2, self.run_review(slot, "full").returncode)
 
     def test_a_mode_outside_the_two_is_refused(self):
         for mode in ("", "Full", "review", "full recheck"):
             with self.subTest(mode=mode):
-                self.assertEqual(2, self.run_review("42", "1", mode).returncode)
+                self.assertEqual(2, self.run_review("1", mode).returncode)
+
+    def test_every_refusal_happens_before_anything_is_asked_of_github(self):
+        # These cases run with no network and no token in CI, so a refusal that
+        # reached `gh` would fail for the wrong reason — and a reader could not
+        # tell the two apart from the exit code alone.
+        for args in ((), ("13", "full"), ("1", "Full"), ("134", "1", "full")):
+            with self.subTest(args=args):
+                result = self.run_review(*args)
+                self.assertEqual(2, result.returncode)
+                self.assertNotIn("pull request", result.stderr)
 
 
 class LedgerStub:
@@ -705,11 +730,47 @@ class SweepWorktreeShape(unittest.TestCase):
         # `git worktree add` writes "HEAD is now at <sha> <subject>" to STDOUT,
         # so an unredirected call made this helper's return value a commit
         # message followed by a path — and the teardown then failed with a `not
-        # an existing directory` naming the whole subject line. Found by running
-        # the round trip, not by reading it.
-        text = DETACH.read_text(encoding="utf-8")
-        self.assertRegex(text, r"git worktree add --detach .* >&2")
-        self.assertIn("printf '%s\\n' \"$resolved\"", text)
+        # an existing directory` naming the whole subject line.
+        #
+        # **This runs the real round trip rather than grepping the source**, and
+        # the first version of this test did the latter. Two source strings
+        # existing proves nothing about what a caller captures: an added debug
+        # `echo`, or any other command leaking a line, recreates the defect with
+        # the assertions green. So: detach at a real commit, capture stdout
+        # exactly as `security-sweep.md` does, and assert it is one line and a
+        # directory. Raised by a reviewer against the structural version.
+        repo = str(SCRIPTS.parent.parent)
+        pinned = run_bash('cd "$REPO" && git rev-parse HEAD', REPO=repo).stdout.strip()
+        self.assertRegex(pinned, r"^[0-9a-f]{40}$")
+
+        made = run_bash(
+            'cd "$REPO" && bash "$DETACH" "$SHA" 2>/dev/null',
+            REPO=repo, DETACH=str(DETACH), SHA=pinned,
+        )
+        path = made.stdout.strip()
+        # Registered before anything is asserted, so a failing assertion below
+        # still tears the worktree down rather than leaving one for the next run.
+        self.addCleanup(
+            lambda: run_bash(
+                'cd "$REPO" && bash "$DROP" "$TARGET" >/dev/null 2>&1 || true',
+                REPO=repo, DROP=str(DROP), TARGET=path,
+            )
+        )
+        self.assertEqual(0, made.returncode, made.stderr)
+        self.assertEqual(
+            path + "\n", made.stdout,
+            "stdout must be the path and nothing else — no banner, no commit subject",
+        )
+        self.assertEqual(1, len(made.stdout.strip().split("\n")))
+        self.assertEqual(
+            "yes",
+            run_bash('[ -d "$P" ] && echo yes || echo no', P=path).stdout.strip(),
+            "the returned string must be usable as a directory by the caller",
+        )
+        # And it is the shape the drop helper will later require, which is the
+        # agreement between the two ends of a sweep's lifetime.
+        self.assertEqual(self.tmproot, run_bash('dirname "$P"', P=path).stdout.strip())
+        self.assertRegex(run_bash('basename "$P"', P=path).stdout.strip(), r"^secsweep-.{6}$")
 
 
 class LabelHelperHasNoFreeParameter(unittest.TestCase):

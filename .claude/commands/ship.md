@@ -711,20 +711,32 @@ same argument as never calling a branch clean because asking failed.
       the point, and a review run by the author's own model is not one:
 
       ```bash
-      bash .claude/scripts/grok-review.sh <pr> <N> <full|recheck>
+      bash .claude/scripts/grok-review.sh <N> <full|recheck>
       ```
 
-      **The helper spends the ledger slot itself, and that is why it now takes
-      three arguments.** This block used to read `bash
-      .claude/scripts/grok-review.sh` with the reservation posted beside it as
-      a separate command, and nothing made the pair happen in that order or
-      happen at all: a run that invoked the review without reserving spent a
-      check that left no record, a resumed run read a lower count, and the PR
-      ran past twelve against a paid API. A bound whose two halves are two
-      commands is a bound any ordering mistake lifts. So do not post a
-      reservation here — `.claude/settings.json` denies the verb — and pass the
-      PR number and the slot instead. The helper validates all three against
-      the ledger's own vocabulary and refuses anything else.
+      **The helper spends the ledger slot itself, and that is why it takes the
+      slot.** This block used to read `bash .claude/scripts/grok-review.sh` with
+      the reservation posted beside it as a separate command, and nothing made
+      the pair happen in that order or happen at all: a run that invoked the
+      review without reserving spent a check that left no record, a resumed run
+      read a lower count, and the PR ran past twelve against a paid API. A bound
+      whose two halves are two commands is a bound any ordering mistake lifts.
+      So do not post a reservation here — `.claude/settings.json` denies the
+      verb — and pass the slot instead.
+
+      **You do not pass the PR number, and it was an argument for exactly one
+      review round.** A caller-supplied number is a free parameter aimed at the
+      one thing the helper writes to the outside world: a numeric typo, or an
+      instruction substituting another open pull request, posted the reservation
+      *there* while cloning and reviewing this branch — so this branch's cap
+      stayed re-armed and someone else's slot was spent. That is this very
+      change's own defect one level up, accounting pointed somewhere other than
+      the thing it accounts for. The helper resolves the PR from the branch it
+      is about to clone, so the slot and the review cannot be different
+      subjects, and refuses a branch with no open pull request or more than one
+      rather than guessing. It validates the slot and the mode against the
+      ledger's own vocabulary and refuses anything else, the old
+      three-argument form included.
 
       **Exit 13 is the reservation refused**, and it means stop the Grok loop
       rather than take the next slot. Two causes reach it and the response is

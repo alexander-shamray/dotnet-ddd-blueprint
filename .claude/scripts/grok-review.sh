@@ -25,22 +25,29 @@
 # that left no record, a resumed run read a lower count, and the PR ran past
 # twelve against a paid API. A bound whose two halves are two commands is a
 # bound any ordering mistake lifts. Invocation and accounting are one operation
-# now: this script takes the PR and the slot, posts the reservation itself
-# immediately before the model call it accounts for, and .claude/settings.json
-# denies the `reserve` and `release` spellings to the session that invokes it.
+# now: this script takes the slot, RESOLVES the pull request from the branch it
+# is about to clone, posts the reservation itself immediately before the model
+# call it accounts for, and .claude/settings.json denies the `reserve` and
+# `release` spellings to the session that invokes it.
 set -euo pipefail
 
-# The PR this review is a check against, the slot it spends, and which kind of
-# check it is. Validated to the ledger's own vocabulary rather than passed
-# through, because a slot outside 1..12 is a claim about a cap that does not
-# exist and `gh` would be pointed at whatever the third argument happened to be.
-[ "$#" -eq 3 ] ||
-  { echo "usage: grok-review.sh <pr-number> <slot 1-12> <full|recheck>" >&2; exit 2; }
-pr="$1"
-slot="$2"
-mode="$3"
-[[ "$pr" =~ ^[0-9]+$ ]] ||
-  { echo "pr-number must be digits: $pr" >&2; exit 2; }
+# The slot this review spends and which kind of check it is. Validated to the
+# ledger's own vocabulary rather than passed through, because a slot outside
+# 1..12 is a claim about a cap that does not exist.
+#
+# **The PR is NOT an argument, and it was one in the first version of this
+# change.** A caller-supplied number is a free parameter aimed at the one thing
+# this script writes to the outside world: any numeric typo — or an instruction
+# that substituted another open pull request — posted the reservation *there*
+# while cloning and reviewing THIS branch, so this branch's cap stayed re-armed
+# and somebody else's slot was spent. That is the same defect the change was
+# written to close, one level up: accounting that can be pointed somewhere other
+# than the thing it accounts for. Resolved below from the branch instead, which
+# makes the slot and the review provably the same subject.
+[ "$#" -eq 2 ] ||
+  { echo "usage: grok-review.sh <slot 1-12> <full|recheck>" >&2; exit 2; }
+slot="$1"
+mode="$2"
 [[ "$slot" =~ ^([1-9]|1[0-2])$ ]] ||
   { echo "slot must be 1..12 — the ledger's whole vocabulary: $slot" >&2; exit 2; }
 case "$mode" in
@@ -99,6 +106,19 @@ host_path() {
 
 branch=$(git branch --show-current)
 [ -n "$branch" ] || { echo "not on a branch" >&2; exit 2; }
+# The pull request the ledger row lands on, resolved from the branch this script
+# is about to clone — so the two cannot be different subjects. See the argument
+# block above for what a caller-supplied number bought.
+#
+# Exactly one open pull request, and both other counts are refusals rather than
+# something to guess past. None means there is no ledger to write to and
+# therefore no cap to enforce, which is a state to stop in, not to review
+# through. More than one is ambiguous, and picking either would be inventing
+# the answer to the question this line exists to ask.
+pr=$(gh pr list --head "$branch" --state open --json number --jq '.[].number') ||
+  { echo "cannot ask GitHub which pull request $branch has" >&2; exit 2; }
+[ "$(grep -c . <<<"$pr")" -eq 1 ] ||
+  { echo "expected exactly one open pull request for $branch, found: ${pr:-none}" >&2; exit 2; }
 # suggestions.md is the one file allowed to differ — it is the review's own
 # working state. Anything else, tracked or untracked, means the reviewer would
 # read a state the PR does not carry: the clone below holds only commits.
