@@ -45,6 +45,23 @@ path=$(mktemp -d "$tmproot/secsweep-XXXXXX") ||
   { echo "cannot create a sweep worktree directory under $tmproot" >&2; exit 4; }
 resolved=$(cd "$path" && pwd -P)
 
+# Every refusal from here on has to take the directory with it. Once this script
+# makes the path, a later failure leaves one behind that nothing will ever
+# revisit — the next run's `mktemp` invents a different name — so a repo whose
+# `git worktree add` keeps refusing litters the temp root one empty directory at
+# a time. That cost nothing while the caller supplied the path; it does now.
+#
+# `rmdir`, never `rm -rf`, and the difference is the whole safety of this
+# function: rmdir refuses a non-empty directory, so a half-created worktree is
+# LEFT for inspection rather than deleted by a cleanup path. A recursive remove
+# here would be delete-on-error over a path this script chose, which is the
+# shape git-worktree-drop.sh spends its whole length refusing to have.
+refuse() {
+  echo "$1" >&2
+  rmdir "$resolved" 2>/dev/null || true
+  exit "$2"
+}
+
 # The shape check, kept even though this script made the path, because it is the
 # contract git-worktree-drop.sh depends on and a check that only holds while
 # nobody edits the line above is not a contract. It is cheap and it fails loudly.
@@ -58,10 +75,10 @@ resolved=$(cd "$path" && pwd -P)
 # held, direct-childness did not. Splitting the two halves is what fixes it —
 # a basename contains no `/`, so `??????` can only mean six real characters.
 [ "$(dirname "$resolved")" = "$tmproot" ] ||
-  { echo "not a direct child of the temp root: $resolved" >&2; exit 2; }
+  refuse "not a direct child of the temp root: $resolved" 2
 case "$(basename "$resolved")" in
   secsweep-??????) : ;;
-  *) echo "not a sweep-shaped temp path: $resolved" >&2; exit 2 ;;
+  *) refuse "not a sweep-shaped temp path: $resolved" 2 ;;
 esac
 
 # Redirected, and the redirection is load-bearing rather than tidy. This script's
@@ -71,7 +88,8 @@ esac
 # handed both to the next command as a directory name. Found by running the
 # round trip rather than by reading it: the failure is a `not an existing
 # directory` naming a whole commit message, at the teardown, after the sweep.
-git worktree add --detach "$resolved" "$commit" >&2
+git worktree add --detach "$resolved" "$commit" >&2 ||
+  refuse "git worktree add refused $resolved at $commit" 3
 # The path, and it is the POSIX spelling — the one the shell and this helper
 # share. The caller still reads `git worktree list --porcelain` for the
 # host-native spelling its readers need; under MSYS those are two strings for

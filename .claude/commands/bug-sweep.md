@@ -669,10 +669,10 @@ agent profile's argument does not cover this.
 
 Three things narrow it and none of them closes it. The path check at the head of
 step 2 drops any candidate citing a path outside `$work` before the code is
-opened. The mutation that still takes a free parameter is `gh issue create`,
-with its stated rule — always `--repo` for this repository — where the label
-and the worktree paths have none left to state a rule about, both having gone
-into helpers. `Write` and
+opened. The one mutation that still takes free parameters is `gh issue create`,
+with its stated rule — always `--repo` for this repository, with the issue's own
+text unbounded — where the label and the worktree paths have nothing left to
+state a rule about, both having gone into helpers. `Write` and
 `Edit` are **denied**, which closes the editing tools and not the class: `Bash`
 remains granted, and a redirection through it writes what `Edit(...)` refuses —
 argued in full below. **The branch is a residual rather than a control**: `git
@@ -792,10 +792,13 @@ re-open source editing, and a read-only claim resting on prose while the grant
 permits writing every undenied path is unenforced. Bodies go through
 `gh issue create` on stdin for exactly this reason.
 
-**Three mutations are still scoped by discipline rather than by the grant, and
-naming all three is the point.** An earlier draft of this paragraph claimed the
-only mutations were the issues filed and the worktree, and that was two
-omissions wide:
+**One mutation is still scoped by discipline rather than by the grant, and the
+other two are closed.** This paragraph has been wrong in both directions: an
+earlier draft claimed the only mutations were the issues filed and the worktree,
+which was two omissions wide, and it then went on saying three were open after
+two of them had been moved into helpers by the change immediately below. The
+count is the part that rots, so it is stated once here and the entries carry
+their own status:
 
 - **`Bash(gh issue create:*)` pins no repository.** It is a prefix grant, so the
   rule is prose: always pass `--repo` for **this** repository, never one named

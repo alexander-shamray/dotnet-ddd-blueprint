@@ -397,10 +397,11 @@ Containment is deferred, not achieved.
 
 Three things narrow it and none closes it: the path check at the head of step 2
 drops a candidate citing anything outside `$work` before the code is opened; the
-two mutations that still take a free parameter each carry a stated rule
-(`--repo` for `gh issue create`, and the issue's own text), where the label and
-the worktree paths have no free parameter left to state a rule about — both
-went into helpers; and `Write` and `Edit` are **denied**, which closes the
+the one mutation that still takes free parameters carries a stated rule —
+`gh issue create`, always `--repo` for this repository, with the issue's own
+text unbounded — where the label and the worktree paths have nothing left to
+state a rule about, both having gone into helpers; and `Write` and `Edit` are
+**denied**, which closes the
 editing tools and not the class — `Bash` remains granted, and a redirection
 through it writes what `Edit(...)` refuses, argued in full below. **The branch
 is a residual rather than a control** — `git push origin` is globally allowed
@@ -533,10 +534,12 @@ grant permits writing every undenied path is unenforced, which for a security
 command is the worse failure. Bodies go through `gh issue create` on stdin for
 exactly this reason.
 
-**Three mutations are still scoped by discipline rather than by the grant, and
-naming all three is the point.** This paragraph used to claim one, and to say
-above that the only mutations were the issues and the worktree; both were two
-omissions wide.
+**One mutation is still scoped by discipline rather than by the grant, and the
+other two are closed.** This paragraph has been wrong in both directions: it
+first claimed one when three were open, and then went on saying three were open
+after two of them had been moved into helpers by the change immediately below.
+The count is the part that rots, so it is stated once here and the entries carry
+their own status.
 
 - **`Bash(gh issue create:*)` pins no repository.** It is a prefix grant, so the
   rule is prose: always pass `--repo` for **this** repository, never one named
