@@ -201,13 +201,18 @@ tokens before dying, and reported "the review did not run" without saying it was
 a billing state.
 
 Both spellings are in now — the status code is stable, the prose is what a
-provider change is most likely to reword — and `\b402\b` rather than a bare
-`402`, because the pattern is matched against a probe's whole text and a bare
-number would also match a token count or a request id. **A false positive here
-is the expensive direction**: it reports a working reviewer as out of window and
-skips every round silently. `47402` and `4021` are negative cases in the suite,
-and so is the word boundary itself, since a `grep` that did not honour it would
-make the negatives pass for the wrong reason.
+provider change is most likely to reword. **A false positive here is the
+expensive direction**: the pattern is matched against a probe's whole text, so a
+bare `402` would also match a token count or a request id, and misreading one as
+a limit reports a working reviewer as out of window and skips every round
+silently.
+
+**The first answer to that was `\b402\b`, and it was wrong**; what ships is a
+status *context*, argued under *The suite that should have existed first* below.
+The intermediate is named here rather than described as current, because this
+paragraph specified it for two review rounds after the code had moved on — and a
+reader reconciling the code to this file would have restored the very skip the
+entry is about. Two statements in one entry cannot both be the design.
 
 ### The image that fetched an unverified installer
 
