@@ -63,7 +63,7 @@ the review loop's own helpers under `.claude/scripts/`. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
 
-**The tenth needs `bash`, `grep` and `git`, and no network** — the `gh` its
+**The tenth needs `bash`, `grep`, `git` and `jq`, and no network** — the `gh` its
 ledger cases call is a stub on `PATH`, and the `git` is real rather than
 incidental: one case detaches a worktree at `HEAD` and removes it again, because
 a helper's contract is its stdout and only a round trip tests what a caller

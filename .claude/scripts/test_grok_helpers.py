@@ -48,7 +48,9 @@ Two rules the suite is written to, both of them this repository's:
   cases are paired with structural cases over the call sites.
 
 Run: py -3.12 -m unittest discover -s .claude/scripts
-Needs bash and grep on PATH; needs no network, no Docker, no gh and no SDK.
+Needs bash, grep, git and jq on PATH; needs no network, no Docker, no gh
+and no SDK. `git` because one case drives a real worktree round trip, and
+`jq` because the did-it-run verdict is parsed rather than matched.
 """
 
 import os
@@ -68,18 +70,30 @@ DROP = SCRIPTS / "git-worktree-drop.sh"
 
 BASH = shutil.which("bash")
 GREP = shutil.which("grep")
+GIT = shutil.which("git")
+JQ = shutil.which("jq")
 
 
 def setUpModule():
     # Not a skip. A skip on a missing tool reports a pass, which is the fail-open
     # this repository has refused since ADR-010 made real infrastructure
-    # non-optional for `dotnet test`. Absent bash, this suite has established
-    # nothing and says so.
-    if BASH is None or GREP is None:
+    # non-optional for `dotnet test`. Absent any of these, this suite has
+    # established nothing and says so.
+    #
+    # The list grew with the suite and is checked rather than assumed: `git`
+    # arrived with the worktree round trip and `jq` with the parsed verdict, and
+    # a prerequisite that is used but not declared is the drift this repository
+    # keeps finding one file at a time.
+    missing = [
+        name for name, path in
+        (("bash", BASH), ("grep", GREP), ("git", GIT), ("jq", JQ))
+        if path is None
+    ]
+    if missing:
         raise RuntimeError(
-            "bash and grep are required: these tests exercise the same engine "
-            "the scripts do, and asserting through Python's `re` instead would "
-            "be testing a second specification"
+            f"{', '.join(missing)} required and not on PATH: these tests exercise "
+            "the same tools the scripts do, and asserting through Python "
+            "equivalents instead would be testing a second specification"
         )
 
 

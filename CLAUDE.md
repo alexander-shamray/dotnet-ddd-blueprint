@@ -1046,7 +1046,7 @@ py -3.12 -m unittest discover -s .github/closure-gate
 gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
 
-py -3.12 -m unittest discover -s .claude/scripts   # needs bash, grep and git; no network
+py -3.12 -m unittest discover -s .claude/scripts   # needs bash, grep, git, jq; no network
 ```
 
 **The tenth is the review loop's own helpers, and it is the only suite whose
