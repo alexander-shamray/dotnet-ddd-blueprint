@@ -242,18 +242,19 @@ class FailsClosed(unittest.TestCase):
             linked=(88,),
         )), [])
 
-    def test_a_linked_list_at_the_page_size_is_refused(self):
-        problems = check(payload(
-            body="| | |\n|---|---|\n| Closes | #88 |\n\nCloses #88\n",
-            commit_messages=("fix: a\n\nCloses #88",),
-            linked=tuple(range(1, 101)),
-        ))
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("paginated endpoint", problems[0])
+    def test_a_linked_list_at_the_page_size_is_judged_not_refused(self):
+        """NoLinkedGuard — the commit guard must not gain a twin here.
 
-    def test_a_linked_list_below_the_page_size_is_judged(self):
-        """The second boundary is a boundary too, not a permanent refusal."""
-        numbers = tuple(range(1, 100))
+        `gh` preloads `closingIssuesReferences`: cli/cli's
+        `pkg/cmd/pr/shared/finder.go` dispatches to
+        `preloadPrClosingIssuesReferences`, which loops on
+        `PageInfo.HasNextPage` until the collection is exhausted. Commits are
+        not in that preload set, which is why they are guarded and this is
+        not. A guard here would refuse every pull request with a hundred or
+        more linked issues, and telling its author to paginate would be
+        unfollowable advice about an already-paginated fetch.
+        """
+        numbers = tuple(range(1, 101))
         cell = " ".join(f"#{n}" for n in numbers)
         self.assertEqual(check(payload(
             body=f"| | |\n|---|---|\n| Closes | {cell} |\n",

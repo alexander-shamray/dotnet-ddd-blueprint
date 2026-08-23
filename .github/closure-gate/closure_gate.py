@@ -64,25 +64,31 @@ history — and a closing keyword in a commit past the cut is absent from the
 commit set for a reason that has nothing to do with what the pull request
 says. If the description omits it too, the sets agree and the merge closes an
 issue nobody declared: the fail-open shape this file exists to close, reached
-by a route the parser cannot see. So `COMMIT_PAGE_SIZE` makes it fail closed
-— a list at or above the page size is **refused rather than judged**, and the
+by a route the parser cannot see. So `GH_PAGE_SIZE` makes it fail closed — a
+list at or above the page size is **refused rather than judged**, and the
 message says to fetch through a paginated endpoint.
 
-**`closingIssuesReferences` is paged by the same call and was guarded one
-round later**, which is the same defect as the three sites above: the fix
-went in where the finding pointed and not where the shape recurs. A body
-carrying more closures than one page returns hands the gate a prefix of
-GitHub's own answer, and a reference past the cut is then absent from
-`linked` — so the table looks like it understates, or the commit set looks
-like it over-closes, for a reason that is neither. Both collections now
-refuse at the boundary.
+**`closingIssuesReferences` is NOT exposed to that, and a guard for it was
+added here and then removed.** `gh` preloads the collection: `finder.go`
+dispatches to `preloadPrClosingIssuesReferences`, which loops on
+`PageInfo.HasNextPage` issuing `closingIssuesReferences(first: 100, after:
+$endCursor)` until it is exhausted. Commits get no such treatment — the
+preload set is reviews, comments, closing issues and checks, and nothing
+else — which is exactly why one of these two collections needs a guard and
+the other must not have one. A guard there would refuse every pull request
+with a hundred or more linked issues, and its own advice would be
+unfollowable, because that fetch is already paginated.
 
-**The page size is GitHub's documented default and has not been measured
-here**, which is why the guard triggers at or above it rather than on
-equality: if the real cap is higher, this refuses a pull request it could
-have judged, and a false refusal is the recoverable direction. Nothing in
-this repository has come close — the longest branch to date is a few dozen
-commits — so the guard is a tripwire, not a workaround.
+**Measured against cli/cli at v2.92.0, not assumed.** An earlier revision of
+this docstring said the page size was "GitHub's documented default and has
+not been measured here" and guarded both collections on that guess. Half of
+it was right, and the wrong half was a false-refusal generator sitting in a
+gate whose whole subject is not trusting an unchecked claim. The guard
+triggers at or above the size rather than on equality for the reason that
+still holds: a prefix of exactly one page and a complete list of exactly one
+page are indistinguishable from in here. `NoLinkedGuard` in the suite pins
+the removal, so the symmetric guard cannot come back on the symmetry
+argument that produced it.
 
 Stdlib only, on the licence gate's terms, and the network is not in here: the
 deciding takes JSON on stdin and the fetching is one `gh` call in the
@@ -138,9 +144,10 @@ ISSUE_NUMBER = re.compile(r"#(\d+)\b")
 
 REQUIRED_FIELDS = ("number", "url", "body", "commits", "closingIssuesReferences")
 
-# One page of `gh pr view`. A collection this long may be a prefix, and a
-# prefix is indistinguishable from the whole thing from in here. It bounds
-# the commit list and `closingIssuesReferences` alike — one call, one page.
+# One page of `gh pr view`. The commit list is not preloaded, so a list this
+# long may be a prefix and a prefix is indistinguishable from the whole thing
+# from in here. `closingIssuesReferences` IS preloaded and is deliberately
+# not measured against this — see the docstring.
 GH_PAGE_SIZE = 100
 
 PULL_URL = re.compile(r"^https?://github\.com/(?P<repo>[\w.-]+/[\w.-]+)/pull/\d+", re.IGNORECASE)
@@ -225,17 +232,6 @@ def check(payload: dict) -> list[str]:
             f"fail-open shape this gate exists to close, so it refuses rather "
             f"than judging: fetch the commits through a paginated endpoint and "
             f"pass the complete list"
-        ]
-
-    if len(payload["closingIssuesReferences"]) >= GH_PAGE_SIZE:
-        return [
-            f"this pull request reports "
-            f"{len(payload['closingIssuesReferences'])} linked issues, at or "
-            f"above the {GH_PAGE_SIZE} one page returns — so GitHub's own "
-            f"answer to what merging closes may itself be a prefix here, and "
-            f"a reference past the cut would read as a table that understates "
-            f"or a commit that over-closes. Neither would be true. Fetch this "
-            f"collection through a paginated endpoint and pass it whole"
         ]
 
     linked = {issue["number"] for issue in payload["closingIssuesReferences"]}
