@@ -81,7 +81,7 @@ ENV HOME=/home/reviewer
 # against the very same file. A credential must mean the same thing on both
 # sides of the mount.
 #
-# Track the host's version when it moves. Both are 1.0.0 today.
+# Track the host's version when it moves. Both are 1.0.5 today.
 #
 # PATH is set before the install rather than after, so the `grok --version`
 # below is a real check. After the RUN it would not be on PATH yet and the
@@ -89,12 +89,71 @@ ENV HOME=/home/reviewer
 # about whether grok installed.
 ENV PATH="/home/reviewer/.grok/bin:${PATH}"
 
-ARG GROK_VERSION=1.0.0
-RUN curl --fail --silent --show-error --location \
-        https://x.ai/cli/install.sh --output /tmp/install-grok.sh \
-    && bash /tmp/install-grok.sh "${GROK_VERSION}" \
-    && rm --force /tmp/install-grok.sh \
-    && grok --version
+# The version was pinned and its INTEGRITY was not, which is the half of the
+# argument above that was missing. Every build refetched
+# https://x.ai/cli/install.sh and executed it with no checksum and no signature
+# — inside the one image that exists to be a security boundary, and that
+# grok-review.sh then hands the credentials the boundary was built to contain.
+# Anyone able to alter that script or its delivery (an upstream compromise, or
+# DNS/CDN/TLS interception on the developer's network) got code execution inside
+# the boundary on the next review. The image is rebuilt routinely, so the window
+# was not a one-off.
+#
+# Both artefacts are pinned now, and the second one matters more than the first:
+# the installer performs NO verification of the 163 MB binary it downloads —
+# read, not assumed, by grepping the script for sha256/checksum/gpg and finding
+# nothing — so pinning only the bootstrap would have left the larger artefact
+# arriving unchecked over the same channel from the same origin.
+#
+# The digests were taken by fetching each artefact and hashing it, and the
+# amd64 one was cross-checked against the md5 GCS reports in its own
+# `x-goog-hash` response header. That is trust on first use, and it is the point
+# rather than a weakness: from here a change to what x.ai serves for a pinned
+# version fails the build, and moving the pin is a reviewed diff — the same
+# property Directory.Packages.props and global.json are here for.
+#
+# An architecture with no recorded digest FAILS rather than building unverified.
+# That is the scaffold's rule one tree over: a tool that refuses input it has
+# never been shown beats one that guesses. Docker Desktop on this host builds
+# linux/amd64; an arm64 developer adds one line, which is exactly the reviewed
+# diff a pin is for.
+#
+# Residual, stated because it is real: the installer runs the downloaded binary
+# once itself (`"$binary_tmp" --version`, its own smoke check) BEFORE this
+# verification can run, so a tampered artefact would execute once in the build
+# container. It never reaches an image — the build fails and nothing ships —
+# and closing the gap entirely means replacing the installer with a vendored
+# install, which trades a narrow, stated residual for reimplementing install
+# semantics (the bin symlinks and the `[cli]` config block) that only a full
+# review round would prove wrong.
+ARG GROK_VERSION=1.0.5
+ARG GROK_INSTALLER_SHA256=43d0943123edade1383a476a4f778674877acee7c1f98a00f094c4a0f7349321
+ARG GROK_SHA256_X86_64=9ba87444e1819e8f6104adbbf4676a870c204380aa5c3e1c38a926c4ea677238
+ARG GROK_SHA256_AARCH64=1c1fe67d7c35497fb09f44a451f57acc3787add4c9aea2c56f5c7c75dc5ffcf1
+# Compared with `[ "$a" = "$b" ]` rather than piped into `sha256sum --check`,
+# because the recorded digest arrives through a build argument: a stray
+# character on it — a CR from a CRLF checkout of this file, most plausibly —
+# would make `--check` fail to PARSE its input, which is a different error from
+# a mismatch and reads like a broken command rather than a bad digest. A string
+# comparison says which value disagreed, whatever is wrong with either.
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64|amd64) arch=x86_64; want="${GROK_SHA256_X86_64}" ;; \
+        aarch64|arm64) arch=aarch64; want="${GROK_SHA256_AARCH64}" ;; \
+        *) echo "no recorded grok ${GROK_VERSION} digest for $(uname -m); add one rather than building an unverified reviewer" >&2; exit 1 ;; \
+    esac; \
+    curl --fail --silent --show-error --location \
+        https://x.ai/cli/install.sh --output /tmp/install-grok.sh; \
+    got="$(sha256sum /tmp/install-grok.sh | cut -d' ' -f1)"; \
+    [ "$got" = "${GROK_INSTALLER_SHA256}" ] || \
+        { echo "install.sh sha256 ${got} does not match the recorded ${GROK_INSTALLER_SHA256}" >&2; exit 1; }; \
+    bash /tmp/install-grok.sh "${GROK_VERSION}"; \
+    binary="${HOME}/.grok/downloads/grok-linux-${arch}"; \
+    got="$(sha256sum "${binary}" | cut -d' ' -f1)"; \
+    [ "$got" = "${want}" ] || \
+        { echo "grok ${GROK_VERSION} ${arch} sha256 ${got} does not match the recorded ${want}" >&2; exit 1; }; \
+    rm --force /tmp/install-grok.sh; \
+    grok --version
 
 # The mounted clone carries its host ownership, so git refuses it as dubiously
 # owned. Declared here rather than left to the reviewer, which is not a nicety:
