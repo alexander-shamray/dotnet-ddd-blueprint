@@ -865,7 +865,14 @@ own line rather than sending a reader to a file that does not hold it.
   be one operation**, and where they are, the *placement* of the write becomes
   the accounting rule: reserving immediately before the model call makes a slot
   spent if and only if the review ran, which is what deleted the release path
-  rather than merely tidying it.
+  rather than merely tidying it. **And one operation is not enough if the
+  operation can be aimed elsewhere** — the first version of that fix took the
+  pull request number as an argument while cloning the *current branch*, so a
+  typo or a substituted number spent someone else's slot and left this branch's
+  cap re-armed, with both halves looking correct in isolation. Resolve the
+  subject from the thing being acted on rather than accepting it:
+  `gh pr list --head "$branch"` beside the clone of `$branch`, the same way
+  `gh-label-ensure.sh` resolves the repository from the checkout.
 - **An `exit` in the last stage of a pipeline ends a subshell, and the consumer
   on the other side has already answered.** The ledger's trust check bailed with
   `exit 3` inside `gh api … | while …`; the `awk` on the other side of

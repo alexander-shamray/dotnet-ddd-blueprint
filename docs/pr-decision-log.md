@@ -109,6 +109,20 @@ is what deleted the release path rather than merely tidying it: exit 12 has no
 reservation to give back. A structural test asserts the ordering, because the
 ordering *is* the property.
 
+**One operation is not enough if the operation can be aimed elsewhere, and the
+first version of this could be.** The helper took the pull request number as
+argument one and then cloned and reviewed the *current branch*, with nothing
+checking that the two were the same subject — so a numeric typo, or an
+instruction substituting another open pull request, posted the reservation there
+while reviewing this branch: this branch's cap stayed re-armed and someone
+else's slot was spent, on a pull request whose ledger then read one check higher
+than the reviews it received. Neither half looks wrong on its own, which is what
+let it survive the first draft. The number is not an argument now —
+`gh pr list --head "$branch"` resolves it from the branch about to be cloned,
+and a branch with no open pull request, or more than one, is refused rather than
+guessed at. Raised by Copilot against this very change, which is the loop
+catching the fix to the loop.
+
 The verb survives with no caller: `count` must still fold a released row out of
 a PR ledgered before this was true, and a human reconciling a slot spent wrongly
 has nothing else to reach for. `.claude/settings.json` denies both spellings to
@@ -305,6 +319,15 @@ the test asserts about its own second copy. And because that proves only what a
 pattern *matches*, the cases are paired with structural ones over the call
 sites — every declared pattern has a use, every `exit 12` is guarded by the
 declared pattern, and no second literal copy survives.
+
+**A structural test is not a contract test, and the first version of the stdout
+case was structural.** It asserted that two source strings existed, which proves
+nothing about what a caller captures: an added debug `echo` recreates the defect
+with the assertion green. It runs the real round trip now — detach at a real
+commit, capture stdout as `security-sweep.md` does, assert one line and a usable
+directory — and was confirmed as a negative by removing the redirection, which
+fails it with `1 != 2` *and* fails its own cleanup, the original bug reproducing
+in miniature because the polluted path is what the drop helper receives.
 
 Two findings came out of writing it rather than out of the issues.
 `git worktree add` writes "Preparing worktree" to stderr but `HEAD is now at
