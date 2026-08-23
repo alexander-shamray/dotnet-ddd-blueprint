@@ -762,14 +762,28 @@ own line rather than sending a reader to a file that does not hold it.
   the outbox persists the event's message id and restores it on every publish.
   What gets through is the delivery whose inbox row was never written — the
   filter records it only after the consumer returns, so a crash between the
-  saga state committing and that write is the window. Narrow, and the whole
-  justification for the callback, which is why naming it exactly is the point.
+  saga state committing and that write is the window. Narrow, and it was the
+  whole justification for an `OnUnhandledEvent(x => x.Ignore())` catch-all.
   **And naming it exactly was still not exact enough**: the in-memory outbox
   flushes inside that window, so half of it is a crash with the instance
   advanced and its commands unsent — not a duplicate, but the last delivery
-  that could notice. A callback that ignores silently converts a loud loss
-  into a quiet one; this one logs first, and #128 carries the durable fix.
-  **A window named to one boundary can still contain a second one.**
+  that could notice. **A window named to one boundary can still contain a
+  second one.**
+- **A catch-all answers every arrival the same way, so it is only ever as
+  right as its worst case.** The callback above was written, defended over
+  several review rounds, given a log line, and then removed. Three things
+  reach it and it cannot tell them apart: a post-flush duplicate (quiet is
+  right), a pre-flush crash that lost the instance's commands (quiet is
+  permanent loss), and a misroute (a configuration fault). The log line was
+  not a rescue — §13.6 pages on the **error queue**, which is exactly what
+  ignoring keeps the event out of, so it moved the case from silent to
+  searchable and no further. **What replaced it is enumeration**: every
+  legitimate arrival written out with its own `Ignore`, and a structural test
+  partitioning the machine's declared next-events so a new one cannot be
+  forgotten. The measurement that had justified the catch-all was a test
+  republishing an event rather than anything observed in production, which is
+  its own lesson: **check whether the traffic a mitigation removes is traffic
+  that actually occurs.**
   The suite was green throughout, because `harness.Consumed` records a delivery
   whether the pipeline returned or threw: "no transition ran" is what a fault
   looks like from every assertion in a saga test. **Assert the absence of the

@@ -3,7 +3,6 @@ using Common.Contracts.Ordering.V1;
 using Common.Contracts.Payments.V1;
 using Common.Contracts.Shipping.V1;
 using MassTransit;
-using MassTransit.Logging;
 using static Ordering.Infrastructure.Messaging.Endpoints;
 
 namespace Ordering.Infrastructure.Messaging;
@@ -74,96 +73,61 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     {
         InstanceState(x => x.CurrentState);
 
-        // "Not applicable" has to be spelled, because the default is to throw.
+        // **Nothing catches an unhandled event, and that is the decision
+        // rather than an omission.** MassTransit's default raises
+        // UnhandledEventException, so an event reaching an instance in a
+        // state with no transition for it spends §9.8's retries and lands in
+        // the error queue §13.6 pages on. This machine keeps that default.
         //
-        // **The path that reaches this callback is narrower than an earlier
-        // version of this comment claimed, and the narrow one is what the
-        // trade below has to be justified against.** A republished outbox row
-        // carries the SAME message id — OutboxMessage.Stage persists the
-        // integration event's own id, and OutboxDispatcher restores it onto
-        // every publish — so §9.5's inbox suppresses the ordinary completed
-        // redelivery. What it cannot suppress is a redelivery whose inbox row
-        // was never written: InboxFilter adds its row AFTER the inner pipe
-        // returns, in a second SaveChangesAsync, so a crash between the saga
-        // state committing and that write leaves the event unrecorded, and the
-        // next delivery lands on an instance that has already moved on. A
-        // producer staging one fact as two outbox rows is the other way in,
-        // and that one is a defect rather than routine.
+        // **An OnUnhandledEvent(x => x.Ignore()) catch-all stood here and was
+        // removed.** The argument for it was that the only event reaching it
+        // is a duplicate: §9.5's inbox suppresses the ordinary completed
+        // redelivery, because OutboxMessage.Stage persists the integration
+        // event's own message id and OutboxDispatcher restores it on every
+        // publish. What the inbox cannot suppress is a redelivery whose row
+        // was never written — InboxFilter adds its row AFTER the inner pipe
+        // returns, so a crash between the instance committing and that write
+        // leaves the event unrecorded and the next delivery finds the
+        // instance moved on.
         //
-        // MassTransit's default unhandled-event callback raises
-        // UnhandledEventException, so §9.8's retry policy spends six attempts
-        // on a transition that can never become applicable and files the
-        // message in the error queue §13.6 pages on. The design considers that
-        // duplicate correctly absorbed; this is the line that makes it so.
+        // **That window contains the in-memory outbox's flush, and that is
+        // what settled it (#128).** UseInMemoryOutbox sits inside the inbox
+        // filter and releases its buffered sends after the inner pipeline
+        // returns — after the repository has committed. So three cases reach
+        // here and only one of them wants to be quiet:
         //
-        // Measured before it was written: a redelivered StockReserved in
-        // AwaitingPayment came back as NotAcceptedStateMachineException. A
-        // stale TIMEOUT does not — MassTransit filters a scheduled message
-        // whose token id no longer matches the instance, which is why
-        // ADR-021's uncancellable timeouts were harmless while this was not.
+        //   * a crash AFTER the flush — the commands went out, the state
+        //     advanced, and the redelivery really is a duplicate;
+        //   * a crash BEFORE it — the state advanced and its commands were
+        //     never sent, including the scheduled timeout that would have
+        //     rescued the order. The redelivery is the last thing that could
+        //     notice, and ignoring it makes the loss permanent and silent;
+        //   * a misroute — a configuration fault, which wants to be loud.
         //
-        // **The window above has two halves and an earlier version of this
-        // comment called both of them absorbed. Only one is (#128).** §9.8
-        // puts UseInMemoryOutbox INSIDE the inbox filter, and it flushes its
-        // buffered sends after the inner pipeline returns — which is after
-        // the repository has committed the instance. So a crash in this
-        // window is either:
+        // Nothing here can tell them apart, so the catch-all had to answer
+        // all three the same way and answered two of them wrongly. A log
+        // line was tried in its place and is not a signal: §13.6 pages on the
+        // error queue, which is exactly what ignoring keeps the event out of.
         //
-        //   * after the flush — the commands went out, the state advanced,
-        //     and the redelivery really is a duplicate with nothing left to
-        //     do; or
-        //   * BEFORE the flush — the state advanced and its commands were
-        //     never sent. The redelivery is then not a duplicate at all: it
-        //     is the last chance anything has to notice that an
-        //     AuthorisePayment or a ReleaseStock is missing, and the
-        //     scheduled timeout that would have rescued the order was
-        //     buffered in the same flush and lost with it.
+        // **The cost is real and is the smaller half.** A post-flush
+        // duplicate now spends six retries and files one message a human
+        // reads. That case is as rare as the loss it used to hide — the
+        // NotAcceptedStateMachineException that motivated the catch-all was
+        // produced by a test republishing an event, not observed in
+        // production, where the inbox suppresses the ordinary redelivery.
         //
-        // Nothing here can tell them apart, so Ignore() alone would make the
-        // second silent and permanent. It is not a new hole — an in-memory
-        // outbox beside an EF saga repository is a dual write, and that
-        // predates this branch — but the default it replaces raised
-        // UnhandledEventException, so this callback is what would remove the
-        // only signal it had. #128 carries the real fix, which is
-        // AddEntityFrameworkOutbox/UseBusOutbox persisting the sends with the
-        // instance in one transaction.
+        // **What replaces it is enumeration, which this machine already
+        // does.** Every event legitimately arriving in a state it has no
+        // work for is written out with an explicit Ignore — Compensating
+        // carries five — and a structural test asserts the machine's
+        // declared next-events partition into "reachable here" and "not".
+        // An unenumerated arrival is now a fault by design, which is what
+        // makes that enumeration load-bearing rather than documentation.
         //
-        // So it LOGS and then ignores: the error queue stops being spent on a
-        // transition that can never become applicable, and the event still
-        // leaves a record naming itself and the state it arrived in. A
-        // misrouted event — the other way in, and a configuration fault —
-        // lands in the same line rather than vanishing.
-        //
-        // **That is a diagnostic and not a signal, and the difference is the
-        // residual rather than a detail.** No alert reads this line; §13.6
-        // pages on the error queue, which is exactly what ignoring keeps the
-        // event out of. So the honest statement of the trade is that THREE
-        // cases reach here and only one of them wants to be quiet:
-        //
-        //   * a post-flush duplicate — quiet is right;
-        //   * a pre-flush loss — quiet is wrong, and permanent;
-        //   * a misroute — quiet is wrong, and a configuration fault.
-        //
-        // MassTransit's default would make all three loud, which is what this
-        // line replaced and what `main` still does. **Whether that trade is
-        // the right way round is a decision the branch took and a reviewer has
-        // twice asked to revisit**, and it is recorded here rather than
-        // settled in a comment: reverting to the default costs six retries per
-        // rare duplicate and buys back the signal for the other two, and #128
-        // removes the question entirely by making the pre-flush case
-        // impossible.
-        OnUnhandledEvent(x =>
-        {
-            LogContext.Warning?.Log(
-                "Saga {CorrelationId} ignored {EventName} in state {State}: no transition accepts it. "
-                + "If this followed a restart, commands buffered by the in-memory outbox may have been "
-                + "lost with it (#128).",
-                x.Saga.CorrelationId,
-                x.Event.Name,
-                x.CurrentState);
-
-            return x.Ignore();
-        });
+        // #128 removes the question by persisting the sends with the
+        // instance (UseBusOutbox); the pre-flush case stops existing and a
+        // catch-all becomes arguable again on evidence rather than on this
+        // comment.
 
         // Correlated on the order in every case, which is also what §9.3's
         // mapper sets CorrelationId to — so one id follows the workflow across
@@ -538,11 +502,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // because an order that reached it may still be despatched, and
             // this state sends cancelled_after_payment because it cannot.
             //
-            // Left unwritten it would fall to OnUnhandledEvent and
-            // be IGNORED — the catch-all this branch added for redelivery
-            // would silently swallow the case this branch's other half exists
-            // to escalate. The two fixes interacted, and only writing the
-            // transition separates them.
+            // Left unwritten it would FAULT, and a paged error queue is not
+            // what this case is owed: the money problem has a review row to
+            // land in, which is the whole point of the code above. Writing
+            // the transition is what turns the fault into the row.
+            //
+            // An earlier revision of this branch also carried an
+            // OnUnhandledEvent catch-all, and then this line was what kept
+            // the case from being swallowed instead. The catch-all is gone;
+            // the reason to write this transition is unchanged either way,
+            // which is what makes it the right kind of line.
             //
             // No Finalize: the saga is still waiting on StockReleased, and the
             // exits below own the cancellation. This adds the review row and
@@ -564,7 +533,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                         ctx.Saga.OrderId,
                         ReviewReasons.CancelledAfterPayment)),
 
-            // Written, not left to OnUnhandledEvent, and the difference is
+            // Written rather than left to fault, and the difference is
             // whether a reader can tell a decision from an omission. Reaching
             // Compensating means a cancellation is already the outcome — from
             // a decline, a timeout, or the customer's own request one state
@@ -611,14 +580,15 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // body already said so while this comment did not.
             //
             // Written for the same reason as the line above, and they were the
-            // last two events left on the catch-all. §9.6's trap justifies
-            // OnUnhandledEvent by claiming every declared event is handled in
-            // every state it can reach one in — a claim that was false for
-            // PaymentAuthorised when the callback landed and false for these
-            // two after that was fixed. Enumerating beat patching: the
-            // declared events are eight, Compensating can be reached from
-            // AwaitingStock and AwaitingPayment, and these are the ones that
-            // follow.
+            // last two arrivals with no branch. **The enumeration is now the
+            // whole mechanism**, not a tidy-up beside a catch-all: with
+            // MassTransit's default kept, anything not written out here
+            // reaches the error queue. §9.6's trap used to justify a
+            // catch-all by claiming every declared event is handled in every
+            // state it can reach one in — a claim that was false for
+            // PaymentAuthorised and then for these two. A structural test
+            // partitions the declared next-events now, so the claim is
+            // checked rather than asserted.
             Ignore(StockReserved),
             Ignore(StockReservationFailed),
 
@@ -628,9 +598,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // out. The OrderCancelled transition this branch added arrives
             // there with the authorisation still OUTSTANDING, so its verdict
             // can be either: PaymentAuthorised is handled above, and a decline
-            // is this line. Left unwritten it fell to OnUnhandledEvent, which
-            // is the catch-all the comment beside it claims Compensating does
-            // not lean on.
+            // is this line. Left unwritten it would reach the error queue,
+            // for an outcome compensation was already heading towards.
             //
             // Ignored rather than escalated, unlike its sibling: a decline
             // means no money moved, which is the outcome compensation was

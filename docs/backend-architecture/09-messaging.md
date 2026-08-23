@@ -2115,21 +2115,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // filter adds its row after the inner pipe returns, so a crash between
         // the saga state committing and that write lands the next delivery on
         // an instance that has moved on.
-        // Without this line MassTransit raises UnhandledEventException, §9.8's
-        // retry policy spends six attempts on a transition that can never
-        // apply, and the message reaches the error queue §13.6 pages on.
-        OnUnhandledEvent(x =>
-        {
-            LogContext.Warning?.Log(
-                "Saga {CorrelationId} ignored {EventName} in state {State}: no transition accepts it. "
-                + "If this followed a restart, commands buffered by the in-memory outbox may have been "
-                + "lost with it (#128).",
-                x.Saga.CorrelationId,
-                x.Event.Name,
-                x.CurrentState);
-
-            return x.Ignore();
-        });
+        // NO OnUnhandledEvent CALLBACK, and the absence is the decision.
+        // MassTransit raises UnhandledEventException, §9.8's retry policy
+        // spends six attempts on a transition that can never apply, and the
+        // message reaches the error queue §13.6 pages on. That is wanted:
+        // an arrival no state enumerates is either a lost-command crash or
+        // a misroute, and both want a human. The legitimate arrivals are
+        // written out with Ignore, one per event, below.
 
         Event(() => OrderPlaced, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
@@ -2399,9 +2391,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // has not been published yet, since CancelOrder goes on this
             // state's exit. Nothing here knows whether a refund follows.
             //
-            // Left unwritten it falls to OnUnhandledEvent and is IGNORED: the
-            // catch-all that keeps redeliveries out of the error queue would
-            // silently swallow the case Confirmed escalates one state over.
+            // Left unwritten it FAULTS, which is why writing it matters: the
+            // machine keeps MassTransit's default, so an arrival no state
+            // enumerates reaches the error queue rather than being absorbed.
+            // Escalating here is what turns a paged fault into a review row.
             // No Finalize — StockReleased and ReleaseTimeout still own the
             // exit; this adds the review row and nothing else.
             When(PaymentAuthorised)
@@ -2464,9 +2457,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > to miss is that MassTransit's way of saying "no transition applies" is
 > `UnhandledEventException`, so the message the design considers correctly
 > absorbed is retried to exhaustion and filed in the error queue
-> [§13.6](13-observability.md) pages on. `OnUnhandledEvent(x => x.Ignore())` is
-> the line that makes the comment true; without it the code and the reasoning
-> beside it describe opposite outcomes.
+> [§13.6](13-observability.md) pages on. So a comment calling such an event
+> harmless describes the opposite of what the code does unless something is
+> written to make it true.
+>
+> **`OnUnhandledEvent(x => x.Ignore())` is the obvious answer and this
+> blueprint does not take it.** A catch-all cannot tell the three arrivals
+> apart — a genuine post-flush duplicate, a crash before the in-memory
+> outbox flushed that left the instance advanced and its commands unsent,
+> and a misroute — so it answers all three the way only the first wants.
+> The second is permanent silent loss and the third is a configuration
+> fault; both are worth six retries and one error-queue message. **What
+> makes the comment true instead is enumeration**: every event that
+> legitimately arrives in a state with no work for it gets its own
+> `Ignore`, and a structural test partitions the machine's declared
+> next-events so a new one cannot be forgotten.
 >
 > **Timeouts were never the exposure, and only measuring said so.** A scheduled
 > message carries the token id the schedule was armed with, and MassTransit
@@ -2511,13 +2516,14 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > test now reads the machine's declared next-events for that state rather than
 > trusting the list here.
 
-> **A missing instance is a different mechanism, and it is silent.**
-> `OnUnhandledEvent` governs an event that reaches an instance in a state that
-> does not handle it. An event that correlates to **no instance at all** never
-> reaches the machine, and MassTransit's default for a non-initial event there
-> is to consume it cleanly — no transition, no fault, no error-queue entry, so
-> §13.6's threshold-at-zero alert never sees it. Measured rather than read, and
-> the two were run together in review until it was.
+> **A missing instance is a different mechanism, and it is silent.** The
+> unhandled-event path governs an event that reaches an instance in a state
+> that does not handle it — and faults. An event that correlates to **no
+> instance at all** never reaches the machine, and MassTransit's default for
+> a non-initial event there is to consume it cleanly — no transition, no
+> fault, no error-queue entry, so §13.6's threshold-at-zero alert never sees
+> it. Measured rather than read, and the two were run together in review
+> until it was.
 >
 > **Two consequences are open and are named rather than implied.** A customer's
 > `OrderCancelled` overtaking its own `OrderPlaced` is dropped, and the later
@@ -3520,12 +3526,15 @@ message id across every republish, so a completed redelivery never reaches the
 machine. The one that does is the redelivery whose inbox row was never written,
 because the filter records it only after the consumer returns: the saga state
 commits, the row does not, and the next delivery finds an instance that has
-moved on. That case is rare and it is the whole justification, so the state
-machine absorbing it is the mechanism. MassTransit's default way of saying "no
-transition applies" is to
-throw, which sends every one of those through the retry policy above and into
-this queue. §9.6's `OnUnhandledEvent(x => x.Ignore())` is what keeps the
-threshold at zero honest; the callout there states what it costs.
+moved on. **That case is rare, and the threshold stays at zero because the
+machine enumerates it rather than because a catch-all swallows it.**
+MassTransit's default way of saying "no transition applies" is to throw,
+which sends every such arrival through the retry policy above and into this
+queue — and §9.6 keeps that default. Each event that legitimately arrives in
+a state with no work for it is written out with its own `Ignore`, so what
+reaches this queue is an arrival nobody enumerated: a crash that lost the
+instance's commands, or a misroute. Both are worth a page. The callout in
+§9.6 states the trade and what a catch-all would have cost.
 
 Rejections get their own instrument instead. `MessagingMetrics.Rejected`
 (§13.3) writes `command.domain_rejected`, tagged with the message type and the

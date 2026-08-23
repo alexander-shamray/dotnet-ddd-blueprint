@@ -204,7 +204,7 @@ public class OrderFulfilmentSagaTests
     /// <b>The harness records a consume whether the pipeline threw or not</b>,
     /// so <see cref="Consumed"/> answers "did it arrive" and never "what
     /// happened to it". A saga event that no longer applies faults by default
-    /// (§9.6's <c>OnUnhandledEvent</c>), and every negative in this file would
+    /// (§9.6 keeps MassTransit's default), and every negative in this file would
     /// stay green through it — the transition did not run, which is what the
     /// negative asserts, and the message went to the error queue, which is
     /// what nothing asked. Read this list after a positive has pinned the
@@ -412,7 +412,7 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
-    public async Task A_redelivered_event_is_ignored_rather_than_faulted()
+    public async Task A_redelivered_event_faults_rather_than_being_absorbed_silently()
     {
         // §9.4 guarantees at-least-once, and §9.8's inbox suppresses the
         // completed redelivery — the outbox preserves the event's message id,
@@ -420,28 +420,25 @@ public class OrderFulfilmentSagaTests
         // own state must absorb is the delivery the inbox never recorded: the
         // filter writes its row after the consumer returns, so a crash between
         // the saga state committing and that write leaves the next delivery
-        // free to land on an instance that has moved on. "Not applicable" is
-        // the OnUnhandledEvent callback and not a default that throws:
-        // without it, six attempts of §9.8's retry policy end in the error
-        // queue §13.6 pages on, for a duplicate the design considers correctly
-        // absorbed.
+        // free to land on an instance that has moved on. **It faults**, and
+        // this test asserts the fault rather than its absence.
         //
-        // **This covers the post-flush half of that window and nothing else
-        // (#128).** It republishes after the first delivery has completed, so
-        // the in-memory outbox has already flushed and the commands really
-        // did go out — which is what makes the second delivery a genuine
-        // duplicate. The other half is a crash BEFORE that flush, where the
-        // instance is advanced and its commands were never sent; there the
-        // redelivery is the last thing that could notice, and the callback
-        // ignores it just the same. The harness cannot express an interrupt
-        // between the repository commit and the flush, so no test here
-        // reaches it — stated rather than left for a reader to infer from a
-        // green suite, which is exactly what this file got wrong once before
-        // by asserting an effect instead of the absence of an exception.
+        // **This test asserted the opposite until #128 was understood.** An
+        // OnUnhandledEvent(x => x.Ignore()) catch-all made every such
+        // arrival quiet, on the argument that it can only be a duplicate.
+        // The window it was justified by contains the in-memory outbox's
+        // flush, so it also contains the case where the instance advanced
+        // and its commands were never sent — there the redelivery is the
+        // last thing that could notice, and quiet is permanent loss.
         //
-        // The callback logs before ignoring for that reason. This test does
-        // not assert the log line: it is a diagnostic, not the behaviour
-        // under test, and #128 is where the durable fix lives.
+        // The stimulus below is the POST-flush half: it republishes after
+        // the first delivery completed, so the commands really did go out
+        // and the second delivery is a genuine duplicate. That is the one
+        // case the old behaviour got right, and it now costs six retries
+        // and one error-queue message — the price of the other two being
+        // loud. The pre-flush half is unreachable from this harness, which
+        // cannot interrupt between the repository commit and the flush, so
+        // nothing here covers it; #128 is where it stops existing.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
@@ -466,13 +463,25 @@ public class OrderFulfilmentSagaTests
             (await Consumed<StockReserved>(harness, m => m.MessageId == redelivered.MessageId))
                 .ShouldBeTrue();
 
-            ConsumeFaults<StockReserved>(harness).ShouldAllBe(e => e == null);
+            // The subject, and the reason §12.5 insists on reading Exception
+            // rather than an effect: "no transition ran" is what BOTH a
+            // silent absorb and a fault look like from every other
+            // assertion in this file. Only this one tells them apart, and
+            // it is the assertion that changed direction when the catch-all
+            // was removed.
+            ConsumeFaults<StockReserved>(harness)
+                .ShouldContain(
+                    e => e != null,
+                    "an event no transition accepts must reach the error queue §13.6 pages on. " +
+                    "Absorbing it silently would answer a lost-command crash and a misroute the " +
+                    "same way it answers a duplicate (#128).");
 
-            // And absorbed rather than merely survived: one authorisation for
-            // one order, not two charges because the event arrived twice. Read
-            // as of now, for the reason every negative here is — the positive
-            // above is the point in time, and a waiting read would hand a late
-            // second send somewhere to hide.
+            // And the fault costs nothing beyond the noise: one authorisation
+            // for one order, not two charges because the event arrived twice.
+            // The instance refuses the transition either way — what changed
+            // is whether anybody is told. Read as of now, for the reason every
+            // negative here is: the positive above is the point in time, and a
+            // waiting read would hand a late second send somewhere to hide.
             harness.Sent
                 .Select<AuthorisePayment>(Spent())
                 .Count(m => m.Context.Message.OrderId == orderId)
@@ -649,11 +658,11 @@ public class OrderFulfilmentSagaTests
             (await Consumed<StockReserved>(harness, m => m.MessageId == late.MessageId)).ShouldBeTrue();
             (await NotYetSent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
 
-            // And it is absorbed rather than filed. It used to be the
-            // OnUnhandledEvent catch-all doing this; Compensating now writes
-            // Ignore(StockReserved) explicitly, so what this asserts is a
-            // declared transition rather than a default — which is the whole
-            // difference between a decision and an omission (§9.6).
+            // And it is absorbed rather than filed. A catch-all used to do
+            // this; Compensating writes Ignore(StockReserved) explicitly and
+            // the catch-all is gone, so this now asserts the declared
+            // transition and NOTHING ELSE could make it pass — delete the
+            // Ignore and the event faults. Measured by deleting it.
             ConsumeFaults<StockReserved>(harness).ShouldAllBe(e => e == null);
 
             await Publish(harness, SagaContracts.StockReleased(orderId));
@@ -786,11 +795,13 @@ public class OrderFulfilmentSagaTests
     [Fact]
     public async Task A_payment_authorised_while_compensating_escalates_rather_than_being_ignored()
     {
-        // The case the two halves of this branch created between them.
-        // OnUnhandledEvent(Ignore) was added so a redelivered event does not
-        // page anyone — and Compensating had no PaymentAuthorised transition,
-        // so the catch-all would have swallowed the money arriving after a
-        // cancellation. That is Confirmed's case by the other door — the same
+        // The case the two halves of this branch created between them. A
+        // catch-all was added so a redelivered event does not page anyone —
+        // and Compensating had no PaymentAuthorised transition, so it would
+        // have swallowed the money arriving after a cancellation. The
+        // catch-all is gone and this transition is not: it was always the
+        // escalation that mattered, and the catch-all was what made its
+        // absence invisible. That is Confirmed's case by the other door — the same
         // SYMPTOM under a different code, and the difference is SHIPPING:
         // this state cannot despatch and Confirmed may. Not the refund —
         // Payments voids off OrderCancelled (§3.2) on both, and whether it
@@ -941,8 +952,8 @@ public class OrderFulfilmentSagaTests
         //
         // Absorbed rather than escalated: a decline means no money moved,
         // which is the outcome compensation was heading for. Written as an
-        // Ignore rather than left to OnUnhandledEvent, because that catch-all
-        // is what the comment beside Compensating claims it does not lean on.
+        // Ignore rather than left to fault, because an outcome compensation
+        // was already heading towards is not worth an error-queue entry.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
@@ -965,13 +976,20 @@ public class OrderFulfilmentSagaTests
             (await Consumed<PaymentDeclined>(harness, m => m.MessageId == declined.MessageId))
                 .ShouldBeTrue();
 
-            // Not faulted — necessary, and measured to be insufficient.
-            // OnUnhandledEvent(x => x.Ignore()) produces the identical
-            // observable outcome, so this assertion stays green with the
-            // Ignore deleted: verified by deleting it. What it establishes is
-            // the behaviour; the structural test below is what establishes the
-            // branch was WRITTEN, which is the difference between a decision
-            // and an omission.
+            // Not faulted, and this assertion is load-bearing again. While an
+            // OnUnhandledEvent(x => x.Ignore()) catch-all stood in the machine
+            // it produced the identical observable outcome, so this stayed
+            // green with the Ignore deleted — verified by deleting it, and the
+            // reason the structural test below was written. With the catch-all
+            // gone the two outcomes differ: a missing branch faults.
+            //
+            // Measured on Ignore(StockReserved) rather than on this line,
+            // because that one has a behavioural test to catch it: deleting
+            // it fails the structural test AND
+            // A_cancellation_while_awaiting_stock_requests_release_and_sends_no_authorisation,
+            // where under the catch-all only the structural one went red.
+            // This event has no such pair, which is the asymmetry the
+            // partition below exists for.
             ConsumeFaults<PaymentDeclined>(harness).ShouldAllBe(e => e == null);
 
             // And nothing escalated. A decline is not a cancelled_after_payment
@@ -1060,11 +1078,19 @@ public class OrderFulfilmentSagaTests
     [Fact]
     public void Compensating_writes_out_every_event_it_can_receive()
     {
-        // The structural half, and it exists because the behavioural tests
-        // above cannot supply it. OnUnhandledEvent(x => x.Ignore()) makes an
-        // unwritten branch and an explicit Ignore observably identical — no
-        // fault, no transition, nothing sent — so every one of those tests
-        // stays green when a branch is deleted. Measured, not assumed.
+        // The structural half. **Its original reason no longer holds and it
+        // is kept for a better one.** While a catch-all stood in the machine,
+        // an unwritten branch and an explicit Ignore were observably
+        // identical — no fault, no transition, nothing sent — so every
+        // behavioural test above stayed green when a branch was deleted. With
+        // the catch-all removed a deleted branch faults, and those tests do
+        // catch it.
+        //
+        // What they still cannot catch is an event NOBODY WROTE A TEST FOR.
+        // A ninth event arriving in Compensating with no branch faults in
+        // production and nowhere in this file, because no test publishes it.
+        // That is what the partition below is for, and it is why this test
+        // survives the change that removed its first justification.
         //
         // What the machine's own declaration can say is whether the branch is
         // there. Compensating is the state where that matters: it is reachable
@@ -1147,8 +1173,9 @@ public class OrderFulfilmentSagaTests
             .ShouldBe(
                 reachableHere.OrderBy(n => n, StringComparer.Ordinal),
                 "Compensating accepts exactly the events classified as reachable there. A name " +
-                "missing from the machine is a branch nobody wrote and OnUnhandledEvent would " +
-                "swallow; one the machine has and this list does not is a branch nobody argued.");
+                "missing from the machine is a branch nobody wrote, which now faults in " +
+                "production and is caught by no test here; one the machine has and this list " +
+                "does not is a branch nobody argued.");
     }
 
     [Fact]
@@ -1183,8 +1210,9 @@ public class OrderFulfilmentSagaTests
         // **Measured, because two review findings turn on it and neither the
         // chapter nor this file said which way it goes.** MassTransit's
         // policy for a NON-INITIAL event that correlates to no instance is
-        // not the same thing as OnUnhandledEvent, which governs an event that
-        // reaches an instance in a state that does not handle it. This is the
+        // not the same thing as the unhandled-event path, which governs an
+        // event reaching an instance in a state that does not handle it and
+        // faults. This is the
         // other one, and the default is to consume the message CLEANLY and
         // drop it: no transition, no fault, no error-queue entry, nothing on
         // §13.6's pager.

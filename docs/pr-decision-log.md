@@ -972,15 +972,22 @@ after.
     reaches an advanced instance is the one whose inbox row was never written —
     `InboxFilter` adds its row after the inner pipe returns, so the window is a
     crash between the saga state committing and that second `SaveChangesAsync`.
-    An `OnUnhandledEvent` callback is the line that was missing.
-    **It logs before it ignores, and this entry recorded a bare `Ignore()`
-    until a review read what happens inside that window.** `UseInMemoryOutbox`
-    flushes after the inner pipeline returns, so the window contains the
-    moment the instance is committed and its commands are not yet sent — a
-    crash there loses them, and a bare `Ignore()` would make that permanent
-    and silent by suppressing the only delivery left to notice. #128 carries
-    the fix (`UseBusOutbox`); the log line is what keeps the case observable
-    until then. Reproduced first: a redelivered `StockReserved`
+    **An `OnUnhandledEvent(x => x.Ignore())` catch-all was written for that
+    window, defended over several review rounds, and then removed — which is
+    the entry's real subject.** `UseInMemoryOutbox` flushes after the inner
+    pipeline returns, so the window contains the moment the instance is
+    committed and its commands are not yet sent. Three arrivals reach the
+    callback and it cannot tell them apart: a post-flush duplicate, which
+    wants quiet; a pre-flush crash that lost the instance's commands, where
+    quiet is permanent loss; and a misroute, which is a configuration fault.
+    A log line was tried in between and is not a signal — §13.6 pages on the
+    error queue, which is precisely what ignoring keeps the event out of.
+    **So the machine keeps MassTransit's default and the enumeration does the
+    work**: every legitimate arrival has its own `Ignore`, and a structural
+    test partitions the declared next-events so a new one cannot be missed.
+    #128 carries the durable fix (`UseBusOutbox`), which makes the pre-flush
+    case stop existing and a catch-all arguable again on evidence.
+    Reproduced first: a redelivered `StockReserved`
     in `AwaitingPayment` came back as `NotAcceptedStateMachineException`. A
     stale **timeout** never did — a scheduled message whose token id no longer
     matches the instance is discarded before the machine is asked, which is why
