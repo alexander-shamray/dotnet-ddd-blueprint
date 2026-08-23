@@ -295,7 +295,28 @@ heading and then explained two paragraphs down that there would not be one.
      `stock_not_released` row. **Check for that second row before deciding
      stock needs nothing** — if it is there, the reservation may still be
      held and [that section](#stock_not_released) is the procedure. With no
-     such row, step 1 is the whole of the work.
+     such row, the stock needs nothing and the money is all that is left.
+
+     **This is the one branch on the page where step 1's answer decides
+     what you do, and it decides it because nothing can race you here.**
+     A gone instance sent its `CancelOrder`, so `OrderCancelled` is
+     published and the automatic path has already had its turn. A
+     `PaymentRefunded` means the workflow finished and there is nothing to
+     do. **No `PaymentRefunded` does not mean "refund it"** — it means the
+     automatic path fired and produced nothing, which is a failure on
+     Payments' side rather than a missing instruction on Ordering's: check
+     that service's error queue and replay the consumer, because one that
+     succeeds on retry voids the authorisation and duplicates anything paid
+     by hand. Refund manually only if the authorisation cannot wait for
+     that, record it, and own the reconciliation — the same terms as every
+     other manual refund on this page.
+
+     **Round 25 deleted this and round 26 put it back**, which is worth the
+     line it costs. Step 1 used to end "then refund only if it did not":
+     wrong for the live branch, right for this one, and removing it left
+     the ordinary case with a check and no action. That is the fifth
+     correction to this one instruction and the second where the previous
+     fix was what broke it.
    - **Still there** — both exits failed, which is its own incident. **Leave
      the reservation alone**: the machine is waiting on `StockReleased` and
      will cancel the order when it arrives, and releasing by hand races it.

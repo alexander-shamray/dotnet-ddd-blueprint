@@ -225,6 +225,23 @@ class Directions(unittest.TestCase):
 class FailsClosed(unittest.TestCase):
     """The gate must never report a pass over a subject it did not read."""
 
+    def test_a_commit_list_at_the_page_size_is_refused(self):
+        problems = check(payload(
+            body="| | |\n|---|---|\n| Closes | #88 |\n\nCloses #88\n",
+            commit_messages=tuple(f"fix: {i}\n\nCloses #88" for i in range(100)),
+            linked=(88,),
+        ))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("paginated endpoint", problems[0])
+
+    def test_a_commit_list_below_the_page_size_is_judged(self):
+        """The boundary is a boundary, not a permanent refusal."""
+        self.assertEqual(check(payload(
+            body="| | |\n|---|---|\n| Closes | #88 |\n\nCloses #88\n",
+            commit_messages=tuple(f"fix: {i}\n\nCloses #88" for i in range(99)),
+            linked=(88,),
+        )), [])
+
     def test_a_missing_field_is_a_problem_not_a_pass(self):
         broken = payload()
         del broken["commits"]

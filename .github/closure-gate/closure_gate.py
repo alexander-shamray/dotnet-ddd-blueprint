@@ -54,6 +54,24 @@ deliberately literal — it matches inside backticks and inside quoted prose,
 exactly as GitHub's linker does — and anything keyword-shaped it cannot
 resolve to a number is reported as a problem rather than skipped.
 
+**The commit half arrives one page at a time, and a short list looks exactly
+like a complete one.** `gh pr view --json commits` returns a single page, so a
+pull request longer than that page hands this gate a prefix of its own
+history — and a closing keyword in a commit past the cut is absent from the
+commit set for a reason that has nothing to do with what the pull request
+says. If the description omits it too, the sets agree and the merge closes an
+issue nobody declared: the fail-open shape this file exists to close, reached
+by a route the parser cannot see. So `COMMIT_PAGE_SIZE` makes it fail closed
+— a list at or above the page size is **refused rather than judged**, and the
+message says to fetch the commits through a paginated endpoint.
+
+**The page size is GitHub's documented default and has not been measured
+here**, which is why the guard triggers at or above it rather than on
+equality: if the real cap is higher, this refuses a pull request it could
+have judged, and a false refusal is the recoverable direction. Nothing in
+this repository has come close — the longest branch to date is a few dozen
+commits — so the guard is a tripwire, not a workaround.
+
 Stdlib only, on the licence gate's terms, and the network is not in here: the
 deciding takes JSON on stdin and the fetching is one `gh` call in the
 workflow. That is `deploy/canary/canary.py`'s split, for its reason.
@@ -107,6 +125,10 @@ TABLE_ROW = re.compile(
 ISSUE_NUMBER = re.compile(r"#(\d+)\b")
 
 REQUIRED_FIELDS = ("number", "url", "body", "commits", "closingIssuesReferences")
+
+# One page of `gh pr view --json commits`. A list this long may be a prefix,
+# and a prefix is indistinguishable from the whole thing from in here.
+COMMIT_PAGE_SIZE = 100
 
 PULL_URL = re.compile(r"^https?://github\.com/(?P<repo>[\w.-]+/[\w.-]+)/pull/\d+", re.IGNORECASE)
 
@@ -178,6 +200,18 @@ def check(payload: dict) -> list[str]:
             "this pull request reports no commits at all, which is not a state "
             "the gate can judge — the commit half of the comparison would be "
             "empty for the wrong reason"
+        ]
+
+    if len(commits) >= COMMIT_PAGE_SIZE:
+        return [
+            f"this pull request reports {len(commits)} commits, at or above "
+            f"the {COMMIT_PAGE_SIZE} that `gh pr view --json commits` returns "
+            f"in one page — so the list may be a prefix, and a closing keyword "
+            f"past the cut is invisible to this gate for a reason that has "
+            f"nothing to do with what the pull request says. That is the "
+            f"fail-open shape this gate exists to close, so it refuses rather "
+            f"than judging: fetch the commits through a paginated endpoint and "
+            f"pass the complete list"
         ]
 
     linked = {issue["number"] for issue in payload["closingIssuesReferences"]}
