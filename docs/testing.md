@@ -81,8 +81,8 @@ wrong — it is a grant closed by moving it into a helper, and the suite is what
 keeps it closed. The regression
 negatives are paired with positive controls, and those are not decoration: a
 negative that passes because the pattern matches *nothing* is indistinguishable
-from one that works, so the accepted values and the word boundaries carry
-controls of their own.
+from one that works, so the accepted values and the limit pattern's status
+anchor carry controls of their own.
 
 **The closure gate's suite is the whole of what runs here.** The gate itself
 needs a pull request and a `gh` token, so the live invocation belongs in CI

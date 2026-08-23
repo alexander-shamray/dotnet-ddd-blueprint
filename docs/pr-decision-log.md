@@ -344,13 +344,14 @@ supplied the worked example rather than merely citing one. The usage-limit
 pattern used `\b402\b`, its negatives tested `47402` and `4021`, and neither
 tested the number *alone* — so `"input_tokens": 402` matched, in defiance of the
 comment sitting beside it, and every case stayed green. A false positive there
-skips every review silently. The pattern now requires a status *context* rather
-than a word boundary, and the anchor has a positive control of its own. So
-`end_turn` is
-asserted to be accepted, an empty ledger is asserted to count zero, a trusted
-reservation is asserted to count as spent, and the `\b` word boundary the limit
-pattern depends on has a positive control of its own. Without it, `47402` not
-matching would prove nothing about whether `402` ever does.
+skips every review silently.
+
+What ships requires a status *context* instead, and the controls follow the same
+rule: `end_turn` is asserted to be accepted, an empty ledger to count zero, a
+trusted reservation to count as spent, and the status anchor itself to match
+`(status 402 …)` while missing `"input_tokens": 402`. Without that last one,
+`47402` failing to match would prove nothing about whether the anchor ever
+matches anything.
 
 **It shells out to the same `grep -E` the scripts call.** Restating the patterns
 in Python's `re` would be a second specification, and a hand-written double

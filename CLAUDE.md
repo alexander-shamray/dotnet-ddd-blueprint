@@ -1034,7 +1034,7 @@ grant closed by moving it into a helper, and the suite is what keeps it closed.
 Paired with
 positive controls, which are not decoration: a negative that passes because the
 pattern matches *nothing* is this repository's most-repeated failure wearing a
-test's clothes, so the accepted values and the word boundaries themselves are
+test's clothes, so the accepted values and the limit pattern's status anchor are
 pinned alongside. **It shells out to the same `grep -E` the scripts call**
 rather than restating the patterns in Python's `re` — a re-implementation is a
 second specification, and a double cannot disagree with itself.
