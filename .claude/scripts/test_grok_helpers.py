@@ -16,9 +16,14 @@ What is under test, and which issue each half closes:
   #51   the ledger printed `0` — "nothing spent" — on its own trust-check error
         path, re-arming the twelve-check cap.
   #59   nothing made the reservation happen, and nothing tied it to the model
-        call it accounts for.
+        call it accounts for — and the first fix for that could still aim the
+        reservation at a different pull request.
   #75   the sweeps' worktree shape check was not the direct-child check its
         comment claimed, because `?` matches `/` in a bash `case`.
+  #75   `gh label create` is create-or-overwrite, so the grant reached any
+        label in any repository. This one is the odd entry: it never shipped
+        wrong. It is a grant closed by moving it into a helper, and these cases
+        are what keep it closed rather than what caught it.
 
 Two rules the suite is written to, both of them this repository's:
 
@@ -483,6 +488,35 @@ class ReviewArgumentValidation(unittest.TestCase):
         self.assertRegex(text, r'git -C "\$work/repo" checkout --quiet "\$branch"')
         # Exactly one, with none and several both refused rather than guessed at.
         self.assertIn("exactly one open pull request", text)
+
+    def test_the_pr_must_also_come_from_this_repository(self):
+        # `--head` filters on the branch NAME alone and matches across forks, so
+        # an open pull request from someone's fork carrying the same branch name
+        # is a candidate — and reserving a slot on THAT one while reviewing this
+        # local branch is exactly the mismatch dropping the argument was meant to
+        # prevent. Closing a hole by name and leaving it open by provenance moves
+        # the defect rather than removing it. Raised by a reviewer against the
+        # first version of the resolution.
+        text = REVIEW.read_text(encoding="utf-8")
+        self.assertIn("headRepository", text)
+        self.assertRegex(text, r"gh repo view --json nameWithOwner")
+        self.assertRegex(text, r'awk -F\'\\t\' -v r="\$repo"')
+
+    def test_the_fork_filter_selects_this_repository_only(self):
+        # The filter itself, run rather than read: the same awk the helper uses,
+        # over a listing that contains a fork's pull request on an identically
+        # named branch.
+        listing = (
+            "someone-else/dotnet-ddd-blueprint\t999\n"
+            "acme/widgets\t134\n"
+            "\t7\n"  # a deleted fork: nameWithOwner is null, `// ""` makes it empty
+        )
+        out = run_bash(
+            "awk -F'\\t' -v r=\"$REPO\" '$1 == r { print $2 }'",
+            listing,
+            REPO="acme/widgets",
+        )
+        self.assertEqual("134", out.stdout.strip())
 
     def test_a_slot_outside_the_cap_is_refused(self):
         for slot in ("0", "13", "12.0", "-1", "1 2"):

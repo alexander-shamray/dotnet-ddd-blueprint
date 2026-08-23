@@ -317,8 +317,9 @@ free parameter.
 ### The suite that should have existed first
 
 **Six judgements the whole loop rests on had no test, five of which had already
-shipped wrong.** `test_grok_helpers.py` grew to 57 cases across the review
-rounds, and each of those five defects is reproduced as one that fails against
+shipped wrong.** `test_grok_helpers.py` grew across the review
+rounds — every round but one added cases, and the count is deliberately not
+restated here for the reason this file gives about counts, and each of those five defects is reproduced as one that fails against
 the old behaviour: a gate only ever observed green is one nobody has established
 is looking at anything. The sixth — that the label helper leaves no free
 parameter a finding could steer — never shipped wrong; it is a grant closed by

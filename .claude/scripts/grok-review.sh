@@ -123,15 +123,34 @@ branch=$(git branch --show-current)
 # is about to clone — so the two cannot be different subjects. See the argument
 # block above for what a caller-supplied number bought.
 #
-# Exactly one open pull request, and both other counts are refusals rather than
-# something to guess past. None means there is no ledger to write to and
-# therefore no cap to enforce, which is a state to stop in, not to review
-# through. More than one is ambiguous, and picking either would be inventing
-# the answer to the question this line exists to ask.
-pr=$(gh pr list --head "$branch" --state open --json number --jq '.[].number') ||
+# **`--head` filters on the branch NAME and nothing else**, which is not the
+# question being asked. It matches across forks, so an open pull request from
+# someone's fork carrying the same branch name is a candidate here — and
+# selecting it would reserve a slot on THAT pull request while cloning and
+# reviewing this local branch, which is precisely the mismatch this block
+# replaced an argument to prevent. A fix that closes a hole by name and leaves
+# it open by provenance has moved the defect rather than removed it.
+#
+# So the head repository is compared against the one this checkout is, and only
+# pull requests from it survive. `gh repo view` reads the checkout, so both
+# sides of that comparison are properties of the filesystem rather than of
+# anything a caller or a finding supplied.
+repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) ||
+  { echo "cannot resolve this checkout's repository" >&2; exit 2; }
+# Tab-separated and filtered in awk rather than inside --jq, because gh's --jq
+# takes no --arg: embedding "$repo" in the jq program would put a shell value
+# into a program text, which is the shape this directory exists to avoid.
+pr=$(gh pr list --head "$branch" --state open --json number,headRepository \
+       --jq '.[] | "\(.headRepository.nameWithOwner // "")\t\(.number)"' |
+     awk -F'\t' -v r="$repo" '$1 == r { print $2 }') ||
   { echo "cannot ask GitHub which pull request $branch has" >&2; exit 2; }
+# Exactly one, and both other counts are refusals rather than something to guess
+# past. None means there is no ledger to write to and therefore no cap to
+# enforce, which is a state to stop in, not to review through. More than one is
+# ambiguous, and picking either would be inventing the answer to the question
+# these lines exist to ask.
 [ "$(grep -c . <<<"$pr")" -eq 1 ] ||
-  { echo "expected exactly one open pull request for $branch, found: ${pr:-none}" >&2; exit 2; }
+  { echo "expected exactly one open pull request for $branch in $repo, found: ${pr:-none}" >&2; exit 2; }
 # suggestions.md is the one file allowed to differ — it is the review's own
 # working state. Anything else, tracked or untracked, means the reviewer would
 # read a state the PR does not carry: the clone below holds only commits.
