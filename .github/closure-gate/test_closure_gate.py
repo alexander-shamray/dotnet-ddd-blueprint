@@ -242,6 +242,25 @@ class FailsClosed(unittest.TestCase):
             linked=(88,),
         )), [])
 
+    def test_a_linked_list_at_the_page_size_is_refused(self):
+        problems = check(payload(
+            body="| | |\n|---|---|\n| Closes | #88 |\n\nCloses #88\n",
+            commit_messages=("fix: a\n\nCloses #88",),
+            linked=tuple(range(1, 101)),
+        ))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("paginated endpoint", problems[0])
+
+    def test_a_linked_list_below_the_page_size_is_judged(self):
+        """The second boundary is a boundary too, not a permanent refusal."""
+        numbers = tuple(range(1, 100))
+        cell = " ".join(f"#{n}" for n in numbers)
+        self.assertEqual(check(payload(
+            body=f"| | |\n|---|---|\n| Closes | {cell} |\n",
+            commit_messages=("fix: a",),
+            linked=numbers,
+        )), [])
+
     def test_a_missing_field_is_a_problem_not_a_pass(self):
         broken = payload()
         del broken["commits"]

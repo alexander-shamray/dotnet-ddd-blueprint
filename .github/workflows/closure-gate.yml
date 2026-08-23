@@ -81,7 +81,7 @@ jobs:
       # failed would be masked by whatever the right-hand side exited with.
       # Here the gate would exit 2 on the empty input anyway — but relying on
       # that is relying on a second bug to cover the first.
-      - name: The description, the table and the commits agree
+      - name: What the PR says it closes matches what merging it closes
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

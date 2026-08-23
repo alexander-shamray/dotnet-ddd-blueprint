@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""The three statements a pull request makes about what it closes must agree.
+"""What a pull request says it closes must match what merging it will close.
 
-There are three of them and they are honoured by different machinery, which is
-why they can disagree without anybody noticing:
+It says it three times, and the three are honoured by different machinery,
+which is why they can disagree without anybody noticing:
 
 1. **The `| Closes |` row** in the house body form — a human-readable summary,
    read by people and by nothing else.
@@ -41,7 +41,10 @@ would fail a correct pull request. What has to agree is what the merge
 what the pull request **says** it does, in the table and in the description.
 A silent commit contradicts neither. The `NoCommitRepeatsIt` case in
 `test_closure_gate.py` pins it, so the fourth comparison cannot be added by
-someone reading "must agree" as a claim about all three pairs.
+someone reading the three statements above as three pairs that have to
+match. This file's opening sentence *was* that reading — it said the three
+statements must agree — and it was flagged from three separate sites before
+being rewritten rather than annotated.
 
 **Half of this comparison is GitHub's own parse and half is the regex below,
 and that asymmetry decides the failure mode.** A regex that matches too much
@@ -63,7 +66,16 @@ says. If the description omits it too, the sets agree and the merge closes an
 issue nobody declared: the fail-open shape this file exists to close, reached
 by a route the parser cannot see. So `COMMIT_PAGE_SIZE` makes it fail closed
 — a list at or above the page size is **refused rather than judged**, and the
-message says to fetch the commits through a paginated endpoint.
+message says to fetch through a paginated endpoint.
+
+**`closingIssuesReferences` is paged by the same call and was guarded one
+round later**, which is the same defect as the three sites above: the fix
+went in where the finding pointed and not where the shape recurs. A body
+carrying more closures than one page returns hands the gate a prefix of
+GitHub's own answer, and a reference past the cut is then absent from
+`linked` — so the table looks like it understates, or the commit set looks
+like it over-closes, for a reason that is neither. Both collections now
+refuse at the boundary.
 
 **The page size is GitHub's documented default and has not been measured
 here**, which is why the guard triggers at or above it rather than on
@@ -126,9 +138,10 @@ ISSUE_NUMBER = re.compile(r"#(\d+)\b")
 
 REQUIRED_FIELDS = ("number", "url", "body", "commits", "closingIssuesReferences")
 
-# One page of `gh pr view --json commits`. A list this long may be a prefix,
-# and a prefix is indistinguishable from the whole thing from in here.
-COMMIT_PAGE_SIZE = 100
+# One page of `gh pr view`. A collection this long may be a prefix, and a
+# prefix is indistinguishable from the whole thing from in here. It bounds
+# the commit list and `closingIssuesReferences` alike — one call, one page.
+GH_PAGE_SIZE = 100
 
 PULL_URL = re.compile(r"^https?://github\.com/(?P<repo>[\w.-]+/[\w.-]+)/pull/\d+", re.IGNORECASE)
 
@@ -202,16 +215,27 @@ def check(payload: dict) -> list[str]:
             "empty for the wrong reason"
         ]
 
-    if len(commits) >= COMMIT_PAGE_SIZE:
+    if len(commits) >= GH_PAGE_SIZE:
         return [
             f"this pull request reports {len(commits)} commits, at or above "
-            f"the {COMMIT_PAGE_SIZE} that `gh pr view --json commits` returns "
+            f"the {GH_PAGE_SIZE} that `gh pr view --json commits` returns "
             f"in one page — so the list may be a prefix, and a closing keyword "
             f"past the cut is invisible to this gate for a reason that has "
             f"nothing to do with what the pull request says. That is the "
             f"fail-open shape this gate exists to close, so it refuses rather "
             f"than judging: fetch the commits through a paginated endpoint and "
             f"pass the complete list"
+        ]
+
+    if len(payload["closingIssuesReferences"]) >= GH_PAGE_SIZE:
+        return [
+            f"this pull request reports "
+            f"{len(payload['closingIssuesReferences'])} linked issues, at or "
+            f"above the {GH_PAGE_SIZE} one page returns — so GitHub's own "
+            f"answer to what merging closes may itself be a prefix here, and "
+            f"a reference past the cut would read as a table that understates "
+            f"or a commit that over-closes. Neither would be true. Fetch this "
+            f"collection through a paginated endpoint and pass it whole"
         ]
 
     linked = {issue["number"] for issue in payload["closingIssuesReferences"]}
@@ -298,7 +322,10 @@ def main(argv: list[str]) -> int:
 
     linked = sorted(issue["number"] for issue in payload["closingIssuesReferences"])
     closes = ", ".join(f"#{number}" for number in linked) if linked else "nothing"
-    print(f"closure-gate: the description, the table and the commits agree — this merge closes {closes}.")
+    print(
+        f"closure-gate: what this pull request says it closes matches what "
+        f"merging it will close — {closes}."
+    )
     return 0
 
 
