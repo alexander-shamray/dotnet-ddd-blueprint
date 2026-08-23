@@ -218,15 +218,21 @@ the same defect one step less obvious.
    cancellation, **check the saga before doing anything else** — step 2 of
    the `Compensating` procedure below.
 
-   **A gone instance means wait; a live one means fix the saga, not the
-   money.** Both exits finalise, so an instance still live at the hour this
-   alerts on has missed its own ten-minute timeout and no `CancelOrder` is
-   coming without intervention. Waiting there waits for ever — but
-   refunding there races an automatic void that arrives the moment the
-   saga is unstuck, so the fix is the saga. Two earlier revisions of this
-   step got that wrong in both directions: one said "wait for one"
+   **A gone instance is not an answer on its own; a live one means fix the
+   saga, not the money.** Both exits finalise, so an instance still live at
+   the hour this alerts on has missed its own ten-minute timeout and no
+   `CancelOrder` is coming without intervention. Waiting there waits for
+   ever — but refunding there races an automatic void that arrives the
+   moment the saga is unstuck, so the fix is the saga.
+
+   **And a gone one still has to be checked**, because #128's crash window
+   can delete the instance with its `CancelOrder` never sent: look for the
+   cancellation itself, not for the missing saga row. Step 2's `Gone`
+   branch is the procedure. Three earlier revisions of this step were
+   wrong in three different directions — one said "wait for one"
    unconditionally, the next said refund by hand and treat the saga
-   separately.
+   separately, and the third read a deleted instance as proof the
+   cancellation had been sent.
 
    An earlier version of this step said "refund the authorisation" with no
    check at all, which is a double refund whenever Payments got there first.
@@ -297,26 +303,45 @@ heading and then explained two paragraphs down that there would not be one.
      held and [that section](#stock_not_released) is the procedure. With no
      such row, the stock needs nothing and the money is all that is left.
 
-     **This is the one branch on the page where step 1's answer decides
-     what you do, and it decides it because nothing can race you here.**
-     A gone instance sent its `CancelOrder`, so `OrderCancelled` is
-     published and the automatic path has already had its turn. A
-     `PaymentRefunded` means the workflow finished and there is nothing to
-     do. **No `PaymentRefunded` does not mean "refund it"** — it means the
-     automatic path fired and produced nothing, which is a failure on
-     Payments' side rather than a missing instruction on Ordering's: check
-     that service's error queue and replay the consumer, because one that
-     succeeds on retry voids the authorisation and duplicates anything paid
-     by hand. Refund manually only if the authorisation cannot wait for
-     that, record it, and own the reconciliation — the same terms as every
-     other manual refund on this page.
+     **A gone instance is not proof that the cancellation was sent**, and
+     this branch said it was. `SetCompletedWhenFinalized` deletes the row
+     inside the transaction that commits the exit, while
+     `UseInMemoryOutbox` flushes the buffered `CancelOrder` only after the
+     consume pipeline returns — [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128),
+     and §9.6's crash-window callout. A crash between the two leaves
+     exactly this evidence: no instance, and no `CancelOrder` ever sent.
+     **So check for the cancellation itself, not for the absence of a
+     saga.** The order's own state, or an `OrderCancelled` row in
+     Ordering's outbox, is what settles it.
 
-     **Round 25 deleted this and round 26 put it back**, which is worth the
-     line it costs. Step 1 used to end "then refund only if it did not":
-     wrong for the live branch, right for this one, and removing it left
-     the ordinary case with a check and no action. That is the fifth
-     correction to this one instruction and the second where the previous
-     fix was what broke it.
+     **Cancelled, and no `PaymentRefunded`** — the automatic path fired and
+     produced nothing, which is a failure on Payments' side rather than a
+     missing instruction on Ordering's. Check that service's error queue
+     and replay the consumer, because one that succeeds on retry voids the
+     authorisation and duplicates anything paid by hand. Refund manually
+     only if the authorisation cannot wait for that, record it, and own the
+     reconciliation — the same terms as every other manual refund here.
+
+     **Not cancelled** — the crash window above. The order is still open,
+     the money is still authorised, and nothing further is coming, because
+     the only thing that was going to send `CancelOrder` no longer exists.
+     **Recover the cancellation rather than the money**: send `CancelOrder`
+     (§11.4's endpoint), which publishes `OrderCancelled` and gives
+     Payments the void it consumes. Refunding by hand here is the same
+     duplicate the live-instance branch warns about, arriving by a
+     different route.
+
+     **`PaymentRefunded` already there** — the workflow finished. Nothing
+     to do.
+
+     **This branch has now been corrected six times, and three of those
+     corrected the previous correction.** Round 25 deleted step 1's refund
+     instruction because it was wrong for the live branch; round 26 put it
+     back here, where it is right, and asserted that a gone instance means
+     the cancellation was sent; round 30 found that assertion refuted by
+     this branch's own #128. The pattern is worth the lines it costs: every
+     revision reasoned from *what the saga does* and each was falsified by
+     *what the saga does when it stops halfway*.
    - **Still there** — both exits failed, which is its own incident. **Leave
      the reservation alone**: the machine is waiting on `StockReleased` and
      will cancel the order when it arrives, and releasing by hand races it.
