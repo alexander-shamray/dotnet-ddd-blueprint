@@ -15,9 +15,15 @@
 ## What it means
 
 A saga reached something it could not compensate and escalated (§9.6) — two
-of the four reasons are a wait that ran out, and the other two are a
-cancellation the platform has no contract to undo, split by the state it was
-raised from because the procedures differ.
+of the four reasons are a wait that ran out, and the other two are an
+authorisation **Ordering** has no command to undo, split by the state each
+was raised from because the procedures differ.
+
+**"The platform has no contract to undo it" is what this said, and it is
+wider than the truth.** Payments consumes `OrderCancelled` and voids an
+authorisation already taken (§3.2); what Ordering lacks is a refund *command*
+to send. The difference decides step 1 below, which is why the page cannot
+open by collapsing it.
 
 **Check whether the saga is still running before you work the row**, because
 that is not the same answer for every reason and an earlier version of this

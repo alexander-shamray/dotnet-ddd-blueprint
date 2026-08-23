@@ -6,15 +6,29 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 /// §9.6's one command that changes no business state. It writes an operations
 /// row and stops, and no aggregate is loaded — but <b>not</b> because nothing
 /// about the order changed. What the four reasons share is narrower than
-/// that: a human now has work the platform has no contract to do, and that is
-/// a fact about operations rather than about the order.
+/// that: a human now has work <b>this workflow cannot finish itself</b>, and
+/// that is a fact about operations rather than about the order.
+///
+/// <b>Not "work the platform has no contract to do", which this said.</b>
+/// True of the two waits; false of the two money codes, where §3.2 gives
+/// Payments a <c>Refund</c> aggregate and <c>OrderCancelled</c> to act on.
+/// The platform may well do the work — what it cannot do is let this saga
+/// ask for it, or tell whether it happened.
 ///
 /// Two of them are a wait that ran out, where the order's own state genuinely
-/// has not moved. The other two — <c>payment_authorised_during_compensation</c> and
-/// <c>cancelled_after_confirmation</c> — exist because <b>money is
-/// authorised and the order is not going to be delivered</b>, and §3.2 gives
-/// Ordering no refund command to answer that with. Reading "the process
-/// stalled" onto either row describes the opposite of what happened.
+/// has not moved. The other two —
+/// <c>payment_authorised_during_compensation</c> and
+/// <c>cancelled_after_confirmation</c> — exist because <b>money is authorised
+/// and cancellation is the workflow's outcome</b>, and §3.2 gives Ordering no
+/// refund command to answer that with. Reading "the process stalled" onto
+/// either row describes the opposite of what happened.
+///
+/// <b>Not "the order is not going to be delivered", which this said and which
+/// the sibling code refutes.</b> <c>cancelled_after_confirmation</c> exists
+/// precisely because Shipping may still despatch — that is the first step of
+/// its procedure. What the two share is authorised money against a workflow
+/// ending in cancellation; whether anything ships is the open question one of
+/// them is raised to ask.
 ///
 /// <b>Payments none the less refunds off <c>OrderCancelled</c>, which §3.2 has
 /// it consume and which voids an authorisation already taken.</b> Whether it

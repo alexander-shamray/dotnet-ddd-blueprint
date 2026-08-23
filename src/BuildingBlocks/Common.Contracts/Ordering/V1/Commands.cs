@@ -133,8 +133,11 @@ public static class ReviewReasons
     /// spike is a dependency signal and not a product one.
     /// </remarks>
     /// <remarks>
-    /// <b>The cancellation the saga cannot compensate, raised from
-    /// <c>Compensating</c>.</b> It was the only one until
+    /// <b>The authorisation the saga cannot compensate, raised from
+    /// <c>Compensating</c>.</b> The authorisation, not the cancellation — on
+    /// the decline and payment-timeout doors there is no cancellation yet, and
+    /// leading with one is the reading the rename exists to stop. It was the
+    /// only one until
     /// <see cref="CancelledAfterConfirmation"/> was split out of it, and that
     /// one is the same money problem from <c>Confirmed</c> — so neither is
     /// unique in what it cannot undo, and the state each is raised from is the

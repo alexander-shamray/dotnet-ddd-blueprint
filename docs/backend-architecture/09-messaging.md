@@ -1971,8 +1971,11 @@ public sealed record CancelOrder(Guid OrderId, string Reason);
 // ShipmentDispatched directly. The aggregate still enforces the transition.
 public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 
-// Escalation path for work this platform has no contract to do (§9.6) — a
-// wait that ran out, or a cancellation with money already authorised. This
+// Escalation path for work this workflow cannot finish itself (§9.6) — a
+// wait that ran out, or money authorised against an outcome of
+// cancellation. NOT "work the platform has no contract to do": §3.2 gives
+// Payments a Refund aggregate and OrderCancelled to act on, so the
+// platform may do it — Ordering just cannot ask, or tell. This
 // does NOT touch the Order aggregate, because "a human should look at this"
 // is a fact about operations rather than about the order.
 //
@@ -2639,14 +2642,23 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 `FlagOrderForReview` is the one command here that changes no business state. Its
 handler writes an operations row and stops, and no aggregate is loaded — but
 **not** because nothing about the order changed. What the reasons share is
-narrower: a human now has work this platform has no contract to do, which is a
-fact about operations rather than about the order.
+narrower: a human now has work **this workflow cannot finish itself**, which
+is a fact about operations rather than about the order — and not "work this
+platform has no contract to do", which holds for the two waits and not for
+the two money codes, where Payments has both a `Refund` aggregate and
+`OrderCancelled` to act on.
 
 Two of the four are a wait that ran out, where the order's own state genuinely
-has not moved. The two cancellation codes are the opposite — they exist
-because **money is authorised and the order is not going to be delivered**,
-and §3.2 gives Ordering no refund command to answer that with. A single "the
-process stalled" would describe those rows backwards.
+has not moved. The other two are the opposite — they exist because **money is
+authorised and cancellation is the workflow's outcome**, and §3.2 gives
+Ordering no refund command to answer that with. A single "the process
+stalled" would describe those rows backwards.
+
+**Not "and the order is not going to be delivered", which this said until
+a reviewer set it against the sibling code.** `cancelled_after_confirmation`
+exists *because* Shipping may still despatch, and stopping that is the first
+step of its procedure — so delivery is exactly what is still open on one of
+the two. The shared condition is the money, not the outcome for the goods.
 
 **Nor is the money the thing that tells the two apart**, which this section
 assumed in two different directions before settling. Payments consumes
