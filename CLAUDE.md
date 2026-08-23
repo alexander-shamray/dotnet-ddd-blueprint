@@ -873,6 +873,16 @@ own line rather than sending a reader to a file that does not hold it.
   subject from the thing being acted on rather than accepting it:
   `gh pr list --head "$branch"` beside the clone of `$branch`, the same way
   `gh-label-ensure.sh` resolves the repository from the checkout.
+- **A multi-target edit that aborts has applied a *prefix* of its changes, and
+  the targets after the failure are silently absent rather than wrong.** A
+  three-file substitution script wrote the first file, failed an assertion on
+  the second, and never attempted the third; the follow-up was then derived from
+  the *error message*, so it covered the file that had errored and not the one
+  that had never been reached. The two files named in the failure were verified
+  to agree and the third was never re-read. **Resume from the original list,
+  never from the error**, and re-grep every target before claiming the batch
+  landed — the absent change leaves no trace to grep for, which is why only the
+  list finds it.
 - **An `exit` in the last stage of a pipeline ends a subshell, and the consumer
   on the other side has already answered.** The ledger's trust check bailed with
   `exit 3` inside `gh api … | while …`; the `awk` on the other side of
