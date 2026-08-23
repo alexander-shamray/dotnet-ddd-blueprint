@@ -137,7 +137,19 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              SOURCE_INPUTS list to drift. It is also the only
                              workflow taking `edited`, because the defect it
                              exists for was introduced by an edit to a PR body
-                             with no push behind it
+                             with no push behind it. **Proposal and enforcement
+                             are two executions**: the suite runs the branch's
+                             gate, and the gate that JUDGES is read out of the
+                             base commit with `git show`, so a pull request
+                             cannot supply its own judge. A base carrying no
+                             gate fails rather than falling back — the fallback
+                             is the silent pass the split exists to refuse.
+                             **The workflow file itself is still the branch's
+                             copy**, because `pull_request` runs the head
+                             definition; only `pull_request_target` reads the
+                             base one, at a price this repo refuses. Closing
+                             that needs a required status check, and `main` is
+                             not protected today
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/closure-gate/        what a pull request SAYS it closes, against what
                              merging it WILL close. Three statements — the

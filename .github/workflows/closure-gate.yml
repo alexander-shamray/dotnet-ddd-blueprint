@@ -49,32 +49,104 @@ concurrency:
   group: closure-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# **This workflow enforces from the pull request's own copy of the gate,
-# and #132 carries that.** The checkout below is the merge ref, so both the
-# suite and the gate that judges the branch come from the branch. It is a
-# policy property rather than a privilege one — the token is read-only and
-# nothing is posted — and the version worth worrying about is accidental: a
-# refactor that makes the gate pass vacuously, with the suite edited to
-# match, is green here. The fix is to run the ENFORCING copy from the base
-# SHA while the suite keeps running the head copy, and it needs a decision
-# about the bootstrap case, because `main` does not carry this gate yet.
+# **Proposal and enforcement are two executions here, and that split is the
+# whole design of this job.** Until #132 they were one: a bare checkout on
+# `pull_request` gives the merge ref, so the gate judging a branch was the
+# gate that branch shipped. Not a privilege problem — the token is read-only
+# and nothing is posted — but a policy one, and the version worth worrying
+# about is accidental rather than malicious: a refactor that makes `check()`
+# return `[]` on a path nobody considered, with the suite edited in the same
+# change to match, was green. That is this repository's most-repeated failure
+# with the instrument meant to catch it inside the blast radius.
+#
+# So the SUITE runs the head copy — testing a proposed gate is the point of
+# that step — and the ENFORCING copy is read out of the base commit. A pull
+# request may now change the gate freely without changing what judges it, and
+# a change that neuters it goes red on the pull request proposing it rather
+# than on the one after.
+#
+# `pull_request_target` is the other documented answer and is worse: a
+# writable token against a base checkout, buying a much larger hazard to
+# solve a read-only problem.
+#
+# **THIS FILE IS STILL THE BRANCH'S OWN COPY, and that residual is not closed
+# by anything above.** `pull_request` runs the workflow definition from the
+# HEAD ref, so a pull request can edit or delete the enforcing step and the
+# run that judges it is the edited one. Base-sourcing the gate narrows the
+# accidental case — the refactor that neuters `check()` — and leaves the
+# deliberate one, and only `pull_request_target` reads the base definition,
+# at the price this file has already refused.
+#
+# **What would actually close it is a repository setting rather than a file:**
+# a required status check on `main`, which fails a pull request whose
+# `closure-gate` check never reports. `main` is NOT protected today —
+# `gh api repos/.../branches/main/protection` answers 404 — so a pull request
+# deleting this workflow currently removes the check with nothing to notice.
+# Stated here rather than in a commit message because a residual nobody can
+# grep is a residual nobody re-checks.
 jobs:
   closure-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The enforcing copy comes out of the base commit, which a shallow
+          # checkout does not have. This is the honest cost of not letting a
+          # pull request supply its own judge.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # The gate's own tests first, on the licence gate's terms — running it
-      # against a well-formed pull request passes and says nothing about what
-      # it would catch. Every test in that suite is a negative case, and nine
+      # The HEAD copy, deliberately: this step's subject is the gate this
+      # pull request PROPOSES, so a proposal that fails its own suite belongs
+      # red here. Running it at all is the licence gate's terms — a gate
+      # observed only against a well-formed input says nothing about what it
+      # would catch. Every test in that suite is a negative case, and nine
       # deliberate mutations of the gate were each observed red against it.
-      - name: Test the gate
+      - name: Test the proposed gate
         working-directory: .github/closure-gate
         run: python -m unittest
+
+      # The BASE copy, deliberately, for the reason at the top of this file.
+      #
+      # A base that carries no gate FAILS rather than falling back to the head
+      # copy. Falling back is the silent-pass shape this whole file exists to
+      # refuse: it would restore the property #132 reported, on exactly the
+      # pull requests where nobody was watching for it. `main` carries the
+      # gate as of 1af772b, so the only way to reach this branch now is a base
+      # older than that — which is a rebase somebody should perform knowingly.
+      - name: Take the enforcing gate from the base commit
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GATE: .github/closure-gate/closure_gate.py
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$BASE_SHA:$GATE" 2>/dev/null; then
+            echo "The base commit carries no $GATE, so there is no copy of the"
+            echo "gate that this pull request did not write. Rebase onto a base"
+            echo "that has it. Falling back to the head copy is the silent pass"
+            echo "this job exists to refuse, so it is not offered."
+            echo "::error::base commit $BASE_SHA carries no $GATE"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/closure-gate"
+          git show "$BASE_SHA:$GATE" > "$RUNNER_TEMP/closure-gate/closure_gate.py"
+          # Fail on an empty subject rather than run a gate that reads nothing
+          # and reports a pass — the rule the gate applies to its own input.
+          if [ ! -s "$RUNNER_TEMP/closure-gate/closure_gate.py" ]; then
+            echo "::error::$GATE at $BASE_SHA is empty"
+            exit 1
+          fi
+          # The workflow is in this comparison as well as the gate, and it is
+          # the half a reader is least likely to think of: see the residual at
+          # the top of this file.
+          if ! git diff --quiet "$BASE_SHA" -- .github/closure-gate/ .github/workflows/closure-gate.yml; then
+            echo "::notice::this pull request modifies the closure gate or its workflow; the gate below is the copy at $BASE_SHA"
+          fi
+          echo "enforcing with the gate as of $BASE_SHA"
 
       # One `gh` call, and it is the only network in the check. The deciding
       # takes JSON on stdin and is pure — deploy/canary/canary.py's split, for
@@ -98,4 +170,4 @@ jobs:
           gh pr view "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
             --json number,url,body,commits,closingIssuesReferences |
-            python .github/closure-gate/closure_gate.py
+            python "$RUNNER_TEMP/closure-gate/closure_gate.py"
