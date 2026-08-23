@@ -86,13 +86,13 @@ groups:
       # below described the case where it does. What makes the separate row
       # necessary is that the saga is normally FINALISED before its review
       # row ages to an hour, so there is no instance left to be stuck — but
-      # "the saga has already finalised" is a
-      # property of the REASON, not of the row, and this comment used to state
-      # it as though it were universal. payment_authorised_during_compensation is raised
-      # mid-wait from Compensating and can sit beside a live instance; every
-      # other reason is raised on the way out. The instance is nonetheless
-      # usually gone by the hour this measures, because Compensating's two
-      # exits are both well inside it.
+      # "the saga has already finalised" is a property of the REASON, not
+      # of the row, and this comment used to state it as though it were
+      # universal. payment_authorised_during_compensation is raised
+      # mid-wait from Compensating and can sit beside a live instance;
+      # every other reason is raised on the way out. The instance is
+      # nonetheless usually gone by the hour this measures, because
+      # Compensating's two exits are both well inside it.
       - alert: OrdersAwaitingReview
         expr: max by (service_name) (ordering_order_reviews_oldest_age_seconds) > 3600
         for: 5m
