@@ -886,8 +886,14 @@ same argument as never calling a branch clean because asking failed.
 
      A reservation is an election, not just a write: two resumed runs can read
      the same count and claim the same slot, so the ledger settles it after
-     posting — the earliest comment for the slot wins, and a losing claim
-     spends nothing. That arrives here as the helper's **exit 13**, and it
+     posting — **the first reservation posted after that slot's most recent
+     release wins**, and a losing claim spends nothing. Not "the earliest
+     comment", which is what this said and is the rule the fold was rewritten
+     to discard: first-ever would refuse a legitimately re-spendable slot
+     forever while `count` kept naming it as next. The two readings coincide
+     for a never-released slot, which is the case this paragraph is otherwise
+     about — so the wrong one *reads* correctly here, and anyone reconciling
+     the ledger to this file would have restored the defect. That arrives here as the helper's **exit 13**, and it
      means a concurrent `/ship` is mid-check on this PR, so stop the loop and
      say so — never take the next slot instead: two Grok runs share one root
      `suggestions.md`, and the later finisher would overwrite the earlier's
