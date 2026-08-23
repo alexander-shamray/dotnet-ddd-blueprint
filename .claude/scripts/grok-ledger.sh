@@ -27,6 +27,28 @@
 # fold takes the last event per N, so a released slot can be legitimately
 # re-spent and a stale release cannot hide a later one.
 #
+# That stop has to happen before a value is printed, and for one release it did
+# not. `exit 3` fires inside the `while` that reads the API's rows, which is the
+# last stage of a pipeline and so runs in a SUBSHELL: it ends that subshell, not
+# this script. The `awk` on the other side of `ledger_rows | awk` then saw EOF,
+# ran its END block and printed `0` — the same byte a legitimately empty ledger
+# produces, and the one that re-arms the very cap this file exists to hold.
+# `pipefail` and `set -e` did abort afterwards, with status 3, but the consumer
+# is a model reading stdout and the answer was already there. So every consumer
+# now BUFFERS: `ledger_rows` is collected into a variable, its status is checked
+# while nothing has been written, and only then are the rows folded. The
+# END-runs-on-empty-input behaviour stays — a fresh PR's ledger is legitimately
+# empty — which is exactly why the two cases had to be separated upstream of it
+# rather than told apart downstream.
+#
+# `reserve` and `release` are the REVIEW HELPER'S verbs, not the caller's.
+# grok-review.sh posts the reservation itself, immediately before the model call
+# it accounts for, so that invoking a review and spending a slot are one
+# operation rather than two an ordering mistake can separate. .claude/settings.json
+# denies both spellings to a session; they stay here because `count` must still
+# parse a released row out of a PR's history, and because a human reconciling a
+# slot spent wrongly has nothing else to reach for.
+#
 # `reserve` is an election, not just a write. Two resumed runs can read the
 # same count and claim the same slot; posting is not atomic, so the claim is
 # settled after the fact: the first reservation posted after the slot's most
@@ -93,12 +115,36 @@ ledger_rows() {
   done
 }
 
+# The buffer, and it is not merely a tidier spelling of a pipe. Command
+# substitution runs ledger_rows in a subshell and hands back its STATUS, so a
+# failed trust check arrives here as a non-zero return with nothing yet written
+# to this script's stdout — where `ledger_rows | awk` gave awk an EOF it could
+# not tell from an empty ledger, and let it answer first. Every consumer below
+# reads through these two functions and never through a pipe from ledger_rows.
+rows=""
+read_rows() {
+  # No `local`: the caller needs the value. `|| return` rather than leaning on
+  # set -e, because an assignment's failure inside a function is not reliably
+  # fatal and observing this failure here is the whole point.
+  rows=$(ledger_rows) || return $?
+}
+
+# printf, not a here-string: `<<<` appends a newline, so an empty ledger would
+# reach awk as one blank line rather than as no input at all, and the fold's
+# empty case would be folding a row that does not exist. Zero bytes in, END
+# out, 0 printed — which is what a fresh PR's ledger means.
+emit_rows() {
+  [ -z "$rows" ] || printf '%s\n' "$rows"
+}
+
 if [ "$op" = "count" ]; then
   [ -z "$n" ] || usage
   # POSIX awk only — no gawk match(..., m) — and empty input must still reach
   # END and print 0: a fresh PR's ledger is legitimately empty, and pipefail
   # turning that into a failure was this helper's first field defect.
-  ledger_rows | awk -F'\t' '
+  read_rows ||
+    { echo "the ledger's trust check failed; refusing to print a count" >&2; exit 3; }
+  emit_rows | awk -F'\t' '
     $2 ~ /converged/ { next }
     {
       split($2, a, "/")
@@ -122,7 +168,9 @@ if [ "$op" = "status" ]; then
   # check that makes the ledger state at all. A converged marker stands
   # until a later reservation supersedes it; releases change nothing, since
   # a skip neither spends nor converges.
-  ledger_rows | awk -F'\t' '
+  read_rows ||
+    { echo "the ledger's trust check failed; refusing to print a status" >&2; exit 3; }
+  emit_rows | awk -F'\t' '
     $2 ~ /converged/ { conv = 1 }
     $2 ~ /reserved/  { conv = 0 }
     END { print conv ? "converged" : "unconverged" }'
@@ -165,7 +213,9 @@ if [ "$op" = "reserve" ]; then
   # the slot forever while count kept naming it as next. Rows arrive in
   # posting order, so a release resets the candidate and the first
   # reservation after it takes the slot; later claims lose.
-  winner=$(ledger_rows |
+  read_rows ||
+    { echo "the ledger's trust check failed after posting; slot $n stands as reserved" >&2; exit 3; }
+  winner=$(emit_rows |
     awk -F'\t' \
       -v r="Grok check $n/12 — reserved " \
       -v x="Grok check $n/12 — released" '
