@@ -1,10 +1,20 @@
 """The review loop's helpers, tested where they decide.
 
 Five of this directory's scripts carry a judgement that the whole /ship loop
-rests on, and until now none of them had a test. Each of the defects below
-shipped, and each is a *negative* case here — a gate only ever observed green is
-one nobody has established is looking at anything, which is the rule the
-.github/**-gate suites are already written to.
+rests on, and until now none of them had a test.
+
+**Six judgements, five of which shipped wrong.** Each of those five is
+reproduced as a case that fails against the old behaviour — a gate only ever
+observed green is one nobody has established is looking at anything, which is
+the rule the .github/**-gate suites are already written to. The sixth, the label
+helper's confinement, never shipped wrong; its cases keep a closed grant closed
+rather than catching anything.
+
+**The regression negatives are paired with positive controls, and those are not
+decoration.** A negative that passes because a pattern matches *nothing* is
+indistinguishable from one that works — a trap this suite fell into once, when
+`\\b402\\b`'s negatives all tested digits *around* the number and none tested it
+alone.
 
 What is under test, and which issue each half closes:
 
@@ -248,6 +258,18 @@ class UsageLimitPattern(unittest.TestCase):
         self.assertLimit('"http_status": 402')
         self.assertLimit("status: 429")
         self.assertLimit("HTTP/1.1 429 Too Many Requests")
+
+    def test_a_longer_number_in_status_position_is_not_a_status_code(self):
+        # **The third hole in this one pattern, and the mirror of the second.**
+        # `\b402\b` had no left boundary; the first status anchor had a left
+        # boundary and no right one, so `status 4021` and `http_status: 4290`
+        # matched — the same false positive moved from the front of the number
+        # to the back. Each round found the side the previous fix had not
+        # covered, which is why both sides now have a contextual case.
+        self.assertNotLimit("status 4021")
+        self.assertNotLimit("http_status: 4290")
+        self.assertNotLimit('"http_status": 4025')
+        self.assertNotLimit("code 4029 something")
 
     def test_an_ordinary_successful_probe_is_not_a_limit(self):
         self.assertNotLimit("ok")

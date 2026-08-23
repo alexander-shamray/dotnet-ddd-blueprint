@@ -89,7 +89,15 @@ esac
 # `usage balance` and `balance exhausted` as well — the code alternatives are
 # the belt to that pair's braces, since the prose is what a provider change
 # rewords and the code is what stays.
-limit_re='rate.?limit|quota|usage limit|usage balance|balance exhausted|too many requests|(no|any) credits|402 payment required|(status|code)[^0-9]{0,3}(402|429)'
+#
+# **And it needs a boundary on BOTH sides**, which the first status-anchored
+# version had only on the left: `status 4021` and `http_status: 4290` matched,
+# because nothing stopped the code alternative at the third digit. That is the
+# same false positive the anchor was introduced to remove, moved from the front
+# of the number to the back — the third correction to this one pattern, each
+# round finding the side the previous fix had not covered. `([^0-9]|$)` closes
+# it, and the suite carries a contextual larger-number negative for each side.
+limit_re='rate.?limit|quota|usage limit|usage balance|balance exhausted|too many requests|(no|any) credits|402 payment required|(status|code)[^0-9]{0,3}(402|429)([^0-9]|$)'
 
 # What a FINISHED turn looks like, and this one is an allow-list because it was
 # a deny-list of three and that is the same fail-open one level on. It used to
@@ -379,6 +387,21 @@ fi
 #
 # One exit code for both a lost election and an unreachable ledger, because the
 # caller does the same thing with each: do not count this round, and stop.
+#
+# **"If and only if" has one exception, and it is deliberate rather than
+# overlooked.** The ledger posts its comment and *then* reads the rows to settle
+# the election, so a trust-check failure on that read leaves the reservation
+# standing while this helper exits 13 before `docker run` — a slot spent on a
+# model call that was never launched. Conservative on purpose: after a failed
+# read the state is exactly what is not known, and releasing on it would hand a
+# slot back on the strength of a lookup that did not complete, which is the
+# fail-open this file spent a branch closing. The cost is at most one wasted
+# check out of twelve, and it is bounded; guessing the other way is not.
+#
+# So the contract is: a slot is spent if the review's model call was launched,
+# and may also be spent when the ledger could not finish settling its own
+# election. A lost election does *not* add a spend — `count` folds duplicate
+# rows for a slot into one — so this exception is the failed-read case alone.
 ledger="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/grok-ledger.sh"
 ledger_rc=0
 bash "$ledger" "$pr" reserve "$slot" "$mode" >&2 || ledger_rc=$?

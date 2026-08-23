@@ -873,6 +873,17 @@ own line rather than sending a reader to a file that does not hold it.
   subject from the thing being acted on rather than accepting it:
   `gh pr list --head "$branch"` beside the clone of `$branch`, the same way
   `gh-label-ensure.sh` resolves the repository from the checkout.
+- **A boundary on one side of a pattern is not a boundary, and the fix for one
+  side is where the next hole appears.** One usage-limit regex took three
+  corrections across three review rounds, each finding the side the previous fix
+  had not covered: `402` matched inside `47402`, so it became `\b402\b`; that
+  matched `"input_tokens": 402`, because a quote and a space are word boundaries
+  too, so it became a status *context*; and that matched `status 4021`, because
+  nothing stopped the code alternative at the third digit. The same false
+  positive three times, walking from the middle of the number to its front to
+  its back. **When you constrain one end, write the case for the other end in
+  the same change** — and note that each round's negatives looked thorough while
+  testing only the end that had just been fixed.
 - **Never edit a shell script while it is running.** `bash` reads a script
   incrementally, by byte offset, rather than parsing it whole — so an edit that
   shifts the offsets makes the still-running process resume at the wrong place.
