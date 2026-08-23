@@ -41,6 +41,40 @@ jobs:
         working-directory: .github/licence-gate
         run: python licence_gate.py
 
+  # The review loop's own helpers — the only suite whose subject is `.claude/`.
+  #
+  # Nothing in CI *runs* these scripts, which is exactly why the suite belongs
+  # here: a test nobody runs rots, and the judgements it covers are the ones
+  # /ship and the two sweeps rest on — what counts as a usage limit, what counts
+  # as a review that finished, whether the check ledger can publish an answer on
+  # its own error path, whether every usage-limit skip happens before a slot is
+  # reserved, whether the sweeps' worktree guard is the direct-child
+  # check it claims, and whether the label helper leaves a free parameter a
+  # finding could steer. Five of those six shipped wrong; the sixth is a grant
+  # that was closed by moving it into a helper, and the suite is what keeps it
+  # closed.
+  #
+  # Six, and the count is load-bearing rather than decorative: `CLAUDE.md` and
+  # `docs/testing.md` enumerate the same six, and a list of what a gate is
+  # looking at that quietly drops the newest surface is the failure this
+  # repository names as its most-repeated — which is exactly how this list came
+  # to say four, then five, before a reviewer counted it against the suite.
+  #
+  # Beside the licence gate rather than inside `build`, on its argument: stdlib
+  # Python over text and a few `bash` fragments, so it needs no restore, no
+  # Docker and no network — the `gh` the ledger calls is a stub on PATH.
+  review-helpers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the review helpers
+        run: python -m unittest discover -s .claude/scripts
+
   # PR-25's inventory gates, and they sit beside the licence gate rather than
   # inside `build` for the same reason it does: stdlib Python over text, so
   # they need no restore and cannot be skipped by a build failure.

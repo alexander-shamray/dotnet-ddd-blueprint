@@ -20,8 +20,8 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 
 ## The suites
 
-Nine of them, three runners, and `dotnet test` says nothing about the other
-eight:
+Ten of them, three runners, and `dotnet test` says nothing about the other
+nine:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -41,6 +41,7 @@ py -3.12 -m unittest discover -s .github/pipeline-gate   # PR-25's quality gates
 py -3.12 -m unittest discover -s .github/coverage        # the coverage merge
 py -3.12 -m unittest discover -s deploy/canary           # §15.5's rollout
 py -3.12 -m unittest discover -s .github/closure-gate    # what a PR closes
+py -3.12 -m unittest discover -s .claude/scripts         # the review loop's helpers
 ```
 
 **The licence gate is in that list because CI runs it on the same terms**, and
@@ -49,17 +50,39 @@ runs it — the pattern every gate here follows — so a suite that ships with t
 repository, runs in CI, and is invisible to `dotnet test` is one of these
 whatever directory it lives in.
 
-**Only the first is a §12 suite, and the other eight are here anyway**, because
+**Only the first is a §12 suite, and the other nine are here anyway**, because
 this file is written for someone with a checkout rather than for someone
 deciding what to test. The scaffold's tests exercise a developer tool; the
 chart gate renders `deploy/helm/` and asserts what comes out (§15.3); the
 observability gate pairs §13.6's alerts with §13.9's runbooks both ways and
 checks that every metric a loaded rule reads is one something publishes;
 PR-25's three cover the pipeline's own inventories, the coverage merge, and
-§15.5's rollout arithmetic; and the closure gate compares what a pull request
-says it closes against what GitHub will actually close. None
+§15.5's rollout arithmetic; the closure gate compares what a pull request
+says it closes against what GitHub will actually close; and the last covers
+the review loop's own helpers under `.claude/scripts/`. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
+
+**The tenth needs `bash`, `grep`, `git` and `jq`, and no network** — the `gh` its
+ledger cases call is a stub on `PATH`, and the `git` is real rather than
+incidental: one case detaches a worktree at `HEAD` and removes it again, because
+a helper's contract is its stdout and only a round trip tests what a caller
+actually captures. It is the one suite whose
+subject is agent tooling rather than the platform, and it is here on the licence
+gate's terms: it ships with the repository, CI runs it, and `dotnet test` is
+blind to it. **Six judgements, five of which shipped wrong at least once, each
+reproduced as a case that fails against the old behaviour** — what counts as a
+usage limit, what counts as a review that finished, whether the check ledger can
+publish an answer on its own error path, whether every usage-limit skip happens
+before a slot is reserved, whether the sweeps' worktree guard is the
+direct-child check it claims, and whether the label helper leaves a free
+parameter a finding could steer. That last is the one that never shipped
+wrong — it is a grant closed by moving it into a helper, and the suite is what
+keeps it closed. The regression
+negatives are paired with positive controls, and those are not decoration: a
+negative that passes because the pattern matches *nothing* is indistinguishable
+from one that works, so the accepted values and the limit pattern's status
+anchor carry controls of their own.
 
 **The closure gate's suite is the whole of what runs here.** The gate itself
 needs a pull request and a `gh` token, so the live invocation belongs in CI

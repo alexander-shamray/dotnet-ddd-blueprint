@@ -68,6 +68,341 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The review loop's fail-opens, and the sweep grants beside them
+
+**No `PR-NN` heading, on the closure gate's terms one entry down.** Appendix C's
+rows describe the blueprint's specified system; this is agent tooling under
+`.claude/`, which has never had a row and never will. What it closes is issues
+#34, #51, #59, #69, #120 and the operable half of #75 — six findings from
+authorised sweeps of this repository's own scripts, filed over five months and
+sharing one property: **each is a protection that did not protect**, in the loop
+that decides how much external review a pull request receives.
+
+**They are one change because they are one permission lift.** `.claude/scripts/`
+and `.claude/sandbox/` are `Edit`-denied to an agent session by design, so every
+fix here is a human's edit made with that deny lifted and restored. Filing them
+separately would mean lifting it six times.
+
+### The cap that was not one
+
+**A bound whose two halves are two commands is not a bound.** `ship.md`
+specified the discipline as prose — post `grok-ledger.sh <n> reserve <N>`, then
+invoke `grok-review.sh` — over two separately granted commands, and neither half
+was enforced. A grep of the review helper for `ledger`, `reserve` or `release`
+returned nothing, so the ordering was agent behaviour; and `release` was
+accepted for any slot at any time, validating the number and posting the comment
+without verifying that a skip had occurred or that the run it released had ever
+happened. A run that invoked the review without reserving spent a check that
+left no record, a resumed run read a lower count, and the PR ran past twelve
+against a paid API.
+
+Invocation and accounting are one operation now: `grok-review.sh` takes the slot
+and the mode, validates both against the ledger's own vocabulary, resolves the
+pull request from the branch it is about to clone, and posts the reservation
+itself. **It took the PR number as an argument for exactly one review round**,
+which is the finding recorded two paragraphs down.
+
+**The placement of that write is the accounting rule, not an implementation
+detail.** It sits immediately before the review's own `docker run`, so a slot is
+reserved by no path that refuses earlier. Everything
+that can refuse earlier — a dirty tree, no daemon, a missing credential, a bad
+`suggestions.md` shape, and all three usage-limit skips — spends nothing. That
+is what deleted the release path rather than merely tidying it: exit 12 has no
+reservation to give back. A structural test asserts the ordering, because the
+ordering *is* the property.
+
+**One operation is not enough if the operation can be aimed elsewhere, and the
+first version of this could be.** The helper took the pull request number as
+argument one and then cloned and reviewed the *current branch*, with nothing
+checking that the two were the same subject — so a numeric typo, or an
+instruction substituting another open pull request, posted the reservation there
+while reviewing this branch: this branch's cap stayed re-armed and someone
+else's slot was spent, on a pull request whose ledger then read one check higher
+than the reviews it received. Neither half looks wrong on its own, which is what
+let it survive the first draft. The number is not an argument now —
+`gh pr list --head "$branch"` resolves it from the branch about to be cloned,
+and a branch with no open pull request, or more than one, is refused rather than
+guessed at. Raised by Copilot against this very change, which is the loop
+catching the fix to the loop.
+
+The verb survives with no caller: `count` must still fold a released row out of
+a PR ledgered before this was true, and a human reconciling a slot spent wrongly
+has nothing else to reach for. `.claude/settings.json` denies both spellings to
+a session, in the same mid-string wildcard form the `--output` deny already
+uses — **a speed bump with its limit stated**, since a substring deny over a
+shell command string is defeated by quoting, exactly as that entry records.
+
+**Three verbs stay reachable, not two, and that is a deliberate departure from
+the issue's own fix.** #59 asked for `count` and `status` to be all the agent
+invokes; `converge` is left with them. It is a write, but it cannot re-arm the
+budget — `count` skips converged rows by construction, so the marker moves no
+number — and what it records is a judgement the agent is already the one making:
+whether the loop ended clean or ran out of ceiling. Removing it would delete
+`ship.md`'s only way to tell those apart on a resume and buy nothing, since a
+false convergence marker is a lie the agent could equally tell in its report.
+The two verbs that ARE denied are the two that move the count.
+
+### The counter that answered on its own error path
+
+**An `exit` in the last stage of a pipeline ends a subshell, and the consumer on
+the other side has already answered.** `grok-ledger.sh`'s trust check bailed
+with `exit 3` inside `gh api … | while …`. That killed the subshell, not this
+script;
+the `awk` on the other side of `ledger_rows | awk` saw EOF, ran its `END` block
+and printed `0` — "nothing spent", which re-arms the twelve-check cap the helper
+exists to enforce — and only *then* did `pipefail` and `set -e` abort with 3. A
+model reading stdout had its answer before the failure existed. Reachable by
+plain API rate limiting on a busy PR.
+
+**What made the two cases indistinguishable was a behaviour that is correct.**
+`END`-runs-on-empty-input is deliberate and documented: a fresh PR's ledger is
+legitimately empty, and `pipefail` turning that into a failure was this helper's
+first field defect. So the separation had to happen *upstream* of the fold. All
+three consumers now buffer — command substitution hands back the status, where a
+pipe hands the reader an EOF it cannot tell from empty input — and nothing is
+written until the status has been checked.
+
+Measured rather than reasoned: the pre-fix `count`, run against a stub whose
+permission lookup fails, exits 3 with `0` on stdout; the fixed one exits 3 with
+stdout empty.
+
+### The verdict that passed everything nobody had listed
+
+**A deny-list of terminal states passes every state nobody listed, including the
+ones the next version invents.** The last of the three gates deciding whether a
+review actually ran refused `"stopReason":"(cancelled|refusal|error*)"` and
+passed the rest. grok's documented vocabulary for that field is `end_turn`,
+`max_tokens`, `max_turn_requests`, `refusal` and `cancelled` — so a reviewer
+that exhausted its output budget or its turn budget exited 0, wrote non-empty
+JSON,
+left no `suggestions.md`, and had that absence read as the clean verdict. **No
+attacker is required**: a long branch is the ordinary way there, and a long
+branch is when review matters most. One that wants it can buy it, and under the
+two-clean-passes rule two such rounds end the loop.
+
+It became an allow-list of one accepted value, `end_turn`. **That was still not
+enough, and the reason is the more useful half of this entry.** A regex over a
+serialised structure answers a different question from the one being asked: it
+cannot tell a ROOT field from a nested one, so
+`{"modelUsage":{"stopReason":"end_turn"}}` produced exactly one match, matched
+the accepted value, and was read as a finished turn — a document whose turn
+never ended, passing the check that exists to notice. Nor can `grep` establish
+that the output is JSON at all, so a truncated write could be read as a verdict.
+
+So the verdict is **parsed**: `jq` is asked for the root `stopReason` and the
+answer is compared. That settles the shape, the nesting and the
+well-formedness in one step, and collapses three distinct failures — not an
+object, no root field, wrong value — into one question. `.stopReason` names a
+field, where a regex only ever named a substring, so a mention inside the
+review's own prose cannot be mistaken for the verdict either. The accepted value
+stays pinned the way the client version is: a grok bump must re-verify it.
+
+**Three corrections, and each one was the previous fix's blind spot** — a
+deny-list that passed what it had not enumerated, an allow-list that could not
+see nesting, and only then a parse. It cost `jq` as a stated precondition of the
+helper, probed up front beside the Docker check on the same argument: a missing
+tool should cost a second, not a round.
+
+### The limit that read as a failure
+
+**PR #117 round 6 spent a ledger slot on a review that never started.** The
+usage-limit preflight exists so that a review the limits will not allow is
+*skipped* (exit 12) rather than *failed* (exit 4), and its pattern did not match
+what an exhausted prepaid balance produces: `API error (status 402 Payment
+Required): Grok Build usage balance exhausted` is not `429`, not `quota`, and
+not `(no|any) credits`. So the run reached three model calls and about 200k
+input
+tokens before dying, and reported "the review did not run" without saying it was
+a billing state.
+
+Both spellings are in now — the status code is stable, the prose is what a
+provider change is most likely to reword. **A false positive here is the
+expensive direction**: the pattern is matched against a probe's whole text, so a
+bare `402` would also match a token count or a request id, and misreading one as
+a limit reports a working reviewer as out of window and skips every round
+silently.
+
+**The first answer to that was `\b402\b`, and it was wrong**; what ships is a
+status *context*, argued under *The suite that should have existed first* below.
+The intermediate is named here rather than described as current, because this
+paragraph specified it for two review rounds after the code had moved on — and a
+reader reconciling the code to this file would have restored the very skip the
+entry is about. Two statements in one entry cannot both be the design.
+
+### The image that fetched an unverified installer
+
+**Pinning a version is not pinning an artefact.** `.claude/sandbox/Dockerfile`
+pinned the grok *client version* and refetched `https://x.ai/cli/install.sh` on
+every build, executing it with no checksum and no signature — inside the one
+image built to be a security boundary, which `grok-review.sh` then hands the
+credentials the boundary exists to contain, with unrestricted egress. The
+Dockerfile already made the argument for pinning; the integrity half was
+missing.
+
+**Pinning the installer would have been half a fix, and reading it is what said
+so.** Grepping the script for `sha256`, `checksum`, `verify` and `gpg` returns
+nothing: it performs no verification whatever of the 163 MB binary it downloads.
+
+**The first version pinned both and was still not enough**, which a reviewer
+established rather than this branch. It kept the installer, checksummed, and
+hashed the binary *afterwards* — and the installer smoke-runs the binary before
+that hash can be taken, as the reviewer user, with the network and a writable
+`$HOME`. So a malicious artefact gets one execution in which to put the expected
+bytes where the check will read them, and the check then passes and the image
+ships. **A verification that runs after the thing it verifies has already
+executed does not verify anything** — the same shape as the ledger publishing
+its answer before its trust check failed, two files over.
+
+So the installer is gone. The release artefact is fetched directly, its digest
+checked before anything executes, and the few steps the installer performs on
+Linux are done inline — read out of the pinned script rather than guessed: the
+binary into `downloads/`, `chmod +x`, relative symlinks for `grok` and `agent`,
+and the `[cli]` block in `config.toml`. `grok --version` is now the binary's
+FIRST execution and runs only after the digest matched. An architecture with no
+recorded digest **fails** rather than building unverified — the scaffold's rule
+one tree over, that a tool refusing input it has never been shown beats one that
+guesses.
+
+The digests are trust on first use, and that is the point rather than a
+weakness: from here a change to what x.ai serves for a pinned version fails the
+build, and moving a pin is a reviewed diff, which is what
+`Directory.Packages.props` and `global.json` are for. Both failure paths were
+observed red — a wrong digest stops the build naming both values, and now does
+so *before* anything is executed — and the amd64 artefact was cross-checked
+against the md5 GCS reports in its own response header. The vendored layout was
+verified against what the installer produced: the same relative symlinks, the
+same `config.toml`, `grok 1.0.5` reported by the built image.
+
+**The version moved to 1.0.5 in the same change**, because the file's own rule
+is to track the host's client and the host had moved: a credential must mean the
+same thing on both sides of the mount, which is the failure the pin was
+introduced for. Verified end to end rather than assumed — the built image runs
+`grok 1.0.5`, and a real call through the OAuth path the reviewer actually uses
+returns `"stopReason": "end_turn"`, which is also the allow-list's own value
+confirmed from inside the container that will run the reviews.
+
+**That residual is closed, and how it closed is the lesson.** It was written
+here as narrow and stated — the binary executes once and then fails the build —
+and the reasoning was wrong in the direction that matters: the execution
+*precedes* the check, so it can arrange for the check to pass. **Naming a
+residual is not bounding it.** The bound has to be argued against someone who
+gets to run first, and this one never had been. What replaced it is the option
+this entry had already considered and declined as too risky to reimplement;
+a reviewer pointing at the ordering is what made the trade obvious.
+
+### The sweep guards that were narrower than advertised
+
+Issue #75 collected five weaknesses from PR #73's review loops, sharing one root
+cause: **each grant was documented by the operation it was added for rather than
+by what its prefix admits.** Three are closed here, one was already closed, and
+one is architecture.
+
+**`Bash(mktemp:*)` was a filesystem write primitive.** `mktemp` takes an
+arbitrary template, so the grant permitted creating an empty directory or file
+anywhere the session could write, the checkout included — it could not write
+content and could not clobber, so no source file was ever alterable through it,
+but "the only mutations are the issues it files and the worktree" was false. A
+prefix rule cannot constrain a template, so this needed a helper:
+`git-worktree-detach.sh` creates the directory itself and prints it, its
+interface drops from `<path> <commit>` to `<commit>`, and both sweeps dropped
+the grant. Its shape check is now a tautology, which is the point.
+
+**The `secsweep-??????` check was not a direct-child check**, though both
+helpers' comments said so. A bash `case` does no pathname expansion, so `?`
+matches `/` like any other character and `$tmproot/secsweep-a/bbbb` passed as
+readily as `$tmproot/secsweep-abc123` — verified by running the issue's whole
+table through a `case`. Prefix and length held; direct-childness did not. Both
+helpers now compare `dirname` against the root and match the basename alone,
+which cannot be talked past because a basename contains no `/`.
+
+**`gh label create` is create-or-overwrite.** `--force` updates an existing
+label's colour and description — `gh`'s own help says so — and `-R` unpinned put
+that write in any repository, while the argument reaches that stage from a tree
+that is prompt-injection input. It was held as two prose rules, which is a rule
+a reader enforces and a finding can talk past. `gh-label-ensure.sh` leaves no
+free parameter: one name out of a fixed six-entry case with its colour and text,
+`--force` never spelled, and the repository resolved from the checkout rather
+than named by a caller.
+
+**Item 4 was already closed and item 5 is not a command edit.** The `Agent`
+grant is pinned to one auditor type with every other registered type denied —
+done when `/bug-sweep` landed, since the harness has no "only this type" allow.
+Item 5 — the parent verifying while holding the mutation grants — needs either a
+structured verdict the parent files on without composing a body from text it has
+read, or the fan-out in a container. That is the same class of decision as the
+container isolating the Grok reviewer, and it stays a named residual. What
+narrows it further today is that two of its three mutations no longer take a
+free parameter.
+
+### The suite that should have existed first
+
+**Six judgements the whole loop rests on had no test, five of which had already
+shipped wrong.** `test_grok_helpers.py` grew across the review
+rounds — every round but one added cases, and the count is deliberately not
+restated here for the reason this file gives about counts, and each of those five defects is reproduced as one that fails against
+the old behaviour: a gate only ever observed green is one nobody has established
+is looking at anything. The sixth — that the label helper leaves no free
+parameter a finding could steer — never shipped wrong; it is a grant closed by
+moving it into a helper, and the suite is what keeps it closed.
+
+**A figure and a list, in a file that already argues against restating either.**
+Both went stale during this branch's own review loop and were corrected from
+outside: the count when cases were added, the list when the label helper joined
+it. They are here because an entry describing a suite is worth nothing if it
+describes a different one — and the honest note is that neither was caught by
+the person adding the cases.
+
+**They are paired with positive controls, and those are not decoration.** A
+negative case that passes because the pattern matches *nothing* is this
+repository's most-repeated failure wearing a test's clothes — and this branch
+supplied the worked example rather than merely citing one. The usage-limit
+pattern used `\b402\b`, its negatives tested `47402` and `4021`, and neither
+tested the number *alone* — so `"input_tokens": 402` matched, in defiance of the
+comment sitting beside it, and every case stayed green. A false positive there
+skips every review silently.
+
+What ships requires a status *context* instead, and the controls follow the same
+rule: `end_turn` is asserted to be accepted, an empty ledger to count zero, a
+trusted reservation to count as spent, and the status anchor itself to match
+`(status 402 …)` while missing `"input_tokens": 402`. Without that last one,
+`47402` failing to match would prove nothing about whether the anchor ever
+matches anything.
+
+**It shells out to the same `grep -E` the scripts call.** Restating the patterns
+in Python's `re` would be a second specification, and a hand-written double
+cannot disagree with itself — this repository's own lesson from `StubCatalog`,
+one artefact over.
+
+**The patterns are declared once, together, away from the code that applies
+them**, which is the `SOURCE_INPUTS` discipline the `deploy/**` gates arrived
+at: a value a test asserts about has to be declared where the test can find it,
+or
+the test asserts about its own second copy. And because that proves only what a
+pattern *matches*, the cases are paired with structural ones over the call
+sites — every declared pattern has a use, every `exit 12` is guarded by the
+declared pattern, and no second literal copy survives.
+
+**A structural test is not a contract test, and the first version of the stdout
+case was structural.** It asserted that two source strings existed, which proves
+nothing about what a caller captures: an added debug `echo` recreates the defect
+with the assertion green. It runs the real round trip now — detach at a real
+commit, capture stdout as `security-sweep.md` does, assert one line and a usable
+directory — and was confirmed as a negative by removing the redirection, which
+fails it with `1 != 2` *and* fails its own cleanup, the original bug reproducing
+in miniature because the polluted path is what the drop helper receives.
+
+Two findings came out of writing it rather than out of the issues.
+`git worktree add` writes "Preparing worktree" to stderr but `HEAD is now at
+<sha> <subject>` to **stdout**, so the detach helper's first version returned a
+commit subject followed by a path and the teardown failed with a `not an
+existing directory` naming a whole commit message — **a helper's contract is its
+stdout, so test what a caller captures, never what the code appears to print.**
+And on this host an argv element crossing into `bash.exe` is re-parsed, so a
+pattern containing `"` arrived with its quotes eaten and the suite reported a
+working allow-list as broken; environment variables and stdin are not re-parsed.
+That is the MSYS path divergence `CLAUDE.md` already records, one layer down —
+the argument rather than the path.
+
 ## The closure gate — landed inside PR #117, and the plan has no row for it
 
 **No `PR-NN` heading, and that is the honest form rather than an omission.**

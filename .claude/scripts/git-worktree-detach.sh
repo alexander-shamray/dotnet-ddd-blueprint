@@ -11,57 +11,87 @@
 # --detach is fixed here rather than passed, because a sweep worktree carries
 # no commits and must never hold a branch: the caller's branch stays checked
 # out where it is, which is the whole reason that command takes a detached one.
+#
+# **The PATH is made here rather than passed, and that is what turned the shape
+# check from a guess into a fact.** The caller used to run its own `mktemp -d`
+# and hand the result over, which meant two things at once: the sweeps needed a
+# `Bash(mktemp:*)` grant, and `mktemp` takes an arbitrary template — so the
+# grant was a filesystem-write primitive able to create an empty directory or
+# file anywhere the session can write, the checkout included. It could not write
+# content and could not clobber, so no source file was ever reachable through
+# it; but "the only mutations are the issues it files and the worktree" was
+# false, and a prefix rule cannot constrain a template. Now the only path git is
+# ever handed is one this script has just created, and both sweeps drop the
+# grant altogether.
 set -euo pipefail
-[ "$#" -eq 2 ] || { echo "usage: git-worktree-detach.sh <path> <commit-sha>" >&2; exit 2; }
-path="$1"
-commit="$2"
-# The caller makes this with `mktemp -d`, so it exists and is empty. Requiring
-# both is what stops a path that happens to hold something from being handed to
-# git, and neither argument can begin with '-'.
-case "$path" in -*) echo "path may not start with '-'" >&2; exit 2 ;; esac
-[ -d "$path" ] || { echo "not an existing directory: $path" >&2; exit 2; }
-[ -z "$(ls -A "$path" 2>/dev/null)" ] || { echo "directory is not empty: $path" >&2; exit 2; }
-# **Registration is not ownership, and neither is emptiness.** The audited tree
-# is prompt-injection input, so a path arriving here may be chosen by it — and
-# the residual this helper was written to close is precisely about *which* path,
-# not which flags. So the path must match `secsweep-` plus six characters under
-# the canonical temp root — a prefix that is historical and shared, /bug-sweep
-# having borrowed it rather than widen this check.
-#
-# Be precise about what that buys, because two stronger readings are wrong and
-# both stood in this comment before either was tested.
-#
-# It EXCLUDES an unrelated empty directory elsewhere on the host, and every
-# sibling PR worktree that happens to be registered. That is the point: a
-# poisoned finding naming a sibling must not be able to delete someone's
-# workspace.
-#
-# It does NOT prove a sweep made this path. `Bash(mktemp:*)` takes an arbitrary
-# template, and git-worktree-drop.sh accepts any registered worktree of the
-# right shape, so "only a sweep's own mktemp could have produced it" is not a
-# property this check has.
-#
-# It is NOT strictly a direct-child check either, though this comment claimed
-# so. A bash `case` does no pathname expansion, so `?` matches `/` like any
-# other character and $tmproot/secsweep-a/bbbb passes as readily as
-# $tmproot/secsweep-abc123 — run through a `case` rather than reasoned about,
-# with wrong-length, wrong-prefix and wrong-root controls all correctly refused.
-# Prefix and length hold; direct-childness does not.
-#
-# Fix owed, one line: compare `dirname "$resolved"` against "$tmproot" and match
-# the basename alone. The same line is owed in git-worktree-drop.sh.
-tmproot=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
-  { echo "cannot resolve the temp root" >&2; exit 4; }
-resolved=$(cd "$path" && pwd -P)
-case "$resolved" in
-  "$tmproot"/secsweep-??????) : ;;
-  *) echo "not a sweep-shaped temp path: $path" >&2; exit 2 ;;
-esac
+[ "$#" -eq 1 ] || { echo "usage: git-worktree-detach.sh <commit-sha>" >&2; exit 2; }
+commit="$1"
 # A resolved sha, never a ref: the caller reads `git rev-parse HEAD` once and
 # passes the result, precisely so HEAD is not resolved a second time under a
-# tree another session may have moved.
+# tree another session may have moved. Checked before anything is created, so a
+# bad argument leaves no directory behind.
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] ||
   { echo "commit must be a full 40-character sha: $commit" >&2; exit 2; }
 git rev-parse --verify --quiet "$commit^{commit}" >/dev/null ||
   { echo "no such commit: $commit" >&2; exit 3; }
-git worktree add --detach "$resolved" "$commit"
+
+tmproot=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
+  { echo "cannot resolve the temp root" >&2; exit 4; }
+# Six X's, so the name `mktemp` invents is `secsweep-` plus exactly six
+# characters — the shape git-worktree-drop.sh will later require before it
+# removes anything. The two ends of the sweep's lifetime agree because one of
+# them produced the name.
+path=$(mktemp -d "$tmproot/secsweep-XXXXXX") ||
+  { echo "cannot create a sweep worktree directory under $tmproot" >&2; exit 4; }
+resolved=$(cd "$path" && pwd -P)
+
+# Every refusal from here on has to take the directory with it. Once this script
+# makes the path, a later failure leaves one behind that nothing will ever
+# revisit — the next run's `mktemp` invents a different name — so a repo whose
+# `git worktree add` keeps refusing litters the temp root one empty directory at
+# a time. That cost nothing while the caller supplied the path; it does now.
+#
+# `rmdir`, never `rm -rf`, and the difference is the whole safety of this
+# function: rmdir refuses a non-empty directory, so a half-created worktree is
+# LEFT for inspection rather than deleted by a cleanup path. A recursive remove
+# here would be delete-on-error over a path this script chose, which is the
+# shape git-worktree-drop.sh spends its whole length refusing to have.
+refuse() {
+  echo "$1" >&2
+  rmdir "$resolved" 2>/dev/null || true
+  exit "$2"
+}
+
+# The shape check, kept even though this script made the path, because it is the
+# contract git-worktree-drop.sh depends on and a check that only holds while
+# nobody edits the line above is not a contract. It is cheap and it fails loudly.
+#
+# **It is a direct-child check now, and it was not before.** The old form was a
+# single `case "$resolved" in "$tmproot"/secsweep-??????)`, and a bash `case`
+# does no pathname expansion — so `?` matches `/` like any other character and
+# `$tmproot/secsweep-a/bbbb` passed as readily as `$tmproot/secsweep-abc123`.
+# Run through a `case` rather than reasoned about, with wrong-length,
+# wrong-prefix and wrong-root controls all correctly refused: prefix and length
+# held, direct-childness did not. Splitting the two halves is what fixes it —
+# a basename contains no `/`, so `??????` can only mean six real characters.
+[ "$(dirname "$resolved")" = "$tmproot" ] ||
+  refuse "not a direct child of the temp root: $resolved" 2
+case "$(basename "$resolved")" in
+  secsweep-??????) : ;;
+  *) refuse "not a sweep-shaped temp path: $resolved" 2 ;;
+esac
+
+# Redirected, and the redirection is load-bearing rather than tidy. This script's
+# stdout IS its return value now, and `git worktree add` writes "Preparing
+# worktree" to stderr but "HEAD is now at <sha> <subject>" to STDOUT — so the
+# first caller to capture the output got the commit subject and the path, and
+# handed both to the next command as a directory name. Found by running the
+# round trip rather than by reading it: the failure is a `not an existing
+# directory` naming a whole commit message, at the teardown, after the sweep.
+git worktree add --detach "$resolved" "$commit" >&2 ||
+  refuse "git worktree add refused $resolved at $commit" 3
+# The path, and it is the POSIX spelling — the one the shell and this helper
+# share. The caller still reads `git worktree list --porcelain` for the
+# host-native spelling its readers need; under MSYS those are two strings for
+# one directory, and on some hosts two directories.
+printf '%s\n' "$resolved"

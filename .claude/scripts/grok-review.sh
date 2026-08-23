@@ -18,7 +18,111 @@
 # than hidden. Confining it to api.x.ai needs an allow-list proxy on an internal
 # network; Docker alone offers "all" or "none", and "none" stops the review too.
 # The credential half is what the finding named, and it is what this closes.
+#
+# This helper also OWNS the ledger slot it spends. ship.md used to specify the
+# accounting as prose — "reserve, then invoke the review helper" — over two
+# separately granted commands, so a run that skipped the first spent a check
+# that left no record, a resumed run read a lower count, and the PR ran past
+# twelve against a paid API. A bound whose two halves are two commands is a
+# bound any ordering mistake lifts. Invocation and accounting are one operation
+# now: this script takes the slot, RESOLVES the pull request from the branch it
+# is about to clone, posts the reservation itself immediately before the model
+# call it accounts for, and .claude/settings.json denies the `reserve` and
+# `release` spellings to the session that invokes it.
 set -euo pipefail
+
+# The slot this review spends and which kind of check it is. Validated to the
+# ledger's own vocabulary rather than passed through, because a slot outside
+# 1..12 is a claim about a cap that does not exist.
+#
+# **The PR is NOT an argument, and it was one in the first version of this
+# change.** A caller-supplied number is a free parameter aimed at the one thing
+# this script writes to the outside world: any numeric typo — or an instruction
+# that substituted another open pull request — posted the reservation *there*
+# while cloning and reviewing THIS branch, so this branch's cap stayed re-armed
+# and somebody else's slot was spent. That is the same defect the change was
+# written to close, one level up: accounting that can be pointed somewhere other
+# than the thing it accounts for. Resolved below from the branch instead, which
+# makes the slot and the review provably the same subject.
+[ "$#" -eq 2 ] ||
+  { echo "usage: grok-review.sh <slot 1-12> <full|recheck>" >&2; exit 2; }
+slot="$1"
+mode="$2"
+[[ "$slot" =~ ^([1-9]|1[0-2])$ ]] ||
+  { echo "slot must be 1..12 — the ledger's whole vocabulary: $slot" >&2; exit 2; }
+case "$mode" in
+  full|recheck) ;;
+  *) echo "mode must be full or recheck: $mode" >&2; exit 2 ;;
+esac
+
+# Two patterns, declared together and away from the code that applies them, so
+# the suite beside this file has ONE subject to read. That is the SOURCE_INPUTS
+# discipline the deploy/** gates arrived at: a value a test asserts about has to
+# be declared once, where the test can find it, or the test ends up asserting
+# about its own second copy. test_grok_helpers.py extracts both by name and
+# exercises them with real payloads.
+
+# What a usage limit looks like, and every spelling here was paid for. The
+# preflight below exists to SKIP such a round rather than fail it, and it missed
+# an exhausted prepaid balance entirely: `API error (status 402 Payment
+# Required): Grok Build usage balance exhausted` is not `429`, not `quota`, and
+# not `(no|any) credits`, so PR #117 round 6 took the failure path and burned a
+# ledger slot on a review that never started.
+#
+# **A status code needs a status CONTEXT, not a word boundary.** This pattern is
+# matched against the whole text of a probe run, so a bare `402` would also match
+# a token count or a request id — and a false positive here is the expensive
+# direction: it reports a working reviewer as out of limits and skips every round
+# silently, which is a review loop that has stopped reviewing.
+#
+# `\b402\b` was the first attempt at that and is not enough, which a reviewer
+# caught and the suite did not. It excludes `47402` and `4021` — both of which
+# were negative cases here — and matches `"input_tokens": 402` exactly, because
+# a quote and a space are word boundaries too. The negatives tested digits
+# AROUND the number and never the number on its own, so they agreed with the
+# comment beside them while the pattern did not.
+#
+# So the number has to arrive as a status: after the word `status` or `code`
+# within a few non-digits (which covers `(status 402 …)`, `status: 429` and
+# `"http_status": 402`), or in the provider's own phrase. `429` also reaches the
+# prose alternative `too many requests` on its own, and the observed 402 reaches
+# `usage balance` and `balance exhausted` as well — the code alternatives are
+# the belt to that pair's braces, since the prose is what a provider change
+# rewords and the code is what stays.
+#
+# **And it needs a boundary on BOTH sides**, which the first status-anchored
+# version had only on the left: `status 4021` and `http_status: 4290` matched,
+# because nothing stopped the code alternative at the third digit. That is the
+# same false positive the anchor was introduced to remove, moved from the front
+# of the number to the back — the third correction to this one pattern, each
+# round finding the side the previous fix had not covered. `([^0-9]|$)` closes
+# it, and the suite carries a contextual larger-number negative for each side.
+limit_re='rate.?limit|quota|usage limit|usage balance|balance exhausted|too many requests|(no|any) credits|402 payment required|(status|code)[^0-9]{0,3}(402|429)([^0-9]|$)'
+
+# **What a FINISHED turn looks like is PARSED, not matched**, and the journey to
+# that is the whole argument. It began as a deny-list of three — refuse
+# `cancelled|refusal|error*`, pass everything else — which let a reviewer that
+# exhausted its output or turn budget exit 0, write JSON, leave no
+# suggestions.md, and have that absence read as a clean verdict. grok's
+# documented vocabulary for the field is `end_turn`, `max_tokens`,
+# `max_turn_requests`, `refusal` and `cancelled`, so two of the five passed. No
+# attacker is needed: a long branch is the ordinary way there, and a long branch
+# is when review matters most.
+#
+# Inverting it to an allow-list of `end_turn` fixed that and left a subtler hole,
+# which a reviewer found: a regex cannot tell a ROOT field from a nested one.
+# `{"modelUsage":{"stopReason":"end_turn"}}` produced exactly one match, matched
+# `end_turn`, and was accepted — a document whose turn never ended, passing the
+# check that exists to notice. Nor can grep establish that the output is JSON at
+# all, so a truncated write could be read as a verdict.
+#
+# **A regex over a serialised structure answers a different question from the
+# one being asked.** The check below asks jq for the root `stopReason` and
+# compares it, which settles the shape, the nesting and the well-formedness in
+# one step. The accepted value stays pinned the way the client version is in
+# .claude/sandbox/Dockerfile: a grok bump must re-verify it. Verified against
+# grok 1.0.5's `--output-format json` and its own headless-mode documentation.
+stop_ok=end_turn
 
 # Docker on Windows wants a Windows path in --volume; elsewhere the path is
 # already right. cygpath exists only under MSYS/Git Bash, which is the tell.
@@ -28,6 +132,38 @@ host_path() {
 
 branch=$(git branch --show-current)
 [ -n "$branch" ] || { echo "not on a branch" >&2; exit 2; }
+# The pull request the ledger row lands on, resolved from the branch this script
+# is about to clone — so the two cannot be different subjects. See the argument
+# block above for what a caller-supplied number bought.
+#
+# **`--head` filters on the branch NAME and nothing else**, which is not the
+# question being asked. It matches across forks, so an open pull request from
+# someone's fork carrying the same branch name is a candidate here — and
+# selecting it would reserve a slot on THAT pull request while cloning and
+# reviewing this local branch, which is precisely the mismatch this block
+# replaced an argument to prevent. A fix that closes a hole by name and leaves
+# it open by provenance has moved the defect rather than removed it.
+#
+# So the head repository is compared against the one this checkout is, and only
+# pull requests from it survive. `gh repo view` reads the checkout, so both
+# sides of that comparison are properties of the filesystem rather than of
+# anything a caller or a finding supplied.
+repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) ||
+  { echo "cannot resolve this checkout's repository" >&2; exit 2; }
+# Tab-separated and filtered in awk rather than inside --jq, because gh's --jq
+# takes no --arg: embedding "$repo" in the jq program would put a shell value
+# into a program text, which is the shape this directory exists to avoid.
+pr=$(gh pr list --head "$branch" --state open --json number,headRepository \
+       --jq '.[] | "\(.headRepository.nameWithOwner // "")\t\(.number)"' |
+     awk -F'\t' -v r="$repo" '$1 == r { print $2 }') ||
+  { echo "cannot ask GitHub which pull request $branch has" >&2; exit 2; }
+# Exactly one, and both other counts are refusals rather than something to guess
+# past. None means there is no ledger to write to and therefore no cap to
+# enforce, which is a state to stop in, not to review through. More than one is
+# ambiguous, and picking either would be inventing the answer to the question
+# these lines exist to ask.
+[ "$(grep -c . <<<"$pr")" -eq 1 ] ||
+  { echo "expected exactly one open pull request for $branch in $repo, found: ${pr:-none}" >&2; exit 2; }
 # suggestions.md is the one file allowed to differ — it is the review's own
 # working state. Anything else, tracked or untracked, means the reviewer would
 # read a state the PR does not carry: the clone below holds only commits.
@@ -40,6 +176,12 @@ status=$(git status --porcelain)
 # instead of the exit 7 this script documents. Probe what is actually needed.
 docker info >/dev/null 2>&1 ||
   { echo "docker is required and its daemon must be running: the reviewer runs in a container (.claude/sandbox/Dockerfile)" >&2; exit 7; }
+# jq, because the verdict below is a JSON document and the question asked of it
+# — what is the ROOT stopReason — is not one a regex can answer. Probed here
+# rather than discovered at the end of a review, on the same argument as the
+# daemon check above: a missing tool should cost a second, not a round.
+command -v jq >/dev/null 2>&1 ||
+  { echo "jq is required: the reviewer's verdict is JSON and its root stopReason must be parsed rather than matched" >&2; exit 14; }
 
 sandbox=$(cd "$(dirname "${BASH_SOURCE[0]}")/../sandbox" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/grok-review-XXXXXX")
@@ -152,7 +294,6 @@ image=$(docker build --quiet "${build_args[@]}" \
 # docker's argv, where every `ps` on this machine can read it for the life of
 # the container; the first forwards the value this process already holds.
 mounts=()
-limit_re='rate.?limit|429|quota|usage limit|too many requests|(no|any) credits'
 key_probe=""
 if [ -n "${XAI_API_KEY:-}" ] &&
    key_probe=$(docker run --rm --env XAI_API_KEY "$image" \
@@ -237,6 +378,50 @@ if [ "$probe_rc" -ne 0 ] && [ -n "${XAI_API_KEY:-}" ] &&
   exit 12
 fi
 
+# The reservation, and its POSITION is the accounting rule rather than an
+# implementation detail: **every path that can refuse before this line spends
+# nothing** — a dirty tree, no daemon, a missing credential, a bad
+# suggestions.md shape, and all three of the usage-limit skips above. That is
+# why exit 12 has no release to post and why the release verb has no caller left
+# in this repository.
+#
+# Stated as an ordering rather than as "spent if and only if the model call was
+# launched", which is what this comment used to say and is not true of the
+# failed-read case argued below. One file must not define two contracts. ship.md's argument for writing before the call is interruption
+# safety, and the window this leaves is the microseconds between posting and
+# `docker run`; written after, an interrupted run spends a check and leaves no
+# record, and the resumed run spends a thirteenth.
+#
+# The write is also an election. Two resumed /ship runs can read the same count
+# and claim the same slot, and the ledger settles it after posting: a loser
+# exits 4, which arrives here as exit 13 and means a concurrent run is mid-check
+# on this PR. Stop the loop rather than take the next slot — two Grok runs share
+# one root suggestions.md, and the later finisher would overwrite the earlier's
+# findings or pass off its rival's clean pass as its own convergence.
+#
+# One exit code for both a lost election and an unreachable ledger, because the
+# caller does the same thing with each: do not count this round, and stop.
+#
+# **"If and only if" has one exception, and it is deliberate rather than
+# overlooked.** The ledger posts its comment and *then* reads the rows to settle
+# the election, so a trust-check failure on that read leaves the reservation
+# standing while this helper exits 13 before `docker run` — a slot spent on a
+# model call that was never launched. Conservative on purpose: after a failed
+# read the state is exactly what is not known, and releasing on it would hand a
+# slot back on the strength of a lookup that did not complete, which is the
+# fail-open this file spent a branch closing. The cost is at most one wasted
+# check out of twelve, and it is bounded; guessing the other way is not.
+#
+# So the contract is: a slot is spent if the review's model call was launched,
+# and may also be spent when the ledger could not finish settling its own
+# election. A lost election does *not* add a spend — `count` folds duplicate
+# rows for a slot into one — so this exception is the failed-read case alone.
+ledger="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/grok-ledger.sh"
+ledger_rc=0
+bash "$ledger" "$pr" reserve "$slot" "$mode" >&2 || ledger_rc=$?
+[ "$ledger_rc" -eq 0 ] ||
+  { echo "could not reserve check $slot/12 on PR $pr (ledger exit $ledger_rc); the review did not run" >&2; exit 13; }
+
 set +e
 docker run --rm \
   --volume "$(host_path "$work/repo"):/review:Z" \
@@ -255,9 +440,20 @@ set -e
   { echo "grok exited $grok_status; the review did not run" >&2; exit 4; }
 [ -s "$result" ] ||
   { echo "grok produced no output; the review did not run" >&2; exit 5; }
-if grep -qE '"stopReason"[[:space:]]*:[[:space:]]*"(cancelled|refusal|error[^"]*)"' "$result"; then
-  grep -oE '"(stopReason|cancellationCategory)"[[:space:]]*:[[:space:]]*"[^"]*"' "$result" >&2 || true
-  echo "grok stopped early; the review did not run and suggestions.md is left as it was" >&2
+# The allow-list declared at the head of this file, applied to the ROOT of the
+# document. Three failures collapse into one question, which is the point of
+# parsing rather than matching: output that is not JSON, output whose root
+# carries no stopReason, and output whose root carries the wrong one.
+#
+# A mention inside the review's own prose cannot be mistaken for the verdict
+# either — `.stopReason` names a field, where a regex only ever named a
+# substring.
+stop=$(jq -r 'if type == "object" then (.stopReason // "<absent>") else "<not-an-object>" end' \
+         "$result" 2>/dev/null) ||
+  { echo "grok's output is not valid JSON; the review did not run and suggestions.md is left as it was" >&2; exit 6; }
+if [ "$stop" != "$stop_ok" ]; then
+  jq -r '.cancellationCategory // empty' "$result" 2>/dev/null >&2 || true
+  echo "grok did not finish its turn — the root stopReason is \"$stop\", not \"$stop_ok\"; the review did not run and suggestions.md is left as it was" >&2
   exit 6
 fi
 cat "$result"

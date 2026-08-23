@@ -684,6 +684,15 @@ own line rather than sending a reader to a file that does not hold it.
   divergence was already diagnosed twice in-tree for *subprocesses*
   (`git-worktree-drop.sh`, `grok-review.sh`'s `host_path()`) and never for the
   readers.
+- **The same host re-parses an argument on its way into `bash.exe`, so a `"`
+  inside an argv element does not arrive.** A test that passed a regex
+  containing `"` as an argument found nothing and reported the pattern under
+  test as broken when the pattern was fine — silent in the direction that
+  matters, because "matched nothing" reads exactly like "the input carried
+  nothing". **Environment variables and stdin are not re-parsed**; use them for
+  anything whose bytes matter and keep argv for values with no shell
+  metacharacters. This is the divergence above one layer down: the argument,
+  not the path.
 - **One tool's "valid" is not the next tool's, and the gap is where a value
   crosses between them.** PR-23 hit this three times in one file: `Release_1`
   is a legal OCI tag and an illegal Job name; `https://shop.example.com:443` is
@@ -846,6 +855,139 @@ own line rather than sending a reader to a file that does not hold it.
   reputation rather than its surface. **Check the binding, not the ecosystem**:
   a capability present in a project's Rust core, its JVM binding and its
   marketing is not thereby present in the one language this repository compiles.
+- **A bound whose two halves are two commands is not a bound.** `/ship`'s
+  twelve-check Grok cap was specified as prose — reserve, then invoke the review
+  helper — over two separately granted commands, and neither half was enforced:
+  the review helper never touched the ledger, and `release` was accepted for any
+  slot at any time with no skip behind it. So a run that invoked without
+  reserving spent a check that left no record, and a resumed run ran past
+  twelve against a paid API. **Accounting and the thing it accounts for have to
+  be one operation**, and where they are, the *placement* of the write becomes
+  the accounting rule: reserving immediately before the model call makes a slot
+  spent by no path that refuses earlier, which is what deleted the release path
+  rather than merely tidying it. **Not "spent if and only if the review ran"** —
+  the ledger settles its election *after* posting, so a failed read there leaves
+  a slot spent with nothing launched. That case is kept deliberately, because
+  after a failed read the state is what is not known; the point is that a claim
+  has to be the ordering the code guarantees, not the tidier one beside it. **And one operation is not enough if the
+  operation can be aimed elsewhere** — the first version of that fix took the
+  pull request number as an argument while cloning the *current branch*, so a
+  typo or a substituted number spent someone else's slot and left this branch's
+  cap re-armed, with both halves looking correct in isolation. Resolve the
+  subject from the thing being acted on rather than accepting it:
+  `gh pr list --head "$branch"` beside the clone of `$branch`, the same way
+  `gh-label-ensure.sh` resolves the repository from the checkout.
+- **A boundary on one side of a pattern is not a boundary, and the fix for one
+  side is where the next hole appears.** One usage-limit regex took three
+  corrections across three review rounds, each finding the side the previous fix
+  had not covered: `402` matched inside `47402`, so it became `\b402\b`; that
+  matched `"input_tokens": 402`, because a quote and a space are word boundaries
+  too, so it became a status *context*; and that matched `status 4021`, because
+  nothing stopped the code alternative at the third digit. The same false
+  positive three times, walking from the middle of the number to its front to
+  its back. **When you constrain one end, write the case for the other end in
+  the same change** — and note that each round's negatives looked thorough while
+  testing only the end that had just been fixed.
+- **Never edit a shell script while it is running.** `bash` reads a script
+  incrementally, by byte offset, rather than parsing it whole — so an edit that
+  shifts the offsets makes the still-running process resume at the wrong place.
+  Measured here rather than reasoned about: editing `grok-review.sh` during a
+  live review produced `line 376: ing: command not found` — the tail of a word
+  the new offset landed inside — and then re-executed a region that had already
+  run, posting a **second** ledger reservation for a slot ten minutes after the
+  first. The helpers in `.claude/scripts/` are long-running by nature, so this
+  is a live hazard here and not a curiosity: hold an edit until the run ends, or
+  copy the script and edit the copy.
+- **A concurrency control is only ever proved by a collision you did not
+  intend.** The duplicate above is the only real contention the ledger's
+  election has ever seen, and it behaved as written: the second claim lost to
+  the first and exited 4, `grok-review.sh` turned that into exit 13 and refused
+  to run, and `count` folded the two rows for that slot into one spend. A
+  deliberate test can show the arithmetic; only an accident shows the whole
+  mechanism under load.
+- **A run whose integrity is in doubt is a run that did not happen**, whatever
+  its artefacts look like. That corrupted review left no `suggestions.md`, which
+  is the same evidence a clean pass leaves — and reading it as clean would be
+  the exact fail-open the stop-reason allow-list exists to refuse, arriving
+  through the script rather than through the model. Spend the next slot and run
+  it again.
+- **A multi-target edit that aborts has applied a *prefix* of its changes, and
+  the targets after the failure are silently absent rather than wrong.** A
+  three-file substitution script wrote the first file, failed an assertion on
+  the second, and never attempted the third; the follow-up was then derived from
+  the *error message*, so it covered the file that had errored and not the one
+  that had never been reached. The two files named in the failure were verified
+  to agree and the third was never re-read. **Resume from the original list,
+  never from the error**, and re-grep every target before claiming the batch
+  landed — the absent change leaves no trace to grep for, which is why only the
+  list finds it.
+- **An `exit` in the last stage of a pipeline ends a subshell, and the consumer
+  on the other side has already answered.** The ledger's trust check bailed with
+  `exit 3` inside `gh api … | while …`; the `awk` on the other side of
+  `ledger_rows | awk` saw EOF, ran its END block and printed `0` — "nothing
+  spent", re-arming the cap — and only *then* did `pipefail` abort with 3. A
+  caller reading stdout had its answer before the failure existed. **Buffer, and
+  check the status while nothing has been written**: command substitution hands
+  back the status, a pipe hands the reader an EOF it cannot tell from empty
+  input. Worse, the empty case was legitimate and documented, which is exactly
+  what made the two indistinguishable — so the separation has to happen upstream
+  of the fold, never inside it.
+- **A deny-list of terminal states passes every state nobody listed, including
+  the ones the next version invents.** The Grok verdict check refused
+  `cancelled|refusal|error*` and passed everything else, so a reviewer that
+  exhausted its output or turn budget exited 0, wrote JSON, left no
+  `suggestions.md`, and had that absence read as a clean review. No attacker is
+  required — a long branch is the ordinary way there, and a long branch is when
+  review matters most. **Enumerate what is acceptable**: one accepted value,
+  every other value and the field's absence refused, pinned like a version so a
+  bump must re-verify the string.
+- **A regex over a serialised structure answers a different question from the
+  one being asked.** Inverting that deny-list to an allow-list of `end_turn` was
+  still not enough, because a pattern cannot tell a ROOT field from a nested
+  one: `{"modelUsage":{"stopReason":"end_turn"}}` matched exactly once, matched
+  the accepted value, and was read as a finished turn — a document whose turn
+  never ended, passing the check that exists to notice. A regex also cannot
+  establish that the input is well-formed at all, so a truncated write reads as
+  a verdict. **Parse it and name the field**: `.stopReason` on the root settles
+  shape, nesting and well-formedness together, where three greps could not
+  settle any of them. The general form — *if the thing you are matching has
+  structure, matching is the wrong tool* — is worth more than the instance,
+  and it took three rounds to reach: deny-list, allow-list, parse, each fix
+  blind in the way the next one found.
+- **Pinning a version is not pinning an artefact.** The review sandbox pinned
+  the grok *client version* and refetched `https://x.ai/cli/install.sh` on every
+  build, executing it unverified inside the one image built to be a security
+  boundary. Pinning the installer's digest is half the fix: reading the
+  installer showed it performs **no** checksum or signature check on the 163 MB
+  binary it downloads, so the larger artefact was still arriving unchecked over
+  the same channel. Pin every artefact that crosses, and make an unrecorded
+  platform **fail** rather than build unverified — the scaffold's rule, that a
+  tool refusing input it has never been shown beats one that guesses.
+- **A verification that runs after the thing it verifies has already executed
+  does not verify anything.** Pinning both artefacts above was *still* not
+  enough while the installer stayed: it smoke-runs the binary before the hash
+  can be taken, as a user with the network and a writable `$HOME`, so a
+  malicious artefact gets one execution in which to put the expected bytes where
+  the check will read them — and the check then passes. That was written down as
+  a "narrow, stated residual" and was the whole property. **Naming a residual is
+  not bounding it**: the bound has to be argued against someone who gets to run
+  first, and where it cannot be, move the execution after the check rather than
+  the check after the execution.
+- **`?` in a bash `case` matches `/`.** A `case` performs no pathname expansion,
+  so `"$tmproot"/secsweep-??????` accepted `$tmproot/secsweep-a/bbbb` as readily
+  as `$tmproot/secsweep-abc123` — a guard whose comment called it a direct-child
+  check for as long as it was not one. Compare `dirname` against the root and
+  match the *basename*, which cannot be talked past because a basename contains
+  no `/`. The general form: **a glob's alphabet is not the shell's, and a
+  pattern is not a parser.**
+- **A helper whose stdout is its return value owes every subcommand a
+  redirection.** `git worktree add` writes "Preparing worktree" to stderr and
+  `HEAD is now at <sha> <subject>` to *stdout*, so a helper that printed a path
+  after calling it returned a commit subject followed by a path, and the caller
+  failed later with a `not an existing directory` naming a whole commit message.
+  Found by running the round trip, not by reading it — which is the reusable
+  half: **a helper's contract is its stdout, so test what a caller captures,
+  never what the code appears to print.**
 - **Where two mechanisms answer one question and only one of them is editable,
   the editable one is where the lie lives.** GitHub honours closing keywords in
   a PR body and in a commit body independently, and
@@ -873,14 +1015,14 @@ dotnet test  Platform.slnx --filter "Category!=Integration"   # 689 of 877, no d
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Nine suites, three runners, and only one of them is `dotnet test`.** The
+**Ten suites, three runners, and only one of them is `dotnet test`.** The
 scaffold's tests are Python, the chart gate is bash over `helm template`, and
 the licence gate, the observability gate, the pipeline gate, the coverage
-reporter's suite, the canary's and the closure gate's are Python again; none is
-in `Platform.slnx`, so a green solution says nothing about any of them. **The
-licence gate belongs in that count** — CI tests it and then runs it, which is
-the pattern every gate here follows — and leaving it out is what made this
-seven:
+reporter's suite, the canary's, the closure gate's and the review helpers' are
+Python again; none is in `Platform.slnx`, so a green solution says nothing about
+any of them. **The licence gate belongs in that count** — CI tests it and then
+runs it, which is the pattern every gate here follows — and leaving it out is
+what made this seven:
 
 ```bash
 (cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
@@ -903,13 +1045,35 @@ py -3.12 deploy/canary/canary.py check
 py -3.12 -m unittest discover -s .github/closure-gate
 gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
+
+py -3.12 -m unittest discover -s .claude/scripts   # needs bash, grep, git, jq; no network
 ```
 
-**The closure gate is the only one of the nine whose *runner* needs the
+**The tenth is the review loop's own helpers, and it is the only suite whose
+subject is `.claude/`.** `test_grok_helpers.py` covers the judgements `/ship`
+and the two sweeps rest on: what the usage-limit preflight calls a limit, what
+counts as a review that finished, that the ledger publishes no answer on its
+trust check's error path, that every usage-limit skip happens before a slot is
+reserved, and that the sweeps' worktree shape check is the
+direct-child check it claims, and whether the label helper leaves a free
+parameter a finding could steer. **Five of those six shipped wrong, so each is
+reproduced as a case that fails against the old behaviour** — the sixth is a
+grant closed by moving it into a helper, and the suite is what keeps it closed.
+Paired with
+positive controls, which are not decoration: a negative that passes because the
+pattern matches *nothing* is this repository's most-repeated failure wearing a
+test's clothes, so the accepted values and the limit pattern's status anchor are
+pinned alongside. **It shells out to the same `grep -E` the scripts call**
+rather than restating the patterns in Python's `re` — a re-implementation is a
+second specification, and a double cannot disagree with itself.
+
+**The closure gate is the only one of the ten whose *runner* needs the
 network**, and the suite is deliberately not: the deciding takes JSON on stdin
 and the fetching is one `gh` call, which is `deploy/canary/canary.py`'s split
 one artefact over. So `unittest` runs anywhere, and the second line is the only
-part that needs a token and a PR to point at.
+part that needs a token and a PR to point at. The review helpers' suite is the
+same split taken further — it needs no network at all, because the `gh` the
+ledger calls is replaced by a stub on `PATH`.
 
 **`pipeline_gate.py stages` is the one that cannot be run on its own**: it
 reads what the three test steps wrote, so it needs a `dotnet test` per stage
@@ -1935,6 +2099,19 @@ forms of `git` as promptless built-ins whatever the allow list says, and its
 own note is that "to require a prompt for one of these commands, add an `ask`
 or `deny` rule".
 
+**"Including the middle" is the measurement; the documented rule is wider, and
+the two are worth keeping apart.** What was measured here is a wildcard between
+two literals. The harness's own reference says a Bash rule's wildcards "can
+appear at any position in the command, including at the beginning, middle, or
+end" — so a pattern *starting* with `*`, which this repository had no precedent
+for, is supported rather than merely untested. That was read out of the docs
+after a branch shipped two such denies and flagged them as an unverified guess,
+which is the right order: **write down which half you measured and which half
+you looked up.** Two neighbouring constraints came from the same page and
+match what is recorded above — the `:*` form is recognised only at the end of a
+pattern, and a trailing `*` preceded by a space enforces a word boundary, so
+`Bash(ls *)` misses `lsof` where `Bash(ls*)` catches it.
+
 **It raises the cost of the naive spelling and it is not a boundary**, and the
 distinction is the whole of the reset-grant lesson one paragraph up. A
 permission rule matches the command *string*; the shell reassembles adjacent
@@ -2013,6 +2190,22 @@ it went stale the moment a branch pinned that file's fetch grant. Two are
 failing checks. Helpers are owed for both; until someone with the
 `Edit(.claude/scripts/**)` deny lifted writes them, `/ship` carries them by
 reporting its literal invocations, flags and all.
+
+**Two more sat in the sweep command files rather than in this paragraph, and
+both are now closed — which is worth recording because they were closed the
+same way.** `Bash(mktemp:*)` took an arbitrary template, so it was a filesystem
+write primitive able to create an empty directory or file anywhere the session
+could write; `git-worktree-detach.sh` makes the directory itself now and prints
+it, and both sweeps dropped the grant. `Bash(gh label create:*)` was
+create-*or-overwrite* — `--force` updates an existing label's colour and
+description, and `-R` put that write in any repository — and it was held as two
+prose rules; `gh-label-ensure.sh` leaves no free parameter, taking one name out
+of a fixed six-entry case and resolving the repository from the checkout. **The
+root cause both shared is the one that generalises**: each was documented by the
+operation it was added for rather than by what its prefix admits, and reading
+the tool's own `--help` found something every time it was done. That they were
+inventoried in a command file and not here is the same drift this paragraph
+warns about, running the other way.
 
 The third is `Bash(git fetch origin:*)`, which no longer admits a URL but still
 admits a trailing flag; `--upload-pack`, `--receive-pack` and `--exec` are

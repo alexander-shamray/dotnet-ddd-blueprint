@@ -29,6 +29,8 @@
       "Edit(./.claude/scripts/**)",
       "Edit(.claude/sandbox/**)",
       "Edit(./.claude/sandbox/**)",
+      "Bash(*grok-ledger.sh * reserve*)",
+      "Bash(*grok-ledger.sh * release*)",
       "Bash(git push --force:*)",
       "Bash(git push --force-with-lease:*)",
       "Bash(git push -f:*)",

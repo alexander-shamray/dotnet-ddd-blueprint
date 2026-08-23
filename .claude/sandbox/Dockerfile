@@ -26,7 +26,7 @@
 FROM debian:trixie-slim
 
 # git, because /review-branch spends its whole life in it. curl and CA certs for
-# the installer below and the model calls afterwards.
+# the pinned release download below and the model calls afterwards.
 #
 # python3 for the one gate the review is asked to run itself: the licence gate
 # is stdlib-only and needs no restore, which is exactly why §15.1 puts it ahead
@@ -64,14 +64,17 @@ RUN groupadd --gid "${REVIEWER_GID}" reviewer \
 USER reviewer
 ENV HOME=/home/reviewer
 
-# The official installer, which is what x.ai documents and what installed the
-# host's copy. Run as `reviewer` so the CLI lands in this user's home, beside
-# the credentials mounted into it.
+# The release artefact, fetched directly. It used to be x.ai's official
+# installer — what the docs give and what installed the host's copy — and the
+# argument for replacing it is below. Either way it lands as `reviewer`, so the
+# CLI sits in this user's home beside the credentials mounted into it.
 #
-# Downloaded first, then executed, rather than piped. `RUN a | b` reports only
-# b's status under /bin/sh, and bash handed an empty script exits 0 — so a
-# failed download would publish an image with no grok in it and defer the real
-# error to the first review, where it arrives as an authentication problem.
+# `--fail`, and never a pipe into a shell. `RUN a | b` reports only b's status
+# under /bin/sh, and bash handed an empty script exits 0 — so a failed download
+# used to publish an image with no grok in it and defer the real error to the
+# first review, where it arrives as an authentication problem. Fetching to a
+# file and checking its digest keeps that closed for the same reason and more
+# strictly: an empty or truncated download cannot match the pin.
 #
 # Pinned, and not for tidiness. Unpinned this takes the latest and the reviewer
 # drifts from the developer's client without anyone choosing it: with the host
@@ -81,7 +84,7 @@ ENV HOME=/home/reviewer
 # against the very same file. A credential must mean the same thing on both
 # sides of the mount.
 #
-# Track the host's version when it moves. Both are 1.0.0 today.
+# Track the host's version when it moves. Both are 1.0.5 today.
 #
 # PATH is set before the install rather than after, so the `grok --version`
 # below is a real check. After the RUN it would not be on PATH yet and the
@@ -89,12 +92,88 @@ ENV HOME=/home/reviewer
 # about whether grok installed.
 ENV PATH="/home/reviewer/.grok/bin:${PATH}"
 
-ARG GROK_VERSION=1.0.0
-RUN curl --fail --silent --show-error --location \
-        https://x.ai/cli/install.sh --output /tmp/install-grok.sh \
-    && bash /tmp/install-grok.sh "${GROK_VERSION}" \
-    && rm --force /tmp/install-grok.sh \
-    && grok --version
+# The version was pinned and its INTEGRITY was not, which is the half of the
+# argument above that was missing. Every build refetched
+# https://x.ai/cli/install.sh and executed it with no checksum and no signature
+# — inside the one image that exists to be a security boundary, and that
+# grok-review.sh then hands the credentials the boundary was built to contain.
+# Anyone able to alter that script or its delivery (an upstream compromise, or
+# DNS/CDN/TLS interception on the developer's network) got code execution inside
+# the boundary on the next review. The image is rebuilt routinely, so the window
+# was not a one-off.
+#
+# The first fix pinned BOTH artefacts, the installer's digest and the binary's,
+# because the installer performs NO verification of the 163 MB binary it
+# downloads — read, not assumed, by grepping the script for sha256/checksum/gpg
+# and finding nothing — so pinning only the bootstrap would have left the larger
+# artefact arriving unchecked over the same channel from the same origin.
+#
+# **That is history: there is no installer here now**, for the reason argued
+# below, and the only digest this file carries is the release binary's.
+#
+# The digests were taken by fetching the artefact and hashing it, and the
+# amd64 one was cross-checked against the md5 GCS reports in its own
+# `x-goog-hash` response header. That is trust on first use, and it is the point
+# rather than a weakness: from here a change to what x.ai serves for a pinned
+# version fails the build, and moving the pin is a reviewed diff — the same
+# property Directory.Packages.props and global.json are here for.
+#
+# An architecture with no recorded digest FAILS rather than building unverified.
+# That is the scaffold's rule one tree over: a tool that refuses input it has
+# never been shown beats one that guesses. Docker Desktop on this host builds
+# linux/amd64; an arm64 developer adds one line, which is exactly the reviewed
+# diff a pin is for.
+#
+# **The installer is gone, and verifying after it ran was not good enough.** The
+# first version of this pin kept `install.sh` — checksummed — and hashed the
+# binary afterwards, stating the residual as "the installer smoke-runs the
+# binary once before the check, so a tampered artefact executes once and then
+# fails the build". That understated it, and a reviewer said so. The execution
+# happens *before* the hash, as the reviewer user, with the network and a
+# writable `$HOME`: a malicious binary can use that one execution to put the
+# expected bytes where the check will read them, and then the check passes and
+# the image ships. **A verification that runs after the thing it verifies has
+# already executed does not verify anything** — the same shape as the ledger
+# printing its answer before its trust check failed, two files over.
+#
+# So the release artefact is fetched directly and its digest checked before
+# anything is executed. What replaces the installer is the handful of steps it
+# performs on Linux, read out of the pinned script rather than guessed: drop the
+# binary in `downloads/`, `chmod +x`, relative symlinks for `grok` and `agent`
+# in `bin/` (relative because they survive a bind-mounted `$HOME`), and the
+# `[cli]` block it writes to `config.toml`. The shell completions it also
+# generates are omitted deliberately: producing them means running the binary,
+# which is the thing being avoided, and no reviewer has a shell to complete in.
+#
+# `grok --version` at the end is now the FIRST execution of the binary, and it
+# happens only after the digest matched.
+ARG GROK_VERSION=1.0.5
+ARG GROK_SHA256_X86_64=9ba87444e1819e8f6104adbbf4676a870c204380aa5c3e1c38a926c4ea677238
+ARG GROK_SHA256_AARCH64=1c1fe67d7c35497fb09f44a451f57acc3787add4c9aea2c56f5c7c75dc5ffcf1
+# Compared with `[ "$a" = "$b" ]` rather than piped into `sha256sum --check`,
+# because the recorded digest arrives through a build argument: a stray
+# character on it — a CR from a CRLF checkout of this file, most plausibly —
+# would make `--check` fail to PARSE its input, which is a different error from
+# a mismatch and reads like a broken command rather than a bad digest. A string
+# comparison says which value disagreed, whatever is wrong with either.
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64|amd64) arch=x86_64; want="${GROK_SHA256_X86_64}" ;; \
+        aarch64|arm64) arch=aarch64; want="${GROK_SHA256_AARCH64}" ;; \
+        *) echo "no recorded grok ${GROK_VERSION} digest for $(uname -m); add one rather than building an unverified reviewer" >&2; exit 1 ;; \
+    esac; \
+    curl --fail --silent --show-error --location \
+        "https://x.ai/cli/grok-${GROK_VERSION}-linux-${arch}" --output /tmp/grok; \
+    got="$(sha256sum /tmp/grok | cut -d' ' -f1)"; \
+    [ "$got" = "${want}" ] || \
+        { echo "grok ${GROK_VERSION} ${arch} sha256 ${got} does not match the recorded ${want}" >&2; exit 1; }; \
+    mkdir -p "${HOME}/.grok/downloads" "${HOME}/.grok/bin"; \
+    mv /tmp/grok "${HOME}/.grok/downloads/grok-linux-${arch}"; \
+    chmod +x "${HOME}/.grok/downloads/grok-linux-${arch}"; \
+    ln -sf "../downloads/grok-linux-${arch}" "${HOME}/.grok/bin/grok"; \
+    ln -sf "../downloads/grok-linux-${arch}" "${HOME}/.grok/bin/agent"; \
+    printf '[cli]\ninstaller = "internal"\n' > "${HOME}/.grok/config.toml"; \
+    grok --version
 
 # The mounted clone carries its host ownership, so git refuses it as dubiously
 # owned. Declared here rather than left to the reviewer, which is not a nicety:
