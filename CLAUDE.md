@@ -684,6 +684,15 @@ own line rather than sending a reader to a file that does not hold it.
   divergence was already diagnosed twice in-tree for *subprocesses*
   (`git-worktree-drop.sh`, `grok-review.sh`'s `host_path()`) and never for the
   readers.
+- **The same host re-parses an argument on its way into `bash.exe`, so a `"`
+  inside an argv element does not arrive.** A test that passed a regex
+  containing `"` as an argument found nothing and reported the pattern under
+  test as broken when the pattern was fine — silent in the direction that
+  matters, because "matched nothing" reads exactly like "the input carried
+  nothing". **Environment variables and stdin are not re-parsed**; use them for
+  anything whose bytes matter and keep argv for values with no shell
+  metacharacters. This is the divergence above one layer down: the argument,
+  not the path.
 - **One tool's "valid" is not the next tool's, and the gap is where a value
   crosses between them.** PR-23 hit this three times in one file: `Release_1`
   is a legal OCI tag and an illegal Job name; `https://shop.example.com:443` is
@@ -846,6 +855,61 @@ own line rather than sending a reader to a file that does not hold it.
   reputation rather than its surface. **Check the binding, not the ecosystem**:
   a capability present in a project's Rust core, its JVM binding and its
   marketing is not thereby present in the one language this repository compiles.
+- **A bound whose two halves are two commands is not a bound.** `/ship`'s
+  twelve-check Grok cap was specified as prose — reserve, then invoke the review
+  helper — over two separately granted commands, and neither half was enforced:
+  the review helper never touched the ledger, and `release` was accepted for any
+  slot at any time with no skip behind it. So a run that invoked without
+  reserving spent a check that left no record, and a resumed run ran past
+  twelve against a paid API. **Accounting and the thing it accounts for have to
+  be one operation**, and where they are, the *placement* of the write becomes
+  the accounting rule: reserving immediately before the model call makes a slot
+  spent if and only if the review ran, which is what deleted the release path
+  rather than merely tidying it.
+- **An `exit` in the last stage of a pipeline ends a subshell, and the consumer
+  on the other side has already answered.** The ledger's trust check bailed with
+  `exit 3` inside `gh api … | while …`; the `awk` on the other side of
+  `ledger_rows | awk` saw EOF, ran its END block and printed `0` — "nothing
+  spent", re-arming the cap — and only *then* did `pipefail` abort with 3. A
+  caller reading stdout had its answer before the failure existed. **Buffer, and
+  check the status while nothing has been written**: command substitution hands
+  back the status, a pipe hands the reader an EOF it cannot tell from empty
+  input. Worse, the empty case was legitimate and documented, which is exactly
+  what made the two indistinguishable — so the separation has to happen upstream
+  of the fold, never inside it.
+- **A deny-list of terminal states passes every state nobody listed, including
+  the ones the next version invents.** The Grok verdict check refused
+  `cancelled|refusal|error*` and passed everything else, so a reviewer that
+  exhausted its output or turn budget exited 0, wrote JSON, left no
+  `suggestions.md`, and had that absence read as a clean review. No attacker is
+  required — a long branch is the ordinary way there, and a long branch is when
+  review matters most. **Enumerate what is acceptable**: one accepted value,
+  every other value and the field's absence refused, pinned like a version so a
+  bump must re-verify the string.
+- **Pinning a version is not pinning an artefact.** The review sandbox pinned
+  the grok *client version* and refetched `https://x.ai/cli/install.sh` on every
+  build, executing it unverified inside the one image built to be a security
+  boundary. Pinning the installer's digest is half the fix: reading the
+  installer showed it performs **no** checksum or signature check on the 163 MB
+  binary it downloads, so the larger artefact was still arriving unchecked over
+  the same channel. Pin every artefact that crosses, and make an unrecorded
+  platform **fail** rather than build unverified — the scaffold's rule, that a
+  tool refusing input it has never been shown beats one that guesses.
+- **`?` in a bash `case` matches `/`.** A `case` performs no pathname expansion,
+  so `"$tmproot"/secsweep-??????` accepted `$tmproot/secsweep-a/bbbb` as readily
+  as `$tmproot/secsweep-abc123` — a guard whose comment called it a direct-child
+  check for as long as it was not one. Compare `dirname` against the root and
+  match the *basename*, which cannot be talked past because a basename contains
+  no `/`. The general form: **a glob's alphabet is not the shell's, and a
+  pattern is not a parser.**
+- **A helper whose stdout is its return value owes every subcommand a
+  redirection.** `git worktree add` writes "Preparing worktree" to stderr and
+  `HEAD is now at <sha> <subject>` to *stdout*, so a helper that printed a path
+  after calling it returned a commit subject followed by a path, and the caller
+  failed later with a `not an existing directory` naming a whole commit message.
+  Found by running the round trip, not by reading it — which is the reusable
+  half: **a helper's contract is its stdout, so test what a caller captures,
+  never what the code appears to print.**
 - **Where two mechanisms answer one question and only one of them is editable,
   the editable one is where the lie lives.** GitHub honours closing keywords in
   a PR body and in a commit body independently, and
@@ -873,14 +937,14 @@ dotnet test  Platform.slnx --filter "Category!=Integration"   # 689 of 877, no d
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Nine suites, three runners, and only one of them is `dotnet test`.** The
+**Ten suites, three runners, and only one of them is `dotnet test`.** The
 scaffold's tests are Python, the chart gate is bash over `helm template`, and
 the licence gate, the observability gate, the pipeline gate, the coverage
-reporter's suite, the canary's and the closure gate's are Python again; none is
-in `Platform.slnx`, so a green solution says nothing about any of them. **The
-licence gate belongs in that count** — CI tests it and then runs it, which is
-the pattern every gate here follows — and leaving it out is what made this
-seven:
+reporter's suite, the canary's, the closure gate's and the review helpers' are
+Python again; none is in `Platform.slnx`, so a green solution says nothing about
+any of them. **The licence gate belongs in that count** — CI tests it and then
+runs it, which is the pattern every gate here follows — and leaving it out is
+what made this seven:
 
 ```bash
 (cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
@@ -903,13 +967,28 @@ py -3.12 deploy/canary/canary.py check
 py -3.12 -m unittest discover -s .github/closure-gate
 gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
+
+py -3.12 -m unittest discover -s .claude/scripts   # needs bash and grep, nothing else
 ```
 
-**The closure gate is the only one of the nine whose *runner* needs the
+**The tenth is the review loop's own helpers, and it is the only suite whose
+subject is `.claude/`.** `test_grok_helpers.py` covers the judgements `/ship`
+and the two sweeps rest on: what the usage-limit preflight calls a limit, what
+counts as a review that finished, that the ledger publishes no answer on its
+trust check's error path, that a slot is reserved if and only if the review's
+model call was launched, and that the sweeps' worktree shape check is the
+direct-child check it claims. Every case is a negative one, because each of
+those five shipped. **It shells out to the same `grep -E` the scripts call**
+rather than restating the patterns in Python's `re` — a re-implementation is a
+second specification, and a double cannot disagree with itself.
+
+**The closure gate is the only one of the ten whose *runner* needs the
 network**, and the suite is deliberately not: the deciding takes JSON on stdin
 and the fetching is one `gh` call, which is `deploy/canary/canary.py`'s split
 one artefact over. So `unittest` runs anywhere, and the second line is the only
-part that needs a token and a PR to point at.
+part that needs a token and a PR to point at. The review helpers' suite is the
+same split taken further — it needs no network at all, because the `gh` the
+ledger calls is replaced by a stub on `PATH`.
 
 **`pipeline_gate.py stages` is the one that cannot be run on its own**: it
 reads what the three test steps wrote, so it needs a `dotnet test` per stage
@@ -2013,6 +2092,22 @@ it went stale the moment a branch pinned that file's fetch grant. Two are
 failing checks. Helpers are owed for both; until someone with the
 `Edit(.claude/scripts/**)` deny lifted writes them, `/ship` carries them by
 reporting its literal invocations, flags and all.
+
+**Two more sat in the sweep command files rather than in this paragraph, and
+both are now closed — which is worth recording because they were closed the
+same way.** `Bash(mktemp:*)` took an arbitrary template, so it was a filesystem
+write primitive able to create an empty directory or file anywhere the session
+could write; `git-worktree-detach.sh` makes the directory itself now and prints
+it, and both sweeps dropped the grant. `Bash(gh label create:*)` was
+create-*or-overwrite* — `--force` updates an existing label's colour and
+description, and `-R` put that write in any repository — and it was held as two
+prose rules; `gh-label-ensure.sh` leaves no free parameter, taking one name out
+of a fixed six-entry case and resolving the repository from the checkout. **The
+root cause both shared is the one that generalises**: each was documented by the
+operation it was added for rather than by what its prefix admits, and reading
+the tool's own `--help` found something every time it was done. That they were
+inventoried in a command file and not here is the same drift this paragraph
+warns about, running the other way.
 
 The third is `Bash(git fetch origin:*)`, which no longer admits a URL but still
 admits a trailing flag; `--upload-pack`, `--receive-pack` and `--exec` are
