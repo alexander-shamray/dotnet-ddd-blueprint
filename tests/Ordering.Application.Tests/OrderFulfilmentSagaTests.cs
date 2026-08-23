@@ -1068,21 +1068,87 @@ public class OrderFulfilmentSagaTests
         //
         // What the machine's own declaration can say is whether the branch is
         // there. Compensating is the state where that matters: it is reachable
-        // from AwaitingStock and AwaitingPayment, so six of the eight declared
+        // from AwaitingStock and AwaitingPayment, so most of the declared
         // events can arrive, and the comment beside it claims none is left to
-        // the catch-all. PaymentDeclined was the sixth, and was missing from
-        // that enumeration — which is also why this count read five until the
-        // assertion below was added under it.
+        // the catch-all. PaymentDeclined was missing from that enumeration —
+        // which is why this test exists at all.
+        //
+        // **It was a list of ShouldContain and that did not enforce its own
+        // name.** A ninth event declared with no Compensating branch leaves
+        // NextEvents returning the same set, so every hard-coded assertion
+        // still passes — the gate-coverage regression this file exists to
+        // catch, in the test written to catch it.
+        //
+        // So the subject is the PARTITION rather than a membership list. Every
+        // event the machine declares is classified below, the two halves must
+        // together account for all of them, and the reachable half must equal
+        // what the machine says it accepts. A new event fails the first
+        // assertion until someone classifies it, and classifying it as
+        // reachable without writing the branch fails the second.
         OrderFulfilmentSaga saga = new();
 
-        string[] accepted = [.. saga.NextEvents(saga.Compensating).Select(e => e.Name)];
+        string[] reachableHere =
+        [
+            nameof(saga.StockReleased),
+            nameof(saga.PaymentAuthorised),
+            nameof(saga.PaymentDeclined),
+            nameof(saga.OrderCancelled),
+            nameof(saga.StockReserved),
+            nameof(saga.StockReservationFailed),
+            $"{nameof(saga.ReleaseTimeout)}.Received"
+        ];
 
-        accepted.ShouldContain(nameof(saga.StockReleased));
-        accepted.ShouldContain(nameof(saga.PaymentAuthorised));
-        accepted.ShouldContain(nameof(saga.PaymentDeclined));
-        accepted.ShouldContain(nameof(saga.OrderCancelled));
-        accepted.ShouldContain(nameof(saga.StockReserved));
-        accepted.ShouldContain(nameof(saga.StockReservationFailed));
+        // Not reachable in Compensating, and each for a stated reason rather
+        // than by omission: OrderPlaced only creates an instance,
+        // ShipmentDispatched and the despatch timeout belong to Confirmed,
+        // and the stock and payment timeouts are unscheduled by the
+        // transitions that enter this state.
+        string[] notReachableHere =
+        [
+            nameof(saga.OrderPlaced),
+            nameof(saga.ShipmentDispatched),
+            $"{nameof(saga.StockTimeout)}.Received",
+            $"{nameof(saga.PaymentTimeout)}.Received",
+            $"{nameof(saga.DespatchTimeout)}.Received"
+        ];
+
+        string[] declared =
+        [
+            .. typeof(OrderFulfilmentSaga)
+                .GetProperties()
+                .Where(pi => typeof(Event).IsAssignableFrom(pi.PropertyType))
+                .Select(pi => pi.Name),
+            .. typeof(OrderFulfilmentSaga)
+                .GetProperties()
+                .Where(pi => pi.PropertyType.IsGenericType &&
+                    pi.PropertyType.GetGenericTypeDefinition() == typeof(Schedule<,>))
+                .Select(pi => $"{pi.Name}.Received")
+        ];
+
+        declared.ShouldNotBeEmpty("the reflection scan found no events on this machine");
+
+        reachableHere
+            .Concat(notReachableHere)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ShouldBe(
+                declared.OrderBy(n => n, StringComparer.Ordinal),
+                "every event this machine declares must be classified as reachable in " +
+                "Compensating or not. An event in neither list is one nobody decided about, " +
+                "which is exactly how PaymentDeclined came to be missing (§9.6).");
+
+        // .AnyReceived is MassTransit's own, one per Schedule, and it is
+        // accepted in every state whether or not anybody wrote a branch — so
+        // it says nothing about the subject here and would only dilute it.
+        // The schedule itself is still classified, through its .Received.
+        saga.NextEvents(saga.Compensating)
+            .Select(e => e.Name)
+            .Where(n => !n.EndsWith(".AnyReceived", StringComparison.Ordinal))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ShouldBe(
+                reachableHere.OrderBy(n => n, StringComparer.Ordinal),
+                "Compensating accepts exactly the events classified as reachable there. A name " +
+                "missing from the machine is a branch nobody wrote and OnUnhandledEvent would " +
+                "swallow; one the machine has and this list does not is a branch nobody argued.");
     }
 
     [Fact]

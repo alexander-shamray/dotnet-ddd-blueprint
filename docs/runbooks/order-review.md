@@ -184,8 +184,15 @@ the same defect one step less obvious.
    **A cancellation may still be in flight**, which is the case worth naming:
    on `cancelled_after_payment` reached from a decline or a timeout, the
    `CancelOrder` that triggers the void has not been sent yet when this row
-   appears. If you find no refund and no cancellation, wait for one before
-   refunding by hand rather than racing it.
+   appears. If you find no refund and no cancellation, **check the saga
+   before deciding to wait** — step 2 of the `Compensating` procedure below.
+
+   **Waiting is right only if the instance is gone.** Both exits finalise, so
+   an instance still live at the hour this alerts on has missed its own
+   ten-minute timeout and no `CancelOrder` is coming without intervention:
+   waiting there is waiting for ever while the authorisation stands. An
+   earlier revision of this step said "wait for one" unconditionally and
+   contradicted the paragraph above that says so.
 
    An earlier version of this step said "refund the authorisation" with no
    check at all, which is a double refund whenever Payments got there first.

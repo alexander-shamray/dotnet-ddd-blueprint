@@ -187,8 +187,13 @@ public static class ReviewReasons
     /// <remarks>
     /// <b>Distinct from <see cref="CancelledAfterPayment"/> because the
     /// procedure is different, and the row is the only thing an operator
-    /// has.</b> Both are raised by §9.6's saga on a cancellation arriving after
-    /// an authorisation, from two different states — and
+    /// has.</b> Both are raised by §9.6's saga with an authorisation standing
+    /// and the workflow ending in cancellation — <b>not</b> both "on a
+    /// cancellation arriving after an authorisation", which this said and
+    /// which describes only this code. <see cref="CancelledAfterPayment"/> is
+    /// the authorisation arriving after compensation began, and on its decline
+    /// and payment-timeout doors no cancellation has been sent at all. Two
+    /// state-and-event pairs, one shared condition — and
     /// <c>ordering.OrderReviews</c> persists <c>(OrderId, Reason, RaisedAt)</c>
     /// and nothing else, so a single code makes the two indistinguishable by
     /// the time anyone reads the queue. The saga has usually finalised by then;
