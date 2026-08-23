@@ -137,17 +137,46 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              SOURCE_INPUTS list to drift. It is also the only
                              workflow taking `edited`, because the defect it
                              exists for was introduced by an edit to a PR body
-                             with no push behind it
+                             with no push behind it. **Proposal and enforcement
+                             are two executions**: the suite runs the branch's
+                             gate, and the gate that JUDGES is read out of the
+                             base commit with `git show`, so a pull request
+                             cannot supply its own judge. A base carrying no
+                             gate fails rather than falling back — the fallback
+                             is the silent pass the split exists to refuse.
+                             **The workflow file itself is still the branch's
+                             copy**, because `pull_request` runs the head
+                             definition; only `pull_request_target` reads the
+                             base one, at a price this repo refuses. Closing
+                             that needs a required status check, and `main` is
+                             not protected today
 .github/licence-gate/        the gate, its allow-list and its tests
-.github/closure-gate/        the three statements a PR makes about what it
-                             closes — the `| Closes |` row, GitHub's own
+.github/closure-gate/        what a pull request SAYS it closes, against what
+                             merging it WILL close. Three statements — the
+                             `| Closes |` row, GitHub's own
                              `closingIssuesReferences`, and the keywords in the
-                             commit bodies — compared against each other. Half
-                             the comparison is GitHub's parse and half is a
-                             regex, so a too-narrow regex is the fail-open
-                             direction and the suite is mostly that parser.
-                             Both historical defects reproduce: PR #112 red on
-                             three counts, PR #116 red on #30 and #56
+                             commit bodies — and **two comparisons, not
+                             three**. The missing pairing is deliberate: an
+                             issue the description closes and no commit
+                             mentions is the ordinary case, so requiring the
+                             commit to repeat it would make a commit keyword
+                             mandatory, which no rule here states. A test pins
+                             that absence, because the symmetry argument is
+                             what produced the fourth comparison the first
+                             time. Half of what is compared is GitHub's parse
+                             and half is a regex, so a too-narrow regex is the
+                             fail-open direction and the suite is mostly that
+                             parser. A commit list at or above `gh`'s page size
+                             is REFUSED rather than judged — a prefix of one
+                             page and a complete list of one page read alike
+                             from in there. `closingIssuesReferences` needs no
+                             such guard and briefly had one: `gh` preloads that
+                             collection to exhaustion and does not preload
+                             commits, which is why exactly one of the two is
+                             exposed. Both historical defects reproduce — PR
+                             #112 red on three counts, PR #116 on the two it
+                             disclaimed — and it went red on its own branch,
+                             over test fixtures a commit body quoted
 .github/pipeline-gate/       PR-25's quality gates, and all three are
                              inventories: every deployable under src/ is
                              matched by a path filter, every Dockerfile is
@@ -872,7 +901,7 @@ py -3.12 -m unittest discover -s deploy/canary
 py -3.12 deploy/canary/canary.py check
 
 py -3.12 -m unittest discover -s .github/closure-gate
-gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
 ```
 
@@ -1754,8 +1783,10 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   closed by hand. In the other direction a commit keyword is permanent where a
   description is editable, so **the description is reconciled to the commits,
   never the reverse**: PR #116 withdrew two closures from its body and closed
-  them anyway. `.github/closure-gate/` compares the three on every push and on
-  every description edit.
+  them anyway. `.github/closure-gate/` compares what the pull request *says*
+  against what the merge *will do*, on every push and on every description
+  edit. **It does not require a commit to repeat a closure the description
+  makes** — that pairing is deliberately absent and a test pins the absence.
 - **Uncommitted work in the tree belongs in the PR being worked on.** When a
   change appears that nobody in the current task wrote — an edit made directly
   by the repo owner, most often — it is not stray churn to be reverted or left
