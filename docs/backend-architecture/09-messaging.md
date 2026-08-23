@@ -2487,7 +2487,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > crash between the saga state committing and that write leaves the event
 > unrecorded and the next delivery finds the instance already moved on.
 >
-> **That window has two halves and this passage described one of them.**
+> **That window has two halves, and it is why no catch-all absorbs it.**
 > `UseInMemoryOutbox` sits *inside* the inbox filter and flushes its buffered
 > sends after the inner pipeline returns — which is after the repository has
 > committed. So a crash there is either after the flush, where the commands
@@ -2495,19 +2495,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > the instance advanced and its commands were never sent. In the second the
 > redelivery is not a duplicate at all: it is the last thing that could
 > notice, and the scheduled timeout that would have rescued the order was
-> buffered in the same flush. Nothing in the machine can tell them apart, so
-> the callback **logs before it ignores** — the error queue stops being spent
-> on a transition that can never apply, and the case still leaves a record.
-> [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
-> carries the real fix, which is persisting the sends with the instance
-> (`UseBusOutbox`) rather than beside it.
+> buffered in the same flush.
 >
-> **The other cost is that a genuinely misrouted event is not a fault.** That
-> is a configuration problem traded against a routine one, and it is only
-> acceptable because every event this machine declares is handled in every
+> **This half is where the "permanent silent loss" above comes from**, and it
+> is the reason the trade is not close. A log line in front of an ignore does
+> not soften it either: [§13.6](13-observability.md) pages on the **error
+> queue**, which is precisely what ignoring keeps the event out of, so a
+> warning moves the case from silent to searchable and no further.
+> [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
+> removes it by persisting the sends with the instance (`UseBusOutbox`)
+> rather than beside it, at which point a catch-all becomes arguable again on
+> evidence.
+>
+> **The enumeration is therefore the mechanism rather than a courtesy.** With
+> the default kept, anything not written out reaches the error queue — which
+> only works because every event this machine declares is handled in every
 > state it can reach one in. `Compensating` is where that is load-bearing,
 > and it writes out
-> all five rather than leaning on this callback: `Ignore(OrderCancelled)`,
+> all five: `Ignore(OrderCancelled)`,
 > `When(PaymentAuthorised)`, `Ignore(StockReserved)`,
 > `Ignore(StockReservationFailed)` and `Ignore(PaymentDeclined)`. **The last
 > was missing while this passage claimed the list was complete**, which is the
