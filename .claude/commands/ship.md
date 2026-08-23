@@ -906,7 +906,8 @@ same argument as never calling a branch clean because asking failed.
      and never exceeds it. The helper writes it immediately before the review's
      own `docker run`, which is what makes the accounting tight: **every path
      that can refuse before that line spends nothing** — a dirty tree, no
-     daemon, a missing credential, and all three usage-limit skips.
+     daemon, a missing credential, a bad `suggestions.md` shape, and all three
+     usage-limit skips.
 
      **Tight rather than exact, and the difference is one deliberate case.** The
      ledger posts its comment and then reads to settle the election, so a

@@ -99,6 +99,18 @@ def declared(name):
     return found[0]
 
 
+def declared_value(name):
+    """Read one bare `name=value` assignment out of grok-review.sh."""
+    text = REVIEW.read_text(encoding="utf-8")
+    found = re.findall(rf"^{re.escape(name)}=(\S+)$", text, re.MULTILINE)
+    if len(found) != 1:
+        raise AssertionError(
+            f"expected exactly one declaration of {name} in {REVIEW.name}, "
+            f"found {len(found)}"
+        )
+    return found[0]
+
+
 def run_bash(script, subject="", **env_extra):
     """Run a bash fragment with the subject on stdin and everything else in env.
 
@@ -131,27 +143,22 @@ def grep_matches(pattern, subject, ignore_case=True):
 def stop_verdict(payload):
     """Re-run grok-review.sh's did-it-run decision over one JSON payload.
 
-    The three lines below are the script's, with both patterns read out of it —
-    so a change to either the pattern or the shape of the check is a change this
-    test sees.
+    The jq program and the accepted value are both read out of the script, so a
+    change to either is a change these cases see. It used to be two regexes; a
+    reviewer showed that a regex cannot tell a ROOT field from a nested one, and
+    `{"modelUsage":{"stopReason":"end_turn"}}` was accepted as a finished turn.
     """
-    script = textwrap.dedent(
-        """
-        payload=$(cat)
-        stop_reasons=$(grep -oE "$ANY_RE" <<<"$payload" || true)
-        stop_count=$(grep -c . <<<"$stop_reasons" || true)
-        if [ "$stop_count" -ne 1 ] || ! grep -qE "$OK_RE" <<<"$stop_reasons"; then
-          echo "did-not-run $stop_count"
-        else
-          echo "ran $stop_count"
-        fi
-        """
-    )
     out = run_bash(
-        script,
+        textwrap.dedent(
+            """
+            payload=$(cat)
+            stop=$(jq -r 'if type == "object" then (.stopReason // "<absent>") else "<not-an-object>" end' \
+                     <<<"$payload" 2>/dev/null) || { echo "did-not-run not-json"; exit 0; }
+            if [ "$stop" != "$OK" ]; then echo "did-not-run $stop"; else echo "ran $stop"; fi
+            """
+        ),
         payload,
-        ANY_RE=declared("stop_any_re"),
-        OK_RE=declared("stop_ok_re"),
+        OK=declared_value("stop_ok"),
     )
     if out.returncode != 0:
         raise AssertionError(f"the verdict fragment failed: {out.stderr}")
@@ -319,20 +326,21 @@ class DidItRunAllowList(unittest.TestCase):
         return body
 
     def test_end_turn_is_the_only_accepted_terminal_state(self):
-        self.assertEqual("ran 1", stop_verdict(self.payload("end_turn")))
+        self.assertEqual("ran end_turn", stop_verdict(self.payload("end_turn")))
 
     def test_a_budget_stop_is_not_a_clean_review(self):
         # The two the deny-list missed, and the ordinary way to reach them is a
         # long branch — which is when review matters most.
-        self.assertEqual("did-not-run 1", stop_verdict(self.payload("max_tokens")))
+        self.assertEqual("did-not-run max_tokens", stop_verdict(self.payload("max_tokens")))
         self.assertEqual(
-            "did-not-run 1", stop_verdict(self.payload("max_turn_requests"))
+            "did-not-run max_turn_requests",
+            stop_verdict(self.payload("max_turn_requests")),
         )
 
     def test_the_three_the_deny_list_already_caught_still_fail(self):
-        self.assertEqual("did-not-run 1", stop_verdict(self.payload("cancelled")))
-        self.assertEqual("did-not-run 1", stop_verdict(self.payload("refusal")))
-        self.assertEqual("did-not-run 1", stop_verdict(self.payload("error_max")))
+        self.assertEqual("did-not-run cancelled", stop_verdict(self.payload("cancelled")))
+        self.assertEqual("did-not-run refusal", stop_verdict(self.payload("refusal")))
+        self.assertEqual("did-not-run error_max", stop_verdict(self.payload("error_max")))
 
     def test_a_value_no_version_has_emitted_yet_fails_closed(self):
         # The whole reason for inverting the check: an allow-list does not have
@@ -340,11 +348,11 @@ class DidItRunAllowList(unittest.TestCase):
         for unknown in ("aborted", "timeout", "length", "tool_budget", "pause_turn"):
             with self.subTest(unknown=unknown):
                 self.assertEqual(
-                    "did-not-run 1", stop_verdict(self.payload(unknown))
+                    f"did-not-run {unknown}", stop_verdict(self.payload(unknown))
                 )
 
     def test_an_absent_stop_reason_is_did_not_run(self):
-        self.assertEqual("did-not-run 0", stop_verdict(self.payload(None)))
+        self.assertEqual("did-not-run <absent>", stop_verdict(self.payload(None)))
 
     def test_a_quoted_mention_in_the_reviews_own_text_cannot_rescue_a_bad_stop(self):
         # The reviewer reads this repository, so its output can quote this very
@@ -355,14 +363,33 @@ class DidItRunAllowList(unittest.TestCase):
             '{"text": "the script greps \\"stopReason\\": \\"end_turn\\" here",'
             ' "stopReason": "max_tokens"}'
         )
-        self.assertEqual("did-not-run 1", stop_verdict(quoting))
+        self.assertEqual("did-not-run max_tokens", stop_verdict(quoting))
 
-    def test_a_second_occurrence_fails_rather_than_picking_one(self):
-        # A single object with a single such field is what `--output-format
-        # json` emits, verified against grok 1.0.5. A second one means the shape
-        # changed under the pin, which is a run to stop on rather than guess at.
-        two = '{"stopReason": "end_turn", "modelUsage": {"stopReason": "end_turn"}}'
-        self.assertEqual("did-not-run 2", stop_verdict(two))
+    def test_a_nested_stop_reason_is_not_the_root_one(self):
+        # **The hole the allow-list still had, and the reason this is parsed.**
+        # A regex cannot tell a ROOT field from a nested one, so
+        # `{"modelUsage":{"stopReason":"end_turn"}}` produced exactly one match,
+        # matched `end_turn`, and was accepted — a document whose turn never
+        # ended, passing the check that exists to notice. Raised by a reviewer
+        # against the allow-list that had just replaced a deny-list.
+        nested = '{"text": "x", "modelUsage": {"stopReason": "end_turn"}}'
+        self.assertEqual("did-not-run <absent>", stop_verdict(nested))
+
+    def test_a_root_stop_reason_wins_over_a_nested_one(self):
+        # The other direction: a root `max_tokens` beside a nested `end_turn` is
+        # a turn that did not finish, whatever the nested field says.
+        both = '{"stopReason": "max_tokens", "modelUsage": {"stopReason": "end_turn"}}'
+        self.assertEqual("did-not-run max_tokens", stop_verdict(both))
+
+    def test_output_that_is_not_json_is_did_not_run(self):
+        # A truncated write is not a verdict. grep could not establish this at
+        # all — it matched substrings of a document it never parsed.
+        self.assertEqual("did-not-run not-json", stop_verdict('{"stopReason": "end_'))
+        self.assertEqual("did-not-run not-json", stop_verdict("grok: connection reset"))
+
+    def test_a_json_document_that_is_not_an_object_is_did_not_run(self):
+        self.assertEqual("did-not-run <not-an-object>", stop_verdict('["end_turn"]'))
+        self.assertEqual("did-not-run <not-an-object>", stop_verdict('"end_turn"'))
 
 
 class PatternsAreActuallyApplied(unittest.TestCase):
@@ -382,16 +409,27 @@ class PatternsAreActuallyApplied(unittest.TestCase):
         return len(re.findall(rf'"\${re.escape(name)}"', body))
 
     def test_every_declared_pattern_has_at_least_one_call_site(self):
-        for name in ("limit_re", "stop_any_re", "stop_ok_re"):
+        # One pattern left. `stop_any_re` and `stop_ok_re` were retired when the
+        # verdict stopped being matched and started being parsed — a regex
+        # cannot tell a root field from a nested one, and this list is where a
+        # retired declaration would otherwise sit forever, asserted about and
+        # used by nothing.
+        for name in ("limit_re",):
             with self.subTest(name=name):
                 self.assertGreaterEqual(self.uses(name), 1, f"{name} is declared and never used")
 
+    def test_the_verdict_is_parsed_rather_than_matched(self):
+        # The structural half of the nesting fix: `.stopReason` names a FIELD,
+        # where a regex only ever named a substring. If this reverts to a grep
+        # the nesting cases would still pass on a hand-written fragment, so the
+        # call site is asserted here rather than only the behaviour.
+        code = "\n".join(self.code_lines())
+        self.assertIn("jq -r 'if type ==", code)
+        self.assertIn(".stopReason", code)
+        self.assertNotIn('grep -oE "$stop', code)
+
     def code_lines(self):
-        return [
-            line
-            for line in self.text.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
+        return code_lines(self.text)
 
     def test_the_limit_pattern_guards_every_skip_path(self):
         # Three usage-limit skips exist — the API key's own probe, the preflight
@@ -411,14 +449,15 @@ class PatternsAreActuallyApplied(unittest.TestCase):
     def test_no_second_literal_copy_of_either_pattern_survives(self):
         # The drift that ends this way every time: a pattern declared once, then
         # spelled out again at a call site, and only one of the two ever updated.
-        # Scoped to the two fields the declared patterns are ABOUT. A grep for
-        # `cancellationCategory` beside the check is a diagnostic that prints an
-        # extra detail and decides nothing, so it is not a second copy of a
-        # judgement — where a second `"stopReason"` regex would be exactly that.
+        # Scoped to the limit pattern, which is the only regex left carrying a
+        # judgement. The verdict's `.stopReason` is a jq field reference rather
+        # than a pattern, so it is excluded by construction — and a second
+        # `rate.?limit` spelled at a call site would be exactly the drift this
+        # case exists for.
         stray = [
             line
             for line in self.code_lines()
-            if ('"stopReason"' in line or "rate.?limit" in line)
+            if "rate.?limit" in line
             and not re.match(r"^\w+_re='", line)
             and "echo " not in line
         ]

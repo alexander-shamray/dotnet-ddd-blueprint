@@ -180,13 +180,28 @@ attacker is required**: a long branch is the ordinary way there, and a long
 branch is when review matters most. One that wants it can buy it, and under the
 two-clean-passes rule two such rounds end the loop.
 
-It is an allow-list now: exactly one `stopReason`, and it must be `end_turn`.
-Exactly one rather than the last one, because `--output-format json` emits a
-single object with a single such field — verified against grok 1.0.5 — so a
-second occurrence means the shape moved under the pin and is a run to stop on
-rather than guess at. A mention inside the review's own prose cannot be
-miscounted: JSON escapes the quotes, so `\"stopReason\"` never presents the `"`
-the pattern needs, which is asserted rather than assumed.
+It became an allow-list of one accepted value, `end_turn`. **That was still not
+enough, and the reason is the more useful half of this entry.** A regex over a
+serialised structure answers a different question from the one being asked: it
+cannot tell a ROOT field from a nested one, so
+`{"modelUsage":{"stopReason":"end_turn"}}` produced exactly one match, matched
+the accepted value, and was read as a finished turn — a document whose turn
+never ended, passing the check that exists to notice. Nor can `grep` establish
+that the output is JSON at all, so a truncated write could be read as a verdict.
+
+So the verdict is **parsed**: `jq` is asked for the root `stopReason` and the
+answer is compared. That settles the shape, the nesting and the
+well-formedness in one step, and collapses three distinct failures — not an
+object, no root field, wrong value — into one question. `.stopReason` names a
+field, where a regex only ever named a substring, so a mention inside the
+review's own prose cannot be mistaken for the verdict either. The accepted value
+stays pinned the way the client version is: a grok bump must re-verify it.
+
+**Three corrections, and each one was the previous fix's blind spot** — a
+deny-list that passed what it had not enumerated, an allow-list that could not
+see nesting, and only then a parse. It cost `jq` as a stated precondition of the
+helper, probed up front beside the Docker check on the same argument: a missing
+tool should cost a second, not a round.
 
 ### The limit that read as a failure
 

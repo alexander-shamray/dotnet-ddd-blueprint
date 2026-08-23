@@ -941,6 +941,19 @@ own line rather than sending a reader to a file that does not hold it.
   review matters most. **Enumerate what is acceptable**: one accepted value,
   every other value and the field's absence refused, pinned like a version so a
   bump must re-verify the string.
+- **A regex over a serialised structure answers a different question from the
+  one being asked.** Inverting that deny-list to an allow-list of `end_turn` was
+  still not enough, because a pattern cannot tell a ROOT field from a nested
+  one: `{"modelUsage":{"stopReason":"end_turn"}}` matched exactly once, matched
+  the accepted value, and was read as a finished turn — a document whose turn
+  never ended, passing the check that exists to notice. A regex also cannot
+  establish that the input is well-formed at all, so a truncated write reads as
+  a verdict. **Parse it and name the field**: `.stopReason` on the root settles
+  shape, nesting and well-formedness together, where three greps could not
+  settle any of them. The general form — *if the thing you are matching has
+  structure, matching is the wrong tool* — is worth more than the instance,
+  and it took three rounds to reach: deny-list, allow-list, parse, each fix
+  blind in the way the next one found.
 - **Pinning a version is not pinning an artefact.** The review sandbox pinned
   the grok *client version* and refetched `https://x.ai/cli/install.sh` on every
   build, executing it unverified inside the one image built to be a security
@@ -1043,7 +1056,7 @@ counts as a review that finished, that the ledger publishes no answer on its
 trust check's error path, that every usage-limit skip happens before a slot is
 reserved, and that the sweeps' worktree shape check is the
 direct-child check it claims, and whether the label helper leaves a free
-parameter a finding could steer. **Five of those six shipped, so each is
+parameter a finding could steer. **Five of those six shipped wrong, so each is
 reproduced as a case that fails against the old behaviour** — the sixth is a
 grant closed by moving it into a helper, and the suite is what keeps it closed.
 Paired with

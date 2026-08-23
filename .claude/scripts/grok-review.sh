@@ -99,25 +99,30 @@ esac
 # it, and the suite carries a contextual larger-number negative for each side.
 limit_re='rate.?limit|quota|usage limit|usage balance|balance exhausted|too many requests|(no|any) credits|402 payment required|(status|code)[^0-9]{0,3}(402|429)([^0-9]|$)'
 
-# What a FINISHED turn looks like, and this one is an allow-list because it was
-# a deny-list of three and that is the same fail-open one level on. It used to
-# refuse `cancelled|refusal|error*` and pass everything else — but grok's
-# documented vocabulary for this field is `end_turn`, `max_tokens`,
-# `max_turn_requests`, `refusal` and `cancelled`, so a reviewer that exhausted
-# its output budget or its turn budget exited 0, wrote JSON, left no
-# suggestions.md, and had that absence read as a clean verdict. No attacker is
-# needed: a long branch is the ordinary way to reach it, and a long branch is
-# when review matters most. One that wants it can also buy it, by making the
-# diff large enough to blow the reviewer's budget — and under the two-clean-
-# passes rule two such rounds end the loop.
+# **What a FINISHED turn looks like is PARSED, not matched**, and the journey to
+# that is the whole argument. It began as a deny-list of three — refuse
+# `cancelled|refusal|error*`, pass everything else — which let a reviewer that
+# exhausted its output or turn budget exit 0, write JSON, leave no
+# suggestions.md, and have that absence read as a clean verdict. grok's
+# documented vocabulary for the field is `end_turn`, `max_tokens`,
+# `max_turn_requests`, `refusal` and `cancelled`, so two of the five passed. No
+# attacker is needed: a long branch is the ordinary way there, and a long branch
+# is when review matters most.
 #
-# So the only accepted terminal state is `end_turn`, and every other value —
-# including the field being absent — is "did not run". Pinned the way the
-# client version is pinned in .claude/sandbox/Dockerfile: a grok bump must
-# re-verify this string. Verified against grok 1.0.5's `--output-format json`
-# and its own headless-mode documentation.
-stop_any_re='"stopReason"[[:space:]]*:[[:space:]]*"[^"]*"'
-stop_ok_re='^"stopReason"[[:space:]]*:[[:space:]]*"end_turn"$'
+# Inverting it to an allow-list of `end_turn` fixed that and left a subtler hole,
+# which a reviewer found: a regex cannot tell a ROOT field from a nested one.
+# `{"modelUsage":{"stopReason":"end_turn"}}` produced exactly one match, matched
+# `end_turn`, and was accepted — a document whose turn never ended, passing the
+# check that exists to notice. Nor can grep establish that the output is JSON at
+# all, so a truncated write could be read as a verdict.
+#
+# **A regex over a serialised structure answers a different question from the
+# one being asked.** The check below asks jq for the root `stopReason` and
+# compares it, which settles the shape, the nesting and the well-formedness in
+# one step. The accepted value stays pinned the way the client version is in
+# .claude/sandbox/Dockerfile: a grok bump must re-verify it. Verified against
+# grok 1.0.5's `--output-format json` and its own headless-mode documentation.
+stop_ok=end_turn
 
 # Docker on Windows wants a Windows path in --volume; elsewhere the path is
 # already right. cygpath exists only under MSYS/Git Bash, which is the tell.
@@ -171,6 +176,12 @@ status=$(git status --porcelain)
 # instead of the exit 7 this script documents. Probe what is actually needed.
 docker info >/dev/null 2>&1 ||
   { echo "docker is required and its daemon must be running: the reviewer runs in a container (.claude/sandbox/Dockerfile)" >&2; exit 7; }
+# jq, because the verdict below is a JSON document and the question asked of it
+# — what is the ROOT stopReason — is not one a regex can answer. Probed here
+# rather than discovered at the end of a review, on the same argument as the
+# daemon check above: a missing tool should cost a second, not a round.
+command -v jq >/dev/null 2>&1 ||
+  { echo "jq is required: the reviewer's verdict is JSON and its root stopReason must be parsed rather than matched" >&2; exit 14; }
 
 sandbox=$(cd "$(dirname "${BASH_SOURCE[0]}")/../sandbox" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/grok-review-XXXXXX")
@@ -429,21 +440,20 @@ set -e
   { echo "grok exited $grok_status; the review did not run" >&2; exit 4; }
 [ -s "$result" ] ||
   { echo "grok produced no output; the review did not run" >&2; exit 5; }
-# The allow-list declared at the head of this file, applied. EXACTLY one
-# stopReason, and it must be end_turn.
+# The allow-list declared at the head of this file, applied to the ROOT of the
+# document. Three failures collapse into one question, which is the point of
+# parsing rather than matching: output that is not JSON, output whose root
+# carries no stopReason, and output whose root carries the wrong one.
 #
-# Exactly one rather than "the last one": `--output-format json` emits a single
-# object carrying a single such field, so a second occurrence means the output
-# shape changed under the pin and the pin has to be re-read — which is a build
-# this loop should stop on, not one it should guess at. A mention inside the
-# review's own prose cannot be miscounted, because JSON escapes the quotes and
-# `\"stopReason\"` never presents the `"` this pattern needs.
-stop_reasons=$(grep -oE "$stop_any_re" "$result" || true)
-stop_count=$(grep -c . <<<"$stop_reasons" || true)
-if [ "$stop_count" -ne 1 ] || ! grep -qE "$stop_ok_re" <<<"$stop_reasons"; then
-  [ -z "$stop_reasons" ] || printf '%s\n' "$stop_reasons" >&2
-  grep -oE '"cancellationCategory"[[:space:]]*:[[:space:]]*"[^"]*"' "$result" >&2 || true
-  echo "grok did not finish its turn — expected exactly one stopReason of \"end_turn\", saw $stop_count; the review did not run and suggestions.md is left as it was" >&2
+# A mention inside the review's own prose cannot be mistaken for the verdict
+# either — `.stopReason` names a field, where a regex only ever named a
+# substring.
+stop=$(jq -r 'if type == "object" then (.stopReason // "<absent>") else "<not-an-object>" end' \
+         "$result" 2>/dev/null) ||
+  { echo "grok's output is not valid JSON; the review did not run and suggestions.md is left as it was" >&2; exit 6; }
+if [ "$stop" != "$stop_ok" ]; then
+  jq -r '.cancellationCategory // empty' "$result" 2>/dev/null >&2 || true
+  echo "grok did not finish its turn — the root stopReason is \"$stop\", not \"$stop_ok\"; the review did not run and suggestions.md is left as it was" >&2
   exit 6
 fi
 cat "$result"
