@@ -316,14 +316,31 @@ free parameter.
 
 ### The suite that should have existed first
 
-**Five judgements the whole loop rests on had no test.** `test_grok_helpers.py`
-is 47 cases, and each of the five defects is reproduced as one that fails
-against the old behaviour: a gate only ever observed green is one nobody has
-established is looking at anything.
+**Six judgements the whole loop rests on had no test, five of which had already
+shipped wrong.** `test_grok_helpers.py` grew to 57 cases across the review
+rounds, and each of those five defects is reproduced as one that fails against
+the old behaviour: a gate only ever observed green is one nobody has established
+is looking at anything. The sixth — that the label helper leaves no free
+parameter a finding could steer — never shipped wrong; it is a grant closed by
+moving it into a helper, and the suite is what keeps it closed.
+
+**A figure and a list, in a file that already argues against restating either.**
+Both went stale during this branch's own review loop and were corrected from
+outside: the count when cases were added, the list when the label helper joined
+it. They are here because an entry describing a suite is worth nothing if it
+describes a different one — and the honest note is that neither was caught by
+the person adding the cases.
 
 **They are paired with positive controls, and those are not decoration.** A
 negative case that passes because the pattern matches *nothing* is this
-repository's most-repeated failure wearing a test's clothes — so `end_turn` is
+repository's most-repeated failure wearing a test's clothes — and this branch
+supplied the worked example rather than merely citing one. The usage-limit
+pattern used `\b402\b`, its negatives tested `47402` and `4021`, and neither
+tested the number *alone* — so `"input_tokens": 402` matched, in defiance of the
+comment sitting beside it, and every case stayed green. A false positive there
+skips every review silently. The pattern now requires a status *context* rather
+than a word boundary, and the anchor has a positive control of its own. So
+`end_turn` is
 asserted to be accepted, an empty ledger is asserted to count zero, a trusted
 reservation is asserted to count as spent, and the `\b` word boundary the limit
 pattern depends on has a positive control of its own. Without it, `47402` not

@@ -215,24 +215,47 @@ class UsageLimitPattern(unittest.TestCase):
         self.assertNotLimit("Error: could not read ~/.grok/auth.json")
 
     def test_a_number_inside_a_larger_number_is_not_a_status_code(self):
-        # Why `\b402\b` and not `402`. This pattern is matched against the whole
-        # text of a probe run, and a bare number would also match a token count
-        # or a request id — reporting a working reviewer as out of limits.
         self.assertNotLimit('"total_tokens": 47402')
         self.assertNotLimit('"input_tokens": 4021')
         self.assertNotLimit('"requestId": "ce40cbac-402f-4429-bef9-5805903fb4c8"')
         self.assertNotLimit("cost_usd_ticks: 1429000")
 
+    def test_a_bare_status_number_in_an_ordinary_field_is_not_a_limit(self):
+        # **The case the first version of this class missed.** The pattern was
+        # `\b402\b`, and every negative here tested digits AROUND the number —
+        # `47402`, `4021` — so none of them tested the number on its own. A
+        # quote and a space are word boundaries too, so `"input_tokens": 402`
+        # matched, and the comment beside the pattern said in as many words that
+        # a token count must not read as a status code.
+        #
+        # A false positive is the expensive direction: it reports a working
+        # reviewer as out of limits and skips every round silently. Raised by a
+        # reviewer, which is the only reason it is here rather than shipped.
+        self.assertNotLimit('"input_tokens": 402')
+        self.assertNotLimit('"output_tokens": 429')
+        self.assertNotLimit('"num_turns": 402')
+        self.assertNotLimit("reasoning_tokens 429")
+
+    def test_a_status_code_still_matches_when_it_arrives_as_one(self):
+        # The other half: excluding the bare number must not exclude the code in
+        # the shape the provider actually sends it.
+        self.assertLimit("API error (status 402 Payment Required)")
+        self.assertLimit('"http_status": 402')
+        self.assertLimit("status: 429")
+        self.assertLimit("HTTP/1.1 429 Too Many Requests")
+
     def test_an_ordinary_successful_probe_is_not_a_limit(self):
         self.assertNotLimit("ok")
         self.assertNotLimit('{"text": "ok", "stopReason": "end_turn"}')
 
-    def test_the_word_boundaries_are_supported_by_this_grep(self):
-        # The boundaries are a GNU extension. If the grep on this machine did
-        # not honour them the negatives above would pass for the wrong reason —
-        # matching nothing at all — so pin the positive control too.
-        self.assertTrue(grep_matches(r"\b402\b", "status 402 Payment"))
-        self.assertFalse(grep_matches(r"\b402\b", "47402"))
+    def test_the_status_anchor_is_what_separates_the_two(self):
+        # A positive control for the mechanism itself. Without it the negatives
+        # above could be passing because the pattern matches nothing at all,
+        # which is this repository's most-repeated failure wearing a test's
+        # clothes — and is exactly how `\b402\b` looked green while wrong.
+        anchor = r"(status|code)[^0-9]{0,3}(402|429)"
+        self.assertTrue(grep_matches(anchor, "(status 402 Payment Required)"))
+        self.assertFalse(grep_matches(anchor, '"input_tokens": 402'))
 
 
 class DidItRunAllowList(unittest.TestCase):

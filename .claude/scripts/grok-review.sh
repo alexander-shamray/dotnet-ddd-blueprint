@@ -69,14 +69,27 @@ esac
 # not `(no|any) credits`, so PR #117 round 6 took the failure path and burned a
 # ledger slot on a review that never started.
 #
-# `\b402\b` rather than a bare `402`, and the same for 429. This pattern is
-# matched against the WHOLE text of a probe run, so a bare number would also
-# match a token count or a request id — and a false positive here is the
-# expensive direction: it reports a working reviewer as out of limits and skips
-# every round silently. The word boundaries are GNU extensions, which both this
-# host's MSYS grep and the Linux runner's provide, and the suite pins them with
-# `47402` and `4021` as negative cases.
-limit_re='rate.?limit|\b402\b|\b429\b|quota|usage limit|usage balance|balance exhausted|too many requests|(no|any) credits'
+# **A status code needs a status CONTEXT, not a word boundary.** This pattern is
+# matched against the whole text of a probe run, so a bare `402` would also match
+# a token count or a request id — and a false positive here is the expensive
+# direction: it reports a working reviewer as out of limits and skips every round
+# silently, which is a review loop that has stopped reviewing.
+#
+# `\b402\b` was the first attempt at that and is not enough, which a reviewer
+# caught and the suite did not. It excludes `47402` and `4021` — both of which
+# were negative cases here — and matches `"input_tokens": 402` exactly, because
+# a quote and a space are word boundaries too. The negatives tested digits
+# AROUND the number and never the number on its own, so they agreed with the
+# comment beside them while the pattern did not.
+#
+# So the number has to arrive as a status: after the word `status` or `code`
+# within a few non-digits (which covers `(status 402 …)`, `status: 429` and
+# `"http_status": 402`), or in the provider's own phrase. `429` also reaches the
+# prose alternative `too many requests` on its own, and the observed 402 reaches
+# `usage balance` and `balance exhausted` as well — the code alternatives are
+# the belt to that pair's braces, since the prose is what a provider change
+# rewords and the code is what stays.
+limit_re='rate.?limit|quota|usage limit|usage balance|balance exhausted|too many requests|(no|any) credits|402 payment required|(status|code)[^0-9]{0,3}(402|429)'
 
 # What a FINISHED turn looks like, and this one is an allow-list because it was
 # a deny-list of three and that is the same fail-open one level on. It used to
