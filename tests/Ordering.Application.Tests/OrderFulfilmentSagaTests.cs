@@ -1,6 +1,7 @@
 using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
 using Common.Contracts.Payments.V1;
+using Common.Contracts.Shipping.V1;
 using MassTransit;
 using MassTransit.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -276,8 +277,25 @@ public class OrderFulfilmentSagaTests
         {
             var orderId = Guid.CreateVersion7();
 
+            // **Each publish waits for the transition it depends on, and #107
+            // is why.** Publish returns when the message reaches the transport,
+            // not when the saga has consumed it, and nothing ordered these
+            // three — so under a loaded parallel run PaymentDeclined could
+            // reach the endpoint before OrderPlaced had created the instance
+            // (discarded in silence) or before StockReserved had moved it to
+            // AwaitingPayment (a state with no decline branch, so a fault).
+            //
+            // Both landed on the ReleaseStock assertion below, which then
+            // burned the full inactivity timeout and failed wearing "the saga
+            // did not send" — the misattribution this file's header warns
+            // about. The waits are assertions about the machine in their own
+            // right, so they cost nothing but the two lines.
             await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
             await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
             await Publish(harness, SagaContracts.PaymentDeclined(orderId, "insufficient_funds"));
 
             (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
@@ -516,14 +534,171 @@ public class OrderFulfilmentSagaTests
                 m.PaymentReference == "psp-ref-1"))
                     .ShouldBeTrue();
 
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            // **Sending the command is not confirming the order, and this
+            // assertion is #126.** The machine waits here for the aggregate's
+            // own acknowledgement; it used to call this state Confirmed, which
+            // made every downstream branch reason about a handoff that had not
+            // happened yet.
+            (await saga.Exists(orderId, x => x.AwaitingConfirmation)).ShouldNotBeNull();
+
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
+
             // Not finalised: the order is confirmed, not finished, and the
             // instance has to survive to time the despatch out. Confirmed is a
             // state precisely because a wait the machine cannot represent is a
             // wait it cannot time out.
+            (await saga.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_before_the_confirmation_lands_releases_the_stock()
+    {
+        // #126's payload. Reaching AwaitingConfirmation means ConfirmOrder is
+        // in flight and NOTHING downstream has been told: no OrderConfirmed has
+        // been published, so Shipping has no despatch to prepare. The old
+        // machine took the Confirmed branch here — withholding ReleaseStock on
+        // the argument that a reservation being picked must not be dropped,
+        // for a picking that was not happening — and stranded the reservation.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-126"));
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
 
-            (await saga.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+            (await saga.Exists(orderId, x => x.AwaitingConfirmation)).ShouldNotBeNull();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            // And no review row: Payments voids off OrderCancelled itself
+            // (§3.2), and what made the confirmed case a human's problem was a
+            // despatch that might already be moving. There is none here, so
+            // there is nothing for a person to do.
+            harness.Sent
+                .Select<FlagOrderForReview>(Spent())
+                .ShouldBeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task A_confirmation_arriving_after_compensation_began_escalates()
+    {
+        // The other side of #126's race, and the reason Compensating writes
+        // OrderConfirmed out rather than ignoring it. OrderConfirmed and
+        // OrderCancelled are both Ordering's own outbox rows and §9.4 orders
+        // nothing between them, so the cancellation can reach the saga first —
+        // and the confirmation landing afterwards is the ONLY evidence that
+        // the aggregate had already confirmed, Shipping had already been told,
+        // and the ReleaseStock now in flight is for stock somebody may be
+        // picking. Absorbing it would restore the silence #126 was about.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-127"));
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.CancelledAfterConfirmation))
+                    .ShouldBeTrue();
+
+            // The absence of the exception, not the absence of the effect:
+            // harness.Consumed records a delivery whether the pipeline returned
+            // or threw, so an unwritten branch would look identical from the
+            // assertion above if it happened to have been sent already.
+            ConsumeFaults<OrderConfirmed>(harness).ShouldAllBe(e => e == null);
+
+            // Still waiting on Inventory — the exits own the cancellation, so
+            // this branch adds the row and nothing else.
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_confirmation_that_never_arrives_escalates_rather_than_hanging()
+    {
+        // The bound on #126's new wait. ConfirmOrder is a local command with a
+        // retry budget, and the aggregate REFUSING it is not this case — that
+        // is a Rule failure CommandConsumer acks, and the cancellation behind
+        // it reaches the saga on its own event. What is left is the command
+        // never being consumed at all, with the card authorised and the stock
+        // held, which is a person's problem rather than the machine's.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-128"));
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.AwaitingConfirmation)).ShouldNotBeNull();
+
+            // Driven rather than waited out, exactly as the other timeout tests
+            // are: the schedule is ten minutes and a test that slept for it
+            // would be a test nobody runs.
+            await Publish(harness, new ConfirmationExpired(orderId));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.NotConfirmed))
+                    .ShouldBeTrue();
+
+            // No CancelOrder: §3.2 gives Ordering no refund command, so there
+            // is nothing to compensate WITH and pretending otherwise would
+            // cancel an order whose money has moved.
+            harness.Sent
+                .Select<CancelOrder>(Spent())
+                .Count(m => m.Context.Message.OrderId == orderId)
+                .ShouldBe(0);
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
         }
     }
 
@@ -535,9 +710,30 @@ public class OrderFulfilmentSagaTests
         {
             var orderId = Guid.CreateVersion7();
 
+            // Waited between rather than published in a burst, for #107's
+            // reason: this chain grew a fifth message with #126, and a
+            // reordering inside it would fail on the MarkOrderShipped
+            // assertion below wearing "the saga did not send".
             await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
             await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
             await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-2"));
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            // The acknowledgement is what puts the saga in Confirmed (#126).
+            // AwaitingConfirmation binds ShipmentDispatched too, so arriving
+            // early is handled rather than faulted — but this test drives the
+            // ordinary path, and the wait is what keeps it doing so.
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> confirmed =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await confirmed.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+
             await Publish(harness, SagaContracts.ShipmentDispatched(orderId, "TRACK-9"));
 
             (await Sent<MarkOrderShipped>(harness, m =>
@@ -567,8 +763,27 @@ public class OrderFulfilmentSagaTests
             var orderId = Guid.CreateVersion7();
 
             await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
             await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
             await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-3"));
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            // DespatchTimeout is armed on entering Confirmed, and #126 moved
+            // that entry onto the acknowledgement — so the despatch wait does
+            // not begin until the order actually is confirmed, which is the
+            // point of the split. The expiry below is discarded unless the
+            // token is set, so the wait for Confirmed is what makes this test
+            // drive a transition rather than a no-op.
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> armed =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await armed.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+
             await Publish(harness, new DespatchExpired(orderId));
 
             (await Sent<FlagOrderForReview>(harness, m =>
@@ -876,15 +1091,17 @@ public class OrderFulfilmentSagaTests
             await Publish(harness, SagaContracts.StockReserved(orderId));
             await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-4"));
 
-            // Sent, and that is all this establishes — the harness registers no
-            // command consumer, so nothing confirms the aggregate and no
-            // OrderConfirmed reaches Shipping. The saga enters Confirmed on the
-            // SEND, which is the premise #126 is filed against: a cancellation
-            // beating this command to the aggregate reaches the branch below
-            // for an order that was never confirmed. This test drives the
-            // ordinary path and does not cover that race, which is stated here
-            // rather than left to be assumed from a green run.
+            // Sent, and that is all a send establishes — the harness registers
+            // no command consumer, so nothing here confirms the aggregate.
+            // **That gap used to be this test's blind spot and is now its
+            // setup (#126).** The saga entered Confirmed on the SEND, so this
+            // test reached the branch below without any confirmation having
+            // happened, and it asserted the confirmed-order behaviour anyway;
+            // the machine now waits, so the acknowledgement has to be driven
+            // and the state below means what its name says.
             (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
 
             await Publish(
                 harness,
@@ -1057,6 +1274,109 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public async Task A_second_confirmation_in_Confirmed_is_absorbed_rather_than_faulted()
+    {
+        // **The rollout case, and the one this branch would have paged on.**
+        // The old machine entered Confirmed when it SENT ConfirmOrder, so
+        // every order it confirmed publishes an OrderConfirmed moments after
+        // the instance is already there. The binding this release declares is
+        // durable and queue-scoped, so the first new replica starts copying
+        // those into the saga queue for instances an old replica advanced —
+        // and §15.5's canary runs both releases for the length of its ladder.
+        // Left unwritten it faults, and §13.6 pages on the error queue.
+        //
+        // The same line covers §9.5's unrecorded redelivery, which needs no
+        // deploy to happen.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-dup"));
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
+            (await saga.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+
+            // The duplicate carries its own message id, and waiting on THAT id
+            // is what makes the assertion below mean anything. Read as of now
+            // against an unsynchronised publish, `ConsumeFaults` answers before
+            // the second delivery has been consumed at all — measured: the test
+            // passed against a machine with no branch here until this wait was
+            // added, which is the vacuous-pass shape §12.5 keeps warning about.
+            OrderConfirmed duplicate = SagaContracts.OrderConfirmed(orderId, Customer);
+            await Publish(harness, duplicate);
+
+            (await Consumed<OrderConfirmed>(harness, m => m.MessageId == duplicate.MessageId))
+                .ShouldBeTrue();
+
+            // The absence of the exception, not the absence of an effect:
+            // harness.Consumed records a delivery whether the pipeline
+            // returned or threw, so every assertion about "nothing happened"
+            // reads the same on a fault. This is the one that does not.
+            ConsumeFaults<OrderConfirmed>(harness).ShouldAllBe(e => e == null);
+
+            (await saga.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_despatch_that_beats_the_confirmation_still_marks_the_order_shipped()
+    {
+        // **Splitting the state made this reachable and it was not before.**
+        // §3.2 gives Shipping OrderConfirmed too, so the aggregate's one
+        // publish fans out to two independent consumers with no ordering
+        // between them (§9.4). The old machine was already in Confirmed before
+        // that publish existed; now the saga's own copy can be behind a retry
+        // or a backlog when the despatch lands.
+        //
+        // Handled rather than ignored, because ignoring loses MarkOrderShipped.
+        // Safe on the aggregate's terms too: Shipping learns of the order only
+        // FROM OrderConfirmed, so a despatch arriving at all proves the
+        // confirmation committed.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-early"));
+            (await Sent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.AwaitingConfirmation)).ShouldNotBeNull();
+
+            // No OrderConfirmed published at all — the despatch arrives first.
+            await Publish(harness, SagaContracts.ShipmentDispatched(orderId, "TRACK-EARLY"));
+
+            (await Sent<MarkOrderShipped>(harness, m =>
+                m.OrderId == orderId &&
+                m.TrackingNumber == "TRACK-EARLY"))
+                    .ShouldBeTrue();
+
+            ConsumeFaults<ShipmentDispatched>(harness).ShouldAllBe(e => e == null);
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
     public void The_machine_declares_the_states_the_chapter_draws_and_no_others()
     {
         // §9.6's own rule about its diagram, turned into a test: "A picture
@@ -1071,7 +1391,15 @@ public class OrderFulfilmentSagaTests
         saga.States
             .Select(s => s.Name)
             .ShouldBe(
-                ["Initial", "Final", "AwaitingStock", "AwaitingPayment", "Confirmed", "Compensating"],
+                [
+                    "Initial",
+                    "Final",
+                    "AwaitingStock",
+                    "AwaitingPayment",
+                    "AwaitingConfirmation",
+                    "Confirmed",
+                    "Compensating"
+                ],
                 ignoreOrder: true);
     }
 
@@ -1121,20 +1449,27 @@ public class OrderFulfilmentSagaTests
             nameof(saga.OrderCancelled),
             nameof(saga.StockReserved),
             nameof(saga.StockReservationFailed),
+
+            // #126's addition. AwaitingConfirmation is a third door into this
+            // state, and it is the only one that can be entered with an
+            // OrderConfirmed still outstanding — the customer cancelled while
+            // the aggregate's own confirmation was in flight.
+            nameof(saga.OrderConfirmed),
             $"{nameof(saga.ReleaseTimeout)}.Received"
         ];
 
         // Not reachable in Compensating, and each for a stated reason rather
         // than by omission: OrderPlaced only creates an instance,
         // ShipmentDispatched and the despatch timeout belong to Confirmed,
-        // and the stock and payment timeouts are unscheduled by the
-        // transitions that enter this state.
+        // and the stock, payment and confirmation timeouts are unscheduled by
+        // the transitions that enter this state.
         string[] notReachableHere =
         [
             nameof(saga.OrderPlaced),
             nameof(saga.ShipmentDispatched),
             $"{nameof(saga.StockTimeout)}.Received",
             $"{nameof(saga.PaymentTimeout)}.Received",
+            $"{nameof(saga.ConfirmationTimeout)}.Received",
             $"{nameof(saga.DespatchTimeout)}.Received"
         ];
 
@@ -1179,6 +1514,68 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public void The_two_states_a_confirmation_can_reach_write_it_out()
+    {
+        // **The residual above, closed for the two states #126 created and
+        // narrowed — and it is here because leaving it open cost this branch
+        // two defects.** The partition test one method up reads
+        // NextEvents(Compensating) and nothing else, so it demanded the
+        // OrderConfirmed branch there and said nothing about the two states
+        // that actually carry the new event. Both were missed on the first
+        // pass: a second OrderConfirmed in Confirmed faulted, and a
+        // ShipmentDispatched beating the acknowledgement into
+        // AwaitingConfirmation faulted.
+        //
+        // **A test whose subject is what the gate is looking at**, which is
+        // this repository's most-repeated lesson arriving in the one place it
+        // had not been applied. It is deliberately NOT a general sweep over
+        // every state: what makes a claim here checkable is naming the events
+        // a state can receive and why, and that argument has to be written
+        // per state rather than generated.
+        OrderFulfilmentSaga saga = new();
+
+        // AwaitingConfirmation is entered with ConfirmOrder in flight. The
+        // acknowledgement ends the wait; a cancellation compensates; the
+        // timeout escalates; and a despatch can beat the acknowledgement,
+        // because Shipping subscribes to the same OrderConfirmed this saga
+        // does and §9.4 orders nothing between two consumers.
+        Accepts(
+            saga,
+            saga.AwaitingConfirmation,
+            [
+                nameof(saga.OrderConfirmed),
+                nameof(saga.OrderCancelled),
+                nameof(saga.ShipmentDispatched),
+                $"{nameof(saga.ConfirmationTimeout)}.Received"
+            ]);
+
+        // Confirmed is entered BY OrderConfirmed, so a second one is a
+        // duplicate — from §9.5's unrecorded redelivery, or from a rolling
+        // deploy handing a new replica an instance an old one advanced. It is
+        // absorbed rather than faulted, and the saga argues that at the line.
+        Accepts(
+            saga,
+            saga.Confirmed,
+            [
+                nameof(saga.OrderConfirmed),
+                nameof(saga.OrderCancelled),
+                nameof(saga.ShipmentDispatched),
+                $"{nameof(saga.DespatchTimeout)}.Received"
+            ]);
+    }
+
+    private static void Accepts(OrderFulfilmentSaga saga, State state, string[] expected) =>
+        saga.NextEvents(state)
+            .Select(e => e.Name)
+            .Where(n => !n.EndsWith(".AnyReceived", StringComparison.Ordinal))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ShouldBe(
+                expected.OrderBy(n => n, StringComparer.Ordinal),
+                $"{state.Name} accepts exactly the events written out for it. One the machine " +
+                "has and this list does not is a branch nobody argued; one this list has and " +
+                "the machine does not is an arrival that faults to the error queue.");
+
+    [Fact]
     public void Every_wait_state_declares_a_schedule()
     {
         // The rule Appendix C names — "a timeout on every wait state" — as a
@@ -1192,15 +1589,19 @@ public class OrderFulfilmentSagaTests
         [
             saga.StockTimeout,
             saga.PaymentTimeout,
+            saga.ConfirmationTimeout,
             saga.DespatchTimeout,
             saga.ReleaseTimeout
         ];
 
         schedules.ShouldAllBe(s => s != null);
 
-        // Four states that wait, four schedules. The equality is the guard: a
-        // fifth wait state added without a schedule fails here, and so does a
-        // schedule left behind by a wait state that was removed.
+        // One schedule per state that waits. The equality is the guard: a new
+        // wait state added without a schedule fails here, and so does a
+        // schedule left behind by a wait state that was removed. #126 was the
+        // first change to test it in the first direction — AwaitingConfirmation
+        // and ConfirmationTimeout arrived together, and either one alone would
+        // have gone red.
         schedules.Length.ShouldBe(saga.States.Count(s => s.Name is not ("Initial" or "Final")));
     }
 

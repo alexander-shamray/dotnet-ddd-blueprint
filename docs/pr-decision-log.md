@@ -68,6 +68,126 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The state named for a command's intent (#126)
+
+**No `PR-NN` heading**, on the terms the entries below set: Appendix C's plan is
+complete, and this is a defect fix against a chapter §9.6 already owns rather
+than a row that was ever in it.
+
+**§9.6's `Confirmed` was entered in the activity that *sends* `ConfirmOrder`,
+so it meant "a command is in flight" while everything downstream read it as
+"the aggregate confirmed and Shipping has been told".** Those diverge for
+exactly as long as one local command takes, and a cancellation arriving inside
+that window took the `Confirmed` branch: it withheld `ReleaseStock` on the
+argument that a reservation being picked must not be dropped — for a picking
+nobody had requested — and raised `cancelled_after_confirmation` for an order
+that was never confirmed, sending an on-call to stop a despatch that did not
+exist.
+
+**The fix is a state that waits for the acknowledgement, and it cost no
+contract.** `Order.ConfirmPayment` already raises `OrderConfirmedDomainEvent`,
+§9.3's mapper already produces `OrderConfirmed`, and §6.3 already stages it in
+the transaction that sets the status. The evidence was being published the whole
+time and nothing was listening to it — which is why the issue's own estimate
+("costs a new event on the contract, a §9.2 version bump") was wrong in this
+codebase's favour. **Read what the service already publishes before pricing a
+new contract.**
+
+- **A state entered on an intention is the general shape.** `Confirmed` was not
+  so much mis-named as named for what its transition was *trying* to achieve.
+  The test that catches it is whether anything outside the machine could
+  contradict the name — here the aggregate could, and did. That question is
+  cheap and applies to any state, flag or status field.
+- **The saga now subscribes to a third of its own events, and the reason is
+  different from the other two.** `OrderPlaced` and `OrderCancelled` are
+  *origins* the workflow has to learn about; `OrderConfirmed` is the
+  **acknowledgement of a command the saga itself sent**. §3.2's Consumes cell
+  gained an entry whose justification is a round trip with both ends in one
+  service — the platform's only one.
+- **`Compensating` had to write `OrderConfirmed` out, and `Ignore` was the
+  wrong answer.** `AwaitingConfirmation` cancels on the premise that the
+  aggregate had not confirmed, which is unknowable at that moment: both events
+  are Ordering's own outbox rows and §9.4 orders nothing between them. A
+  confirmation arriving afterwards is the **only** evidence the premise was
+  false — Shipping was told, a despatch may be moving, and a `ReleaseStock`
+  for it has already gone out. Absorbing it would have restored the silence the
+  whole fix was about, so it raises `cancelled_after_confirmation` there.
+- **One code, two states, and that broke a navigation rule the runbook rested
+  on.** `order-review.md` selected its procedure on the saga state, which
+  PR-21's own entry had argued for; `cancelled_after_confirmation` is now
+  raised from two states with different saga lifetimes and the same procedure.
+  **The code carries the procedure and nothing persists the branch**, which is
+  the right way round — an operator needs to know what to do, and the row says
+  it. What no longer follows from the code is whether an instance is still
+  alive, and the runbook now asks that separately.
+- **Splitting a state moves what can arrive at BOTH halves, and the first
+  pass got both wrong.** An adversarial review found two events reaching a
+  state with no branch, which under this machine's kept default faults to the
+  error queue §13.6 pages on. A second `OrderConfirmed` in `Confirmed` — from
+  §9.5's unrecorded redelivery, and from a rollout, since the old machine
+  entered `Confirmed` on the *send* and §15.5's canary runs both releases for
+  the length of its ladder. And a `ShipmentDispatched` in
+  `AwaitingConfirmation`, because §3.2 gives Shipping the same
+  `OrderConfirmed` this saga now consumes and §9.4 orders nothing between two
+  consumers — an ordering dependency the split *created*, since the old
+  machine was in `Confirmed` before that publish existed. Both reproduce as
+  `UnhandledEventException` and both are now written out.
+- **The gate that exists to catch that covered one state, and the newest
+  surface was not it.** `Compensating_writes_out_every_event_it_can_receive`
+  partitions `NextEvents(Compensating)` and nothing else — so it demanded the
+  `OrderConfirmed` branch in `Compensating` and said nothing about the two
+  states carrying the new event. **This repository's most-repeated failure,
+  arriving inside the test written to catch it.** `AwaitingConfirmation` and
+  `Confirmed` have partitions of their own now; `AwaitingStock` and
+  `AwaitingPayment` still do not, and that is the residual restated. It was
+  deliberately not generalised into a loop: what makes a partition checkable
+  is naming the events a state can receive *and why*.
+- **A test can pass against the defect it is written for, if it reads the
+  harness before the delivery lands.** The first version of the duplicate-
+  confirmation test published and then snapshotted `ConsumeFaults` through an
+  already-cancelled token — so it went green against a machine that faults,
+  and only the counterfactual run exposed it. The fix is this file's existing
+  pattern: give the duplicate its own `MessageId` and wait on *that* id.
+  **"Observed red" is worth nothing unless the red run is the one you
+  predicted** — here the first counterfactual was green and that was the
+  finding.
+- **A hard-coded count in a test failed where the list beside it was
+  correct.** `DatabaseSmokeTests` asserted `applied.Length.ShouldBe(8)` next to
+  eight named migrations, so a ninth migration went red on the number while the
+  names were still complete. It asserts `expected.Length` now. **A literal
+  beside a list it describes is a second place to edit that says nothing the
+  first does not** — the same finding this repository has recorded for prose
+  counts, arriving in a test.
+- **The `ConfirmOrder` fault this race was said to cause does not exist.** The
+  saga's own comment, and `order-review.md`, both told a reader to expect a
+  `ConfirmOrder` in the error queue §13.6 pages on. `ConfirmOrderHandler`
+  catches the `DomainException` and returns `OrderErrors.NotAwaitingPayment`,
+  which is `Error.Rule`; `CommandConsumer` rethrows only
+  `ErrorType.Unavailable`, so it is acked, counted and logged.
+  `Confirming_an_order_that_has_moved_on_is_a_rejection` has pinned it since
+  PR-21. **A consequence asserted in a defect report is not thereby a
+  consequence** — this one was repeated across two files for two rounds
+  because it sounded like the sort of thing that would happen.
+- **The timeout's floor was argued from the wrong term.** The comment priced
+  it at §9.8's retry budget on `ordering-commands` — "five attempts backing
+  off to a minute apiece" — which is about seventy seconds in practice, not
+  five minutes, because that ladder never reaches its cap. And it credited the
+  outbox dispatcher's 500ms *poll*, which is the one quantity that cannot
+  matter. What actually decides it is the dispatcher's *failure* ladder:
+  `POWER(2, MIN(Attempts, 8)) * 5` seconds, so a publish succeeding on its
+  eighth attempt lands after ten minutes have already passed and a
+  `not_confirmed` review has been filed for an order that then confirms. Ten
+  minutes is kept knowing that — seven consecutive publish failures is a stuck
+  outbox with its own alert — but the argument now names the governing term.
+- **ADR-021's volume argument moves with the state count**, and nothing in a
+  state-machine review would surface that. Its scheduler cannot cancel, so
+  every wait an order enters leaves one undeliverable delayed message in
+  Mnesia — three before this change, four after. That total is the ADR's
+  stated supersession trigger, so it is now written as a rule (one per wait
+  entered) with the number as an illustration.
+
+---
+
 ## The review loop's fail-opens, and the sweep grants beside them
 
 **No `PR-NN` heading, on the closure gate's terms one entry down.** Appendix C's
@@ -977,8 +1097,10 @@ way. **A guard against the wrong dependency shape is not evidence about which
 shape you have.**
 
 **§13.6's saga alert excludes a state that does not exist.** The condition
-excludes a saga *"awaiting despatch"*, and `OrderFulfilmentSaga` has four
-states — `AwaitingStock`, `AwaitingPayment`, `Confirmed` and `Compensating`.
+excludes a saga *"awaiting despatch"*, and `OrderFulfilmentSaga` had four
+states at the time — `AwaitingStock`, `AwaitingPayment`, `Confirmed` and
+`Compensating`; #126 has since added `AwaitingConfirmation`, and the finding is
+unchanged because none of them is called `AwaitingDespatch`.
 The three-day despatch timeout is armed on the transition **into `Confirmed`**,
 because the order is confirmed and now waiting on Shipping. A label selector
 spelled `AwaitingDespatch` would match no series, exclude nothing, and page on
@@ -1308,12 +1430,13 @@ enforcement is opened.
 ## PR-21 — the saga, and the four things §9.6 did not say
 
 PR-21 landed §9.6's `OrderFulfilmentSaga` with its four compensation paths and
-four timeouts, the four command handlers those timeouts send to, §9.4's
+four timeouts **as the machine then stood** — #126 has since made it five of
+the latter — the four command handlers those timeouts send to, §9.4's
 `ordering-commands` endpoint and §9.3's allow-list — empty since PR-18, and the
 reason the saga had nothing to start on. Five of its decisions bind what comes
 after.
 
-- **No chapter had ever named a message scheduler, and §9.6's four `Schedule`
+- **No chapter had ever named a message scheduler, and §9.6's `Schedule`
   declarations do not work without one.** [ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
   settles it on MassTransit's delayed message scheduler, which on RabbitMQ is
   the delayed message exchange **plugin** — so §14.1's broker is now the one
@@ -1477,8 +1600,9 @@ next reader wondering whether it was ever there.
   - **Closed, and §9.6 took the decision this entry said it owned.** The
     machine declares `Event<OrderCancelled>` and has a branch in every state it
     can reach one in: `AwaitingStock` and `AwaitingPayment` compensate on the
-    decline branch's own terms, recording **the event's own reason** rather
-    than a literal — both lines said `customer_request` until a later round
+    decline branch's own terms — and since #126 `AwaitingConfirmation` does
+    too, deliberately identically — recording **the event's own reason**
+    rather than a literal — both lines said `customer_request` until a round
     established that §11.4 accepts all five `CancelReasons` codes, so the
     caller's reason was overwritten and `Compensating`'s exit sent
     `CancelOrder` under a reason nobody had chosen; `Compensating`
@@ -1492,7 +1616,21 @@ next reader wondering whether it was ever there.
     anyone reads it — so `cancelled_after_confirmation` and
     `payment_authorised_during_compensation` are what let the runbook select
     without a state
-    that is gone. That
+    that is gone.
+
+    **#126 has since undone the premise of that last sentence while keeping
+    its conclusion**, and the pair is worth reading together.
+    `cancelled_after_confirmation` is now raised from `Compensating` as well as
+    from `Confirmed` — an `OrderConfirmed` arriving there is the only evidence
+    that the aggregate confirmed before the customer cancelled — so the code
+    no longer identifies the state. It still identifies the **procedure**, which
+    is what the runbook actually selects on, and that is why two codes remain
+    right. The lesson the entry recorded ("a code named for one of its causes
+    reads as an explanation and survives review") applies to its own reasoning
+    here: the codes were justified by the states they came from, and the states
+    moved.
+
+    That
     also removes the false `not_despatched` this entry predicted — **by
     `Finalize()`, not by the `Unschedule` beside it**, which is the credit
     this entry gave until a review checked the mechanism. Deleting the

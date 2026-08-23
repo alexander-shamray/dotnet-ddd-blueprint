@@ -59,17 +59,33 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // product-level withdrawal watermark that projection consults on the
         // one branch a per-row guard cannot cover (§6.6) — and, since PR-21,
         // §9.6's saga instance store with the operations queue its escalations
-        // land in.
+        // land in, plus the token column #126's confirmation wait needs.
+        //
+        // **The length is asserted from the list rather than as a literal, and
+        // #126 is why.** It was written out as `ShouldBe(8)` beside eight named
+        // rows, so a ninth migration failed here on a number while the names
+        // beside it were still correct and complete — a second place to edit
+        // that says nothing the first does not. `expected.Length` keeps what
+        // the assertion was for (a shorter prefix, or one applied twice, still
+        // fails) and drops the copy.
+        string[] expected =
+        [
+            "_InitialCreate",
+            "_AddOutbox",
+            "_AddInbox",
+            "_AddOutboxRetentionIndex",
+            "_AddOrders",
+            "_AddProductPrices",
+            "_AddProductWithdrawals",
+            "_AddFulfilmentSaga",
+            "_AddSagaConfirmationTimeout"
+        ];
+
         string[] applied = await fixture.AppliedMigrationsAsync();
-        applied.Length.ShouldBe(8);
-        applied[0].ShouldEndWith("_InitialCreate");
-        applied[1].ShouldEndWith("_AddOutbox");
-        applied[2].ShouldEndWith("_AddInbox");
-        applied[3].ShouldEndWith("_AddOutboxRetentionIndex");
-        applied[4].ShouldEndWith("_AddOrders");
-        applied[5].ShouldEndWith("_AddProductPrices");
-        applied[6].ShouldEndWith("_AddProductWithdrawals");
-        applied[7].ShouldEndWith("_AddFulfilmentSaga");
+        applied.Length.ShouldBe(expected.Length);
+
+        for (int i = 0; i < expected.Length; i++)
+            applied[i].ShouldEndWith(expected[i]);
     }
 
     [Fact]
