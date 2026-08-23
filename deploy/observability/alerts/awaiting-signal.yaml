@@ -103,9 +103,10 @@ groups:
           summary: "An order has been awaiting manual review for over an hour"
           description: >-
             A saga escalated work it cannot finish itself (§9.6): either a
-            wait that ran out, or an authorisation that landed once the order
-            was already being cancelled — the second is not necessarily a
-            customer cancelling. Do NOT refund before reading the runbook:
+            wait that ran out, or an authorisation that landed while
+            compensation was already under way — which is not the same as a
+            cancellation existing, and not necessarily a customer
+            cancelling. Do NOT refund before reading the runbook:
             Payments voids off OrderCancelled on its own and nothing here
             knows whether it has, so a manual refund may be the second one.
             The saga has

@@ -2,8 +2,20 @@ name: Closure gate
 
 # A pull request states what it closes three times — the `| Closes |` row, the
 # keywords GitHub's linker reads out of the body, and the keywords in the
-# commit bodies — and the three are honoured by different machinery. All three
-# must agree. Both ways of disagreeing have already fired here: PR #112 closed
+# commit bodies — and the three are honoured by different machinery. What has
+# to agree is what the merge DOES and what the pull request SAYS it does: a
+# closure the commits carry has to appear in the description, and the table
+# has to match what GitHub linked, in both directions.
+#
+# This comment used to end "all three must agree", which is a fourth
+# comparison the gate must not make. A description closure that no commit
+# repeats is the ordinary case — the bare closing line under the table is what
+# fires, and a commit is under no obligation to say it again — so checking it
+# would make a commit keyword mandatory and fail a correct pull request. The
+# gate's `NoCommitRepeatsIt` test guards the absence; this header was the
+# second site of the overclaim and the docstring's fix did not reach it.
+#
+# Both ways of disagreeing have already fired here: PR #112 closed
 # nothing it claimed, PR #116 closed two issues its own body said stayed open.
 #
 # A workflow of its own rather than a job in ci.yml, and for once NOT because
