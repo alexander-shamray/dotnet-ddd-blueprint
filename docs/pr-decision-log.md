@@ -104,7 +104,7 @@ which is the finding recorded two paragraphs down.
 
 **The placement of that write is the accounting rule, not an implementation
 detail.** It sits immediately before the review's own `docker run`, so a slot is
-reserved **if and only if** the review's model call was launched. Everything
+reserved by no path that refuses earlier. Everything
 that can refuse earlier — a dirty tree, no daemon, a missing credential, a bad
 `suggestions.md` shape, and all three usage-limit skips — spends nothing. That
 is what deleted the release path rather than merely tidying it: exit 12 has no

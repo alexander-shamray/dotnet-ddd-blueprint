@@ -73,8 +73,8 @@ gate's terms: it ships with the repository, CI runs it, and `dotnet test` is
 blind to it. **Six judgements, five of which shipped wrong at least once, each
 reproduced as a case that fails against the old behaviour** — what counts as a
 usage limit, what counts as a review that finished, whether the check ledger can
-publish an answer on its own error path, whether a slot is spent if and only if
-the review's model call was launched, whether the sweeps' worktree guard is the
+publish an answer on its own error path, whether every usage-limit skip happens
+before a slot is reserved, whether the sweeps' worktree guard is the
 direct-child check it claims, and whether the label helper leaves a free
 parameter a finding could steer. That last is the one that never shipped
 wrong — it is a grant closed by moving it into a helper, and the suite is what

@@ -864,8 +864,12 @@ own line rather than sending a reader to a file that does not hold it.
   twelve against a paid API. **Accounting and the thing it accounts for have to
   be one operation**, and where they are, the *placement* of the write becomes
   the accounting rule: reserving immediately before the model call makes a slot
-  spent if and only if the review ran, which is what deleted the release path
-  rather than merely tidying it. **And one operation is not enough if the
+  spent by no path that refuses earlier, which is what deleted the release path
+  rather than merely tidying it. **Not "spent if and only if the review ran"** —
+  the ledger settles its election *after* posting, so a failed read there leaves
+  a slot spent with nothing launched. That case is kept deliberately, because
+  after a failed read the state is what is not known; the point is that a claim
+  has to be the ordering the code guarantees, not the tidier one beside it. **And one operation is not enough if the
   operation can be aimed elsewhere** — the first version of that fix took the
   pull request number as an argument while cloning the *current branch*, so a
   typo or a substituted number spent someone else's slot and left this branch's
@@ -1036,8 +1040,8 @@ py -3.12 -m unittest discover -s .claude/scripts   # needs bash, grep and git; n
 subject is `.claude/`.** `test_grok_helpers.py` covers the judgements `/ship`
 and the two sweeps rest on: what the usage-limit preflight calls a limit, what
 counts as a review that finished, that the ledger publishes no answer on its
-trust check's error path, that a slot is reserved if and only if the review's
-model call was launched, and that the sweeps' worktree shape check is the
+trust check's error path, that every usage-limit skip happens before a slot is
+reserved, and that the sweeps' worktree shape check is the
 direct-child check it claims, and whether the label helper leaves a free
 parameter a finding could steer. **Five of those six shipped, so each is
 reproduced as a case that fails against the old behaviour** — the sixth is a

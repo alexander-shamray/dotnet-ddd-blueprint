@@ -904,11 +904,17 @@ same argument as never calling a branch clean because asking failed.
      and the resumed run spends a thirteenth; written before, the worst case is
      a reservation for a check that never ran, which wastes one of the twelve
      and never exceeds it. The helper writes it immediately before the review's
-     own `docker run`, which is what makes the accounting exact rather than
-     merely conservative: **a slot is spent if and only if the review's model
-     call was launched.** Everything that can refuse earlier — a dirty tree, no
-     daemon, a missing credential, and all three usage-limit skips — spends
-     nothing. So **exit 12 no longer posts a release**, because it has no
+     own `docker run`, which is what makes the accounting tight: **every path
+     that can refuse before that line spends nothing** — a dirty tree, no
+     daemon, a missing credential, and all three usage-limit skips.
+
+     **Tight rather than exact, and the difference is one deliberate case.** The
+     ledger posts its comment and then reads to settle the election, so a
+     trust-check failure on that read leaves the reservation standing while the
+     helper exits 13 before the model call. That stays: after a failed read the
+     state is precisely what is not known, and releasing on it would return a
+     slot on the strength of a lookup that did not complete. The cost is bounded
+     at one check in twelve; guessing the other way is not. So **exit 12 no longer posts a release**, because it has no
      reservation to give one back for; the verb survives for a human
      reconciling a slot spent wrongly, and for `count`, which must still fold a
      released row out of a PR's existing history.

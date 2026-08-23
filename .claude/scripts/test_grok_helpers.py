@@ -158,6 +158,22 @@ def stop_verdict(payload):
     return out.stdout.strip()
 
 
+def code_lines(text):
+    """The executable lines of a shell script — comments and blanks dropped.
+
+    Shared rather than duplicated per class, because the two callers assert
+    opposite things with it and both are load-bearing: one that a pattern has no
+    second literal copy, the other that an exit code exists in the *code*. That
+    second one is why this is here at all — asserted against the whole file, it
+    passed on the explanatory comments alone, so deleting the executable line
+    would not have failed it.
+    """
+    return [
+        line for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
 def bash_tmproot():
     """The temp root as BASH resolves it, which is not the one Python resolves.
 
@@ -433,10 +449,14 @@ class ReservationIsTiedToTheModelCall(unittest.TestCase):
         self.assertLess(reserve, run, "the slot must be claimed before the model call")
 
     def test_every_usage_limit_skip_happens_before_the_reservation(self):
-        # This is the accounting rule stated as an ordering, and it is what
-        # makes a `release` verb unnecessary rather than merely unused: a slot is
-        # reserved if and only if the review's model call was launched, so an
-        # exit-12 skip has nothing to give back.
+        # **The ordering is the property, and it is narrower than "spent if and
+        # only if the review ran".** That stronger claim stood in this comment
+        # and in six other files, and the implementation deliberately breaks it:
+        # the ledger settles its election *after* posting, so a failed read there
+        # leaves a slot spent with nothing launched. What is actually asserted —
+        # and all that is needed to make the `release` verb unnecessary rather
+        # than merely unused — is that every exit-12 skip precedes the
+        # reservation, so no usage-limit skip has anything to give back.
         reserve = self.text.index('reserve "$slot"')
         for match in re.finditer(r"^\s*exit 12$", self.text, re.MULTILINE):
             self.assertLess(
@@ -447,10 +467,16 @@ class ReservationIsTiedToTheModelCall(unittest.TestCase):
             )
 
     def test_a_failed_reservation_stops_the_run_with_its_own_exit(self):
-        self.assertIn("exit 13", self.text)
+        # **Searched over code lines only, because the comments discuss `exit 13`
+        # at length.** Against the whole file this passed on the explanatory
+        # prose alone, so deleting the executable exit would have left it green —
+        # a test whose subject was its own documentation. Raised by a reviewer,
+        # and it is the gate-coverage rule at its smallest scale.
+        code = "\n".join(code_lines(self.text))
+        self.assertIn("exit 13", code)
         self.assertLess(
-            self.text.index("exit 13"),
-            self.text.index('grok -p "/review-branch"'),
+            code.index("exit 13"),
+            code.index('grok -p "/review-branch"'),
         )
 
     def test_the_ledger_still_understands_a_released_row(self):

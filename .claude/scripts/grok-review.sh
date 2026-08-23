@@ -368,12 +368,15 @@ if [ "$probe_rc" -ne 0 ] && [ -n "${XAI_API_KEY:-}" ] &&
 fi
 
 # The reservation, and its POSITION is the accounting rule rather than an
-# implementation detail: a slot is spent if and only if the review's own model
-# call was launched. Everything that can refuse before this line — a dirty
-# tree, no daemon, a missing credential, a bad suggestions.md shape, and all
-# three of the usage-limit skips above — spends nothing, which is why exit 12
-# has no release to post and why the release verb has no caller left in this
-# repository. ship.md's argument for writing before the call is interruption
+# implementation detail: **every path that can refuse before this line spends
+# nothing** — a dirty tree, no daemon, a missing credential, a bad
+# suggestions.md shape, and all three of the usage-limit skips above. That is
+# why exit 12 has no release to post and why the release verb has no caller left
+# in this repository.
+#
+# Stated as an ordering rather than as "spent if and only if the model call was
+# launched", which is what this comment used to say and is not true of the
+# failed-read case argued below. One file must not define two contracts. ship.md's argument for writing before the call is interruption
 # safety, and the window this leaves is the microseconds between posting and
 # `docker run`; written after, an interrupted run spends a check and leaves no
 # record, and the resumed run spends a thirteenth.
