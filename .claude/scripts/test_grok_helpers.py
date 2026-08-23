@@ -412,10 +412,19 @@ class ReservationIsTiedToTheModelCall(unittest.TestCase):
 
 
 class ReviewArgumentValidation(unittest.TestCase):
-    """The three arguments are the ledger's vocabulary, and are checked as it.
+    """Two arguments, checked against the ledger's own vocabulary.
 
-    Each case below exits before anything is created, cloned or built — which is
-    also why they are safe to run with no Docker and no network.
+    **The pull request is deliberately not one of them.** It was argument one for
+    exactly one review round: the helper took a caller-supplied number and then
+    cloned and reviewed the *current branch*, so a typo — or an instruction
+    substituting another open pull request — spent someone else's slot while
+    leaving this branch's cap re-armed. It is resolved from the branch now, which
+    is why the old three-argument form has to be REFUSED rather than tolerated,
+    and why that refusal has a case of its own below.
+
+    Each case exits before anything is created, cloned or built, and before
+    anything is asked of GitHub — which is what makes them safe to run with no
+    Docker, no network and no token, and is asserted rather than assumed.
     """
 
     def run_review(self, *args):

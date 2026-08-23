@@ -27,11 +27,24 @@
 # direct-childness did not. Comparing `dirname` against the root and matching
 # the basename alone is what fixes it, because a basename contains no `/`.
 #
-# It now also DOES mean a sweep created the path, which the old comment
-# correctly said it did not. `git-worktree-detach.sh` creates the directory
-# itself and prints it, so no caller supplies a path to either helper and the
-# `Bash(mktemp:*)` grant that made an arbitrary template reachable is gone from
-# both sweeps. The shape is still checked here rather than assumed: a helper
+# It still does NOT mean a sweep created this path, and the two helpers differ
+# on why — a distinction a revision of this comment briefly erased.
+# `git-worktree-detach.sh` now creates the directory it hands to git, so for
+# THAT helper the question does not arise: there is no caller-supplied path to
+# doubt, and the `Bash(mktemp:*)` grant that made an arbitrary template
+# reachable is gone from both sweeps. **This helper is the other case and is
+# unchanged in that respect.** The teardown passes it `$posix`, and any
+# registered worktree of the right shape satisfies the checks below — including
+# one an abandoned earlier sweep left behind, which is not hypothetical: a stray
+# `secsweep-` checkout from a previous session was sitting in the temp root
+# while this was being written.
+#
+# So exclusion is the load-bearing half here and ownership is not proved.
+# Generalising the detach helper's new property to this one would retire a
+# residual by asserting it away, which is the same mistake as answering "what is
+# it owed" by inference rather than by reading.
+#
+# The shape is checked here rather than assumed for a separate reason: a helper
 # whose guard holds only while the other helper is unedited has no guard.
 set -euo pipefail
 [ "$#" -eq 1 ] || { echo "usage: git-worktree-drop.sh <path>" >&2; exit 2; }
