@@ -131,32 +131,67 @@ public class AuthorizationPolicyTests(HostSmokeTests.UnreachableInfrastructureFa
         // Read off the built endpoints for AuthorizationPolicyTests' own
         // reason: a list beside the registrations would agree with itself while
         // disagreeing with the host.
-        Endpoint[] idempotent =
+        (Endpoint Endpoint, Type Command)[] idempotent =
         [
             .. Endpoints
-                .Where(e => e.Metadata
-                    .GetMetadata<MethodInfo>()?
-                    .GetParameters()
-                    .Any(p => typeof(IIdempotentCommand).IsAssignableFrom(p.ParameterType)) == true)
+                .SelectMany(e => (e.Metadata
+                        .GetMetadata<MethodInfo>()?
+                        .GetParameters() ?? [])
+                    .Where(p => typeof(IIdempotentCommand).IsAssignableFrom(p.ParameterType))
+                    .Select(p => (Endpoint: e, Command: p.ParameterType)))
         ];
 
-        // The gate's own subject. Both assertions below are over a sequence, so
-        // an empty one passes them — and this selector depends on minimal APIs
-        // putting the handler's MethodInfo in endpoint metadata, which is a
-        // framework detail rather than a contract.
-        idempotent.ShouldNotBeEmpty(
-            "this service declares an idempotent command bound to an endpoint; the selector found none");
+        // **The gate's own subject, and a floor was not enough.** This used to
+        // assert only ShouldNotBeEmpty, which establishes that the selector
+        // found SOMETHING and not that it found everything — while the test is
+        // named for every command declaring the interface. With a second
+        // idempotent command, an endpoint binding a request DTO instead of the
+        // command (a shape this codebase permits) becomes invisible here and
+        // the floor still passes, so exactly the endpoint that stopped being
+        // covered is the one nothing reports.
+        //
+        // So the subject is the AGREEMENT between two independently derived
+        // sets: every idempotent command this service's Application assembly
+        // declares, and every one reachable through an endpoint. It fails from
+        // either side — a command with no endpoint, or a selector that stopped
+        // matching one.
+        //
+        // A broker-only idempotent command would fail this, and that is the
+        // design rather than a limitation: §8.5's subject is equally shared for
+        // a message-borne command, so one arriving is a decision to take and
+        // not a case to widen the gate for silently.
+        Type[] declared =
+        [
+            .. typeof(Catalog.Application.DependencyInjection).Assembly
+                .GetTypes()
+                .Where(typeof(IIdempotentCommand).IsAssignableFrom)
+                .Where(t => t is { IsClass: true, IsAbstract: false })
+        ];
 
-        foreach (Endpoint endpoint in idempotent)
+        declared.ShouldNotBeEmpty(
+            "this service declares an idempotent command; the assembly scan found none");
+
+        idempotent
+            .Select(pair => pair.Command)
+            .Distinct()
+            .OrderBy(t => t.Name, StringComparer.Ordinal)
+            .ShouldBe(
+                declared.OrderBy(t => t.Name, StringComparer.Ordinal),
+                "every idempotent command must reach this service through an endpoint this test can " +
+                "see. A command missing from the left is one no endpoint binds directly — either it " +
+                "is broker-only, which §8.5 makes a decision rather than an omission, or an endpoint " +
+                "binds a DTO and this selector no longer covers it.");
+
+        foreach ((Endpoint endpoint, Type command) in idempotent)
         {
             endpoint.Metadata.GetMetadata<IAllowAnonymous>().ShouldBeNull(
-                $"{endpoint.DisplayName} takes an idempotent command and allows anonymous callers, " +
+                $"{endpoint.DisplayName} takes {command.Name} and allows anonymous callers, " +
                 "so every one of them claims under the shared system subject (§8.5)");
 
             endpoint.Metadata
                 .GetOrderedMetadata<IAuthorizeData>()
                 .ShouldNotBeEmpty(
-                    $"{endpoint.DisplayName} takes an idempotent command and requires no authorization, " +
+                    $"{endpoint.DisplayName} takes {command.Name} and requires no authorization, " +
                     "so the caller has no subject to key on (§8.5)");
         }
     }

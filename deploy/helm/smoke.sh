@@ -166,7 +166,26 @@ check "exactly one chart declares client credentials (found $credentialed)" \
 # The invocation form of §8.2's helper, as opposed to any mention of its name.
 # Declared here so the self-test below can be written against the same string
 # the gate uses — two copies of a pattern is one of them going stale.
-CALLS_REDIS='^[[:space:]]*[^/[:space:]].*\.AddRedisConnections\('
+# ANCHORED TO A STATEMENT, not merely to a line that does not begin with a
+# slash. The first form here was a bare mention, which three comments per
+# service satisfied; the second required a non-slash first character, which
+# a `//` comment cannot satisfy but plenty of prose can — a `*` continuation
+# inside a block comment, or a line beginning with a quote. A regression gate
+# that a deleted registration can leave green by way of a leftover mention is
+# not a gate, and neither of the first two forms was tested against prose
+# that had a non-slash lead.
+#
+# So the line must OPEN with an identifier and reach the call through a dot:
+# `services.AddRedisConnections(` and `builder.Services.AddRedisConnections(`
+# match, and every comment, string and block-comment continuation is refused
+# by the first character alone.
+#
+# It fails CLOSED on one legitimate shape and that is the safe direction: a
+# chain broken under the house style, `services` on its own line and
+# `.AddRedisConnections(configuration)` beneath it, is not matched — so the
+# gate would demand a chart with no redis and fail loudly against one that
+# has it, rather than passing a service whose registration is gone.
+CALLS_REDIS='^[[:space:]]*[A-Za-z_][A-Za-z0-9_.]*\.AddRedisConnections\('
 
 declares() {
     # declares <chart> <block> -> exit 0 when that block sets enabled: true
@@ -258,6 +277,18 @@ section 'The source-detection patterns select code, not prose'
 check 'CALLS_REDIS refuses a comment that names the helper' \
     sh -c 'printf "        // AddRedisConnections and nothing called it\n" |
         grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS refuses a block-comment continuation' \
+    sh -c 'printf "         * services.AddRedisConnections(configuration);\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS refuses the call inside a string literal' \
+    sh -c 'printf "        \"services.AddRedisConnections(configuration)\";\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS still matches the real registration' \
+    sh -c 'printf "        services.AddRedisConnections(configuration);\n" |
+        grep -qE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS still matches it through a qualified receiver' \
+    sh -c 'printf "        builder.Services.AddRedisConnections(builder.Configuration);\n" |
+        grep -qE "$0"' "$CALLS_REDIS"
 check 'CALLS_REDIS refuses a commented-out call' \
     sh -c 'printf "        // services.AddRedisConnections(configuration);\n" |
         grep -qvE "$0"' "$CALLS_REDIS"
