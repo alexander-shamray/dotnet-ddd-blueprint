@@ -116,6 +116,16 @@ a session, in the same mid-string wildcard form the `--output` deny already
 uses — **a speed bump with its limit stated**, since a substring deny over a
 shell command string is defeated by quoting, exactly as that entry records.
 
+**Three verbs stay reachable, not two, and that is a deliberate departure from
+the issue's own fix.** #59 asked for `count` and `status` to be all the agent
+invokes; `converge` is left with them. It is a write, but it cannot re-arm the
+budget — `count` skips converged rows by construction, so the marker moves no
+number — and what it records is a judgement the agent is already the one making:
+whether the loop ended clean or ran out of ceiling. Removing it would delete
+`ship.md`'s only way to tell those apart on a resume and buy nothing, since a
+false convergence marker is a lie the agent could equally tell in its report.
+The two verbs that ARE denied are the two that move the count.
+
 ### The counter that answered on its own error path
 
 **An `exit` in the last stage of a pipeline ends a subshell, and the consumer on
