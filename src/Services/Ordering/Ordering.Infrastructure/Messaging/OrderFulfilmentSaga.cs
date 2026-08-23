@@ -60,6 +60,15 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // so the workflow ends with it; §11.4's customer endpoint cancels the
     // AGGREGATE and ended nothing, leaving the saga to reserve stock and
     // authorise a card for an order the customer had already cancelled.
+    //
+    // **Declaring it binds OrderCancelled to an EXISTING queue, and #131
+    // is what that costs during a rollout.** Both releases consume
+    // ordering-fulfilment-saga at once, so the broker can hand a newly
+    // bound OrderCancelled to an old replica whose machine does not
+    // declare it — and MassTransit moves a message an endpoint has no
+    // consumer for to <queue>_skipped, which §13.6 does not watch. The
+    // cancellation is then lost quietly, which is the defect this line
+    // exists to fix, reappearing for the length of the deploy.
     public Event<OrderCancelled> OrderCancelled { get; private set; } = null!;
 
     // One schedule per wait. "Every wait has a timeout" is a rule the machine

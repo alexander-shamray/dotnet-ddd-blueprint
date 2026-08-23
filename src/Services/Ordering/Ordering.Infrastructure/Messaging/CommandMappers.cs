@@ -131,6 +131,14 @@ public sealed class FlagOrderForReviewMapper
     /// consumer, which is the trade <c>MetricsInitialiser</c> already makes.
     /// </para>
     /// </remarks>
+    // **Three of these four arrive in the same release that starts
+    // emitting them, and #131 is the ordering nobody has stated.** An old
+    // ordering-commands consumer handed the new FlagOrderForReview refuses
+    // the reason below, and ContractMappingException is on this endpoint's
+    // retry-ignore list on purpose — so it reaches the error queue on the
+    // FIRST attempt rather than after a minute of pointless backoff. Right
+    // for a contract that really is malformed; wrong for a well-formed one
+    // from a newer producer, which is the case that has no rule.
     public static readonly FrozenSet<string> Known = FrozenSet.Create(
         StringComparer.Ordinal,
         ReviewReasons.NotDespatched,

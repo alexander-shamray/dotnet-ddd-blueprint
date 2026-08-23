@@ -49,6 +49,15 @@ concurrency:
   group: closure-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# **This workflow enforces from the pull request's own copy of the gate,
+# and #132 carries that.** The checkout below is the merge ref, so both the
+# suite and the gate that judges the branch come from the branch. It is a
+# policy property rather than a privilege one — the token is read-only and
+# nothing is posted — and the version worth worrying about is accidental: a
+# refactor that makes the gate pass vacuously, with the suite edited to
+# match, is green here. The fix is to run the ENFORCING copy from the base
+# SHA while the suite keeps running the head copy, and it needs a decision
+# about the bootstrap case, because `main` does not carry this gate yet.
 jobs:
   closure-gate:
     runs-on: ubuntu-latest
