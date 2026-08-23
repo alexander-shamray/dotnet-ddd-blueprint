@@ -77,6 +77,46 @@ Wrapped at 80 columns, British spelling, no emoji. Structure:
    established shape for metadata.
 5. The `🤖 Generated with [Claude Code]` footer and session link.
 
+### What the branch closes
+
+**A closing keyword inside a table cell links nothing.** The metadata row —
+`| Closes | #88 (high), #81 (high) |` — is a summary for a reader and that is
+all it is: a cell boundary sits between `Closes` and `#88`, so GitHub is never
+handed a keyword-reference pair. This is not GitHub declining to read a table.
+PR #112's row was the only place its keywords appeared,
+`closingIssuesReferences` reads `[]` to this day, and #84, #70 and #40 were
+closed by hand once somebody noticed.
+
+So the body carries **both**: the row as the human-readable summary, and a
+bare `Closes #n` line for each issue below it.
+
+**A `Closes #n` in a commit body fires on merge whatever the description
+says.** That is the opposite failure and it has fired too. PR #116's review
+loop narrowed two of its claims and the body was rewritten to say *"#56 stays
+open"*; the merge closed #30 and #56 anyway, out of commits written before the
+loop ran. Both were reopened by hand with the reason recorded.
+
+**The commits are the half that cannot be taken back, so the description is
+reconciled to them** — never the other way round. A description is editable
+and a commit message is not, which is why withdrawing a closure from the body
+reads as sufficient and is not. If a commit already closes an issue the branch
+has since decided to leave open, name it in the description, let it close, and
+reopen it with the reason on the issue itself.
+
+**A keyword the body only *discusses* still links.** GitHub's linker does not
+read markdown, so a `` `Closes #30` `` quoted inside an argument about closures
+closes #30 — which makes this section's own examples a hazard for any PR that
+edits it. Write the number away from the keyword when the point is the keyword.
+
+`.github/closure-gate/` compares all three on every push **and on every
+description edit**, so this is checked rather than remembered. Run it here
+before opening if you want the answer early:
+
+```bash
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+    py -3.12 .github/closure-gate/closure_gate.py
+```
+
 Do not include a test-plan section while the repo is in its documentation
 phase — there is nothing to run. Once `Platform.slnx` exists, state the
 `dotnet build` / `dotnet test` result instead, and report it as it actually

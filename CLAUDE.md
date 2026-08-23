@@ -129,7 +129,25 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              because a gate cannot see a read it was never told
                              about. A test over the reads is what closes that,
                              not a more careful list
+.github/workflows/closure-gate.yml  the ONE workflow with no path filter, and
+                             that is the design rather than an omission: what
+                             it judges is a property of every pull request, so
+                             a filter could only make it skippable — and with
+                             nothing read out of the checkout there is no
+                             SOURCE_INPUTS list to drift. It is also the only
+                             workflow taking `edited`, because the defect it
+                             exists for was introduced by an edit to a PR body
+                             with no push behind it
 .github/licence-gate/        the gate, its allow-list and its tests
+.github/closure-gate/        the three statements a PR makes about what it
+                             closes — the `| Closes |` row, GitHub's own
+                             `closingIssuesReferences`, and the keywords in the
+                             commit bodies — compared against each other. Half
+                             the comparison is GitHub's parse and half is a
+                             regex, so a too-narrow regex is the fail-open
+                             direction and the suite is mostly that parser.
+                             Both historical defects reproduce: PR #112 red on
+                             three counts, PR #116 red on #30 and #56
 .github/pipeline-gate/       PR-25's quality gates, and all three are
                              inventories: every deployable under src/ is
                              matched by a path filter, every Dockerfile is
@@ -797,6 +815,17 @@ own line rather than sending a reader to a file that does not hold it.
   reputation rather than its surface. **Check the binding, not the ecosystem**:
   a capability present in a project's Rust core, its JVM binding and its
   marketing is not thereby present in the one language this repository compiles.
+- **Where two mechanisms answer one question and only one of them is editable,
+  the editable one is where the lie lives.** GitHub honours closing keywords in
+  a PR body and in a commit body independently, and
+  `gh pr view --json closingIssuesReferences` reports the **body** only — so
+  withdrawing a closure from the description reads as sufficient and is not,
+  and the discrepancy is invisible from the one place a reviewer would check.
+  **A field whose name is the question is not thereby the answer to it.**
+  Reconcile toward the record that cannot be edited, and gate the two against
+  each other rather than trusting the half that is easy to look at. The same
+  shape reaches past issue closure: a version in a tag and a version in a
+  manifest, a threshold in prose and a threshold in a rule file.
 
 ### The commands
 
@@ -813,13 +842,14 @@ dotnet test  Platform.slnx --filter "Category!=Integration"   # 689 of 877, no d
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Eight suites, three runners, and only one of them is `dotnet test`.** The
+**Nine suites, three runners, and only one of them is `dotnet test`.** The
 scaffold's tests are Python, the chart gate is bash over `helm template`, and
 the licence gate, the observability gate, the pipeline gate, the coverage
-reporter's suite and the canary's are Python again; none is in `Platform.slnx`,
-so a green solution says nothing about any of them. **The licence gate belongs
-in that count** — CI tests it and then runs it, which is the pattern every gate
-here follows — and leaving it out is what made this seven:
+reporter's suite, the canary's and the closure gate's are Python again; none is
+in `Platform.slnx`, so a green solution says nothing about any of them. **The
+licence gate belongs in that count** — CI tests it and then runs it, which is
+the pattern every gate here follows — and leaving it out is what made this
+seven:
 
 ```bash
 (cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
@@ -838,7 +868,17 @@ py -3.12 .github/pipeline-gate/pipeline_gate.py images
 py -3.12 -m unittest discover -s .github/coverage
 py -3.12 -m unittest discover -s deploy/canary
 py -3.12 deploy/canary/canary.py check
+
+py -3.12 -m unittest discover -s .github/closure-gate
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+    py -3.12 .github/closure-gate/closure_gate.py
 ```
+
+**The closure gate is the only one of the nine whose *runner* needs the
+network**, and the suite is deliberately not: the deciding takes JSON on stdin
+and the fetching is one `gh` call, which is `deploy/canary/canary.py`'s split
+one artefact over. So `unittest` runs anywhere, and the second line is the only
+part that needs a token and a PR to point at.
 
 **`pipeline_gate.py stages` is the one that cannot be run on its own**: it
 reads what the three test steps wrote, so it needs a `dotnet test` per stage
@@ -1702,6 +1742,18 @@ every argument at column 7). If you find one, it is a leftover — convert it.
 - **Commit messages** are semantic and present-tense: `docs:`, `feat(<scope>):`,
   `fix:`, `chore:` — the delivery plan in Appendix C already names each PR in
   this form, so use its title verbatim when you implement one.
+- **A `Closes #n` in a commit body fires on merge whatever the PR description
+  says, and a keyword in a table cell fires for nothing.** Those are two
+  different mechanisms and they have failed in opposite directions here. The
+  house body form keeps `| Closes | #88 (high) |` as the human-readable
+  summary and adds a bare `Closes #88` line below it, because a cell boundary
+  between the keyword and the reference means GitHub is handed no
+  keyword-reference pair at all — PR #112 linked nothing and three issues were
+  closed by hand. In the other direction a commit keyword is permanent where a
+  description is editable, so **the description is reconciled to the commits,
+  never the reverse**: PR #116 withdrew two closures from its body and closed
+  them anyway. `.github/closure-gate/` compares the three on every push and on
+  every description edit.
 - **Uncommitted work in the tree belongs in the PR being worked on.** When a
   change appears that nobody in the current task wrote — an edit made directly
   by the repo owner, most often — it is not stray churn to be reverted or left

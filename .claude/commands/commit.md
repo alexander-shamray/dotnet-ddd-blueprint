@@ -56,6 +56,15 @@ British spelling in prose, identifiers left alone.>
   and say plainly where nothing changed (`no behaviour changes; every edit is a
   declaration`).
 - Tables are fine in a body when they carry the summary data.
+- **A `Closes #n` in a body closes that issue on merge**, out of history rather
+  than out of the pull request description — and unlike the description, a
+  commit message cannot be edited afterwards. So write one only where this
+  commit genuinely resolves that issue, and never as a remark *about* a
+  closure: GitHub's linker does not read markdown, so a `` `Closes #30` ``
+  quoted inside an argument links exactly as hard as a real one. PR #116
+  closed two issues its own body said stayed open, from commits written before
+  the claim was narrowed. `/pr` carries the other half of this rule, and
+  `.github/closure-gate/` gates the two against each other.
 - Keep the `Co-Authored-By:` and `Claude-Session:` trailers.
 
 ## Steps

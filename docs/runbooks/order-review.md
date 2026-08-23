@@ -147,11 +147,25 @@ both.**
 and step 2 is where you find out whether it did.** Both exits finalise —
 `StockReleased`, and the ten-minute `ReleaseTimeout` — so an instance still
 live at the hour this alerts on has had neither, which means the cancellation
-has not been sent and will not be until someone intervenes. **Do not wait for
-a cancellation in that case**: a live instance past its own timeout is a
-scheduler incident ([`stuck-saga.md`](stuck-saga.md)), and the authorisation
-is outstanding for as long as it lasts. Refund by hand and treat the saga as
-the separate incident it is.
+has not been sent and will not be until someone intervenes.
+
+**Deal with the saga before the money, and this page said the opposite.** It
+read "refund by hand and treat the saga as the separate incident it is",
+which is a double refund by a slower route: a live instance that later
+resumes — because `StockReleased` finally arrives, or because someone
+restarts the scheduler — sends `CancelOrder`, the aggregate publishes
+`OrderCancelled`, and Payments voids off it. A manual refund on a live
+instance is therefore a refund **ahead of** an automatic one, not instead of
+it. Nothing in the platform suppresses that second refund: §3.2 gives
+Ordering no refund command, so it has no way to say "already done" either.
+
+So drive the instance to an exit first — [`stuck-saga.md`](stuck-saga.md), a
+live instance past its own timeout being a scheduler incident — and let the
+cancellation it sends do the refunding. **If the authorisation genuinely
+cannot wait**, refunding by hand is still available and you own the
+reconciliation: record it, and check for `PaymentRefunded` again once the
+saga finally exits, because the second one is coming and this page cannot
+stop it.
 
 **What actually separates the two is Shipping.**
 `cancelled_after_confirmation` means the order reached `Confirmed`, so a
@@ -190,19 +204,22 @@ the same defect one step less obvious.
    answer is the expected one — see above — so the check is the work, not a
    formality before the refund.
 
-   **A cancellation may still be in flight**, which is the case worth naming: on
-   `payment_authorised_during_compensation` reached from a decline or a timeout,
-   the
-   `CancelOrder` that triggers the void has not been sent yet when this row
-   appears. If you find no refund and no cancellation, **check the saga
-   before deciding to wait** — step 2 of the `Compensating` procedure below.
+   **A cancellation may still be in flight**, which is the case worth
+   naming: on `payment_authorised_during_compensation` reached from a
+   decline or a timeout, the `CancelOrder` that triggers the void has not
+   been sent yet when this row appears. If you find no refund and no
+   cancellation, **check the saga before doing anything else** — step 2 of
+   the `Compensating` procedure below.
 
-   **Waiting is right only if the instance is gone.** Both exits finalise, so
-   an instance still live at the hour this alerts on has missed its own
-   ten-minute timeout and no `CancelOrder` is coming without intervention:
-   waiting there is waiting for ever while the authorisation stands. An
-   earlier revision of this step said "wait for one" unconditionally and
-   contradicted the paragraph above that says so.
+   **A gone instance means wait; a live one means fix the saga, not the
+   money.** Both exits finalise, so an instance still live at the hour this
+   alerts on has missed its own ten-minute timeout and no `CancelOrder` is
+   coming without intervention. Waiting there waits for ever — but
+   refunding there races an automatic void that arrives the moment the
+   saga is unstuck, so the fix is the saga. Two earlier revisions of this
+   step got that wrong in both directions: one said "wait for one"
+   unconditionally, the next said refund by hand and treat the saga
+   separately.
 
    An earlier version of this step said "refund the authorisation" with no
    check at all, which is a double refund whenever Payments got there first.
@@ -275,6 +292,10 @@ heading and then explained two paragraphs down that there would not be one.
    - **Still there** — both exits failed, which is its own incident. **Leave
      the reservation alone**: the machine is waiting on `StockReleased` and
      will cancel the order when it arrives, and releasing by hand races it.
+     **The same is true of the money**, and it is the less obvious half:
+     that cancellation publishes the `OrderCancelled` Payments voids off,
+     so a manual refund now is one the automatic path will duplicate when
+     the instance is unstuck. Fix the saga first.
 3. **A live instance at this age has already missed its own timeout — do not
    wait for it again.** This row alerts at one hour and `ReleaseTimeout` is
    ten minutes, so an instance still here means the timeout never arrived,

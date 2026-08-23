@@ -1,0 +1,80 @@
+name: Closure gate
+
+# A pull request states what it closes three times — the `| Closes |` row, the
+# keywords GitHub's linker reads out of the body, and the keywords in the
+# commit bodies — and the three are honoured by different machinery. All three
+# must agree. Both ways of disagreeing have already fired here: PR #112 closed
+# nothing it claimed, PR #116 closed two issues its own body said stayed open.
+#
+# A workflow of its own rather than a job in ci.yml, and for once NOT because
+# of path filtering — this one has no paths at all. Two reasons, and the
+# second is the load-bearing one:
+#
+#   - the defect is a property of every pull request rather than of a tree, so
+#     a filter could only ever make it skippable. Nothing here is derived from
+#     the checkout beyond the gate itself, so there is no inputs list to
+#     declare and none to drift — the SOURCE_INPUTS family of bugs that the
+#     helm, observability and canary gates each paid for cannot arise;
+#
+#   - `edited` is in the trigger list, and ci.yml's default `pull_request`
+#     types are `opened`, `synchronize` and `reopened` only. PR #116's defect
+#     was introduced by an EDIT to the description that withdrew a closure the
+#     commits had already made permanent, and no push followed it. Adding
+#     `edited` to ci.yml instead would rebuild and retest the solution every
+#     time somebody fixed a typo in a PR body.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  # The gate reads the pull request's body, its commits and GitHub's own
+  # `closingIssuesReferences`. Read is the whole of what it needs; it changes
+  # nothing and posts nothing.
+  pull-requests: read
+
+concurrency:
+  group: closure-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  closure-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The gate's own tests first, on the licence gate's terms — running it
+      # against a well-formed pull request passes and says nothing about what
+      # it would catch. Every test in that suite is a negative case, and nine
+      # deliberate mutations of the gate were each observed red against it.
+      - name: Test the gate
+        working-directory: .github/closure-gate
+        run: python -m unittest
+
+      # One `gh` call, and it is the only network in the check. The deciding
+      # takes JSON on stdin and is pure — deploy/canary/canary.py's split, for
+      # its reason: what is tested is the judgement, and what is not tested is
+      # the fetch.
+      #
+      # `closingIssuesReferences` is GitHub's OWN parse of the body, which is
+      # what makes this a comparison rather than a second implementation of a
+      # linker nobody here has the spec for.
+      #
+      # `shell: bash` rather than the default, and it is not cosmetic: the
+      # default `run` shell is `bash -e` with NO pipefail, so a `gh` that
+      # failed would be masked by whatever the right-hand side exited with.
+      # Here the gate would exit 2 on the empty input anyway — but relying on
+      # that is relying on a second bug to cover the first.
+      - name: The description, the table and the commits agree
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --json number,url,body,commits,closingIssuesReferences |
+            python .github/closure-gate/closure_gate.py
