@@ -873,6 +873,29 @@ own line rather than sending a reader to a file that does not hold it.
   subject from the thing being acted on rather than accepting it:
   `gh pr list --head "$branch"` beside the clone of `$branch`, the same way
   `gh-label-ensure.sh` resolves the repository from the checkout.
+- **Never edit a shell script while it is running.** `bash` reads a script
+  incrementally, by byte offset, rather than parsing it whole — so an edit that
+  shifts the offsets makes the still-running process resume at the wrong place.
+  Measured here rather than reasoned about: editing `grok-review.sh` during a
+  live review produced `line 376: ing: command not found` — the tail of a word
+  the new offset landed inside — and then re-executed a region that had already
+  run, posting a **second** ledger reservation for a slot ten minutes after the
+  first. The helpers in `.claude/scripts/` are long-running by nature, so this
+  is a live hazard here and not a curiosity: hold an edit until the run ends, or
+  copy the script and edit the copy.
+- **A concurrency control is only ever proved by a collision you did not
+  intend.** The duplicate above is the only real contention the ledger's
+  election has ever seen, and it behaved as written: the second claim lost to
+  the first and exited 4, `grok-review.sh` turned that into exit 13 and refused
+  to run, and `count` folded the two rows for that slot into one spend. A
+  deliberate test can show the arithmetic; only an accident shows the whole
+  mechanism under load.
+- **A run whose integrity is in doubt is a run that did not happen**, whatever
+  its artefacts look like. That corrupted review left no `suggestions.md`, which
+  is the same evidence a clean pass leaves — and reading it as clean would be
+  the exact fail-open the stop-reason allow-list exists to refuse, arriving
+  through the script rather than through the model. Spend the next slot and run
+  it again.
 - **A multi-target edit that aborts has applied a *prefix* of its changes, and
   the targets after the failure are silently absent rather than wrong.** A
   three-file substitution script wrote the first file, failed an assertion on
