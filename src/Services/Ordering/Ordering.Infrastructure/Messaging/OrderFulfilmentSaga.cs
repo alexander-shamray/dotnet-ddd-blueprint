@@ -128,11 +128,30 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // AddEntityFrameworkOutbox/UseBusOutbox persisting the sends with the
         // instance in one transaction.
         //
-        // So it is LOUD and then ignored: the error queue stops being spent
-        // on a transition that can never become applicable, and the event
-        // still leaves a record naming itself and the state it arrived in.
-        // A misrouted event — the other way in, and a configuration fault —
+        // So it LOGS and then ignores: the error queue stops being spent on a
+        // transition that can never become applicable, and the event still
+        // leaves a record naming itself and the state it arrived in. A
+        // misrouted event — the other way in, and a configuration fault —
         // lands in the same line rather than vanishing.
+        //
+        // **That is a diagnostic and not a signal, and the difference is the
+        // residual rather than a detail.** No alert reads this line; §13.6
+        // pages on the error queue, which is exactly what ignoring keeps the
+        // event out of. So the honest statement of the trade is that THREE
+        // cases reach here and only one of them wants to be quiet:
+        //
+        //   * a post-flush duplicate — quiet is right;
+        //   * a pre-flush loss — quiet is wrong, and permanent;
+        //   * a misroute — quiet is wrong, and a configuration fault.
+        //
+        // MassTransit's default would make all three loud, which is what this
+        // line replaced and what `main` still does. **Whether that trade is
+        // the right way round is a decision the branch took and a reviewer has
+        // twice asked to revisit**, and it is recorded here rather than
+        // settled in a comment: reverting to the default costs six retries per
+        // rare duplicate and buys back the signal for the other two, and #128
+        // removes the question entirely by making the pre-flush case
+        // impossible.
         OnUnhandledEvent(x =>
         {
             LogContext.Warning?.Log(
