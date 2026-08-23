@@ -55,9 +55,17 @@ internal sealed class OrderReviewConfiguration : IEntityTypeConfiguration<OrderR
 
 /// <summary>
 /// A row of <see cref="OrderReviewConfiguration"/>'s table. Deliberately not a
-/// domain type: §9.6 is explicit that an escalation changes nothing about the
-/// order, so putting it in <c>Ordering.Domain</c> would make "a human should
-/// look at this" part of the model that decides what an order may do.
+/// domain type, and <b>the aggregate's state is not the reason either way</b>.
+/// This said "not because the order is unchanged", on the grounds that the two
+/// cancellation reasons are raised on an order already cancelled — which is
+/// false for <c>payment_authorised_during_compensation</c> reached from a decline or a payment
+/// timeout, where <c>CancelOrder</c> is still owed at <c>Compensating</c>'s
+/// exit. Both revisions were arguing from the order's state, and that is the
+/// part that was wrong.
+/// The reason is that "a human should look at this" is an OPERATIONS fact:
+/// putting it in <c>Ordering.Domain</c> would make it part of the model that
+/// decides what an order may do, which it is not, whether or not the order
+/// moved.
 /// </summary>
 internal sealed class OrderReview
 {

@@ -79,8 +79,20 @@ groups:
           runbook_url: docs/runbooks/stuck-saga.md
 
       # Owed: ordering.order_reviews.oldest.age, over ordering.OrderReviews.
-      # A saga that escalated has already FINALISED, so StuckSaga above will
-      # never catch this — which is why §13.6 gives it a row of its own.
+      # StuckSaga above usually will not catch this, and §13.6 gives it a row
+      # of its own for that reason. NOT because it never could: a
+      # Compensating instance that survived an hour is exactly what StuckSaga
+      # measures, and this comment said "will not" flatly while the lines
+      # below described the case where it does. What makes the separate row
+      # necessary is that the saga is normally FINALISED before its review
+      # row ages to an hour, so there is no instance left to be stuck — but
+      # "the saga has already finalised" is a property of the REASON, not
+      # of the row, and this comment used to state it as though it were
+      # universal. payment_authorised_during_compensation is raised
+      # mid-wait from Compensating and can sit beside a live instance;
+      # every other reason is raised on the way out. The instance is
+      # nonetheless usually gone by the hour this measures, because
+      # Compensating's two exits are both well inside it.
       - alert: OrdersAwaitingReview
         expr: max by (service_name) (ordering_order_reviews_oldest_age_seconds) > 3600
         for: 5m
@@ -90,8 +102,17 @@ groups:
         annotations:
           summary: "An order has been awaiting manual review for over an hour"
           description: >-
-            A saga hit a wait it could not compensate and escalated (§9.6).
-            It has already finalised, so the saga-age alert will not catch it.
+            A saga escalated work it cannot finish itself (§9.6): either a
+            wait that ran out, or an authorisation that landed while
+            compensation was already under way — which is not the same as a
+            cancellation existing, and not necessarily a customer
+            cancelling. Do NOT refund before reading the runbook:
+            Payments voids off OrderCancelled on its own and nothing here
+            knows whether it has, so a manual refund may be the second one.
+            The saga has
+            usually finalised by now, so the saga-age alert will not catch it
+            — but check before assuming, because one reason is raised
+            mid-wait. The runbook branches on all of it.
           runbook_url: docs/runbooks/order-review.md
 
       # OWED AN INSTRUMENT, AND IT IS THE ONE NO GATE HERE CAN WATCH.

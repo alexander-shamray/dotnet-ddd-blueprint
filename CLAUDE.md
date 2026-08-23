@@ -129,7 +129,25 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              because a gate cannot see a read it was never told
                              about. A test over the reads is what closes that,
                              not a more careful list
+.github/workflows/closure-gate.yml  the ONE workflow with no path filter, and
+                             that is the design rather than an omission: what
+                             it judges is a property of every pull request, so
+                             a filter could only make it skippable — and with
+                             nothing read out of the checkout there is no
+                             SOURCE_INPUTS list to drift. It is also the only
+                             workflow taking `edited`, because the defect it
+                             exists for was introduced by an edit to a PR body
+                             with no push behind it
 .github/licence-gate/        the gate, its allow-list and its tests
+.github/closure-gate/        the three statements a PR makes about what it
+                             closes — the `| Closes |` row, GitHub's own
+                             `closingIssuesReferences`, and the keywords in the
+                             commit bodies — compared against each other. Half
+                             the comparison is GitHub's parse and half is a
+                             regex, so a too-narrow regex is the fail-open
+                             direction and the suite is mostly that parser.
+                             Both historical defects reproduce: PR #112 red on
+                             three counts, PR #116 red on #30 and #56
 .github/pipeline-gate/       PR-25's quality gates, and all three are
                              inventories: every deployable under src/ is
                              matched by a path filter, every Dockerfile is
@@ -442,7 +460,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 859 tests — so the build rules and the drift rules below
+and `dotnet test` runs 877 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -455,8 +473,10 @@ summed a local `dotnet test Platform.slnx` the same way, which is the same
 arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
-there are eight suites now — see *The commands* below, which is where the
-current set lives, and which is the only place a count of them belongs. That
+there are several more now — see *The commands* below, which is where the
+current set lives, and which is the only place a count of them belongs. This
+sentence used to give the figure itself, two sections above the one that
+owns it, and the two disagreed the moment a ninth suite landed. That first
 one: `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a
 `scaffold` job for them beside `licence-gate`.
 
@@ -751,6 +771,44 @@ own line rather than sending a reader to a file that does not hold it.
   66 it ran before this PR, not the 77 it runs now — over a change that
   answers 500 to every lower-case currency in production. **Ask what would
   falsify the double, not whether its suite is green.**
+- **A library's way of saying "this does not apply" may be to throw, and a
+  comment saying it is harmless does not make it so.** §9.6's saga was
+  documented as idempotent against a redelivered event because "the transition
+  is simply not applicable" — true of the state machine, and MassTransit's
+  spelling of it is `UnhandledEventException`, so a duplicate that reached the
+  machine was retried six times into the error queue the design depends on
+  staying empty. **Not "every routine duplicate", which is how this lesson was
+  first written**: §9.5's inbox suppresses the completed redelivery, because
+  the outbox persists the event's message id and restores it on every publish.
+  What gets through is the delivery whose inbox row was never written — the
+  filter records it only after the consumer returns, so a crash between the
+  saga state committing and that write is the window. Narrow, and it was the
+  whole justification for an `OnUnhandledEvent(x => x.Ignore())` catch-all.
+  **And naming it exactly was still not exact enough**: the in-memory outbox
+  flushes inside that window, so half of it is a crash with the instance
+  advanced and its commands unsent — not a duplicate, but the last delivery
+  that could notice. **A window named to one boundary can still contain a
+  second one.**
+- **A catch-all answers every arrival the same way, so it is only ever as
+  right as its worst case.** The callback above was written, defended over
+  several review rounds, given a log line, and then removed. Three things
+  reach it and it cannot tell them apart: a post-flush duplicate (quiet is
+  right), a pre-flush crash that lost the instance's commands (quiet is
+  permanent loss), and a misroute (a configuration fault). The log line was
+  not a rescue — §13.6 pages on the **error queue**, which is exactly what
+  ignoring keeps the event out of, so it moved the case from silent to
+  searchable and no further. **What replaced it is enumeration**: every
+  legitimate arrival written out with its own `Ignore`, and a structural test
+  partitioning the machine's declared next-events so a new one cannot be
+  forgotten. The measurement that had justified the catch-all was a test
+  republishing an event rather than anything observed in production, which is
+  its own lesson: **check whether the traffic a mitigation removes is traffic
+  that actually occurs.**
+  The suite was green throughout, because `harness.Consumed` records a delivery
+  whether the pipeline returned or threw: "no transition ran" is what a fault
+  looks like from every assertion in a saga test. **Assert the absence of the
+  exception, not the absence of the effect** — and ask what the library does
+  with the case your comment calls benign.
 - **A tool a plan names may not reach the case the plan made it conditional
   on.** Appendix C made Pact conditional on a consumer relationship becoming
   contentious; the relationship that did is gRPC, and PactNet ships HTTP and
@@ -759,6 +817,17 @@ own line rather than sending a reader to a file that does not hold it.
   reputation rather than its surface. **Check the binding, not the ecosystem**:
   a capability present in a project's Rust core, its JVM binding and its
   marketing is not thereby present in the one language this repository compiles.
+- **Where two mechanisms answer one question and only one of them is editable,
+  the editable one is where the lie lives.** GitHub honours closing keywords in
+  a PR body and in a commit body independently, and
+  `gh pr view --json closingIssuesReferences` reports the **body** only — so
+  withdrawing a closure from the description reads as sufficient and is not,
+  and the discrepancy is invisible from the one place a reviewer would check.
+  **A field whose name is the question is not thereby the answer to it.**
+  Reconcile toward the record that cannot be edited, and gate the two against
+  each other rather than trusting the half that is easy to look at. The same
+  shape reaches past issue closure: a version in a tag and a version in a
+  manifest, a threshold in prose and a threshold in a rule file.
 
 ### The commands
 
@@ -769,19 +838,20 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 671 of 859, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 689 of 877, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Eight suites, three runners, and only one of them is `dotnet test`.** The
+**Nine suites, three runners, and only one of them is `dotnet test`.** The
 scaffold's tests are Python, the chart gate is bash over `helm template`, and
 the licence gate, the observability gate, the pipeline gate, the coverage
-reporter's suite and the canary's are Python again; none is in `Platform.slnx`,
-so a green solution says nothing about any of them. **The licence gate belongs
-in that count** — CI tests it and then runs it, which is the pattern every gate
-here follows — and leaving it out is what made this seven:
+reporter's suite, the canary's and the closure gate's are Python again; none is
+in `Platform.slnx`, so a green solution says nothing about any of them. **The
+licence gate belongs in that count** — CI tests it and then runs it, which is
+the pattern every gate here follows — and leaving it out is what made this
+seven:
 
 ```bash
 (cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
@@ -800,7 +870,17 @@ py -3.12 .github/pipeline-gate/pipeline_gate.py images
 py -3.12 -m unittest discover -s .github/coverage
 py -3.12 -m unittest discover -s deploy/canary
 py -3.12 deploy/canary/canary.py check
+
+py -3.12 -m unittest discover -s .github/closure-gate
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+    py -3.12 .github/closure-gate/closure_gate.py
 ```
+
+**The closure gate is the only one of the nine whose *runner* needs the
+network**, and the suite is deliberately not: the deciding takes JSON on stdin
+and the fetching is one `gh` call, which is `deploy/canary/canary.py`'s split
+one artefact over. So `unittest` runs anywhere, and the second line is the only
+part that needs a token and a PR to point at.
 
 **`pipeline_gate.py stages` is the one that cannot be run on its own**: it
 reads what the three test steps wrote, so it needs a `dotnet test` per stage
@@ -848,8 +928,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 671 of
-the 859 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 689 of
+the 877 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 188, needing the daemon exactly as
 before.
 
@@ -861,7 +941,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (653) and integration (188), which is the 671 above split at the
+(18), unit (671) and integration (188), which is the 689 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1007,9 +1087,9 @@ Run `/validate-blueprint` after any substantive edit.
   fine. Cite the section that actually states the claim; a reference to a
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
-  admonition syntax. Two forms are named and recurring — `**Trap — …**` (16)
-  for a mistake worth naming, and `**Decision — …**` (8), which always points
-  at the ADR that records it:
+  admonition syntax. Two forms are named and recurring — `**Trap — …**`
+  (17) for a mistake worth naming, and `**Decision — …**` (8), which always
+  points at the ADR that records it:
 
   ```markdown
   > **Trap — projecting everything by default.** Each projection is a second
@@ -1031,8 +1111,9 @@ Run `/validate-blueprint` after any substantive edit.
   inside one PR is not a number that recounting fixes.**
 
   What holds is the two named counts, and the branch that added a sixteenth
-  `Trap` is the first test of that. This paragraph used to say *what never
-  drifted is 15 and 8*; `Trap` has now moved once, and the lesson survives the
+  `Trap` was the first test of that; a seventeenth has since landed and was
+  reconciled the same way. This paragraph used to say *what never
+  drifted is 15 and 8*; `Trap` has now moved twice, and the lesson survives the
   movement rather than being refuted by it — those are the figures a reader
   checks, so the change was caught and reconciled inside the PR that caused it,
   where the residual nobody looks at is the one that rots unnoticed. Keep them
@@ -1663,6 +1744,18 @@ every argument at column 7). If you find one, it is a leftover — convert it.
 - **Commit messages** are semantic and present-tense: `docs:`, `feat(<scope>):`,
   `fix:`, `chore:` — the delivery plan in Appendix C already names each PR in
   this form, so use its title verbatim when you implement one.
+- **A `Closes #n` in a commit body fires on merge whatever the PR description
+  says, and a keyword in a table cell fires for nothing.** Those are two
+  different mechanisms and they have failed in opposite directions here. The
+  house body form keeps `| Closes | #88 (high) |` as the human-readable
+  summary and adds a bare `Closes #88` line below it, because a cell boundary
+  between the keyword and the reference means GitHub is handed no
+  keyword-reference pair at all — PR #112 linked nothing and three issues were
+  closed by hand. In the other direction a commit keyword is permanent where a
+  description is editable, so **the description is reconciled to the commits,
+  never the reverse**: PR #116 withdrew two closures from its body and closed
+  them anyway. `.github/closure-gate/` compares the three on every push and on
+  every description edit.
 - **Uncommitted work in the tree belongs in the PR being worked on.** When a
   change appears that nobody in the current task wrote — an edit made directly
   by the repo owner, most often — it is not stray churn to be reverted or left

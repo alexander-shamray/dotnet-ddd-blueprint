@@ -20,8 +20,8 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 
 ## The suites
 
-Eight of them, three runners, and `dotnet test` says nothing about the other
-seven:
+Nine of them, three runners, and `dotnet test` says nothing about the other
+eight:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -40,6 +40,7 @@ py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
 py -3.12 -m unittest discover -s .github/pipeline-gate   # PR-25's quality gates
 py -3.12 -m unittest discover -s .github/coverage        # the coverage merge
 py -3.12 -m unittest discover -s deploy/canary           # §15.5's rollout
+py -3.12 -m unittest discover -s .github/closure-gate    # what a PR closes
 ```
 
 **The licence gate is in that list because CI runs it on the same terms**, and
@@ -48,16 +49,26 @@ runs it — the pattern every gate here follows — so a suite that ships with t
 repository, runs in CI, and is invisible to `dotnet test` is one of these
 whatever directory it lives in.
 
-**Only the first is a §12 suite, and the other seven are here anyway**, because
+**Only the first is a §12 suite, and the other eight are here anyway**, because
 this file is written for someone with a checkout rather than for someone
 deciding what to test. The scaffold's tests exercise a developer tool; the
 chart gate renders `deploy/helm/` and asserts what comes out (§15.3); the
 observability gate pairs §13.6's alerts with §13.9's runbooks both ways and
-checks that every metric a loaded rule reads is one something publishes; and
+checks that every metric a loaded rule reads is one something publishes;
 PR-25's three cover the pipeline's own inventories, the coverage merge, and
-§15.5's rollout arithmetic. None
+§15.5's rollout arithmetic; and the closure gate compares what a pull request
+says it closes against what GitHub will actually close. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
+
+**The closure gate's suite is the whole of what runs here.** The gate itself
+needs a pull request and a `gh` token, so the live invocation belongs in CI
+and in `/pr` rather than in this block:
+
+```bash
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+    py -3.12 .github/closure-gate/closure_gate.py
+```
 
 Each has its own reference for what it asserts and — more usefully — what it
 does not: `deploy/helm/README.md`, since that gate reaches no cluster, and
@@ -123,10 +134,10 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Those are the runner's numbers, and `--list-tests` gives different ones.**
 > Discovery reports 82 for that project where execution reports 81, so a
 > partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 859 is summed from `dotnet test` output, and mixing the two is how
+> here — the 877 is summed from `dotnet test` output, and mixing the two is how
 > this callout first came to claim 72 and 82. Quote what ran.
 >
-> Across the solution the split is **671 and 188 of 859**, and the fast half
+> Across the solution the split is **689 and 188 of 877**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -162,7 +173,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **653** and **188**, summing to the 859 the
+on this repository they are **18**, **671** and **188**, summing to the 877 the
 whole suite runs — which is the arithmetic the callout below asks for.
 
 ```bash
@@ -193,8 +204,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 671 and 188 summing to
-> 859 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 689 and 188 summing to
+> 877 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

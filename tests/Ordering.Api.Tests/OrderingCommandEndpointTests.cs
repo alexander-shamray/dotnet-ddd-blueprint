@@ -257,10 +257,14 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
     [Fact]
     public async Task A_second_escalation_for_one_reason_is_absorbed_rather_than_duplicated()
     {
-        // The conditional insert's range lock (§9.6). A redelivery carries a
-        // new message id — the inbox does not suppress it — so the statement
-        // itself is what must absorb the second write rather than violating
-        // the primary key.
+        // The conditional insert's range lock (§9.6). Two escalations for one
+        // reason are two SENDS — the saga's Compensating exit sends one and a
+        // later transition can send another — so they are two messages with
+        // two ids and §9.5's inbox has nothing to match. **Not "a redelivery
+        // carries a new message id", which is what this comment used to say
+        // and is the opposite of §9.4's mechanism**: a republished outbox row
+        // carries the id the outbox persisted. The statement itself is what
+        // must absorb the second write rather than violating the primary key.
         Guid orderId = await fixture.SeedOrderAsync(Customer);
 
         await SendAsync(new FlagOrderForReview(orderId, ReviewReasons.StockNotReleased));

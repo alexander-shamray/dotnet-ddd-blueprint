@@ -3,8 +3,16 @@ using Common.Application;
 namespace Ordering.Application.Orders.FlagOrderForReview;
 
 /// <summary>
-/// Escalate an order to a human (§9.6) — the path for a wait with no automatic
-/// compensation.
+/// Escalate an order to a human (§9.6) — the path for work this workflow
+/// cannot finish itself.
+/// <para>
+/// <b>Not "a wait with no automatic compensation", which this said.</b> That
+/// describes two of <see cref="Common.Contracts.Ordering.V1.ReviewReasons"/>'s
+/// four codes. The other two are raised the moment an authorisation turns up
+/// against a workflow ending in cancellation — no wait, and nothing ran out.
+/// A caller taught the narrower contract would read a
+/// <c>payment_authorised_during_compensation</c> row as a stall.
+/// </para>
 /// </summary>
 /// <remarks>
 /// <see cref="Reason"/> stays a string where the other saga commands carry

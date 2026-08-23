@@ -104,20 +104,47 @@ public sealed class FlagOrderForReviewMapper
     : ICommandMessageMapper<FlagOrderForReview, FlagOrderForReviewCommand>
 {
     /// <summary>
-    /// The closed vocabulary of <see cref="ReviewReasons"/>, read off the class
-    /// rather than listed again. A second table is a second thing to forget
-    /// when a reason is added, which is the argument
-    /// <c>CancellationReasons</c> already makes one file over. The consequence
+    /// The closed vocabulary of <see cref="ReviewReasons"/>. The consequence
     /// of letting an unknown code through is sharper here than a bad value in
     /// a column: <c>Reason</c> is half the primary key of
     /// <c>ordering.OrderReviews</c>, so a typo does not overwrite an
     /// escalation — it silently opens a second one nobody resolves, and §13.6
     /// pages on any row older than an hour.
     /// </summary>
-    private static readonly FrozenSet<string> Known = FrozenSet.Create(
+    /// <remarks>
+    /// <b>This is a second copy of that class and it used to claim it was
+    /// not</b> — "read off the class rather than listed again" was the comment
+    /// here, over three names typed out by hand. The list stays, because a
+    /// validator whose vocabulary is derived by reflection accepts whatever
+    /// the class grows next and can never be observed refusing anything; what
+    /// closes the drift is a test whose subject is the agreement between the
+    /// two, which fails from either side. <c>CancellationReasons</c> one file
+    /// over parses rather than lists and is the shape this cannot take, since
+    /// a review reason maps to no domain type.
+    /// <para>
+    /// <b>Public because that test is its only other reader, and until this
+    /// change it could not be written.</b> A private set left the suite able
+    /// to assert one direction — every declared reason is accepted — which
+    /// passes unchanged while a stale code sits here that
+    /// <see cref="ReviewReasons"/> no longer declares. One access modifier is
+    /// a smaller commitment than an <c>InternalsVisibleTo</c> naming the
+    /// consumer, which is the trade <c>MetricsInitialiser</c> already makes.
+    /// </para>
+    /// </remarks>
+    // **Three of these four arrive in the same release that starts
+    // emitting them, and #131 is the ordering nobody has stated.** An old
+    // ordering-commands consumer handed the new FlagOrderForReview refuses
+    // the reason below, and ContractMappingException is on this endpoint's
+    // retry-ignore list on purpose — so it reaches the error queue on the
+    // FIRST attempt rather than after a minute of pointless backoff. Right
+    // for a contract that really is malformed; wrong for a well-formed one
+    // from a newer producer, which is the case that has no rule.
+    public static readonly FrozenSet<string> Known = FrozenSet.Create(
         StringComparer.Ordinal,
         ReviewReasons.NotDespatched,
-        ReviewReasons.StockNotReleased);
+        ReviewReasons.StockNotReleased,
+        ReviewReasons.PaymentAuthorisedDuringCompensation,
+        ReviewReasons.CancelledAfterConfirmation);
 
     public FlagOrderForReviewCommand Map(FlagOrderForReview message)
     {

@@ -57,7 +57,7 @@ subscriber silently executing your business commands.
 | Service | Owns | Publishes (events) | Consumes (events) | Accepts (commands) |
 |---|---|---|---|---|
 | **Catalog** | Product, Category, Price | `ProductPublished`, `PriceChanged`, `ProductDiscontinued` | `StockLevelChanged` | — |
-| **Ordering** | Order, OrderLine, the fulfilment saga | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled` | `OrderPlaced` (its own — the saga starts on it), `ProductPublished`, `PriceChanged`, `ProductDiscontinued`, `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | `CancelOrder`, `ConfirmOrder`, `MarkOrderShipped`, `FlagOrderForReview` |
+| **Ordering** | Order, OrderLine, the fulfilment saga | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled` | `OrderPlaced` (its own — the saga starts on it), `OrderCancelled` (its own — the saga stops on it), `ProductPublished`, `PriceChanged`, `ProductDiscontinued`, `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | `CancelOrder`, `ConfirmOrder`, `MarkOrderShipped`, `FlagOrderForReview` |
 | **Inventory** | StockItem, Reservation | `StockReserved`, `StockReservationFailed`, `StockReleased`, `StockLevelChanged` | `OrderCancelled`, `ShipmentDispatched` | `ReserveStock`, `ReleaseStock` |
 | **Payments** | PaymentIntent, Refund | `PaymentAuthorised`, `PaymentDeclined`, `PaymentRefunded` | `OrderCancelled` | `AuthorisePayment` |
 | **Shipping** | Shipment, TrackingEvent | `ShipmentDispatched`, `ShipmentDelivered` | `OrderConfirmed` | — |
@@ -85,6 +85,15 @@ The command column is entirely the saga's doing: Ordering's `OrderFulfilmentSaga
 is the only thing that sends commands, and each one lands on the queue of the
 service that owns the decision. `CancelOrder` and `ConfirmOrder` route back to
 Ordering itself — the saga coordinates, the aggregate decides (§9.6).
+
+**Ordering subscribes to two of its own events, and both entries are the saga
+rather than a duplication.** `OrderPlaced` starts the workflow. `OrderCancelled`
+stops it, and it is in this cell because the *other* origin of a cancellation is
+not a command at all: [§11.4](11-identity-authorization.md)'s customer endpoint
+cancels the aggregate directly, which the saga can only learn about by
+subscribing to the fact the aggregate publishes. Its absence here was the same
+gap as its absence from the state machine — a workflow that went on reserving
+stock and authorising payment for an order the customer had cancelled (§9.6).
 
 Note the shapes this produces. **Shipping** and **Notifications** expose no
 public write API at all — they are pure event consumers. **Notifications** is

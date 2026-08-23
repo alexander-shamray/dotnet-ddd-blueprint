@@ -6,7 +6,7 @@ using Common.Contracts.Shipping.V1;
 namespace Ordering.Application.Tests;
 
 /// <summary>
-/// The seven events §9.6's saga reacts to, built for a test.
+/// The eight events §9.6's saga reacts to, built for a test.
 /// </summary>
 /// <remarks>
 /// <b>A builder rather than object initialisers at each call site, and §12.5
@@ -85,6 +85,36 @@ internal static class SagaContracts
         CorrelationId = orderId,
         OccurredAt = Occurred,
         OrderId = orderId
+    };
+
+    /// <summary>
+    /// The eighth, and the second of the two Ordering publishes itself —
+    /// <c>OrderPlaced</c> is the other (§3.2).
+    /// </summary>
+    /// <remarks>
+    /// The reason is a parameter because both origins reach the saga through
+    /// this one type: §11.4's endpoint, and the code the saga itself sent on
+    /// <c>CancelOrder</c>, echoed back by the aggregate it cancelled.
+    /// <para>
+    /// <b>The code does not say which origin it came from, and an earlier
+    /// revision of these remarks taught that it did.</b> It paired
+    /// <c>customer_request</c> with the endpoint and everything else with the
+    /// saga; <c>CancellationReasons.TryParse</c> accepts all five
+    /// <see cref="CancelReasons"/> codes, so the endpoint may send any of
+    /// them, and the saga sends whichever its own transition recorded. A
+    /// double that teaches a discriminator the real contract does not have is
+    /// the failure PR-26 named — so this is stated rather than left to be
+    /// inferred from the parameter.
+    /// </para>
+    /// </remarks>
+    internal static OrderCancelled OrderCancelled(Guid orderId, Guid customerId, string reason) => new()
+    {
+        MessageId = Guid.CreateVersion7(),
+        CorrelationId = orderId,
+        OccurredAt = Occurred,
+        OrderId = orderId,
+        CustomerId = customerId,
+        Reason = reason
     };
 
     internal static ShipmentDispatched ShipmentDispatched(Guid orderId, string tracking) => new()

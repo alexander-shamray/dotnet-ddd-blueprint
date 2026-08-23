@@ -1884,6 +1884,34 @@ public async Task Commands_are_sent_and_events_are_published()
 > never did — and removing it took the suite from twelve seconds to two, which
 > is the measurement that priced the habit.
 
+> **`Consumed` says a message arrived and never what happened to it.** The
+> harness records the delivery whether the pipeline returned or threw, so
+> "nothing changed" — no transition, no command sent — is exactly what a
+> saga event **faulting onto the error queue** looks like from every assertion
+> on this page. That is not a hypothetical: a state machine's default answer
+> to an event no state handles is `UnhandledEventException`
+> ([§9.6](09-messaging.md)), and the suite that proved a stale timeout
+> "changes nothing" was green against both outcomes for as long as it existed.
+> A test whose subject is absorption has to read
+> `harness.Consumed.Select<T>(spent).Select(m => m.Exception)` and assert every
+> element is **null** — and on the cancelled token, for the reason above, or
+> the read spends the shared bound and every assertion after it answers
+> falsely.
+>
+> **Null, not empty, and the difference is the whole test.** `Consumed` records
+> one entry per delivery whatever the outcome, and `Exception` is null on a
+> clean one — so the sequence has an element per absorbed message, and an
+> emptiness assertion fails on exactly the result the test exists to prove.
+> `ShouldAllBe(e => e == null)` is what the suite runs.
+>
+> **This paragraph carried a PR attribution for that correction and no longer
+> does**, because none was supportable: it credited a PR that is not the saga
+> suite's, and the repair a reviewer proposed — the saga suite's own
+> number — is not supportable either. The callout is new here, and no
+> committed revision of that suite ever asserted emptiness. A claim about when
+> a repo's prose was wrong is checkable against its history, so it is worth
+> either checking or dropping; the fact above stands without it.
+
 > **A missing scheduler fails this suite in the costume the traps above
 > describe, which is why the registration is spelled out rather than trimmed.**
 > The sample above carried neither scheduler line until PR-21 compiled it, and

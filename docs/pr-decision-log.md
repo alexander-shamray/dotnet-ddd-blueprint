@@ -960,10 +960,45 @@ after.
   - The endpoint separation §9.6 argues for `ordering-stock-events` survives on
     a different reason — retry policy, not the inbox — and both chapters now
     say so.
+  - **The half that survived was true and incomplete, and a later branch
+    measured the difference.** "The transition is simply not applicable" is a
+    statement about the state machine; MassTransit's way of *saying* it is
+    `UnhandledEventException`, so a redelivered non-initial event that reached
+    the machine was retried six times and filed in the error queue this entry's
+    own alert argument depends on staying empty. **Not every redelivered
+    non-initial event**: §9.5's inbox suppresses the completed one, since
+    `OutboxMessage.Stage` persists the integration event's own message id and
+    `OutboxDispatcher` restores it onto every publish. The delivery that
+    reaches an advanced instance is the one whose inbox row was never written —
+    `InboxFilter` adds its row after the inner pipe returns, so the window is a
+    crash between the saga state committing and that second `SaveChangesAsync`.
+    **An `OnUnhandledEvent(x => x.Ignore())` catch-all was written for that
+    window, defended over several review rounds, and then removed — which is
+    the entry's real subject.** `UseInMemoryOutbox` flushes after the inner
+    pipeline returns, so the window contains the moment the instance is
+    committed and its commands are not yet sent. Three arrivals reach the
+    callback and it cannot tell them apart: a post-flush duplicate, which
+    wants quiet; a pre-flush crash that lost the instance's commands, where
+    quiet is permanent loss; and a misroute, which is a configuration fault.
+    A log line was tried in between and is not a signal — §13.6 pages on the
+    error queue, which is precisely what ignoring keeps the event out of.
+    **So the machine keeps MassTransit's default and the enumeration does the
+    work**: every legitimate arrival has its own `Ignore`, and a structural
+    test partitions the declared next-events so a new one cannot be missed.
+    #128 carries the durable fix (`UseBusOutbox`), which makes the pre-flush
+    case stop existing and a catch-all arguable again on evidence.
+    Reproduced first: a redelivered `StockReserved`
+    in `AwaitingPayment` came back as `NotAcceptedStateMachineException`. A
+    stale **timeout** never did — a scheduled message whose token id no longer
+    matches the instance is discarded before the machine is asked, which is why
+    ADR-021's uncancellable timeouts were harmless throughout and this was not.
 
-**Five things are owed and are named rather than built.** Each is a §9.6, §5.4
-or §9.8 decision that PR-21 made *reachable* rather than one it introduced, and
-naming them is the alternative to a silent gap.
+**Five things were owed and are named rather than built — four still are.**
+Each is a §9.6, §5.4 or §9.8 decision that PR-21 made *reachable* rather than
+one it introduced, and naming them is the alternative to a silent gap. The
+second is marked Closed in place rather than deleted: an owed item that turns
+out to have been taken is part of the record, and removing it would leave the
+next reader wondering whether it was ever there.
 
 - **A stock timeout strands the reservation.** §9.6's `StockTimeout` branch
   cancels the order and finalises **without releasing stock**, so a reservation
@@ -988,6 +1023,35 @@ naming them is the alternative to a silent gap.
   refund contract to send. A partial fix covering `AwaitingStock` and
   `AwaitingPayment` is possible and was rejected here as a state-machine change
   §9.6 owns.
+  - **Closed, and §9.6 took the decision this entry said it owned.** The
+    machine declares `Event<OrderCancelled>` and has a branch in every state it
+    can reach one in: `AwaitingStock` and `AwaitingPayment` compensate on the
+    decline branch's own terms, recording **the event's own reason** rather
+    than a literal — both lines said `customer_request` until a later round
+    established that §11.4 accepts all five `CancelReasons` codes, so the
+    caller's reason was overwritten and `Compensating`'s exit sent
+    `CancelOrder` under a reason nobody had chosen; `Compensating`
+    `Ignore`s it, because a cancellation is already the outcome there. **The
+    refund gap is stated rather than closed** — `Confirmed` escalates and
+    finalises, so the money reaches a person instead of a contract that does
+    not exist. **Two new `ReviewReasons` codes rather than the one this entry
+    first recorded**: a review found that `Confirmed` and `Compensating` raise
+    the same escalation for different procedures, and the row persists
+    `(OrderId, Reason, RaisedAt)` with the saga usually finalised by the time
+    anyone reads it — so `cancelled_after_confirmation` and
+    `payment_authorised_during_compensation` are what let the runbook select
+    without a state
+    that is gone. That
+    also removes the false `not_despatched` this entry predicted — **by
+    `Finalize()`, not by the `Unschedule` beside it**, which is the credit
+    this entry gave until a review checked the mechanism. Deleting the
+    instance is what leaves the timeout correlating to nothing when it
+    arrives; [ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)'s
+    scheduler returns `Task.CompletedTask` from both `CancelScheduledSend`
+    overloads, so **every `Unschedule` in this machine is a no-op** and the
+    call removes nothing. The saga and §9.6 were corrected on this branch
+    and this entry was not, which is the fix landing in the code and not in
+    the record it came from.
 - **The payment reference is accepted and goes nowhere.** `ConfirmOrder`
   carries it, `Order.ConfirmPayment` puts it on `OrderConfirmedDomainEvent` and
   stores no column, and `V1.OrderConfirmed` has no field for it — so it reaches
