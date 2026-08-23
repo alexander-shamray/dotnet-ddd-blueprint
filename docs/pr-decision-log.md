@@ -96,9 +96,11 @@ happened. A run that invoked the review without reserving spent a check that
 left no record, a resumed run read a lower count, and the PR ran past twelve
 against a paid API.
 
-Invocation and accounting are one operation now: `grok-review.sh` takes the PR
-number, the slot and the mode, validates all three against the ledger's own
-vocabulary, and posts the reservation itself.
+Invocation and accounting are one operation now: `grok-review.sh` takes the slot
+and the mode, validates both against the ledger's own vocabulary, resolves the
+pull request from the branch it is about to clone, and posts the reservation
+itself. **It took the PR number as an argument for exactly one review round**,
+which is the finding recorded two paragraphs down.
 
 **The placement of that write is the accounting rule, not an implementation
 detail.** It sits immediately before the review's own `docker run`, so a slot is
@@ -294,7 +296,7 @@ free parameter.
 ### The suite that should have existed first
 
 **Five judgements the whole loop rests on had no test.** `test_grok_helpers.py`
-is 45 cases, and each of the five defects is reproduced as one that fails
+is 47 cases, and each of the five defects is reproduced as one that fails
 against the old behaviour: a gate only ever observed green is one nobody has
 established is looking at anything.
 

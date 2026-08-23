@@ -67,11 +67,16 @@ which is exactly why a person needs to be told they exist.
 `gh` its ledger cases call is a stub on `PATH`. It is the one suite whose
 subject is agent tooling rather than the platform, and it is here on the licence
 gate's terms: it ships with the repository, CI runs it, and `dotnet test` is
-blind to it. Every case is a negative, because each judgement it covers — what
-counts as a usage limit, what counts as a review that finished, whether the
-check ledger can publish an answer on its own error path, and whether the
-sweeps' worktree guard is the direct-child check it claims — shipped wrong at
-least once.
+blind to it. **Each of the five judgements it covers shipped wrong at least
+once, and each is reproduced as a case that fails against the old behaviour** —
+what counts as a usage limit, what counts as a review that finished, whether the
+check ledger can publish an answer on its own error path, whether a slot is
+spent if and only if the review's model call was launched, and whether the
+sweeps' worktree guard is the direct-child check it claims. The regression
+negatives are paired with positive controls, and those are not decoration: a
+negative that passes because the pattern matches *nothing* is indistinguishable
+from one that works, so the accepted values and the word boundaries carry
+controls of their own.
 
 **The closure gate's suite is the whole of what runs here.** The gate itself
 needs a pull request and a `gh` token, so the live invocation belongs in CI
