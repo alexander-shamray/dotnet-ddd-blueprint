@@ -30,6 +30,19 @@ The second is the one no amount of care in the description reaches, because
 `gh pr view --json closingIssuesReferences` reports the body only — so the
 discrepancy is invisible from the one place a reviewer would look.
 
+**One direction is deliberately not compared, and the first line above reads
+as though it were.** An issue the description closes and no commit body
+mentions is the ordinary case, not a disagreement: the bare `Closes #n` line
+under the table is what fires, and a commit is not obliged to repeat it.
+Adding the symmetric `linked - from_commits` check would make a commit
+keyword *mandatory* — a rule nothing in this repository states, and one that
+would fail a correct pull request. What has to agree is what the merge
+**does** — `closingIssuesReferences` together with the commit keywords — and
+what the pull request **says** it does, in the table and in the description.
+A silent commit contradicts neither. The `NoCommitRepeatsIt` case in
+`test_closure_gate.py` pins it, so the fourth comparison cannot be added by
+someone reading "must agree" as a claim about all three pairs.
+
 **Half of this comparison is GitHub's own parse and half is the regex below,
 and that asymmetry decides the failure mode.** A regex that matches too much
 makes the gate disagree with GitHub and fail loudly, which is recoverable. A

@@ -198,11 +198,18 @@ earlier version had only the `Confirmed` procedure, which sent an on-call
 looking for a despatch that does not exist; keying it on a vanished state was
 the same defect one step less obvious.
 
-1. **Find out whether Payments already refunded it, then refund only if it
-   did not.** Look for a `PaymentRefunded` for this order, or read the
-   provider's own console. This is the same act on both codes and neither
-   answer is the expected one — see above — so the check is the work, not a
-   formality before the refund.
+1. **Find out whether Payments already refunded it. This decides which
+   branch you are in, and never on its own that you should pay.** Look for
+   a `PaymentRefunded` for this order, or read the provider's own console.
+   This is the same act on both codes and neither answer is the expected
+   one — see above — so the check is the work, not a formality before the
+   refund.
+
+   **"Then refund only if it did not" is what this step said**, and it
+   contradicted the two paragraphs directly below it: finding no refund is
+   the start of the saga check, not a licence to pay. Every refund
+   instruction on this page now sits after the saga's state is known, for
+   the reason those paragraphs give.
 
    **A cancellation may still be in flight**, which is the case worth
    naming: on `payment_authorised_during_compensation` reached from a

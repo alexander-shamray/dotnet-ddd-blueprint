@@ -20,8 +20,8 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 
 ## The suites
 
-Eight of them, three runners, and `dotnet test` says nothing about the other
-seven:
+Nine of them, three runners, and `dotnet test` says nothing about the other
+eight:
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/

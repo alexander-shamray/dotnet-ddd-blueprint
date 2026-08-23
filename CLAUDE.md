@@ -473,8 +473,10 @@ summed a local `dotnet test Platform.slnx` the same way, which is the same
 arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
-there are eight suites now — see *The commands* below, which is where the
-current set lives, and which is the only place a count of them belongs. That
+there are several more now — see *The commands* below, which is where the
+current set lives, and which is the only place a count of them belongs. This
+sentence used to give the figure itself, two sections above the one that
+owns it, and the two disagreed the moment a ninth suite landed. That first
 one: `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a
 `scaffold` job for them beside `licence-gate`.
 

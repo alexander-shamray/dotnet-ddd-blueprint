@@ -199,6 +199,21 @@ class Directions(unittest.TestCase):
             linked=(88,),
         )), [])
 
+    def test_a_description_closure_no_commit_repeats_passes(self):
+        """NoCommitRepeatsIt — the fourth comparison must not be added.
+
+        An issue the description closes and no commit mentions is the
+        ordinary case: the bare `Closes #n` line under the table is what
+        fires. A `linked - from_commits` check would make a commit keyword
+        mandatory and fail this, which is why the docstring says the
+        omission is the design rather than a gap.
+        """
+        self.assertEqual(check(payload(
+            body="| | |\n|---|---|\n| Closes | #77 |\n\nCloses #77\n",
+            commit_messages=("fix: a", "docs: b"),
+            linked=(77,),
+        )), [])
+
     def test_a_pull_request_closing_nothing_passes(self):
         self.assertEqual(check(payload(
             body="Some prose that closes the naive spelling and nothing more.",
