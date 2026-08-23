@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -263,11 +263,16 @@ triage answer, not a finding — and `created_at` no earlier than the candidate'
 exactly its own.
 
 **Each loop's check count lives on the PR itself, where any resumed run can
-read it.** Step 5's checks are ledgered as PR comments — a reservation
-posted before each `grok-review.sh` invocation, released only by an exit-12
-skip (step 5 has both forms) — and a resumed run recovers the count as the
+read it.** Step 5's checks are ledgered as PR comments — a reservation posted
+by `grok-review.sh` itself, immediately before the review's model call, so
+that spending a slot and running a review are one operation rather than two an
+ordering mistake can separate — and a resumed run recovers the count as the
 highest N reserved and not released; an unreleased reservation counts as
-spent, and no ledger comment means a fresh PR with nothing spent. The ledger
+spent, and no ledger comment means a fresh PR with nothing spent. **A release
+is a historical row rather than a step 5 outcome**: because the reservation is
+posted after every skip path, an exit-12 skip has no slot to give back, and
+`count` folds a released row only out of a PR ledgered before that was true.
+The ledger
 carries convergence as well as spend, because spend alone cannot tell a loop
 that converged on its last allowed check from one the ceiling cut off. The
 `converged` marker settles only that question — the report at the ceiling —
@@ -586,8 +591,10 @@ same argument as never calling a branch clean because asking failed.
    >
    > Every comparable case in this repository is fixed by a helper that spells
    > its own flags, and the two that exist (`git-worktree-detach.sh`,
-   > `git-worktree-drop.sh`) shape-check their argument against
-   > `secsweep-??????` and therefore refuse a PR worktree by design. Two more
+   > `git-worktree-drop.sh`) bind the path to `secsweep-` plus six characters
+   > directly under the temp root, and therefore refuse a PR worktree by
+   > design — the detach helper by *creating* the only path it hands to git,
+   > which is stronger than checking one a caller supplied. Two more
    > are owed here; until someone with the `Edit(.claude/scripts/**)` deny
    > lifted writes them, both rules are carried by this file, like the `[`
    > placement rule in `CLAUDE.md`.
@@ -704,8 +711,27 @@ same argument as never calling a branch clean because asking failed.
       the point, and a review run by the author's own model is not one:
 
       ```bash
-      bash .claude/scripts/grok-review.sh
+      bash .claude/scripts/grok-review.sh <pr> <N> <full|recheck>
       ```
+
+      **The helper spends the ledger slot itself, and that is why it now takes
+      three arguments.** This block used to read `bash
+      .claude/scripts/grok-review.sh` with the reservation posted beside it as
+      a separate command, and nothing made the pair happen in that order or
+      happen at all: a run that invoked the review without reserving spent a
+      check that left no record, a resumed run read a lower count, and the PR
+      ran past twelve against a paid API. A bound whose two halves are two
+      commands is a bound any ordering mistake lifts. So do not post a
+      reservation here — `.claude/settings.json` denies the verb — and pass the
+      PR number and the slot instead. The helper validates all three against
+      the ledger's own vocabulary and refuses anything else.
+
+      **Exit 13 is the reservation refused**, and it means stop the Grok loop
+      rather than take the next slot. Two causes reach it and the response is
+      the same for both: a lost election — a concurrent `/ship` is mid-check on
+      this PR, and two Grok runs share one root `suggestions.md` — or a ledger
+      that could not be read or written, which stops the chain like any other
+      failed ledger operation.
 
       The helper runs Grok **in a container** (`.claude/sandbox/Dockerfile`)
       over a **throwaway clone**: the reviewer's repository-wide grant lands
@@ -829,38 +855,62 @@ same argument as never calling a branch clean because asking failed.
      count the same — and this loop's ceiling is **no more than twelve of them
      against one PR**, carried across resumed `/ship` runs rather than reset
      each time the chain re-enters. A skip on limits (exit 12) is not a check
-     and does not count; a review that ran and reported does. The ledger
-     writes **before** the model call, not after:
+     and does not count; a review that ran and reported does.
 
-     ```bash
-     bash .claude/scripts/grok-ledger.sh <n> reserve <N> <full|recheck>
-     ```
+     **The reservation is `grok-review.sh`'s, not yours, and that is the
+     correction rather than a detail of where a line moved.** This paragraph
+     used to specify the discipline as prose — write the ledger before the
+     model call, then invoke the review helper — over two separately granted
+     commands, and neither half was enforced: `grok-review.sh` never touched
+     the ledger, and `release` was accepted for any slot at any time without
+     any skip having occurred. So a run that invoked the review without
+     reserving spent a check that left no record, and an agent that misread a
+     failed round as a skip could hand spent budget back. **A stated bound that
+     any ordering mistake lifts is not a bound.** Invocation and accounting are
+     one operation now: the helper posts the reservation itself, and
+     `.claude/settings.json` denies the `reserve` and `release` spellings to
+     this session, leaving `count`, `status` and `converge` as the only ledger
+     verbs you invoke.
 
-     then invoke the review helper. A reservation is an election, not just a
-     write: two resumed runs can read the same count and claim the same slot,
-     so the helper settles it after posting — the earliest comment for the
-     slot wins, and a losing claim exits 4 having spent nothing. Losing
-     means a concurrent `/ship` is mid-check on this PR, so stop the loop
-     and say so — never reserve the next slot instead: two Grok runs share
-     one root `suggestions.md`, and the later finisher would overwrite the
-     earlier's findings or pass off its rival's clean pass as its own
-     convergence. The two orders fail in
-     opposite directions and only one is safe — written after, an
-     interrupted run has spent the check and left no record, and the
-     resumed run spends a
-     thirteenth; written before, the worst case is a reservation for a check
-     that never ran, which wastes one of the twelve and never exceeds it.
-     Exit 12 is the one outcome that posts a second line —
-     `grok-ledger.sh <n> release <N>` — because a skip is not a check; every
-     other outcome lets the reservation stand as the record. A resumed run
-     reads the count with `grok-ledger.sh <n> count`, which accepts only the
-     ledger's line shapes from write-verified authors and counts an
-     unreleased reservation as spent. The ledger goes through its own fixed
+     A reservation is an election, not just a write: two resumed runs can read
+     the same count and claim the same slot, so the ledger settles it after
+     posting — the earliest comment for the slot wins, and a losing claim
+     spends nothing. That arrives here as the helper's **exit 13**, and it
+     means a concurrent `/ship` is mid-check on this PR, so stop the loop and
+     say so — never take the next slot instead: two Grok runs share one root
+     `suggestions.md`, and the later finisher would overwrite the earlier's
+     findings or pass off its rival's clean pass as its own convergence.
+
+     **The two orders fail in opposite directions and only one is safe** —
+     written after, an interrupted run has spent the check and left no record,
+     and the resumed run spends a thirteenth; written before, the worst case is
+     a reservation for a check that never ran, which wastes one of the twelve
+     and never exceeds it. The helper writes it immediately before the review's
+     own `docker run`, which is what makes the accounting exact rather than
+     merely conservative: **a slot is spent if and only if the review's model
+     call was launched.** Everything that can refuse earlier — a dirty tree, no
+     daemon, a missing credential, and all three usage-limit skips — spends
+     nothing. So **exit 12 no longer posts a release**, because it has no
+     reservation to give one back for; the verb survives for a human
+     reconciling a slot spent wrongly, and for `count`, which must still fold a
+     released row out of a PR's existing history.
+
+     A resumed run reads the count with `grok-ledger.sh <n> count`, which
+     accepts only the ledger's line shapes from write-verified authors and
+     counts an unreleased reservation as spent. **That read had its own
+     fail-open and no longer has it**: the trust check's `exit 3` fired inside
+     a subshell, so the `awk` on the other side of the pipe saw EOF, ran its
+     END block and printed `0` — "nothing spent", which re-arms the very cap
+     the helper enforces — and only then did the non-zero status arrive. The
+     read is buffered now and publishes nothing on its error path, but the
+     rule for the caller is unchanged and is the one that would have caught it
+     anyway: **a ledger read or write that fails stops the chain, and its
+     stdout is not an answer.** The ledger goes through its own fixed
      helper for the same reason the Copilot request does: a
      `Bash(gh pr comment:*)` grant would also license `--edit-last`,
      `--delete-last` and `--repo` —
      editing history and writing across repositories — where the helper can
-     post exactly the two lines above to a PR of this repository, and is
+     post exactly the lines above to a PR of this repository, and is
      edit-denied to the session that invokes it. Keep the running count in
      the report as well — the report line is for the reader, the ledger is
      for the machine — and when the twelfth is spent, stop and say the PR

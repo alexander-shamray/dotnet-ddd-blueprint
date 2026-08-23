@@ -18,7 +18,78 @@
 # than hidden. Confining it to api.x.ai needs an allow-list proxy on an internal
 # network; Docker alone offers "all" or "none", and "none" stops the review too.
 # The credential half is what the finding named, and it is what this closes.
+#
+# This helper also OWNS the ledger slot it spends. ship.md used to specify the
+# accounting as prose — "reserve, then invoke the review helper" — over two
+# separately granted commands, so a run that skipped the first spent a check
+# that left no record, a resumed run read a lower count, and the PR ran past
+# twelve against a paid API. A bound whose two halves are two commands is a
+# bound any ordering mistake lifts. Invocation and accounting are one operation
+# now: this script takes the PR and the slot, posts the reservation itself
+# immediately before the model call it accounts for, and .claude/settings.json
+# denies the `reserve` and `release` spellings to the session that invokes it.
 set -euo pipefail
+
+# The PR this review is a check against, the slot it spends, and which kind of
+# check it is. Validated to the ledger's own vocabulary rather than passed
+# through, because a slot outside 1..12 is a claim about a cap that does not
+# exist and `gh` would be pointed at whatever the third argument happened to be.
+[ "$#" -eq 3 ] ||
+  { echo "usage: grok-review.sh <pr-number> <slot 1-12> <full|recheck>" >&2; exit 2; }
+pr="$1"
+slot="$2"
+mode="$3"
+[[ "$pr" =~ ^[0-9]+$ ]] ||
+  { echo "pr-number must be digits: $pr" >&2; exit 2; }
+[[ "$slot" =~ ^([1-9]|1[0-2])$ ]] ||
+  { echo "slot must be 1..12 — the ledger's whole vocabulary: $slot" >&2; exit 2; }
+case "$mode" in
+  full|recheck) ;;
+  *) echo "mode must be full or recheck: $mode" >&2; exit 2 ;;
+esac
+
+# Two patterns, declared together and away from the code that applies them, so
+# the suite beside this file has ONE subject to read. That is the SOURCE_INPUTS
+# discipline the deploy/** gates arrived at: a value a test asserts about has to
+# be declared once, where the test can find it, or the test ends up asserting
+# about its own second copy. test_grok_helpers.py extracts both by name and
+# exercises them with real payloads.
+
+# What a usage limit looks like, and every spelling here was paid for. The
+# preflight below exists to SKIP such a round rather than fail it, and it missed
+# an exhausted prepaid balance entirely: `API error (status 402 Payment
+# Required): Grok Build usage balance exhausted` is not `429`, not `quota`, and
+# not `(no|any) credits`, so PR #117 round 6 took the failure path and burned a
+# ledger slot on a review that never started.
+#
+# `\b402\b` rather than a bare `402`, and the same for 429. This pattern is
+# matched against the WHOLE text of a probe run, so a bare number would also
+# match a token count or a request id — and a false positive here is the
+# expensive direction: it reports a working reviewer as out of limits and skips
+# every round silently. The word boundaries are GNU extensions, which both this
+# host's MSYS grep and the Linux runner's provide, and the suite pins them with
+# `47402` and `4021` as negative cases.
+limit_re='rate.?limit|\b402\b|\b429\b|quota|usage limit|usage balance|balance exhausted|too many requests|(no|any) credits'
+
+# What a FINISHED turn looks like, and this one is an allow-list because it was
+# a deny-list of three and that is the same fail-open one level on. It used to
+# refuse `cancelled|refusal|error*` and pass everything else — but grok's
+# documented vocabulary for this field is `end_turn`, `max_tokens`,
+# `max_turn_requests`, `refusal` and `cancelled`, so a reviewer that exhausted
+# its output budget or its turn budget exited 0, wrote JSON, left no
+# suggestions.md, and had that absence read as a clean verdict. No attacker is
+# needed: a long branch is the ordinary way to reach it, and a long branch is
+# when review matters most. One that wants it can also buy it, by making the
+# diff large enough to blow the reviewer's budget — and under the two-clean-
+# passes rule two such rounds end the loop.
+#
+# So the only accepted terminal state is `end_turn`, and every other value —
+# including the field being absent — is "did not run". Pinned the way the
+# client version is pinned in .claude/sandbox/Dockerfile: a grok bump must
+# re-verify this string. Verified against grok 1.0.5's `--output-format json`
+# and its own headless-mode documentation.
+stop_any_re='"stopReason"[[:space:]]*:[[:space:]]*"[^"]*"'
+stop_ok_re='^"stopReason"[[:space:]]*:[[:space:]]*"end_turn"$'
 
 # Docker on Windows wants a Windows path in --volume; elsewhere the path is
 # already right. cygpath exists only under MSYS/Git Bash, which is the tell.
@@ -152,7 +223,6 @@ image=$(docker build --quiet "${build_args[@]}" \
 # docker's argv, where every `ps` on this machine can read it for the life of
 # the container; the first forwards the value this process already holds.
 mounts=()
-limit_re='rate.?limit|429|quota|usage limit|too many requests|(no|any) credits'
 key_probe=""
 if [ -n "${XAI_API_KEY:-}" ] &&
    key_probe=$(docker run --rm --env XAI_API_KEY "$image" \
@@ -237,6 +307,32 @@ if [ "$probe_rc" -ne 0 ] && [ -n "${XAI_API_KEY:-}" ] &&
   exit 12
 fi
 
+# The reservation, and its POSITION is the accounting rule rather than an
+# implementation detail: a slot is spent if and only if the review's own model
+# call was launched. Everything that can refuse before this line — a dirty
+# tree, no daemon, a missing credential, a bad suggestions.md shape, and all
+# three of the usage-limit skips above — spends nothing, which is why exit 12
+# has no release to post and why the release verb has no caller left in this
+# repository. ship.md's argument for writing before the call is interruption
+# safety, and the window this leaves is the microseconds between posting and
+# `docker run`; written after, an interrupted run spends a check and leaves no
+# record, and the resumed run spends a thirteenth.
+#
+# The write is also an election. Two resumed /ship runs can read the same count
+# and claim the same slot, and the ledger settles it after posting: a loser
+# exits 4, which arrives here as exit 13 and means a concurrent run is mid-check
+# on this PR. Stop the loop rather than take the next slot — two Grok runs share
+# one root suggestions.md, and the later finisher would overwrite the earlier's
+# findings or pass off its rival's clean pass as its own convergence.
+#
+# One exit code for both a lost election and an unreachable ledger, because the
+# caller does the same thing with each: do not count this round, and stop.
+ledger="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/grok-ledger.sh"
+ledger_rc=0
+bash "$ledger" "$pr" reserve "$slot" "$mode" >&2 || ledger_rc=$?
+[ "$ledger_rc" -eq 0 ] ||
+  { echo "could not reserve check $slot/12 on PR $pr (ledger exit $ledger_rc); the review did not run" >&2; exit 13; }
+
 set +e
 docker run --rm \
   --volume "$(host_path "$work/repo"):/review:Z" \
@@ -255,9 +351,21 @@ set -e
   { echo "grok exited $grok_status; the review did not run" >&2; exit 4; }
 [ -s "$result" ] ||
   { echo "grok produced no output; the review did not run" >&2; exit 5; }
-if grep -qE '"stopReason"[[:space:]]*:[[:space:]]*"(cancelled|refusal|error[^"]*)"' "$result"; then
-  grep -oE '"(stopReason|cancellationCategory)"[[:space:]]*:[[:space:]]*"[^"]*"' "$result" >&2 || true
-  echo "grok stopped early; the review did not run and suggestions.md is left as it was" >&2
+# The allow-list declared at the head of this file, applied. EXACTLY one
+# stopReason, and it must be end_turn.
+#
+# Exactly one rather than "the last one": `--output-format json` emits a single
+# object carrying a single such field, so a second occurrence means the output
+# shape changed under the pin and the pin has to be re-read — which is a build
+# this loop should stop on, not one it should guess at. A mention inside the
+# review's own prose cannot be miscounted, because JSON escapes the quotes and
+# `\"stopReason\"` never presents the `"` this pattern needs.
+stop_reasons=$(grep -oE "$stop_any_re" "$result" || true)
+stop_count=$(grep -c . <<<"$stop_reasons" || true)
+if [ "$stop_count" -ne 1 ] || ! grep -qE "$stop_ok_re" <<<"$stop_reasons"; then
+  [ -z "$stop_reasons" ] || printf '%s\n' "$stop_reasons" >&2
+  grep -oE '"cancellationCategory"[[:space:]]*:[[:space:]]*"[^"]*"' "$result" >&2 || true
+  echo "grok did not finish its turn — expected exactly one stopReason of \"end_turn\", saw $stop_count; the review did not run and suggestions.md is left as it was" >&2
   exit 6
 fi
 cat "$result"
