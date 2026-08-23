@@ -48,9 +48,22 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
         string Currency,
         DateTimeOffset PublishedAt);
 
+    /// <summary>
+    /// A fresh <c>CommandId</c> per call, and it is load-bearing rather than
+    /// incidental since §8.5's behaviour took the fourth pipeline seat: several
+    /// tests here publish twice, and one reused value would have the second
+    /// replay the first's id instead of running.
+    /// </summary>
     private Task<HttpResponseMessage> PublishAsync(string name, decimal amount = 10m) =>
         PostAsync(
-            new { Name = name, ThumbnailUrl = (string?)null, Amount = amount, Currency = "EUR" },
+            new
+            {
+                CommandId = Guid.CreateVersion7(),
+                Name = name,
+                ThumbnailUrl = (string?)null,
+                Amount = amount,
+                Currency = "EUR"
+            },
             CatalogPermissions.Write);
 
     /// <summary>
@@ -72,6 +85,78 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
             request.Headers.Add(TestAuthHandler.UserHeader, Guid.CreateVersion7().ToString());
             request.Headers.Add(TestAuthHandler.PermissionsHeader, permissions);
         }
+
+        return _client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task The_same_command_id_from_the_same_caller_replays_instead_of_publishing_twice()
+    {
+        // §8.5 end to end, and it is the only test in the solution that crosses
+        // the whole stack: HTTP → the registered pipeline → RedisIdempotencyStore
+        // on a real container → SQL. Everything else covers a piece. The
+        // behaviour's own suite replays from an in-memory double, and the store's
+        // suite reads payloads back through the store — neither can see the DI
+        // wiring, the serialisation of THIS command's result, the interaction
+        // with §6.3's transaction, or the reconstruction of a Result<T> from
+        // what was stored. All four are what a duplicate POST actually meets.
+        //
+        // **The subject is pinned, and that is not incidental.** The key is
+        // subject:operation:commandId (§8.5), and PostAsync mints a fresh
+        // X-Test-User per call — so a test that reused only the CommandId would
+        // claim two different keys, publish twice, and pass every assertion
+        // below by never reaching the replay path at all.
+        var caller = Guid.CreateVersion7();
+        var commandId = Guid.CreateVersion7();
+        object body = new
+        {
+            CommandId = commandId,
+            Name = "Walnut desk",
+            ThumbnailUrl = (string?)null,
+            Amount = 10m,
+            Currency = "EUR"
+        };
+
+        HttpResponseMessage first = await PostAsAsync(body, caller);
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        HttpResponseMessage second = await PostAsAsync(body, caller);
+
+        // The stored outcome, not a fresh one. Result<Guid> maps to 200 with
+        // the value as the body (§10.5), so the status alone proves little —
+        // the identity below is what separates a replay from a second run.
+        second.StatusCode.ShouldBe(
+            HttpStatusCode.OK,
+            "a replay returns the first attempt's outcome, not a fresh decision");
+
+        Guid firstId = await first.Content.ReadFromJsonAsync<Guid>(TestContext.Current.CancellationToken);
+        Guid secondId = await second.Content.ReadFromJsonAsync<Guid>(TestContext.Current.CancellationToken);
+
+        secondId.ShouldBe(
+            firstId,
+            "the replayed payload is the first attempt's ProductId — a second id would mean the " +
+            "command ran again and the response merely looked the same");
+
+        // The half no status code can carry, and the one §8.5 exists for. Two
+        // runs produce two rows under two ids, and the client sees a 200 both
+        // times either way.
+        int rows = await fixture.ScalarAsync<int>("SELECT Value = COUNT(*) FROM catalog.Products");
+        rows.ShouldBe(1, "the claim is what stops the second attempt reaching the handler (§8.5)");
+    }
+
+    /// <summary>
+    /// <see cref="PostAsync"/> with the caller pinned, for the one test whose
+    /// subject is the key rather than the endpoint.
+    /// </summary>
+    private Task<HttpResponseMessage> PostAsAsync(object body, Guid caller)
+    {
+        HttpRequestMessage request = new(HttpMethod.Post, "/v1/catalog/products")
+        {
+            Content = JsonContent.Create(body)
+        };
+
+        request.Headers.Add(TestAuthHandler.UserHeader, caller.ToString());
+        request.Headers.Add(TestAuthHandler.PermissionsHeader, CatalogPermissions.Write);
 
         return _client.SendAsync(request, TestContext.Current.CancellationToken);
     }

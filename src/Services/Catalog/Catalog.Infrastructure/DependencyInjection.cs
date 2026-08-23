@@ -7,6 +7,7 @@ using Common.Contracts.Catalog.V1;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Common.Infrastructure.Redis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -110,6 +111,25 @@ public static class DependencyInjection
         // AddObservability already collects.
         services.AddSingleton<MessagingMetrics>();
 
+        // §8's two connections, and the first host to take them. PR-12 built
+        // AddRedisConnections and nothing called it; the seat §8.5's behaviour
+        // fills is what finally reads a key, so the wiring joins here on the
+        // rule every other line in this method follows — a registration
+        // arrives with the code that consumes it.
+        //
+        // It brings §8.2's HybridCache stack with it, which nothing in this
+        // service reads yet. That is deliberate rather than overlooked: the
+        // method is one call by design (§8.2), so a service either has Redis
+        // or does not, and half-having it is the state that produces a cache
+        // silently reading the database.
+        //
+        // Both connection strings are read EAGERLY and throw when absent, so
+        // this line is what a missing key stops — the host will not start.
+        // Compose and the Helm charts gained both in the same change; a
+        // deployment that did not would crash-loop rather than run
+        // unprotected.
+        services.AddRedisConnections(configuration);
+
         // The bus (§9). Its readiness needs no line below: AddMassTransit
         // registers the bus health check itself — "masstransit-bus", tagged
         // ready — argued at the registration.
@@ -161,9 +181,32 @@ public static class DependencyInjection
         // Until this line Catalog reported ready immediately, which §13.5 says
         // is indistinguishable from readiness never having been wired up — true
         // then, because there was no connection string, and false from here.
+        //
+        // **The two Redis rows joined with §8.5's PR, and §13.5 has printed
+        // them since before there was a connection string to give them.** The
+        // rule that section states is the whole argument: a host with a
+        // connection string has a readiness check, and one without does not.
+        // From the AddRedisConnections call above this service has two, and
+        // AbortOnConnectFail is false (§8.1) — so a disconnected multiplexer
+        // does not stop the host, and without these lines it would sit Ready
+        // while every idempotency claim failed closed on the coordination
+        // instance. Ready and unable to serve is the case §13.5 says is
+        // indistinguishable from readiness never having been wired.
+        //
+        // Both, not one. §8.1 gives the two instances different eviction
+        // policies and therefore different servers, so a cache that is up
+        // says nothing about the coordination instance §8.5 writes claims to.
         services
             .AddHealthChecks()
-            .AddSqlServer(configuration.GetConnectionString("Catalog")!, name: "sql", tags: ["ready"]);
+            .AddSqlServer(configuration.GetConnectionString("Catalog")!, name: "sql", tags: ["ready"])
+            .AddRedis(
+                configuration.GetConnectionString(RedisConnections.Cache)!,
+                name: "redis-cache",
+                tags: ["ready"])
+            .AddRedis(
+                configuration.GetConnectionString(RedisConnections.Coordination)!,
+                name: "redis-coordination",
+                tags: ["ready"]);
 
         return services;
     }

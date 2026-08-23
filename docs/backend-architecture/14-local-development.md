@@ -144,15 +144,31 @@ services:
       # client credentials (§9.7, §11.5).
       Identity__Authority: "http://keycloak:8080/realms/commerce"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-      # No Redis keys, and no redis-* in depends_on below: Ordering reads
-      # neither connection yet. An environment variable nothing reads is the
-      # container form of an unused registration, and each joins with the PR
-      # whose code first reads it — the rule PR-12 set when it wired no
-      # service at all. §8.4's cache invalidation is what brings them.
+      # §8.1's two connections, joined on the rule that brought every line
+      # above: an environment variable nothing reads is the container form of
+      # an unused registration, so each waits for the PR whose code first reads
+      # it. §8.5's IdempotencyBehavior is that PR — it claims a
+      # {service}:idem: key before any protected command runs. §8.4's cache
+      # invalidation was the expected trigger and was not the one that came.
+      #
+      # BOTH, though only the coordination one is read: AddRedisConnections is
+      # a single call by design (§8.2) and reads both eagerly, so a host given
+      # one key throws naming the other.
+      #
+      # 6379 on both — the host-side ports differ (6379/6380), the
+      # container-side ports do not.
+      ConnectionStrings__RedisCache: "redis-cache:6379"
+      ConnectionStrings__RedisCoordination: "redis-coordination:6379"
     ports: [ "5101:8080" ]
     depends_on:
       ordering-migrator: { condition: service_completed_successfully }
       rabbitmq:          { condition: service_healthy }
+      # service_healthy, not service_started: AbortOnConnectFail is false
+      # (§8.1's "degrade, don't die"), so the host would start against a Redis
+      # still booting and the first protected command would fail on a claim
+      # instead — a symptom nothing connects to a container that was not ready.
+      redis-cache:        { condition: service_healthy }
+      redis-coordination: { condition: service_healthy }
       # service_healthy rather than service_started, though the API does not
       # need Keycloak to boot — JwtBearer fetches the discovery document
       # lazily. `up --wait` gates on every service's health, and the value is
@@ -346,19 +362,39 @@ dotnet run --project src/Services/Ordering/Ordering.Api
 ```
 
 **A host process reads none of the container `environment:` blocks, so every
-key a service throws without has to be supplied to it.** Three do that today,
-each named by the registration that reads it — `ConnectionStrings__<Service>`
-(§7.1's runtime key, `AddSqlServer`), `ConnectionStrings__RabbitMq` (§9's bus)
-and `Identity__Authority` ([§11.3](11-identity-authorization.md), read eagerly
-by `AddJwtAuthentication`). The values differ from the container ones only in
-the host name, because the compose file publishes each port:
+key a service throws without has to be supplied to it.** **Five** do that
+today, each named by the registration that reads it —
+`ConnectionStrings__<Service>` (§7.1's runtime key, `AddSqlServer`),
+`ConnectionStrings__RabbitMq` (§9's bus), `Identity__Authority`
+([§11.3](11-identity-authorization.md), read eagerly by
+`AddJwtAuthentication`), and the two Redis connections
+([§8.1](08-caching-redis.md), read eagerly by `AddRedisConnections`). The
+values differ from the container ones only in the host name and, for the
+second Redis instance, the port — because the compose file publishes each one:
 
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Ordering='Server=localhost;Database=Ordering;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
 export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
+export ConnectionStrings__RedisCache='localhost:6379'
+export ConnectionStrings__RedisCoordination='localhost:6380'
 ```
+
+> **The two Redis ports differ here and are identical in the compose blocks,
+> and getting that backwards is a connection to the wrong instance rather than
+> an error.** Both containers listen on Redis's own 6379, so inside the network
+> the addresses differ only by host name; the published ports are 6379 and
+> **6380**, so on the host they differ only by port. A block copied from the
+> compose file would point both connections at the cache — the same defect the
+> chart's key guard refuses at render time (§15.3), arriving where nothing
+> checks it.
+>
+> **This block said three keys until §8.5's PR gave `AddRedisConnections` its
+> first callers.** It reads both connection strings eagerly and throws naming
+> the missing one, so the `dotnet run` above exited before startup for anyone
+> following the instructions — the failure §14.1's own rule predicts, in the
+> half of the chapter that rule does not cover.
 
 **The key is the service's own**, and the block above is `Ordering.Api`'s
 because that is the host the fence names. `AddOrderingInfrastructure` reads

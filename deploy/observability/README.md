@@ -94,7 +94,7 @@ and each names the instrument it is waiting for:
 |---|---|
 | `StuckSaga` | a gauge over `ordering.OrderFulfilmentStates` |
 | `OrdersAwaitingReview` | a gauge over `ordering.OrderReviews` |
-| `CacheHitRatioCollapse` | an instrument **and** a consumer — see below |
+| `CacheHitRatioCollapse` | an instrument — see below |
 | `BusinessVolumeDrop` | `OrderMetrics`, which arrives with §6.6's `OrderSummaries` projection |
 
 **Check 5 is what keeps that list honest.** It asserts the metrics named there
@@ -111,6 +111,9 @@ and wiring Redis would not change that. An earlier version of this gate treated
 a call to `AddRedisConnections` as the signal arriving; that was written, tested
 red and removed, because it would have gone red on a consumer while the alert
 stayed silent — moving a rule into the loaded file where it cannot fire.
+**That removal is now load-bearing rather than hypothetical**: §8.5's PR gave
+`AddRedisConnections` its first callers, so the gate that was removed would have
+fired on this branch and turned an alert with no signal on.
 
 What the row is owed is an instrument: a bridge written here, which check 5
 would see, or a package that publishes a meter — **which no gate in this

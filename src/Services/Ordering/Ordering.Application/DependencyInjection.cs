@@ -47,10 +47,19 @@ public static class DependencyInjection
         services.AddSingleton<RequestMetrics>();
 
         // Ordered, explicit, not scanned — registration order is pipeline
-        // order (§6.3). Three of four: IdempotencyBehavior joins with the PR
-        // that builds it, and slots in between Validation and Transaction.
+        // order (§6.3), and all four seats are filled since the PR that built
+        // §8.5's behaviour.
+        //
+        // Idempotency sits INSIDE validation and OUTSIDE the transaction, and
+        // both neighbours are load-bearing. Inside validation, because a
+        // malformed command must be refused without claiming a key — a 400
+        // that burned the caller's CommandId for 24 hours would make a typo
+        // unretryable. Outside the transaction, because the claim has to be
+        // held before any work starts, and a claim taken inside the
+        // transaction would be released by a rollback it knows nothing about.
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+        services.AddScoped(typeof(IPipelineBehavior<,>), typeof(IdempotencyBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
 
         // §4.2's sample line. IValidator<T> is not in PluggableInterfaces.All

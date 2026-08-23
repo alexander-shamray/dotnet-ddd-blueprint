@@ -285,7 +285,7 @@ class OmitsTheSlice(unittest.TestCase):
                 "AddZuluApplication_registers_the_real_domain_event_dispatcher_scoped",
                 "AddZuluApplication_registers_the_projection_registry_scoped",
                 "AddZuluApplication_registers_the_allow_list_mapper",
-                "AddZuluApplication_registers_the_three_behaviours_in_pipeline_order",
+                "AddZuluApplication_registers_the_four_behaviours_in_pipeline_order",
             ],
             re.findall(r"public void (\w+)\(\)", tests),
         )
@@ -1124,10 +1124,17 @@ class TheCommandLine(unittest.TestCase):
 
             self.assertEqual(0, code)
             self.assertEqual("", err)
-            # 54 since PR-16 added TestAuthHandler to Catalog.TestSupport,
-            # which every service carries because CatalogApiFactory installs
-            # it unconditionally.
-            self.assertIn("54 files created, 5 updated", out)
+            # 55: PR-16 added TestAuthHandler to Catalog.TestSupport, which
+            # every service carries because CatalogApiFactory installs it
+            # unconditionally, and §8.5's PR added IdempotencyOptInTests.cs,
+            # which every service carries because the gate it holds is one a
+            # service without it silently does not have.
+            #
+            # The comment is the half that rots: it said 54 and named only the
+            # first, while the assertion beside it had already been raised to
+            # 55. A number a test pins and a number a comment states are two
+            # copies, and only one of them fails when they disagree.
+            self.assertIn("55 files created, 5 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

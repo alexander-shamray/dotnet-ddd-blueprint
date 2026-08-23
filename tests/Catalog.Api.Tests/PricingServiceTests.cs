@@ -76,6 +76,9 @@ public sealed class PricingServiceTests(ServiceFixture fixture) : IAsyncLifetime
         {
             Content = JsonContent.Create(new
             {
+                // Fresh per call: two publishes under one CommandId would
+                // replay the first id rather than creating a second product.
+                CommandId = Guid.CreateVersion7(),
                 Name = name,
                 ThumbnailUrl = (string?)null,
                 Amount = amount,

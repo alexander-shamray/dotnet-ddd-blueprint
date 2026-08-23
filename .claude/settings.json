@@ -45,7 +45,11 @@
       "Bash(git branch -M:*)",
       "Bash(git branch --delete:*)",
       "Bash(git branch --move:*)",
-      "Bash(git branch --force:*)"
+      "Bash(git branch --force:*)",
+      "Bash(git *--output*)",
+      "Bash(git *--upload-pack*)",
+      "Bash(git *--receive-pack*)",
+      "Bash(git *--exec*)"
     ]
   }
 }

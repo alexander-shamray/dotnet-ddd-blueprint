@@ -632,6 +632,7 @@ public static IServiceCollection AddCommonProblemDetails(this IServiceCollection
 | Authenticated but not permitted | 403 | Do not leak whether the resource exists |
 | Aggregate not found | 404 | |
 | Concurrency conflict, no precondition sent | 409 | From `DbUpdateConcurrencyException` |
+| A request under this key is still in flight | 409 | From `ConcurrentRequestException` ([§8.5](08-caching-redis.md)). The **second** producer of this status, and deliberately not a status of its own: 425 is about replayed TLS early data and 503 says the service is unavailable when it is serving everyone else. Both 409s say *retry*, and their `detail` is what separates them |
 | `If-Match` / `If-Unmodified-Since` failed | **412** | The client *did* send a precondition and it did not hold. Distinguishing this from 409 tells the client whether retrying with a fresh ETag is the fix |
 | Request body past the edge's ceiling | **413** | The gateway only (§10.1). Kestrel throws `BadHttpRequestException` carrying this status and `ExceptionHandlerMiddleware` reads it off the exception rather than defaulting to 500, so unlike the 400 and 409 rows this one needs no handler of its own |
 | Domain rule violated | 422 | The request was well-formed but not allowed |
@@ -810,10 +811,22 @@ whole content of this status is *re-read and retry*.
 > and no test could have failed — the promise became false only when the
 > mechanism it described became reachable.
 
+**§8.5's contention is the third handler, and it arrived the same way the
+second did — with the mechanism that makes it reachable.** Until
+`IdempotencyBehavior` took its pipeline seat, `ConcurrentRequestException` was
+a type nothing threw on an HTTP path; from that PR a duplicate arriving while
+the first attempt is still running reaches `UseExceptionHandler`, which
+answers 500 unless something translates it. That is the worst available
+outcome for this particular feature: the mechanism reports itself as a server
+fault, and a client treating 500 as fatal abandons an operation that was about
+to succeed. `ConcurrentRequestExceptionHandler` answers 409 and its `detail`
+echoes no `CommandId` — the caller sent it, so repeating it says nothing, and
+it is half of a key whose other segment is the subject.
+
 The 412 half of that row is still unimplemented, deliberately: it needs a
 precondition filter reading `If-Match`, and nothing here sends or reads an
 ETag. What separates the two is whether the client sent a precondition, so
-until it can, every conflict is the no-precondition case the 409 answers.
+until it can, every conflict is the no-precondition case the 409s answer.
 
 ---
 

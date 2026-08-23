@@ -19,6 +19,12 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
 
     public PlaceOrderValidator()
     {
+        // An omitted CommandId binds as Guid.Empty, which is a single shared
+        // key rather than an absent one — every caller of this command would
+        // claim the same one, and the first success would be replayed to all
+        // of them for a day. Validation is the OUTER behaviour (§6.3), so this
+        // 400 is raised before any key is claimed.
+        RuleFor(x => x.CommandId).NotEmpty();
         // NotEmpty first: Matches alone skips null, and a JSON "currency":
         // null would reach the domain as a 500 rather than this 400. Letters,
         // not just length — Money.Of refuses "1$?" as a bug; this refuses it

@@ -114,13 +114,25 @@ groups:
             mid-wait. The runbook branches on all of it.
           runbook_url: docs/runbooks/order-review.md
 
-      # OWED TWICE OVER, AND THE SECOND IS THE ONE NO GATE HERE CAN WATCH.
+      # OWED AN INSTRUMENT, AND IT IS THE ONE NO GATE HERE CAN WATCH.
       #
-      # First: no host calls AddRedisConnections, so nothing constructs a
-      # HybridCache. §15.4 records that absence from the secrets side, where the
-      # two Redis rows are conditional on a consumer existing.
+      # This said "owed twice over" and named a missing consumer first. That
+      # half is closed at the level §15.4 asks about: §8.5's PR gave
+      # AddRedisConnections its first callers in Catalog and Ordering, so both
+      # hosts REGISTER the cache stack and the two Redis rows are required.
       #
-      # Second, and measured against the pinned package rather than assumed:
+      # A correction on top of that correction: registering is not
+      # constructing. This comment said a HybridCache "IS constructed in both
+      # hosts", and DI builds a singleton when something resolves it — nothing
+      # in src/ injects HybridCache at all. So no cache object exists, which
+      # is a THIRD state after "no caller" and "a caller", and none of the
+      # three is what this alert waits on.
+      #
+      # What is still owed is the instrument, below — and the note under it
+      # already said wiring Redis would not supply it, so this file
+      # half-anticipated its own correction.
+      #
+      # Measured against the pinned package rather than assumed:
       # Microsoft.Extensions.Caching.Hybrid 10.0.0 references
       # System.Diagnostics.Tracing and NOT System.Diagnostics.Metrics. It
       # reports through HybridCacheEventSource with PollingCounter — that is

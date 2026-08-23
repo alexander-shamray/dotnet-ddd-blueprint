@@ -29,6 +29,15 @@ public static class ProblemDetailsExtensions
         // rather than left to be rediscovered separately.
         services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 
+        // §8.5's contention, the second producer of that same 409 and the one
+        // this method was missing on the day the behaviour took its pipeline
+        // seat. IdempotencyBehavior throws ConcurrentRequestException beside
+        // the handler exactly as ValidationBehavior throws its own, so without
+        // a line here a duplicate that is merely still in flight reaches the
+        // fallback and is reported as a 500 — a server fault, for the
+        // mechanism working correctly.
+        services.AddExceptionHandler<ConcurrentRequestExceptionHandler>();
+
         return services.AddProblemDetails(options =>
             options.CustomizeProblemDetails = context =>
             {

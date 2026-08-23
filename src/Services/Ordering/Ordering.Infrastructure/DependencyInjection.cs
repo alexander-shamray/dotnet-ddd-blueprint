@@ -9,6 +9,7 @@ using Common.Contracts;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
+using Common.Infrastructure.Redis;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -194,6 +195,15 @@ public static class DependencyInjection
         // exist before the first message can be delivered against them.
         services.AddHostedService<MetricsInitialiser>();
 
+        // §8's two connections — see Catalog's copy of this line for the whole
+        // argument, which is the same one twice: PR-12 built
+        // AddRedisConnections and nothing called it until §8.5's behaviour
+        // took the fourth pipeline seat and read a key.
+        //
+        // Both connection strings are read EAGERLY and throw when absent, so
+        // this line is what a missing key stops — the host will not start.
+        services.AddRedisConnections(configuration);
+
         // The bus (§9). Its readiness needs no line below: AddMassTransit
         // registers the bus health check itself — "masstransit-bus", tagged
         // ready — argued at the registration.
@@ -245,9 +255,32 @@ public static class DependencyInjection
         // Until this line Ordering reported ready immediately, which §13.5 says
         // is indistinguishable from readiness never having been wired up — true
         // then, because there was no connection string, and false from here.
+        //
+        // **The two Redis rows joined with §8.5's PR, and §13.5 has printed
+        // them since before there was a connection string to give them.** The
+        // rule that section states is the whole argument: a host with a
+        // connection string has a readiness check, and one without does not.
+        // From the AddRedisConnections call above this service has two, and
+        // AbortOnConnectFail is false (§8.1) — so a disconnected multiplexer
+        // does not stop the host, and without these lines it would sit Ready
+        // while every idempotency claim failed closed on the coordination
+        // instance. Ready and unable to serve is the case §13.5 says is
+        // indistinguishable from readiness never having been wired.
+        //
+        // Both, not one. §8.1 gives the two instances different eviction
+        // policies and therefore different servers, so a cache that is up
+        // says nothing about the coordination instance §8.5 writes claims to.
         services
             .AddHealthChecks()
-            .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"]);
+            .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
+            .AddRedis(
+                configuration.GetConnectionString(RedisConnections.Cache)!,
+                name: "redis-cache",
+                tags: ["ready"])
+            .AddRedis(
+                configuration.GetConnectionString(RedisConnections.Coordination)!,
+                name: "redis-coordination",
+                tags: ["ready"]);
 
         return services;
     }
