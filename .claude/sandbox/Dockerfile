@@ -26,7 +26,7 @@
 FROM debian:trixie-slim
 
 # git, because /review-branch spends its whole life in it. curl and CA certs for
-# the installer below and the model calls afterwards.
+# the pinned release download below and the model calls afterwards.
 #
 # python3 for the one gate the review is asked to run itself: the licence gate
 # is stdlib-only and needs no restore, which is exactly why §15.1 puts it ahead
@@ -102,13 +102,16 @@ ENV PATH="/home/reviewer/.grok/bin:${PATH}"
 # the boundary on the next review. The image is rebuilt routinely, so the window
 # was not a one-off.
 #
-# Both artefacts are pinned now, and the second one matters more than the first:
-# the installer performs NO verification of the 163 MB binary it downloads —
-# read, not assumed, by grepping the script for sha256/checksum/gpg and finding
-# nothing — so pinning only the bootstrap would have left the larger artefact
-# arriving unchecked over the same channel from the same origin.
+# The first fix pinned BOTH artefacts, the installer's digest and the binary's,
+# because the installer performs NO verification of the 163 MB binary it
+# downloads — read, not assumed, by grepping the script for sha256/checksum/gpg
+# and finding nothing — so pinning only the bootstrap would have left the larger
+# artefact arriving unchecked over the same channel from the same origin.
 #
-# The digests were taken by fetching each artefact and hashing it, and the
+# **That is history: there is no installer here now**, for the reason argued
+# below, and the only digest this file carries is the release binary's.
+#
+# The digests were taken by fetching the artefact and hashing it, and the
 # amd64 one was cross-checked against the md5 GCS reports in its own
 # `x-goog-hash` response header. That is trust on first use, and it is the point
 # rather than a weakness: from here a change to what x.ai serves for a pinned

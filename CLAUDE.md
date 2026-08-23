@@ -1004,8 +1004,11 @@ and the two sweeps rest on: what the usage-limit preflight calls a limit, what
 counts as a review that finished, that the ledger publishes no answer on its
 trust check's error path, that a slot is reserved if and only if the review's
 model call was launched, and that the sweeps' worktree shape check is the
-direct-child check it claims. **Every one of those five shipped, so each is
-reproduced as a case that fails against the old behaviour** — paired with
+direct-child check it claims, and whether the label helper leaves a free
+parameter a finding could steer. **Five of those six shipped, so each is
+reproduced as a case that fails against the old behaviour** — the sixth is a
+grant closed by moving it into a helper, and the suite is what keeps it closed.
+Paired with
 positive controls, which are not decoration: a negative that passes because the
 pattern matches *nothing* is this repository's most-repeated failure wearing a
 test's clothes, so the accepted values and the word boundaries themselves are

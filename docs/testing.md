@@ -70,12 +70,15 @@ a helper's contract is its stdout and only a round trip tests what a caller
 actually captures. It is the one suite whose
 subject is agent tooling rather than the platform, and it is here on the licence
 gate's terms: it ships with the repository, CI runs it, and `dotnet test` is
-blind to it. **Each of the five judgements it covers shipped wrong at least
-once, and each is reproduced as a case that fails against the old behaviour** —
-what counts as a usage limit, what counts as a review that finished, whether the
-check ledger can publish an answer on its own error path, whether a slot is
-spent if and only if the review's model call was launched, and whether the
-sweeps' worktree guard is the direct-child check it claims. The regression
+blind to it. **Six judgements, five of which shipped wrong at least once, each
+reproduced as a case that fails against the old behaviour** — what counts as a
+usage limit, what counts as a review that finished, whether the check ledger can
+publish an answer on its own error path, whether a slot is spent if and only if
+the review's model call was launched, whether the sweeps' worktree guard is the
+direct-child check it claims, and whether the label helper leaves a free
+parameter a finding could steer. That last is the one that never shipped
+wrong — it is a grant closed by moving it into a helper, and the suite is what
+keeps it closed. The regression
 negatives are paired with positive controls, and those are not decoration: a
 negative that passes because the pattern matches *nothing* is indistinguishable
 from one that works, so the accepted values and the word boundaries carry
