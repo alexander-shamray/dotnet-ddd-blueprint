@@ -2048,6 +2048,19 @@ forms of `git` as promptless built-ins whatever the allow list says, and its
 own note is that "to require a prompt for one of these commands, add an `ask`
 or `deny` rule".
 
+**"Including the middle" is the measurement; the documented rule is wider, and
+the two are worth keeping apart.** What was measured here is a wildcard between
+two literals. The harness's own reference says a Bash rule's wildcards "can
+appear at any position in the command, including at the beginning, middle, or
+end" — so a pattern *starting* with `*`, which this repository had no precedent
+for, is supported rather than merely untested. That was read out of the docs
+after a branch shipped two such denies and flagged them as an unverified guess,
+which is the right order: **write down which half you measured and which half
+you looked up.** Two neighbouring constraints came from the same page and
+match what is recorded above — the `:*` form is recognised only at the end of a
+pattern, and a trailing `*` preceded by a space enforces a word boundary, so
+`Bash(ls *)` misses `lsof` where `Bash(ls*)` catches it.
+
 **It raises the cost of the naive spelling and it is not a boundary**, and the
 distinction is the whole of the reset-grant lesson one paragraph up. A
 permission rule matches the command *string*; the shell reassembles adjacent
