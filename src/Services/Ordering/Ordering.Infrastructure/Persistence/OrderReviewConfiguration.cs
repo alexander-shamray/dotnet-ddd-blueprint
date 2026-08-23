@@ -58,7 +58,7 @@ internal sealed class OrderReviewConfiguration : IEntityTypeConfiguration<OrderR
 /// domain type, and <b>the aggregate's state is not the reason either way</b>.
 /// This said "not because the order is unchanged", on the grounds that the two
 /// cancellation reasons are raised on an order already cancelled — which is
-/// false for <c>cancelled_after_payment</c> reached from a decline or a payment
+/// false for <c>payment_authorised_during_compensation</c> reached from a decline or a payment
 /// timeout, where <c>CancelOrder</c> is still owed at <c>Compensating</c>'s
 /// exit. Both revisions were arguing from the order's state, and that is the
 /// part that was wrong.

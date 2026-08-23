@@ -10,7 +10,7 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 /// a fact about operations rather than about the order.
 ///
 /// Two of them are a wait that ran out, where the order's own state genuinely
-/// has not moved. The other two — <c>cancelled_after_payment</c> and
+/// has not moved. The other two — <c>payment_authorised_during_compensation</c> and
 /// <c>cancelled_after_confirmation</c> — exist because <b>money is
 /// authorised and the order is not going to be delivered</b>, and §3.2 gives
 /// Ordering no refund command to answer that with. Reading "the process
@@ -26,7 +26,7 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 /// separates them is <b>Shipping</b> rather than the money.
 /// <para>
 /// <b>This said they exist BECAUSE the order was cancelled, and that is not
-/// reliably true of <c>cancelled_after_payment</c>.</b> Reached from a
+/// reliably true of <c>payment_authorised_during_compensation</c>.</b> Reached from a
 /// decline or a payment timeout, the saga is in <c>Compensating</c> and
 /// <c>CancelOrder</c> is still owed at the state's exit — so the row can be
 /// written before the cancellation it is named after. The money is the

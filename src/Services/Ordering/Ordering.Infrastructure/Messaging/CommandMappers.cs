@@ -135,7 +135,7 @@ public sealed class FlagOrderForReviewMapper
         StringComparer.Ordinal,
         ReviewReasons.NotDespatched,
         ReviewReasons.StockNotReleased,
-        ReviewReasons.CancelledAfterPayment,
+        ReviewReasons.PaymentAuthorisedDuringCompensation,
         ReviewReasons.CancelledAfterConfirmation);
 
     public FlagOrderForReviewCommand Map(FlagOrderForReview message)

@@ -500,7 +500,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // money problem, which is why it escalates too. It raises a
             // DIFFERENT code: Confirmed sends cancelled_after_confirmation
             // because an order that reached it may still be despatched, and
-            // this state sends cancelled_after_payment because it cannot.
+            // this state sends payment_authorised_during_compensation because it cannot.
             //
             // Left unwritten it would FAULT, and a paged error queue is not
             // what this case is owed: the money problem has a review row to
@@ -531,7 +531,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     OrderingQueue,
                     ctx => new FlagOrderForReview(
                         ctx.Saga.OrderId,
-                        ReviewReasons.CancelledAfterPayment)),
+                        ReviewReasons.PaymentAuthorisedDuringCompensation)),
 
             // Written rather than left to fault, and the difference is
             // whether a reader can tell a decision from an omission. Reaching

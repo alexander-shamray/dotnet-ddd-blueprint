@@ -1039,7 +1039,8 @@ next reader wondering whether it was ever there.
     the same escalation for different procedures, and the row persists
     `(OrderId, Reason, RaisedAt)` with the saga usually finalised by the time
     anyone reads it — so `cancelled_after_confirmation` and
-    `cancelled_after_payment` are what let the runbook select without a state
+    `payment_authorised_during_compensation` are what let the runbook select
+    without a state
     that is gone. That
     also removes the false `not_despatched` this entry predicted — **by
     `Finalize()`, not by the `Unschedule` beside it**, which is the credit

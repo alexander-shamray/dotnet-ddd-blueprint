@@ -61,9 +61,21 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     // They stay because they are the scheduler's contract rather than this
     // saga's convenience — a scheduler that DOES cancel needs them, and ADR-021
     // names Quartz as its own successor. What carries correctness meanwhile is
-    // the state machine: a timeout arriving in a state that does not handle it
-    // is ignored, and one arriving after finalisation is discarded. Both
-    // measured, and the first has a test.
+    // NOT the state machine, and this comment used to say it was: "a timeout
+    // arriving in a state that does not handle it is ignored" names a
+    // mechanism the machine does not have. §9.6 keeps MassTransit's default,
+    // so an arrival no state accepts FAULTS — the catch-all that would have
+    // ignored it was removed for losing a crash and a misroute along with the
+    // duplicate (#128).
+    //
+    // What actually carries it is the TOKEN below. A scheduled message is
+    // delivered with the token id its schedule was armed with, and MassTransit
+    // discards one that no longer matches this instance before the machine is
+    // asked — so a stale timeout never reaches a transition to be ignored or
+    // to fault. Unschedule clears the id here even though ADR-021 makes the
+    // broker-side cancel a no-op, which is why the no-op is harmless. One
+    // arriving after finalisation is discarded by OnMissingInstance instead.
+    // Both measured.
     public Guid? StockTimeoutTokenId { get; set; }
 
     public Guid? PaymentTimeoutTokenId { get; set; }

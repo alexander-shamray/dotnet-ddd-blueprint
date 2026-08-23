@@ -1915,7 +1915,7 @@ stateDiagram-v2
 
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
-    Compensating --> Compensating : PaymentAuthorised → FlagOrderForReview cancelled_after_payment
+    Compensating --> Compensating : PaymentAuthorised → FlagOrderForReview payment_authorised_during_compensation
     Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed, PaymentDeclined → absorbed
 
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
@@ -1978,7 +1978,7 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 //
 // NOT because the order is unchanged — and not because it changed either,
 // which is what this comment claimed next until a review read the states.
-// cancelled_after_payment is raised from Compensating, whose exits are
+// payment_authorised_during_compensation is raised from Compensating, whose exits are
 // where CancelOrder is sent, so on the decline and payment-timeout doors
 // the order is still uncancelled when the row is written. The aggregate's
 // state is simply not what decides where the row lives.
@@ -1989,10 +1989,15 @@ public static class ReviewReasons
 {
     public const string NotDespatched = "not_despatched";
     public const string StockNotReleased = "stock_not_released";
-    // An authorisation landed while the saga was already compensating —
-    // NOT "a customer cancelled", because Compensating is reached from a
-    // cancellation, a decline and a payment timeout alike, and the
-    // escalation fires from all three. Undoing an authorisation is a
+    // An authorisation landed while the saga was already compensating,
+    // which is what the name now says. **It was cancelled_after_payment**,
+    // and that encoded an event order true on two of its four doors:
+    // Compensating is reached from a cancellation, a decline and a payment
+    // timeout alike, and on the last two no cancellation has been sent when
+    // the row is raised. Renamed while no row had ever been written — a
+    // persisted vocabulary has exactly one cheap moment, and a code named
+    // for one of its causes reads as an explanation and survives review.
+    // Undoing an authorisation is a
     // refund §3.2 gives ORDERING no command for — its Accepts column
     // closes at AuthorisePayment — so the saga escalates rather than
     // compensating. Payments refunds off OrderCancelled, which it
@@ -2006,7 +2011,7 @@ public static class ReviewReasons
     // From Confirmed the order may still be despatched, so stopping Shipping
     // comes first; from Compensating there is no despatch and a ReleaseStock
     // is already in flight.
-    public const string CancelledAfterPayment = "cancelled_after_payment";
+    public const string PaymentAuthorisedDuringCompensation = "payment_authorised_during_compensation";
     public const string CancelledAfterConfirmation = "cancelled_after_confirmation";
 }
 
@@ -2402,7 +2407,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     OrderingQueue,
                     ctx => new FlagOrderForReview(
                         ctx.Saga.OrderId,
-                        ReviewReasons.CancelledAfterPayment)),
+                        ReviewReasons.PaymentAuthorisedDuringCompensation)),
 
             // Written, not left to OnUnhandledEvent, because a reader cannot
             // tell a decision from an omission. Reaching Compensating means a
@@ -2537,15 +2542,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > And `Compensating`'s `When(PaymentAuthorised)` covers only the interleaving
 > where the money beats the stock release; the other way round the saga has
 > already finalised, so the authorisation lands on nothing and the
-> `cancelled_after_payment` row this section provides for is never raised.
-> Both are lifetime questions rather than transition questions: the handler
+> `payment_authorised_during_compensation` row this section provides for is
+> never raised. Both are lifetime questions rather than transition ones: the
+> handler
 > exists and the instance does not.
 >
 > **That claim was false when this callback was first added, and it took three
 > passes to make it true — which is the more useful half of the story.** First
 > `PaymentAuthorised` was missing, so an authorisation landing after a
 > cancellation was swallowed rather than escalated as
-> `cancelled_after_payment`. Writing that one transition left the two Inventory
+> `payment_authorised_during_compensation`. Writing that one transition left the
+> two Inventory
 > races still on the catch-all, reachable by cancelling in `AwaitingStock`.
 >
 > **Repairing an invariant one counter-example at a time does not establish
@@ -2575,7 +2582,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, recording `OrderCancelled.Reason` |
 > | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, recording `OrderCancelled.Reason` — this does not stop the charge |
 > | `Confirmed` | The card is authorised | Escalate — `cancelled_after_confirmation`, its own code because Shipping may still despatch — and finalise |
-> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | **Five** written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway; `When(PaymentAuthorised)` escalates `cancelled_after_payment`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation** — §9.4 orders nothing, so a release handled before its reserve is a no-op and the reservation that follows it is stranded. Named here rather than argued away, because this row used to close the case with "`ReleaseStock` is already in flight" |
+> | `Compensating` | A cancellation is already the outcome — but the money and the reservation may still land | **Five** written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway; `When(PaymentAuthorised)` escalates `payment_authorised_during_compensation`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation** — §9.4 orders nothing, so a release handled before its reserve is a no-op and the reservation that follows it is stranded. Named here rather than argued away, because this row used to close the case with "`ReleaseStock` is already in flight" |
 >
 > **`Confirmed` is a gap this states rather than closes.** Undoing an
 > authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
@@ -2590,12 +2597,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > own contract says an authorisation already taken is voided. So a refund may
 > well happen without anyone doing it — Ordering simply has no way to *ask*.
 >
-> **A second revision then predicted which code gets that refund, and that
-> is a claim about another service's delivery order.** It said this one has
-> the void on its way and `cancelled_after_payment` is beyond its reach.
-> [§9.4](09-messaging.md) orders nothing between two independent consumers, so
-> a saga seeing `OrderCancelled` says nothing about when Payments consumed it
-> — and on the decline and payment-timeout doors the cancellation has not been
+> **A second revision then predicted which code gets that refund, and that is a
+> claim about another service's delivery order.** It said this one has the void
+> on its way and `payment_authorised_during_compensation` is beyond its reach.
+> [§9.4](09-messaging.md) orders nothing between two independent consumers, so a
+> saga seeing `OrderCancelled` says nothing about when Payments consumed it —
+> and on the decline and payment-timeout doors the cancellation has not been
 > published at all when the row is raised, because `CancelOrder` goes on
 > `Compensating`'s exit. Neither prediction holds, and the runbook checks on
 > both codes rather than expecting an answer on either.
@@ -2644,17 +2651,18 @@ process stalled" would describe those rows backwards.
 **Nor is the money the thing that tells the two apart**, which this section
 assumed in two different directions before settling. Payments consumes
 `OrderCancelled` and voids an authorisation already taken (§3.2), so a refund
-may arrive on either code with nobody acting — and §9.4 orders nothing
-between that consumer and this saga, so neither code predicts whether it has.
-**`Shipping` is the difference**: `cancelled_after_confirmation` is raised
-from a state that may still despatch, `cancelled_after_payment` from one that
-cannot. Ordering having no refund command is true of both; it is not what
-separates them:
+may arrive on either code with nobody acting — and §9.4 orders nothing between
+that consumer and this saga, so neither code predicts whether it has.
+**`Shipping` is the difference**: `cancelled_after_confirmation` is raised from
+a state that may still despatch, `payment_authorised_during_compensation` from
+one that cannot. Ordering having no refund command is true of both; it is not
+what separates them:
 
 > **The money is the invariant; the order's state is not, and this passage
 > said it was.** It read "they exist *because* the order changed, cancelled
 > with money already authorised" — which does not hold for
-> `cancelled_after_payment` reached from a decline or a payment timeout. In
+> `payment_authorised_during_compensation` reached from a decline or a payment
+> timeout. In
 > those the saga is in `Compensating` and `CancelOrder` is still owed at the
 > state's exit, so the row precedes the cancellation it is named after. A
 > reason code is evidence about the workflow, not about the aggregate.
@@ -2799,13 +2807,21 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     // One token per schedule — Unschedule needs the specific token, so two
     // waits cannot share a field.
     //
-    // On ADR-021's scheduler these are written and never read back: the
+    // On ADR-021's scheduler the SCHEDULER never reads these back: the
     // delayed message exchange cannot cancel, so every Unschedule below is a
     // no-op and every order keeps its timeouts until they fire. They stay
     // because they are the scheduler's contract rather than this saga's
     // convenience, and because Quartz — the ADR's own named successor —
-    // needs them. Correctness meanwhile is the state machine's: a timeout
-    // arriving where no transition handles it is ignored.
+    // needs them.
+    //
+    // **MassTransit reads them back regardless, and that is what carries
+    // correctness meanwhile.** A scheduled message is delivered with the
+    // token id its schedule was armed with, and one that no longer matches
+    // the instance is discarded before the machine is asked — measured, and
+    // the callout above. So a stale timeout never reaches a transition at
+    // all. This comment used to say the machine ignores it, which names a
+    // mechanism the machine does not have: §9.6 keeps MassTransit's default,
+    // so anything that DOES reach a state with no transition for it faults.
     public Guid? StockTimeoutTokenId { get; set; }
     public Guid? PaymentTimeoutTokenId { get; set; }
     public Guid? DespatchTimeoutTokenId { get; set; }

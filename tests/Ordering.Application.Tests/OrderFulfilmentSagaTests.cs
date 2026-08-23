@@ -831,7 +831,7 @@ public class OrderFulfilmentSagaTests
 
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
-                m.Reason == ReviewReasons.CancelledAfterPayment))
+                m.Reason == ReviewReasons.PaymentAuthorisedDuringCompensation))
                     .ShouldBeTrue();
 
             // And it did not reach the error queue: the point is that this is
@@ -891,7 +891,7 @@ public class OrderFulfilmentSagaTests
                 SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
 
             // The Confirmed code, not Compensating's. Both origins used to
-            // raise cancelled_after_payment and the row persists nothing else,
+            // raise payment_authorised_during_compensation and the row persists nothing else,
             // so the runbook selected its procedure on a saga state that is
             // gone by the time anyone reads the queue.
             (await Sent<FlagOrderForReview>(harness, m =>
@@ -992,7 +992,7 @@ public class OrderFulfilmentSagaTests
             // partition below exists for.
             ConsumeFaults<PaymentDeclined>(harness).ShouldAllBe(e => e == null);
 
-            // And nothing escalated. A decline is not a cancelled_after_payment
+            // And nothing escalated. A decline is not a payment_authorised_during_compensation
             // — there is no money for a human to chase.
             (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
 

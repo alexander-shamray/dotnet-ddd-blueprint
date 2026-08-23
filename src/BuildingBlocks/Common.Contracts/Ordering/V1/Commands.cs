@@ -50,7 +50,7 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// whose outcome is cancellation</b> — deliberately not "a cancellation landing
 /// after an authorisation", which this used to say and which describes only
 /// <see cref="ReviewReasons.CancelledAfterConfirmation"/>. On
-/// <see cref="ReviewReasons.CancelledAfterPayment"/> the authorisation is the
+/// <see cref="ReviewReasons.PaymentAuthorisedDuringCompensation"/> the authorisation is the
 /// <i>later</i> event, and on two of that code's four doors — a decline and a
 /// payment timeout — no cancellation exists at all when it is raised.
 /// </para>
@@ -70,7 +70,7 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// about the order — <b>not</b> that the order is unchanged, and not that it
 /// changed either. An earlier revision of this paragraph claimed the second
 /// for the two cancellation codes and it does not hold for
-/// <c>cancelled_after_payment</c>: when compensation began from a decline or
+/// <c>payment_authorised_during_compensation</c>: when compensation began from a decline or
 /// a payment timeout the saga is in <c>Compensating</c> and has not yet sent
 /// <c>CancelOrder</c> — that goes on the state's exit — so a late
 /// authorisation raises this row while the order is still uncancelled.
@@ -167,9 +167,26 @@ public static class ReviewReasons
     /// line used to say and which is only true on one of the three paths
     /// into <c>Compensating</c>. From a decline or a payment timeout the
     /// <c>CancelOrder</c> is still owed at the state's exit, so this row can
-    /// precede the cancellation it is named after.
+    /// precede the cancellation entirely.
+    /// <para>
+    /// <b>It was <c>cancelled_after_payment</c>, and the name asserted that
+    /// order.</b> True on the two cancellation doors, false on the other two,
+    /// and the prose around it spent several revisions saying so — which is
+    /// the tell that the label rather than the paragraph was wrong. Renamed
+    /// while <c>ordering.OrderReviews</c> had never held a row with it: a
+    /// persisted vocabulary has exactly one cheap moment, the same rule this
+    /// repository already states about a contract with no consumers, and the
+    /// same edit after the first row is a migration. <b>A code named for one
+    /// of its causes survives review precisely because it reads as an
+    /// explanation.</b>
+    /// </para>
+    /// <para>
+    /// <see cref="CancelledAfterConfirmation"/> keeps its name deliberately:
+    /// it is raised only when an <c>OrderCancelled</c> reaches the saga in
+    /// <c>Confirmed</c>, so the order it asserts holds on its one path.
+    /// </para>
     /// </remarks>
-    public const string CancelledAfterPayment = "cancelled_after_payment";
+    public const string PaymentAuthorisedDuringCompensation = "payment_authorised_during_compensation";
 
     /// <summary>
     /// A customer cancelled an order the saga had confirmed and was waiting
@@ -185,12 +202,12 @@ public static class ReviewReasons
     /// <see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/126">#126</see>.
     /// </remarks>
     /// <remarks>
-    /// <b>Distinct from <see cref="CancelledAfterPayment"/> because the
+    /// <b>Distinct from <see cref="PaymentAuthorisedDuringCompensation"/> because the
     /// procedure is different, and the row is the only thing an operator
     /// has.</b> Both are raised by §9.6's saga with an authorisation standing
     /// and the workflow ending in cancellation — <b>not</b> both "on a
     /// cancellation arriving after an authorisation", which this said and
-    /// which describes only this code. <see cref="CancelledAfterPayment"/> is
+    /// which describes only this code. <see cref="PaymentAuthorisedDuringCompensation"/> is
     /// the authorisation arriving after compensation began, and on its decline
     /// and payment-timeout doors no cancellation has been sent at all. Two
     /// state-and-event pairs, one shared condition — and
@@ -201,7 +218,7 @@ public static class ReviewReasons
     /// <para>
     /// What separates them: this one means the order reached <c>Confirmed</c>,
     /// so <b>Shipping may still despatch it</b> and stopping that is the first
-    /// step. <see cref="CancelledAfterPayment"/> means compensation was already
+    /// step. <see cref="PaymentAuthorisedDuringCompensation"/> means compensation was already
     /// under way — there is no despatch to stop and a <c>ReleaseStock</c> is in
     /// flight. The runbook has always described these as two procedures; until
     /// this code existed it keyed them on a saga state nothing recorded.

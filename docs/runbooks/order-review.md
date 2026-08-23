@@ -28,7 +28,7 @@ page assumed it was:
 | `not_despatched` | Finalised. The state row is gone and this row is the only trace |
 | `stock_not_released` | Finalised, on the release timeout |
 | `cancelled_after_confirmation` | Finalised — cancelled after despatch was being waited for |
-| `cancelled_after_payment` | **The only one that can still be running — but usually is not.** Raised mid-wait when an authorisation lands after compensation has BEGUN — which is not the same as after a cancellation: `Compensating` is also reached from `PaymentDeclined` and the fifteen-minute payment timeout, where no `OrderCancelled` exists yet. The instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`; both are well inside the hour this alerts on, so by the time you read the row it has normally finalised. Check, and branch. A `stock_not_released` row may join it |
+| `payment_authorised_during_compensation` | **The only one that can still be running — but usually is not.** Raised mid-wait when an authorisation lands after compensation has BEGUN — which is not the same as after a cancellation: `Compensating` is also reached from `PaymentDeclined` and the fifteen-minute payment timeout, where no `OrderCancelled` exists yet. The instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`; both are well inside the hour this alerts on, so by the time you read the row it has normally finalised. Check, and branch. A `stock_not_released` row may join it |
 
 For the finalised cases [`stuck-saga.md`](stuck-saga.md) will not catch this,
 which is why §13.6 gives it a row of its own rather than folding it into the
@@ -102,7 +102,7 @@ like any other wait.
 3. Confirm the order really did cancel: the review row says compensation
    stalled, not that the cancellation failed.
 
-### `cancelled_after_confirmation` and `cancelled_after_payment`
+### `cancelled_after_confirmation` and `payment_authorised_during_compensation`
 
 An order is being cancelled and its payment is authorised. Undoing an
 authorisation is a **refund**, and
@@ -120,8 +120,9 @@ nobody doing it. **So the first act is never to refund.**
 **Whether the void has already happened is not knowable from the code, and
 that is the whole reason step 1 is a check.** An earlier revision of this
 paragraph said `cancelled_after_confirmation` has its refund on the way while
-`cancelled_after_payment` is beyond the automatic path's reach. Neither half
-survives contact with [§9.4](../backend-architecture/09-messaging.md):
+`payment_authorised_during_compensation` is beyond the automatic path's
+reach. Neither half survives
+[§9.4](../backend-architecture/09-messaging.md):
 
 - The saga seeing `OrderCancelled` before an authorisation says nothing about
   when **Payments** consumed it. They are two independent consumers of two
@@ -149,22 +150,24 @@ the separate incident it is.
 **What actually separates the two is Shipping.**
 `cancelled_after_confirmation` means the order reached `Confirmed`, so a
 despatch may be in motion and stopping it comes first;
-`cancelled_after_payment` is raised from `Compensating`, which cannot
+`payment_authorised_during_compensation` is raised from `Compensating`, which
+cannot
 despatch. That is the saga-state distinction this page has always drawn, and
 the money is what both rows have in common rather than what tells them apart.
 
-**Only one of the two is necessarily a customer cancelling**, and this
-paragraph said both were. `cancelled_after_confirmation` is raised only when
-an `OrderCancelled` reaches the saga in `Confirmed` — so something did cancel
-the order. `cancelled_after_payment` is raised when an
-authorisation arrives while the saga is *already compensating*, and
-compensation starts on a cancellation, a decline **or** a fifteen-minute
-payment timeout. A slow PSP that authorises after the timeout produces that row
-with nobody having cancelled anything.
+**Only one of the two is necessarily a customer cancelling**, and this paragraph
+said both were. `cancelled_after_confirmation` is raised only when an
+`OrderCancelled` reaches the saga in `Confirmed` — so something did cancel the
+order. `payment_authorised_during_compensation` is raised when an authorisation
+arrives while the saga is *already compensating*, and compensation starts on a
+cancellation, a decline **or** a fifteen-minute payment timeout. A slow PSP that
+authorises after the timeout produces that row with nobody having cancelled
+anything.
 
 **Step 1 is the same either way and its answer is not predictable from the
 code. Steps 2 and 3 differ, and the code is what tells you which** —
-`cancelled_after_confirmation` from `Confirmed`, `cancelled_after_payment`
+`cancelled_after_confirmation` from `Confirmed`,
+`payment_authorised_during_compensation`
 from `Compensating`.
 
 **These used to be one code, and this page selected on a saga state instead.**
@@ -181,8 +184,9 @@ the same defect one step less obvious.
    answer is the expected one — see above — so the check is the work, not a
    formality before the refund.
 
-   **A cancellation may still be in flight**, which is the case worth naming:
-   on `cancelled_after_payment` reached from a decline or a timeout, the
+   **A cancellation may still be in flight**, which is the case worth naming: on
+   `payment_authorised_during_compensation` reached from a decline or a timeout,
+   the
    `CancelOrder` that triggers the void has not been sent yet when this row
    appears. If you find no refund and no cancellation, **check the saga
    before deciding to wait** — step 2 of the `Compensating` procedure below.
@@ -311,11 +315,11 @@ its upstream is customers, so a spike is a product or pricing signal rather
 than a dependency, and there is no service to fix. Look at what confirmed
 orders are being cancelled *for* before treating it as an incident.
 
-**`cancelled_after_payment` follows BOTH rules, and this section used to file
-it with the customer-driven one.** It is raised when an authorisation lands
-while the saga is compensating, and compensation starts three ways: a
-customer cancelling, a declined payment, and a **fifteen-minute payment
-timeout**. That last one is an upstream fault wearing a customer-shaped code —
-a PSP slower than the timeout that then authorises anyway. So a spike here is
-a Payments latency signal until the orders say otherwise, and the cheap
+**`payment_authorised_during_compensation` follows BOTH rules, and this section
+used to file it with the customer-driven one.** It is raised when an
+authorisation lands while the saga is compensating, and compensation starts
+three ways: a customer cancelling, a declined payment, and a **fifteen-minute
+payment timeout**. That last one is an upstream fault wearing a customer-shaped
+code — a PSP slower than the timeout that then authorises anyway. So a spike
+here is a Payments latency signal until the orders say otherwise, and the cheap
 discriminator is whether the orders carry a customer cancellation at all.
