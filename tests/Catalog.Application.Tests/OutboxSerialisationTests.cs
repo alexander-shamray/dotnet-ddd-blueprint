@@ -104,7 +104,15 @@ public class OutboxSerialisationTests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Catalog"] = "Server=none;Database=Catalog;",
-                ["ConnectionStrings:RabbitMq"] = "amqp://none"
+                ["ConnectionStrings:RabbitMq"] = "amqp://none",
+                // AddRedisConnections reads both eagerly and throws naming the
+                // missing one, so the two lines below are what let
+                // AddCatalogInfrastructure run at all — the same reason the
+                // bus key above is here. Nothing resolves a multiplexer in
+                // this suite: the keyed registrations are factories, and no
+                // test asks for one.
+                ["ConnectionStrings:RedisCache"] = "redis.invalid:6379",
+                ["ConnectionStrings:RedisCoordination"] = "redis.invalid:6380"
             })
             .Build();
 

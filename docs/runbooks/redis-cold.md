@@ -4,11 +4,13 @@
 |---|---|
 | Alert | `CacheHitRatioCollapse`, in `deploy/observability/alerts/awaiting-signal.yaml` — **not loaded yet** |
 | Condition | hits / (hits + misses) < 50% over 10 minutes |
-| Signal | **Owed — an instrument *and* a consumer.** See the callout below |
+| Signal | **Owed — an instrument.** See the callout below |
 | Owner | Platform ([§13.8](../backend-architecture/13-observability.md)) |
 
-> **This alert cannot fire today, it is owed two things rather than one, and
-> the second is the reason wiring Redis will not be enough.**
+> **This alert cannot fire today, and what it is owed is the instrument.** It
+> used to be owed two things; the second closed when §8.5's PR gave
+> `AddRedisConnections` its first callers, and the remaining half is the one
+> that was always the harder of the two.
 >
 > §13.2's `AddObservability` *does* register the
 > `Microsoft.Extensions.Caching.Hybrid` meter. **The package publishes no
@@ -20,16 +22,22 @@
 > is exactly the trap §13.6 warns about, and the `AddMeter` line is what makes
 > it look wired.
 >
-> Separately, no host calls `AddRedisConnections`, so nothing constructs a
-> `HybridCache` at all. §15.4 records that absence from the other side, where
-> the two Redis rows are conditional on a consumer existing.
+> The consumer half is closed as §15.4 measures it: Catalog and Ordering both
+> call `AddRedisConnections` since §8.5's PR, so both hosts REGISTER the
+> cache stack and the two Redis rows are required. **Registering is not
+> constructing**, and an earlier revision of this callout said a `HybridCache`
+> was constructed in each: DI builds a singleton when something resolves it,
+> and nothing in `src/` injects one. So there are three states here, not two —
+> no caller, a caller, and a cache anything actually reads — and the alert is
+> waiting on none of them. A meter with no publisher reports nothing whichever
+> state holds.
 >
-> So the signal needs an **instrument** — an EventCounters-to-OTel bridge, or a
-> package version that publishes a meter — **and** a consumer. Taking the cache
-> is necessary and not sufficient, and an earlier draft of this file said
-> otherwise.
+> So the signal needs an **instrument**: an EventCounters-to-OTel bridge, or a
+> package version that publishes a meter. Taking the cache was necessary and
+> was never sufficient, which two earlier drafts of this file each got wrong in
+> a different direction.
 >
-> Everything below applies from the moment both arrive. Until then it is a
+> Everything below applies from the moment it arrives. Until then it is a
 > procedure written ahead of its alert, which is what §13.9 asks for — and the
 > Redis commands in it work today regardless, because they read the server
 > rather than the metric.

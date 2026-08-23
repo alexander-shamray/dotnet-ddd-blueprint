@@ -1,3 +1,4 @@
+using Common.Application;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.Configuration;
@@ -34,6 +35,16 @@ public static class DependencyInjection
 
             services.AddSingleton<RedisKeys>();
             services.AddSingleton<IDistributedLockFactory, RedisDistributedLockFactory>();
+
+            // §8.5's store, on the coordination connection like the lock
+            // factory beside it. Singleton for the same reason: it holds
+            // nothing per request, and the multiplexer behind it is already
+            // one. Registered here rather than in a service's own
+            // Add<Service>Infrastructure because the port is Common's and the
+            // connection it needs is the one this method establishes — a
+            // service that has Redis has the store, and one that does not
+            // cannot half-have it.
+            services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
 
             // The CACHE connection (allkeys-lru); coordination keys use the
             // other. The factory hands the cache its keyed multiplexer — one

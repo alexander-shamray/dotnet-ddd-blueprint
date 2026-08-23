@@ -646,7 +646,12 @@ public static IServiceCollection AddOrderingInfrastructure(
     // that authenticates has a current user, which is the criterion that helper
     // exists for.
 
-    services.AddScoped<IIdempotencyStore, RedisIdempotencyStore>();       // §8.5
+    // No IIdempotencyStore line, and its absence is a registration rather than
+    // an omission: RedisIdempotencyStore is Common.Infrastructure's (§8.5) and
+    // arrives with AddRedisConnections below, on RedisDistributedLockFactory's
+    // terms. That method is one call by design (§8.2) — a service either has
+    // Redis or does not — so a second registration here would be a second
+    // place for the lifetime and the keyed connection to disagree.
 
     // No ITokenCache, no ClientCredentialsHandler and no ServiceIdentityOptions
     // here. Ordering makes no synchronous outbound call — the price it needs
@@ -689,9 +694,14 @@ public static IServiceCollection AddOrderingInfrastructure(
     // observable gauge that is never constructed never reports.
     services.AddHostedService<MetricsInitialiser>();
 
-    // Keyed connections (§8.1) and the HybridCache over the cache one (§8.2).
-    // No service name passed: the key prefix comes from ApplicationName, the
-    // single source §8.5 already uses for idempotency keys.
+    // Keyed connections (§8.1), the HybridCache over the cache one (§8.2), the
+    // lock factory and §8.5's idempotency store — all four, because this is
+    // one call by design. No service name passed: the key prefix comes from
+    // ApplicationName, the single source §8.5 already uses for idempotency
+    // keys.
+    //
+    // Both connection strings are read EAGERLY here and throw naming the
+    // missing one, so this line is what a half-configured deployment stops.
     services.AddRedisConnections(configuration);
     services.AddMassTransitMessaging(configuration);                     // §9
 

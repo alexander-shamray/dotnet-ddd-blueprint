@@ -359,6 +359,7 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
         return client.PostAsJsonAsync(
             "/v1/orders",
             new PlaceOrderCommand(
+                Guid.CreateVersion7(),
                 [new PlaceOrderItem(product, 1)],
                 new AddressDto("1 Test Street", null, "Almaty", "050000", "KZ"),
                 "EUR"),

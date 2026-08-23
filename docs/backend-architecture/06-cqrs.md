@@ -801,7 +801,14 @@ public sealed record PlaceOrderCommand(
     Guid CommandId,
     IReadOnlyList<PlaceOrderItem> Items,
     AddressDto ShippingAddress,
-    string Currency) : ICommand<Result<Guid>>, IIdempotentCommand;
+    string Currency) : ICommand<Result<Guid>>, IIdempotentCommand
+{
+    // The key's operation segment, declared rather than read off the type name
+    // (§8.5). Spelled in the domain's vocabulary so that copying the CLR name
+    // back in reads as the mistake it is — a rename would otherwise change a
+    // live key, and a rolling deployment serves both spellings at once.
+    public static string OperationName => "ordering.order.place";
+}
 
 public sealed record PlaceOrderItem(Guid ProductId, int Quantity);
 

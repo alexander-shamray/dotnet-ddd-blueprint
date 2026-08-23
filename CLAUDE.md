@@ -425,11 +425,24 @@ contract**, and the first artefact deliberately *not* built with the tool the
 plan named: PactNet cannot express gRPC at all
 ([ADR-023](docs/backend-architecture/appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)),
 so the property is taken and the machinery is not — one file, linked into both
-suites, exactly as `pricing.proto` is. **Every mandatory PR in the plan has now
-landed and so has the one optional PR, so there is no next PR.**
+suites, exactly as `pricing.proto` is.
+PR-28 is **not in the original plan and had to be added to it**, which is a
+different thing from a PR being late: §8.5 specified six types, four chapters
+cited them, and `grep -in "idempotenc"` over Appendix C's twenty-seven rows
+returned nothing — so five source files deferred to "§8.5's PR", a row that did
+not exist. It built the behaviour, the Redis store and the fourth pipeline
+seat, and found that **`AddRedisConnections` had no caller anywhere in `src/`**:
+PR-12 built §8's whole stack and wired it into no host, so §8's deployment
+wiring — Compose, both charts, both API fixtures — came with it.
+
+**Every mandatory PR in the plan has landed, the one optional PR has landed,
+and Appendix C now carries an "After the plan" section.** So "there is no next
+PR" is no longer the right sentence: the plan being finished is not the same as
+the blueprint being built, and a deferral to a complete plan is a dead
+reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 812 tests — so the build rules and the drift rules below
+and `dotnet test` runs 859 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -487,11 +500,26 @@ means reading the declared graph, which is a repo-wide build change whose own
 failure mode is the vacuous pass named above. §4.2 states the reach and the
 cost; the instrument is **owed**.
 
-**`Common.Application`'s pipeline is three behaviours of four.**
-`IdempotencyBehavior` (§8.5) does not exist, and its seat is between Validation
-and Transaction; `PublishProductCommand` carries no `CommandId` for the same
-reason, since §6.4 warns the field without the interface is unprotected. Both
-join with §8.5's PR. `PluggableInterfaces.All` is **complete at five** —
+**`Common.Application`'s pipeline is complete at four since PR-28**, and
+`IdempotencyBehavior` (§8.5) sits between Validation and Transaction. Both
+neighbours are load-bearing: inside Validation, so a malformed command is
+refused without burning the caller's `CommandId` for a day; outside
+Transaction, so the claim is held before any work starts.
+
+**Two commands opt in and the third is a decision, not an omission.**
+`PlaceOrderCommand` and `PublishProductCommand` carry a `CommandId` and
+`IIdempotentCommand`; `CancelOrderCommand` carries neither, because
+`Order.Cancel` is already idempotent, its broker ingress has no principal to
+claim under, and §9.5's inbox absorbs the duplicate one layer down. That
+argument lives on the record itself — §8.5's rule is that opting in is a
+decision and forgetting to is not meant to look like one, so a reflection gate
+per service reads the *shape* of every command rather than trusting the author.
+
+**`IIdempotentCommand` has two members, and the second is why a rename is
+safe.** `static abstract OperationName` is the key's operation segment,
+declared rather than read off `typeof(TCommand).Name` — the compiler refuses a
+command that supplies none, and a gate refuses one that supplies its own type
+name back. `PluggableInterfaces.All` is **complete at five** —
 adding an interface there and nowhere else is the design, and adding one before
 its PR is inventing a project early by another route.
 
@@ -635,12 +663,15 @@ own line rather than sending a reader to a file that does not hold it.
   endpoint. **Ask what writes to it, not whether it exists.**
 - **"What is it owed" is a question to answer by reading, not by inferring
   from what is absent.** The same alert was first diagnosed as owed a
-  *consumer*, because nothing calls `AddRedisConnections` — true, visible from
-  this repository, and not the reason. A gate was written against that
-  premise, observed red and removed once the package was read: gating on a
+  *consumer*, because at the time nothing called `AddRedisConnections` — true,
+  visible from this repository, and not the reason. A gate was written against
+  that premise, observed red and removed once the package was read: gating on a
   consumer would have gone green→red the day Redis was wired and moved a
   silent alert into the loaded file. **A plausible cause you can see beats an
   actual cause you have not looked for, which is what makes it dangerous.**
+  **PR-28 wired Redis into both services and the alert did not move**, which is
+  the counterfactual arriving rather than being argued: the removed gate would
+  have fired that day, and the meter still publishes nothing.
 - **A list of things known to be missing needs a gate asserting they are still
   missing.** PR-24's four unloaded alerts would otherwise become four alerts
   nobody ever turned on: the gate that says "these metrics are published by
@@ -738,7 +769,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 635 of 812, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 671 of 859, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -817,13 +848,20 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 635 of
-the 812 and starts no container — measured with `docker events`, not inferred —
-and `Category=Integration` is the other 177, needing the daemon exactly as
+category runs a smaller suite and says which. `Category!=Integration` is 671 of
+the 859 and starts no container — measured with `docker events`, not inferred —
+and `Category=Integration` is the other 188, needing the daemon exactly as
 before.
 
+**The integration half read 187 for two branches and the arithmetic never
+closed**, which is this file's own rule about restated numbers catching one:
+18 + 649 + 187 is 854 and the suites summed to 855. The figure was reconciled
+against the branch's own CI run rather than recomputed — `gh run view <id>
+--log`, summed over the per-project totals of each stage — which is the check
+this file names for exactly this case.
+
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (617) and integration (177), which is the 635 above split at the
+(18), unit (653) and integration (188), which is the 671 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.

@@ -9,11 +9,14 @@ namespace Catalog.Application.Products.PublishProduct;
 /// key — and here they are identical primitives.
 /// </summary>
 /// <remarks>
-/// No <c>CommandId</c> and no <c>IIdempotentCommand</c>: §8.5's behaviour does
-/// not exist yet, and §6.4 itself warns that the field without the interface
-/// is unprotected. Both join with the PR that builds the behaviour.
+/// <b><c>CommandId</c> and <c>IIdempotentCommand</c> arrived together</b>, in
+/// the PR that built §8.5's behaviour. §6.4 warns that the field without the
+/// interface is unprotected, so shipping one ahead of the other would have
+/// been worse than shipping neither — a client reading the field would take a
+/// retry to be safe when nothing was claiming a key.
 /// </remarks>
 public sealed record PublishProductCommand(
+    Guid CommandId,
     string Name,
     string? ThumbnailUrl,
     // Nullable because a bare decimal cannot say "absent": an omitted amount
@@ -23,4 +26,13 @@ public sealed record PublishProductCommand(
     // attribute was tried first and surfaces as a 500 through the binder.
     // The reference members need no such dance: omission binds them null.
     decimal? Amount,
-    string Currency) : ICommand<Result<Guid>>;
+    string Currency) : ICommand<Result<Guid>>, IIdempotentCommand
+{
+    /// <summary>
+    /// Declared, never derived from the type name — a rename must not be able
+    /// to change a live key (§8.5). Spelled in the domain's vocabulary rather
+    /// than the CLR's, so that copying the type name back in reads as the
+    /// mistake it is.
+    /// </summary>
+    public static string OperationName => "catalog.product.publish";
+}

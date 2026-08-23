@@ -701,12 +701,24 @@ saying so.
 
 **A key joins a chart when a host's code reads it, and not before.** That is
 §14.1's rule for Compose blocks — an environment variable nothing reads is the
-container form of an unused registration — and it is why no chart carries the
-two Redis connection strings, which §15.4 marks required **only once a host
-reads a cache**. None does: nothing calls `AddRedisConnections` yet, and a
-`secretKeyRef` to a Secret nobody has created is a pod that never starts. They
-join with the PR whose code reads them, and the inventory's column becomes
-unconditional in the same change.
+container form of an unused registration — and it is why no chart carried the
+two Redis connection strings for as long as nothing called
+`AddRedisConnections`.
+
+**Catalog and Ordering now do**, because §8.5's `IdempotencyBehavior` claims a
+`{service}:idem:` key before any protected command runs, so both charts carry a
+`redis:` block on `broker`'s exact shape and §15.4's column is unconditional
+for them. The gateway and the BFF declare `redis.enabled: false` — written down
+rather than omitted, because a capability is a claim a chart makes rather than
+one to infer from a missing key.
+
+**Both keys are required together even though only the coordination one is read
+today**, and the reason is the code's rather than the chart's:
+`AddRedisConnections` is one call by design (§8.2) and reads both eagerly, so a
+chart supplying one renders cleanly and produces a pod that will not start.
+`deploy/helm/smoke.sh` asserts the two `secretKeyRef` keys **differ** as well as
+being present — one key copied onto both rows passes every count and points
+§8.5's claims at the `allkeys-lru` instance §8.1 exists to keep them off.
 
 **Shipping and Notifications get the same chart minus the Service and the
 Ingress.** They consume from the broker and expose no API, so their only
@@ -989,15 +1001,23 @@ in the PR that shipped the charts. A default that turns a missing value into
 silence is worse than one that turns it into a refusal, which is why the column
 now says required and the default is recorded here instead.
 
-**The two Redis rows are a fourth category and it is the one the table used to
-get wrong.** They were marked required outright, and no host in the solution
-calls `AddRedisConnections` — so a chart honouring the table would mount two
-Secrets nobody has created, and a `secretKeyRef` to a missing Secret is a pod
-that never starts. That is worse than the over-supply two paragraphs up, which
-merely provisions credentials nothing sends: this one stops the service. The
-rule that resolves it is §14.1's, applied one deployment target over — **a key
-joins when a host's code reads it** — so both rows are conditional on the
-consumer existing, and they become unconditional in the PR that adds one.
+**The two Redis rows were a fourth category, and §8.5's PR is the one that
+added the consumer.** They had been marked required outright while no host in
+the solution called `AddRedisConnections` — so a chart honouring the table
+would have mounted two Secrets nobody had created, and a `secretKeyRef` to a
+missing Secret is a pod that never starts. That is worse than the over-supply
+two paragraphs up, which merely provisions credentials nothing sends: this one
+stops the service. The rule that resolved it is §14.1's, applied one deployment
+target over — **a key joins when a host's code reads it**.
+
+`IdempotencyBehavior` reads one, so Catalog and Ordering carry both rows
+unconditionally and the gateway and the BFF carry neither. **Both, not just the
+coordination one that is actually read**: `AddRedisConnections` is a single
+call by design (§8.2) and reads both eagerly, so a host given one key throws
+naming the other. The condition that remains is per chart rather than per
+platform, and `deploy/helm/smoke.sh` derives it from `src/` rather than from
+this table — a chart whose service calls `AddRedisConnections` must declare
+`redis`.
 
 The rule for the Kind column is mechanical: **if the value contains a
 credential, it is a Secret.** Every connection string here does — SQL Server
@@ -1020,8 +1040,8 @@ namespace read access.
 |---|---|---|---|
 | `ConnectionStrings__Ordering` | Secret | External Secrets → runtime identity (§7.1) | ✓ |
 | `ConnectionStrings__OrderingMigrator` | Secret | External Secrets → migrator Job only | ✓ (Job) |
-| `ConnectionStrings__RedisCache` | **Secret** | External Secrets — carries the §8.1 ACL user and password | ✓ **when the host reads a cache** — see below |
-| `ConnectionStrings__RedisCoordination` | **Secret** | External Secrets — separate ACL user, `noeviction` instance | ✓ **when the host reads a cache** |
+| `ConnectionStrings__RedisCache` | **Secret** | External Secrets — carries the §8.1 ACL user and password | ✓ **when the host calls `AddRedisConnections`** — see below |
+| `ConnectionStrings__RedisCoordination` | **Secret** | External Secrets — separate ACL user, `noeviction` instance | ✓ **when the host calls `AddRedisConnections`** — both or neither |
 | `ConnectionStrings__RabbitMq` | Secret | External Secrets | ✓ |
 | `Identity__Authority` | Config | Helm `identity.authority` → ConfigMap | ✓ — **every host**, including the gateway |
 | `Identity__Client__ClientId` | Config | Helm `identity.clientId` | ✓ **BFF only** — the one host that calls a peer ([§9.7](09-messaging.md), [§11.5](11-identity-authorization.md)) |

@@ -55,7 +55,7 @@ DATABASELESS_CHARTS="gateway web-bff"
 # branch has spent six findings learning that about counts and inventories, and
 # this is the same lesson applied to the gate's own inputs.
 SOURCE_INPUTS="
-src/Gateway/Gateway.Api/appsettings.json
+src/Gateway/Gateway.Api
 src/BFF/Web.Bff
 src/Services/Catalog
 src/Services/Ordering
@@ -163,6 +163,30 @@ check "exactly one chart declares client credentials (found $credentialed)" \
 # matched whichever block came first (there are five in Catalog's values), so
 # clearing the broker entirely left this gate green while claiming to check it.
 # A vacuous assertion in the file whose whole subject is vacuous assertions.
+# The invocation form of §8.2's helper, as opposed to any mention of its name.
+# Declared here so the self-test below can be written against the same string
+# the gate uses — two copies of a pattern is one of them going stale.
+# ANCHORED TO A STATEMENT, not merely to a line that does not begin with a
+# slash. The first form here was a bare mention, which three comments per
+# service satisfied; the second required a non-slash first character, which
+# a `//` comment cannot satisfy but plenty of prose can — a `*` continuation
+# inside a block comment, or a line beginning with a quote. A regression gate
+# that a deleted registration can leave green by way of a leftover mention is
+# not a gate, and neither of the first two forms was tested against prose
+# that had a non-slash lead.
+#
+# So the line must OPEN with an identifier and reach the call through a dot:
+# `services.AddRedisConnections(` and `builder.Services.AddRedisConnections(`
+# match, and every comment, string and block-comment continuation is refused
+# by the first character alone.
+#
+# It fails CLOSED on one legitimate shape and that is the safe direction: a
+# chain broken under the house style, `services` on its own line and
+# `.AddRedisConnections(configuration)` beneath it, is not matched — so the
+# gate would demand a chart with no redis and fail loudly against one that
+# has it, rather than passing a service whose registration is gone.
+CALLS_REDIS='^[[:space:]]*[A-Za-z_][A-Za-z0-9_.]*\.AddRedisConnections\('
+
 declares() {
     # declares <chart> <block> -> exit 0 when that block sets enabled: true
     awk -v want="$2" '
@@ -173,10 +197,31 @@ declares() {
     ' "$CHARTS_DIR/$1/values.yaml"
 }
 
-for chart in $MIGRATOR_CHARTS; do
-    svc="$(awk '/^workload:/ { w = 1 } w && /^  name: / { sub(/^  name: /, ""); print; exit }' \
-        "$CHARTS_DIR/$chart/values.yaml")"
-    src="$ROOT/src/Services/$(echo "${chart:0:1}" | tr '[:lower:]' '[:upper:]')${chart:1}"
+# The negation, as a function rather than a `!` at the call site: `check` runs
+# its argument through "$@", which cannot carry a shell keyword.
+lacks() { ! declares "$1" "$2"; }
+
+# THE MAPPING IS DATA, because two of the four trees are not under
+# src/Services at all and no capitalisation rule reaches them.
+#
+# This loop ran over MIGRATOR_CHARTS and derived the path by capitalising
+# the chart name, which silently excluded the gateway and the BFF from
+# every agreement below. Their charts were asserted to declare no redis and
+# nothing ever compared that to their source, so the day either edge host
+# started calling AddRedisConnections the checks stayed green and the pod
+# resolved a key its chart never mounted. A gate cannot fail on a
+# comparison it never makes — the same shape as a gate that cannot fail on
+# a file that is not there.
+src_of() {
+    case "$1" in
+        gateway) echo "$ROOT/src/Gateway/Gateway.Api" ;;
+        web-bff) echo "$ROOT/src/BFF/Web.Bff" ;;
+        *)       echo "$ROOT/src/Services/$(echo "${1:0:1}" | tr '[:lower:]' '[:upper:]')${1:1}" ;;
+    esac
+}
+
+for chart in $SERVICE_CHARTS; do
+    src="$(src_of "$chart")"
     if [ -d "$src" ]; then
         if grep -rq 'GetConnectionString("RabbitMq")' "$src"; then
             check "$chart reads RabbitMq in src/, so its chart declares a broker" \
@@ -186,6 +231,33 @@ for chart in $MIGRATOR_CHARTS; do
             check "$chart resolves a connection string in src/, so its chart names one" \
                 grep -qE '^  connectionName: ' "$CHARTS_DIR/$chart/values.yaml"
         fi
+        # §8.1's two connections, read from src/ like the broker above. A
+        # service whose Infrastructure calls AddRedisConnections resolves both
+        # keys eagerly at startup, so a chart that does not declare redis
+        # renders cleanly and produces a pod that will not start.
+        #
+        # THE PATTERN MATCHES AN INVOCATION, NOT A MENTION, and the difference
+        # is the whole gate. A bare 'AddRedisConnections' is satisfied by the
+        # comments that explain the call — there are three such lines per
+        # service beside the one call, some of them added by the very PR that
+        # wired Redis up — so deleting the registration left this check green
+        # and the chart's redis block unjustified. $CALLS_REDIS requires the
+        # first non-space character on the line to be something other than a
+        # slash, which is what a `//` comment can never satisfy.
+        #
+        # ASSERTED IN BOTH DIRECTIONS, because one direction is a gate that
+        # stops looking. Tightening the pattern above means a deleted
+        # registration no longer satisfies the `if`, so the check is SKIPPED
+        # rather than failed — and a chart left declaring redis for a service
+        # that reads nothing mounts a Secret reference no pod needs. The
+        # agreement is what has to hold, and it fails from either side.
+        if grep -rqE "$CALLS_REDIS" "$src"; then
+            check "$chart calls AddRedisConnections in src/, so its chart declares redis" \
+                declares "$chart" redis
+        else
+            check "$chart calls no AddRedisConnections in src/, so its chart declares no redis" \
+                lacks "$chart" redis
+        fi
     else
         fail "no source tree found at $src for chart $chart — the mapping, not the chart, is wrong"
     fi
@@ -193,6 +265,36 @@ done
 
 check 'the BFF binds ServiceIdentityOptions in src/, so its chart declares credentials' \
     grep -rq 'ServiceIdentityOptions' "$ROOT/src/BFF/Web.Bff"
+
+# --------------------------------------------------------------------------
+section 'The source-detection patterns select code, not prose'
+# --------------------------------------------------------------------------
+# The gate above went green on a service whose registration had been deleted,
+# because three comments per service name the helper it calls. A pattern is a
+# claim about what it selects, and the only way to establish that claim is to
+# hand it something it must REFUSE — every other run of this script feeds it a
+# tree where the answer is yes either way.
+check 'CALLS_REDIS refuses a comment that names the helper' \
+    sh -c 'printf "        // AddRedisConnections and nothing called it\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS refuses a block-comment continuation' \
+    sh -c 'printf "         * services.AddRedisConnections(configuration);\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS refuses the call inside a string literal' \
+    sh -c 'printf "        \"services.AddRedisConnections(configuration)\";\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS still matches the real registration' \
+    sh -c 'printf "        services.AddRedisConnections(configuration);\n" |
+        grep -qE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS still matches it through a qualified receiver' \
+    sh -c 'printf "        builder.Services.AddRedisConnections(builder.Configuration);\n" |
+        grep -qE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS refuses a commented-out call' \
+    sh -c 'printf "        // services.AddRedisConnections(configuration);\n" |
+        grep -qvE "$0"' "$CALLS_REDIS"
+check 'CALLS_REDIS accepts the real invocation' \
+    sh -c 'printf "        services.AddRedisConnections(configuration);\n" |
+        grep -qE "$0"' "$CALLS_REDIS"
 
 # --------------------------------------------------------------------------
 section 'The workflow watches everything this script reads'
@@ -242,9 +344,17 @@ done
 # the copy that was caught. This is that debt paid here.
 #
 # The subject is this script's own source: every `$ROOT/…` path it names must
-# be covered by a declared entry — the WHOLE path, not a prefix of it, because
-# the entries here are deeper than a top-level segment
-# (`src/Gateway/Gateway.Api/appsettings.json` is a file, not a tree).
+# be covered by a declared entry — matched as the WHOLE entry or as a directory
+# prefix of it, never as an arbitrary substring, because the entries here are
+# deeper than a top-level segment.
+#
+# BOTH KINDS ARE DECLARED and the example here named only the first. A file
+# entry (`src/BuildingBlocks/Common.Web/HealthCheckExtensions.cs`) is matched
+# whole; a tree entry (`src/Gateway/Gateway.Api`, `src/BFF/Web.Bff`) also
+# covers the paths beneath it, which is what lets the source-agreement loop
+# grep a whole service directory against one declared input. The gateway was
+# the file example until that loop widened to every service chart and the
+# entry became a tree; the sentence describing it did not move with it.
 #
 # Two kinds of match are skipped, and neither hides a gap:
 #
@@ -497,6 +607,37 @@ for chart in $SERVICE_CHARTS; do
     grep -qE '^ +migrator: ' "$CHARTS_DIR/$chart/values.yaml" && has_image=yes
     check "$chart: migration template ($has_template) and image.migrator ($has_image) agree" \
         test "$has_template" = "$has_image"
+done
+
+# DRIVEN FROM THE CHART'S OWN redis BLOCK, over every service chart — and it
+# used to iterate MIGRATOR_CHARTS and demand two keys unconditionally, which
+# is a rule about DATABASES applied to a question about REDIS.
+#
+# Tightening the source-detection gate above is what exposed it: that gate now
+# permits a database-backed chart whose code calls no AddRedisConnections, and
+# requires it to declare no redis — while this loop still demanded two Redis
+# variables from every migrator chart. The next such service could satisfy
+# neither gate, and the gateway and BFF were never compared to their source at
+# all. Two gates disagreeing about the same fact is worse than one gate.
+#
+# So the expected count is 0 or 2, read from `declares`, over SERVICE_CHARTS.
+# Never 1: the two connections are provisioned together and a chart carrying
+# one is a pod that resolves the other to null at startup.
+for chart in $SERVICE_CHARTS; do
+    if declares "$chart" redis; then expected=2; else expected=0; fi
+    check "$chart declares redis=$(declares "$chart" redis && echo yes || echo no), so it mounts $expected of §8.1's connections" \
+        test "$(count '^ *- name: ConnectionStrings__Redis' "$OUT/$chart.yaml")" -eq "$expected"
+    # THE TWO KEYS MUST DIFFER, and this is the assertion that would have
+    # caught the likeliest wiring mistake. Both instances are provisioned
+    # together and named alike, so one Secret key copied onto both rows renders
+    # cleanly, passes the count above, and points §8.5's idempotency claims at
+    # the allkeys-lru instance §8.1 exists to keep them off. Counting the rows
+    # cannot see that; comparing the keys can.
+    if [ "$expected" -eq 2 ]; then
+        check "$chart: the cache and coordination connections read different Secret keys" \
+            test "$(awk '/- name: ConnectionStrings__Redis/ { want = 1; next }
+                         want && /key: / { print $2; want = 0 }' "$OUT/$chart.yaml" | sort -u | wc -l)" -eq 2
+    fi
 done
 
 # --------------------------------------------------------------------------
@@ -826,6 +967,19 @@ refuses_chart catalog 'disabling a database the chart is configured for fails th
     'database.enabled is false' --set database.enabled=false
 refuses_chart catalog 'disabling a broker the chart is configured for fails the render' \
     'broker.enabled is false' --set broker.enabled=false
+refuses_chart catalog 'disabling redis the chart is configured for fails the render' \
+    'redis.enabled is false' --set redis.enabled=false
+refuses_chart catalog 'clearing the coordination Secret key fails the render' \
+    'redis.secretRef.coordinationKey is required' --set-string 'redis.secretRef.coordinationKey='
+# The two keys being PRESENT is not the same claim as their being DIFFERENT,
+# and only the first had a test. This repository's own values differ, so every
+# render was green while a production overlay pointing both connections at the
+# allkeys-lru instance would have rendered green too — and an evicted
+# idempotency claim leaves no trace of having existed, so the failure is the
+# kind nobody reproduces afterwards.
+refuses_chart catalog 'pointing both Redis connections at one Secret key fails the render' \
+    'are the same key' --set-string 'redis.secretRef.coordinationKey=cache-connection-string'
+
 refuses_chart catalog 'clearing the migrator image fails the render' \
     'image.migrator is required' --set-string 'image.migrator='
 

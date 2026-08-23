@@ -347,6 +347,14 @@ public sealed record IdempotencyEntry(bool InProgress, string? Payload);
 /// </summary>
 public interface IIdempotentCommand
 {
+    // The operation's identity, declared rather than derived — see "Renaming a
+    // command changes its keys" below, which is the defect this closes. A
+    // static abstract member is what makes the decision unskippable: the
+    // compiler refuses a command that supplies none, and a rename of the type
+    // leaves the string alone. Give it a value the domain would recognise;
+    // copying the CLR name back in reintroduces the coupling by convention.
+    static abstract string OperationName { get; }
+
     Guid CommandId { get; }
 }
 ```
@@ -393,11 +401,11 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
     public async Task<TResult> HandleAsync(TCommand command, NextDelegate<TResult> next, CancellationToken ct)
     {
         // Key shape only — the store owns the service prefix and namespace.
-        // The subject segment is not decoration: see "A claimed key belongs to
-        // one subject" below. Nor is the type name free — see "Renaming a
-        // command changes its keys", which is the reason it is not FullName
-        // either.
-        string key = $"{Subject()}:{typeof(TCommand).Name}:{command.CommandId}";
+        // Neither of the first two segments is decoration: the subject is
+        // argued at "A claimed key belongs to one subject" below, and the
+        // operation is declared on the command rather than read off the type
+        // for the reason "Renaming a command changes its keys" gives.
+        string key = $"{Subject()}:{TCommand.OperationName}:{command.CommandId}";
 
         if (!await store.TryClaimAsync(key, Retention, ct))
         {
@@ -606,14 +614,25 @@ is the caller's own cancellation, and honouring the token would abandon the
 release and leak the claim for a day — so `None` is right there too, whether or
 not the transaction committed, which the next callout is about.
 
-> **Renaming a command changes its keys, and a rolling deployment is where
-> that costs a duplicate write.** The operation segment is
-> `typeof(TCommand).Name`, so `PlaceOrderCommand` → `SubmitOrderCommand` is a
-> new key for the same `CommandId`. During a rollout both versions are serving:
-> the old pods claim under the old name, the new pods under the new one, and a
+> **Renaming a command would change its keys, and a rolling deployment is
+> where that costs a duplicate write — which is why the operation segment is
+> declared and not derived.** The segment was `typeof(TCommand).Name` when this
+> section was first written, so `PlaceOrderCommand` → `SubmitOrderCommand` was
+> a new key for the same `CommandId`. During a rollout both versions serve: the
+> old pods claim under the old name, the new pods under the new one, and a
 > client retrying one `CommandId` is protected by neither — it places two
 > orders. The window is not the rollout but the **retention**, because an entry
 > written before the rename stays claimable for 24 hours after it.
+>
+> `IIdempotentCommand.OperationName` closes that, and the shape is the one this
+> callout used to merely recommend: a `static abstract` member, which C# 14
+> makes cheapest because the compiler then refuses a command that does not
+> supply one. What it cannot refuse is a command that supplies its own type
+> name back, so a per-service reflection gate asserts none does. `FullName` was
+> the obvious alternative and is worth ruling out: it addresses a collision
+> between two same-named commands in different namespaces — a real but
+> different problem — while making the key *more* fragile by binding the
+> namespace to it as well.
 >
 > **The stored payload has the same problem one field over, and it is worse
 > because nothing throws.** `Capture` writes the success value with default
@@ -627,18 +646,12 @@ not the transaction committed, which the next callout is about.
 > one is taken, **changing the shape of an idempotent command's result is a
 > migration too**, on exactly the terms the rename is.
 >
-> `FullName` does not fix this and is worth ruling out explicitly: it addresses
-> a collision between two same-named commands in different namespaces, which is
-> a different problem, and it makes the key *more* fragile by binding the
-> namespace to it as well. The fix is an explicit discriminator the refactor
-> cannot silently change — a `static abstract` member on `IIdempotentCommand`
-> is the shape C# 14 makes cheapest, since the compiler then refuses a command
-> that does not supply one — or, failing that, a stated dual-read across a
-> rename. **Neither is written here**: this section specifies the mechanism
-> that #40, #70 and #84 are about, and a member on the opted-in interface is a
-> change to the contract every command implements rather than to the behaviour.
-> Until one is taken, **renaming an idempotent command is a migration**, and
-> this paragraph is the only thing saying so.
+> **The operation half is closed and the payload half is not**, and the
+> asymmetry is worth being explicit about: a discriminator was cheap to add
+> while the interface had no implementors, and a stored-payload version is a
+> change to what every completed entry holds. Until one is taken, **changing
+> the shape of an idempotent command's result is a migration**, and this
+> paragraph is the only thing saying so.
 
 > **The lost commit acknowledgement is the one fault the `catch` gets wrong,
 > and it is this section's debt rather than a new finding.** If `CommitAsync`
@@ -715,14 +728,36 @@ precisely because nothing commits.
 > point, not a nested unit. A service that puts a dispatch inside a *command*
 > handler needs this behaviour to decline nested dispatches outright, and this
 > is the paragraph that changes when it does.
+>
+> **"Unreached" is a claim about an assembly, so a gate makes it, not this
+> sentence.** `No_command_handler_dispatches_a_command` reads the constructor
+> parameters of every `ICommandHandler<,>` in the service and refuses
+> `IDispatcher` — one per service, beside the opt-in gates, and the day a
+> handler takes one the build fails here rather than the hole opening in
+> silence. Without it the paragraph above is a residual nothing re-checks,
+> which this blueprint treats as a decision rather than a deferral. Its reach
+> is the constructor: a handler that resolves `IServiceProvider` and asks it
+> for a dispatcher is invisible to it, exactly as a forbidden-but-unused
+> reference is invisible to §4.2's gates — late rather than absent.
 
 The Redis implementation lives in Infrastructure and is where the two §8.1
 constraints are satisfied — §8.3's `RedisKeys` supplies the `{service}:idem:`
 prefix the ACL requires, and the **coordination** connection rather than the
-cache connection, because idempotency keys must never be evicted:
+cache connection, because idempotency keys must never be evicted.
+
+**It is `Common.Infrastructure`'s and not a service's, which is the one place
+this section moved when it was built.** The obvious home is
+`Ordering.Infrastructure.Idempotency`, beside the service that uses it; what
+argues the other way is `RedisDistributedLockFactory`, which sits one file over
+on the same connection with the same keying and the same `[FromKeyedServices]`
+attribute. Two per-service copies of one Redis interaction drift the first time
+either changes, and §4.3's one-assembly rule is not in play — every service
+already references this building block. It is registered by
+`AddRedisConnections` for the same reason the lock factory is: that method is
+one call by design (§8.2), so a service either has Redis or does not:
 
 ```csharp
-namespace Ordering.Infrastructure.Idempotency;
+namespace Common.Infrastructure.Redis;
 
 internal sealed class RedisIdempotencyStore(
     [FromKeyedServices(RedisConnections.Coordination)] IConnectionMultiplexer redis,
@@ -846,10 +881,12 @@ every allowed value type, which is §12.6's
 `Every_contract_round_trips_through_the_bus_serialiser` one layer over and is
 owed if this list ever grows past the primitives §6.4 uses.
 
-**Neither reflection test reaches the behaviour, and §12.4's two integration
-tests reach only half of it.** Both dispatch `PlaceOrderCommand`, so every
-assertion they make is about `Result<Guid>` on the success path: the release
-decisions are unobserved, and so is the void-shaped replay. Moving
+**Neither reflection test reaches the behaviour, and the integration tests
+reach only part of it.** A third one crosses the replay path end to end —
+`Catalog.Api.Tests` posts the same `CommandId` twice through a real Redis and
+asserts one product and one identical response — but every integration
+assertion here is still about the **success** path and about `Result<Guid>`:
+the release decisions are unobserved, and so is the void-shaped replay. Moving
 `CompleteAsync` back inside the `try` — undoing this section's answer to the
 release question — leaves all of them green. So the behaviour gets its own
 suite against a recording store, in `Common.Application.Tests` beside §6.3's,
@@ -861,14 +898,37 @@ public class IdempotencyBehaviorTests
     // One record per outcome, rather than sentinel CommandIds: the key is
     // built from CommandId, so overloading it to select a handler would make
     // every key assertion depend on which branch the test wanted.
-    private sealed record Place(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
-    private sealed record Refuse(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
-    private sealed record Explode(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand;
+    //
+    // Each declares OperationName because the interface's member is `static
+    // abstract` — the compiler refuses a command that supplies none, which is
+    // the whole point of declaring it there rather than reading it off the
+    // type. A test double is not exempt from a constraint whose value is that
+    // nobody can forget it, and these four are the shortest demonstration of
+    // that in the chapter. Distinct values, for the same reason a service's
+    // gate asserts distinctness: two of these sharing one would share a
+    // keyspace across the suite.
+    private sealed record Place(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.place";
+    }
+
+    private sealed record Refuse(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.refuse";
+    }
+
+    private sealed record Explode(Guid CommandId) : ICommand<Result<Guid>>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.explode";
+    }
 
     // The void shape is not a curiosity: it is the branch returning
     // (TResult)Result.Success() and the one storing the "null" sentinel, and
     // §12.4 has no command with it.
-    private sealed record Cancel(Guid CommandId) : ICommand<Result>, IIdempotentCommand;
+    private sealed record Cancel(Guid CommandId) : ICommand<Result>, IIdempotentCommand
+    {
+        public static string OperationName => "tests.cancel";
+    }
 
     [Fact]
     public async Task A_successful_command_completes_the_claim_and_never_releases()

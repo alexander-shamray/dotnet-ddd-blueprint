@@ -295,13 +295,25 @@ The secret half of the same table, and the rule that decides what is in either:
 a variable joins when a host's code READS it, and not before.
 
 That is the rule §14.1's Compose blocks already state — "an env var nothing
-reads is the container form of an unused registration" — and it is why there
-are no Redis keys here. §15.4's inventory marks `ConnectionStrings__RedisCache`
-and `ConnectionStrings__RedisCoordination` required *once a host reads a cache*,
-and none does — nothing calls `AddRedisConnections` yet. Supplying them anyway
-would demand two Secrets exist before any pod can start, for values nothing
-reads. They join with the PR whose code reads them, exactly as
-`Identity__Authority` joined with PR-16.
+reads is the container form of an unused registration". §15.4's inventory marks
+`ConnectionStrings__RedisCache` and `ConnectionStrings__RedisCoordination`
+required *once the host calls `AddRedisConnections`* — **both or neither** —
+and **that condition is now met**: §8.5's PR gave that helper its first
+callers, in Catalog and Ordering. So the two keys are rendered below, under
+`redis.enabled`, exactly as `Identity__Authority` joined with PR-16.
+
+**The condition is the CALL, not a cache read, and this paragraph said "once a
+host reads a cache" until a review caught it.** The helper reads both
+connection strings eagerly, so a host that caches nothing still fails at
+startup without them — and §8.5's idempotency store reads the *coordination*
+instance, which is not a cache at all and is the `noeviction` half of §8.1's
+split. Keying the requirement on caching would leave the one key this PR
+actually made load-bearing looking optional.
+
+**This paragraph said the opposite in the branch that added them**, which is
+the drift the rule above exists to prevent arriving inside the file it governs:
+the keys went in eighty lines down and the comment explaining their absence
+stayed where it was.
 
 Secrets are REFERENCED, never rendered. External Secrets Operator owns the
 Secret objects (§15.4); a chart that templated a connection string would put a
@@ -344,6 +356,9 @@ database its host unconditionally resolves.
 {{- if and .Values.broker.secretRef (not .Values.broker.enabled) }}
 {{- fail "broker.enabled is false but broker.secretRef is set. AddMassTransitMessaging throws without ConnectionStrings:RabbitMq (§9.3), so this renders cleanly and the host does not start." }}
 {{- end }}
+{{- if and .Values.redis.secretRef (not .Values.redis.enabled) }}
+{{- fail "redis.enabled is false but redis.secretRef is set. AddRedisConnections reads BOTH connection strings eagerly and throws naming the missing one (§8.1), so this renders cleanly and the host does not start. A capability is a fact about the code, not an environment setting." }}
+{{- end }}
 {{- if and .Values.identity.clientId (not .Values.identity.clientCredentials) }}
 {{- fail "identity.clientCredentials is false but identity.clientId is set. Web.Bff binds ServiceIdentityOptions unconditionally and ValidateOnStart refuses to boot without all three values (§15.4) — so this is a render that succeeds and a pod that never starts." }}
 {{- end }}
@@ -364,6 +379,43 @@ key is the other half, mounted into the migration Job and nowhere else.
     secretKeyRef:
       name: {{ include "commerce.require" (list .Values.broker.secretRef.name "broker.secretRef.name is required when broker.enabled: AddMassTransitMessaging throws without the connection string, so the host does not start (§9.3).") | quote }}
       key: {{ include "commerce.require" (list .Values.broker.secretRef.key "broker.secretRef.key is required when broker.enabled.") | quote }}
+{{- end }}
+{{- if .Values.redis.enabled }}
+{{- if eq (.Values.redis.secretRef.cacheKey | toString) (.Values.redis.secretRef.coordinationKey | toString) }}
+{{- fail "redis.secretRef.cacheKey and redis.secretRef.coordinationKey are the same key. The two instances have different eviction policies (§8.1) — one key points both connections at the same server, and if that is the allkeys-lru instance then §8.5's idempotency claims are evicted under exactly the memory pressure that makes a duplicate write hardest to reproduce. A capability is a fact about the code, not an environment setting." }}
+{{- end }}
+{{- /*
+The guard above was argued in the comment below and not written, until a review
+asked what enforced it. Nothing did: the smoke test renders this repository's
+own values, which differ, so every render was green and a production overlay
+setting both to the cache key would have been too. **An argument in a comment
+is not a control**, and the failure it describes is the one that cannot be
+reproduced afterwards — an evicted claim leaves no trace of having existed.
+*/}}
+{{- /*
+§8.1's two connections, and BOTH are required even where only one is read.
+AddRedisConnections is one call by design (§8.2) and reads both eagerly, so a
+service either has Redis or does not — half-having it is a pod that will not
+start, which is the same shape as every other guard in this file.
+
+Secrets rather than Config, unlike the authority and the OTLP endpoint above,
+and §8.1 is why: each service connects as its OWN ACL user, so the string
+carries a credential. Two references rather than one, because the two instances
+have different eviction policies and therefore different servers (§8.1) — a
+single value would let a chart point idempotency keys at the allkeys-lru
+instance, where they are evicted under exactly the memory pressure that makes
+the duplicate write hardest to reproduce.
+*/}}
+- name: ConnectionStrings__RedisCache
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "commerce.require" (list .Values.redis.secretRef.name "redis.secretRef.name is required when redis.enabled: AddRedisConnections throws without both connection strings, so the host does not start (§8.1).") | quote }}
+      key: {{ include "commerce.require" (list .Values.redis.secretRef.cacheKey "redis.secretRef.cacheKey is required when redis.enabled.") | quote }}
+- name: ConnectionStrings__RedisCoordination
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "commerce.require" (list .Values.redis.secretRef.name "redis.secretRef.name is required when redis.enabled.") | quote }}
+      key: {{ include "commerce.require" (list .Values.redis.secretRef.coordinationKey "redis.secretRef.coordinationKey is required when redis.enabled: it is the noeviction instance §8.5's idempotency claims are written to, and pointing it at the cache one is a duplicate write nobody can reproduce (§8.1).") | quote }}
 {{- end }}
 {{- if .Values.identity.clientCredentials }}
 - name: Identity__Client__ClientSecret

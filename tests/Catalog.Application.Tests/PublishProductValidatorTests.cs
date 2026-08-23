@@ -15,7 +15,7 @@ public class PublishProductValidatorTests
     private static readonly PublishProductValidator Validator = new();
 
     private static PublishProductCommand Valid() =>
-        new("Walnut desk", "https://cdn.example/desk.jpg", 19.99m, "EUR");
+        new(Guid.CreateVersion7(), "Walnut desk", "https://cdn.example/desk.jpg", 19.99m, "EUR");
 
     [Fact]
     public void A_valid_command_passes()
@@ -38,6 +38,11 @@ public class PublishProductValidatorTests
 
     public static TheoryData<string, PublishProductCommand> Invalid() => new()
     {
+        // An omitted CommandId binds as Guid.Empty, which is a single
+        // SHARED idempotency key rather than an absent one (§8.5) — so the
+        // guard is load-bearing, and Valid() mints a fresh id, which is why
+        // deleting the rule left every other case here green.
+        { nameof(PublishProductCommand.CommandId), Valid() with { CommandId = Guid.Empty } },
         { nameof(PublishProductCommand.Name), Valid() with { Name = "" } },
         { nameof(PublishProductCommand.Name), Valid() with { Name = new string('x', 201) } },
         { nameof(PublishProductCommand.ThumbnailUrl), Valid() with { ThumbnailUrl = new string('x', 401) } },

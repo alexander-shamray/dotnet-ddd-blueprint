@@ -109,6 +109,7 @@ COPIED = frozenset(
         "tests/Catalog.Application.Tests/ArchitectureTests.cs",
         "tests/Catalog.Application.Tests/Catalog.Application.Tests.csproj",
         "tests/Catalog.Application.Tests/DependencyInjectionTests.cs",
+        "tests/Catalog.Application.Tests/IdempotencyOptInTests.cs",
         "tests/Catalog.Api.Tests/ArchitectureTests.cs",
         "tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj",
         "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs",
@@ -223,6 +224,16 @@ OMITTED = frozenset(
         # §11.4's callout, executed: every policy an endpoint names must
         # resolve. With no endpoint there is no policy to enumerate, and the
         # suite's own guard against passing vacuously is what fails first.
+        #
+        # IT CARRIES A SECOND GATE and dropping it drops that too: §8.5's
+        # rule that an idempotent command's endpoint must require
+        # authentication, since ICurrentUser.IsAuthenticated is false for an
+        # anonymous request and every such caller then claims under the
+        # shared "system" subject. A rendered service has neither an endpoint
+        # nor an idempotent command, so nothing is unguarded today — what
+        # would be unguarded is the first slice that adds both, which is why
+        # the inverted floor in IdempotencyOptInTests names this file in the
+        # message it fails with.
         "tests/Catalog.Api.Tests/AuthorizationPolicyTests.cs",
         # Not slice by subject — it is about EfUnitOfWork's rollback — but slice
         # by requirement: the claim is that a rejected command leaves nothing
@@ -388,12 +399,31 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "    <!-- §9.4's outbox: the entity this assembly maps, the type map, the\n"
             "         metrics and the dispatcher it hosts. PR-14's edge, and the reason\n"
-            "         Common.Infrastructure stopped being a project no service referenced —\n"
-            "         PR-12's Redis helpers are still nobody's dependency here, and the\n"
-            "         first service to wire them will not need a new reference. -->\n",
+            "         Common.Infrastructure stopped being a project no service referenced.\n"
+            "         §8's Redis helpers ride in on this same reference and are now used\n"
+            "         rather than merely available — AddRedisConnections and\n"
+            "         RedisIdempotencyStore are wired in DependencyInjection.cs. This\n"
+            "         comment said they were \"still nobody's dependency\" and that the first\n"
+            "         service to wire them would need no new reference; the second half was\n"
+            "         right and is why nothing here changed but the sentence. -->\n",
+            # THE RENDERED SERVICE DOES WIRE REDIS, and this comment said it did
+            # not. DependencyInjection.cs is a template file and no edit removes
+            # `services.AddRedisConnections(configuration)`, so a scaffolded
+            # service registers the connections, the lock factory and §8.5's
+            # store on the day it is created — which is why its compose block
+            # carries both ConnectionStrings__Redis* keys and why it starts at
+            # all. AddRedisConnections reads both eagerly and throws naming the
+            # missing one.
+            #
+            # Redis is therefore part of the empty-service BASELINE rather than
+            # something a first slice adds, and the text below now says so. The
+            # wrong version was not merely stale prose: it described the one
+            # arrangement under which a rendered service would fail to start.
             "    <!-- §9.4's outbox: the entity this assembly maps, the type map, the\n"
             "         metrics and the dispatcher it hosts. §8's Redis helpers ride in on\n"
-            "         the same reference, so wiring a cache later costs no new one. -->\n",
+            "         the same reference and are wired from the start — the connections,\n"
+            "         the lock factory and §8.5's idempotency store — so a first cache\n"
+            "         read costs no new reference and no new registration. -->\n",
         ),
         (
             "    <!-- typeof(ProductPublished).Assembly, the Broker lane's half of\n"
@@ -593,6 +623,100 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        string[] allowed = [\"Common.Domain\", \"System.Runtime\"];\n"
             "\n"
             "        IEnumerable<string> referenced = typeof(AssemblyMarker).Assembly\n",
+        ),
+    ),
+    # §8.5's opt-in gate travels to every service, and one of its three tests
+    # cannot travel as written. "This service declares commands; the selector
+    # found none" is the anti-vacuity half — and a scaffolded service has no
+    # commands at all until its first slice, so that assertion would fail on a
+    # tree that is perfectly correct.
+    #
+    # Deleting it is the wrong fix, and CLAUDE.md names why: a gate that
+    # silently stops covering the newest surface is this repository's
+    # most-repeated failure, and a vacuous gate with its vacuity check removed
+    # IS that failure, written down and shipped. So the assertion is INVERTED
+    # instead. The rendered service asserts it has no commands YET, which fails
+    # the day it gains one — and the failure message is the instruction to
+    # restore the real form. Self-clearing, on the same argument as
+    # deploy/observability/awaiting-signal.yaml: a list of things known to be
+    # missing needs a gate asserting they are still missing.
+    "tests/Catalog.Application.Tests/IdempotencyOptInTests.cs": (
+        (
+            "    public void The_gate_above_is_looking_at_this_service_s_commands()\n",
+            "    public void This_service_has_no_commands_for_the_gate_above_to_look_at_yet()\n",
+        ),
+        (
+            '        Commands().ShouldNotBeEmpty("Catalog declares commands; '
+            'the selector above found none");\n',
+            "        Commands().ShouldBeEmpty(\n"
+            '            "This service declares no commands yet, so the gate above is vacuous. '
+            'The day it "\n'
+            '            + "gains its first command this test fails — replace it with the '
+            'ShouldNotBeEmpty "\n'
+            '            + "form, which is what keeps a vacuous gate from quietly becoming a '
+            'permanent one.");\n',
+        ),
+        # The same inversion, one gate down, and it is owed for the same
+        # reason: a rendered service opts no command into idempotency, so
+        # that gate's own floor would fail on a tree that is correct. It
+        # clears itself the day the service opts its first command in.
+        (
+            '        names.ShouldNotBeEmpty("Catalog declares an idempotent command; '
+            'the selector above found none");\n',
+            "        names.ShouldBeEmpty(\n"
+            '            "This service opts no command into idempotency yet, so the '
+            'check below is "\n'
+            '            + "vacuous. The day it does, this test fails — replace it '
+            'with the ShouldNotBeEmpty "\n'
+            '            + "form, which is what keeps a vacuous gate from quietly '
+            'becoming a permanent one. "\n'
+            '            + "RESTORE AuthorizationPolicyTests IN THE SAME CHANGE: §8.5 '
+            'requires an idempotent "\n'
+            '            + "command\'s endpoint to be authenticated, an anonymous one '
+            'collapses every caller "\n'
+            '            + "into the shared system subject, and this service dropped '
+            'that suite as a slice "\n'
+            '            + "file.");\n',
+        ),
+        # And a THIRD, for the same reason again — which is the argument for
+        # keeping these as data rather than as a rule someone reapplies. §8.5's
+        # shape gate opens with its own anti-vacuity floor over `candidates`,
+        # and a rendered service has none, so the floor fails on a tree that is
+        # correct exactly as the two above would. The count is what makes the
+        # point: every anti-vacuity floor added to a template file is owed an
+        # entry here, and the third was owed the moment the gate was rewritten
+        # to §8.5's specified form.
+        (
+            "        candidates.ShouldNotBeEmpty(\n"
+            '            "no command in this assembly implements IIdempotentCommand, '
+            'so this test is " +\n'
+            '            "looking at nothing — the interface has been renamed, '
+            'moved, or not yet applied.");\n',
+            "        candidates.ShouldBeEmpty(\n"
+            '            "This service opts no command into idempotency yet, so the '
+            'two shape checks below " +\n'
+            '            "are vacuous. The day it does, this test fails — restore '
+            'the ShouldNotBeEmpty " +\n'
+            '            "form, which is what keeps a vacuous gate from quietly '
+            'becoming a permanent one.");\n',
+        ),
+        # And a FOURTH. §8.5's nested-dispatch gate has its own floor over
+        # CommandHandlers(), and a rendered service declares none — PR-10's
+        # slice is what brings the first handler. The gate ITSELF needs no
+        # inversion: with no handlers the offender list is empty and the
+        # assertion is correct, which is exactly why the floor beneath it
+        # has to be turned around instead.
+        (
+            "        CommandHandlers().ShouldNotBeEmpty(\n"
+            '            "Catalog declares command handlers; the selector '
+            'above found none");\n',
+            "        CommandHandlers().ShouldBeEmpty(\n"
+            '            "This service declares no command handlers yet, so the '
+            'gate above is "\n'
+            '            + "vacuous. The day it gains one this test fails — restore '
+            'the ShouldNotBeEmpty "\n'
+            '            + "form, which is what keeps a vacuous gate from quietly '
+            'becoming a permanent one.");\n',
         ),
     ),
     "tests/Catalog.Application.Tests/ArchitectureTests.cs": (

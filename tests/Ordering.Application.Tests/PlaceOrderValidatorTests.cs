@@ -18,6 +18,7 @@ public class PlaceOrderValidatorTests
 
     private static PlaceOrderCommand WithItems(int count) =>
         new(
+            Guid.CreateVersion7(),
             [.. Enumerable.Range(0, count).Select(_ => new PlaceOrderItem(Guid.CreateVersion7(), 1))],
             AnAddress(),
             "EUR");
@@ -66,11 +67,32 @@ public class PlaceOrderValidatorTests
         // the failure — and a malformed request arrives as a 500. The
         // assertion is that Validate returns rather than throws; IsValid
         // being false is the easy half.
-        PlaceOrderCommand command = new(null!, AnAddress(), "EUR");
+        PlaceOrderCommand command = new(Guid.CreateVersion7(), null!, AnAddress(), "EUR");
 
         ValidationResult result = Should.NotThrow(() => Validator.Validate(command));
 
         result.IsValid.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_omitted_CommandId_is_refused_before_any_key_is_claimed()
+    {
+        // The guard is load-bearing and nothing else pins it: an omitted
+        // CommandId binds as Guid.Empty, which is not an ABSENT key but a
+        // single SHARED one, so every caller omitting it claims the same
+        // Redis key and the first success is replayed to all of them for a
+        // day (§8.5).
+        //
+        // Every other case in this file builds its command through
+        // WithItems, which mints a fresh id — so deleting the NotEmpty rule
+        // left the whole suite green. A rule whose only protection is that
+        // nobody deletes it is not protected.
+        PlaceOrderCommand command = WithItems(1) with { CommandId = Guid.Empty };
+
+        ValidationResult result = Validator.Validate(command);
+
+        result.IsValid.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.PropertyName == nameof(PlaceOrderCommand.CommandId));
     }
 
     [Fact]
