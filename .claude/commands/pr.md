@@ -108,10 +108,14 @@ read markdown, so a `` `Closes #30` `` quoted inside an argument about closures
 closes #30 — which makes this section's own examples a hazard for any PR that
 edits it. Write the number away from the keyword when the point is the keyword.
 
-`.github/closure-gate/` compares all three on every push **and on every
-description edit**, so this is checked rather than remembered. Run it
-yourself as soon as the pull request exists, if you want the answer before
-the workflow reports it — **not before opening, which is what this said**:
+`.github/closure-gate/` compares what this body *says* against what the merge
+*will do*, on every push **and on every description edit**, so this is checked
+rather than remembered. It does **not** ask a commit to repeat a closure the
+description makes — a bare `Closes` line under the table is enough on its own.
+
+Run it yourself as soon as the pull request exists, if you want the answer
+before the workflow reports it — **not before opening, which is what this
+said**:
 `gh pr view <n>` needs a pull request to view, and
 `closingIssuesReferences` is GitHub's parse of a body it has not been given
 yet, so there is nothing to ask about until the PR is open:
