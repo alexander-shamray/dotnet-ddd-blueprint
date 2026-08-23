@@ -280,8 +280,17 @@ free parameter.
 ### The suite that should have existed first
 
 **Five judgements the whole loop rests on had no test.** `test_grok_helpers.py`
-is 45 cases and every one is a negative: a gate only ever observed green is one
-nobody has established is looking at anything.
+is 45 cases, and each of the five defects is reproduced as one that fails
+against the old behaviour: a gate only ever observed green is one nobody has
+established is looking at anything.
+
+**They are paired with positive controls, and those are not decoration.** A
+negative case that passes because the pattern matches *nothing* is this
+repository's most-repeated failure wearing a test's clothes — so `end_turn` is
+asserted to be accepted, an empty ledger is asserted to count zero, a trusted
+reservation is asserted to count as spent, and the `\b` word boundary the limit
+pattern depends on has a positive control of its own. Without it, `47402` not
+matching would prove nothing about whether `402` ever does.
 
 **It shells out to the same `grep -E` the scripts call.** Restating the patterns
 in Python's `re` would be a second specification, and a hand-written double

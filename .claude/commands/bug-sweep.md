@@ -348,27 +348,28 @@ cannot be talked past because a basename contains no `/`, and
 `test_grok_helpers.py` runs both nested paths through the real helper as
 negative cases.
 
-**Both helpers now say this in their own comments**, which matters because a
-reader of a helper has not necessarily read this file first, and for two
-rounds the correction lived only here while the scripts still claimed the
-guarantee. Each spells out what the check excludes (sibling PR worktrees,
-anything outside the temp root), what it does not prove (that a sweep created
-the path), what it is not (a direct-child check), and the one line owed. That
-edit needed `Edit(.claude/scripts/**)` lifted for comments only — the shape
-check, `--detach` and the absent `-f` are untouched, and the only code change
-was in **both** helpers' refusal message: `not a sweep-owned temp path`
-asserted in an error string the very ownership the check does not establish,
-and now reads `sweep-shaped`. It was fixed in one helper first and in the other
-a round later, which is the fifth time on this branch a claim was corrected
-where a review pointed and left standing where it did not — grep the string you
-are replacing, never the file you are editing.
+**Both helpers say this in their own comments**, which matters because a reader
+of a helper has not necessarily read this file first, and for two rounds the
+correction lived only here while the scripts still claimed the guarantee. Each
+spells out what the check excludes (sibling PR worktrees, anything outside the
+temp root) and — now that the detach helper mints the path itself — what it does
+establish. **Those comments used to end differently**, naming what the check did
+not prove, what it was not, and a line owed; all three of those are closed, and
+this paragraph is what it looked like while they were open. The refusal message
+was corrected in the same era: `not a sweep-owned temp path` asserted in an
+error string the very ownership the check did not then establish, and reads
+`sweep-shaped`. It was fixed in one helper first and in the other a round later
+— a claim corrected where a review pointed and left standing where it did not,
+which is the lesson to carry: grep the string you are replacing, never the file
+you are editing.
 
-**What it costs is attribution, not safety.** The accepted path set is
-unchanged, the names `mktemp` invents inside the detach helper are unique so two
+**What it costs is attribution, not safety.** The accepted path set is now
+*narrower* than it was — a nested `secsweep-a/bbbb` is refused where it used to
+pass — the names `mktemp` invents inside the detach helper are unique so two
 sweeps cannot collide, and the drop helper removes only the exact path handed to
 it. What is lost is that a
-stray temp directory no longer says which of the two commands left it. Until
-that is fixed this is a residual named rather than hidden, and the run summary
+stray temp directory still does not say which of the two commands left it. That
+one is unfixed and is a residual named rather than hidden, and the run summary
 says which command owns the directory it reports.
 
 **Both helpers' header comments name "a sweep" rather than `/security-sweep`**,

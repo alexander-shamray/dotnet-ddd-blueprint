@@ -977,8 +977,12 @@ and the two sweeps rest on: what the usage-limit preflight calls a limit, what
 counts as a review that finished, that the ledger publishes no answer on its
 trust check's error path, that a slot is reserved if and only if the review's
 model call was launched, and that the sweeps' worktree shape check is the
-direct-child check it claims. Every case is a negative one, because each of
-those five shipped. **It shells out to the same `grep -E` the scripts call**
+direct-child check it claims. **Every one of those five shipped, so each is
+reproduced as a case that fails against the old behaviour** — paired with
+positive controls, which are not decoration: a negative that passes because the
+pattern matches *nothing* is this repository's most-repeated failure wearing a
+test's clothes, so the accepted values and the word boundaries themselves are
+pinned alongside. **It shells out to the same `grep -E` the scripts call**
 rather than restating the patterns in Python's `re` — a re-implementation is a
 second specification, and a double cannot disagree with itself.
 
