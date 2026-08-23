@@ -300,8 +300,24 @@ heading and then explained two paragraphs down that there would not be one.
      ten-minute `ReleaseTimeout`, which gives up on it and raises a
      `stock_not_released` row. **Check for that second row before deciding
      stock needs nothing** — if it is there, the reservation may still be
-     held and [that section](#stock_not_released) is the procedure. With no
-     such row, the stock needs nothing and the money is all that is left.
+     held and [that section](#stock_not_released) is the procedure.
+
+     **Its absence proves nothing either, for the same reason the missing
+     saga row does not.** The `ReleaseTimeout` exit buffers its
+     `FlagOrderForReview` in the same in-memory outbox as its `CancelOrder`
+     and finalises in the same transaction, so #128's window loses both
+     sends together: a reservation still held, no review row naming it, and
+     no cancellation. **Ask Inventory whether the reservation is still
+     held** rather than reading a missing row as an answer. It is one query,
+     and it is the only check that tells "released" apart from "never
+     reported".
+
+     **This page corrected the money half of that inference one revision
+     ago and left the stock half standing six lines above it.** Both read an
+     absence as evidence, both are refuted by the same crash window, and
+     only one was fixed — which is the failure this repository keeps paying
+     for: the fix goes where the finding pointed, not where the shape
+     recurs.
 
      **A gone instance is not proof that the cancellation was sent**, and
      this branch said it was. `SetCompletedWhenFinalized` deletes the row
