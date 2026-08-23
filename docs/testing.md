@@ -66,7 +66,7 @@ needs a pull request and a `gh` token, so the live invocation belongs in CI
 and in `/pr` rather than in this block:
 
 ```bash
-gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
 ```
 

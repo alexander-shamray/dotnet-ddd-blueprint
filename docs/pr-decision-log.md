@@ -148,6 +148,25 @@ linked issues while telling the reader to do the paginated fetch `gh` had
 already done. **A false-refusal generator in a gate whose subject is not
 trusting unchecked claims** — removed, with a test pinning the removal.
 
+**A third way to read a short list turned up by being watched rather than by
+being reasoned about.** Run seconds after a push that added a closing keyword,
+`gh pr view` returned the commit list *without* that commit and the gate
+reported a pass; the same command a moment later reported the problem. GitHub
+had not indexed the push yet. A stale list is an unread subject with a clock
+attached, and it fails in the silent direction exactly as a truncated one
+does. The gate now takes `headRefOid` and refuses a commit list that does not
+contain it — which also catches a page whose cut dropped the newest commit,
+and is the stronger of the two guards for that case. It was observed on the
+pull request that added it.
+
+**Its absence from `REQUIRED_FIELDS` was green, and that is the second
+lesson.** Deleting the new entry from that inventory failed no test, because
+the field-presence case had been written once against one field rather than
+once per field. A loop over `REQUIRED_FIELDS` would not have helped: it passes
+whatever the list happens to contain, including a list an edit shortened.
+**The subject of an inventory test is the inventory, so it has to be spelled
+out beside it.**
+
 ### It went red on its own branch, and then did not close its own issue
 
 Three live failures on PR #117 before the branch went green, and the first was

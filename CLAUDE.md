@@ -901,7 +901,7 @@ py -3.12 -m unittest discover -s deploy/canary
 py -3.12 deploy/canary/canary.py check
 
 py -3.12 -m unittest discover -s .github/closure-gate
-gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
 ```
 

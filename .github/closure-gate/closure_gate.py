@@ -94,7 +94,7 @@ Stdlib only, on the licence gate's terms, and the network is not in here: the
 deciding takes JSON on stdin and the fetching is one `gh` call in the
 workflow. That is `deploy/canary/canary.py`'s split, for its reason.
 
-    gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+    gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
         py -3.12 .github/closure-gate/closure_gate.py
 
 **Cross-repository closing is out of scope and is refused rather than
@@ -151,7 +151,7 @@ TABLE_ROW = re.compile(
 
 ISSUE_NUMBER = re.compile(r"#(\d+)\b")
 
-REQUIRED_FIELDS = ("number", "url", "body", "commits", "closingIssuesReferences")
+REQUIRED_FIELDS = ("number", "url", "body", "commits", "closingIssuesReferences", "headRefOid")
 
 # One page of `gh pr view`. The commit list is not preloaded, so a list this
 # long may be a prefix and a prefix is indistinguishable from the whole thing
@@ -231,6 +231,24 @@ def check(payload: dict) -> list[str]:
             "this pull request reports no commits at all, which is not a state "
             "the gate can judge — the commit half of the comparison would be "
             "empty for the wrong reason"
+        ]
+
+    # A read taken before GitHub has indexed the newest push returns the
+    # commit list WITHOUT it, and a missing commit is a missing keyword.
+    # OBSERVED HERE, not reasoned about: run seconds after a push that added a
+    # `Closes` line, this gate reported a pass on PR #133, and the same command
+    # a moment later reported the problem. Every guard in this file is about
+    # not judging a subject it did not fully read, and a stale list is that
+    # with a clock attached. `headRefOid` is what the pull request's head
+    # actually is, so a list not containing it is a list that is behind — which
+    # also catches a truncated page whose cut dropped the newest commit.
+    oids = {(commit.get("oid") or "") for commit in commits}
+    if payload["headRefOid"] not in oids:
+        return [
+            f"the commit list does not contain this pull request's head "
+            f"({payload['headRefOid'][:8]}), so it is stale or truncated — a "
+            f"closing keyword in a commit this gate cannot see is exactly the "
+            f"fail-open it exists to refuse. Re-read `gh pr view` and try again"
         ]
 
     if len(commits) >= GH_PAGE_SIZE:

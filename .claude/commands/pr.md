@@ -121,7 +121,7 @@ said**:
 yet, so there is nothing to ask about until the PR is open:
 
 ```bash
-gh pr view <n> --json number,url,body,commits,closingIssuesReferences |
+gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
 ```
 

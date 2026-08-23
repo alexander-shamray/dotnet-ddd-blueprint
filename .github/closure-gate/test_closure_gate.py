@@ -24,18 +24,28 @@ def payload(
     linked: tuple[int, ...] = (),
     number: int = 999,
     url: str | None = None,
+    head_ref_oid: str | None = None,
 ) -> dict:
+    commits = [
+        {"oid": oid(index), "messageHeadline": message.split("\n")[0],
+         "messageBody": "\n".join(message.split("\n")[1:])}
+        for index, message in enumerate(commit_messages)
+    ]
     return {
         "number": number,
         "url": url if url is not None else f"https://github.com/{REPO}/pull/{number}",
         "body": body,
-        "commits": [
-            {"oid": f"{index:08x}" + "0" * 32, "messageHeadline": message.split("\n")[0],
-             "messageBody": "\n".join(message.split("\n")[1:])}
-            for index, message in enumerate(commit_messages)
-        ],
+        "commits": commits,
         "closingIssuesReferences": [{"number": n} for n in linked],
+        # The default is the newest commit, which is what a fresh read gives.
+        # A test wanting a stale read says so by passing something else.
+        "headRefOid": head_ref_oid if head_ref_oid is not None
+        else (commits[-1]["oid"] if commits else oid(0)),
     }
+
+
+def oid(index: int) -> str:
+    return f"{index:08x}" + "0" * 32
 
 
 class KeywordParser(unittest.TestCase):
@@ -247,6 +257,45 @@ class Directions(unittest.TestCase):
 
 class FailsClosed(unittest.TestCase):
     """The gate must never report a pass over a subject it did not read."""
+
+    def test_every_required_field_is_reported_when_absent(self):
+        """One case per field, because `REQUIRED_FIELDS` is an inventory.
+
+        Asserted field by field rather than by looping over the list the gate
+        is built from: a loop over `REQUIRED_FIELDS` passes whatever that list
+        happens to contain, including a list an edit shortened. Dropping
+        `headRefOid` from it left every other test green until this arrived.
+        """
+        for field in ("number", "url", "body", "commits",
+                      "closingIssuesReferences", "headRefOid"):
+            with self.subTest(field=field):
+                broken = payload()
+                del broken[field]
+                problems = check(broken)
+                self.assertEqual(len(problems), 1, (field, problems))
+                self.assertIn(field, problems[0])
+
+    def test_a_commit_list_missing_the_head_is_refused(self):
+        """A read taken before GitHub has indexed the newest push.
+
+        Observed on PR #133, not reasoned about: seconds after a push that
+        added a closing keyword, `gh pr view` returned the commit list WITHOUT
+        that commit and the gate reported a pass; the same command a moment
+        later reported the problem. A stale list is an unread subject with a
+        clock attached, and it fails in the silent direction.
+        """
+        stale = payload(commit_messages=("fix: a\n\nCloses #7",), head_ref_oid=oid(9))
+        problems = check(stale)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("stale or truncated", problems[0])
+
+    def test_a_fresh_read_naming_the_newest_commit_is_judged(self):
+        """The guard must not refuse the ordinary case it was written beside."""
+        self.assertEqual(check(payload(
+            body="| Closes | #7 |\n\nCloses #7\n",
+            commit_messages=("fix: a", "fix: b\n\nCloses #7"),
+            linked=(7,),
+        )), [])
 
     def test_a_commit_list_at_the_page_size_is_refused(self):
         problems = check(payload(
