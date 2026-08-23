@@ -18,10 +18,10 @@
 An order has entered §9.6's fulfilment saga and stopped advancing. Payment may
 be taken, stock may be reserved, and nothing is moving it forward.
 
-**Why `Confirmed` has its own threshold rather than the hour.** The saga has
-four states and three of them are short: `AwaitingStock` times out in 5 minutes,
-`Compensating` in 10 and `AwaitingPayment` in 15. `Confirmed` is the wait on
-Shipping, and its timeout is **three days** by design — so an hour-old saga
+**Why `Confirmed` has its own threshold rather than the hour.** Every other
+state is short: `AwaitingStock` times out in 5 minutes, `AwaitingConfirmation`
+and `Compensating` in 10, and `AwaitingPayment` in 15. `Confirmed` is the wait
+on Shipping, and its timeout is **three days** by design — so an hour-old saga
 there is the healthy path, and the alert excludes it from the hourly branch. A
 despatch that genuinely expires escalates to
 [`order-review.md`](order-review.md), never here.
@@ -80,12 +80,24 @@ already have fired.
 |---|---|---|---|
 | `AwaitingStock` | `StockReserved` from Inventory | 5 min | Cancels the order, `stock_timeout` |
 | `AwaitingPayment` | `PaymentAuthorised` / `PaymentDeclined` | 15 min | Cancels and releases stock, `payment_timeout` |
+| `AwaitingConfirmation` | `OrderConfirmed` from **Ordering itself** | 10 min | Escalates to `OrderReviews`, `not_confirmed` |
 | `Confirmed` | `ShipmentDispatched` from Shipping | 3 days | Escalates to `OrderReviews`, `not_despatched` |
 | `Compensating` | `StockReleased` from Inventory | 10 min | Escalates to `OrderReviews`, `stock_not_released` |
 
 **A saga older than its state's timeout is a timeout that did not arrive**, and
 that is a different fault from the peer being slow. It is the first thing to
 check, because it has one cause far more often than not.
+
+**`AwaitingConfirmation` is the exception to everything below, because there is
+no peer.** The saga sent `ConfirmOrder` to Ordering's own `ordering-commands`
+queue and is waiting for the `OrderConfirmed` the aggregate publishes when it
+commits — so a saga stuck there is **this service** failing to consume its own
+command, and the scheduler section below is the wrong place to start. Go
+straight to the outbox query further down and look for the `ConfirmOrder` that
+never left, then at whether `ordering-commands` is being drained at all. The
+aggregate *refusing* the command does not land here: that is a `Rule` failure
+`CommandConsumer` acks, and the cancellation behind it moves the saga to
+`Compensating` on its own event.
 
 ## The timeout scheduler is the usual culprit
 
@@ -149,6 +161,14 @@ ORDER BY OccurredAt;
 A `CancelOrder` or `FlagOrderForReview` that never left is the answer, and the
 outbox runbooks take it from there.
 
+**For a saga in `AwaitingConfirmation` this is the first query rather than the
+last**, and what it is looking for is a `ConfirmOrder`. There is no peer to have
+gone quiet: the command is Ordering's own, so a row still sitting here unsent —
+or sent and never consumed, which the `ordering-commands` queue depth shows —
+is the whole fault. The order is still `AwaitingPayment` with the card
+authorised, which is why that wait escalates rather than compensating when its
+ten minutes run out.
+
 ## Manual compensation
 
 **Last resort, and only with the order read first.** The saga sends commands to
@@ -172,6 +192,15 @@ and `POST /api/v1/orders/{id}/cancel`. `ConfirmOrder`, `MarkOrderShipped` and
 Whichever ingress, it goes through the domain rather than around it — §5's
 `Order` refuses transitions that do not make sense, and that refusal is a
 feature here.
+
+**`AwaitingConfirmation` is where that last row bites hardest, so do not take
+it literally there.** The event it waits for is `OrderConfirmed`, and
+publishing one by hand would be stating a fact the aggregate has not stated —
+the order would still be `AwaitingPayment`, the saga would move to `Confirmed`,
+and Shipping would be told to despatch an unconfirmed order. Redeliver the
+`ConfirmOrder` instead and let the aggregate publish its own acknowledgement.
+The distinction the table draws is between commands and events; the rule under
+it is that you may replay a message, never invent one.
 
 Record every manual action against the `OrderId`. The next person to read this
 order will find a state machine that moved without a message, and the only

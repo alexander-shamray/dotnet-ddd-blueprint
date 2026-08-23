@@ -30,7 +30,8 @@ groups:
       # reading is a query away — there is simply no instrument over it.
       #
       # The state exclusion is not a refinement, it is the alert: AwaitingStock
-      # times out in 5 minutes, Compensating in 10 and AwaitingPayment in 15,
+      # times out in 5 minutes, AwaitingConfirmation and Compensating in 10 and
+      # AwaitingPayment in 15,
       # but the despatch wait is THREE DAYS by design. An unqualified hour would
       # page on the healthy path for most of a saga's real lifetime, and a
       # despatch that genuinely expires escalates to OrdersAwaitingReview below
@@ -88,11 +89,21 @@ groups:
       # row ages to an hour, so there is no instance left to be stuck — but
       # "the saga has already finalised" is a property of the REASON, not
       # of the row, and this comment used to state it as though it were
-      # universal. payment_authorised_during_compensation is raised
-      # mid-wait from Compensating and can sit beside a live instance;
-      # every other reason is raised on the way out. The instance is
-      # nonetheless usually gone by the hour this measures, because
-      # Compensating's two exits are both well inside it.
+      # universal. Two reasons are raised mid-wait from Compensating and can
+      # sit beside a live instance: payment_authorised_during_compensation,
+      # and — since #126 — cancelled_after_confirmation, whose Compensating
+      # branch escalates an OrderConfirmed arriving after the state was
+      # entered and deliberately does not finalise. The rest are raised on
+      # the way out. The instance is nonetheless usually gone by the hour
+      # this measures, because Compensating's two exits are both well
+      # inside it.
+      #
+      # "Every other reason is raised on the way out" was the shape this
+      # comment had after its first correction, and #126 falsified it the
+      # same way the sentence before it had been falsified — a universal
+      # asserted over a vocabulary that grows. What holds is the predicate:
+      # a reason raised by a branch with no Finalize can outlive its row's
+      # first hour, and only the branch knows.
       - alert: OrdersAwaitingReview
         expr: max by (service_name) (ordering_order_reviews_oldest_age_seconds) > 3600
         for: 5m
@@ -102,16 +113,16 @@ groups:
         annotations:
           summary: "An order has been awaiting manual review for over an hour"
           description: >-
-            A saga escalated work it cannot finish itself (§9.6): either a
-            wait that ran out, or an authorisation that landed while
-            compensation was already under way — which is not the same as a
-            cancellation existing, and not necessarily a customer
+            A saga escalated work it cannot finish itself (§9.6): a wait that
+            ran out, an authorisation that landed while compensation was
+            already under way, or a confirmation that did — which is not the
+            same as a cancellation existing, and not necessarily a customer
             cancelling. Do NOT refund before reading the runbook:
             Payments voids off OrderCancelled on its own and nothing here
             knows whether it has, so a manual refund may be the second one.
             The saga has
             usually finalised by now, so the saga-age alert will not catch it
-            — but check before assuming, because one reason is raised
+            — but check before assuming, because two reasons are raised
             mid-wait. The runbook branches on all of it.
           runbook_url: docs/runbooks/order-review.md
 

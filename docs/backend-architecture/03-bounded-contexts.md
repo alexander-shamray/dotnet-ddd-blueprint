@@ -30,10 +30,14 @@ graph LR
 ```
 
 **Every collaboration is a round trip, and the return leg is an event.**
-Ordering sends a command and then waits — it does not call and block. The three
-return edges are what the fulfilment saga ([§9.6](09-messaging.md)) transitions on, and drawing
-only the outbound half would depict the request/response topology ADR-002 and
-ADR-017 exist to reject.
+Ordering sends a command and then waits — it does not call and block. The
+return edges drawn above are what the fulfilment saga
+([§9.6](09-messaging.md)) transitions on, and drawing only the outbound half
+would depict the request/response topology ADR-002 and ADR-017 exist to reject.
+The saga has a fourth round trip the map does not draw, because both of its
+ends are Ordering: `ConfirmOrder` out to the aggregate and `OrderConfirmed`
+back. It is asynchronous on exactly these terms, and the Consumes cell below is
+where it is recorded.
 
 | Context | Type | Why it is separate |
 |---|---|---|
@@ -57,7 +61,7 @@ subscriber silently executing your business commands.
 | Service | Owns | Publishes (events) | Consumes (events) | Accepts (commands) |
 |---|---|---|---|---|
 | **Catalog** | Product, Category, Price | `ProductPublished`, `PriceChanged`, `ProductDiscontinued` | `StockLevelChanged` | — |
-| **Ordering** | Order, OrderLine, the fulfilment saga | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled` | `OrderPlaced` (its own — the saga starts on it), `OrderCancelled` (its own — the saga stops on it), `ProductPublished`, `PriceChanged`, `ProductDiscontinued`, `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | `CancelOrder`, `ConfirmOrder`, `MarkOrderShipped`, `FlagOrderForReview` |
+| **Ordering** | Order, OrderLine, the fulfilment saga | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled` | `OrderPlaced` (its own — the saga starts on it), `OrderCancelled` (its own — the saga stops on it), `OrderConfirmed` (its own — the saga waits on it), `ProductPublished`, `PriceChanged`, `ProductDiscontinued`, `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | `CancelOrder`, `ConfirmOrder`, `MarkOrderShipped`, `FlagOrderForReview` |
 | **Inventory** | StockItem, Reservation | `StockReserved`, `StockReservationFailed`, `StockReleased`, `StockLevelChanged` | `OrderCancelled`, `ShipmentDispatched` | `ReserveStock`, `ReleaseStock` |
 | **Payments** | PaymentIntent, Refund | `PaymentAuthorised`, `PaymentDeclined`, `PaymentRefunded` | `OrderCancelled` | `AuthorisePayment` |
 | **Shipping** | Shipment, TrackingEvent | `ShipmentDispatched`, `ShipmentDelivered` | `OrderConfirmed` | — |
@@ -86,7 +90,7 @@ is the only thing that sends commands, and each one lands on the queue of the
 service that owns the decision. `CancelOrder` and `ConfirmOrder` route back to
 Ordering itself — the saga coordinates, the aggregate decides (§9.6).
 
-**Ordering subscribes to two of its own events, and both entries are the saga
+**Ordering subscribes to three of its own events, and every entry is the saga
 rather than a duplication.** `OrderPlaced` starts the workflow. `OrderCancelled`
 stops it, and it is in this cell because the *other* origin of a cancellation is
 not a command at all: [§11.4](11-identity-authorization.md)'s customer endpoint
@@ -94,6 +98,22 @@ cancels the aggregate directly, which the saga can only learn about by
 subscribing to the fact the aggregate publishes. Its absence here was the same
 gap as its absence from the state machine — a workflow that went on reserving
 stock and authorising payment for an order the customer had cancelled (§9.6).
+
+**`OrderConfirmed` is in the cell for a different reason from the other two,
+and the difference is worth having.** It is not a second origin: it is the
+**acknowledgement of a command the saga itself sent**. `ConfirmOrder` goes to
+the aggregate, and the aggregate's own event is the only evidence it
+committed — so without this subscription the saga could only assume, which is
+exactly what it used to do. A state named for a command's intent rather than
+for its effect is what that assumption looked like in the machine
+([#126](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/126));
+`AwaitingConfirmation` and this cell entry are one change.
+
+**A round trip whose two ends are the same service is still a round trip**, and
+this is the platform's only one. The context map above draws no Ordering
+self-edge, which is a simplification rather than a claim: the collaboration is
+real, it is asynchronous like every other, and it obeys the same rule that the
+return leg is an event.
 
 Note the shapes this produces. **Shipping** and **Notifications** expose no
 public write API at all — they are pure event consumers. **Notifications** is

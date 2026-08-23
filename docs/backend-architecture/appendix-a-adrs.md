@@ -369,7 +369,7 @@ decision made once, in the open.
 
 ## ADR-021 — Saga timeouts are scheduled by the broker
 
-**Decision.** [§9.6](09-messaging.md)'s four saga schedules are delivered by
+**Decision.** [§9.6](09-messaging.md)'s saga schedules are delivered by
 MassTransit's **delayed message scheduler** —
 `AddDelayedMessageScheduler()` in the registration and
 `UseDelayedMessageScheduler()` on the transport, both halves named because
@@ -466,23 +466,34 @@ MassTransit 8.5.3's `DelayedScheduleMessageProvider.CancelScheduledSend` returns
 `Task.CompletedTask` on both overloads — checked against the tagged source — so
 once the broker holds a delayed message nothing recalls it. Every `Unschedule`
 in §9.6's machine is a no-op here, and **every order keeps all of its timeouts
-until they fire**: five minutes and fifteen minutes on the ordinary path, and
-three days on every order that ships. The token-id columns are written and
-never read back.
+until they fire**: five minutes, fifteen minutes and ten minutes on the
+ordinary path, and three days on every order that ships. The token-id columns
+are written and never read back.
 
 Correctness survives it, and by construction rather than by luck — a timeout
 arriving in a state that does not handle it is ignored, and one arriving after
 the saga finalised is discarded. Both were measured; the first has a test
 (§12.5). What does not survive is the volume argument: the plugin keeps its
 delayed messages in Mnesia, per node and unreplicated, its own guidance warns
-against large numbers of long delays, and this decision guarantees three per
-order rather than the few a cancelling scheduler would leave.
+against large numbers of long delays, and this decision guarantees one
+undeliverable delayed message **per wait the order enters** rather than the few
+a cancelling scheduler would leave — four on an order that ships.
+
+**That number is not fixed by this decision and has already moved once.** It
+was three until §9.6 gained `AwaitingConfirmation`
+([#126](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/126)),
+which is worth recording here because the *volume* is this ADR's stated
+supersession trigger: a state added to the machine raises the standing Mnesia
+population by one message per order, and nothing in the state machine's own
+review would surface that. **A cost that grows with a decision taken somewhere
+else is one to state as a rule rather than as a total**, which is why the rule
+is written above and the four is an illustration of it.
 
 **That is the trigger to supersede**, and the replacement is the Quartz option
 above rather than a new one — Quartz cancels, so the `Unschedule` calls and the
 token columns start working the day it lands, with no change to the state
-machine, the four schedules or the tests. Which is the same property that let
-the choice be made on cost.
+machine, its schedules or the tests. Which is the same property that let the
+choice be made on cost.
 
 ## ADR-022 — The canary is a second release, weighted by replicas
 
