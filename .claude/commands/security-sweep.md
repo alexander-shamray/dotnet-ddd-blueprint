@@ -397,7 +397,7 @@ Containment is deferred, not achieved.
 
 Three things narrow it and none closes it: the path check at the head of step 2
 drops a candidate citing anything outside `$work` before the code is opened; the
-the one mutation that still takes free parameters carries a stated rule —
+one mutation that still takes free parameters carries a stated rule —
 `gh issue create`, always `--repo` for this repository, with the issue's own
 text unbounded — where the label and the worktree paths have nothing left to
 state a rule about, both having gone into helpers; and `Write` and `Edit` are
@@ -407,7 +407,7 @@ through it writes what `Edit(...)` refuses, argued in full below. **The branch
 is a residual rather than a control** — `git push origin` is globally allowed
 and this command does not deny it, argued in full below. What is unbounded is
 what an issue says and where it is filed. Closing it means helpers that pin the
-repository and label so no free parameter remains, or a verify stage returning a
+repository so no free parameter remains, or a verify stage returning a
 structured verdict the parent files on without composing a body from text it has
 read — the same class of decision as the container named below.
 

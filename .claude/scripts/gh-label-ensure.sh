@@ -64,7 +64,23 @@ if grep -qx -- "$label" <<<"$existing"; then
   exit 0
 fi
 
-gh label create "$label" \
+# Check-then-create is not atomic, and two sweeps can run at once. If one wins
+# the race, the loser's `gh label create` exits non-zero — correctly, since
+# `--force` is the flag this file exists not to use — and `set -e` would abort a
+# sweep over a label that is now exactly what it asked for.
+#
+# So a failed create is AMBIGUOUS on its own and is resolved by re-reading
+# rather than by assuming either answer. Present afterwards means the request is
+# satisfied, whoever satisfied it; absent means the create genuinely failed and
+# the caller has to hear so. Assuming success would be the fail-open, and
+# assuming failure aborts a sweep that had nothing wrong with it.
+if ! gh label create "$label" \
   --repo "$repo" \
   --color "$colour" \
-  --description "$description"
+  --description "$description"; then
+  again=$(gh label list --repo "$repo" --search "$label" --json name --jq '.[].name') ||
+    { echo "cannot confirm whether $label exists in $repo after a failed create" >&2; exit 3; }
+  grep -qx -- "$label" <<<"$again" ||
+    { echo "could not create label $label in $repo" >&2; exit 3; }
+  echo "label $label was created concurrently in $repo"
+fi

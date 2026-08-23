@@ -68,7 +68,7 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
-## The review loop's fail-opens — five of them, in the tooling `/ship` trusts
+## The review loop's fail-opens, and the sweep grants beside them
 
 **No `PR-NN` heading, on the closure gate's terms one entry down.** Appendix C's
 rows describe the blueprint's specified system; this is agent tooling under
@@ -222,17 +222,36 @@ missing.
 **Pinning the installer would have been half a fix, and reading it is what said
 so.** Grepping the script for `sha256`, `checksum`, `verify` and `gpg` returns
 nothing: it performs no verification whatever of the 163 MB binary it downloads.
-So both artefacts are pinned, and an architecture with no recorded digest
-**fails** rather than building unverified — the scaffold's rule one tree over,
-that a tool refusing input it has never been shown beats one that guesses.
+
+**The first version pinned both and was still not enough**, which a reviewer
+established rather than this branch. It kept the installer, checksummed, and
+hashed the binary *afterwards* — and the installer smoke-runs the binary before
+that hash can be taken, as the reviewer user, with the network and a writable
+`$HOME`. So a malicious artefact gets one execution in which to put the expected
+bytes where the check will read them, and the check then passes and the image
+ships. **A verification that runs after the thing it verifies has already
+executed does not verify anything** — the same shape as the ledger publishing
+its answer before its trust check failed, two files over.
+
+So the installer is gone. The release artefact is fetched directly, its digest
+checked before anything executes, and the few steps the installer performs on
+Linux are done inline — read out of the pinned script rather than guessed: the
+binary into `downloads/`, `chmod +x`, relative symlinks for `grok` and `agent`,
+and the `[cli]` block in `config.toml`. `grok --version` is now the binary's
+FIRST execution and runs only after the digest matched. An architecture with no
+recorded digest **fails** rather than building unverified — the scaffold's rule
+one tree over, that a tool refusing input it has never been shown beats one that
+guesses.
 
 The digests are trust on first use, and that is the point rather than a
 weakness: from here a change to what x.ai serves for a pinned version fails the
 build, and moving a pin is a reviewed diff, which is what
 `Directory.Packages.props` and `global.json` are for. Both failure paths were
-observed red — a wrong installer digest and a wrong binary digest each stop the
-build naming the two values — and the amd64 artefact was cross-checked against
-the md5 GCS reports in its own response header.
+observed red — a wrong digest stops the build naming both values, and now does
+so *before* anything is executed — and the amd64 artefact was cross-checked
+against the md5 GCS reports in its own response header. The vendored layout was
+verified against what the installer produced: the same relative symlinks, the
+same `config.toml`, `grok 1.0.5` reported by the built image.
 
 **The version moved to 1.0.5 in the same change**, because the file's own rule
 is to track the host's client and the host had moved: a credential must mean the
@@ -242,12 +261,14 @@ introduced for. Verified end to end rather than assumed — the built image runs
 returns `"stopReason": "end_turn"`, which is also the allow-list's own value
 confirmed from inside the container that will run the reviews.
 
-**One residual, stated because it is real**: the installer runs the downloaded
-binary once itself as its own smoke check, before this verification can run. A
-tampered artefact would execute once in the build container and never reach an
-image. Closing it means replacing the installer with a vendored install, which
-trades a narrow stated residual for reimplementing install semantics that only a
-full review round would prove wrong.
+**That residual is closed, and how it closed is the lesson.** It was written
+here as narrow and stated — the binary executes once and then fails the build —
+and the reasoning was wrong in the direction that matters: the execution
+*precedes* the check, so it can arrange for the check to pass. **Naming a
+residual is not bounding it.** The bound has to be argued against someone who
+gets to run first, and this one never had been. What replaced it is the option
+this entry had already considered and declined as too risky to reimplement;
+a reviewer pointing at the ordering is what made the trade obvious.
 
 ### The sweep guards that were narrower than advertised
 

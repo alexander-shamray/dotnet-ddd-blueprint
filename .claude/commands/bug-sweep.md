@@ -684,8 +684,9 @@ push origin` is globally allowed and this command does not deny it, argued in
 full below. The unbounded part is *what an issue says and where it is filed*.
 
 Closing it properly is infrastructure rather than prose, and there are two
-directions. Helpers that pin the repository and the label name would leave the
-mutation surface with no free parameter for a finding to supply. A verify stage
+directions. A helper that pins the repository for `gh issue create` — the label
+helper already landed — would leave the mutation surface with no free parameter
+for a finding to supply. A verify stage
 that returns a **structured verdict** rather than prose — the parent filing on
 the verdict without composing a body from text it has read — would keep the
 untrusted string out of the mutating stage altogether. Both are the same class

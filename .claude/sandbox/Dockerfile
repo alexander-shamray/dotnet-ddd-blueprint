@@ -64,14 +64,17 @@ RUN groupadd --gid "${REVIEWER_GID}" reviewer \
 USER reviewer
 ENV HOME=/home/reviewer
 
-# The official installer, which is what x.ai documents and what installed the
-# host's copy. Run as `reviewer` so the CLI lands in this user's home, beside
-# the credentials mounted into it.
+# The release artefact, fetched directly. It used to be x.ai's official
+# installer — what the docs give and what installed the host's copy — and the
+# argument for replacing it is below. Either way it lands as `reviewer`, so the
+# CLI sits in this user's home beside the credentials mounted into it.
 #
-# Downloaded first, then executed, rather than piped. `RUN a | b` reports only
-# b's status under /bin/sh, and bash handed an empty script exits 0 — so a
-# failed download would publish an image with no grok in it and defer the real
-# error to the first review, where it arrives as an authentication problem.
+# `--fail`, and never a pipe into a shell. `RUN a | b` reports only b's status
+# under /bin/sh, and bash handed an empty script exits 0 — so a failed download
+# used to publish an image with no grok in it and defer the real error to the
+# first review, where it arrives as an authentication problem. Fetching to a
+# file and checking its digest keeps that closed for the same reason and more
+# strictly: an empty or truncated download cannot match the pin.
 #
 # Pinned, and not for tidiness. Unpinned this takes the latest and the reviewer
 # drifts from the developer's client without anyone choosing it: with the host
@@ -118,16 +121,30 @@ ENV PATH="/home/reviewer/.grok/bin:${PATH}"
 # linux/amd64; an arm64 developer adds one line, which is exactly the reviewed
 # diff a pin is for.
 #
-# Residual, stated because it is real: the installer runs the downloaded binary
-# once itself (`"$binary_tmp" --version`, its own smoke check) BEFORE this
-# verification can run, so a tampered artefact would execute once in the build
-# container. It never reaches an image — the build fails and nothing ships —
-# and closing the gap entirely means replacing the installer with a vendored
-# install, which trades a narrow, stated residual for reimplementing install
-# semantics (the bin symlinks and the `[cli]` config block) that only a full
-# review round would prove wrong.
+# **The installer is gone, and verifying after it ran was not good enough.** The
+# first version of this pin kept `install.sh` — checksummed — and hashed the
+# binary afterwards, stating the residual as "the installer smoke-runs the
+# binary once before the check, so a tampered artefact executes once and then
+# fails the build". That understated it, and a reviewer said so. The execution
+# happens *before* the hash, as the reviewer user, with the network and a
+# writable `$HOME`: a malicious binary can use that one execution to put the
+# expected bytes where the check will read them, and then the check passes and
+# the image ships. **A verification that runs after the thing it verifies has
+# already executed does not verify anything** — the same shape as the ledger
+# printing its answer before its trust check failed, two files over.
+#
+# So the release artefact is fetched directly and its digest checked before
+# anything is executed. What replaces the installer is the handful of steps it
+# performs on Linux, read out of the pinned script rather than guessed: drop the
+# binary in `downloads/`, `chmod +x`, relative symlinks for `grok` and `agent`
+# in `bin/` (relative because they survive a bind-mounted `$HOME`), and the
+# `[cli]` block it writes to `config.toml`. The shell completions it also
+# generates are omitted deliberately: producing them means running the binary,
+# which is the thing being avoided, and no reviewer has a shell to complete in.
+#
+# `grok --version` at the end is now the FIRST execution of the binary, and it
+# happens only after the digest matched.
 ARG GROK_VERSION=1.0.5
-ARG GROK_INSTALLER_SHA256=43d0943123edade1383a476a4f778674877acee7c1f98a00f094c4a0f7349321
 ARG GROK_SHA256_X86_64=9ba87444e1819e8f6104adbbf4676a870c204380aa5c3e1c38a926c4ea677238
 ARG GROK_SHA256_AARCH64=1c1fe67d7c35497fb09f44a451f57acc3787add4c9aea2c56f5c7c75dc5ffcf1
 # Compared with `[ "$a" = "$b" ]` rather than piped into `sha256sum --check`,
@@ -143,16 +160,16 @@ RUN set -eu; \
         *) echo "no recorded grok ${GROK_VERSION} digest for $(uname -m); add one rather than building an unverified reviewer" >&2; exit 1 ;; \
     esac; \
     curl --fail --silent --show-error --location \
-        https://x.ai/cli/install.sh --output /tmp/install-grok.sh; \
-    got="$(sha256sum /tmp/install-grok.sh | cut -d' ' -f1)"; \
-    [ "$got" = "${GROK_INSTALLER_SHA256}" ] || \
-        { echo "install.sh sha256 ${got} does not match the recorded ${GROK_INSTALLER_SHA256}" >&2; exit 1; }; \
-    bash /tmp/install-grok.sh "${GROK_VERSION}"; \
-    binary="${HOME}/.grok/downloads/grok-linux-${arch}"; \
-    got="$(sha256sum "${binary}" | cut -d' ' -f1)"; \
+        "https://x.ai/cli/grok-${GROK_VERSION}-linux-${arch}" --output /tmp/grok; \
+    got="$(sha256sum /tmp/grok | cut -d' ' -f1)"; \
     [ "$got" = "${want}" ] || \
         { echo "grok ${GROK_VERSION} ${arch} sha256 ${got} does not match the recorded ${want}" >&2; exit 1; }; \
-    rm --force /tmp/install-grok.sh; \
+    mkdir -p "${HOME}/.grok/downloads" "${HOME}/.grok/bin"; \
+    mv /tmp/grok "${HOME}/.grok/downloads/grok-linux-${arch}"; \
+    chmod +x "${HOME}/.grok/downloads/grok-linux-${arch}"; \
+    ln -sf "../downloads/grok-linux-${arch}" "${HOME}/.grok/bin/grok"; \
+    ln -sf "../downloads/grok-linux-${arch}" "${HOME}/.grok/bin/agent"; \
+    printf '[cli]\ninstaller = "internal"\n' > "${HOME}/.grok/config.toml"; \
     grok --version
 
 # The mounted clone carries its host ownership, so git refuses it as dubiously

@@ -63,8 +63,11 @@ the review loop's own helpers under `.claude/scripts/`. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
 
-**The tenth needs `bash` and `grep` and nothing else** — no network, because the
-`gh` its ledger cases call is a stub on `PATH`. It is the one suite whose
+**The tenth needs `bash`, `grep` and `git`, and no network** — the `gh` its
+ledger cases call is a stub on `PATH`, and the `git` is real rather than
+incidental: one case detaches a worktree at `HEAD` and removes it again, because
+a helper's contract is its stdout and only a round trip tests what a caller
+actually captures. It is the one suite whose
 subject is agent tooling rather than the platform, and it is here on the licence
 gate's terms: it ships with the repository, CI runs it, and `dotnet test` is
 blind to it. **Each of the five judgements it covers shipped wrong at least

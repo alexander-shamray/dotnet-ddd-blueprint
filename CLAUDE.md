@@ -912,6 +912,16 @@ own line rather than sending a reader to a file that does not hold it.
   the same channel. Pin every artefact that crosses, and make an unrecorded
   platform **fail** rather than build unverified — the scaffold's rule, that a
   tool refusing input it has never been shown beats one that guesses.
+- **A verification that runs after the thing it verifies has already executed
+  does not verify anything.** Pinning both artefacts above was *still* not
+  enough while the installer stayed: it smoke-runs the binary before the hash
+  can be taken, as a user with the network and a writable `$HOME`, so a
+  malicious artefact gets one execution in which to put the expected bytes where
+  the check will read them — and the check then passes. That was written down as
+  a "narrow, stated residual" and was the whole property. **Naming a residual is
+  not bounding it**: the bound has to be argued against someone who gets to run
+  first, and where it cannot be, move the execution after the check rather than
+  the check after the execution.
 - **`?` in a bash `case` matches `/`.** A `case` performs no pathname expansion,
   so `"$tmproot"/secsweep-??????` accepted `$tmproot/secsweep-a/bbbb` as readily
   as `$tmproot/secsweep-abc123` — a guard whose comment called it a direct-child
@@ -985,7 +995,7 @@ py -3.12 -m unittest discover -s .github/closure-gate
 gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
 
-py -3.12 -m unittest discover -s .claude/scripts   # needs bash and grep, nothing else
+py -3.12 -m unittest discover -s .claude/scripts   # needs bash, grep and git; no network
 ```
 
 **The tenth is the review loop's own helpers, and it is the only suite whose

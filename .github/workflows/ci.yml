@@ -47,8 +47,14 @@ jobs:
   # here: a test nobody runs rots, and the judgements it covers are the ones
   # /ship and the two sweeps rest on — what counts as a usage limit, what counts
   # as a review that finished, whether the check ledger can publish an answer on
-  # its own error path, and whether the sweeps' worktree guard is the
-  # direct-child check it claims. Every one of those shipped wrong.
+  # its own error path, whether a slot is spent if and only if the review's model
+  # call was launched, and whether the sweeps' worktree guard is the direct-child
+  # check it claims. Every one of those five shipped wrong.
+  #
+  # Five, and the count is load-bearing rather than decorative: `CLAUDE.md` and
+  # `docs/testing.md` enumerate the same five, and a list of what a gate is
+  # looking at that quietly drops the newest surface is the failure this
+  # repository names as its most-repeated.
   #
   # Beside the licence gate rather than inside `build`, on its argument: stdlib
   # Python over text and a few `bash` fragments, so it needs no restore, no
