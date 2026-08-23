@@ -352,18 +352,19 @@ Each round is the review done once, end to end:
    shipped four times.** MSYS argument conversion rewrites an argument that
    looks like an absolute POSIX path before the native `gh.exe` sees it, so
    `--title "/health/ready returns 200 …"` files as
-   `"C:/Program Files/Git/health/ready returns 200 …"`. Issues #55, #56 and
-   #68 carried it for two weeks and nobody reading the tracker could tell what
-   the subject was. The body is safe — it arrives on stdin, which is bytes rather
+   `"C:/Program Files/Git/health/ready returns 200 …"`. Issues #55, #56 and #68
+   carried it for two weeks and nobody reading the tracker could tell what the
+   subject was. The body is safe — it arrives on stdin, which is bytes rather
    than an argument — so **only `--title` is exposed**, and only at position
    one: measured here, a leading backtick or a leading space both suppress the
    conversion and a bare `/` does not.
 
-   So write the subject in backticks — ``/security-sweep`` — or reword so
-   the slash is not first. **Do not reach for `MSYS2_ARG_CONV_EXCL` instead**: an
+   So write the subject in backticks — ``/security-sweep`` — or reword so the
+   slash is not first. **Do not reach for `MSYS2_ARG_CONV_EXCL` instead**: an
    env-prefixed command no longer begins with `gh issue create`, and this
    command's grant is a prefix match, so the loop would start prompting on
    every filing.
+
 5. **Summarise the round.** New issues filed (with numbers), candidates dropped
    at each gate and why, and the lows/infos recorded but not filed.
 

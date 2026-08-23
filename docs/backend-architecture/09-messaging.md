@@ -3472,10 +3472,24 @@ cfg.ReceiveEndpoint(
 > which is the delivery the exemption was written to protect. It was protecting
 > it from a mechanism that was never a threat to it.
 >
-> What survives is the original observation, now doing less work: a state
-> machine really is idempotent against redelivered *non-initial* events, and
-> that is what keeps a stale timeout harmless (ADR-021 leans on it). It was
-> never enough on its own.
+> **What survives of the original observation is less than it looked, and it
+> is not the stale-timeout mechanism.** The observation was that a state
+> machine is idempotent against a redelivered *non-initial* event — true of
+> the **transition**, which no longer applies, and not of the machine:
+> [§9.6](09-messaging.md) keeps MassTransit's default, so an event no state
+> accepts raises `UnhandledEventException` rather than being absorbed. Being
+> past the state that handled it is exactly what makes it fault.
+>
+> **And a stale timeout never gets that far, which is what ADR-021 actually
+> leans on.** A scheduled message is delivered with the token id its schedule
+> was armed with, and MassTransit discards one that no longer matches the
+> instance before the machine is asked — measured, and the reason
+> [ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)'s
+> uncancellable timeouts are harmless. This paragraph credited the state
+> machine for it, which is a mechanism a reader would copy and not get.
+>
+> So the exemption was never enough on its own, and the half of it that
+> survives protects nothing.
 
 > **One message can leave two inbox rows, and that is the key working.** A
 > published `StockReserved` reaches both `ordering-stock-events` and the saga's
