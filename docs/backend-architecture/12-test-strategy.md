@@ -1925,11 +1925,11 @@ public async Task Commands_are_sent_and_events_are_published()
 >
 > **That measurement is pinned to the suite PR-21 shipped and does not
 > re-run to the same numbers**, which is why it names that PR rather than the
-> file. The suite has grown since — #126 alone added three tests and a third
-> bus-free structural one — so a reader reproducing it today gets a different
-> ratio from the same deletion. The proportion is not the point and the
-> **costume** is: whatever the count, the failures arrive as timeouts naming a
-> command, and the structural tests pass throughout.
+> file. The suite has grown since — #126 alone added five tests, one of them a
+> fourth bus-free structural one — so a reader reproducing it today gets a
+> different ratio from the same deletion. The proportion is not the point and
+> the **costume** is: whatever the count, the failures arrive as timeouts
+> naming a command, and the structural tests pass throughout.
 
 > **Where the numbers live is the other half.** The first sample states them in
 > the registration it shows; the second gets them from `StartHarnessAsync`, the

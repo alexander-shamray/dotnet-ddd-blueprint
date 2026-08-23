@@ -1916,6 +1916,7 @@ stateDiagram-v2
     AwaitingConfirmation --> Confirmed : OrderConfirmed
     AwaitingConfirmation --> Compensating : OrderCancelled → ReleaseStock
     AwaitingConfirmation --> [*] : ConfirmationTimeout 10m → FlagOrderForReview not_confirmed
+    AwaitingConfirmation --> [*] : ShipmentDispatched → MarkOrderShipped
 
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
@@ -1923,6 +1924,7 @@ stateDiagram-v2
     Compensating --> Compensating : OrderConfirmed → FlagOrderForReview cancelled_after_confirmation
     Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed, PaymentDeclined → absorbed
 
+    Confirmed --> Confirmed : OrderConfirmed → absorbed
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
     Confirmed --> [*] : OrderCancelled → FlagOrderForReview cancelled_after_confirmation
@@ -2433,6 +2435,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotConfirmed))
+                .Finalize(),
+
+            // Shipping can beat this saga to its own acknowledgement, and
+            // splitting the state is what made that reachable: §3.2 gives
+            // Shipping OrderConfirmed too, so one publish fans out to two
+            // independent consumers and §9.4 orders nothing between them.
+            // Handled rather than ignored, because ignoring loses the
+            // MarkOrderShipped — and safe, because Shipping learns of the
+            // order only FROM OrderConfirmed, so a despatch arriving at all
+            // proves the aggregate committed.
+            When(ShipmentDispatched)
+                .Unschedule(ConfirmationTimeout)
+                .Send(
+                    OrderingQueue,
+                    ctx => new MarkOrderShipped(ctx.Saga.OrderId, ctx.Message.TrackingNumber))
                 .Finalize());
 
         During(
@@ -2489,7 +2506,20 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     ctx => new FlagOrderForReview(
                         ctx.Saga.OrderId,
                         ReviewReasons.CancelledAfterConfirmation))
-                .Finalize());
+                .Finalize(),
+
+            // A second OrderConfirmed reaches this state two ways, and both
+            // want absorbing rather than paging: §9.5's unrecorded redelivery,
+            // and #131 at its sharpest — the OLD machine entered Confirmed on
+            // the SEND, so during a rollout a new replica is handed
+            // acknowledgements for instances an old replica already advanced.
+            // What it costs is the #128 signal on this transition, and that is
+            // affordable HERE because entering Confirmed sends no command: it
+            // arms a three-day backstop, which §13.6's saga-age alert backstops
+            // in turn. StockReserved one state back has no Ignore for exactly
+            // that reason — losing an AuthorisePayment is not losing a
+            // backstop.
+            Ignore(OrderConfirmed));
 
         During(
             Compensating,
@@ -2721,12 +2751,23 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > `Compensating` or not, the two halves account for all of them, and the
 > reachable half equals what the machine says it accepts.
 >
-> **What is still not enforced is the invariant one state wider**: no test
-> fails when a *newly declared* event joins the machine without a transition
-> in some **other** state that can reach it. That residual is unchanged by
-> #126, and #126 is an instance of it surviving — `OrderConfirmed` needed a
-> branch in `Compensating`, which the test above demanded, and the author had
-> to notice `Confirmed` unaided.
+> **The residual was one state wider, and #126 is what made it bite.** The
+> partition above reads `NextEvents(Compensating)` and nothing else, so it
+> demanded the `OrderConfirmed` branch there and said nothing about the two
+> states that actually carry the new event. Both were missed on the first
+> pass: a second `OrderConfirmed` in `Confirmed` faulted, and a
+> `ShipmentDispatched` beating the acknowledgement into `AwaitingConfirmation`
+> faulted. **A gate that silently stops covering the newest surface is this
+> repository's most-repeated failure, and this is it arriving in the test
+> written to catch that failure.**
+>
+> `AwaitingConfirmation` and `Confirmed` now have partitions of their own, so
+> three of the five states are checked. The remaining two are not, and that is
+> the residual as it now stands: a newly declared event joining the machine
+> without a branch in `AwaitingStock` or `AwaitingPayment` still fails no test.
+> **The sweep was deliberately not generalised** — what makes a partition
+> checkable is naming the events a state can receive *and why*, which is an
+> argument per state rather than something a loop can produce.
 
 > **A cancellation has two origins and the saga used to see one.** The saga's
 > own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
@@ -2744,7 +2785,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | `AwaitingStock` | A reservation that may or may not exist yet | Release it and wait — `Compensating`, recording `OrderCancelled.Reason` |
 > | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, recording `OrderCancelled.Reason` — this does not stop the charge |
 > | `AwaitingConfirmation` | The card is authorised, and **nothing downstream has been told** — `ConfirmOrder` is in flight, so no `OrderConfirmed` has been published and Shipping has no despatch to prepare | `AwaitingPayment`'s compensation unchanged, one state later: release, wait, cancel. It escalates nothing, because Payments voids off `OrderCancelled` itself and there is no despatch to stop. **What it cannot see is whether the aggregate confirmed a moment before the customer cancelled** — that is caught in `Compensating` below, on the confirmation's arrival |
-> | `Confirmed` | The card is authorised **and Shipping has been told** | Escalate — `cancelled_after_confirmation`, because a despatch may still be moving — and finalise |
+> | `Confirmed` | The card is authorised **and Shipping has been told** | Escalate — `cancelled_after_confirmation`, because a despatch may still be moving — and finalise. A second `OrderConfirmed` is absorbed here rather than faulted: it is either §9.5's unrecorded redelivery or a rollout handing this replica an instance the previous release advanced |
 > | `Compensating` | A cancellation is already the outcome — but the money, the reservation and the **confirmation** may still land | Every arrival written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway; `When(PaymentAuthorised)` escalates `payment_authorised_during_compensation`; `When(OrderConfirmed)` escalates `cancelled_after_confirmation`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation** — §9.4 orders nothing, so a release handled before its reserve is a no-op and the reservation that follows it is stranded. Named here rather than argued away, because this row used to close the case with "`ReleaseStock` is already in flight" |
 >
 > **The money is a gap the last three rows state rather than close.** Undoing
@@ -2791,8 +2832,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > saga's word. **On the `Compensating` raising a `ReleaseStock` has already
 > gone out** — the state was entered on the premise that no confirmation had
 > happened — and nothing can recall it, because §3.2 gives Inventory no way
-> to be told to keep a reservation after all. The row is what carries that, which
-> is the same thing it has always done for the money.
+> to be told to keep a reservation after all. The row is what carries that,
+> which is the same thing it has always done for the money.
 >
 > **A late `StockReserved` after a cancellation is a different case from the
 > `StockTimeout` strand, and this callout has now been wrong about it

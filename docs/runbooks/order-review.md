@@ -247,9 +247,9 @@ and it is the change this page most needs its reader to know
 Until then `cancelled_after_confirmation` came only from `Confirmed`, so the
 code and the state were the same fact and this page navigated on either. Now
 `Compensating` raises it too — on an `OrderConfirmed` arriving after that
-state was entered, which is exactly the evidence Shipping was told. **The code is
-still the discriminator for Shipping. The state is not, and is now a separate
-question you have to ask.**
+state was entered, which is exactly the evidence Shipping was told. **The code
+is still the discriminator for Shipping. The state is not, and is now a
+separate question you have to ask.**
 
 **Two things follow, and the second is the one that surprises.** The saga may
 still be live when the row is `cancelled_after_confirmation`, so the
@@ -264,8 +264,9 @@ stopping the despatch, rather than assuming the release was correct.
 said both were. `cancelled_after_confirmation` is reached only through an
 `OrderCancelled` arriving at the saga — in `Confirmed` directly, or in
 `AwaitingConfirmation` on the way to `Compensating` — so something did cancel
-the order. `payment_authorised_during_compensation` is raised when an authorisation
-arrives while the saga is *already compensating*, and compensation starts on a
+the order. `payment_authorised_during_compensation` is raised when an
+authorisation arrives while the saga is *already compensating*, and
+compensation starts on a
 cancellation, a decline **or** a fifteen-minute payment timeout. A slow PSP that
 authorises after the timeout produces that row with nobody having cancelled
 anything.
@@ -388,7 +389,7 @@ left `AwaitingConfirmation` without ever entering `Confirmed`.
    the order's own state will say so — §5.4 refuses to cancel a `Shipped`
    order, so a row here means the aggregate was cancelled before despatch.
 
-#### `payment_authorised_during_compensation` — the saga may still be running, and usually is not
+#### `payment_authorised_during_compensation`
 
 An authorisation landed while the saga was compensating. **There is no
 despatch to stop** — Shipping was never told, which is what separates this code

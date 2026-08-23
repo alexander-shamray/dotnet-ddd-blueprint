@@ -120,6 +120,37 @@ new contract.**
   the right way round — an operator needs to know what to do, and the row says
   it. What no longer follows from the code is whether an instance is still
   alive, and the runbook now asks that separately.
+- **Splitting a state moves what can arrive at BOTH halves, and the first
+  pass got both wrong.** An adversarial review found two events reaching a
+  state with no branch, which under this machine's kept default faults to the
+  error queue §13.6 pages on. A second `OrderConfirmed` in `Confirmed` — from
+  §9.5's unrecorded redelivery, and from a rollout, since the old machine
+  entered `Confirmed` on the *send* and §15.5's canary runs both releases for
+  the length of its ladder. And a `ShipmentDispatched` in
+  `AwaitingConfirmation`, because §3.2 gives Shipping the same
+  `OrderConfirmed` this saga now consumes and §9.4 orders nothing between two
+  consumers — an ordering dependency the split *created*, since the old
+  machine was in `Confirmed` before that publish existed. Both reproduce as
+  `UnhandledEventException` and both are now written out.
+- **The gate that exists to catch that covered one state, and the newest
+  surface was not it.** `Compensating_writes_out_every_event_it_can_receive`
+  partitions `NextEvents(Compensating)` and nothing else — so it demanded the
+  `OrderConfirmed` branch in `Compensating` and said nothing about the two
+  states carrying the new event. **This repository's most-repeated failure,
+  arriving inside the test written to catch it.** `AwaitingConfirmation` and
+  `Confirmed` have partitions of their own now; `AwaitingStock` and
+  `AwaitingPayment` still do not, and that is the residual restated. It was
+  deliberately not generalised into a loop: what makes a partition checkable
+  is naming the events a state can receive *and why*.
+- **A test can pass against the defect it is written for, if it reads the
+  harness before the delivery lands.** The first version of the duplicate-
+  confirmation test published and then snapshotted `ConsumeFaults` through an
+  already-cancelled token — so it went green against a machine that faults,
+  and only the counterfactual run exposed it. The fix is this file's existing
+  pattern: give the duplicate its own `MessageId` and wait on *that* id.
+  **"Observed red" is worth nothing unless the red run is the one you
+  predicted** — here the first counterfactual was green and that was the
+  finding.
 - **A hard-coded count in a test failed where the list beside it was
   correct.** `DatabaseSmokeTests` asserted `applied.Length.ShouldBe(8)` next to
   eight named migrations, so a ninth migration went red on the number while the
@@ -137,6 +168,17 @@ new contract.**
   PR-21. **A consequence asserted in a defect report is not thereby a
   consequence** — this one was repeated across two files for two rounds
   because it sounded like the sort of thing that would happen.
+- **The timeout's floor was argued from the wrong term.** The comment priced
+  it at §9.8's retry budget on `ordering-commands` — "five attempts backing
+  off to a minute apiece" — which is about seventy seconds in practice, not
+  five minutes, because that ladder never reaches its cap. And it credited the
+  outbox dispatcher's 500ms *poll*, which is the one quantity that cannot
+  matter. What actually decides it is the dispatcher's *failure* ladder:
+  `POWER(2, MIN(Attempts, 8)) * 5` seconds, so a publish succeeding on its
+  eighth attempt lands after ten minutes have already passed and a
+  `not_confirmed` review has been filed for an order that then confirms. Ten
+  minutes is kept knowing that — seven consecutive publish failures is a stuck
+  outbox with its own alert — but the argument now names the governing term.
 - **ADR-021's volume argument moves with the state count**, and nothing in a
   state-machine review would surface that. Its scheduler cannot cancel, so
   every wait an order enters leaves one undeliverable delayed message in
@@ -1560,7 +1602,7 @@ next reader wondering whether it was ever there.
     can reach one in: `AwaitingStock` and `AwaitingPayment` compensate on the
     decline branch's own terms — and since #126 `AwaitingConfirmation` does
     too, deliberately identically — recording **the event's own reason**
-    rather than a literal — both lines said `customer_request` until a later round
+    rather than a literal — both lines said `customer_request` until a round
     established that §11.4 accepts all five `CancelReasons` codes, so the
     caller's reason was overwritten and `Compensating`'s exit sent
     `CancelOrder` under a reason nobody had chosen; `Compensating`
