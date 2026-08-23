@@ -287,6 +287,29 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // rejected for losing the wait: a release nobody waits on is a
             // reservation nobody notices is stranded, and §9.6 already gives
             // compensation a timeout for exactly that reason.
+            //
+            // **One OrderCancelled starts two races to this endpoint, and
+            // only one of them is this transition.** §3.2 has Inventory
+            // consuming OrderCancelled DIRECTLY and publishing StockReleased,
+            // independently of the ReleaseStock sent below — so a
+            // StockReleased derived from this very event can reach the saga
+            // before the saga has consumed its own copy, in a state that
+            // declares no branch for it. Neither AwaitingStock nor
+            // AwaitingPayment does.
+            //
+            // The retry envelope absorbs the ordinary interleaving: a later
+            // attempt re-reads the instance, finds Compensating, and
+            // finalises. #129 carries the case where it does not and the
+            // reason Ignore(StockReleased) is NOT the fix — ignoring discards
+            // the release, so the instance then waits out ReleaseTimeout and
+            // raises a stock_not_released review for a reservation that came
+            // back. A transient race traded for a certain wrong answer.
+            //
+            // Not introduced here: on main this machine has no
+            // When(OrderCancelled) at all, so the derived StockReleased lands
+            // in a branchless state EVERY time and no retry can rescue it,
+            // because nothing will move the state. This narrows a certainty
+            // to an interleaving.
             When(OrderCancelled)
                 .Unschedule(StockTimeout)
                 // **The event's reason, not a literal — and this line read
@@ -355,6 +378,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // narrower and worth stating exactly: it sends no FURTHER
             // AuthorisePayment, and if one is authorised anyway the
             // Compensating state escalates it for a human.
+            //
+            // The two-races note on the AwaitingStock branch above applies
+            // here unchanged — this state declares no StockReleased branch
+            // either, and #129 is the same issue from this door.
             When(OrderCancelled)
                 .Unschedule(PaymentTimeout)
                 // The event's reason, for the argument on the AwaitingStock
