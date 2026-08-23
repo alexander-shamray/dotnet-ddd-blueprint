@@ -196,13 +196,26 @@ public static class ReviewReasons
     /// on Shipping for.
     /// </summary>
     /// <remarks>
-    /// <b>"The saga had confirmed" is weaker than "the order is confirmed",
-    /// and the difference is a filed race.</b> §9.6 enters <c>Confirmed</c>
-    /// the moment it SENDS <c>ConfirmOrder</c>, not when that command
-    /// commits — so a cancellation can beat it to the aggregate, and this
-    /// code is then raised for an order that was never confirmed and that
-    /// Shipping was never told about. See
-    /// <see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/126">#126</see>.
+    /// <b>"The saga had confirmed" used to be weaker than "the order is
+    /// confirmed", and closing that gap is what #126 was.</b> §9.6 entered
+    /// <c>Confirmed</c> the moment it SENT <c>ConfirmOrder</c>, not when that
+    /// command committed — so a cancellation could beat it to the aggregate,
+    /// and this code was then raised for an order that was never confirmed and
+    /// that Shipping was never told about. The machine now waits in
+    /// <c>AwaitingConfirmation</c> for the <c>OrderConfirmed</c> the aggregate
+    /// publishes, so every path that raises this code has observed that event
+    /// and the name is true by construction rather than by intention.
+    /// <para>
+    /// <b>Two states raise it, and the second is the interesting one.</b> An
+    /// <c>OrderCancelled</c> arriving in <c>Confirmed</c> is the plain case.
+    /// The other is an <c>OrderConfirmed</c> arriving in <c>Compensating</c>:
+    /// both events are Ordering's own outbox rows, §9.4 orders nothing between
+    /// them, so a cancellation can reach the saga first and start a release for
+    /// an order the aggregate had already confirmed. The confirmation landing
+    /// afterwards is the only evidence that happened, which is exactly what
+    /// this code is for — the despatch is live and the release is already in
+    /// flight, so a human has both loose ends.
+    /// </para>
     /// </remarks>
     /// <remarks>
     /// <b>Distinct from <see cref="PaymentAuthorisedDuringCompensation"/> because the
@@ -228,4 +241,38 @@ public static class ReviewReasons
     /// </para>
     /// </remarks>
     public const string CancelledAfterConfirmation = "cancelled_after_confirmation";
+
+    /// <summary>
+    /// Payment was authorised and the order never acknowledged the
+    /// <c>ConfirmOrder</c> that followed (#126).
+    /// </summary>
+    /// <remarks>
+    /// <b>The escalation for the state #126 added.</b> §9.6 waits in
+    /// <c>AwaitingConfirmation</c> for the aggregate's own
+    /// <c>OrderConfirmed</c>; if that never arrives the money is taken, the
+    /// stock is held, and Shipping has been told nothing — so the wait needs a
+    /// bound and the bound needs somewhere to land. It escalates rather than
+    /// compensating for <see cref="NotDespatched"/>'s reason: a card has been
+    /// charged and §3.2 gives Ordering no refund command, so there is no
+    /// automatic action left to take and a human owns what follows.
+    /// <para>
+    /// <b>Read it as "the acknowledgement is missing", not "the order was
+    /// refused".</b> A <c>ConfirmOrder</c> the aggregate <em>rejects</em> —
+    /// because the order was cancelled underneath it — is a
+    /// <c>Rule</c> failure that <c>CommandConsumer</c> acks and counts (§9.8),
+    /// and the cancellation that caused it reaches the saga on its own event.
+    /// This code is what is left over: no acknowledgement, no cancellation, and
+    /// nothing further the machine can do.
+    /// </para>
+    /// <para>
+    /// <b>Not to be confused with Ordering's <c>order.not_confirmed</c> error
+    /// code</b>, which <c>MarkOrderShippedHandler</c> returns when a shipment
+    /// is reported for an order the aggregate has not confirmed. That one is
+    /// broker-only — §9.6's saga is its sole caller and no HTTP route reaches
+    /// it — so the two never appear in the same place. Two vocabularies and
+    /// one adjective; the collision is named here so a reader who meets both
+    /// does not reconcile them into one.
+    /// </para>
+    /// </remarks>
+    public const string NotConfirmed = "not_confirmed";
 }

@@ -80,6 +80,8 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
 
     public Guid? PaymentTimeoutTokenId { get; set; }
 
+    public Guid? ConfirmationTimeoutTokenId { get; set; }
+
     public Guid? DespatchTimeoutTokenId { get; set; }
 
     public Guid? ReleaseTimeoutTokenId { get; set; }

@@ -6,7 +6,7 @@ using Common.Contracts.Shipping.V1;
 namespace Ordering.Application.Tests;
 
 /// <summary>
-/// The eight events §9.6's saga reacts to, built for a test.
+/// The events §9.6's saga reacts to, built for a test.
 /// </summary>
 /// <remarks>
 /// <b>A builder rather than object initialisers at each call site, and §12.5
@@ -88,8 +88,8 @@ internal static class SagaContracts
     };
 
     /// <summary>
-    /// The eighth, and the second of the two Ordering publishes itself —
-    /// <c>OrderPlaced</c> is the other (§3.2).
+    /// One of the events Ordering publishes to itself — <c>OrderPlaced</c> and
+    /// <c>OrderConfirmed</c> are the others (§3.2).
     /// </summary>
     /// <remarks>
     /// The reason is a parameter because both origins reach the saga through
@@ -115,6 +115,37 @@ internal static class SagaContracts
         OrderId = orderId,
         CustomerId = customerId,
         Reason = reason
+    };
+
+    /// <summary>
+    /// The acknowledgement §9.6's <c>AwaitingConfirmation</c> waits for
+    /// (#126) — the aggregate's own confirmation, published in the
+    /// transaction that set the status.
+    /// </summary>
+    /// <remarks>
+    /// <b>The saga reads only <c>OrderId</c> off it, and the rest is built
+    /// anyway.</b> Every member of a V1 contract is <c>required</c>, so there
+    /// is no partial construction to elide — but the more useful reason is
+    /// that a double which fills only the fields today's consumer happens to
+    /// read teaches the next reader that the others are optional. §3.2 gives
+    /// this event to Shipping, which needs the address and the lines.
+    /// </remarks>
+    internal static OrderConfirmed OrderConfirmed(Guid orderId, Guid customerId) => new()
+    {
+        MessageId = Guid.CreateVersion7(),
+        CorrelationId = orderId,
+        OccurredAt = Occurred,
+        OrderId = orderId,
+        CustomerId = customerId,
+        TotalAmount = Total,
+        Currency = Currency,
+        Lines = [new ConfirmedLine(Product, 2, 64.99m)],
+        ShippingAddress = new ShippingAddressV1(
+            "1 Test Street",
+            null,
+            "Springfield",
+            "12345",
+            "GB")
     };
 
     internal static ShipmentDispatched ShipmentDispatched(Guid orderId, string tracking) => new()

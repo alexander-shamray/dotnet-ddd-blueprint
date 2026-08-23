@@ -35,8 +35,26 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // Cancelled and Shipped are NOT states here: they are terminal outcomes,
     // and SetCompletedWhenFinalized() deletes the instance at that point, so a
     // state for either would be one no saga is ever observed in.
+    //
+    // **AwaitingConfirmation is #126, and it exists because the state below it
+    // was named after a thing that had not happened.** Confirmed used to be
+    // entered in the activity that SENDS ConfirmOrder, so it meant "a command
+    // is in flight" while every comment and every review code read it as "the
+    // aggregate confirmed and Shipping knows". The two diverge for exactly as
+    // long as one local command takes, and a cancellation arriving inside that
+    // window took the Confirmed branch: no ReleaseStock, on the argument that
+    // a reservation being picked must not be dropped — for a despatch nobody
+    // had requested — and a cancelled_after_confirmation row for an order that
+    // was never confirmed.
+    //
+    // The fix is to wait for the acknowledgement rather than to assume it, and
+    // the acknowledgement is not a new contract: Order.ConfirmPayment raises
+    // OrderConfirmedDomainEvent and §9.3's mapper stages OrderConfirmed on the
+    // outbox already. So the honest state is one this service was publishing
+    // the evidence for the whole time and nothing was listening to.
     public State AwaitingStock { get; private set; } = null!;
     public State AwaitingPayment { get; private set; } = null!;
+    public State AwaitingConfirmation { get; private set; } = null!;
     public State Confirmed { get; private set; } = null!;
     public State Compensating { get; private set; } = null!;
 
@@ -48,12 +66,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     public Event<StockReleased> StockReleased { get; private set; } = null!;
     public Event<ShipmentDispatched> ShipmentDispatched { get; private set; } = null!;
 
-    // Ordering's own event, and the SECOND of the two here that are —
-    // OrderPlaced above is the other, which the sentence that used to end
-    // "and the only one here that is" contradicted in its own next clause.
-    // §3.2 gives Ordering both for the same reason: a service is a subscriber
-    // to itself whenever a fact it publishes is also a fact its workflow has
-    // to react to.
+    // Ordering's own event, and not the only one here that is — OrderPlaced
+    // above and OrderConfirmed below are the others. §3.2 gives Ordering all
+    // three for the same reason: a service is a subscriber to itself whenever
+    // a fact it publishes is also a fact its workflow has to react to.
+    //
+    // **This line carried a count and it went stale exactly as counts here
+    // do.** It said "the SECOND of the two", having already been corrected
+    // once from "the only one"; #126 made it three without touching this
+    // comment's subject. The property they share is what the sentence is for,
+    // so it now names them instead of numbering them.
     //
     // "Cancel this order" has two origins and only one of them was reaching
     // the machine. The saga's own CancelOrder is always paired with Finalize,
@@ -71,10 +93,34 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // exists to fix, reappearing for the length of the deploy.
     public Event<OrderCancelled> OrderCancelled { get; private set; } = null!;
 
+    // The acknowledgement AwaitingConfirmation waits for (#126), and the reason
+    // that state costs no contract change: Order.ConfirmPayment already raises
+    // OrderConfirmedDomainEvent, OrderingIntegrationEventMapper already maps it
+    // to this type, and TransactionBehavior already stages it on the outbox in
+    // the same transaction that sets the status. Shipping binds it (§3.2); the
+    // saga now binds it too, which is the same "subscriber to itself" edge
+    // OrderPlaced and OrderCancelled already draw.
+    //
+    // **Binding it costs what every new binding on a live queue costs (#131).**
+    // Both releases consume ordering-fulfilment-saga during a rollout, so the
+    // broker can hand a newly bound OrderConfirmed to an old replica whose
+    // machine does not declare it, and MassTransit parks it in <queue>_skipped
+    // — which §13.6 does not watch. Here the loss is bounded rather than
+    // silent, and that is worth stating precisely: an old replica is still
+    // running the old machine, whose Confirmed state it entered on the send, so
+    // it is not waiting for this event and loses nothing by missing it. A NEW
+    // replica's instance parked in AwaitingConfirmation is the one that needs
+    // it, and a new replica declares it. What the rollout can still strand is
+    // an instance a new replica advanced and an old replica is handed the
+    // acknowledgement for — bounded by ConfirmationTimeout below, which
+    // escalates rather than hanging.
+    public Event<OrderConfirmed> OrderConfirmed { get; private set; } = null!;
+
     // One schedule per wait. "Every wait has a timeout" is a rule the machine
     // must be able to express, not a habit to remember at each transition.
     public Schedule<OrderFulfilmentState, StockReservationExpired> StockTimeout { get; private set; } = null!;
     public Schedule<OrderFulfilmentState, PaymentAuthorisationExpired> PaymentTimeout { get; private set; } = null!;
+    public Schedule<OrderFulfilmentState, ConfirmationExpired> ConfirmationTimeout { get; private set; } = null!;
     public Schedule<OrderFulfilmentState, DespatchExpired> DespatchTimeout { get; private set; } = null!;
     public Schedule<OrderFulfilmentState, StockReleaseExpired> ReleaseTimeout { get; private set; } = null!;
 
@@ -148,6 +194,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         Event(() => PaymentDeclined, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => StockReleased, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => ShipmentDispatched, x => x.CorrelateById(m => m.Message.OrderId));
+        Event(() => OrderConfirmed, x => x.CorrelateById(m => m.Message.OrderId));
 
         // Discarded when no instance exists, and this one needs saying because
         // it is the routine case rather than the exotic one: every cancellation
@@ -204,6 +251,28 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             s =>
             {
                 s.Delay = TimeSpan.FromMinutes(15);
+                s.Received = e => e.CorrelateById(m => m.Message.OrderId);
+            });
+
+        // #126's wait, and the only one whose far end is this same service —
+        // Ordering answering its own ConfirmOrder. So the number is not a
+        // guess about a peer: its FLOOR is §9.8's retry budget on
+        // ordering-commands, which is five attempts backing off to a minute
+        // apiece, and a timeout inside that would fire while the command was
+        // still being legitimately retried. Ten minutes clears it with room
+        // for the outbox dispatcher's own poll, and matches ReleaseTimeout
+        // below for the same reason both are waits on a message this service
+        // has already sent rather than on a third party deciding something.
+        //
+        // Like DespatchTimeout it escalates rather than compensating: the card
+        // is authorised by the time this wait begins and §3.2 gives Ordering no
+        // refund command, so there is no automatic action left.
+        Schedule(
+            () => ConfirmationTimeout,
+            x => x.ConfirmationTimeoutTokenId,
+            s =>
+            {
+                s.Delay = TimeSpan.FromMinutes(10);
                 s.Received = e => e.CorrelateById(m => m.Message.OrderId);
             });
 
@@ -340,15 +409,22 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
         During(
             AwaitingPayment,
+            // **This activity SENDS ConfirmOrder; it does not confirm the
+            // order, and the state it moves to now says so (#126).** It used
+            // to land in Confirmed and arm DespatchTimeout here — naming a
+            // state after a command's intent and arming a three-day wait on
+            // Shipping before Shipping had been told anything. Both now wait
+            // for the aggregate's own OrderConfirmed, which is the first
+            // moment either claim is true.
+            //
+            // Not Finalize either way: the order is not finished at payment.
             When(PaymentAuthorised)
                 .Unschedule(PaymentTimeout)
                 .Send(
                     OrderingQueue,
                     ctx => new ConfirmOrder(ctx.Saga.OrderId, ctx.Message.Reference))
-                // Not Finalize: the order is confirmed, not finished. It is now
-                // waiting on Shipping, and that wait needs a state to live in.
-                .Schedule(DespatchTimeout, ctx => new DespatchExpired(ctx.Saga.OrderId))
-                .TransitionTo(Confirmed),
+                .Schedule(ConfirmationTimeout, ctx => new ConfirmationExpired(ctx.Saga.OrderId))
+                .TransitionTo(AwaitingConfirmation),
 
             When(PaymentDeclined)
                 .Unschedule(PaymentTimeout)
@@ -400,6 +476,72 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
                 .TransitionTo(Compensating));
+
+        // #126's state. ConfirmOrder is in flight and nothing downstream knows
+        // anything yet: the aggregate is still AwaitingPayment, no
+        // OrderConfirmed has been published, and Shipping has not been told.
+        // Every branch below turns on that being true.
+        During(
+            AwaitingConfirmation,
+            // The acknowledgement. This is the moment the order IS confirmed —
+            // the aggregate committed the status and staged this event in the
+            // same transaction (§6.3) — so it is also the first moment a
+            // despatch can be expected, which is why DespatchTimeout is armed
+            // here rather than one state back.
+            When(OrderConfirmed)
+                .Unschedule(ConfirmationTimeout)
+                .Schedule(DespatchTimeout, ctx => new DespatchExpired(ctx.Saga.OrderId))
+                .TransitionTo(Confirmed),
+
+            // The cancellation Confirmed's branch used to answer wrongly.
+            // Here the release is unambiguously right: no OrderConfirmed has
+            // been seen, so Shipping was never told, so nothing is being
+            // picked and the reservation is the saga's to give back. This is
+            // AwaitingPayment's branch unchanged, and deliberately so — the
+            // situation is the same one, a state later.
+            //
+            // **It escalates nothing, and that is the difference from
+            // Confirmed's.** The money is authorised, but §3.2 has Payments
+            // void on OrderCancelled itself; what made the confirmed case a
+            // human's problem was a despatch that might already be moving, and
+            // there is none here. Compensating's exits send CancelOrder, which
+            // Order.Cancel absorbs when the customer's own cancellation got
+            // there first.
+            //
+            // **The residual is that this branch cannot see the race it is
+            // inside**, and the state below is where it is caught: the
+            // aggregate may have confirmed a moment before the customer
+            // cancelled, in which case OrderConfirmed is still in flight and
+            // arrives in Compensating. That arrival is the only evidence, and
+            // it raises cancelled_after_confirmation there rather than being
+            // absorbed.
+            When(OrderCancelled)
+                .Unschedule(ConfirmationTimeout)
+                .Then(ctx => ctx.Saga.CancelReason = ctx.Message.Reason)
+                .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
+                .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
+                .TransitionTo(Compensating),
+
+            // No acknowledgement and no cancellation, so the machine is out of
+            // moves: the card is authorised, the stock is held, and §3.2 gives
+            // Ordering no refund command to compensate with. It escalates on
+            // DespatchTimeout's argument — a wait with no compensating action
+            // still ends, and a human owns what follows.
+            //
+            // **Reaching this is a fault somewhere else, not an ordinary
+            // outcome.** ConfirmOrder is a local command with a bounded retry
+            // budget, and the aggregate refusing it is not this branch's case:
+            // a refusal is a Rule failure CommandConsumer acks and counts, and
+            // the only thing that refuses it is a cancellation, which arrives
+            // here on its own event. What is left is the command never being
+            // consumed at all — an outbox that stopped, a queue that is not
+            // being drained, a replica that took the acknowledgement during a
+            // rollout (#131). Each of those wants a person.
+            When(ConfirmationTimeout.Received)
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(ctx.Saga.OrderId, ReviewReasons.NotConfirmed))
+                .Finalize());
 
         During(
             Confirmed,
@@ -464,18 +606,27 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // picked is not one Inventory can safely be told to drop. The
             // review row is where both loose ends are worked.
             //
-            // **That argument has a hole and it is filed as #126.** This state
-            // is entered when ConfirmOrder is SENT, not when it commits, and
-            // Shipping learns nothing until the aggregate publishes
-            // OrderConfirmed. A cancellation that beats the command to the
-            // aggregate leaves the order never confirmed and Shipping never
-            // told — and this branch then withholds the release on the
-            // strength of a picking that is not happening, strands the
-            // reservation, and records a code saying the order was confirmed.
-            // ConfirmPayment throws on a cancelled order, so the same race
-            // also files ConfirmOrder in the error queue §13.6 pages on.
-            // Closing it means splitting this state on an acknowledgement, or
-            // making the branch conditional on the handoff — a §9.6 decision.
+            // **That argument had a hole, it was #126, and this state is now
+            // the narrower thing that makes it sound.** The state used to be
+            // entered when ConfirmOrder was SENT rather than when it
+            // committed, so "a despatch may still happen" was an assumption
+            // about a handoff that had not been made: a cancellation beating
+            // the command to the aggregate left the order never confirmed and
+            // Shipping never told, and this branch then withheld the release
+            // on the strength of a picking that was not happening. It is now
+            // entered on the aggregate's own OrderConfirmed, so every premise
+            // above is established rather than intended.
+            //
+            // **The same race was also said to page the error queue, and that
+            // was wrong in this codebase's favour.** ConfirmOrder against a
+            // cancelled order does not escape ConfirmOrderHandler:
+            // Order.ConfirmPayment throws, the handler catches and returns
+            // OrderErrors.NotAwaitingPayment, and that is Error.Rule — which
+            // CommandConsumer acks, counts as a domain rejection and logs.
+            // Only ErrorType.Unavailable is rethrown for §9.8's retry policy.
+            // SagaCommandHandlerTests.Confirming_an_order_that_has_moved_on_is_a_rejection
+            // pins it. The claim is removed rather than corrected in place
+            // because nothing about that path is a defect.
             When(OrderCancelled)
                 .Unschedule(DespatchTimeout)
                 // **A different code from Compensating's, and the row is the
@@ -568,6 +719,43 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                     ctx => new FlagOrderForReview(
                         ctx.Saga.OrderId,
                         ReviewReasons.PaymentAuthorisedDuringCompensation)),
+
+            // **The confirmation that arrives after compensation has begun,
+            // and the one thing in this machine that can prove #126's race
+            // actually happened.** Only AwaitingConfirmation reaches here with
+            // an OrderConfirmed still outstanding: that state cancels on the
+            // premise that the aggregate had not confirmed — true whenever the
+            // customer got there first, and unknowable at the moment the
+            // branch runs, because OrderConfirmed and OrderCancelled are two of
+            // Ordering's own outbox rows and §9.4 orders nothing between them.
+            //
+            // If it arrives, the premise was false: the order WAS confirmed,
+            // Shipping was told, a despatch may be moving — and a ReleaseStock
+            // for it is already in flight. That is precisely
+            // cancelled_after_confirmation's case, so it raises the same code
+            // Confirmed's branch does. Both loose ends are now on one row
+            // rather than neither being anywhere.
+            //
+            // **Not Ignore, and the difference is the whole point of the
+            // enumeration.** Absorbing it would restore #126's silence one
+            // state over: the release would go out for stock being picked and
+            // nothing would say so. Not a fault either — the arrival is
+            // legitimate and there is a row for it.
+            //
+            // No Finalize: like PaymentAuthorised above, this state is still
+            // waiting on StockReleased and the exits own the cancellation.
+            //
+            // **What it does not do is recall the release**, and the honest
+            // reason is that there is nothing to recall it with: §3.2 gives
+            // Inventory no way to be told "keep the reservation after all".
+            // The row is the mechanism, which is what Confirmed's branch has
+            // always relied on for the money half.
+            When(OrderConfirmed)
+                .Send(
+                    OrderingQueue,
+                    ctx => new FlagOrderForReview(
+                        ctx.Saga.OrderId,
+                        ReviewReasons.CancelledAfterConfirmation)),
 
             // Written rather than left to fault, and the difference is
             // whether a reader can tell a decision from an omission. Reaching
