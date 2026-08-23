@@ -102,6 +102,29 @@ class KeywordParser(unittest.TestCase):
         # corpus.
         self.assert_finds("It closes the naive spelling and nothing more.", set())
 
+    def test_a_reference_in_unknown_markup_is_reported_not_dropped(self):
+        """`~` is not in WRAPPERS, so the strip leaves a token nothing reads.
+
+        It resolves to no issue and it is not prose. Before this it matched
+        neither branch and vanished — a keyword-reference pair GitHub may well
+        honour, gone from the commit set with nothing said. Fail-open, in the
+        one file whose subject is not having that.
+        """
+        numbers, unreadable = closing_references("Closes ~~#21~~", REPO)
+        self.assertEqual(numbers, set())
+        self.assertEqual(len(unreadable), 1, unreadable)
+
+    def test_a_single_unknown_wrapper_is_reported_too(self):
+        numbers, unreadable = closing_references("Fixes ~#21", REPO)
+        self.assertEqual(numbers, set())
+        self.assertEqual(len(unreadable), 1, unreadable)
+
+    def test_a_hash_token_that_is_not_issue_shaped_is_still_reported(self):
+        """The widening must not narrow the case that already worked."""
+        numbers, unreadable = closing_references("Closes #topic", REPO)
+        self.assertEqual(numbers, set())
+        self.assertEqual(len(unreadable), 1, unreadable)
+
     def test_a_keyword_inside_a_longer_word_is_not_a_keyword(self):
         self.assert_finds("prefixes #16 and foreclosed #17", set())
 

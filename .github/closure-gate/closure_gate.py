@@ -134,6 +134,15 @@ REFERENCE = re.compile(
 # writes it in backticks, and GitHub links it anyway.
 WRAPPERS = "`\"'([{*_<"
 
+# A token this matches is issue-shaped whether or not the strip above knew
+# the markup around it. `Closes ~~#21~~` leaves `~~#21~~`: `~` is not a
+# wrapper here, `REFERENCE` refuses it, and a `startswith` test then reads it
+# as ordinary prose and drops it. Silently — which is the one outcome the
+# paragraph about this parser says it does not have. Any unresolved token
+# carrying a `#` before a digit is reported instead, so a spelling nobody
+# anticipated fails the gate rather than leaving the commit set.
+ISSUE_SHAPED = re.compile(r"#\d")
+
 # The house form's metadata row: `| Closes | #88 (high), #81 (high) |`.
 TABLE_ROW = re.compile(
     rf"^[ \t]*\|[ \t]*{_KEYWORD}[ \t]*\|(?P<cell>[^|]*)\|",
@@ -176,7 +185,9 @@ def closing_references(text: str, repository: str) -> tuple[set[int], list[str]]
         reference = REFERENCE.match(token)
         if reference is None:
             # Prose. `Closes the door` is English, not a link.
-            if token.startswith("#") or "github.com/" in token.lower():
+            if (token.startswith("#")
+                    or ISSUE_SHAPED.search(token)
+                    or "github.com/" in token.lower()):
                 unreadable.append(match.group(0).strip())
             continue
 

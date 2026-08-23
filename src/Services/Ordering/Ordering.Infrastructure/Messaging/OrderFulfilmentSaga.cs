@@ -602,9 +602,25 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // in the same breath: that paragraph says the stranding is
             // SILENT, and this path sends no FlagOrderForReview at all.
             // stock_not_released is ReleaseTimeout's code, raised when a
-            // release does not complete — and here it completed, as a no-op.
-            // So there is no row, no alert and no signal, and #125's own
-            // body already said so while this comment did not.
+            // release does not complete — and **whether a no-op release
+            // completes is specified nowhere**. §3.2 gives Inventory
+            // ReleaseStock and StockReleased and says nothing about a
+            // release for a reservation that was never held; no chapter
+            // asks. #130 carries the gap, and it decides this comment both
+            // ways: if the no-op publishes StockReleased there is no row,
+            // no alert and no signal, which is what #125's body claims; if
+            // it does not, the saga waits out ReleaseTimeout and raises a
+            // stock_not_released for stock that was never reserved — a
+            // FALSE row rather than a silent stranding. This comment used
+            // to assert the first reading outright.
+            //
+            // Ignore() is right on either reading, which is why the line
+            // below does not move: the alternative is a transition whose
+            // correctness depends on the same unspecified contract. What
+            // changes with the answer is #125's severity, and the same
+            // question reaches Ignore(StockReservationFailed) beside it —
+            // that event PROVES no reservation is held, so the release it
+            // is waiting on is a no-op by construction.
             //
             // Written for the same reason as the line above, and they were the
             // last two arrivals with no branch. **The enumeration is now the
