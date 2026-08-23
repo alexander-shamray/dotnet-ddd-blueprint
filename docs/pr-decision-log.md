@@ -68,6 +68,103 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The closure gate — landed inside PR #117, and the plan has no row for it
+
+**No `PR-NN` heading, and that is the honest form rather than an omission.**
+Appendix C's rows describe the blueprint's specified system; this is CI tooling,
+and no gate here has ever had a row of its own — the licence gate rode PR-01 and
+the pipeline gate rode PR-25, each inside a row about something else. This one
+rode PR #117, whose subject is §9.6's saga, because the defect it closes had
+just fired for the third time and the branch in front of it was the one being
+merged.
+
+**Two mechanisms answer "what does merging this close", and only one of them
+is editable.** GitHub honours closing keywords in a pull request *body* and in
+a *commit* body independently, and `gh pr view --json closingIssuesReferences`
+reports the body only. So the one field a reviewer would check is blind to
+half the answer, and both halves have failed here:
+
+- **PR #112 closed nothing it claimed.** Its keywords lived only in the
+  `| Closes |` metadata row. A cell boundary sits between the keyword and the
+  reference, so GitHub was handed two cells rather than a pair — it is not
+  declining to read a table. `closingIssuesReferences` reads `[]` to this day
+  and three issues were closed by hand.
+- **PR #116 closed two issues its own body disclaimed.** The review loop
+  narrowed two claims and the description was rewritten to say one of them
+  stayed open; the merge closed both anyway, out of commits written before the
+  loop ran. Measured rather than recalled: that PR's commits carry
+  `{30, 31, 32, 55, 56}` and its `closingIssuesReferences` reports
+  `{31, 32, 55}`. The set difference is exactly the pair reopened by hand.
+
+**So the description is reconciled to the commits, never the reverse.** A
+description is editable and a commit message is not, which is why withdrawing
+a closure from the body reads as sufficient and is not.
+
+### Two comparisons, not three, and the third is the one to refuse
+
+The gate compares what a pull request **says** — the table row — against what
+merging it **does**, which is `closingIssuesReferences` together with the commit
+keywords. It does **not** ask a commit to repeat a closure the description
+makes. An issue the description closes and no commit mentions is the ordinary
+case: the bare `Closes` line under the table is what fires, and a commit is
+under no obligation to say it again. Adding that fourth pairing would make a
+commit keyword *mandatory* — a rule nothing here states — and would fail correct
+pull requests.
+
+**The gate's own first sentence was that mistake.** It said the three
+statements must agree, which reads as three pairs that all have to match, and
+it was flagged from three separate sites before being rewritten rather than
+annotated. A test now pins the absent comparison, because the symmetry
+argument is what produced it the first time and will produce it again.
+
+### Half the comparison is GitHub's parse and half is a regex
+
+That asymmetry decides the failure mode, and it is why the suite is mostly the
+parser. A regex matching too *much* makes the gate disagree with GitHub and
+fail loudly, which is recoverable. A regex matching too *little* drops a
+commit keyword; if the description omits it too, the two sets agree and the
+gate reports a pass while the merge closes an issue nobody declared. So the
+parser is deliberately literal — it matches inside backticks and quoted prose,
+exactly as GitHub's linker does — and **anything keyword-shaped it cannot
+resolve is reported rather than skipped.** A wrapper the strip does not know
+(`~~#21~~`) is the case that proved it: before that fix the token matched
+neither branch and vanished silently.
+
+### One collection is paginated and one is preloaded, and only one needs a guard
+
+`gh pr view --json commits` returns a single page, so a long pull request
+hands the gate a prefix of its own history — and a keyword past the cut is
+absent for a reason that has nothing to do with what the pull request says.
+A list at or above the page size is therefore **refused rather than judged**:
+a prefix of one page and a complete list of one page are indistinguishable
+from inside.
+
+**`closingIssuesReferences` is not exposed to that, and it briefly carried the
+same guard on a symmetry argument.** Measured against `cli/cli` at v2.92.0:
+`finder.go` dispatches to `preloadPrClosingIssuesReferences`, which loops on
+`PageInfo.HasNextPage` until the collection is exhausted; commits get no such
+treatment. A guard there would have refused every pull request with a hundred
+linked issues while telling the reader to do the paginated fetch `gh` had
+already done. **A false-refusal generator in a gate whose subject is not
+trusting unchecked claims** — removed, with a test pinning the removal.
+
+### It went red on its own branch, and then did not close its own issue
+
+Three live failures on PR #117 before the branch went green, and the first was
+its own test fixtures: a commit body *quoting* `Closes ~~#21~~` while arguing
+about wrappers. That is the hazard the prose warns about — GitHub's linker
+does not read markdown, so a keyword discussed in an argument links exactly as
+hard as a real one — firing on the branch that documented it.
+
+**And the merge did not close the issue that specifies it.** The gate landed
+mid-branch, the description was never given a bare keyword line naming it, and
+the two comparisons were satisfied throughout because nothing claimed the
+closure on either side. **A gate that catches disagreement cannot catch
+silence**, and the issue was closed by hand afterwards — the defect in
+miniature, committed by the change that fixes it.
+
+---
+
 ## PR-28 — the section the plan forgot, and the registration nothing called
 
 **PR-28 is not in Appendix C's original twenty-seven and had to be added to
