@@ -1492,10 +1492,12 @@ holds no price for at all — which is what the customer experiences either way.
 Note which condition that is: **not** a product whose `ProductPublished` never
 arrived, since `PriceChanged` reaches the same insert branch and lists it.
 
-> **A projection with no publisher is worse than a remote call.** If Catalog has
-> never emitted `ProductPublished` for a product — nor a `PriceChanged` that
-> would insert the row without one, which the callout below is about — this
-> table has no row for it and every order containing it fails, silently, with a
+> **A projection with no publisher is worse than a remote call.** If this
+> service has applied neither of the two events that write a price row — the
+> `ProductPublished` and the `PriceChanged` the callout below is about, both
+> of which Catalog emitted, because `Product.Publish` is its factory — this
+> table has no row for the product and every order containing it fails,
+> silently, with a
 > 422 `order.products_unavailable` and no error in any log. Silently is the
 > word that matters: a rule rejection is a *correct* answer from a service with
 > no prices, so nothing about it looks like a fault. Two mitigations, both
@@ -1784,9 +1786,11 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
                 INSERT (ProductId, Name, ThumbnailUrl, UpdatedAt)
                 VALUES (@ProductId, @Name, @Thumbnail, @OccurredAt)
             -- The insert branch is what lets this handler arrive before any
-            -- order references the product, which in the ordinary flow it
-            -- always does: PlaceOrder reads ordering.ProductPrices, and the
-            -- same event fills that too. HOLDLOCK for the same reason
+            -- order references the product, which is the ordinary case:
+            -- PlaceOrder reads ordering.ProductPrices, and the same event
+            -- fills that too. Ordinary rather than guaranteed — the two
+            -- handlers commit separately, so an order can slip into the gap
+            -- between them. HOLDLOCK for the same reason
             -- ProductPriceProjection's two upserts carry it: this branch makes
             -- concurrent deliveries for one key able to both insert, and the
             -- endpoint's retry would absorb the violation rather than surface
