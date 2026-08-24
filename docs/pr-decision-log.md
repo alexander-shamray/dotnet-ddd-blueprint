@@ -256,10 +256,19 @@ that each transition sent the command it owes — which is what they were worth
 keeping for, and the comment beside them says so rather than reading as a
 template for the next test.
 
-`dotnet test Platform.slnx` is 886, up from 884, and the fast half is 698 —
-two new tests, both the barrier's: one driving the saga, and one driving a
-consumer the test holds open, because the first can only observe the barrier
-through a race and the second settles it by construction.
+`dotnet test Platform.slnx` came out of this at 886, up from 884, with a fast
+half of 698 — two new tests, both the barrier's: one driving the saga, and one
+driving a consumer the test holds open, because the first can only observe the
+barrier through a race and the second settles it by construction.
+
+**Pinned to then rather than restated**, on the same terms as the twenty-seven
+harness tests above: this entry records what one PR measured, and the live
+figure belongs in `CLAUDE.md` and `docs/testing.md`, which carry it. It read
+"is 886" in the present tense until a later branch made it 888 — and the two
+sentences sat four paragraphs apart in this one entry, one of them already
+pinned. **A treatment applied to one number and not to its neighbour is the
+half-applied reconciliation this file's own rule forbids**, which is what makes
+this worth a paragraph rather than a silent edit.
 
 ---
 
