@@ -54,7 +54,9 @@ internal sealed class OrderFulfilmentStateConfiguration : IEntityTypeConfigurati
         // Nullable in the database and non-nullable on the instance, which is
         // the one place those two disagree on purpose: a saga that never
         // compensates stores NULL, and the state machine guarantees the
-        // property is written before either exit from Compensating reads it.
+        // property is written before either stock exit from Compensating reads
+        // it. Not "either exit": #124 gave that state three more transitions,
+        // and the two that read this are the ones sending CancelOrder.
         builder
             .Property(s => s.CancelReason)
             .HasMaxLength(32)

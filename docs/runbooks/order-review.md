@@ -43,27 +43,31 @@ page assumed it was:
 | Reason | State of the saga |
 |---|---|
 | `not_despatched` | Finalised. The state row is gone and this row is the only trace |
-| `stock_not_released` | Finalised, on the release timeout |
+| `stock_not_released` | **Finalised on the release timeout only if Payments owed nothing.** That exit sends `CancelOrder`, raises this row, and then finalises conditionally, so an order cancelled while an authorisation was in flight keeps its instance until the verdict lands or the payment wait expires ([#124](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/124)). Query the state table |
 | `not_confirmed` | Finalised, on the ten-minute confirmation timeout |
-| `cancelled_after_confirmation` | **Depends on which state raised it, and the row does not say.** From `Confirmed` it is finalised — the branch cancels nothing and finalises. From `Compensating` it is raised **mid-wait** and the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`. Query the state table; the procedures differ at step 2 |
-| `payment_authorised_during_compensation` | Raised mid-wait, when an authorisation lands after compensation has BEGUN — which is not the same as after a cancellation: `Compensating` is also reached from `PaymentDeclined` and the fifteen-minute payment timeout, where no `OrderCancelled` exists yet. The instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`; both are well inside the hour this alerts on, so by the time you read the row it has normally finalised. Check, and branch. A `stock_not_released` row may join it |
+| `cancelled_after_confirmation` | **Depends on which state raised it, and the row does not say.** From `Confirmed` it is finalised — the branch cancels nothing and finalises. From `Compensating` it is raised **mid-wait** and the instance stays until the stock half settles — `StockReleased`, or the ten-minute `ReleaseTimeout`. No payment verdict can be outstanding on that path: the only door onto it runs through `AwaitingConfirmation`, which the saga enters on a `PaymentAuthorised`. Query the state table; the procedures differ at step 2 |
+| `payment_authorised_during_compensation` | Raised mid-wait, when an authorisation lands after compensation has BEGUN — which is not the same as after a cancellation: `Compensating` is also reached from `PaymentDeclined` and the fifteen-minute payment timeout, where no `OrderCancelled` exists yet. The branch that raises this row is also the one that answers the payment half, so the stock half is all that is left: the instance stays until `StockReleased` or the ten-minute `ReleaseTimeout`, both well inside the hour this alerts on, and by the time you read the row it has normally finalised. Check, and branch. A `stock_not_released` row may join it |
 
 For the finalised cases [`stuck-saga.md`](stuck-saga.md) will not catch this,
 which is why §13.6 gives it a row of its own rather than folding it into the
-saga-age alert. **For the two mid-wait rows the saga-age alert usually will not
+saga-age alert. **For a row raised mid-wait the saga-age alert usually will not
 fire either, and an earlier version of this page said it would.** Both
-thresholds are an hour, but `Compensating` normally ends within the ten-minute
-`ReleaseTimeout` — so by the time such a row alerts the instance is long gone.
-The two alerts coincide only when `StockReleased` and that timeout have *both*
-failed to end the wait, and then they are the same incident.
+thresholds are an hour, and every wait `Compensating` can be holding for is far
+shorter — ten minutes on the stock half, fifteen on a payment verdict it is
+still owed — so by the time such a row alerts the instance is normally long
+gone. The two alerts coincide only when the wait that is holding the instance
+outlived its own timeout, and then they are the same incident.
 
 **"The only one that can still be running" is what this table said of
-`payment_authorised_during_compensation`, and it is now two.** Both are raised
-by `Compensating` branches that deliberately do not finalise, because that
-state is still waiting on Inventory and its exits own the cancellation. The
-count is not the lesson — the lesson is that "has the saga finished" is a
-question about the **branch** that raised the row, not about the reason code,
-and the reason code is all the row persists.
+`payment_authorised_during_compensation`, and no count belongs in that sentence
+at all.** The rule is that a row raised by a `Compensating` branch which does
+not finalise leaves an instance behind — and since
+[#124](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/124)
+even the branches that *do* finalise finalise conditionally, because that state
+joins on Inventory and on Payments and settles one half at a time. So "has the
+saga finished" is a question about the **branch** that raised the row and about
+what was still outstanding when it ran, not about the reason code — and the
+reason code is all the row persists.
 
 A row means "a human still needs to look at this". The table is a **work queue,
 not a log**: there is no `ResolvedAt` column, and resolving a review means
@@ -137,6 +141,17 @@ longer one of the ways to get here — which used to be reachable through
 that was settled, step 1 could legitimately find nothing and the row was
 telling you about a contract gap rather than about stock. It is now always
 about stock or about delivery.
+
+**This row no longer implies a finalised saga**, and it is the one reason code
+whose live instance means the *money* half rather than the stock one. The
+release timeout sends `CancelOrder`, raises this row, and then finalises only
+if Payments owes nothing — so an order cancelled while an authorisation was
+still in flight keeps its instance until that verdict arrives or the payment
+wait expires (#124). The cancellation has already gone out either way, which
+is the opposite of `payment_authorised_during_compensation`, where a live
+instance means no `CancelOrder` has been sent at all. Read the instance in
+[`stuck-saga.md`](stuck-saga.md); the steps below are about the stock, and
+they hold whether or not one is still there.
 
 1. Check Inventory for the reservation. If it was released and the event was
    lost, reconcile and move on.
@@ -221,10 +236,23 @@ path can you infer from the code whether Payments has acted. **Check, on
 both.**
 
 **"Published on every path" assumes the saga gets out of `Compensating`,
-and step 2 is where you find out whether it did.** Both exits finalise —
-`StockReleased`, and the ten-minute `ReleaseTimeout` — so an instance still
-live at the hour this alerts on has had neither, which means the cancellation
-has not been sent and will not be until someone intervenes.
+and step 2 is where you find out whether it did.** Both stock settlements —
+`StockReleased`, and the ten-minute `ReleaseTimeout` giving up on it — send
+`CancelOrder`, and on *these two codes* nothing else is holding the instance:
+`payment_authorised_during_compensation` is raised by the branch that answers
+the payment half, and `cancelled_after_confirmation` from `Compensating` is
+reached only through `AwaitingConfirmation`, which the saga enters on a
+`PaymentAuthorised`. So an instance still live at the hour this alerts on has
+had neither settlement, which means the cancellation has not been sent and
+will not be until someone intervenes.
+
+**That inference is narrower than it reads and does not travel to every
+row.** `Compensating` finalises only when the stock half and the payment
+verdict have both settled (#124), so in general a live instance says nothing
+about whether `CancelOrder` went out — on a `stock_not_released` row it has,
+and the instance is being held for the money. These two codes are the case
+where the payment half is discharged by construction, which is why the
+conclusion survives here and has to be argued rather than assumed.
 
 **Deal with the saga before the money, and this page said the opposite.** It
 read "refund by hand and treat the saga as the separate incident it is",
@@ -331,11 +359,13 @@ what to *do*, and the row says it.
    the `Compensating` procedure below.
 
    **A gone instance is not an answer on its own; a live one means fix the
-   saga, not the money.** Both exits finalise, so an instance still live at
-   the hour this alerts on has missed its own ten-minute timeout and no
-   `CancelOrder` is coming without intervention. Waiting there waits for
-   ever — but refunding there races an automatic void that arrives the
-   moment the saga is unstuck, so the fix is the saga.
+   saga, not the money.** On both of these codes the payment half is
+   already answered, so the two stock settlements are the only thing that
+   can end the instance — and one still live at the hour this alerts on has
+   missed the ten-minute release timeout, so no `CancelOrder` is coming
+   without intervention. Waiting there waits for ever — but refunding there
+   races an automatic void that arrives the moment the saga is unstuck, so
+   the fix is the saga.
 
    **And a gone one still has to be checked**, because #128's crash window
    can delete the instance with its `CancelOrder` never sent: look for the
@@ -364,9 +394,18 @@ same event arrives there.
 else.** From `Confirmed` the branch finalises, so the state row is gone by
 design and nothing is stuck. From `Compensating` — a customer cancelling while
 `ConfirmOrder` was in flight, with the confirmation landing afterwards — the
-branch does not finalise, and the instance stays until `StockReleased` or the
-ten-minute `ReleaseTimeout`. Query the saga state table; if an instance is
-there, the "deal with the saga before the money" rule above applies.
+branch does not finalise, and the instance stays until the stock half settles:
+`StockReleased`, or the ten-minute `ReleaseTimeout`. Query the saga state
+table; if an instance is there, the "deal with the saga before the money" rule
+above applies.
+
+**The stock half is the whole of that wait here and is not the whole of it
+everywhere**, which is worth stating because the rest of `Compensating` no
+longer works this way. Since #124 the state also holds for a payment verdict
+it is still owed, and its stock exits finalise only when none is — but the one
+door onto this code is `AwaitingConfirmation`'s cancellation branch, and the
+saga only reaches that state on a `PaymentAuthorised`. The verdict is
+therefore already in before the row can be raised.
 
 **The `Compensating` raising has a second loose end the other does not: a
 `ReleaseStock` has already gone out.** That state was entered on the premise
@@ -426,20 +465,36 @@ Payments answered late rather than a customer changing their mind. The
 `AwaitingConfirmation` door is the only one that can later add a
 `cancelled_after_confirmation` row beside this one.
 
+**An authorisation late enough produces no row at all, and that is this
+code's bound rather than a gap in it.** `Compensating` stops waiting when the
+payment timeout expires — thirty minutes from `AuthorisePayment` on the
+timeout door, fifteen on the cancellation door — and an authorisation arriving
+after the instance has gone correlates to nothing. Since #124 that is not
+silent: `PaymentAuthorised` is the one event the saga faults on a missing
+instance, because Payments produces it and it can therefore never be
+Ordering's own echo, so it lands in the error queue
+[§13.6](../backend-architecture/13-observability.md) pages on and surfaces
+through [`error-queue.md`](error-queue.md) instead of this table. It is the
+same money problem reaching you by the other alert, and the procedure below
+applies with step 2 answered in advance — there is no instance, and there
+will not be one.
+
 **This row is raised mid-wait, which is what lets the instance still exist —
-but the wait is short and the alert is not.** Both
-of `Compensating`'s exits, `StockReleased` and the ten-minute `ReleaseTimeout`,
-land well inside the hour this alerts on, so the ordinary case is a finalised
-saga. An earlier version of this section asserted a live instance in its
-heading and then explained two paragraphs down that there would not be one.
+but the wait is short and the alert is not.** The branch that writes this row
+clears the payment verdict on its way, so the stock half is the only thing
+left holding the instance: `StockReleased` and the ten-minute `ReleaseTimeout`
+both land well inside the hour this alerts on, and the ordinary case is a
+finalised saga. An earlier version of this section asserted a live instance in
+its heading and then explained two paragraphs down that there would not be one.
 **So step 2 is a branch, not an instruction**:
 
 2. **Look for the instance**, by `CorrelationId = OrderId` in the saga state
    table.
    - **Gone** — the ordinary case, but it does **not** by itself prove the
-     stock came back. `Compensating` has two exits and both finalise:
-     `StockReleased`, and the ten-minute `ReleaseTimeout`, which gives up on
-     it and raises a `stock_not_released` row.
+     stock came back. The stock half settles two ways — `StockReleased`, and
+     the ten-minute `ReleaseTimeout`, which gives up on it and raises a
+     `stock_not_released` row — and with the payment verdict already cleared
+     by this row's own branch, either one finalises the instance.
 
      **`StockReleased` is not proof that a reservation was released**, and
      this branch read "the reservation actually released" until
@@ -509,24 +564,41 @@ heading and then explained two paragraphs down that there would not be one.
      this branch's own #128. The pattern is worth the lines it costs: every
      revision reasoned from *what the saga does* and each was falsified by
      *what the saga does when it stops halfway*.
-   - **Still there** — both exits failed, which is its own incident. **Leave
-     the reservation alone**: the machine is waiting on `StockReleased` and
-     will cancel the order when it arrives, and releasing by hand races it.
+   - **Still there** — neither stock settlement happened, which is its own
+     incident. With the payment half already answered by this row's own
+     branch, `StockReleased` and its timeout are the only things left, so
+     both went missing. **Leave the reservation alone**: the machine is
+     waiting on `StockReleased` and will cancel the order when it arrives,
+     and releasing by hand races it.
      **The same is true of the money**, and it is the less obvious half:
      that cancellation publishes the `OrderCancelled` Payments voids off,
      so a manual refund now is one the automatic path will duplicate when
      the instance is unstuck. Fix the saga first.
-3. **A live instance at this age has already missed its own timeout — do not
-   wait for it again.** This row alerts at one hour and `ReleaseTimeout` is
-   ten minutes, so an instance still here means the timeout never arrived,
-   which is a scheduler incident rather than a slow release:
-   [`stuck-saga.md`](stuck-saga.md) is the procedure, and **the saga-age
-   alert will have fired too** — the saga predates this row, so at one hour
-   it is over that alert's threshold as well. Two earlier versions of this
-   step were wrong in opposite directions: the first said the saga-age alert
-   would fire in the ordinary case, and the correction said it would not fire
-   at all. It does not fire for a finalised saga and it does for a live one,
-   which is the only case this step is about.
+3. **A live instance at this age has already missed a timeout — do not
+   wait for it again.** This row alerts at one hour, and every wait
+   `Compensating` can be holding for is far shorter: ten minutes on the
+   stock half, fifteen on a payment verdict. So an instance still here means
+   a timeout never arrived, which is a scheduler incident rather than a slow
+   peer: [`stuck-saga.md`](stuck-saga.md) is the procedure, and **the
+   saga-age alert will have fired too** — the saga predates this row, so at
+   one hour it is over that alert's threshold as well.
+
+   **This step used to reason from `ReleaseTimeout` alone, and that is no
+   longer sufficient anywhere but here.** Since #124 `Compensating` also
+   holds an instance open for an outstanding payment verdict, so in general
+   a live instance past ten minutes is not yet a scheduler fault — it may be
+   the machine correctly waiting on Payments, for up to fifteen minutes more.
+   On *this* row it still is a scheduler fault, because the branch that
+   raised the row answered the payment half, which leaves the release
+   timeout as the only thing that can have gone missing. At one hour the
+   distinction is moot in either direction: both waits have long expired.
+   Read `StockReleaseSettled` and `PaymentVerdictOutstanding` on the state
+   row if you want the answer rather than the argument.
+
+   Two earlier versions of this step were wrong in opposite directions: the
+   first said the saga-age alert would fire in the ordinary case, and the
+   correction said it would not fire at all. It does not fire for a finalised
+   saga and it does for a live one, which is the only case this step is about.
 
 ## Resolving
 
@@ -577,8 +649,8 @@ and the extra ingredient is a race rather than a fault.
 
 **`payment_authorised_during_compensation` follows BOTH rules, and this section
 used to file it with the customer-driven one.** It is raised when an
-authorisation lands while the saga is compensating, and compensation starts
-three ways: a customer cancelling, a declined payment, and a **fifteen-minute
+authorisation lands while the saga is compensating, and compensation starts on
+a customer cancelling, on a declined payment, or on the **fifteen-minute
 payment timeout**. That last one is an upstream fault wearing a customer-shaped
 code — a PSP slower than the timeout that then authorises anyway. So a spike
 here is a Payments latency signal until the orders say otherwise, and the cheap

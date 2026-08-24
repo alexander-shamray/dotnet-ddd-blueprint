@@ -68,6 +68,100 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The state that waits on two services (#124)
+
+**No `PR-NN` heading**, on the terms the entries below set: Appendix C's plan is
+complete, and this is a defect fix against a chapter §9.6 already owns rather
+than a row that was ever in it.
+
+**The interleaving that broke it is the one the design expects, which is why it
+had never been argued.** `Compensating` is reached from `AwaitingPayment` with
+`AuthorisePayment` sent and unanswered, so Inventory and Payments both owe the
+saga an answer and §9.4 orders nothing between them. Both exits finalised on
+the stock half alone. A prompt warehouse and a slow PSP is the ordinary shape
+of that state, not the degenerate one — so on the common ordering the instance
+was deleted and the authorisation still in flight correlated to nothing:
+consumed cleanly, no `payment_authorised_during_compensation` row, nothing on
+§13.6's pager. The escalation §9.6 provides for exactly this case could not
+run, because the thing it needed was the instance.
+
+**The state could not answer the question the exit was asking, and that is the
+general fault rather than a missing branch.** `Compensating` is entered five
+ways and whether a verdict is owed differs by route — nothing from
+`AwaitingStock`, already answered from `AwaitingConfirmation`, and from
+`AwaitingPayment` it depends on whether a decline, a timeout or a cancellation
+brought it there. One state name compresses all five, so the machine had
+discarded the fact before the exit ran.
+[ADR-025](backend-architecture/appendix-a-adrs.md#adr-025--a-saga-state-that-waits-on-two-services-finalises-on-neither-alone)
+records the rule that follows: record the obligation where it is incurred, and
+finalise on the join.
+
+> **A sixth state was the alternative and it is a product, not a state.**
+> `Compensated` — stock settled, still waiting on a verdict — needs a mirror
+> for the case where the verdict lands first, so the honest version is four
+> states enumerating what two booleans and one join express. Worth stating in
+> that direction, because the state machine is the tempting place to put it.
+
+**A timeout ends the wait and not the obligation, and that distinction is the
+whole of the bound.** A PSP that has not answered in fifteen minutes has not
+declined; the authorisation it may still complete is precisely what the review
+row exists for. So `PaymentVerdictOutstanding` survives a timeout, the
+`AwaitingPayment` cancellation branch deliberately stops unscheduling
+`PaymentTimeout` so the wait runs on into `Compensating`, and the timeout door
+re-arms it once. The longest hold is thirty minutes from `AuthorisePayment`,
+inside §13.6's one-hour alert with room to spare. **A join with no bound trades
+a silent loss for a pager**, which is not a trade worth making.
+
+**The bound raises no row, and the reason is that the ordinary case is
+silence.** §3.2 has Payments consuming `OrderCancelled`, so an authorisation
+abandoned on a cancelled order is what should happen. A row on the timeout
+would page someone once per cancelled order the PSP correctly dropped — the
+same failure ADR-024's argument turns on, one state later.
+
+**`Ignore(PaymentDeclined)` had to stop being an `Ignore`, and that is the
+transferable half.** A decline still escalates nothing, because no money moved.
+But it is an *answer*, and ignoring an answer held the instance open until the
+wait expired for a verdict that had already arrived. An `Ignore` is only safe
+for an arrival carrying nothing the machine is waiting for, which is a narrower
+licence than "nothing to do about it".
+
+**`PaymentAuthorised` takes `OnMissingInstance(Fault)` and no other event
+does.** The join keeps the instance for the interleaving that used to delete
+it; the fault answers for the tail past the bound. What makes it safe for this
+event alone is provenance rather than timing: Payments produces it, so unlike
+`OrderCancelled` — Ordering's own echo, arriving at a finalised instance on the
+ordinary path — or `StockReleased`, which ADR-024 has answered for every
+release including a no-op one, it can never be routine. **The reasoning does
+not transfer to #123**, and the attempt is worth recording: `Reason` looked
+like the same kind of discriminator for a cancellation and is not, because
+§11.4's endpoint parses the whole `CancellationReasons` map, so a caller may
+send `payment_declined` and the code carries no origin. That residual is
+already written at the registration and stays there.
+
+**Three of the five new tests were observed red against the unconditional
+`Finalize`, and the fourth was the interesting one.** The decline test passed
+both ways — a decline reaching no instance is discarded, so "no instance, no
+review row" reads identically from either side of the fix. It became a guard
+only after an `Exists` assertion was added between the release and the decline,
+pinning that the instance is alive at the moment the branch under test runs.
+**A negative that the defect also satisfies is not evidence**, and the way to
+tell is to run it against the old behaviour rather than to read it.
+
+**`PaymentTimeout.Received` moved across the structural partition rather than
+being added to it.** It had sat in `Compensating`'s not-reachable list under
+"the transitions that enter this state unschedule it" — true of four doors and
+never of the fifth, which nothing had asked about. The partition is what made
+that visible: a list of what a state accepts would have stayed green, because
+nothing was missing from it.
+
+**Counts pinned to this branch**, in the form the entry below uses: the
+solution runs 896 tests, 708 of them outside `Category=Integration`, and the
+three CI stages are 18, 690 and 188. Reconciled against a local
+`dotnet test Platform.slnx` and owed a check against this branch's own CI run,
+which is the arithmetic this file names for exactly this case.
+
+---
+
 ## The release that answers for the order (#125, #129, #130)
 
 **A specification gap closed three issues, and only one of them was a
@@ -84,8 +178,11 @@ being reachable.
 **The two readings were opposite and both defensible, which is what made it a
 gap rather than a bug.** A release of nothing "succeeding" is as reasonable as
 a release of nothing having nothing to report. What decides it is not
-elegance: `Compensating` has exactly two exits, and the second is a ten-minute
-timeout that raises `stock_not_released` for a human. Under the second reading
+elegance: `Compensating` settles its stock half exactly two ways, and the
+second is a ten-minute timeout that raises `stock_not_released` for a human.
+(That read "`Compensating` has exactly two exits" until #124 made the state a
+join and gave it a conditional `Finalize`; the argument needs the stock half's
+two settlements and never needed the wider claim.) Under the second reading
 `StockReservationFailed` — an event that *proves* no reservation was taken —
 leaves that state through the pager, naming stranded stock that never existed.
 **A contract whose routine path escalates to on-call is the wrong contract**,

@@ -157,9 +157,11 @@ thing between a cancelled confirmed order and a fault:
 > reader's head.
 
 > **Both guarantees exist because the saga's only alternative to an answer is a
-> pager.** [§9.6](09-messaging.md)'s `Compensating` leaves either on
-> `StockReleased` or on a ten-minute timeout that raises a
-> `stock_not_released` review for a human. `StockReservationFailed` reaches
+> pager.** [§9.6](09-messaging.md)'s `Compensating` settles its stock half
+> either on `StockReleased` or on a ten-minute timeout that raises a
+> `stock_not_released` review for a human — the state itself leaves only once
+> the payment half has settled too, which is a different question and does not
+> change what the stock half costs. `StockReservationFailed` reaches
 > that state having proved no reservation was ever taken, so under the other
 > reading the *routine* path escalates, naming stranded stock that does not
 > exist. This is a rule about a service nobody has written, which is exactly

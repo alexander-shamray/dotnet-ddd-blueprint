@@ -70,10 +70,14 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 /// about the order — <b>not</b> that the order is unchanged, and not that it
 /// changed either. An earlier revision of this paragraph claimed the second
 /// for the two cancellation codes and it does not hold for
-/// <c>payment_authorised_during_compensation</c>: when compensation began from a decline or
-/// a payment timeout the saga is in <c>Compensating</c> and has not yet sent
-/// <c>CancelOrder</c> — that goes on the state's exit — so a late
-/// authorisation raises this row while the order is still uncancelled.
+/// <c>payment_authorised_during_compensation</c>: the saga is in
+/// <c>Compensating</c> and <c>CancelOrder</c> goes on that state's stock
+/// exits, so whether the order is cancelled by the time this row is written
+/// depends on whether the stock half has settled yet — and since #124 that
+/// exit no longer ends the instance, so both orderings are reachable.
+/// <b>The row does not say which, and nothing here should be read as
+/// promising one</b>: an earlier revision claimed the order is still
+/// uncancelled, which was true only while a stock answer finalised the saga.
 /// The aggregate's state is simply not what decides where the row lives.
 /// It lands in an operations table either way.
 /// </remarks>

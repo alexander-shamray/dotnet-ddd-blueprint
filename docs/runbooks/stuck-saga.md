@@ -20,10 +20,12 @@ be taken, stock may be reserved, and nothing is moving it forward.
 
 **Why `Confirmed` has its own threshold rather than the hour.** Every other
 state is short: `AwaitingStock` times out in 5 minutes, `AwaitingConfirmation`
-and `Compensating` in 10, and `AwaitingPayment` in 15. `Confirmed` is the wait
-on Shipping, and its timeout is **three days** by design — so an hour-old saga
-there is the healthy path, and the alert excludes it from the hourly branch. A
-despatch that genuinely expires escalates to
+in 10, `AwaitingPayment` in 15, and `Compensating` holds for at most 15 past
+the moment it is entered — its release wait is 10 minutes, and a payment
+verdict it is still owed is bounded by a 15-minute wait of its own. `Confirmed`
+is the wait on Shipping, and its timeout is **three days** by design — so an
+hour-old saga there is the healthy path, and the alert excludes it from the
+hourly branch. A despatch that genuinely expires escalates to
 [`order-review.md`](order-review.md), never here.
 
 **The four-day branch is what catches a lost timeout**, and it exists because
@@ -49,7 +51,9 @@ SELECT
     CurrentState,
     StartedAt,
     AgeMinutes   = DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()),
-    CancelReason
+    CancelReason,
+    PaymentVerdictOutstanding,
+    StockReleaseSettled
 FROM ordering.OrderFulfilmentStates
 WHERE (CurrentState <> 'Confirmed'
         AND DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()) > 60)
@@ -68,13 +72,23 @@ page was the one row it could not show. 5760 minutes is the four days.
 needs no completion predicate — which is also why the alert's condition is
 phrased as an age rather than as a state count.
 
+**The last two columns are the diagnosis for a `Compensating` row and say
+nothing anywhere else.** That state finalises only when both of its halves
+have settled, and `CurrentState` cannot say which one is still open. A row
+with `StockReleaseSettled = 1` has already had its `CancelOrder` sent and is
+holding for Payments; a row with `StockReleaseSettled = 0` has sent nothing
+yet, whatever the verdict flag says. In every other state
+`PaymentVerdictOutstanding` merely records that `AuthorisePayment` went out
+and no answer has come back — true and not a join.
+
 Group by `CurrentState` first — one stuck order is a message; twenty in the same
 state is a dependency.
 
 ## Read the state, then ask what it is waiting for
 
-Each state is waiting on exactly one thing, and each has a timeout that should
-already have fired.
+Every state but one waits on a single answer with a single timeout behind it,
+and that timeout should already have fired. `Compensating` is the exception,
+and the table says so.
 
 | State | Waiting for | Timeout | If the timeout fires |
 |---|---|---|---|
@@ -82,11 +96,36 @@ already have fired.
 | `AwaitingPayment` | `PaymentAuthorised` / `PaymentDeclined` | 15 min | Cancels and releases stock, `payment_timeout` |
 | `AwaitingConfirmation` | `OrderConfirmed` from **Ordering itself** | 10 min | Escalates to `OrderReviews`, `not_confirmed` |
 | `Confirmed` | `ShipmentDispatched` from Shipping | 3 days | Escalates to `OrderReviews`, `not_despatched` |
-| `Compensating` | `StockReleased` from Inventory | 10 min | Escalates to `OrderReviews`, `stock_not_released` |
+| `Compensating` | `StockReleased` from Inventory, **and** a payment verdict from Payments wherever one is still owed | 10 min on the stock half, 15 min on the verdict | Stock: cancels the order and escalates, `stock_not_released`. Verdict: stops waiting, no row |
 
-**A saga older than its state's timeout is a timeout that did not arrive**, and
-that is a different fault from the peer being slow. It is the first thing to
-check, because it has one cause far more often than not.
+**`Compensating` finalises when both halves have settled, not when either
+does.** It is reached from `AwaitingPayment` with `AuthorisePayment` already
+sent, so Inventory and Payments can both owe an answer and
+[§9.4](../backend-architecture/09-messaging.md) orders nothing between them.
+Each stock exit — `StockReleased`, or the release timeout giving up on it —
+sends `CancelOrder` and finalises *only if* no verdict is outstanding; each
+payment arrival — `PaymentAuthorised`, `PaymentDeclined`, or the payment
+timeout — clears the verdict and finalises *only if* the stock half has
+settled. So a `Compensating` row past ten minutes is not by itself a lost
+release.
+
+**Only some doors into the state owe a verdict, which is why the table hedges
+rather than asserting.** A cancellation arriving in `AwaitingPayment` and the
+fifteen-minute payment timeout both enter `Compensating` with Payments still
+unanswered — the timeout deliberately leaves the obligation standing and arms
+the wait once more, because a PSP that has not answered has not declined. A
+decline does not, and neither does anything arriving through
+`AwaitingConfirmation`, because a `PaymentAuthorised` is what got it there.
+
+**A saga older than every timeout its state is waiting on is a timeout that
+did not arrive**, and that is a different fault from the peer being slow. It
+is still the first thing to check, because it has one cause far more often
+than not. For `Compensating` "every timeout" means both of them, and neither
+is measured from the `StartedAt` the query reports — that column is when the
+order was placed. Read `StockReleaseSettled` and `PaymentVerdictOutstanding`
+instead: they answer the same question without the arithmetic. Past the hour
+this alert measures, both waits have long expired either way, so a live
+`Compensating` instance there is a missing timeout whichever half is open.
 
 **`AwaitingConfirmation` is the exception to everything below, because there is
 no peer.** The saga sent `ConfirmOrder` to Ordering's own `ordering-commands`
@@ -141,8 +180,10 @@ a stalled outbox means the saga's own `Send` never left the service, which is
 
 ## Or the peer never answered
 
-If timeouts are working and the saga is younger than its timeout, it is simply
-waiting and there is nothing wrong yet. If it is *older* and the timeout fired
+If timeouts are working and the saga is younger than every timeout its state
+is waiting on, it is simply waiting and there is nothing wrong yet — which for
+a `Compensating` instance holding an outstanding verdict means the payment
+wait as well as the release one. If it is *older* and the timeout fired
 but the state did not change, look for the command that was sent:
 
 ```sql
@@ -205,6 +246,28 @@ and Shipping would be told to despatch an unconfirmed order. Redeliver the
 `ConfirmOrder` instead and let the aggregate publish its own acknowledgement.
 The distinction the table draws is between commands and events; the rule under
 it is that you may replay a message, never invent one.
+
+**`Compensating` is where one event may not be enough**, because it is waiting
+on two halves rather than one. Publishing the `StockReleased` it is missing
+sends the `CancelOrder` and settles the stock half — and if Payments still
+owes a verdict the instance stays, until that verdict arrives or the payment
+wait expires. That is the machine working rather than a second fault. Read
+`PaymentVerdictOutstanding` before publishing anything else, and never invent
+a `PaymentAuthorised` to clear it: that states money moved, and Payments'
+answer is the only thing entitled to say so.
+
+**A `PaymentAuthorised` that finds no instance now FAULTS**, which is the one
+replay on this page whose failure mode is not silence. Every other event the
+machine declares is consumed cleanly when nothing correlates —
+`OrderCancelled` says so explicitly and the rest inherit MassTransit's default;
+`PaymentAuthorised` is answered `OnMissingInstance(m => m.Fault())`, because
+Payments produces it and it therefore can never be Ordering's own echo
+arriving after the workflow ended. It reaches the error queue
+[§13.6](../backend-architecture/13-observability.md) pages on, with the
+message retained. So replaying one against an order whose saga has finalised
+pages someone — and that is the design, not a trap to work around: an
+authorisation with no instance means money moved on an order this saga
+cancelled ([`error-queue.md`](error-queue.md)).
 
 Record every manual action against the `OrderId`. The next person to read this
 order will find a state machine that moved without a message, and the only

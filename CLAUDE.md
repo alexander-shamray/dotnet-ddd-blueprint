@@ -489,7 +489,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 889 tests — so the build rules and the drift rules below
+and `dotnet test` runs 896 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -1013,7 +1013,11 @@ own line rather than sending a reader to a file that does not hold it.
   nothing publish anything — was still open, and answering it deleted the cheap
   one: the no-op release publishes, so the exit has already finalised the
   instance and the branch that would send the second release is one nothing
-  enters. **Two open questions were being weighed independently and one decided
+  enters. (**Still true after #124 made that exit conditional**, and it is
+  worth knowing why rather than re-deriving it: a late `StockReserved` can only
+  reach `Compensating` through the `AwaitingStock` door, which never sent an
+  `AuthorisePayment`, so no verdict is ever outstanding on the one path this
+  argument is about.) **Two open questions were being weighed independently and one decided
   the other.** Before ranking options by cost, ask whether each can still run
   once its neighbours are settled.
 - **Where two mechanisms answer one question and only one of them is editable,
@@ -1037,7 +1041,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 701 of 889, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 708 of 896, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1149,8 +1153,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 701 of
-the 889 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 708 of
+the 896 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 188, needing the daemon exactly as
 before.
 
@@ -1162,7 +1166,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (683) and integration (188), which is the 701 above split at the
+(18), unit (690) and integration (188), which is the 708 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1953,7 +1957,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-025) and keep the
+  (currently ADR-026) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to
