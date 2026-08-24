@@ -33,7 +33,10 @@ namespace Ordering.Infrastructure.Projections;
 /// catalogue, which does not exist yet. Until it does, every product published
 /// before <c>ordering-catalog-events</c> was first declared is absent, because
 /// the broker drops what no queue is bound for, and each is an order refused
-/// with no fault anywhere. §6.6 also records the constraint that republish has
+/// with no fault anywhere — until a <c>PriceChanged</c> for that product
+/// arrives, which runs this same upsert and inserts on the same branch. That
+/// is a door rather than a repair: it carries a price and no name, so the
+/// republish is still what is owed. §6.6 also records the constraint that it has
 /// to meet: it must carry each product's original <c>OccurredAt</c>, since a
 /// fresh one sails past the withdrawal watermark below and re-lists everything
 /// Catalog ever discontinued.

@@ -28,6 +28,10 @@ it before anything else.
   `ordering.ProductPrices` is the worked case — it is written by
   `ProductPriceProjection` from Catalog's integration events, which arrive over
   the broker at `ordering-catalog-events` and **never touch this lane**.
+  `ordering.Products` is the second, written by `OrderSummaryProjection` from
+  the same endpoint, and it is the one a customer notices: a summary resolves
+  its product names from that table, so a stale or unfilled row shows an order
+  with fewer products than it has rather than with the wrong ones.
   [§13.7](../backend-architecture/13-observability.md) records that their
   staleness has no direct signal yet, and that gap is real: if prices are stale,
   this alert will not fire and neither will anything else.

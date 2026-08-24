@@ -1135,16 +1135,19 @@ database at all. Joining across services is impossible; calling Catalog per row
 is an N+1 over the network.
 
 The upgrade adds denormalised tables inside Ordering's own database, kept
-current by projections. Two of them, serving different paths:
+current by projections. Three of them serve a read path — a fourth,
+`ordering.ProductWithdrawals`, is a watermark the upsert below consults and
+nothing reads:
 
 | Table | Fed by | Read by |
 |---|---|---|
-| `ordering.OrderSummaries` | Ordering's five lifecycle events on the local lane — `OrderPlacedDomainEvent`, `OrderStockConfirmedDomainEvent`, `OrderConfirmedDomainEvent`, `OrderShippedDomainEvent`, `OrderCancelledDomainEvent` — plus Catalog's `ProductPublished` from the broker | The escalated history query, below — **not** §6.5's, which stays at level 1 |
+| `ordering.OrderSummaries` | Ordering's five lifecycle events on the local lane — `OrderPlacedDomainEvent`, `OrderStockConfirmedDomainEvent`, `OrderConfirmedDomainEvent`, `OrderShippedDomainEvent`, `OrderCancelledDomainEvent` | The escalated history query, below — **not** §6.5's, which stays at level 1 |
+| `ordering.Products` | Catalog's `ProductPublished` from the broker | The same query, to resolve the ids a summary stores |
 | `ordering.ProductPrices` | Catalog's `PriceChanged`, `ProductPublished`, `ProductDiscontinued` | `IProductPriceReader`, on the **write** path (§6.4) |
 
-The second is the more consequential. A read model that only backs a screen can
-be stale with mild consequences; one that backs a command handler is what keeps
-that handler from making a network call inside a transaction.
+`ordering.ProductPrices` is the consequential one. A read model that only backs
+a screen can be stale with mild consequences; one that backs a command handler
+is what keeps that handler from making a network call inside a transaction.
 
 ```mermaid
 graph LR
@@ -1156,8 +1159,10 @@ graph LR
         PUB --> PP[ProductPriceProjection]
         CAT_EV[[PriceChanged<br/>ProductDiscontinued]] --> PP
         PROJ --> RDB[(OrderSummaries)]
+        PROJ --> PRD[(Products)]
         PP --> PDB[(ProductPrices)]
         RDB --> QRY[Query handlers]
+        PRD --> QRY
         PDB --> CMD
     end
 ```
@@ -1167,7 +1172,8 @@ side. It is the only read model in this design that a write path depends on,
 which is why the next section treats its staleness as a business question
 rather than a display one.
 
-The read table carries denormalised copies of the fields it needs:
+The summary table carries the order's own facts, and an id per line for the
+facts that are Catalog's:
 
 ```sql
 -- Only the three columns every event carries are NOT NULL. The rest arrive
@@ -1179,23 +1185,20 @@ CREATE TABLE ordering.OrderSummaries
     OrderId           UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
     Status            VARCHAR(32)      NOT NULL,
     -- The watermark for Ordering's OWN lifecycle events, and nothing else.
-    -- Catalog's stream gets ProductsUpdatedAt below; the callout after the
-    -- projection says why one column cannot version both.
+    -- Catalog's stream does not touch this table; ordering.Products carries a
+    -- watermark per product, which is what the callout after the projection
+    -- says a second column here could never be.
     UpdatedAt         DATETIMEOFFSET   NOT NULL,
 
     CustomerId        UNIQUEIDENTIFIER NULL,
     TotalAmount       DECIMAL(19,4)    NULL,
     Currency          CHAR(3)          NULL,
     LineCount         INT              NULL,
-    -- One JSON array of {id, name, thumb}, not three parallel arrays: the
-    -- ProductPublished handler has to find the element for a given product id
-    -- and update it in place, which needs the id alongside the copied fields.
+    -- A JSON array of product ids, in the order the lines were placed, and
+    -- nothing else. The name and the image are Catalog's facts about a
+    -- PRODUCT rather than about this order, so they live once in
+    -- ordering.Products and are resolved on read.
     Products          NVARCHAR(MAX)    NULL,
-    -- The watermark for the column above: Catalog's ProductPublished stream,
-    -- stamped from Catalog's clock rather than Ordering's. NULL means no
-    -- rename has ever been applied, which is not the epoch — the guard tests
-    -- for it rather than defaulting it.
-    ProductsUpdatedAt DATETIMEOFFSET   NULL,
     PlacedAt          DATETIMEOFFSET   NULL,
 
     -- Set when the order reaches those states. ConfirmedAt is what makes
@@ -1216,6 +1219,26 @@ CREATE TABLE ordering.OrderSummaries
 CREATE INDEX IX_OrderSummaries_Customer_PlacedAt
     ON ordering.OrderSummaries (CustomerId, PlacedAt DESC)
     INCLUDE (Status, TotalAmount, Currency, LineCount);
+```
+
+The names and images that query needs are Catalog's, and they are facts about a
+product rather than about an order — so they get a table keyed the way the fact
+is keyed, on the same precedent as `ProductWithdrawals` below:
+
+```sql
+CREATE TABLE ordering.Products
+(
+    ProductId    UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    Name         NVARCHAR(200)    NOT NULL,
+    -- Nullable because ProductPublished.ThumbnailUrl is: a product may
+    -- genuinely have no image, and NOT NULL here would be a promise Catalog
+    -- never made.
+    ThumbnailUrl NVARCHAR(400)    NULL,
+    -- Catalog's clock, not Ordering's — and one row per product, so this
+    -- versions exactly one sequence. That is the property no column on
+    -- OrderSummaries could have had.
+    UpdatedAt    DATETIMEOFFSET   NOT NULL
+);
 ```
 
 The price table is smaller and hotter — it is read on every `PlaceOrder`:
@@ -1456,23 +1479,39 @@ product produces the same `ProductsUnavailable` failure as one that was never
 published — which is what the customer experiences either way.
 
 > **A projection with no publisher is worse than a remote call.** If Catalog has
-> never emitted `ProductPublished` for a product, this table has no row for it
-> and every order containing it fails — silently, with a 422
-> `order.products_unavailable` and no error in any log. Silently is the word
-> that matters: a rule rejection is a *correct* answer from a service with no
-> prices, so nothing about it looks like a fault. Two mitigations, both worth having: Catalog
-> republishes its full catalogue on demand (an operational task, not a code
-> path), and the [§13.6](13-observability.md) alert on business volume catches the case where orders
-> stop for a reason no technical metric shows.
+> never emitted `ProductPublished` for a product — nor a `PriceChanged` that
+> would insert the row without one, which the callout below is about — this
+> table has no row for it and every order containing it fails, silently, with a
+> 422 `order.products_unavailable` and no error in any log. Silently is the
+> word that matters: a rule rejection is a *correct* answer from a service with
+> no prices, so nothing about it looks like a fault. Two mitigations, both
+> worth having: Catalog republishes its full catalogue on demand (an
+> operational task, not a code path), and the
+> [§13.6](13-observability.md) alert on business volume catches the case where
+> orders stop for a reason no technical metric shows.
 
 > **This projection's rebuild procedure is Catalog's republish, and it does not
-> exist yet.** The trap at the end of this chapter says to keep a rebuild
-> script in source control from day one, and Ordering cannot hold one: it has
-> no source of truth for prices to rebuild *from*. Everything published before
-> `ordering-catalog-events` was first declared is simply absent — the broker
-> drops what no queue is bound for — so a product Catalog listed last year is
-> unorderable until somebody republishes it. That is the same silence the
-> callout above describes, with a cause nobody can see from Ordering.
+> exist yet — for `ordering.Products` exactly as for `ordering.ProductPrices`.**
+> The trap at the end of this chapter says to keep a rebuild script in source
+> control from day one, and Ordering cannot hold one: it has no source of truth
+> for either a price or a name to rebuild *from*. Both tables guard on
+> `OccurredAt`, so the constraint below binds both of them equally.
+>
+> Everything published before `ordering-catalog-events` was first declared is
+> simply absent — the broker drops what no queue is bound for — so a product
+> Catalog listed last year is unorderable until Catalog speaks about it again.
+> That is the same silence the callout above describes, with a cause nobody can
+> see from Ordering.
+>
+> **A republish is not the only thing that ends it, and this callout used to
+> say it was.** `PriceChanged` runs the same upsert and inserts on the same
+> `NOT MATCHED` branch, so an ordinary price change lists that product with no
+> rebuild having happened — carrying a price and nothing else, because
+> `PriceChanged` has no `Name` or `ThumbnailUrl` to carry. That is a door
+> rather than a repair, and [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally) turns on
+> it: an order placed through it is exactly the order whose name a patch
+> handler could never fill. A product whose price never changes stays absent
+> indefinitely, which is why the republish is still the procedure that is owed.
 >
 > **The republish must carry each product's original `OccurredAt`, and this is
 > the part that is easy to get wrong.** A loop that re-emits `ProductPublished`
@@ -1553,17 +1592,15 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
                 Total = e.Total.Amount,
                 Currency = e.Total.Currency,
                 LineCount = e.Lines.Count,
-                // Ids are known now; name and thumbnail arrive with
-                // ProductPublished and are patched in below.
+                // Ids, and only ids. What the screen shows beside each one
+                // is Catalog's fact about the product, resolved on read from
+                // ordering.Products — so nothing here is left blank for a
+                // later event to fill, which is what this line used to do.
                 //
-                // SummaryProduct, not an anonymous type. The read side declares
-                // that record (below) and deserialises this column into it, so
-                // an anonymous type here is a SECOND declaration of one shape
-                // with nothing holding the two together — and the way they came
-                // apart was member casing, which binds silently rather than
-                // loudly. The callout beside the record says what that costs.
-                Products = JsonSerializer.Serialize(
-                    e.Lines.Select(l => new SummaryProduct(l.ProductId.Value, "", ""))),
+                // A bare Guid array rather than a record: with no member names
+                // on the wire there is nothing for the two sides to disagree
+                // about, which is what the callout below used to be for.
+                Products = JsonSerializer.Serialize(e.Lines.Select(l => l.ProductId.Value)),
                 PlacedAt = e.OccurredAt,
                 UpdatedAt = e.OccurredAt
             });
@@ -1715,99 +1752,82 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
 
     public async Task HandleAsync(ProductPublished e, CancellationToken ct)
     {
-        // Patch the element for this product in place, in every summary that
-        // contains it. OPENJSON gives the array index; JSON_MODIFY needs it.
-        // The guard keeps a stale republish from overwriting a newer name, as
-        // everywhere else in §6.6 — but against ProductsUpdatedAt, which is
-        // this stream's own watermark. UpdatedAt belongs to the lifecycle
-        // events and is neither read nor written here; the callout below says
-        // what sharing it cost.
+        // One row per product, guarded by that product's own watermark. There
+        // is no summary to scan and no array element to find: a rename lands
+        // once here, and every order that ever referenced the product shows it
+        // on the next read.
         using IDbConnection connection = connections.Create();
         await connection.ExecuteAsync(
             """
-            UPDATE s
-            SET
-                s.Products          = JSON_MODIFY(
-                    JSON_MODIFY(
-                        s.Products,
-                        '$[' + CAST(j.[key] AS varchar(10)) + '].name',
-                        @Name),
-                    '$[' + CAST(j.[key] AS varchar(10)) + '].thumb',
-                    @Thumbnail),
-                s.ProductsUpdatedAt = @OccurredAt
-            FROM ordering.OrderSummaries s
-            CROSS APPLY OPENJSON(s.Products) j
-            WHERE JSON_VALUE(j.value, '$.id') = @ProductId
-                AND (s.ProductsUpdatedAt IS NULL
-                    OR s.ProductsUpdatedAt < @OccurredAt);
+            MERGE ordering.Products WITH (HOLDLOCK) AS target
+            USING (SELECT ProductId = @ProductId) AS source
+                ON target.ProductId = source.ProductId
+            WHEN NOT MATCHED THEN
+                INSERT (ProductId, Name, ThumbnailUrl, UpdatedAt)
+                VALUES (@ProductId, @Name, @Thumbnail, @OccurredAt)
+            -- The insert branch is what lets this handler arrive before any
+            -- order references the product, which in the ordinary flow it
+            -- always does: PlaceOrder reads ordering.ProductPrices, and the
+            -- same event fills that too. HOLDLOCK for the same reason the two
+            -- upserts above carry it: this branch makes concurrent deliveries
+            -- for one key able to both insert, and the endpoint's retry would
+            -- absorb the resulting violation rather than surface it.
+            WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
+                UPDATE SET Name = @Name, ThumbnailUrl = @Thumbnail, UpdatedAt = @OccurredAt;
             """,
             new { ProductId = e.ProductId, Name = e.Name, Thumbnail = e.ThumbnailUrl, e.OccurredAt });
     }
 }
 ```
 
-> **Two streams, two watermarks — one column cannot version both.**
-> `UpdatedAt` is a position in Ordering's own lifecycle sequence, stamped by
-> the five domain events above from Ordering's clock. `ProductPublished` is
-> Catalog's, stamped from Catalog's, and holds no position in that sequence at
-> all. Advancing one column from both loses data in both directions, and needs
-> no fault to do it — clock skew between two services is sufficient. A rename
-> stamped ahead of Ordering's clock pushes `UpdatedAt` into the future; the
-> next `OrderConfirmed` then fails `target.UpdatedAt < @OccurredAt`, changes
+> **A watermark belongs to a sequence, not to a row, and that is what the
+> table split is really for.** `UpdatedAt` on `OrderSummaries` is a position in
+> Ordering's own lifecycle sequence, stamped by the five domain events above
+> from Ordering's clock. `ProductPublished` is Catalog's, stamped from
+> Catalog's, and holds no position in that sequence at all. Advancing one
+> column from both loses data in both directions, and needs no fault to do it —
+> clock skew between two services is sufficient. A rename stamped ahead of
+> Ordering's clock would push `UpdatedAt` into the future; the next
+> `OrderConfirmed` then fails `target.UpdatedAt < @OccurredAt`, changes
 > nothing, and is marked processed. The order reads `AwaitingStock` for ever,
 > which is the outcome `SetStatusAsync`'s own comment says its `MERGE` exists
 > to prevent, and `ConfirmedAt` is never written either — so the fulfilment
 > claim never fires and `orders.fulfilment.duration` under-reports in silence.
-> The other direction drops the rename instead.
 >
-> **A watermark belongs to a sequence, not to a row.** The copied-fields stream
-> therefore gets a column of its own, and the two sets of statements do not
-> overlap: the lifecycle `MERGE`s never mention `ProductsUpdatedAt`, and this
-> `UPDATE` never mentions `UpdatedAt`.
->
-> **It is still one watermark for as many sequences as the order has products,
-> and that residual is named rather than closed.** Every product is its own
-> `ProductPublished` stream: a rename of product A at a later `OccurredAt` than
-> one of product B still discards B's, and B keeps the stale name until Catalog
-> republishes it. Closing it means moving the watermark into the array
-> element — a fourth JSON member the reader skips as unmapped, compared after
-> a `CAST` inside the `OPENJSON` predicate — which buys a stale display name
-> at the price of a per-element conversion in the most expensive handler in
-> this chapter. The lifecycle direction is the one that loses a *status*, and
-> that is the direction a column is spent on.
+> **An earlier revision bought that separation with a second column on the
+> summary, and a second column was one watermark for as many sequences as the
+> order had products.** Every product is its own `ProductPublished` stream: a
+> rename of product A at a later `OccurredAt` than one of product B discarded
+> B's, and B kept the stale name until Catalog republished it. That residual
+> was named rather than closed, and closing it inside the array meant a fourth
+> JSON member compared after a `CAST` in an `OPENJSON` predicate. Keying the
+> table the way the fact is keyed retires it instead: `ordering.Products`
+> holds one row and one `UpdatedAt` per product, so each stream has a watermark
+> of its own by construction and there is no array element to compare.
 
-> **This patch can never fill a name on a new order, and that is a defect in
-> the design rather than in the statement — see
-> [#121](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/121).**
-> The writer inserts `name` and `thumb` empty and leaves them for "a later
-> `ProductPublished`"; no later one comes. A product must be published before
-> it can be ordered — `PlaceOrder` reads `ordering.ProductPrices`, which
-> `ProductPublished` fills — so that event is always consumed *before* the
-> summary row exists, and the statement below only touches summaries that
-> already contain the product. **In the normal flow every summary carries empty
-> names**, which is the payload this section exists to deliver.
->
-> The same shape makes the per-product staleness worse than it reads: with
-> names never filled at insert, a discarded out-of-order `ProductPublished` is
-> not a missed rename but a name that is never set at all.
->
-> **Ordering already receives what it needs and discards it.**
-> `ProductPublished` carries `Name` and `ThumbnailUrl`, and
-> `ProductPriceProjection` keeps neither. The fix wants no new contract and no
-> new subscription — a product-level table, on `ProductWithdrawals`' own
-> precedent — and #121 carries the shape, including the question of whether the
-> JSON copy should exist at all once the name is local.
->
-> **Read the rest of this slice as the mechanism it demonstrates, not as a
-> design to copy**, until that is settled.
+> **Decision — the summary stores product ids and resolves the name locally.**
+> See [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally).
 
-> **This handler is the expensive one, and the reason to think twice before
-> denormalising a name.** `OrderPlacedDomainEvent` writes one row; a single
-> `ProductPublished` scans every summary that ever contained that product.
-> Joining at read time is not an option — the products live in Catalog — so
-> denormalisation moved the cost from every read to every rename. That is the
-> right trade only while renames are rare, and this is the first thing that
-> breaks if they stop being.
+> **The shape this replaced could never fill a name, and the reason is worth
+> keeping.** An earlier revision inserted `name` and `thumb` as empty strings
+> and left them for "a later `ProductPublished`" to patch in. No later one
+> comes: a product must be published before it can be ordered — `PlaceOrder`
+> reads `ordering.ProductPrices`, which the same event fills — so it is always
+> consumed *before* the summary row exists, and a patch scoped to summaries
+> that already contain the product touches nothing. **In the normal flow every
+> summary carried empty names**, which is the payload this section exists to
+> deliver.
+>
+> The handler was also the expensive one: `OrderPlacedDomainEvent` writes one
+> row, and a single `ProductPublished` scanned every summary that had ever
+> contained that product. It was justified on the grounds that "joining at read
+> time is not an option — the products live in Catalog", and **that sentence is
+> the defect rather than the statement below it**. The products do not live in
+> Catalog once Ordering projects them; a primary-key lookup against a table in
+> the same database is not the cross-service join the argument was about.
+> Denormalising a name is a trade worth making once, and it was being paid for
+> twice — into `ProductPrices` on the write path, and again into every order's
+> JSON on the read path.
 
 Three details that are easy to miss and expensive to discover later:
 
@@ -1819,18 +1839,20 @@ Three details that are easy to miss and expensive to discover later:
   redelivered `AwaitingPayment` overwrites a `Confirmed` that already followed
   it — and because all five lifecycle events now feed this table (above), that
   is a sequence the projection genuinely sees rather than a hypothetical.
-  Catalog's `ProductPublished` is a different sequence and is guarded by
-  `ProductsUpdatedAt`; the callout above is why that is two columns and not
-  one.
+  Catalog's `ProductPublished` is a different sequence, does not touch this
+  table at all, and is guarded by its own row's watermark in
+  `ordering.Products`; the callout above is why that is a second table and not
+  a second column.
 - **Every lifecycle statement here inserts when the row is absent.** Redelivery
   and reordering are different problems, and the `UpdatedAt` guard only solves
   the first. An event that arrives *early* matches nothing, and an `UPDATE`
   would discard it in silence — no error, no retry, and a summary frozen at
   whatever state it reached. The `WHEN NOT MATCHED` branch is what lets §9.4
-  keep saying ordering is not required. The `ProductPublished` handler is the
-  one statement that cannot take that branch and does not need it: it patches
-  whatever summaries exist, and an order placed after a rename carries the id
-  with no name until Catalog publishes that product again.
+  keep saying ordering is not required. The `ProductPublished` handler takes
+  that branch for a different reason: its `MERGE` is keyed on the product
+  rather than on an order, so an event arriving before anything references
+  that product still writes the row — and the first order to reference it
+  reads a name that is already there.
 
 ### Counting is a claim, not a call
 
@@ -1893,6 +1915,13 @@ namespace Ordering.Application.Orders.GetOrderSummaries;
 
 // The fields §6.6 exists for. Level 1 could not return these at any price:
 // the names and images live in Catalog.
+//
+// LineCount is the order's, Products is what could be named. They can differ:
+// a product Catalog has not published yet resolves to nothing and drops out of
+// the list, where the count is written once from the order and never moves.
+// LineCount is the one to trust for "how many lines"; Products answers "which
+// of them can be shown", and a client rendering the second against the first
+// is what makes the gap visible rather than silent.
 public sealed record OrderSummaryDto(
     Guid OrderId,
     string Status,
@@ -1902,32 +1931,28 @@ public sealed record OrderSummaryDto(
     DateTimeOffset PlacedAt,
     IReadOnlyList<SummaryProduct> Products);
 
-// One type for two jobs: the DTO member above, and the element the projection
-// serialises into the Products column (§6.6, above). The JSON names are PINNED
-// rather than inherited from these members, because a third place spells them
-// — the JSON_MODIFY paths in the ProductPublished handler, which are string
-// literals no compiler reads. An attribute is what ties the wire name to the
-// SQL path; a rename here then costs nothing, where without one it would leave
-// the patch writing a member nobody deserialises.
+// The element of the DTO above, and nothing else now — the column holds bare
+// ids and this record is composed on read from ordering.Products. It used to
+// do two jobs, with its JSON names PINNED by attribute because a third place
+// spelled them: the JSON_MODIFY paths in the patch handler, which are string
+// literals no compiler reads. There is no third place any more, and no member
+// name on the wire at all, so the pinning left with the handler that needed
+// it — Dapper binds these members from the aliases NamesSql spells instead.
 //
-// Thumb is NULLABLE and Name is not, which is not an oversight in either
-// direction. ProductPublished.ThumbnailUrl is `string?` — a product may
-// genuinely have no image — and SQL Server's JSON_MODIFY in lax mode DELETES
-// the key when the value is null rather than writing a JSON null. So the patch
-// leaves `thumb` absent, and an absent member deserialises to null however the
-// property is declared. A non-nullable `string` there is a promise the storage
-// layer breaks silently.
-public sealed record SummaryProduct(
-    [property: JsonPropertyName("id")] Guid Id,
-    [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("thumb")] string? Thumb);
+// Thumb is NULLABLE and Name is not, and that is Catalog's shape rather than
+// storage's: ProductPublished.ThumbnailUrl is `string?`, because a product may
+// genuinely have no image. ordering.Products declares the two columns the same
+// way one level down, so the nullability is stated once and inherited — where
+// before it was a property of how a JSON key happened to be written.
+public sealed record SummaryProduct(Guid Id, string Name, string? Thumb);
 
 public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, ICurrentUser currentUser)
     : IQueryHandler<GetOrderSummariesQuery, CursorPage<OrderSummaryDto>>
 {
-    // One table, no joins, no aggregation — the projection did that work once
-    // at write time. Compare the level-1 query in §6.5, which groups over
-    // OrderLines on every read.
+    // One table and no aggregation — the projection did that work once at
+    // write time. Compare the level-1 query in §6.5, which groups over
+    // OrderLines on every read. The names are a second statement below,
+    // keyed and bounded; they are not a join across this one.
     private const string Sql =
         """
         SELECT TOP (@Take) OrderId, Status, Total = TotalAmount, Currency, LineCount, PlacedAt, Products
@@ -1941,6 +1966,19 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
                 OR PlacedAt < @AfterPlacedAt
                 OR (PlacedAt = @AfterPlacedAt AND OrderId < @AfterId))
         ORDER BY PlacedAt DESC, OrderId DESC;
+        """;
+
+    // One statement for the whole page rather than one per row: the ids are
+    // already in hand, the page is clamped (§6.5), and Dapper expands an array
+    // into an IN list. A product Catalog has not published yet resolves to
+    // nothing and drops out of the row — this section shows a name or shows no
+    // product, where it used to show an empty string for every product on
+    // every order.
+    private const string NamesSql =
+        """
+        SELECT Id = ProductId, Name, Thumb = ThumbnailUrl
+        FROM ordering.Products
+        WHERE ProductId IN @ProductIds;
         """;
 
     public async Task<CursorPage<OrderSummaryDto>> HandleAsync(GetOrderSummariesQuery query, CancellationToken ct)
@@ -1964,18 +2002,31 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
                 cancellationToken: ct))).AsList();
 
         bool hasMore = rows.Count > limit;
+        List<SummaryRow> page = hasMore ? rows.GetRange(0, limit) : rows;
+
+        // Deserialised once and kept. The ids are needed twice — to fetch the
+        // names, and to order each row's products — and a second Deserialize
+        // call is a second chance for the two readings to disagree.
+        Guid[][] lineProducts = [.. page.Select(r => JsonSerializer.Deserialize<Guid[]>(r.Products)!)];
+        Guid[] productIds = [.. lineProducts.SelectMany(ids => ids).Distinct()];
+
+        IReadOnlyDictionary<Guid, SummaryProduct> named = (await connection.QueryAsync<SummaryProduct>(
+            new CommandDefinition(
+                NamesSql,
+                new { ProductIds = productIds },
+                cancellationToken: ct))).ToDictionary(p => p.Id);
+
         OrderSummaryDto[] items =
         [
-            .. (hasMore ? rows.GetRange(0, limit) : rows)
-                .Select(r =>
-                    new OrderSummaryDto(
-                        r.OrderId,
-                        r.Status,
-                        r.Total,
-                        r.Currency,
-                        r.LineCount,
-                        r.PlacedAt,
-                        JsonSerializer.Deserialize<SummaryProduct[]>(r.Products)!))
+            .. page.Select((r, i) =>
+                new OrderSummaryDto(
+                    r.OrderId,
+                    r.Status,
+                    r.Total,
+                    r.Currency,
+                    r.LineCount,
+                    r.PlacedAt,
+                    [.. lineProducts[i].Where(named.ContainsKey).Select(id => named[id])]))
         ];
 
         string? next = hasMore && items.Length > 0
@@ -1987,26 +2038,26 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
 }
 ```
 
-> **Both sides call the no-options overload, and that is only safe because the
-> names are pinned.** The parameterless `JsonSerializer` overloads use
+> **The column holds a `Guid` array, which is the cheapest way to be certain
+> both sides agree.** The parameterless `JsonSerializer` overloads use
 > `JsonSerializerOptions.Default`, where `PropertyNameCaseInsensitive` is
 > **`false`** — the web defaults that would set it true are not in play on a
-> database column. So a `{"id": …}` written by the projection does not bind to
-> a constructor parameter called `Id`, and the failure is the quiet kind:
-> `System.Text.Json` builds the record through its parameterised constructor,
-> leaves every unmatched parameter at its default, and returns an array of
-> `Guid.Empty` with null names. No exception, no log line, and the `!` above
-> suppresses the only warning within reach of it — the whole payload §6.6
-> exists to deliver, empty, with everything green.
+> database column. While this column held `{"id": …, "name": …}` that made a
+> member rename on the reading record a silent data loss: a `{"id": …}` written
+> by the projection does not bind to a constructor parameter called `Id`, and
+> the failure is the quiet kind. `System.Text.Json` builds the record through
+> its parameterised constructor, leaves every unmatched parameter at its
+> default, and returns an array of `Guid.Empty` with null names — no exception,
+> no log line, and the `!` above suppresses the only warning within reach of
+> it. An array of `Guid` has no member name to mismatch, so the hazard is
+> removed rather than guarded.
 >
 > **[§9.4](09-messaging.md)'s rule that both sides must agree is not satisfied
-> by both sides looking similar.** An anonymous `{ id, name, thumb }` and a
-> `record (Guid Id, string Name, string Thumb)` are as similar as two
-> declarations get and they do not agree, which is the argument for there being
-> one declaration rather than two that a reader has to compare. `OutboxJson`
-> states these same settings explicitly rather than inheriting them, for the
-> same reason, and carries the sentence worth repeating here: a payload that
-> only round-trips because matching is lenient is a payload that will not
+> by both sides looking similar**, and the surest way to stop having to check
+> is to leave the wire nothing to disagree about. `OutboxJson` reaches the same
+> place from the other end — it states these settings explicitly rather than
+> inheriting them — and carries the sentence worth repeating here: a payload
+> that only round-trips because matching is lenient is a payload that will not
 > survive a rename.
 
 The index from the DDL above — `(CustomerId, PlacedAt DESC)` including the
@@ -2016,9 +2067,15 @@ deliberately, so each row costs a lookup. That is the right trade at a page of
 twenty and the wrong one at a page of a thousand, which is another reason the
 `limit` is clamped (§6.5).
 
-The benefit being bought is visible in the shape of the query: one table, no
-join, no `GROUP BY`, and a page size that bounds the work. Level 1 aggregates
-`OrderLines` on every read and still cannot return a product name at any price.
+The second statement is bounded by the same clamp. It is **one** round trip for
+the page rather than one per row, and it seeks a primary key — so what it adds
+is a key lookup per distinct product on a page of at most a hundred, against a
+patch handler that used to scan every summary in the table on every rename.
+
+The benefit being bought is visible in the shape of both: no `GROUP BY`, no
+cross-service call, and a page size that bounds each of them. Level 1
+aggregates `OrderLines` on every read and still cannot return a product name at
+any price.
 
 The API must now expose the staleness rather than hide it — for example, by
 returning the write-model status on the order detail endpoint (strongly
