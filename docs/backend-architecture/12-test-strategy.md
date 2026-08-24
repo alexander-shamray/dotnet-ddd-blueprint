@@ -1144,28 +1144,45 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 
 ### The order summary's two names
 
-§6.6's projection is the worked case for a test whose subject is a *defect that
-was shipped*, and it earns a named pair here because the design it replaced
+§6.6's projection is the worked case for a pair of tests whose subjects are two
+*different* counterfactuals, and it is here because the design it replaced
 looked correct and could not deliver its payload
 ([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
-Two cases, and the second is the one nobody writes unprompted:
 
 | | |
 |---|---|
-| **The ordinary flow** | Publish a product, place an order naming it, read the history. The resolved name is Catalog's, not an empty string. This is the case the old design failed on *every* order, which is what makes its absence from a suite worth a rule rather than a habit |
+| **The ordinary flow** | Publish a product, place an order naming it, read the history. The resolved name is Catalog's, not an empty string |
 | **The late arrival** | Let the product reach `ordering.ProductPrices` through `PriceChanged` alone, place an order, then deliver `ProductPublished`. The name appears on a summary written before it — retroactively, with no rebuild |
 
-**The second is the whole argument for the redesign, and a suite holding only
-the first passes against a patch handler.** Filling the name at insert time
-satisfies the ordinary flow completely; only an order that already exists when
-the name arrives can tell the two designs apart. That is the same shape as
-§12.4's rule about negatives: a case both the defect and the fix satisfy is not
-evidence about which one is present.
+**Neither case subsumes the other, and working out which design each one
+refutes is what shows why both are owed.** Three designs are in play: the
+shipped one (empty strings, patched by a later `ProductPublished`), the
+tempting repair (read the names at insert time), and this one (store ids,
+resolve on read).
 
-These live at §12.4's level rather than §12.3's — the projection writes through
-Dapper against a real schema, and an in-memory double would assert on the
-double. Neither belongs in the API suite: they are about what the projection
-stores and resolves, not about what an endpoint returns.
+| | Ordinary flow | Late arrival |
+|---|---|---|
+| Empty strings, patched later | **fails** — the patch ran when the product was published, before this order existed, and it only touches summaries that already contain the product | *passes* — an order that already exists is precisely what that patch was built for |
+| Names read at insert time | passes | **fails** — the price row arrived without a name, and nothing revisits the summary once one exists |
+| Ids resolved on read | passes | passes |
+
+So the ordinary flow is what catches the design that shipped, and the late
+arrival is what catches the cheaper repair that would otherwise look
+equivalent. A suite carrying only one of them leaves a whole design
+indistinguishable from this one — which is §12.4's rule about negatives applied
+to a design rather than to an assertion: a case that two candidates both
+satisfy is not evidence about which is present.
+
+**Both are §12.4-level tests and both belong in `Ordering.Api.Tests`, which is
+not a contradiction.** The level is about what they touch — the projection
+writes through Dapper against a real schema, so an in-memory double would
+assert on the double — and the project is about where the fixture lives.
+`Ordering.Application.Tests` deliberately carries no `Ordering.TestSupport`
+reference and says so in its csproj, so Ordering's real-schema tests are homed
+one project over; `ProductPriceProjectionTests` is already there for exactly
+this reason. Read the pyramid's levels as a statement about what a test
+exercises, never as a mapping onto assembly names.
+
 
 ### API contract tests
 
