@@ -111,10 +111,14 @@ public class OrderFulfilmentSagaTests
     }
 
     /// <summary>
-    /// Publishes, and does not return until the saga has consumed <em>that</em>
-    /// message. The wait is the point: without it two consecutive publishes are
-    /// a race, and losing it fails a later assertion wearing the saga's message
-    /// rather than the runner's.
+    /// Publishes, and does not return until <em>that</em> message has been
+    /// consumed — by whatever is bound to it, which is usually the saga and in
+    /// the barrier's own guard is a consumer the test holds open. A fault
+    /// counts as consumed: the harness records a delivery whether the pipeline
+    /// returned or threw, so this is a claim about ordering and never about
+    /// outcome. The wait is the point: without it two consecutive publishes are
+    /// a race, and losing it fails a later assertion wearing the wrong
+    /// component's name rather than the runner's.
     /// </summary>
     /// <remarks>
     /// <b>This and the helpers under it exist to carry one argument</b>, and it

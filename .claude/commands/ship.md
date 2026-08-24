@@ -994,11 +994,28 @@ same argument as never calling a branch clean because asking failed.
      `.claude/settings.json` denies this session, so six binds because this
      file says so and not because anything refuses a seventh. **A bound whose
      two halves disagree is the shape this repo has already paid for** — it is
-     safe only in this direction, six being narrower than twelve. Closing it is
-     a human's edit with the deny lifted, and it carries a migration hazard
-     worth naming first: the `/12` is part of the ledger's *comment format*, so
-     changing it to `/6` orphans every row already posted — `count` would match
-     none of them, read zero, and re-arm the cap on a PR that had spent it.
+     safe only in this direction, six being narrower than twelve. **The reach is
+     worth stating exactly**: a run that follows this file stops at six, and a
+     resumed or hand-typed `grok-review.sh 7 full` is accepted by both helpers
+     and reserves a seventh paid check with the ledger's validation still green.
+     Nothing refuses it. So the cap is a rule an agent obeys, not a limit a
+     machine imposes.
+
+     Closing it is a human's edit with the deny lifted, and it carries a
+     migration hazard worth naming first: the `/12` is part of the ledger's
+     *comment format*, so changing it to `/6` orphans every row already
+     posted — `count` would match none of them, read zero, and re-arm the cap
+     on a PR that had spent it. A migration has to keep **reading** the old
+     shape while **writing** the new one, and its test has to cover a PR whose
+     ledger holds both.
+
+     **Reverting this file to twelve is the other way to make the two halves
+     agree, and it is not taken.** The caller asked for six; a reviewer's
+     preference for a consistent pair does not outrank that, and the direction
+     of the disagreement is the safe one. What the gap costs is stated here
+     rather than closed, which is the honest half of a bound only one side of
+     which is enforceable from inside a session that may not edit its own
+     helpers.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
