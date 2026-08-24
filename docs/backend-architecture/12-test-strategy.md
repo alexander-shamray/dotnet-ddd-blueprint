@@ -1146,13 +1146,27 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 
 §6.6's projection is the worked case for a set of tests whose subjects are
 *different* counterfactuals rather than different inputs, and it is here
-because the design it replaced looked correct and could not deliver its payload
+because the design it replaced looked correct and delivered its payload only
+by accident — in the ordinary flow it delivered nothing, which is the failure
+the grid below locates precisely
 ([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
 
 | | |
 |---|---|
-| **The ordinary flow** | Publish a product, place an order naming it, read the history. The resolved name is Catalog's, not an empty string |
-| **The late arrival** | Let the product reach `ordering.ProductPrices` through `PriceChanged` alone, place an order, then deliver `ProductPublished`. The name appears on a summary written before it — retroactively, with no rebuild |
+| **The ordinary flow** | Publish **three** products with distinct non-null thumbnails, place one order naming all three, read the history. Each resolved `SummaryProduct` carries Catalog's name *and* its thumbnail, and the three arrive **in the order the lines were placed** |
+| **The late arrival** | Let a product with a **null** thumbnail reach `ordering.ProductPrices` through `PriceChanged` alone, place an order, then deliver `ProductPublished`. Both facts appear on a summary written before them — retroactively, with no rebuild — and the null survives as null |
+
+**Three products rather than one, and both columns rather than the name.** A
+single-product case cannot see line order at all, and the reader reconstructs
+it from the stored id array rather than from the second statement's result —
+`ordering.Products` is keyed by id and SQL Server promises no order without an
+`ORDER BY`, so an implementation that projected the dictionary directly would
+return the page in whatever order the join produced and satisfy any
+one-product assertion. `ThumbnailUrl` is the same gap one column over:
+ADR-027 moves *both* display facts, and a suite that pins one of them accepts
+an implementation that drops the other. The null case belongs to the late
+arrival because `ProductPublished.ThumbnailUrl` is `string?` and nullable is
+the shape Catalog actually promises.
 
 **Neither case subsumes the other, and working out which design each one
 refutes is what shows why both are owed.** Three designs are in play: the
@@ -1173,8 +1187,13 @@ insert a row that was absent, so both exercise only the `MERGE`'s
 the `target.UpdatedAt < @OccurredAt` guard passes them both while silently
 letting a stale `ProductPublished` overwrite a newer name. The per-product
 watermark is the property the whole table shape was chosen for (ADR-027), and
-nothing above tests it. Publish, rename, then redeliver the first event: the
-newer name stands.
+nothing above tests it. Publish, change **both** the name and the thumbnail,
+then redeliver the first event: both newer values stand.
+
+**Both, because this is the only specified case that enters `WHEN MATCHED`.**
+If that arm stopped assigning `ThumbnailUrl` — the easiest column to lose in a
+`MERGE`, since the insert branch above it would still carry one — every other
+case here still passes, because none of them ever updates a row.
 
 Two more cases exist because a *branch* of the reader has no case above, which
 is the same argument as the replay and worth keeping separate from the design
