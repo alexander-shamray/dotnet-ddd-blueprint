@@ -68,16 +68,16 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
-## The copy that could never be filled (#121)
+## The copy that was filled only by accident (#121)
 
 §6.6's order summary wrote each product's name and thumbnail into every order's
 JSON as an empty string and relied on a later `ProductPublished` to patch them
-in. No later one arrives. A product must be published before it can be ordered
-— `PlaceOrder` reads `ordering.ProductPrices`, which the same event fills — so
-that event is ordinarily consumed *before* the summary row exists, and a patch
-scoped to summaries that already contain the product then touches nothing.
-**Every summary carried empty names in the normal flow**, which is the payload
-the section exists to deliver.
+in. Ordinarily none arrives. A product must be published before it can be
+ordered — `PlaceOrder` reads `ordering.ProductPrices`, which the same event
+fills — so that event is ordinarily consumed *before* the summary row exists,
+and a patch scoped to summaries that already contain the product then touches
+nothing. **Every summary carried empty names in the normal flow**, which is the
+payload the section exists to deliver.
 
 **Ordinarily rather than always**, and the review round that raised it was
 right to: `IntegrationEventConsumer` runs the two handlers sequentially and

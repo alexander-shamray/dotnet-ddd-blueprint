@@ -1067,9 +1067,9 @@ are projected once per product into a new `ordering.Products` table, and
 statement. The `ProductsUpdatedAt` column and the `JSON_MODIFY` patch handler
 that versioned it are both removed.
 
-**Why.** The design this replaces could not deliver its own payload. It
-inserted `name` and `thumb` as empty strings and left them for "a later
-`ProductPublished`" to patch in, and no later one arrives: a product must be
+**Why.** The design this replaces delivered its own payload only by accident.
+It inserted `name` and `thumb` as empty strings and left them for "a later
+`ProductPublished`" to patch in, and ordinarily none arrives: a product must be
 published before it can be ordered, because `PlaceOrder` reads
 `ordering.ProductPrices` and the same event fills it. So `ProductPublished` is
 ordinarily consumed *before* the summary row exists, and a patch scoped to

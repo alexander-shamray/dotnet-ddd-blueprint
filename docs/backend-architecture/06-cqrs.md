@@ -1523,9 +1523,13 @@ arrived, since `PriceChanged` reaches the same insert branch and lists it.
 > rebuild having happened — carrying a price and nothing else, because
 > `PriceChanged` has no `Name` or `ThumbnailUrl` to carry. That is a door
 > rather than a repair, and [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally) turns on
-> it: an order placed through it is exactly the order whose name a patch
-> handler could never fill. A product whose price never changes stays absent
-> indefinitely, which is why the republish is still the procedure that is owed.
+> it: an order placed through this door is the one a repair that read names at
+> *insert* time could never fill, because at insert there is no name to read.
+> The old patch handler would eventually fill it, whenever `ProductPublished`
+> arrived — which is why that door refutes the cheaper repair rather than the
+> design being replaced, and §12.4's grid says so. A product whose price never
+> changes stays absent indefinitely, which is why the republish is still the
+> procedure that is owed.
 >
 > **The republish must carry each product's original `OccurredAt`, and this is
 > the part that is easy to get wrong.** A loop that re-emits `ProductPublished`
@@ -1829,9 +1833,10 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
 > **Decision — the summary stores product ids and resolves the name locally.**
 > See [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally).
 
-> **The shape this replaced could never fill a name, and the reason is worth
-> keeping.** An earlier revision inserted `name` and `thumb` as empty strings
-> and left them for "a later `ProductPublished`" to patch in. No later one
+> **The shape this replaced filled a name only by accident, and the reason is
+> worth keeping.** An earlier revision inserted `name` and `thumb` as empty
+> strings
+> and left them for "a later `ProductPublished`" to patch in. Ordinarily none
 > comes: a product must be published before it can be ordered — `PlaceOrder`
 > reads `ordering.ProductPrices`, which the same event fills — so it is
 > ordinarily consumed *before* the summary row exists, and a patch scoped to
