@@ -96,9 +96,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // ordering-fulfilment-saga at once, so the broker can hand a newly
     // bound OrderCancelled to an old replica whose machine does not
     // declare it — and MassTransit moves a message an endpoint has no
-    // consumer for to <queue>_skipped, which §13.6 does not watch. The
-    // cancellation is then lost quietly, which is the defect this line
-    // exists to fix, reappearing for the length of the deploy.
+    // consumer for to <queue>_skipped. The cancellation is then lost, which
+    // is the defect this line exists to fix, reappearing for the length of
+    // the deploy.
+    //
+    // **It is no longer lost QUIETLY, which is what #131 changed.** §13.6
+    // watched the error queue and nothing watched this one; SkippedQueueDepth
+    // pages on it now, and §9.2 states the rule that keeps it empty —
+    // consumer capability ships a release ahead of the producer, and where
+    // the two are one deployable (as here) the release splits or cuts over
+    // without overlap (ADR-026, §15.5).
     public Event<OrderCancelled> OrderCancelled { get; private set; } = null!;
 
     // The acknowledgement AwaitingConfirmation waits for (#126), and the reason
@@ -113,7 +120,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // Both releases consume ordering-fulfilment-saga during a rollout, so the
     // broker can hand a newly bound OrderConfirmed to an old replica whose
     // machine does not declare it, and MassTransit parks it in <queue>_skipped
-    // — which §13.6 does not watch. Here the loss is bounded rather than
+    // — which §13.6 now pages on (#131). Here the loss is bounded rather than
     // silent, and that is worth stating precisely: an old replica is still
     // running the old machine, whose Confirmed state it entered on the send, so
     // it is not waiting for this event and loses nothing by missing it. A NEW

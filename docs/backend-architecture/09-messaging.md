@@ -144,6 +144,46 @@ Contracts live in a versioned namespace: `Common.Contracts.Ordering.V1`.
 **Additive changes** — new optional fields — do not require a version bump.
 Consumers deserialising an unknown field ignore it.
 
+**That tolerance is about fields and does not extend to anything else that can
+be added.** A consumer ignores a field it does not know because the
+deserialiser is built to; it does not ignore a *message type* it has no
+consumer for, and it does not ignore a *member* of a closed vocabulary it does
+not recognise. Both of those are additive by every ordinary reading and neither
+is safe on its own, which is what makes this the sentence to be careful with
+rather than the breaking-change paragraph below.
+
+> **Consumer capability ships first, producer second, as two releases.**
+> Anything a consumer must be able to *recognise* — a new message type, a new
+> binding on an existing endpoint, a new value in a closed vocabulary — is
+> deployed everywhere before the release that starts emitting it. Not a
+> coordinated deploy: two ordinary releases in an order, which is
+> [§7.4](07-persistence.md)'s expand/contract rule applied to a contract
+> instead of a schema.
+>
+> **The two failure modes are opposite and only one is loud**, which is why
+> the rule is stated rather than left to judgement. A new *binding* on a shared
+> queue fails quietly: the broker hands the message to a replica whose build
+> declares no consumer for it, MassTransit parks it in `<queue>_skipped`, and
+> nothing threw. A new *vocabulary member* fails loudly and immediately: the
+> mapper refuses a code it does not know, and [§9.8](09-messaging.md) excludes
+> `ContractMappingException` from retries precisely so a malformed contract
+> does not burn a minute of backoff — correct for a genuinely malformed
+> message, wrong for a well-formed one from a newer producer, and the
+> escalation reaches the error queue on the first attempt.
+>
+> **The vocabulary case is closed by ordering alone; the binding case is
+> not.** Teach the mapper the new codes, deploy everywhere, then enable the
+> transitions that emit them, and instance two cannot happen. A binding is
+> harder because the consumer and the producer are *the same deployable* and
+> the queue is shared, so no ordering of releases separates them —
+> [§15.5](15-cicd-deployment.md) carries what that costs the canary.
+>
+> **`<queue>_skipped` is watched from [§13.6](13-observability.md).** The rule
+> above is a rule and not a hope because a message skipped during a rollout
+> now pages someone; without that, violating it is invisible and the
+> specification is advice. See
+> [#131](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/131).
+
 **Breaking changes** — removing a field, renaming, changing a type, changing
 semantics — require a new version. The publisher then emits both V1 and V2 for a
 deprecation window, consumers migrate independently, and V1 is retired once

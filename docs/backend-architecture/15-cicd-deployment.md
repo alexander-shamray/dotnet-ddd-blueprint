@@ -1210,9 +1210,45 @@ serving traffic, **every migration must be backward compatible with the previous
 release** (section 7.4). A canary rollback with an incompatible schema change is
 unrecoverable without downtime, which defeats the point of the canary.
 
+**The messaging equivalent is the same shape and it is owned by
+[§9.2](09-messaging.md): consumer capability ships before the producer that
+uses it.** A schema and its code are not the only pair the canary puts side by
+side — two releases of the same chart consume the same queues, so a message
+type or a vocabulary member the new build emits can be handed to the old one.
+The rule is stated in §9.2 with both of its failure modes; what belongs here is
+what it costs the ladder.
+
+**A release that adds a binding to an existing endpoint cannot be canaried, and
+that is a real limitation rather than a caveat.** The two other rollout hazards
+this chapter names are separable in time: a migration runs ahead of the deploy,
+and a new vocabulary member can be taught to the consumer one release early.
+A binding cannot, because the consumer and the producer are the same
+deployable — the build that declares `Event<T>` is the build that starts
+publishing `T`. So for the duration of the ladder the old track is bound to
+neither, and every message of that type it is handed goes to `<queue>_skipped`.
+
+Two ways out, and the choice is per release rather than settled here:
+
+- **A non-overlapping cutover** — scale the stable track to zero before the new
+  one takes traffic. This is not a canary and should not be called one: it
+  trades the progressive-confidence property for correctness, and a release
+  note that says so is worth more than a ladder that quietly loses messages.
+- **Split the release in two** — one that declares the consumer and publishes
+  nothing new, then one that starts publishing. This keeps the ladder for both
+  halves and is the same expand/contract move §7.4 makes for a column. It costs
+  a release and is usually the right answer.
+
+**Either way `<queue>_skipped` is watched ([§13.6](13-observability.md)), so
+choosing wrong is loud rather than silent.** That alert is what makes this
+section's rule enforceable; before it, a rollout that lost messages looked
+exactly like one that did not.
+
 Feature flags decouple deployment from release. Deploy the code dark, enable it
 for internal users, then progressively for customers. This also gives you a
-kill switch that does not require a rollback.
+kill switch that does not require a rollback. **For the vocabulary case they
+are an alternative to splitting the release**: emit the new code behind a flag
+that stays off until every consumer is upgraded, which is the same ordering
+bought with a runtime switch instead of a deploy.
 
 ---
 

@@ -68,6 +68,72 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The rule that was missing from a pattern that looked complete (#131)
+
+**No `PR-NN` heading**, on the terms the entries below set: Appendix C's plan is
+complete, and this is a specification gap rather than a row that was ever in it.
+
+**The blueprint reasoned about rolling deploys in a dozen places and every one
+of them was about state.** §6.5's live cache key, §7.3's migration race, §8's
+key rename, §9.4's `MessageTypeMap` alias, §15.5's backward-compatible
+migrations — a schema, a key, a persisted type name, a persisted payload. Not
+one was about **routing** or **vocabulary**, which is why this release could add
+a saga binding and three reason codes with nothing to check them against.
+**A gap inside a well-covered pattern is harder to see than a gap in an
+uncovered one**, because the neighbouring cases make the topic feel answered.
+
+**The sentence that was actually wrong is the one nobody would have looked
+at.** §9.2 said additive changes need no version bump because "consumers
+deserialising an unknown field ignore it" — true, and true only of fields. A
+deserialiser is built to skip an unknown field; nothing is built to skip an
+unknown message *type*, and a closed vocabulary is a whitelist by construction.
+Both are additive by every ordinary reading and neither is safe, so the
+tolerance had to be narrowed rather than the breaking-change paragraph below it
+extended.
+
+**Two instances, opposite failure modes, one root — and the quiet one is why
+this is an ADR.** A new binding on a shared queue is handed to a replica whose
+build declares no consumer, parked in `<queue>_skipped`, nothing thrown. A new
+reason code is refused by the mapper, and §9.8 excludes
+`ContractMappingException` from retries on purpose, so it reaches the error
+queue on the first attempt. Loud and silent, closed by the same rule:
+[ADR-026](backend-architecture/appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it).
+
+**Ordering closes the vocabulary case and does not close the binding case**,
+and running them together is what made this look like one problem with one fix.
+A mapper can learn a code a release early. A saga cannot learn an event a
+release early, because the build that declares `Event<T>` is the build that
+publishes `T` — consumer and producer are the same deployable and the queue is
+shared, so no ordering of releases separates them. §15.5 now carries what that
+costs: split the release, or cut over without overlap and do not call it a
+canary.
+
+> **A rule with no detection is advice.** The alert is what makes this an ADR
+> rather than a paragraph — `SkippedQueueDepth` pages within a minute, where
+> before a rollout that lost messages looked exactly like one that did not.
+> No CI check can help: whether a consumer is deployed everywhere is a fact
+> about the cluster, not about the branch. So this is detection rather than
+> prevention, on the same terms as ADR-024's guarantees, which nothing holds
+> Inventory to either.
+
+**The alert needed its own rule rather than a wider selector, and that was the
+one real design choice.** `.+_(error|skipped)` would have been one line and one
+alert. An `_error` message is one a consumer accepted and could not finish; a
+`_skipped` message is one no consumer would take. They are triaged from
+opposite ends — **replay is the right first move for a skipped message and the
+wrong one for the arrival `error-queue.md` opens with** — so folding them would
+have produced one procedure that is wrong half the time. §13.9's pairing gate
+forces the same conclusion from the other side: sharing a runbook needs an
+argued `SHARED_RUNBOOKS` entry, and the argument would not have been available.
+
+**Two counts went stale on the way in and both were removed rather than
+incremented.** `platform-alerts.yaml` said "the two rules whose signal comes
+from an exporter"; CLAUDE.md said twelve runbooks. The first is now named
+rather than counted, on this file's usual terms; the second is a tree listing
+where the number is the point, so it moved to thirteen.
+
+---
+
 ## The state that waits on two services (#124)
 
 **No `PR-NN` heading**, on the terms the entries below set: Appendix C's plan is
