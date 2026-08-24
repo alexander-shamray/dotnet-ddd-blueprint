@@ -1,3 +1,4 @@
+using Common.Contracts;
 using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
 using Common.Contracts.Payments.V1;
@@ -199,7 +200,25 @@ public class OrderFulfilmentSagaTests
         Guid? messageId = null;
         await harness.Bus.Publish(
             message,
-            context => messageId = context.MessageId,
+            context =>
+            {
+                // §9.1: body, row, header and inbox key are ONE GUID, and
+                // IIntegrationEvent says so in its own words — the envelope's
+                // value is "THE message id, not a second one". Every other
+                // publisher in this repository writes it, `OutboxDispatcher`
+                // included; a harness that let MassTransit mint its own would
+                // give every event two identities, which is the state that
+                // comment calls easy to write and hard to see. It was written
+                // here, and nothing failed — which is exactly the cost it
+                // names.
+                if (message is IIntegrationEvent integrationEvent)
+                    context.MessageId = integrationEvent.MessageId;
+
+                // A scheduled expiry is not a contract (Appendix D) and has no
+                // envelope, so the send context is what both kinds have. That
+                // — not a second identity — is why the wait reads it.
+                messageId = context.MessageId;
+            },
             TestContext.Current.CancellationToken);
 
         // Unset, this degrades into the type-level wait the paragraph above
@@ -222,14 +241,16 @@ public class OrderFulfilmentSagaTests
         harness.Consumed.Any<T>(m => match(m.Context.Message), TestContext.Current.CancellationToken);
 
     /// <summary>
-    /// <see cref="Consumed"/> over the transport's message id rather than the
-    /// contract's, which is what <see cref="Publish"/> needs and no test does.
+    /// <see cref="Consumed"/> over the send context's message id, which is what
+    /// <see cref="Publish"/> needs and no test does.
     /// </summary>
     /// <remarks>
-    /// The two are different ids and only one of them exists for every message
-    /// here: §9.1's envelope gives a contract its own <c>MessageId</c>, and the
-    /// saga's five scheduled expiries are not contracts (Appendix D) and carry
-    /// no envelope at all. The send context has one either way.
+    /// <b>For a contract this is the envelope's own value</b>, because
+    /// <see cref="Publish"/> writes it there — §9.1's body, row, header and
+    /// inbox key are one GUID, and nothing here is entitled to a second. The
+    /// send context is read rather than the payload because the saga's five
+    /// scheduled expiries are not contracts (Appendix D) and have no envelope;
+    /// it is the one handle both kinds carry, not a different id.
     /// </remarks>
     private static Task<bool> ConsumedWithId<T>(ITestHarness harness, Guid? messageId)
         where T : class =>
@@ -1822,14 +1843,27 @@ public class OrderFulfilmentSagaTests
                 .Count(m => m.Context.Message.OrderId == orderId)
                 .ShouldBe(1);
 
-            // And the id it fenced on is the transport's, which is the half a
-            // type-level wait gets wrong. A second delivery of the same fact
-            // carries its own id, so the fence cannot be satisfied by the
-            // first — asserted here rather than trusted, because the tests
-            // that depend on it would stay green if it were.
-            StockReserved redelivered = SagaContracts.StockReserved(orderId);
-            await Publish(harness, redelivered);
-            await Publish(harness, redelivered);
+            // **Two StockReserved facts, not one object published twice**, and
+            // the difference is §9.1's. The fence reads the send context, and
+            // for a contract Publish writes the envelope onto it — so two
+            // separate SagaContracts calls are two envelope ids and two
+            // deliveries the fence can tell apart. Publishing one object twice
+            // would put ONE id on the wire twice, which is what §9.5's inbox
+            // exists to dedupe and what this barrier therefore cannot separate.
+            //
+            // That residual is real and named rather than papered over: the
+            // barrier distinguishes deliveries of DIFFERENT messages, never two
+            // deliveries of the same one. This test used to be the second case,
+            // which only worked because the helper was minting a second
+            // identity §9.1 forbids.
+            //
+            // A type-level wait fails here, on the count below rather than on
+            // the one above: it is satisfied by the first delivery and returns
+            // with the second still in flight.
+            StockReserved first = SagaContracts.StockReserved(orderId);
+            StockReserved second = SagaContracts.StockReserved(orderId);
+            await Publish(harness, first);
+            await Publish(harness, second);
 
             harness.Consumed
                 .Select<StockReserved>(Spent())

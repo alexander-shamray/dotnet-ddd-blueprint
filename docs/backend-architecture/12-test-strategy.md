@@ -1888,7 +1888,14 @@ public async Task Commands_are_sent_and_events_are_published()
 >     Guid? messageId = null;
 >     await harness.Bus.Publish(
 >         message,
->         context => messageId = context.MessageId,
+>         context =>
+>         {
+>             // §9.1: body, row, header and inbox key are one GUID.
+>             if (message is IIntegrationEvent integrationEvent)
+>                 context.MessageId = integrationEvent.MessageId;
+>
+>             messageId = context.MessageId;
+>         },
 >         TestContext.Current.CancellationToken);
 >
 >     messageId.ShouldNotBeNull();
@@ -1900,12 +1907,28 @@ public async Task Commands_are_sent_and_events_are_published()
 > }
 > ```
 >
-> The id is read off the **send context** and not the contract, because the two
-> are different ids and only one exists for every message: §9.1's envelope gives
-> a contract its own `MessageId`, and a saga's scheduled timeouts are not
-> contracts (Appendix D) and carry no envelope at all. Leave it unset and the
-> comparison becomes `null == null`, which matches the first consume of the type
-> and quietly restores the defect — so assert it before waiting on it.
+> **The wait reads the send context because that is the one handle both
+> kinds of message carry** — not because a contract has a second identity. It
+> has not: §9.1's body, row, header and inbox key are one GUID, and
+> `IIntegrationEvent` says the envelope's value is *the* message id "not a
+> second one". So the helper **writes** it, exactly as `OutboxDispatcher` and
+> every other publisher here does; what it reads back for a contract is the
+> envelope's own value. A saga's scheduled timeouts are not contracts
+> (Appendix D) and have no envelope, which is the case the send context covers
+> and the payload cannot.
+>
+> **Letting MassTransit mint the header instead is the trap `IIntegrationEvent`
+> names**, and it was written here before this was noticed: every event gets two
+> identities, one the payload carries and one the broker uses, and **nothing
+> fails** — the suite stayed green and the chapter confidently said the two ids
+> differ. Leave `messageId` unset and the comparison becomes `null == null`,
+> which matches the first consume of the type and quietly restores the defect,
+> so assert it before waiting on it.
+>
+> **What the barrier therefore cannot do is separate two deliveries of one
+> message**, since they share the id by design — that is §9.5's inbox's job, not
+> a barrier's. A suite wanting two arrivals it can tell apart publishes two
+> messages, not one object twice.
 >
 > **A fault releases the barrier too, and that is correct rather than a hole.**
 > The harness records a delivery whether the pipeline returned or threw, so an
