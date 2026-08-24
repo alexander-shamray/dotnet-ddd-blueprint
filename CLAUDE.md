@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..026),
+                             15-cicd-deployment, appendix A (ADR-001..027),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -1313,7 +1313,7 @@ Run `/validate-blueprint` after any substantive edit.
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
   admonition syntax. Two forms are named and recurring — `**Trap — …**`
-  (18) for a mistake worth naming, and `**Decision — …**` (8), which always
+  (18) for a mistake worth naming, and `**Decision — …**` (9), which always
   points at the ADR that records it:
 
   ```markdown
@@ -1957,7 +1957,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-027) and keep the
+  (currently ADR-028) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

@@ -324,10 +324,16 @@ if (fulfilment is not null)
     metrics.Fulfilled(fulfilment.ConfirmedAt - fulfilment.PlacedAt);
 ```
 
-> The projection is the right home for a *duration* metric for the same reason
-> it is the right home for a denormalised name: it is the component that has
-> already gathered both halves. A handler measuring this would have to re-read
-> the aggregate to find its own start time.
+> The projection is the right home for a *duration* metric because it is the
+> component that has already gathered both halves. A handler measuring this
+> would have to re-read the aggregate to find its own start time.
+>
+> **This used to draw an analogy with the denormalised product name, and
+> [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)
+> took the other half of it away.** The name is no longer gathered beside the
+> order at all — it is written to a product-keyed table and resolved on read —
+> so the two are now opposites rather than a pair. The duration keeps the
+> argument because both of *its* halves really do land on the same row.
 >
 > **Note what the predicate is not.** An earlier version of this measured
 > `now − PlacedAt` when the `Confirmed` event arrived, guarded by

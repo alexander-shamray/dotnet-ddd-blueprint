@@ -264,7 +264,7 @@ differently:
 | Kind | Examples | Authored by |
 |---|---|---|
 | **Write model** | `Orders`, `OrderLines` | The EF model. `IEntityTypeConfiguration<T>` (§7.2) is the source of truth; `dotnet ef migrations add` produces the DDL |
-| **Read models and technical tables** | `OrderSummaries`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects. **`ProductPrices` is the exception and states the terms**: PR-18 maps it through an `IEntityTypeConfiguration` so `migrations add` emits it beside the aggregate's tables, and the configuration is then written to produce §6.6's printed types — `char(3)`, `DEFAULT 1` — rather than EF's defaults for the CLR ones. The rule is that the shape is the chapter's; which tool writes it is negotiable, and a generated table that drifts from the DDL a later PR copies is not |
+| **Read models and technical tables** | `OrderSummaries`, `ordering.Products`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects. **`ProductPrices` is the exception and states the terms**: PR-18 maps it through an `IEntityTypeConfiguration` so `migrations add` emits it beside the aggregate's tables, and the configuration is then written to produce §6.6's printed types — `char(3)`, `DEFAULT 1` — rather than EF's defaults for the CLR ones. The rule is that the shape is the chapter's; which tool writes it is negotiable, and a generated table that drifts from the DDL a later PR copies is not |
 
 That is why [§6.6](06-cqrs.md) and [§9.4](09-messaging.md) show `CREATE TABLE` and §7.2 does not — the write
 model's schema is a projection of the aggregate, and duplicating it as SQL would
@@ -287,6 +287,14 @@ public partial class AddOrderSummaries : Migration
             """
             CREATE TABLE ordering.OrderSummaries ( /* §6.6 */ );
             CREATE INDEX IX_OrderSummaries_Customer_PlacedAt ...;
+
+            -- Both tables §6.6's projection writes, in one migration. The
+            -- summary stores product ids and resolves the rest from here, so
+            -- a migration carrying one of them leaves the ProductPublished
+            -- handler and the history query pointing at an object that does
+            -- not exist — and Database.Migrate() is the only mechanism, so
+            -- nothing else would create it.
+            CREATE TABLE ordering.Products ( /* §6.6 */ );
             """);
     }
 }

@@ -48,10 +48,14 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task An_order_with_no_priced_products_is_refused_as_a_rule_not_a_bad_request()
     {
-        // The standing answer for a product Catalog has never published, which
-        // is what §6.6's callout says stays true after the projection exists:
-        // no row, no price, no order. 422 rather than 400 is the point — the
-        // request was well-formed and the validator passed it, and the
+        // The standing answer for a product this service has never been told a
+        // price for in the asked-for currency, which is what §6.6's callout
+        // says stays true after the projection exists: no row, no price, no
+        // order. Note the condition is silence rather than an absent
+        // ProductPublished — PriceChanged reaches the same insert branch, so
+        // an id nothing has ever mentioned is what this test needs, and
+        // CreateVersion7 below is exactly that. 422 rather than 400 is the
+        // point — the request was well-formed and the validator passed it, and
         // products being unpriceable is a fact about this service's state.
         HttpResponseMessage response = await PlaceAsync(Guid.CreateVersion7());
 

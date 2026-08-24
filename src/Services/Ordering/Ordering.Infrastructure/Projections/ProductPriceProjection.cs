@@ -17,9 +17,13 @@ namespace Ordering.Infrastructure.Projections;
 /// it the more consequential of §6.6's two:
 /// <c>ProjectedPriceReader</c> serves <c>PlaceOrder</c> from it, so a row that
 /// is missing is an order that is refused. §6.6's callout is the standing
-/// consequence — a product Catalog has never published produces
-/// <c>order.products_unavailable</c>, which is a correct answer from a service
-/// with no prices and looks like nothing at all in a log.
+/// consequence — a product <i>this service</i> holds no price for in the
+/// asked-for currency produces <c>order.products_unavailable</c>, which is a
+/// correct answer from a service with no prices and looks like nothing at all
+/// in a log. <b>The condition is Ordering's knowledge, not Catalog's act</b>:
+/// <c>Product.Publish</c> is Catalog's factory, so every product it holds was
+/// published, and an absent row means neither price-bearing event has been
+/// applied here — dropped before the queue was bound, or still in flight.
 /// <para>
 /// <b>Public, and the modifier is load-bearing.</b> §6.2's scan is
 /// public-only, so an internal handler is registered as nothing at all —
@@ -33,7 +37,10 @@ namespace Ordering.Infrastructure.Projections;
 /// catalogue, which does not exist yet. Until it does, every product published
 /// before <c>ordering-catalog-events</c> was first declared is absent, because
 /// the broker drops what no queue is bound for, and each is an order refused
-/// with no fault anywhere. §6.6 also records the constraint that republish has
+/// with no fault anywhere — until a <c>PriceChanged</c> for that product
+/// arrives, which runs this same upsert and inserts on the same branch. That
+/// is a door rather than a repair: it carries a price and no name, so the
+/// republish is still what is owed. §6.6 also records the constraint that it has
 /// to meet: it must carry each product's original <c>OccurredAt</c>, since a
 /// fresh one sails past the withdrawal watermark below and re-lists everything
 /// Catalog ever discontinued.

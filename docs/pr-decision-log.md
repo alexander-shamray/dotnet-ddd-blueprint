@@ -68,6 +68,137 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The copy that was filled only by accident (#121)
+
+§6.6's order summary wrote each product's name and thumbnail into every order's
+JSON as an empty string and relied on a later `ProductPublished` to patch them
+in. Ordinarily none arrives. A product must be published before it can be
+ordered — `PlaceOrder` reads `ordering.ProductPrices`, which the same event
+fills — so that event is ordinarily consumed *before* the summary row exists,
+and a patch scoped to summaries that already contain the product then touches
+nothing. **Every summary carried empty names in the normal flow**, which is the
+payload the section exists to deliver.
+
+**Ordinarily rather than always**, and the review round that raised it was
+right to: `IntegrationEventConsumer` runs the two handlers sequentially and
+each commits on its own connection, so an order placed after the price handler
+commits and before the patch handler runs would find its row patched. The
+window is narrow and the defect is the common case, but a specification that
+turns a common outcome into an impossible ordering is making a different claim
+from the one it can support.
+
+**The cheaper repair was available and is the one that had to be refused.**
+Reading the names at insert time satisfies the ordinary flow completely. What
+it does not survive is the second door: `ProductPriceProjection`'s upsert
+inserts on its `NOT MATCHED` branch for `PriceChanged` as well, so a product
+whose `ProductPublished` never reached the queue still acquires a price row and
+is orderable — and an order placed through that door would carry an empty name
+permanently, with the only thing that could repair it being the patch handler
+this change removes. So the fix is a product-keyed table and resolution on
+read ([ADR-027](backend-architecture/appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)),
+which fills every order that ever referenced a product the moment its name
+arrives, retroactively and with no rebuild.
+
+**The premise that justified the copy was false before this PR was written.**
+§6.6 argued for denormalising the name on the grounds that "joining at read
+time is not an option — the products live in Catalog". They do not, once
+Ordering projects them: `ordering.ProductPrices` had been exactly that local
+projection on the write path since PR-20, so a primary-key lookup against a
+table in the same database was never the cross-service join the sentence was
+about.
+
+### One claim, and every sweep that verified clean before it was
+
+**No count in this heading, deliberately.** It carried one — *seven sites,
+three sweeps* — and both figures were stale within two review rounds, in the
+one section of this log whose whole subject is a claim that kept being
+restated. The predicate is what generalises; the tally was never the lesson.
+
+The narrowing this PR needed — *no price row* means this service holds no price
+for the product in the asked-for currency, not that a `ProductPublished` failed
+to arrive — took several commits to apply, and **each intermediate sweep was
+verified before being called done**:
+
+| Sweep | What was searched | What it missed |
+|---|---|---|
+| 1 | The review's own list of sites | Siblings the report did not name |
+| 2 | `grep … src/ docs/` | `tests/`, excluded by the scope rather than the pattern |
+| 3 | `grep 'never published'` | A site where the phrase **wraps across a newline** |
+| 4 | Three named files | A fourth that was not on the list |
+
+**The third is the one worth carrying.** House style wraps prose at 80 columns,
+so a line-oriented pattern goes quiet exactly where the corpus has been
+wrapped, and reports the same nothing a finished sweep reports. What closed it
+was a regex with `\s+` between the words, run over each file's whole text
+rather than line by line. This repository will keep generating the case.
+
+**Then it kept coming back in freshly written prose, which no instrument
+reaches.** Comments and paragraphs added *after* a sweep said "a product
+Catalog has not published" — a different error of the same family:
+`Product.Publish` is Catalog's factory and always raises
+`ProductPublishedDomainEvent`, so every product Catalog holds was published and
+an absent row means *Ordering has not applied the event*. That happened more
+than once, and the last instance was inside a paragraph of this entry
+describing the error itself.
+
+**So the rule is not a better grep.** Conflating another service's act with
+this one's knowledge is the phrasing that comes to hand, and a sweep can only
+remove the instances that already exist. What it needs is to be known as a
+family before the next sentence is written.
+
+### A bound one multiplication away from the bound that was cited
+
+The new history query passes the page's distinct product ids to the second
+statement. Both the chapter and the ADR said it was "bounded by the same clamp"
+as the first — true, and irrelevant. §6.5's clamp bounds **rows** at a hundred;
+§10.5's validator admits a hundred items per order; so the distinct ids reach
+ten thousand against SQL Server's ceiling of 2,100 parameters, where the
+request does not degrade but fails outright. The ids travel as one JSON
+parameter read through `OPENJSON` instead.
+
+**A limit reached by multiplying two documented limits is invisible to a reader
+checking either one**, and a reassurance naming the wrong one of them is worse
+than no reassurance. Six external review checks and three internal audit passes
+went by before it was raised.
+
+### What a test has to refute, rather than what it has to cover
+
+§12 gained five cases for a projection that does not exist yet, and the
+reasoning behind them was wrong once before it was right. The first version
+claimed the ordinary flow (publish, order, read) would pass against the shipped
+design — it does not: that patch ran when the product was published, before the
+order existed. What the ordinary flow cannot distinguish is this design from
+the insert-time repair.
+
+Written out, each case refutes a different candidate:
+
+| | Ordinary flow | Late arrival |
+|---|---|---|
+| Empty strings, patched later | fails | passes |
+| Names read at insert time | passes | fails |
+| Ids resolved on read | passes | passes |
+
+Three more exist because a *branch* has no case rather than because a design
+does: the replay that enters the `MERGE`'s `WHEN MATCHED` arm and its watermark
+guard, the read taken before a name arrives that enters the reader's
+`Where(named.ContainsKey)` filter, and the page wide enough to exceed 2,100
+parameters. **Every one of those three would be satisfied by an implementation
+that deleted the thing it exists to protect**, which is the gate-coverage rule
+this repository keeps rediscovering, arriving at the specification rather than
+at a gate.
+
+### Cheap now, and not later
+
+`OrderSummaryProjection` is unbuilt and Appendix C carries no row that builds
+`OrderSummaries` at all — which is itself worth noticing, since a specified
+mechanism with no row in the plan is exactly what forced Appendix C's *After
+the plan* section into existence for §8.5. Nothing in `src/` changes behaviour
+here; every source and test edit in the branch is a comment or an assertion
+message. The same correction after that row lands is a migration, a backfill
+and a projection rebuild.
+
+---
+
 ## The rule that was missing from a pattern that looked complete (#131)
 
 **No `PR-NN` heading**, on the terms the entries below set: Appendix C's plan is

@@ -1142,6 +1142,94 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > up the ability to run the fast half alone, which is what §15.1's pipeline
 > ordering depends on.
 
+### The order summary's product names
+
+§6.6's projection is the worked case for a set of tests whose subjects are
+*different* counterfactuals rather than different inputs, and it is here
+because the design it replaced looked correct and delivered its payload only
+by accident — in the ordinary flow it delivered nothing, which is the failure
+the grid below locates precisely
+([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
+
+| | |
+|---|---|
+| **The ordinary flow** | Publish **three** products with distinct non-null thumbnails, place one order naming all three, read the history. Each resolved `SummaryProduct` carries Catalog's name *and* its thumbnail, and the three arrive **in the order the lines were placed** |
+| **The late arrival** | Let a product with a **null** thumbnail reach `ordering.ProductPrices` through `PriceChanged` alone, place an order, then deliver `ProductPublished`. Both facts appear on a summary written before them — retroactively, with no rebuild — and the null survives as null |
+
+**Three products rather than one, and both columns rather than the name.** A
+single-product case cannot see line order at all, and the reader reconstructs
+it from the stored id array rather than from the second statement's result —
+`ordering.Products` is keyed by id and SQL Server promises no order without an
+`ORDER BY`, so an implementation that projected the dictionary directly would
+return the page in whatever order the join produced and satisfy any
+one-product assertion. `ThumbnailUrl` is the same gap one column over:
+ADR-027 moves *both* display facts, and a suite that pins one of them accepts
+an implementation that drops the other. The null case belongs to the late
+arrival because `ProductPublished.ThumbnailUrl` is `string?` and nullable is
+the shape Catalog actually promises.
+
+**Neither case subsumes the other, and working out which design each one
+refutes is what shows why both are owed.** Three designs are in play: the
+shipped one (empty strings, patched by a later `ProductPublished`), the
+tempting repair (read the names at insert time), and this one (store ids,
+resolve on read).
+
+| | Ordinary flow | Late arrival |
+|---|---|---|
+| Empty strings, patched later | **fails** — the patch ran when the product was published, before this order existed, and it only touches summaries that already contain the product | *passes* — an order that already exists is precisely what that patch was built for |
+| Names read at insert time | passes | **fails** — the price row arrived without a name, and nothing revisits the summary once one exists |
+| Ids resolved on read | passes | passes |
+
+A third case is owed for a different reason, and it is the one a suite reaches
+last: **a rename, and then a replay of the older event.** Both cases above
+insert a row that was absent, so both exercise only the `MERGE`'s
+`WHEN NOT MATCHED` branch — an implementation whose `WHEN MATCHED` arm dropped
+the `target.UpdatedAt < @OccurredAt` guard passes them both while silently
+letting a stale `ProductPublished` overwrite a newer name. The per-product
+watermark is the property the whole table shape was chosen for (ADR-027), and
+nothing above tests it. Publish, change **both** the name and the thumbnail,
+then redeliver the first event: both newer values stand.
+
+**Both, because this is the only specified case that enters `WHEN MATCHED`.**
+If that arm stopped assigning `ThumbnailUrl` — the easiest column to lose in a
+`MERGE`, since the insert branch above it would still carry one — every other
+case here still passes, because none of them ever updates a row.
+
+Two more cases exist because a *branch* of the reader has no case above, which
+is the same argument as the replay and worth keeping separate from the design
+grid:
+
+| | |
+|---|---|
+| **The unresolved id** | Read the page **before** delivering `ProductPublished`. The unnamed product is absent from `Products` and `LineCount` still counts it. Without this, deleting the reader's `Where(named.ContainsKey)` filter — and throwing on the dictionary lookup instead — satisfies every other case here |
+| **The wide page** | Seed enough orders to put more than 2,100 distinct ids on one page: twenty-two orders of a hundred items reaches 2,200, which is well inside §6.5's clamp of a hundred orders. The page returns. Without this, an implementation that expands the ids into an `IN` list passes every other case, because they all use a handful of products, and fails in production on SQL Server's parameter ceiling |
+
+**The second is the one that would otherwise be documentation rather than a
+rule.** ADR-027 argues the parameter limit at length and the sample uses
+`OPENJSON` because of it; nothing above would notice the `IN` list coming back.
+A limit stated in prose and enforced by no case is the shape this repository
+already names — a claim that reads as settled and is not.
+
+So the ordinary flow is what catches the design that shipped, the late arrival
+is what catches the cheaper repair that would otherwise look equivalent, the
+replay is what catches an update path neither of the others enters, and the
+last two catch reader branches that no case about the *design* reaches. A
+suite carrying only one of them leaves a whole design indistinguishable from
+this one — which is §12.4's rule about negatives applied to a design rather
+than to an assertion: a case that two candidates both satisfy is not evidence
+about which is present.
+
+**Every case above is a §12.4-level test and all of them belong in
+`Ordering.Api.Tests`, which is not a contradiction.** The level is about what
+they touch — the projection writes through Dapper against a real schema, so an
+in-memory double would assert on the double — and the project is about where
+the fixture lives. `Ordering.Application.Tests` deliberately carries no
+`Ordering.TestSupport` reference and says so in its csproj, so Ordering's
+real-schema tests are homed one project over; `ProductPriceProjectionTests` is
+already there for exactly this reason. Read the pyramid's levels as a statement
+about what a test exercises, never as a mapping onto assembly names.
+
+
 ### API contract tests
 
 The pyramid's third level (§12.1) goes through HTTP, and it exists to cover

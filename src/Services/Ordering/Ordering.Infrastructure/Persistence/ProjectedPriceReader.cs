@@ -16,7 +16,9 @@ namespace Ordering.Infrastructure.Persistence;
 /// <b>The table has a producer since PR-20</b> — <c>ProductPriceProjection</c>
 /// (§6.6), on the <c>ordering-catalog-events</c> endpoint. What stands from
 /// the PR that shipped this file is the standing consequence rather than the
-/// gap: a product Catalog has never published still has no row here, and every
+/// gap: a product Catalog has never priced in the asked-for currency still has
+/// no row here — which is narrower than "never published", since
+/// <c>PriceChanged</c> inserts on the same branch — and every
 /// <c>PlaceOrder</c> naming it returns <c>order.products_unavailable</c> —
 /// which is the correct answer to "price these products" from a service that
 /// has no price for them, not a defect. §12.4's handler tests seed the table
@@ -46,9 +48,15 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections) : I
         string currency,
         CancellationToken ct)
     {
-        // An empty IN list is not a query Dapper can expand, and asking for no
-        // prices is a legal thing for a caller to do — the validator refuses
-        // an empty Items, but this port is not only that caller's.
+        // Asking for no prices is a legal thing for a caller to do — the
+        // validator refuses an empty Items, but this port is not only that
+        // caller's — and answering it here saves opening a connection and a
+        // round trip that can only return nothing.
+        //
+        // NOT because Dapper would refuse the query, which is what this
+        // comment claimed until it was measured: against the pinned 2.1.66 an
+        // empty expansion becomes IN (SELECT @Ids WHERE 1 = 0), which is valid
+        // and returns no rows. The guard is an optimisation, not a repair.
         if (productIds.Count == 0)
             return new Dictionary<ProductId, Money>();
 
