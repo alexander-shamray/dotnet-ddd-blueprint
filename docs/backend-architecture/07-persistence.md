@@ -287,6 +287,14 @@ public partial class AddOrderSummaries : Migration
             """
             CREATE TABLE ordering.OrderSummaries ( /* §6.6 */ );
             CREATE INDEX IX_OrderSummaries_Customer_PlacedAt ...;
+
+            -- Both tables §6.6's projection writes, in one migration. The
+            -- summary stores product ids and resolves the rest from here, so
+            -- a migration carrying one of them leaves the ProductPublished
+            -- handler and the history query pointing at an object that does
+            -- not exist — and Database.Migrate() is the only mechanism, so
+            -- nothing else would create it.
+            CREATE TABLE ordering.Products ( /* §6.6 */ );
             """);
     }
 }

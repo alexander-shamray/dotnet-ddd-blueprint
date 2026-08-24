@@ -1142,6 +1142,31 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > up the ability to run the fast half alone, which is what §15.1's pipeline
 > ordering depends on.
 
+### The order summary's two names
+
+§6.6's projection is the worked case for a test whose subject is a *defect that
+was shipped*, and it earns a named pair here because the design it replaced
+looked correct and could not deliver its payload
+([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
+Two cases, and the second is the one nobody writes unprompted:
+
+| | |
+|---|---|
+| **The ordinary flow** | Publish a product, place an order naming it, read the history. The resolved name is Catalog's, not an empty string. This is the case the old design failed on *every* order, which is what makes its absence from a suite worth a rule rather than a habit |
+| **The late arrival** | Let the product reach `ordering.ProductPrices` through `PriceChanged` alone, place an order, then deliver `ProductPublished`. The name appears on a summary written before it — retroactively, with no rebuild |
+
+**The second is the whole argument for the redesign, and a suite holding only
+the first passes against a patch handler.** Filling the name at insert time
+satisfies the ordinary flow completely; only an order that already exists when
+the name arrives can tell the two designs apart. That is the same shape as
+§12.4's rule about negatives: a case both the defect and the fix satisfy is not
+evidence about which one is present.
+
+These live at §12.4's level rather than §12.3's — the projection writes through
+Dapper against a real schema, and an in-memory double would assert on the
+double. Neither belongs in the API suite: they are about what the projection
+stores and resolves, not about what an endpoint returns.
+
 ### API contract tests
 
 The pyramid's third level (§12.1) goes through HTTP, and it exists to cover
