@@ -1826,26 +1826,27 @@ public async Task Commands_are_sent_and_events_are_published()
     // not published. Left on the ordinary token it bills the inactivity
     // timeout on every green run, so it reads the record as of the positive
     // above it instead. See the traps below.
-    // The tuple is the helper's shape — it returns the provider too, and the
-    // suite wraps everything below in `await using (provider)`. A bare
+    // The tuple is the helper's shape — it returns the provider as well as the
+    // harness, and the caller owns it. A bare
     // `ITestHarness harness = await StartHarnessAsync()` does not compile
-    // against it, which is what this line read until §12.5 was reconciled to
-    // the suite it specifies. The scope is elided here rather than shown: this
-    // is an excerpt, and one line of it cannot open a block the excerpt does
-    // not close.
+    // against it, and dropping the `await using` leaks a running bus into
+    // whatever runs next.
     (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
-    var orderId = Guid.CreateVersion7();
+    await using (provider)
+    {
+        var orderId = Guid.CreateVersion7();
 
-    // Every member of V1.OrderPlaced is `required`, so there is no partial
-    // construction to elide — a builder keeps that from filling the test.
-    await Publish(harness, Contracts.OrderPlaced(orderId));
+        // Every member of V1.OrderPlaced is `required`, so there is no partial
+        // construction to elide — a builder keeps that from filling the test.
+        await Publish(harness, Contracts.OrderPlaced(orderId));
 
-    (await harness.Sent.Any<ReserveStock>()).ShouldBeTrue();
+        (await harness.Sent.Any<ReserveStock>()).ShouldBeTrue();
 
-    using CancellationTokenSource spent = new();
-    spent.Cancel();
+        using CancellationTokenSource spent = new();
+        spent.Cancel();
 
-    (await harness.Published.Any<ReserveStock>(spent.Token)).ShouldBeFalse();
+        (await harness.Published.Any<ReserveStock>(spent.Token)).ShouldBeFalse();
+    }
 }
 ```
 
@@ -1908,8 +1909,8 @@ public async Task Commands_are_sent_and_events_are_published()
 >         m => m.Context.MessageId == messageId,
 >         TestContext.Current.CancellationToken))
 >             .ShouldBeTrue(
->                 $"a published {typeof(T).Name} was never consumed, so this barrier "
->                 + "cannot say the next publish is ordered after it");
+>                 $"a published {typeof(T).Name} was never consumed, so this barrier " +
+>                 "cannot say the next publish is ordered after it");
 > }
 > ```
 >
