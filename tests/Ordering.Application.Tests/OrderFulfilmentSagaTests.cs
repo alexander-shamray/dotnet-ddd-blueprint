@@ -168,9 +168,11 @@ public class OrderFulfilmentSagaTests
     /// each deliver one type twice, and a type-level wait would match the first
     /// delivery and return immediately, fencing nothing for exactly the tests
     /// whose subject is a second arrival. They are named rather than counted
-    /// because a count of them is a number nobody re-runs. The id is read off
-    /// the send context rather than the contract because the two differ: a
-    /// scheduled expiry carries no envelope of its own.
+    /// because a count of them is a number nobody re-runs. The send context is
+    /// what is read because it is the handle <em>both</em> kinds of message
+    /// carry — a scheduled expiry has no envelope — and <b>not</b> because a
+    /// contract has an id of its own there: this helper writes the envelope
+    /// onto it, so for a contract the two are one value (§9.1).
     /// </para>
     /// <para>
     /// <b>It costs nothing on a green run</b> — the consume has already
@@ -204,9 +206,13 @@ public class OrderFulfilmentSagaTests
             {
                 // §9.1: body, row, header and inbox key are ONE GUID, and
                 // IIntegrationEvent says so in its own words — the envelope's
-                // value is "THE message id, not a second one". Every other
-                // publisher in this repository writes it, `OutboxDispatcher`
-                // included; a harness that let MassTransit mint its own would
+                // value is "THE message id, not a second one". Every publisher
+                // of a contract in this repository writes it, OutboxDispatcher
+                // included — though that was MADE true rather than found so:
+                // the claim went in as "every other publisher", a reviewer
+                // checked it, and IntegrationEventConsumerTests had three
+                // publishes doing exactly this. They were fixed with this.
+                // A harness that let MassTransit mint its own would
                 // give every event two identities, which is the state that
                 // comment calls easy to write and hard to see. It was written
                 // here, and nothing failed — which is exactly the cost it
@@ -1459,11 +1465,18 @@ public class OrderFulfilmentSagaTests
             // passed against a machine with no branch here until this wait was
             // added, which is the vacuous-pass shape §12.5 keeps warning about.
             //
-            // **`Publish` supplies that wait itself now**, and this line stays
-            // as the assertion it also is: the id being the *contract's* and
-            // the barrier's being the *transport's* are two different claims,
-            // and only this one says a second OrderConfirmed — not a second
-            // delivery of the first — reached the machine.
+            // **`Publish` supplies that wait itself now, and this line is no
+            // longer a second claim.** It was, while the helper let MassTransit
+            // mint its own header: payload id and transport id were different
+            // values, so only this line spoke about the payload. Since the
+            // alignment they are one value (§9.1), and the barrier already
+            // waited on it. Kept as the assertion that the *payload* carries
+            // the duplicate's id — which is what the ConsumeFaults read below
+            // is about to be scoped by — and NOT as a claim that it can tell a
+            // second fact from a second delivery of the first. Nothing here
+            // can: two deliveries of one message share an id by design, which
+            // is §9.5's inbox's problem and the residual the barrier's own
+            // test names.
             OrderConfirmed duplicate = SagaContracts.OrderConfirmed(orderId, Customer);
             await Publish(harness, duplicate);
 

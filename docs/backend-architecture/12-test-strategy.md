@@ -1911,9 +1911,10 @@ public async Task Commands_are_sent_and_events_are_published()
 > kinds of message carry** — not because a contract has a second identity. It
 > has not: §9.1's body, row, header and inbox key are one GUID, and
 > `IIntegrationEvent` says the envelope's value is *the* message id "not a
-> second one". So the helper **writes** it, exactly as `OutboxDispatcher` and
-> every other publisher here does; what it reads back for a contract is the
-> envelope's own value. A saga's scheduled timeouts are not contracts
+> second one". So the helper **writes** it, as `OutboxDispatcher` does; what it
+> reads back for a contract is the envelope's own value. A message with no
+> envelope — a scheduled timeout, or any bare record — needs no such write,
+> which is why the rule is about contracts rather than about publishes. A saga's scheduled timeouts are not contracts
 > (Appendix D) and have no envelope, which is the case the send context covers
 > and the payload cannot.
 >
