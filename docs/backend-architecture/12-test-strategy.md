@@ -1728,7 +1728,12 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     await using ServiceProvider provider = new ServiceCollection()
         .AddMassTransitTestHarness(x =>
         {
-            x.SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(30), testInactivityTimeout: TimeSpan.FromSeconds(10));
+            // 60 and 10, and the ceiling is deliberately six times the bound
+            // meant to fire. 30 is MassTransit's OWN default for testTimeout,
+            // so a sample setting it there states nothing and inherits the
+            // number the trap below is about — this line read 30 while the
+            // suite it specifies ran 60.
+            x.SetTestTimeouts(testTimeout: TimeSpan.FromSeconds(60), testInactivityTimeout: TimeSpan.FromSeconds(10));
             // The same two lines production registers (ADR-021), and they are
             // not optional here: §9.6's Initially arms StockTimeout, so the
             // first OrderPlaced reaches for a scheduler. The in-memory
@@ -1758,9 +1763,21 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     // { OrderId = orderId }` does not compile: the three envelope members are
     // as required as the payload, which is the point of §9.1 declaring them on
     // an interface rather than leaving them to convention.
-    await harness.Bus.Publish(Contracts.OrderPlaced(orderId));
-    await harness.Bus.Publish(Contracts.StockReserved(orderId));
-    await harness.Bus.Publish(Contracts.PaymentDeclined(orderId, "insufficient_funds"));
+    // Publish returns when the message reaches the transport, not when the
+    // saga has consumed it, so each of these waits for the transition the next
+    // one depends on. Three bare publishes here is a race, and the trap below
+    // is what it costs. The suite this specifies puts the wait inside `Publish`
+    // rather than at the call site — also below, and for a reason no sample
+    // written once can show.
+    await Publish(harness, Contracts.OrderPlaced(orderId));
+    (await harness.Sent.Any<ReserveStock>(m => m.Context.Message.OrderId == orderId))
+        .ShouldBeTrue();
+
+    await Publish(harness, Contracts.StockReserved(orderId));
+    (await harness.Sent.Any<AuthorisePayment>(m => m.Context.Message.OrderId == orderId))
+        .ShouldBeTrue();
+
+    await Publish(harness, Contracts.PaymentDeclined(orderId, "insufficient_funds"));
 
     // Sent, not Published — the saga issues these as commands to a single
     // owner (§9.6). The harness tracks the two separately, so asserting on
@@ -1769,11 +1786,11 @@ public async Task Payment_declined_releases_stock_before_cancelling()
         .ShouldBeTrue();
 
     // CancelOrder must not be sent until stock is confirmed released — and
-    // "not yet" needs a point in time to be false *at*. The saga finishing
-    // with PaymentDeclined is that point.
-    (await harness.Consumed.Any<PaymentDeclined>(m => m.Context.Message.OrderId == orderId))
-        .ShouldBeTrue();
-
+    // "not yet" needs a point in time to be false *at*. The `Publish` above
+    // IS that point: it returned only once the saga had consumed
+    // PaymentDeclined, which is why no `Consumed` assertion stands here. It
+    // used to, and the barrier moving into the helper is what retired it.
+    //
     // An already-cancelled token then reads the record as of that point: no
     // wait, no deadline for a late saga to hide inside, and the harness's one
     // shared inactivity token left unspent for the assertion after
@@ -1784,7 +1801,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<CancelOrder>(m => m.Context.Message.OrderId == orderId, asRecorded.Token))
         .ShouldBeFalse();
 
-    await harness.Bus.Publish(Contracts.StockReleased(orderId));
+    await Publish(harness, Contracts.StockReleased(orderId));
 
     // The reason, not just the send. Both exits from Compensating read
     // ctx.Saga.CancelReason (§9.6), so a transition that forgets to set it on
@@ -1809,12 +1826,19 @@ public async Task Commands_are_sent_and_events_are_published()
     // not published. Left on the ordinary token it bills the inactivity
     // timeout on every green run, so it reads the record as of the positive
     // above it instead. See the traps below.
-    ITestHarness harness = await StartHarnessAsync();
+    // The tuple is the helper's shape — it returns the provider too, and the
+    // suite wraps everything below in `await using (provider)`. A bare
+    // `ITestHarness harness = await StartHarnessAsync()` does not compile
+    // against it, which is what this line read until §12.5 was reconciled to
+    // the suite it specifies. The scope is elided here rather than shown: this
+    // is an excerpt, and one line of it cannot open a block the excerpt does
+    // not close.
+    (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
     var orderId = Guid.CreateVersion7();
 
     // Every member of V1.OrderPlaced is `required`, so there is no partial
     // construction to elide — a builder keeps that from filling the test.
-    await harness.Bus.Publish(Contracts.OrderPlaced(orderId));
+    await Publish(harness, Contracts.OrderPlaced(orderId));
 
     (await harness.Sent.Any<ReserveStock>()).ShouldBeTrue();
 
@@ -1824,6 +1848,79 @@ public async Task Commands_are_sent_and_events_are_published()
     (await harness.Published.Any<ReserveStock>(spent.Token)).ShouldBeFalse();
 }
 ```
+
+> **Trap — two consecutive publishes are a race, and losing it fails a
+> different assertion.** `Publish` returns when the message reaches the
+> transport, not when the saga has consumed it, and nothing orders two
+> publishes against each other. So `StockReserved` behind `OrderPlaced` can
+> reach the endpoint before anything has created the instance — discarded in
+> silence, since a non-initial event with no instance is consumed cleanly — or
+> before the instance has reached the state that handles it, which faults. The
+> failure surfaces nowhere near the publish: the test runs on, and the next
+> waiting assertion bills the inactivity bound and reports a command the saga
+> did not send. Measured by forcing the losing order — a scheduled
+> `PaymentAuthorisationExpired` published before `StockReserved` — the
+> compensating `ReleaseStock` is never sent and the assertion returns after
+> 10.1 s, which is the shape CI reported on a merge commit.
+
+> **Put the wait inside the publish helper, not at the call sites.** Per-site
+> waits are the obvious fix and they fail open: the test that forgets one is
+> the test that flakes, and it flakes on a loaded runner and nowhere else.
+> Measured here — the first occurrence was fixed by interleaving waits into
+> the single test that had failed, twenty unfenced publishes remained across
+> fourteen of the suite's twenty-seven harness tests, and the very run that
+> merged the fix went red on the next one. A helper that publishes and then
+> waits for **that message** to be consumed leaves nothing to forget, which is
+> the argument the assembly-wide parallelisation attribute won over a shared
+> collection. **On its own id, not its type**: a suite that delivers one type
+> twice — a redelivery, a duplicate — would otherwise match the first
+> delivery and fence nothing, silently. It costs nothing on a green run,
+> because the consume it waits for is the one already happening; what it
+> spends the inactivity bound on is a message no consumer takes, which is a
+> real defect reported where it occurs rather than four assertions later.
+>
+> ```csharp
+> private static async Task Publish<T>(ITestHarness harness, T message)
+>     where T : class
+> {
+>     Guid? messageId = null;
+>     await harness.Bus.Publish(
+>         message,
+>         context => messageId = context.MessageId,
+>         TestContext.Current.CancellationToken);
+>
+>     messageId.ShouldNotBeNull();
+>
+>     (await harness.Consumed.Any<T>(
+>         m => m.Context.MessageId == messageId,
+>         TestContext.Current.CancellationToken))
+>             .ShouldBeTrue($"a published {typeof(T).Name} must reach the saga first");
+> }
+> ```
+>
+> The id is read off the **send context** and not the contract, because the two
+> are different ids and only one exists for every message: §9.1's envelope gives
+> a contract its own `MessageId`, and a saga's scheduled timeouts are not
+> contracts (Appendix D) and carry no envelope at all. Leave it unset and the
+> comparison becomes `null == null`, which matches the first consume of the type
+> and quietly restores the defect — so assert it before waiting on it.
+>
+> **A fault releases the barrier too, and that is correct rather than a hole.**
+> The harness records a delivery whether the pipeline returned or threw, so an
+> event the machine has no branch for satisfies this wait as readily as one it
+> handles. The barrier is about **ordering** and never about outcome; a test
+> whose subject is the outcome reads `Consumed.Select<T>(spent).Exception`, as
+> the callout further down insists. What the wait cannot be satisfied by is a
+> message **no consumer takes at all**, which is the case worth the ten seconds.
+
+> **A barrier is only ever observed working, so give it a test whose subject is
+> the barrier.** Every other test in a saga suite stays green with the wait
+> removed — on an unloaded machine, which is every machine a developer has.
+> The one that does not is a test that publishes and then reads the record **as
+> of now**, on a cancelled token, asserting the transition's command is
+> already there. That is false the moment the helper stops waiting, and false
+> again if it waits on the type instead of the id — both observed red before
+> the fix was trusted.
 
 > **Trap — the harness gives up after 1.2 seconds, and the timeout named
 > `TestTimeout` is not the one that says so.** An `Any(…)` ends at the
@@ -1866,23 +1963,25 @@ public async Task Commands_are_sent_and_events_are_published()
 > synchronous `Select` overload is no escape: it waits on the same token.
 
 > **So a mid-test negative should not wait at all.** Give "not yet" a point in
-> time to be false at — a positive assertion that the triggering message has
-> been consumed — then read the record as of that point with an
-> already-cancelled token. Measured at the pin, it returns `false` for what is
-> absent and `true` for what is present, both immediately, and leaves the
-> shared token unspent for the assertion that follows. A *deadline* is the
-> wrong tool and fails open: a window is something a late-sending saga fits
-> inside, and the later positive would then accept the very command the
-> negative was there to forbid. A negative that is its test's last assertion
-> *may* simply wait — nothing after it is poisoned — but "may" is not "should",
-> and the second sample above is the case that showed why. It used to wait for
-> a publish the test's own subject guarantees will never come, so the wait was
-> the full inactivity bound, every run, for an answer already known; it now
-> reads the record like every other negative here. **Use the cancelled token
-> for every negative and the question stops arising.** PR-21's suite reached
-> its second review still paying that ten seconds under a comment claiming it
-> never did — and removing it took the suite from twelve seconds to two, which
-> is the measurement that priced the habit.
+> time to be false at — which, where the negative follows a message the test
+> published, the fencing `Publish` above has already supplied, since it returns
+> only once that message has been consumed. Elsewhere it is a positive assertion
+> the test makes for itself. Either way, read the record as of that point with
+> an already-cancelled token. Measured at the pin, it returns `false` for what
+> is absent and `true` for what is present, both immediately, and leaves the
+> shared token unspent for the assertion that follows. A *deadline* is the wrong
+> tool and fails open: a window is something a late-sending saga fits inside,
+> and the later positive would then accept the very command the negative was
+> there to forbid. A negative that is its test's last assertion *may* simply
+> wait — nothing after it is poisoned — but "may" is not "should", and the
+> second sample above is the case that showed why. It used to wait for a publish
+> the test's own subject guarantees will never come, so the wait was the full
+> inactivity bound, every run, for an answer already known; it now reads the
+> record like every other negative here. **Use the cancelled token for every
+> negative and the question stops arising.** PR-21's suite reached its second
+> review still paying that ten seconds under a comment claiming it never did —
+> and removing it took the suite from twelve seconds to two, which is the
+> measurement that priced the habit.
 
 > **`Consumed` says a message arrived and never what happened to it.** The
 > harness records the delivery whether the pipeline returned or threw, so
