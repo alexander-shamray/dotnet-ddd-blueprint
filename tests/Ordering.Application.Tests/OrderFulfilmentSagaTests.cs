@@ -1976,7 +1976,8 @@ public class OrderFulfilmentSagaTests
             .ShouldBeEmpty(
                 "every event this machine declares must be receivable in at least one state. " +
                 "One that is receivable nowhere is a binding on the saga's queue with no " +
-                "transition behind it, which §9.6 sends to the error queue on first delivery.");
+                "transition behind it, which faults on every delivery and reaches the error " +
+                "queue once §9.8's five retries are spent.");
     }
 
     /// <summary>
