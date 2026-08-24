@@ -157,10 +157,10 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Those are the runner's numbers, and `--list-tests` gives different ones.**
 > Discovery reports 82 for that project where execution reports 81, so a
 > partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 884 is summed from `dotnet test` output, and mixing the two is how
+> here — the 885 is summed from `dotnet test` output, and mixing the two is how
 > this callout first came to claim 72 and 82. Quote what ran.
 >
-> Across the solution the split is **696 and 188 of 884**, and the fast half
+> Across the solution the split is **697 and 188 of 885**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -196,7 +196,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **678** and **188**, summing to the 884 the
+on this repository they are **18**, **679** and **188**, summing to the 885 the
 whole suite runs — which is the arithmetic the callout below asks for.
 
 ```bash
@@ -227,8 +227,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 696 and 188 summing to
-> 884 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 697 and 188 summing to
+> 885 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.
@@ -336,14 +336,19 @@ either, which is why it is what ships.
 > and is the wrong one: it relaxes an architecture rule everywhere, for ever,
 > and in every service the scaffold renders, to accommodate a test tool. The
 > gates run first and uninstrumented instead. The two filters are exhaustive
-> and disjoint, so the counts still sum to the whole suite — **18 and 794**.
+> and disjoint, so the counts still sum to the whole suite — **18 and 867**.
 >
 > **That pair had gone stale before PR-25 touched it, and reconciling it is
 > the one rule rather than tidying.** It read 16 and 760, which sums to 776 —
 > neither the 794 that preceded PR-25's branch nor the 795 that followed it.
-> Both of those are history and neither is the suite today; the 794 one line
-> up is a live figure that happens to collide with one of them. The figures
-> above are measured rather than remembered, and the split this
+> It then read 18 and 794 for as long as the suite kept growing past 812, which
+> is the same failure one repair later: a pair restated beside a total it is
+> not derived from goes stale on the total's clock, not its own.
+> All three of those are history and none is the suite today. **The clause
+> that stood here named a live 794 colliding with a historical one, and the
+> repair that moved the pair to 18 and 867 made both of them history** — so
+> the collision it warned about no longer has two sides. The figures above are
+> measured rather than remembered, and the split this
 > callout describes is the *first* seam of the three; `pipeline_gate.py stages`
 > is what asserts all three still partition the suite.
 
