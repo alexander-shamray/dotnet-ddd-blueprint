@@ -739,9 +739,23 @@ repetition, and Inventory owes two guarantees for it:
    a release that finds nothing to release publishes exactly as one that frees a
    reservation does.
 2. **A release for an order whose `ReserveStock` has not arrived is
-   remembered**, and the `ReserveStock` that follows it is refused with
-   `StockReservationFailed` rather than creating a reservation nobody is waiting
-   for.
+   remembered**, and the `ReserveStock` that follows it is refused rather than
+   creating a reservation nobody is waiting for. **The refusal answers with
+   `StockReleased`**, because that is what it establishes — no stock is held
+   for this order — which is the same postcondition guarantee 1 reports and
+   needs no new member in the vocabulary.
+
+> **`StockReservationFailed` is the obvious answer and cannot carry it.** That
+> event means an out-of-stock decision and requires `UnavailableProductIds`
+> ([§9.1](09-messaging.md)); a reserve refused because the order was already
+> released has **no** unavailable products, so the producer would have no
+> truthful payload and every consumer would read a stock shortage that did not
+> happen. Answering with `StockReleased` follows from guarantee 1 rather than
+> being a second decision: once the event reports a postcondition instead of a
+> state change, the refused reserve and the no-op release are reporting the
+> same fact. The alternative — a new event, or a `Reason` on
+> `StockReservationFailed` — is a [§9.2](09-messaging.md) contract addition
+> this ADR does not need.
 
 Both are stated in [§3.2](03-bounded-contexts.md) beside Inventory's row. They
 are commitments on a service that does not exist yet, which is the cheapest
@@ -788,11 +802,22 @@ that still has both facts.
 **Consequences.**
 
 **Inventory carries a tombstone, and it is not free.** A release for an unknown
-order is a row that must persist long enough to meet a `ReserveStock` delayed by
-[§9.4](09-messaging.md)'s backoff ladder — which runs to 635 seconds on the
-eighth attempt — and be reaped afterwards. That is the same retention question
+order is a row that must persist long enough to meet the `ReserveStock` it is
+waiting for, and be reaped afterwards. That is the same retention question
 [§9.5](09-messaging.md)'s inbox already answers for itself, and Inventory's PR
 inherits it rather than inventing it.
+
+> **The bound is the order's lifetime, not a figure off the retry ladder**, and
+> quoting the ladder is how this paragraph first got it wrong. It cited 635
+> seconds as though that were the far end; 635 is the *seventh* failure's
+> cumulative wait, `OutboxDispatcher.MaxAttempts` is **10**, and the eighth and
+> ninth land near 1,275 and 2,555 seconds — some three quarters of an hour
+> before the row may be reaped, with broker backlog on top of that and no bound
+> of its own. A tombstone reaped on the ladder's midpoint lets a late
+> `ReserveStock` recreate exactly the reservation this ADR exists to prevent,
+> which makes the retention a correctness property rather than housekeeping.
+> **A horizon derived from one term of a ladder is a horizon that expires
+> mid-ladder.**
 
 **The saga may absorb a `StockReleased` that overtakes its own cancellation.**
 Inventory consumes `OrderCancelled` directly ([§3.2](03-bounded-contexts.md)),

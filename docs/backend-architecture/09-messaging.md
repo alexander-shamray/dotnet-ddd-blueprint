@@ -2933,14 +2933,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 >
 > **Left unwritten, three of the four are a race the retry envelope usually
 > wins, and the fourth is a race it cannot win.** §9.8 gives the endpoint five
-> attempts over roughly seventy seconds, and a later attempt normally finds the
-> instance moved to `Compensating`, so the event is delivered late rather than
-> lost. `Confirmed`'s cancellation branch **finalises**, so by the second
-> attempt there is no instance — and an event correlating to none is consumed
+> retries over roughly seventy seconds — six deliveries counting the first —
+> and a later one normally finds the instance moved to `Compensating`, so the
+> event is delivered late rather than lost. `Confirmed`'s cancellation branch
+> **finalises**, so by the second delivery there is no instance — and an event
+> correlating to none is consumed
 > cleanly. **That door is therefore silent rather than loud**: one fault, then
-> clean acks and a discarded release, with nothing on §13.6's pager unless the
-> cancellation is still unconsumed after all five attempts, which is the same
-> backlog condition the other three have.
+> a clean ack on the redelivery and a discarded release — one ack rather than a
+> series, because a retry pipeline stops at its first success. Nothing reaches
+> §13.6's pager unless the cancellation is still unconsumed through the first
+> delivery and all five retries, which is the same backlog condition the other
+> three have.
 >
 > It was also the door
 > [#129](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/129)

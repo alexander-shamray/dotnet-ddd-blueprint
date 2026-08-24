@@ -112,9 +112,10 @@ follows with `StockReservationFailed`.
 branch sends a release. `Confirmed`'s branch deliberately sends none, and
 Inventory releases on `OrderCancelled` regardless (§3.2), so the derived event
 arrives there too. **And there the retry discards where elsewhere it
-rescues**: the other three are races §9.8's five attempts usually win by
-finding the instance moved to `Compensating`, while `Confirmed`'s branch
-finalises, so the second attempt finds no instance — and an event correlating
+rescues**: the other three are races §9.8's five retries — six deliveries with
+the first — usually win by finding the instance moved to `Compensating`, while
+`Confirmed`'s branch finalises, so the second delivery finds no instance — and
+an event correlating
 to none is consumed cleanly. That door is **silent**, not loud, which is a
 better argument for writing it than the one first drafted here: the release is
 lost with one fault behind it and nothing on the pager.

@@ -22,7 +22,9 @@ public sealed record ReserveStock(Guid OrderId, IReadOnlyList<StockLine> Lines);
 /// Two guarantees follow and neither is visible in the record: it always
 /// publishes <c>StockReleased</c>, and a release for an order Inventory has
 /// seen no reserve for is <b>remembered</b>, so the reserve that follows is
-/// refused with <c>StockReservationFailed</c>. §9.6's saga leans on the first
+/// refused and answered with <c>StockReleased</c> — the same postcondition,
+/// and not <c>StockReservationFailed</c>, which reports unavailable products
+/// this refusal does not have. §9.6's saga leans on the first
 /// in the three states that send this command; the fourth state that absorbs
 /// an early release sends none and leans on the event's other producer
 /// instead.

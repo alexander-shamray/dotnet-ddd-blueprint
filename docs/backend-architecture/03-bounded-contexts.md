@@ -126,11 +126,14 @@ two guarantees, both recorded in
   reports the postcondition — no stock is held for this order — rather than a
   state change, so the sender gets an answer whatever the prior state was.
 - **A `ReleaseStock` for an order whose `ReserveStock` has not arrived is
-  remembered**, and the `ReserveStock` that follows is refused with
-  `StockReservationFailed`. [§9.4](09-messaging.md) orders nothing between two
-  deliveries, so a cancellation can reach Inventory before the reservation it
-  undoes; without this the reserve creates a hold for an order that is already
-  cancelled and nobody is left waiting to notice.
+  remembered**, and the `ReserveStock` that follows is refused — answering with
+  `StockReleased`, the same postcondition, rather than with
+  `StockReservationFailed`, which means an out-of-stock decision and requires
+  `UnavailableProductIds` a refusal of this kind does not have.
+  [§9.4](09-messaging.md) orders nothing between two deliveries, so a
+  cancellation can reach Inventory before the reservation it undoes; without
+  this the reserve creates a hold for an order that is already cancelled and
+  nobody is left waiting to notice.
 
 **A pair of cells does not state a derivation either, and that is the same gap
 one message over.** `OrderCancelled` sits in Inventory's Consumes column and

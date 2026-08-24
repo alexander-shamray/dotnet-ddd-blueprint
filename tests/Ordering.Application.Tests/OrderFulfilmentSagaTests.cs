@@ -1484,8 +1484,9 @@ public class OrderFulfilmentSagaTests
 
             // The claim the branch exists for. Before this change AwaitingStock
             // declared nothing for StockReleased, so the arrival raised
-            // UnhandledEventException and spent §9.8's five attempts — about
-            // seventy seconds — hoping the cancellation would land first.
+            // UnhandledEventException and spent §9.8's five retries — six
+            // deliveries over about seventy seconds — hoping the cancellation
+            // would land first.
             //
             // Consumed says only that it arrived: the harness records a
             // delivery whether the pipeline returned or threw, so every

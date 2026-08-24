@@ -276,11 +276,14 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // guess about a peer; it is a bound on two mechanisms in this
         // repository, and the smaller of them is not the one that decides it.
         //
-        // §9.8's retry on ordering-commands is five attempts at
-        // Exponential(1s, 1min, delta 2s). **That is about seventy seconds in
-        // total, not five minutes** — this comment read "five attempts backing
-        // off to a minute apiece", which prices every interval at the cap the
-        // ladder never reaches.
+        // §9.8's retry on ordering-commands is five RETRIES at
+        // Exponential(1s, 1min, delta 2s) — six deliveries counting the first,
+        // which is what §9.6 says two thousand lines away and what this said
+        // "five attempts" for. **The waiting is about seventy seconds in
+        // total, not five minutes**: five retries are five intervals whatever
+        // the deliveries are numbered, and this comment read "five attempts
+        // backing off to a minute apiece", which prices every interval at the
+        // cap the ladder never reaches.
         //
         // **The term that actually decides this is §9.4's dispatcher**, and
         // the earlier revision credited its 500ms POLL, which is the one
@@ -458,8 +461,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // has not consumed yet — the race the branch above names, written
             // out (#129).** Left unwritten it faults: the state declares no
             // branch, so MassTransit raises UnhandledEventException and §9.8's
-            // five attempts get about seventy seconds to find the instance in
-            // Compensating. Usually they do. A backlog on this queue outlasts
+            // five retries — six deliveries with the first — get about seventy
+            // seconds to find the instance in Compensating. Usually they do. A backlog on this queue outlasts
             // that ladder, and then the release lands in the error queue §13.6
             // pages on WHILE the instance waits out ReleaseTimeout and files a
             // stock_not_released review for stock that came back an hour
@@ -817,13 +820,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // the second attempt there is no instance — and a non-initial event
             // correlating to none is consumed cleanly, measured above and
             // pinned by a test. So the unwritten door is SILENT rather than
-            // loud: one fault, then four clean acks and a discarded release.
+            // loud: one fault, then a clean ack on the redelivery and a
+            // discarded release. **One ack, not four** — a retry pipeline
+            // stops at its first success, so the remaining retries are never
+            // made rather than being made cleanly.
             //
             // **It is not free, and "faulting would page" was the wrong
             // reason.** Nothing reaches the error queue unless the
-            // cancellation is still unconsumed after all five attempts — the
-            // same backlog condition the AwaitingStock comment states, no
-            // sharper here. What the line actually buys is that the FIRST
+            // cancellation is still unconsumed through the first delivery and
+            // all five retries — the same backlog condition the AwaitingStock
+            // comment states, no sharper here. What the line actually buys is that the FIRST
             // delivery is clean, on every cancellation of a confirmed order,
             // instead of burning a retry on a transition that cannot exist.
             //
