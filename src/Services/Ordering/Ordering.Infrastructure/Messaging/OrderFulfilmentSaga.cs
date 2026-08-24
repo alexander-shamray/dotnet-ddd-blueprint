@@ -813,8 +813,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // that is the difference from the other three doors.** Elsewhere a
             // later attempt finds the instance moved to Compensating and the
             // transition runs, so the event is delivered late rather than
-            // lost. The OrderCancelled branch below FINALISES, so by the
-            // second attempt there is no instance — and a non-initial event
+            // lost. This state's own When(OrderCancelled) FINALISES, so by
+            // the second attempt there is no instance — and a non-initial event
             // correlating to none is consumed cleanly, measured above and
             // pinned by a test. So the unwritten door is SILENT rather than
             // loud: one fault, then four clean acks and a discarded release.
@@ -839,9 +839,15 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // reservation.** Inventory releases off OrderCancelled regardless,
             // so this arrival is the stock coming back for an order a picker
             // may still be working. The saga has no way to raise that —
-            // cancelled_after_confirmation on the branch below is the row an
-            // operator works it from, and #141 is the §3.2 question behind
-            // it.
+            // cancelled_after_confirmation on this state's When(OrderCancelled)
+            // is the row an operator works it from, and #141 is the §3.2
+            // question behind it.
+            //
+            // **Named rather than pointed at, because both sentences said
+            // "the branch below" and it is above** — Ignore(OrderConfirmed)
+            // sits between them. The same false pointer the commit before
+            // this one closed one state over, which is the argument for
+            // naming a transition instead of its direction.
             Ignore(StockReleased));
 
         During(
