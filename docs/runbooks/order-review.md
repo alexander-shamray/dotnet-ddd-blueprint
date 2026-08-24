@@ -438,9 +438,18 @@ heading and then explained two paragraphs down that there would not be one.
    table.
    - **Gone** — the ordinary case, but it does **not** by itself prove the
      stock came back. `Compensating` has two exits and both finalise:
-     `StockReleased`, which is the reservation actually released, and the
-     ten-minute `ReleaseTimeout`, which gives up on it and raises a
-     `stock_not_released` row. **Check for that second row before deciding
+     `StockReleased`, and the ten-minute `ReleaseTimeout`, which gives up on
+     it and raises a `stock_not_released` row.
+
+     **`StockReleased` is not proof that a reservation was released**, and
+     this branch read "the reservation actually released" until
+     [ADR-024](../backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+     made that false. It reports a postcondition — Inventory holds no stock
+     for this order — so it is published for a release that found nothing and
+     for a reserve refused against the tombstone, neither of which freed
+     anything. As evidence it is worth exactly "Inventory says no stock is
+     held", which is what an operator needs and is a weaker claim than a
+     state change. **Check for that second row before deciding
      stock needs nothing** — if it is there, the reservation may still be
      held and [that section](#stock_not_released) is the procedure.
 
