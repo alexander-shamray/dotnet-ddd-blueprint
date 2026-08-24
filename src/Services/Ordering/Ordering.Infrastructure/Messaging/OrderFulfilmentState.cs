@@ -47,6 +47,55 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     /// </summary>
     public string CancelReason { get; set; } = null!;
 
+    /// <summary>
+    /// An <c>AuthorisePayment</c> has been sent and no verdict has come back.
+    /// Set where that command is sent, cleared by the first
+    /// <c>PaymentAuthorised</c> or <c>PaymentDeclined</c> to arrive in any
+    /// state.
+    /// </summary>
+    /// <remarks>
+    /// <b>A timeout does not clear it, and that is the whole point of the
+    /// field.</b> §9.6 waits fifteen minutes for a verdict and then
+    /// compensates, but a slow PSP has not answered — it has merely not
+    /// answered <i>yet</i>, and the authorisation it is still holding is
+    /// exactly the money
+    /// <c>payment_authorised_during_compensation</c> exists to escalate. So
+    /// the timeout ends the <i>wait</i> and not the <i>obligation</i>, which
+    /// is why the two are separate facts rather than one.
+    /// <para>
+    /// <b>It cannot be derived from the state, which is why it is stored.</b>
+    /// <c>Compensating</c> is reached five ways and the answer differs by
+    /// route: from <c>AwaitingStock</c> nothing was ever authorised, from
+    /// <c>AwaitingConfirmation</c> the verdict already landed, and from
+    /// <c>AwaitingPayment</c> it depends on whether a decline, a timeout or a
+    /// cancellation brought it there. A state name carries one of those
+    /// answers and the instance has to carry the rest.
+    /// </para>
+    /// </remarks>
+    public bool PaymentVerdictOutstanding { get; set; }
+
+    /// <summary>
+    /// The compensation's stock half has come to rest — either
+    /// <c>StockReleased</c> arrived or <c>ReleaseTimeout</c> gave up on it and
+    /// raised <c>stock_not_released</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Read with <see cref="PaymentVerdictOutstanding"/> and never alone.</b>
+    /// <c>Compensating</c> finalises when both halves are settled, and either
+    /// one may land first, so each exit has to ask about the other rather
+    /// than assume it is last
+    /// (<a href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/124">#124</a>).
+    /// <para>
+    /// <b>The release token is not a substitute for it.</b>
+    /// <see cref="ReleaseTimeoutTokenId"/> is cleared by <c>Unschedule</c> on
+    /// the <c>StockReleased</c> exit and left standing on the timeout's own,
+    /// so a null test answers for one settled route and not the other — an
+    /// inference over a field kept for a different purpose, which is how it
+    /// would come to be read as a general one.
+    /// </para>
+    /// </remarks>
+    public bool StockReleaseSettled { get; set; }
+
     // One token per schedule — Unschedule needs the specific token, so two
     // waits cannot share a field.
     //

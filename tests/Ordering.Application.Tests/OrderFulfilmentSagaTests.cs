@@ -1241,6 +1241,232 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public async Task A_release_does_not_finalise_while_Payments_still_owes_a_verdict()
+    {
+        // **#124, and the interleaving is the ordinary one rather than the
+        // exotic one.** The test above drives the authorisation before the
+        // release; this drives them the other way round, which is what
+        // happens whenever Inventory answers promptly and the PSP is slow —
+        // the expected case, not the degenerate one.
+        //
+        // Under the unconditional Finalize this branch replaces, the release
+        // ended the saga, SetCompletedWhenFinalized deleted the instance, and
+        // the authorisation still in flight then correlated to nothing:
+        // consumed cleanly, no review row, nothing on §13.6's pager. The two
+        // outstanding results come from two services with §9.4 ordering
+        // nothing between them, so neither order may be assumed.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            // Inventory answers first. The order is cancelled on this
+            // transition — that command does not wait on Payments — but the
+            // instance is held, because the authorisation can still land.
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.CustomerRequest))
+                    .ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            // **The assertion the defect turned on.** Before this change the
+            // instance was gone by here, and everything below was unreachable.
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "auth-after-release"));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.PaymentAuthorisedDuringCompensation))
+                    .ShouldBeTrue();
+
+            // And now both halves are settled, so the saga ends. Holding the
+            // instance open is the mechanism, not the outcome — a saga that
+            // never finalised would trade a silent loss for §13.6's
+            // unfinalised-saga alert firing on every cancelled order.
+            (await saga.NotExists(orderId)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_cancellation_with_no_authorisation_outstanding_still_finalises_on_the_release()
+    {
+        // The counterfactual for the test above, and the one that says the
+        // join did not simply make every compensation hang. Cancelling in
+        // AwaitingStock means AuthorisePayment was never sent, so nothing is
+        // owed and the release ends the saga exactly as it did before #124 —
+        // the conditional Finalize is a condition, not a delay.
+        //
+        // This is also the shape every pre-existing compensation test takes,
+        // which is why they all stayed green: the join only changes the two
+        // doors that arrive owing a verdict.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            (await Sent<CancelOrder>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_verdict_that_never_arrives_bounds_the_wait_and_escalates_nothing()
+    {
+        // **The bound, and the reason it raises no review row.** Holding the
+        // instance for a verdict needs something that ends the hold when none
+        // comes, or a slow PSP parks the saga for ever and §13.6's
+        // unfinalised-saga alert pages instead.
+        //
+        // No FlagOrderForReview, and that is a decision rather than an
+        // omission: §3.2 has Payments consuming OrderCancelled, so an
+        // authorisation abandoned on a cancelled order is what SHOULD happen.
+        // A row here would escalate the healthy path — one per cancelled
+        // order the PSP correctly dropped. The escalation belongs where the
+        // money actually moved, which the test above drives.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            // The wait armed when AuthorisePayment was sent, and deliberately
+            // NOT unscheduled by the cancellation branch — this arrival is
+            // what that absence is for.
+            await Publish(harness, new PaymentAuthorisationExpired(orderId));
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+
+            // Read as of now, after a Publish that returned only once the saga
+            // had consumed the message — so "not yet" has a point in time to
+            // be false at.
+            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task A_decline_after_the_release_settles_the_join_without_escalating()
+    {
+        // A decline is an ANSWER, which is the half that changed. It still
+        // raises nothing — no money moved, which is the outcome compensation
+        // was heading for anyway — but it now discharges the obligation the
+        // cancellation carried in, and the saga ends on it. While this was an
+        // Ignore, a declined authorisation left the instance waiting out the
+        // full payment window for a verdict that had already arrived.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            // **This line is what makes the test a guard rather than a
+            // description**, and it was added after measuring: without it the
+            // test passed against the unconditional Finalize too, because a
+            // decline reaching no instance is discarded and "no instance, no
+            // review row" reads identically from both sides. The instance has
+            // to be observed alive at the moment the decline arrives for the
+            // assertions below to be about this branch at all.
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            await Publish(harness, SagaContracts.PaymentDeclined(orderId, "do_not_honour"));
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+
+            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task A_release_timeout_holds_the_instance_while_a_verdict_is_outstanding()
+    {
+        // #124 names this exit as having the same hole, and it does: giving up
+        // on the release settles the stock half exactly as StockReleased does,
+        // so it asks the same question about the other one. "Settled" means
+        // come to rest rather than succeeded — this branch escalates
+        // stock_not_released and the instance stays for the verdict, so one
+        // order can carry both rows.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+            await Publish(harness, new StockReleaseExpired(orderId));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.StockNotReleased))
+                    .ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "auth-after-timeout"));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.PaymentAuthorisedDuringCompensation))
+                    .ShouldBeTrue();
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
     public async Task A_cancellation_after_confirmation_escalates_rather_than_compensating()
     {
         // A cancellation this machine cannot compensate ITSELF: the card is
@@ -1775,20 +2001,30 @@ public class OrderFulfilmentSagaTests
             // OrderConfirmed still outstanding — the customer cancelled while
             // the aggregate's own confirmation was in flight.
             nameof(saga.OrderConfirmed),
-            $"{nameof(saga.ReleaseTimeout)}.Received"
+            $"{nameof(saga.ReleaseTimeout)}.Received",
+
+            // #124's addition, and it moved across this partition rather than
+            // being new. It sat in the list below on the argument that "the
+            // transitions that enter this state unschedule it" — true of four
+            // doors and never of the fifth: cancelling from AwaitingPayment
+            // arrives here with Payments still owing a verdict, and that
+            // branch now deliberately leaves the wait armed so something
+            // bounds how long the instance is held for one. The timeout door
+            // re-arms it for the same reason. This is the exit that ends that
+            // wait.
+            $"{nameof(saga.PaymentTimeout)}.Received"
         ];
 
         // Not reachable in Compensating, and each for a stated reason rather
         // than by omission: OrderPlaced only creates an instance,
         // ShipmentDispatched and the despatch timeout belong to Confirmed,
-        // and the stock, payment and confirmation timeouts are unscheduled by
-        // the transitions that enter this state.
+        // and the stock and confirmation timeouts are unscheduled by the
+        // transitions that enter this state.
         string[] notReachableHere =
         [
             nameof(saga.OrderPlaced),
             nameof(saga.ShipmentDispatched),
             $"{nameof(saga.StockTimeout)}.Received",
-            $"{nameof(saga.PaymentTimeout)}.Received",
             $"{nameof(saga.ConfirmationTimeout)}.Received",
             $"{nameof(saga.DespatchTimeout)}.Received"
         ];
@@ -2059,26 +2295,66 @@ public class OrderFulfilmentSagaTests
         //
         // That default is what makes OrderCancelled's explicit Discard cheap
         // — it states the routine echo rather than changing anything — and it
-        // is also what makes the two races in #123 and #124 silent rather
-        // than loud. Pinning it here means the day a MassTransit upgrade
-        // changes the default, this suite says so instead of the residual
-        // quietly closing itself.
+        // is what left #123 silent. Pinning it here means the day a
+        // MassTransit upgrade changes the default, this suite says so instead
+        // of the residual quietly closing itself.
+        //
+        // **The subject used to be PaymentAuthorised and had to move**, which
+        // is worth recording rather than quietly rewriting: that event now
+        // configures OnMissingInstance(Fault) precisely because the default
+        // was wrong for it (#124), so continuing to measure the default
+        // through it would have measured the override instead. StockReleased
+        // is the honest replacement — ADR-024 has Inventory publish it for
+        // every release including a no-op one, so reaching a finalised
+        // instance is its ORDINARY case rather than an anomaly, and the
+        // default is what this machine wants for it.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
             var orphan = Guid.CreateVersion7();
 
-            await Publish(harness, SagaContracts.PaymentAuthorised(orphan, "auth-1"));
+            await Publish(harness, SagaContracts.StockReleased(orphan));
+
+            (await Consumed<StockReleased>(harness, m => m.OrderId == orphan)).ShouldBeTrue();
+
+            ConsumeFaults<StockReleased>(harness).ShouldAllBe(e => e == null);
+
+            // And nothing was sent, which is the half that matters: no
+            // transition ran, so the machine did not merely stay quiet about
+            // the event, it never saw it.
+            (await NotYetSent<CancelOrder>(harness, m => m.OrderId == orphan)).ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task An_authorisation_for_an_order_with_no_instance_faults_rather_than_vanishing()
+    {
+        // **The half of #124 the join above cannot reach, and the reason it
+        // is a separate mechanism.** PaymentVerdictOutstanding keeps the
+        // instance alive while a verdict can still arrive; this covers the
+        // arrival that comes after the machine has stopped waiting — past the
+        // bound, or for an order whose saga finalised down some other branch.
+        //
+        // The distinction that makes the override safe is provenance, not
+        // timing: Payments produces PaymentAuthorised, so it can never be
+        // Ordering's own echo of a command it sent. Every other event whose
+        // missing instance is routine — OrderCancelled, StockReleased — is
+        // either this service's echo or ADR-024's postcondition, and both
+        // keep the silent default the test above pins.
+        //
+        // What is asserted is the FAULT, because that is what puts the
+        // arrival on §13.6's pager. The money still moved; the change is that
+        // somebody is told.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orphan = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.PaymentAuthorised(orphan, "auth-orphan"));
 
             (await Consumed<PaymentAuthorised>(harness, m => m.OrderId == orphan)).ShouldBeTrue();
 
-            ConsumeFaults<PaymentAuthorised>(harness).ShouldAllBe(e => e == null);
-
-            // And nothing was escalated, which is the half that matters: the
-            // Compensating transition one state over exists precisely to turn
-            // this event into a review row, and it cannot run for an instance
-            // that is gone.
-            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orphan)).ShouldBeFalse();
+            ConsumeFaults<PaymentAuthorised>(harness).ShouldContain(e => e != null);
         }
     }
 
