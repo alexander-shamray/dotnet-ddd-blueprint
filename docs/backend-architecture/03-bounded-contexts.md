@@ -115,6 +115,32 @@ self-edge, which is a simplification rather than a claim: the collaboration is
 real, it is asynchronous like every other, and it obeys the same rule that the
 return leg is an event.
 
+**A cell names a message; it does not say what the message means when there is
+nothing to do.** `ReleaseStock` is where that gap was load-bearing, and it is
+now closed here rather than assumed in the saga that sends it. Inventory owes
+two guarantees, both recorded in
+[ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation):
+
+- **A `ReleaseStock` always publishes `StockReleased`**, including for a
+  reservation that was never held or has already been released. The event
+  reports the postcondition — no stock is held for this order — rather than a
+  state change, so the sender gets an answer whatever the prior state was.
+- **A `ReleaseStock` for an order whose `ReserveStock` has not arrived is
+  remembered**, and the `ReserveStock` that follows is refused with
+  `StockReservationFailed`. [§9.4](09-messaging.md) orders nothing between two
+  deliveries, so a cancellation can reach Inventory before the reservation it
+  undoes; without this the reserve creates a hold for an order that is already
+  cancelled and nobody is left waiting to notice.
+
+> **Both guarantees exist because the saga's only alternative to an answer is a
+> pager.** [§9.6](09-messaging.md)'s `Compensating` leaves either on
+> `StockReleased` or on a ten-minute timeout that raises a
+> `stock_not_released` review for a human. `StockReservationFailed` reaches
+> that state having proved no reservation was ever taken, so under the other
+> reading the *routine* path escalates, naming stranded stock that does not
+> exist. This is a rule about a service nobody has written, which is exactly
+> when it is cheapest to write down.
+
 Note the shapes this produces. **Shipping** and **Notifications** expose no
 public write API at all — they are pure event consumers. **Notifications** is
 the simplest possible service and the last one built, and those two facts are
