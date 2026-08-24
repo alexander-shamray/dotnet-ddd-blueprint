@@ -107,18 +107,24 @@ projection on the write path since PR-20, so a primary-key lookup against a
 table in the same database was never the cross-service join the sentence was
 about.
 
-### One claim, seven sites, three sweeps that each verified clean
+### One claim, and every sweep that verified clean before it was
 
-The narrowing this PR needed — *no price row* means Catalog has never priced
-the product in the asked-for currency, not that a `ProductPublished` failed to
-arrive — took four commits to apply, and each intermediate sweep was verified
-before being called done:
+**No count in this heading, deliberately.** It carried one — *seven sites,
+three sweeps* — and both figures were stale within two review rounds, in the
+one section of this log whose whole subject is a claim that kept being
+restated. The predicate is what generalises; the tally was never the lesson.
+
+The narrowing this PR needed — *no price row* means this service holds no price
+for the product in the asked-for currency, not that a `ProductPublished` failed
+to arrive — took several commits to apply, and **each intermediate sweep was
+verified before being called done**:
 
 | Sweep | What was searched | What it missed |
 |---|---|---|
-| 1 | The review's own list of sites | Three siblings the report did not name |
+| 1 | The review's own list of sites | Siblings the report did not name |
 | 2 | `grep … src/ docs/` | `tests/`, excluded by the scope rather than the pattern |
 | 3 | `grep 'never published'` | A site where the phrase **wraps across a newline** |
+| 4 | Three named files | A fourth that was not on the list |
 
 **The third is the one worth carrying.** House style wraps prose at 80 columns,
 so a line-oriented pattern goes quiet exactly where the corpus has been
@@ -126,13 +132,19 @@ wrapped, and reports the same nothing a finished sweep reports. What closed it
 was a regex with `\s+` between the words, run over each file's whole text
 rather than line by line. This repository will keep generating the case.
 
-**Then it came back in freshly written prose.** Two comments added *after* that
-sweep said "a product Catalog has not published", which is a different error of
-the same family: `Product.Publish` is Catalog's factory and always raises
+**Then it kept coming back in freshly written prose, which no instrument
+reaches.** Comments and paragraphs added *after* a sweep said "a product
+Catalog has not published" — a different error of the same family:
+`Product.Publish` is Catalog's factory and always raises
 `ProductPublishedDomainEvent`, so every product Catalog holds was published and
-an absent row means *Ordering has not applied the event*. Conflating another
-service's act with this one's knowledge is the default phrasing, which is why
-it is a rule to state rather than a sweep to run once.
+an absent row means *Ordering has not applied the event*. That happened more
+than once, and the last instance was inside a paragraph of this entry
+describing the error itself.
+
+**So the rule is not a better grep.** Conflating another service's act with
+this one's knowledge is the phrasing that comes to hand, and a sweep can only
+remove the instances that already exist. What it needs is to be known as a
+family before the next sentence is written.
 
 ### A bound one multiplication away from the bound that was cited
 
