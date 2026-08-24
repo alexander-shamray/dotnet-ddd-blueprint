@@ -1072,10 +1072,16 @@ inserted `name` and `thumb` as empty strings and left them for "a later
 `ProductPublished`" to patch in, and no later one arrives: a product must be
 published before it can be ordered, because `PlaceOrder` reads
 `ordering.ProductPrices` and the same event fills it. So `ProductPublished` is
-always consumed *before* the summary row exists, and a patch scoped to
-summaries that already contain the product touches nothing. **Every summary
-carried empty names in the normal flow** — which is the payload §6.6 exists to
-deliver, filed as [#121](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/121).
+ordinarily consumed *before* the summary row exists, and a patch scoped to
+summaries that already contain the product then touches nothing. The ordering
+is the ordinary flow and not a guarantee: `IntegrationEventConsumer` runs the
+two handlers sequentially but each commits on its own connection, so an order
+placed in the window after the price handler commits and before the patch
+handler runs would find its summary row patched. Narrow, and it is why this
+reads *in the ordinary flow* rather than *always*. **Every summary carried
+empty names in the normal flow** — which is the payload §6.6 exists to deliver,
+filed as
+[#121](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/121).
 
 The obvious repair — read the names at insert time instead — closes that door
 and leaves a second one open. `ProductPriceProjection`'s upsert inserts on its

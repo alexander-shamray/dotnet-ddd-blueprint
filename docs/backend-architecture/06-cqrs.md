@@ -1833,11 +1833,19 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
 > keeping.** An earlier revision inserted `name` and `thumb` as empty strings
 > and left them for "a later `ProductPublished`" to patch in. No later one
 > comes: a product must be published before it can be ordered — `PlaceOrder`
-> reads `ordering.ProductPrices`, which the same event fills — so it is always
-> consumed *before* the summary row exists, and a patch scoped to summaries
-> that already contain the product touches nothing. **In the normal flow every
-> summary carried empty names**, which is the payload this section exists to
-> deliver.
+> reads `ordering.ProductPrices`, which the same event fills — so it is
+> ordinarily consumed *before* the summary row exists, and a patch scoped to
+> summaries that already contain the product then touches nothing. **In the
+> normal flow every summary carried empty names**, which is the payload this
+> section exists to deliver.
+>
+> **"Ordinarily", not "always", and the gap is worth keeping.** The two
+> handlers run sequentially under one `IntegrationEventConsumer`, but each
+> commits on its own connection — so an order placed in the window after the
+> price handler commits and before the patch handler runs *would* find its
+> summary row and have it patched. That window is narrow and nothing depends
+> on it; what depends on the distinction is that this section is describing a
+> common outcome rather than an impossible ordering.
 >
 > The handler was also the expensive one: `OrderPlacedDomainEvent` writes one
 > row, and a single `ProductPublished` scanned every summary that had ever
@@ -2046,9 +2054,8 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
 
         // An empty page is the ordinary first request from a customer with
         // no orders, and skipping saves a round trip that can only return
-        // nothing. Neither statement needs the guard to be VALID: OPENJSON
-        // over '[]' returns no rows, and Dapper rewrites an empty expansion
-        // to `IN (SELECT @Ids WHERE 1 = 0)`, which does too.
+        // nothing. The guard is not needed for validity: OPENJSON over '[]'
+        // is a legal query returning no rows.
         IReadOnlyDictionary<Guid, SummaryProduct> named = productIds.Length == 0
             ? new Dictionary<Guid, SummaryProduct>()
             : (await connection.QueryAsync<SummaryProduct>(

@@ -74,10 +74,18 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 JSON as an empty string and relied on a later `ProductPublished` to patch them
 in. No later one arrives. A product must be published before it can be ordered
 — `PlaceOrder` reads `ordering.ProductPrices`, which the same event fills — so
-that event is always consumed *before* the summary row exists, and a patch
-scoped to summaries that already contain the product touches nothing. **Every
-summary carried empty names in the normal flow**, which is the payload the
-section exists to deliver.
+that event is ordinarily consumed *before* the summary row exists, and a patch
+scoped to summaries that already contain the product then touches nothing.
+**Every summary carried empty names in the normal flow**, which is the payload
+the section exists to deliver.
+
+**Ordinarily rather than always**, and the review round that raised it was
+right to: `IntegrationEventConsumer` runs the two handlers sequentially and
+each commits on its own connection, so an order placed after the price handler
+commits and before the patch handler runs would find its row patched. The
+window is narrow and the defect is the common case, but a specification that
+turns a common outcome into an impossible ordering is making a different claim
+from the one it can support.
 
 **The cheaper repair was available and is the one that had to be refused.**
 Reading the names at insert time satisfies the ordinary flow completely. What
