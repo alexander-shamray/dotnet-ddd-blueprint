@@ -1097,10 +1097,16 @@ referenced that product, retroactively and with no rebuild.
 denormalising the name on the grounds that "joining at read time is not an
 option — the products live in Catalog". They do not, once Ordering projects
 them: a primary-key lookup against a table in the same database is not the
-cross-service join the argument was about, and `ordering.ProductPrices` had
-already been that same local projection on the write path since PR-20, on a
-table PR-18 shipped with its reader and no producer. The name was being
-denormalised twice and paid for twice.
+cross-service join the argument was about. `ordering.ProductPrices` had
+already been exactly that local projection of Catalog's data on the write path
+since PR-20, on a table PR-18 shipped with its reader and no producer — so the
+premise was false before this change was written.
+
+**What that table held is the price, and it is worth being exact about it.**
+`ordering.ProductPrices` has never had a `Name` column; the name was copied
+once, into every order's JSON, and it is that copy this ADR removes. The
+argument is that a local projection of Catalog was already established and
+paid for, not that the name was stored twice.
 
 **Consequences.**
 

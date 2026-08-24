@@ -16,7 +16,9 @@ namespace Ordering.Infrastructure.Persistence;
 /// <b>The table has a producer since PR-20</b> — <c>ProductPriceProjection</c>
 /// (§6.6), on the <c>ordering-catalog-events</c> endpoint. What stands from
 /// the PR that shipped this file is the standing consequence rather than the
-/// gap: a product Catalog has never published still has no row here, and every
+/// gap: a product Catalog has never priced in the asked-for currency still has
+/// no row here — which is narrower than "never published", since
+/// <c>PriceChanged</c> inserts on the same branch — and every
 /// <c>PlaceOrder</c> naming it returns <c>order.products_unavailable</c> —
 /// which is the correct answer to "price these products" from a service that
 /// has no price for them, not a defect. §12.4's handler tests seed the table

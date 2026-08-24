@@ -22,10 +22,14 @@ namespace Ordering.Application.Orders;
 /// <para>
 /// The table behind it has a producer since PR-20 — §6.6's projection, over
 /// Catalog's three product events. What that did not change is the answer for
-/// a product Catalog has never published: no row, no price, and the order is
-/// refused. That is a fact about an unpublished product rather than a gap
-/// waiting on a pull request, and it is the standing consequence §6.6's
-/// callout names.
+/// a product Catalog has never priced in the asked-for currency: no row, no
+/// price, and the order is refused. That is a fact about a product this
+/// service has never been told a price for rather than a gap waiting on a
+/// pull request, and it is the standing consequence §6.6's callout names.
+/// <b>The condition is silence, not an absent <c>ProductPublished</c></b> —
+/// two of Catalog's three events reach the same insert branch, so a product
+/// whose <c>ProductPublished</c> was dropped is still orderable once a
+/// <c>PriceChanged</c> arrives.
 /// </para>
 /// </remarks>
 public interface IProductPriceReader

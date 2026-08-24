@@ -940,6 +940,12 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
         string currency,
         CancellationToken ct)
     {
+        // An empty IN list is not a query Dapper can expand, and asking for no
+        // prices is a legal thing for a caller to do — the validator refuses
+        // an empty Items, but this port is not only that caller's.
+        if (productIds.Count == 0)
+            return new Dictionary<ProductId, Money>();
+
         using IDbConnection connection = connections.Create();
         IEnumerable<PriceRow> rows = await connection.QueryAsync<PriceRow>(
             new CommandDefinition(
@@ -1135,9 +1141,9 @@ database at all. Joining across services is impossible; calling Catalog per row
 is an N+1 over the network.
 
 The upgrade adds denormalised tables inside Ordering's own database, kept
-current by projections. Three of them serve a read path — a fourth,
-`ordering.ProductWithdrawals`, is a watermark the upsert below consults and
-nothing reads:
+current by projections. Two of them serve the history query, one serves
+`PlaceOrder`, and a fourth — `ordering.ProductWithdrawals` — is a watermark
+the upsert below consults and nothing reads:
 
 | Table | Fed by | Read by |
 |---|---|---|
@@ -1825,9 +1831,10 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
 > the defect rather than the statement below it**. The products do not live in
 > Catalog once Ordering projects them; a primary-key lookup against a table in
 > the same database is not the cross-service join the argument was about.
-> Denormalising a name is a trade worth making once, and it was being paid for
-> twice — into `ProductPrices` on the write path, and again into every order's
-> JSON on the read path.
+> Catalog's facts were **already** projected into this database as prices, so
+> the premise had been false since PR-20 — and the name was then copied a
+> second time into every order's JSON, which is the copy this change removes.
+> `ordering.ProductPrices` never held a name and is not what changed here.
 
 Three details that are easy to miss and expensive to discover later:
 
@@ -2010,11 +2017,17 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
         Guid[][] lineProducts = [.. page.Select(r => JsonSerializer.Deserialize<Guid[]>(r.Products)!)];
         Guid[] productIds = [.. lineProducts.SelectMany(ids => ids).Distinct()];
 
-        IReadOnlyDictionary<Guid, SummaryProduct> named = (await connection.QueryAsync<SummaryProduct>(
-            new CommandDefinition(
-                NamesSql,
-                new { ProductIds = productIds },
-                cancellationToken: ct))).ToDictionary(p => p.Id);
+        // An empty IN list is not a query Dapper can expand, and an empty page
+        // is the ordinary first request from a customer with no orders — the
+        // same guard IProductPriceReader's implementation carries, for the
+        // same reason. Skipping is not defensive here; it is the common case.
+        IReadOnlyDictionary<Guid, SummaryProduct> named = productIds.Length == 0
+            ? new Dictionary<Guid, SummaryProduct>()
+            : (await connection.QueryAsync<SummaryProduct>(
+                new CommandDefinition(
+                    NamesSql,
+                    new { ProductIds = productIds },
+                    cancellationToken: ct))).ToDictionary(p => p.Id);
 
         OrderSummaryDto[] items =
         [
