@@ -1159,7 +1159,7 @@ public sealed class OutboxMetrics
 > and nothing about this table. An empty outbox dashboard is then
 > indistinguishable from a healthy one, which is this section's own callout
 > arriving through the instrument. **An alert on the absence itself is what
-> would close it, and is owed** — a thirteenth alert, a thirteenth runbook and
+> would close it, and is owed** — a further alert, a further runbook and
 > a row in §13.6's table, on the same terms as the four this chapter already
 > ships unloaded.
 
@@ -1443,7 +1443,7 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
 > ratio — write the expression, not an invented metric name. A name that looks
 > like an instrument and is not is the hardest version of this to spot.
 
-### Four of the twelve have no signal yet
+### Four of them have no signal yet
 
 PR-24 wrote all twelve conditions out as Prometheus rules and found that **four
 of them read an instrument nothing publishes**. That is this section's own
@@ -1468,7 +1468,7 @@ Their rules live in `deploy/observability/alerts/awaiting-signal.yaml`, which is
 every loaded rule's metric is published, and every awaiting rule's metric is
 published by *nothing*. The second is what makes the list self-clearing — the
 day one of these instruments lands, the gate goes red and names the rule to
-move. All twelve runbooks exist regardless, per §13.9.
+move. Every runbook exists regardless, per §13.9.
 
 > **The cache row is the one the self-clearing claim does not cover, and only
 > reading the package settled why.** The other three are owed a `Create*` call

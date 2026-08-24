@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..024),
+                             15-cicd-deployment, appendix A (ADR-001..026),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other

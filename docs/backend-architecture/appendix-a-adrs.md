@@ -967,10 +967,19 @@ type, a new binding on an existing endpoint, a new member of a closed
 vocabulary — is deployed everywhere before the release that starts emitting it.
 The two go out as two ordinary releases in an order, never as one.
 
-Where the consumer and the producer are the same deployable and the queue is
-shared, ordering is not available and the release takes one of two other
-shapes: split it, so one release declares the consumer and publishes nothing
-new, or cut over without overlap and do not call it a canary.
+Where the consumer and the producer are in the same build and the queue is
+shared, ordering the *deploy* separates nothing, so the change is split across
+two *releases* before there is an order to impose: one that declares the
+consumer and publishes nothing new, then one that publishes. The alternative
+is a cutover with no overlap, which is not a canary and should not be called
+one.
+
+**Retirement is the mirror and takes the opposite order.** A consumer removed
+before the producer stops emitting leaves the binding live — MassTransit does
+not unbind a queue when a consumer is deleted — so every subsequent message is
+skipped, permanently rather than for the length of a rollout. Producer
+capability retires a release ahead of the consumer, which is [§9.2](09-messaging.md)'s
+own deprecation-window rule read in the direction it does not spell out.
 
 `<queue>_skipped` is alerted on ([§13.6](13-observability.md)), which is what
 makes this a rule rather than advice.
@@ -1005,11 +1014,12 @@ answered.
 
 **Consequences.**
 
-**A binding change costs a release, and the canary cannot absorb it.**
+**A binding change that also starts publishing costs a release, and the canary
+cannot absorb it.**
 [ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)
 makes the canary a second release of the same chart answering the same
 Service, so both tracks consume the same queue for the length of the ladder —
-roughly forty minutes at four rungs. The consumer and producer of a saga event
+roughly half an hour at the ladder's current dwells. The consumer and producer of a saga event
 are in the same build, so ordering the *deploy* separates nothing — for the
 length of the ladder the old track is bound to neither. What separates them is
 splitting the change across two *releases*, which is the usual answer and a
@@ -1034,6 +1044,19 @@ Inventory to either.
 **It also fires on a genuinely missing binding**, which is a different fault
 with the same symptom. The runbook separates them by asking whether every
 replica is on the same build; the alert cannot, and says so.
+
+**The detection is owed a deployment this repository does not configure, and
+saying so is the point.** `rabbitmq_queue_messages` carries a `queue` label
+only where the broker runs `rabbitmq_prometheus` with per-object metrics
+enabled and something scrapes it. §14.1's image enables the delayed-exchange
+and shovel plugins and neither of those; Compose publishes 5672 and 15672 and
+not 15692; and §13.7 already states that nothing here deploys Prometheus. So
+the rule above is enforceable *by an operator who has wired that up*, and is
+advice until then. `ErrorQueueDepth` has carried the same dependency since
+PR-24 without anyone writing it down — the difference is that this ADR leans a
+**specification rule** on it, which is a heavier claim than an alert makes,
+and a claim of enforceability that quietly depends on an unwired signal is the
+exact shape of *a registered name is not a live signal*.
 
 ---
 

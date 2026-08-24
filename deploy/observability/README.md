@@ -79,7 +79,7 @@ not covered rather than implied, on `deploy/helm/smoke.sh`'s terms.
 
 ## Why there are two rule files
 
-Four of §13.6's twelve alerts read an instrument this platform does not publish
+Four of §13.6's alerts read an instrument this platform does not publish
 yet. Loading them would be the exact defect that chapter spends a callout on:
 
 > Two of the alerts in this document were written against signals that did not
@@ -126,7 +126,7 @@ bare "eight loaded" would be a number nothing recomputes, and the first rule
 that moves between the files would make it wrong. `CLAUDE.md` makes the same
 argument about its own line count.
 
-All twelve runbooks exist either way — §13.9 asks for the procedure to be
+Every runbook exists either way — §13.9 asks for the procedure to be
 written *when the alert is created*, not when it first fires.
 
 ## Metric names

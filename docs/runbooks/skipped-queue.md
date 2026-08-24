@@ -4,7 +4,7 @@
 |---|---|
 | Alert | `SkippedQueueDepth`, in `deploy/observability/alerts/platform-alerts.yaml` |
 | Condition | Any message in any `*_skipped` queue |
-| Signal | `rabbitmq_queue_messages`, from the RabbitMQ exporter — not a solution instrument |
+| Signal | `rabbitmq_queue_messages`, from the RabbitMQ exporter — not a solution instrument, and **per-queue series need `rabbitmq_prometheus` with per-object metrics enabled and scraped**, which §14.1's image does not configure |
 | Owner | The service team that owns the endpoint ([§13.8](../backend-architecture/13-observability.md)) |
 
 ## What it means
@@ -37,17 +37,48 @@ kubectl -n <ns> exec deploy/rabbitmq -- \
 
 ## Read the message before deciding anything
 
-The message type is the whole diagnosis, and it is in the headers rather than
-the body.
+The message **type** is the whole diagnosis here, where the fault headers are
+in [`error-queue.md`](error-queue.md). Getting at it is that runbook's
+procedure with two words changed, and for its reasons: `rabbitmqctl` returns
+queue metadata rather than bodies, the credentials are not `guest/guest`, and
+they stay out of `argv`.
+
+**`rabbitmqadmin` is not on the image this repository ships.** The broker
+builds from `rabbitmq:4.1-management-alpine` with the delayed-exchange and
+shovel plugins and nothing else — no Python, so the v1 script is absent, and
+the v2 binary is a separate download. A procedure that cannot be executed on
+the image the repository ships is not a procedure, which that Dockerfile says
+about itself.
 
 ```bash
-kubectl -n <ns> exec deploy/rabbitmq -- \
-  rabbitmqadmin get queue=<endpoint>_skipped count=1 ackmode=reject_requeue_true
+kubectl -n <ns> port-forward svc/rabbitmq 15672:15672 &
+
+umask 077
+cat > "$HOME/.rabbit.curl" <<'EOF'
+user = "OPERATOR:PASSWORD"
+EOF
+
+curl -sS --config "$HOME/.rabbit.curl" -X POST   -H 'content-type: application/json'   -d @- http://localhost:15672/api/queues/%2F/<endpoint>_skipped/get <<'EOF'
+{"count":5,"ackmode":"ack_requeue_true","encoding":"auto"}
+EOF
 ```
 
-`MT-MessageType` carries the type URNs the publisher stamped. Compare that
-against what the endpoint's consumers and — for a saga — the state machine's
-`Event<>` declarations actually bind.
+`ack_requeue_true` is load-bearing for the same reason it is one runbook over:
+**`ack_requeue_false` consumes the message and it is gone.** Delete the config
+when the incident closes.
+
+**The type is in the payload, not in a transport header**, and this is worth
+saying because the obvious guess is wrong. This platform configures no
+serializer, so MassTransit's default envelope
+(`application/vnd.masstransit+json`) is in force and the type is `messageType`
+**inside the body**. `MT-MessageType` belongs to the *raw* serializer and is
+not stamped here — an earlier revision of this runbook sent an on-call looking
+for it, and finding no such header reads as a malformed message rather than as
+a wrong instruction. What the transport does stamp is `MT-Reason`, which says
+why the message was moved.
+
+Compare `messageType` against what this endpoint's consumers — and, for a
+saga, the state machine's `Event<>` declarations — actually bind.
 
 ## Then it is one of three things
 
@@ -85,18 +116,32 @@ If every replica is on the same build and messages are still being skipped, the
 consumer was never written. Read the type against
 [§3.2](../backend-architecture/03-bounded-contexts.md)'s Consumes column: if
 the table gives this service the event, the binding is owed and this is a
-defect. Ship the consumer, then replay.
+defect.
 
-### The message was never meant for this endpoint
+**Do not ship the consumer through the canary.** The producer is another
+service and is publishing already, so the moment the new replica's bus starts
+the queue receives that type — and the stable track, still on the old build,
+skips its share for the length of the ladder. §15.5 names the way round it: a
+new receive endpoint, a queue old replicas never read from. Ship it that way,
+then replay what was parked.
 
-A publish where a send was intended puts one message on every queue bound to
-the type ([§9.6](../backend-architecture/09-messaging.md)), and the endpoints
-that do not handle it skip it. The skipped copies are then noise and the real
-problem is at the producer. Look for the same message id in another endpoint's
-queue — if one endpoint consumed it and the rest skipped it, this is the case.
+### The message was addressed here and does not belong here
 
-Discard the skipped copies with a record. Fixing the producer is what closes
-it.
+**A `Send` to the wrong endpoint, not a `Publish`** — and the distinction
+matters because the obvious suspect is the wrong one. A publish reaches a queue
+only if that endpoint bound the type, and it bound it *because* it has a
+consumer for it; so publishing a command produces N consumers all running it
+(§9.6's actual hazard) and skips nothing. A **send** is addressed to a queue
+directly and arrives whatever that endpoint consumes, so a wrong destination —
+a mistyped `queue:` address, a shovel, a manual reroute — is what puts a
+message somewhere nothing will take it.
+
+The tell is the destination rather than a second copy: the type in the envelope
+is one this endpoint has no business receiving at all, and no other queue is
+missing it.
+
+Discard with a record once the real destination has had it. Fixing the sender
+is what closes it.
 
 ## Closing it
 

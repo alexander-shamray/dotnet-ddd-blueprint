@@ -1218,8 +1218,9 @@ type or a vocabulary member the new build emits can be handed to the old one.
 The rule is stated in §9.2 with both of its failure modes; what belongs here is
 what it costs the ladder.
 
-**A release that adds a binding to an existing endpoint cannot be canaried, and
-that is a real limitation rather than a caveat.** The two other rollout hazards
+**A release that adds a binding to an existing endpoint *and starts publishing
+on it* cannot be canaried, and that is a real limitation rather than a
+caveat.** The two other rollout hazards
 this chapter names are separable in time: a migration runs ahead of the deploy,
 and a new vocabulary member can be taught to the consumer one release early.
 A binding cannot, because the consumer and the producer are the same
@@ -1238,8 +1239,24 @@ Two ways out, and the choice is per release rather than settled here:
   halves and is the same expand/contract move §7.4 makes for a column. It costs
   a release and is usually the right answer.
 
-**Either way `<queue>_skipped` is watched ([§13.6](13-observability.md)), so
-choosing wrong is loud rather than silent.** That alert is what makes this
+**A third case is neither of those and is the one to recognise early: the
+producer is another service.** Adding a binding for a type some *other* service
+already publishes means the queue starts receiving it the moment the new
+replica's bus starts, and the stable track — old build, same queue, no consumer
+— skips its share for the rest of the ladder. Splitting this release does not
+help, because the producer is in neither half of it. What works here is a
+**new receive endpoint**: a queue of its own that old replicas never read from,
+which is how this platform already separates `ordering-catalog-events`,
+`ordering-stock-events` and `ordering-commands`. It is not available to a saga,
+whose correlated events must share one queue — which is precisely why the split
+is the saga's answer and a new endpoint is the cross-service one.
+
+**Either way `<queue>_skipped` is alerted on ([§13.6](13-observability.md)), so
+choosing wrong is meant to be loud rather than silent** — subject to the
+deployment prerequisite
+[ADR-026](appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)
+states, since per-queue broker metrics are not something this repository
+configures. That alert is what makes this
 section's rule enforceable; before it, a rollout that lost messages looked
 exactly like one that did not.
 

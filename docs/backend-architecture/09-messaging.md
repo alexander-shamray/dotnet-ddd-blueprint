@@ -180,10 +180,14 @@ rather than the breaking-change paragraph below.
 > to be **split across two releases** before there is an order to impose.
 > [§15.5](15-cicd-deployment.md) carries that and the alternative to it.
 >
-> **`<queue>_skipped` is watched from [§13.6](13-observability.md).** The rule
-> above is a rule and not a hope because a message skipped during a rollout
-> now pages someone; without that, violating it is invisible and the
-> specification is advice. See
+> **`<queue>_skipped` is alerted on from [§13.6](13-observability.md).** The
+> rule above is checkable rather than a hope, because a message skipped during
+> a rollout is meant to page someone rather than to vanish. **What the alert
+> depends on is stated in
+> [ADR-026](appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)
+> rather than assumed here**: per-queue broker metrics are a deployment
+> prerequisite this repository does not configure, so the enforcement is
+> owed a cluster that has. See
 > [#131](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/131).
 
 **Breaking changes** — removing a field, renaming, changing a type, changing
