@@ -52,11 +52,15 @@ public sealed record StockReservationFailed : IIntegrationEvent
 /// this too, so "a reservation was released" cannot be asserted of every
 /// instance.
 /// <para>
-/// <b>Two things produce it and the payment path is only one.</b> A
-/// <c>ReleaseStock</c> command does, and so does Inventory consuming
+/// <b>Three things produce it and the payment path is only one.</b> A
+/// <c>ReleaseStock</c> command does; so does Inventory consuming
 /// <c>OrderCancelled</c> directly — which is why §9.6's saga can receive one
-/// in a state it never sent a release from, and why the payload carries no
-/// quantity: there may have been nothing to count.
+/// in a state it never sent a release from; and so does a
+/// <see cref="ReserveStock"/> refused against the tombstone, since that
+/// establishes the same postcondition. The third is ADR-024's own
+/// consequence and this list said "two" until a review counted them. It is
+/// also why the payload carries no quantity: there may have been nothing to
+/// count.
 /// </para>
 /// </remarks>
 public sealed record StockReleased : IIntegrationEvent

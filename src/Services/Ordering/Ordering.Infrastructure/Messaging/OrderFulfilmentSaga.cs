@@ -479,12 +479,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // exactly what #129 said and what the ADR settles. The line and the
             // ADR are one change; neither is correct without the other.
             //
-            // **Nothing else can produce one here**, which is what makes
-            // absorbing it safe rather than merely quiet. §3.2 gives Inventory
-            // two triggers for StockReleased — a ReleaseStock command and
-            // OrderCancelled — and this saga has sent no release in this state.
-            // So an arrival is always a cancellation the saga is about to
-            // consume on its own copy.
+            // **Every producer of one is cancellation-derived**, which is
+            // what makes absorbing it safe rather than merely quiet. §3.2 and
+            // ADR-024 give Inventory three: a ReleaseStock command, consuming
+            // OrderCancelled directly, and a ReserveStock refused against the
+            // tombstone a release wrote. This saga has sent no release in this
+            // state, so the first is out — and both of the others exist only
+            // because a cancellation reached Inventory. An arrival is
+            // therefore always a cancellation this saga is about to consume on
+            // its own copy.
+            //
+            // **This read "two triggers, nothing else" until ADR-024 added the
+            // third**, in the same change: the guarantee that closes #125 is
+            // itself a producer of the event four states now absorb, and the
+            // comment arguing the absorption was written from the count
+            // before it.
             Ignore(StockReleased));
 
         During(
