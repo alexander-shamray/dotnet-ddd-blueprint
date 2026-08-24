@@ -940,9 +940,15 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections)
         string currency,
         CancellationToken ct)
     {
-        // An empty IN list is not a query Dapper can expand, and asking for no
-        // prices is a legal thing for a caller to do — the validator refuses
-        // an empty Items, but this port is not only that caller's.
+        // Asking for no prices is a legal thing for a caller to do — the
+        // validator refuses an empty Items, but this port is not only that
+        // caller's — and answering it here saves opening a connection and a
+        // round trip that can only return nothing.
+        //
+        // NOT because Dapper would refuse the query: measured against the
+        // pinned 2.1.66, an empty expansion is rewritten to
+        // `IN (SELECT @Ids WHERE 1 = 0)`, which is valid and returns no rows.
+        // This comment claimed the opposite for as long as it existed.
         if (productIds.Count == 0)
             return new Dictionary<ProductId, Money>();
 
@@ -2038,11 +2044,11 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
         Guid[][] lineProducts = [.. page.Select(r => JsonSerializer.Deserialize<Guid[]>(r.Products)!)];
         Guid[] productIds = [.. lineProducts.SelectMany(ids => ids).Distinct()];
 
-        // An empty page is the ordinary first request from a customer with no
-        // orders, and skipping saves the round trip. Note this is no longer
-        // the guard IProductPriceReader carries: OPENJSON over '[]' is a legal
-        // query returning nothing, where an empty IN list is one Dapper cannot
-        // expand at all. The reason changed with the statement above it.
+        // An empty page is the ordinary first request from a customer with
+        // no orders, and skipping saves a round trip that can only return
+        // nothing. Neither statement needs the guard to be VALID: OPENJSON
+        // over '[]' returns no rows, and Dapper rewrites an empty expansion
+        // to `IN (SELECT @Ids WHERE 1 = 0)`, which does too.
         IReadOnlyDictionary<Guid, SummaryProduct> named = productIds.Length == 0
             ? new Dictionary<Guid, SummaryProduct>()
             : (await connection.QueryAsync<SummaryProduct>(
@@ -2114,8 +2120,10 @@ they travel as one JSON parameter read through `OPENJSON` rather than as an
 expanded `IN` list, which at that size exceeds SQL Server's 2,100-parameter
 limit and fails the request outright.
 
-The benefit being bought is visible in the shape of both: no `GROUP BY`, no
-cross-service call, and a page size that bounds each of them. Level 1
+The benefit being bought is visible in the shape of both: no `GROUP BY` and no
+cross-service call. What bounds them is **not** the same quantity — the page
+clamp bounds the first, and the first multiplied by §10.5's item limit bounds
+the second, which is the whole reason the ids travel as one parameter. Level 1
 aggregates `OrderLines` on every read and still cannot return a product name at
 any price.
 

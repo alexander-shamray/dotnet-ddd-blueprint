@@ -17,11 +17,13 @@ namespace Ordering.Infrastructure.Projections;
 /// it the more consequential of §6.6's two:
 /// <c>ProjectedPriceReader</c> serves <c>PlaceOrder</c> from it, so a row that
 /// is missing is an order that is refused. §6.6's callout is the standing
-/// consequence — a product Catalog has never priced <i>in that currency</i>
-/// produces <c>order.products_unavailable</c>, which is a correct answer from
-/// a service with no prices and looks like nothing at all in a log. Note what
-/// the condition is not: never having emitted <c>ProductPublished</c> is not
-/// sufficient, because <c>PriceChanged</c> reaches the same insert branch.
+/// consequence — a product <i>this service</i> holds no price for in the
+/// asked-for currency produces <c>order.products_unavailable</c>, which is a
+/// correct answer from a service with no prices and looks like nothing at all
+/// in a log. <b>The condition is Ordering's knowledge, not Catalog's act</b>:
+/// <c>Product.Publish</c> is Catalog's factory, so every product it holds was
+/// published, and an absent row means neither price-bearing event has been
+/// applied here — dropped before the queue was bound, or still in flight.
 /// <para>
 /// <b>Public, and the modifier is load-bearing.</b> §6.2's scan is
 /// public-only, so an internal handler is registered as nothing at all —

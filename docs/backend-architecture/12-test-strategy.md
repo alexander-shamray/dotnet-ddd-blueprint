@@ -1200,15 +1200,15 @@ this one — which is §12.4's rule about negatives applied to a design rather
 than to an assertion: a case that two candidates both satisfy is not evidence
 about which is present.
 
-**All three are §12.4-level tests and all three belong in `Ordering.Api.Tests`,
-which is not a contradiction.** The level is about what they touch — the
-projection writes through Dapper against a real schema, so an in-memory double
-would assert on the double — and the project is about where the fixture lives.
-`Ordering.Application.Tests` deliberately carries no `Ordering.TestSupport`
-reference and says so in its csproj, so Ordering's real-schema tests are homed
-one project over; `ProductPriceProjectionTests` is already there for exactly
-this reason. Read the pyramid's levels as a statement about what a test
-exercises, never as a mapping onto assembly names.
+**Every case above is a §12.4-level test and all of them belong in
+`Ordering.Api.Tests`, which is not a contradiction.** The level is about what
+they touch — the projection writes through Dapper against a real schema, so an
+in-memory double would assert on the double — and the project is about where
+the fixture lives. `Ordering.Application.Tests` deliberately carries no
+`Ordering.TestSupport` reference and says so in its csproj, so Ordering's
+real-schema tests are homed one project over; `ProductPriceProjectionTests` is
+already there for exactly this reason. Read the pyramid's levels as a statement
+about what a test exercises, never as a mapping onto assembly names.
 
 
 ### API contract tests

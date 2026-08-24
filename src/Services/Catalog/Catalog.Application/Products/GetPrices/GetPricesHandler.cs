@@ -25,11 +25,14 @@ public sealed class GetPricesHandler(IDbConnectionFactory connections)
 
     public async Task<IReadOnlyList<ProductPriceDto>> HandleAsync(GetPricesQuery query, CancellationToken ct)
     {
-        // Asking for no prices is a legal thing for a caller to do, and an
-        // empty IN list is not a query Dapper can expand — the same guard, for
-        // the same reason, as Ordering's ProjectedPriceReader. The ceiling at
-        // the other end is GetPricesValidator's, because it is a malformed
-        // request rather than an empty answer.
+        // Asking for no prices is a legal thing for a caller to do, and
+        // answering it here saves a round trip that can only return nothing —
+        // the same guard, for the same reason, as Ordering's
+        // ProjectedPriceReader. NOT because Dapper would refuse the query:
+        // measured against the pinned 2.1.66, an empty expansion becomes
+        // IN (SELECT @Ids WHERE 1 = 0), which is valid and returns no rows.
+        // The ceiling at the other end is GetPricesValidator's, because it is
+        // a malformed request rather than an empty answer.
         if (query.ProductIds.Count == 0)
             return [];
 

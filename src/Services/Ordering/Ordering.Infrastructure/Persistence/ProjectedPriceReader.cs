@@ -48,9 +48,15 @@ internal sealed class ProjectedPriceReader(IDbConnectionFactory connections) : I
         string currency,
         CancellationToken ct)
     {
-        // An empty IN list is not a query Dapper can expand, and asking for no
-        // prices is a legal thing for a caller to do — the validator refuses
-        // an empty Items, but this port is not only that caller's.
+        // Asking for no prices is a legal thing for a caller to do — the
+        // validator refuses an empty Items, but this port is not only that
+        // caller's — and answering it here saves opening a connection and a
+        // round trip that can only return nothing.
+        //
+        // NOT because Dapper would refuse the query, which is what this
+        // comment claimed until it was measured: against the pinned 2.1.66 an
+        // empty expansion becomes IN (SELECT @Ids WHERE 1 = 0), which is valid
+        // and returns no rows. The guard is an optimisation, not a repair.
         if (productIds.Count == 0)
             return new Dictionary<ProductId, Money>();
 

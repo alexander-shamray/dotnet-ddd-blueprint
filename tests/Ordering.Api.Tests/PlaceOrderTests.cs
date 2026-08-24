@@ -55,7 +55,7 @@ public sealed class PlaceOrderTests(ServiceFixture fixture) : IAsyncLifetime
         // ProductPublished — PriceChanged reaches the same insert branch, so
         // an id nothing has ever mentioned is what this test needs, and
         // CreateVersion7 below is exactly that. 422 rather than 400 is the
-        // request was well-formed and the validator passed it, and the
+        // point — the request was well-formed and the validator passed it, and
         // products being unpriceable is a fact about this service's state.
         HttpResponseMessage response = await PlaceAsync(Guid.CreateVersion7());
 
