@@ -232,10 +232,14 @@ public class OrderFulfilmentSagaTests
         // nothing — so the barrier fails loudly rather than quietly weakening.
         messageId.ShouldNotBeNull();
 
+        // The message names no consumer, and that is a correction rather than
+        // a generalisation: it said "must reach the saga" while the barrier
+        // also fences the gated probe, so a routing failure in that test
+        // reported a saga it never registered.
         (await ConsumedWithId<T>(harness, messageId)).ShouldBeTrue(
-            $"a published {typeof(T).Name} must reach the saga before the test publishes " +
-            "the message that depends on it — an unfenced publish is a race the runner " +
-            "loses under load, and it fails a later assertion wearing the saga's message.");
+            $"a published {typeof(T).Name} was never consumed, so this barrier cannot say the " +
+            "next publish is ordered after it — an unfenced publish is a race the runner loses " +
+            "under load, and it fails a later assertion wearing the wrong component's name.");
     }
 
     private static Task<bool> Sent<T>(ITestHarness harness, Func<T, bool> match)

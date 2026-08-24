@@ -947,8 +947,8 @@ same argument as never calling a branch clean because asking failed.
      exhaustion, and the difference is whether it reports the Grok half
      finished or blocked.
 
-     The ceiling — then one number shared by both loops, as its size still
-     is — was three, and three was wrong. By its seventh Copilot round
+     The ceiling — then one number shared by both loops, where the two now
+     differ — was three, and three was wrong. By its seventh Copilot round
      PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
      and rounds four through seven caught a documented-but-unenforced
      constraint, an assertion that could not fail in one direction, and a
