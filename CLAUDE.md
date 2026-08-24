@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..023),
+                             15-cicd-deployment, appendix A (ADR-001..024),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -489,7 +489,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 886 tests — so the build rules and the drift rules below
+and `dotnet test` runs 888 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -753,8 +753,9 @@ own line rather than sending a reader to a file that does not hold it.
 - **Fixing the instance of a race that failed leaves every other instance
   armed, and per-site discipline is what makes them instances.** The saga
   suite's flake (#107) was closed by interleaving waits into the one test that
-  had failed; twenty unfenced publishes remained across fourteen of that file's
-  twenty-seven harness tests, and **the CI run of the merge commit that closed
+  had failed; twenty unfenced publishes remained across fourteen of the
+  twenty-seven harness tests that file held then, and **the CI run of the merge
+  commit that closed
   it went red on the next one**. A publish returns when the message reaches the
   transport, not when the consumer has handled it — so the failure surfaces at
   the next waiting assertion, which bills the inactivity bound and reports a
@@ -1004,6 +1005,17 @@ own line rather than sending a reader to a file that does not hold it.
   Found by running the round trip, not by reading it — which is the reusable
   half: **a helper's contract is its stdout, so test what a caller captures,
   never what the code appears to print.**
+- **A cheaper fix can be *unreachable* rather than merely weaker, and from
+  inside the issue the two read alike.** #125 offered two closures: a second
+  `ReleaseStock` from the saga's `Compensating` state, "reachable today", and
+  an Inventory tombstone, "the better shape and the more expensive". They were
+  ranked by cost while the question beside them — #130, does a release of
+  nothing publish anything — was still open, and answering it deleted the cheap
+  one: the no-op release publishes, so the exit has already finalised the
+  instance and the branch that would send the second release is one nothing
+  enters. **Two open questions were being weighed independently and one decided
+  the other.** Before ranking options by cost, ask whether each can still run
+  once its neighbours are settled.
 - **Where two mechanisms answer one question and only one of them is editable,
   the editable one is where the lie lives.** GitHub honours closing keywords in
   a PR body and in a commit body independently, and
@@ -1025,7 +1037,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 698 of 886, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 700 of 888, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1137,8 +1149,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 698 of
-the 886 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 700 of
+the 888 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 188, needing the daemon exactly as
 before.
 
@@ -1150,7 +1162,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (680) and integration (188), which is the 698 above split at the
+(18), unit (682) and integration (188), which is the 700 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1941,7 +1953,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-024) and keep the
+  (currently ADR-025) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to
