@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..024),
+                             15-cicd-deployment, appendix A (ADR-001..026),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -82,7 +82,7 @@ docs/secrets.md              how a secret reaches a pod and how each kind is
                              rotated — the operational half of §15.4 on
                              testing.md's exact terms, and §15.4 keeps the
                              inventory and wins any disagreement
-docs/runbooks/               twelve, one per §13.6 alert, since PR-24. Plus a
+docs/runbooks/               thirteen, one per §13.6 alert, since PR-24. Plus a
                              README that is EXCLUDED from the pairing by name —
                              one declared exception, so a second non-runbook
                              file has to be argued for
@@ -1957,7 +1957,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-026) and keep the
+  (currently ADR-027) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

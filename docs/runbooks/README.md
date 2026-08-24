@@ -22,6 +22,7 @@ rather than added.
 | [`outbox-growth.md`](outbox-growth.md) | `OutboxGrowth` | yes |
 | [`outbox-abandoned.md`](outbox-abandoned.md) | `OutboxAbandonedRows` | yes |
 | [`error-queue.md`](error-queue.md) | `ErrorQueueDepth` | yes |
+| [`skipped-queue.md`](skipped-queue.md) | `SkippedQueueDepth` | yes |
 | [`migration-failure.md`](migration-failure.md) | `MigrationJobFailed` | yes |
 | [`stuck-saga.md`](stuck-saga.md) | `StuckSaga` | **no — signal owed** |
 | [`order-review.md`](order-review.md) | `OrdersAwaitingReview` | **no — signal owed** |

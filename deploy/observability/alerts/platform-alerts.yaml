@@ -179,11 +179,17 @@ groups:
 
   - name: platform-infrastructure
     rules:
-      # The two rules whose signal comes from an exporter rather than from this
+      # The rules whose signal comes from an exporter rather than from this
       # platform's own meters. They are live because those exporters are part of
       # the target deployment (§15.3), and check.py holds their metric names in
       # its declared external list for exactly that reason — a name it cannot
       # find in C# is either external and declared, or a typo.
+      #
+      # Un-counted rather than recounted: this read "the two rules" and #131
+      # made it three, which is the kind of figure this repository keeps having
+      # to stop writing down. The members are ErrorQueueDepth,
+      # SkippedQueueDepth and MigrationJobFailed, and naming them is what makes
+      # a fourth arrival obvious.
       - alert: ErrorQueueDepth
         expr: sum by (queue) (rabbitmq_queue_messages{queue=~".+_error"}) > 0
         for: 1m
@@ -196,6 +202,47 @@ groups:
             A business process has stopped. Something was retried to exhaustion
             and parked.
           runbook_url: docs/runbooks/error-queue.md
+
+      # The queue nothing watched, and the reason it needed a rule of its own
+      # rather than a wider selector on the one above (#131). MassTransit parks
+      # a message its endpoint has NO CONSUMER FOR in <queue>_skipped — a
+      # different fact from the error queue's, which holds messages a consumer
+      # accepted and could not finish. One is a routing mismatch, the other a
+      # failure; ".+_(error|skipped)" would have made them one alert and one
+      # procedure, and the two are triaged from opposite ends.
+      #
+      # **It fires on a correctly-ordered release exactly never, which is what
+      # makes it worth paging on.** A binding that reaches the broker before
+      # the consumer that declares it is the only ordinary way to get a skipped
+      # message here, and §9.2's rule exists to stop that — so this alert is
+      # what makes that rule enforceable rather than advisory. An alert that
+      # fired on every planned rollout would train everyone to ignore it, and
+      # the fix for that is the ordering, not a softer threshold.
+      #
+      # No `for` any longer than the sibling's: the depth does not decay on its
+      # own, so waiting only delays the page. What clears it is a human
+      # draining the queue, which is the runbook.
+      #
+      # The `_skipped` suffix is read off the shipped assemblies rather than
+      # off MassTransit's documentation: it is a UTF-16 literal in
+      # MassTransit.RabbitMqTransport.dll and MassTransit.Abstractions.dll
+      # 8.5.3, beside `_error`, which is the pair the two selectors here
+      # depend on. A suffix this alert has wrong selects nothing and reports a
+      # clean queue, so it is worth checking against the binary on a version
+      # bump rather than assuming.
+      - alert: SkippedQueueDepth
+        expr: sum by (queue) (rabbitmq_queue_messages{queue=~".+_skipped"}) > 0
+        for: 1m
+        labels:
+          severity: page
+          owner: service
+        annotations:
+          summary: "Messages in skipped queue {{ $labels.queue }}"
+          description: >-
+            An endpoint was handed a message it has no consumer for. Either a
+            producer shipped ahead of the consumer that understands it (§9.2),
+            or a binding this service should declare is missing.
+          runbook_url: docs/runbooks/skipped-queue.md
 
       # TWO BRANCHES, because §13.6's condition is "non-zero, OR a release stuck
       # pending". A failed-count-only rule catches the first and is blind to the
