@@ -1763,12 +1763,12 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     // { OrderId = orderId }` does not compile: the three envelope members are
     // as required as the payload, which is the point of §9.1 declaring them on
     // an interface rather than leaving them to convention.
-    // Publish returns when the message reaches the transport, not when the
-    // saga has consumed it, so each of these waits for the transition the next
-    // one depends on. Three bare publishes here is a race, and the trap below
-    // is what it costs. The suite this specifies puts the wait inside `Publish`
-    // rather than at the call site — also below, and for a reason no sample
-    // written once can show.
+    // `Publish` here is the suite's helper, not `harness.Bus.Publish`: it
+    // returns only once the saga has consumed the message, so the ordering
+    // below is its job and not the caller's. The `Sent` lines are assertions
+    // — each names the command a transition owes — and three bare
+    // `harness.Bus.Publish` calls in their place would be the race the trap
+    // below prices.
     await Publish(harness, Contracts.OrderPlaced(orderId));
     (await harness.Sent.Any<ReserveStock>(m => m.Context.Message.OrderId == orderId))
         .ShouldBeTrue();
@@ -1850,9 +1850,11 @@ public async Task Commands_are_sent_and_events_are_published()
 ```
 
 > **Trap — two consecutive publishes are a race, and losing it fails a
-> different assertion.** `Publish` returns when the message reaches the
-> transport, not when the saga has consumed it, and nothing orders two
-> publishes against each other. So `StockReserved` behind `OrderPlaced` can
+> different assertion.** `harness.Bus.Publish` returns when the message
+> reaches the transport, not when the saga has consumed it, and nothing orders
+> two publishes against each other. **The backticked name matters here**: the
+> samples above call a suite helper also called `Publish`, and that one waits.
+> The trap is about the transport call underneath it. So `StockReserved` behind `OrderPlaced` can
 > reach the endpoint before anything has created the instance — discarded in
 > silence, since a non-initial event with no instance is consumed cleanly — or
 > before the instance has reached the state that handles it, which faults. The
@@ -1917,10 +1919,16 @@ public async Task Commands_are_sent_and_events_are_published()
 > the barrier.** Every other test in a saga suite stays green with the wait
 > removed — on an unloaded machine, which is every machine a developer has.
 > The one that does not is a test that publishes and then reads the record **as
-> of now**, on a cancelled token, asserting the transition's command is
-> already there. That is false the moment the helper stops waiting, and false
-> again if it waits on the type instead of the id — both observed red before
-> the fix was trusted.
+> of now**, on a cancelled token, asserting the transition's command is already
+> there. **The two ways the helper can break do not fail the same assertion,
+> and collapsing them is the rounding-off this technique exists to refuse.**
+> With no wait at all, that first command count fails deterministically. With a
+> wait on the message *type* it does not: a type delivered once is fenced
+> correctly, so what fails is a later assertion over a **duplicate** — and only
+> as a race, since the early-returning publish leaves the second consume in
+> flight and the spent-token read may legitimately see it. So the suite needs a
+> stimulus that delivers one type twice, and the second red is a red that was
+> observed rather than one a reader can re-run.
 
 > **Trap — the harness gives up after 1.2 seconds, and the timeout named
 > `TestTimeout` is not the one that says so.** An `Any(…)` ends at the

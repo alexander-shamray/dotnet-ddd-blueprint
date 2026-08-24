@@ -831,10 +831,13 @@ public class OrderFulfilmentSagaTests
         {
             var orderId = Guid.CreateVersion7();
 
-            // Waited between rather than published in a burst, for #107's
-            // reason: this chain grew a fifth message with #126, and a
-            // reordering inside it would fail on the MarkOrderShipped
-            // assertion below wearing "the saga did not send".
+            // The Sent lines assert the command each transition owes; they
+            // are NOT the ordering, which is Publish's job. This chain grew a
+            // fifth message with #126 and is the longest here, so it is the
+            // one where the difference matters most — and the comment that
+            // stood here credited the waits with #107's fix, which is the
+            // template the payment-declined test four hundred lines up was
+            // rewritten to retire.
             await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
             (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
 
