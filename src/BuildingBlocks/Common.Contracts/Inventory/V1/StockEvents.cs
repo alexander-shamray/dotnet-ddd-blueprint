@@ -41,9 +41,28 @@ public sealed record StockReservationFailed : IIntegrationEvent
 }
 
 /// <summary>
-/// A reservation was released (§3.2) — the compensation for a failed payment,
-/// and a new business fact rather than an undo (§9.6).
+/// No stock is held for this order (§3.2) — a new business fact rather than an
+/// undo (§9.6).
 /// </summary>
+/// <remarks>
+/// <b>It reports a postcondition, not a state change, and that is ADR-024
+/// rather than a turn of phrase.</b> This read "a reservation was released —
+/// the compensation for a failed payment", and neither half survives the
+/// decision: a <c>ReleaseStock</c> that finds nothing to release publishes
+/// this too, so "a reservation was released" cannot be asserted of every
+/// instance.
+/// <para>
+/// <b>Three things produce it and the payment path is only one.</b> A
+/// <c>ReleaseStock</c> command does; so does Inventory consuming
+/// <c>OrderCancelled</c> directly — which is why §9.6's saga can receive one
+/// in a state it never sent a release from; and so does a
+/// <see cref="ReserveStock"/> refused against the tombstone, since that
+/// establishes the same postcondition. The third is ADR-024's own
+/// consequence and this list said "two" until a review counted them. It is
+/// also why the payload carries no quantity: there may have been nothing to
+/// count.
+/// </para>
+/// </remarks>
 public sealed record StockReleased : IIntegrationEvent
 {
     public required Guid MessageId { get; init; }

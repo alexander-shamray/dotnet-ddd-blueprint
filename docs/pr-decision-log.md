@@ -68,6 +68,105 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The release that answers for the order (#125, #129, #130)
+
+**A specification gap closed three issues, and only one of them was a
+specification issue.** [#130](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/130)
+asked whether a `ReleaseStock` for a reservation that was never held publishes
+`StockReleased`. Nothing said. §3.2 gave Inventory the command and the event
+and stopped there; §9 sends the command from every compensating transition it
+has and never asks.
+The answer is
+[ADR-024](backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation),
+and once it is written down, #129 becomes a four-line change and #125 stops
+being reachable.
+
+**The two readings were opposite and both defensible, which is what made it a
+gap rather than a bug.** A release of nothing "succeeding" is as reasonable as
+a release of nothing having nothing to report. What decides it is not
+elegance: `Compensating` has exactly two exits, and the second is a ten-minute
+timeout that raises `stock_not_released` for a human. Under the second reading
+`StockReservationFailed` — an event that *proves* no reservation was taken —
+leaves that state through the pager, naming stranded stock that never existed.
+**A contract whose routine path escalates to on-call is the wrong contract**,
+and that is the whole argument.
+
+**The second guarantee was not obvious and is the one that closes #125.** With
+"always publishes" alone, a release handled before its reserve is a no-op that
+publishes, the saga finalises on it, and the `StockReserved` that follows
+correlates to nothing. So the ADR also has Inventory *remember* a release for
+an order whose `ReserveStock` has not arrived and refuse the reserve that
+follows — answering with `StockReleased`, the same postcondition, rather than
+with `StockReservationFailed`, which reports unavailable products a refusal of
+that kind does not have.
+
+> **The cheap saga-side fix is unreachable rather than merely weaker, and
+> noticing that is what stopped it being written.** #125 offers sending a
+> second `ReleaseStock` on `StockReserved` in `Compensating`. Under the first
+> guarantee the no-op release has already published and the exit has already
+> finalised, so the branch that would send it is one nothing enters. A fix
+> whose precondition is the defect it ships beside is not a fix. **Only the
+> participant that still holds both facts can reconcile them**, which is why
+> the guarantee is Inventory's and not the saga's.
+
+**#129 was three doors and there are four.** The issue names `AwaitingStock`,
+`AwaitingPayment` and `AwaitingConfirmation` — the states whose cancellation
+branch sends a release. `Confirmed`'s branch deliberately sends none, and
+Inventory releases on `OrderCancelled` regardless (§3.2), so the derived event
+arrives there too. **And there the retry discards where elsewhere it
+rescues**: the other three are races §9.8's five retries — six deliveries with
+the first — usually win by finding the instance moved to `Compensating`, while
+`Confirmed`'s branch finalises, so the second delivery finds no instance — and
+an event correlating
+to none is consumed cleanly. That door is **silent**, not loud, which is a
+better argument for writing it than the one first drafted here: the release is
+lost with one fault behind it and nothing on the pager.
+
+**The gate and the issue had the same blind spot, which is the reusable half.**
+`The_two_states_a_confirmation_can_reach_write_it_out` covered
+`AwaitingConfirmation` and `Confirmed`; the residual it left — "three of the
+five states are checked" — is exactly where `Confirmed`'s door hid, because
+that test asserted the events a state accepts and nobody had added the release
+to either list. A gate covering three of four surfaces reports the fourth as
+fine. The per-state arguments now cover all five states, and the two
+behavioural tests were each observed red against the branch removed,
+separately, so neither is passing on the other's account.
+
+**"The partition now covers all five states" is what this said, and only one of
+the five is a partition.** `Compensating` classifies every declared event; the
+other four compare `NextEvents` to a written list and pass when a new event is
+missing from both. So the sentence claimed the fail-closed property for four
+checks that do not have it — the overstatement this entry is otherwise about,
+made about the fix for it. A third test now asserts that every declared event is
+receivable somewhere, both sides read from the machine, and it was observed red
+against an unhandled event that every other assertion in the file accepted.
+
+**`Ignore` is correct because of the ADR and was not correct without it**, and
+the ordering of those two halves is the point rather than a footnote. #129
+argues at length that ignoring is the wrong fix — the release is discarded, so
+the instance waits out `ReleaseTimeout` and raises `stock_not_released` for a
+reservation that came back. True under the second reading of #130 and false
+under the first, because the saga's own `ReleaseStock` is then answered
+whatever Inventory did with the event. **A code change that is only sound
+because of a contract change has to land with it**, and the three `Ignore`
+lines that depend on it say so at the site. The fourth is `Confirmed`'s, which
+refuses the dependency in as many words, and is the subject two paragraphs
+down — writing "the four" here and carving it out there is the collapse this
+entry warns about, committed inside the entry that warns about it.
+
+**Nothing enforces the ADR until Inventory exists, and that is stated rather
+than gated.** No test can hold an unwritten service to a contract. What stands
+in for one is that every site leaning on it cites it — the §3.2 bullets, the
+comments in the machine, the runbook's `stock_not_released` section and this
+entry — so an Inventory built to a different rule contradicts a paragraph rather
+than failing silently. That is weaker than a gate and it is what is available.
+
+**`Confirmed`'s absorption is the one that does not lean on it**, and an earlier
+revision of this entry counted it in. That state sends no `ReleaseStock`, so
+nothing there is waiting on an answer; it absorbs the release because Inventory
+released off the cancellation itself, which is a §3.2 fact rather than this
+ADR's.
+
 ## The barrier that was twenty call sites, and the run that proved it (#107)
 
 **No `PR-NN` heading**, on the terms the entries below set: this is a defect fix
@@ -92,11 +191,11 @@ happens. The test runs on and the *next* waiting assertion bills the inactivity
 bound, so the failure is reported four assertions away from its cause, wearing
 the saga's message rather than the runner's.
 
-**An audit of the file found twenty unfenced publishes across fourteen of its
-twenty-seven harness tests.** Three of the twenty publish a scheduled expiry,
-which is the worst case: an expiry arriving early lands in a state with no
-branch for it, and `ReleaseTimeout` in particular can only be handled in
-`Compensating`, three transitions downstream.
+**An audit of the file found twenty unfenced publishes across fourteen of the
+twenty-seven harness tests it held then.** Three of the twenty publish a
+scheduled expiry, which is the worst case: an expiry arriving early lands in a
+state with no branch for it, and `ReleaseTimeout` in particular can only be
+handled in `Compensating`, three transitions downstream.
 
 **The counterfactual was measured rather than argued**, because the race does
 not reproduce on a developer's machine — twelve concurrent runs of the suite
@@ -169,10 +268,19 @@ that each transition sent the command it owes — which is what they were worth
 keeping for, and the comment beside them says so rather than reading as a
 template for the next test.
 
-`dotnet test Platform.slnx` is 886, up from 884, and the fast half is 698 —
-two new tests, both the barrier's: one driving the saga, and one driving a
-consumer the test holds open, because the first can only observe the barrier
-through a race and the second settles it by construction.
+`dotnet test Platform.slnx` came out of this at 886, up from 884, with a fast
+half of 698 — two new tests, both the barrier's: one driving the saga, and one
+driving a consumer the test holds open, because the first can only observe the
+barrier through a race and the second settles it by construction.
+
+**Pinned to then rather than restated**, on the same terms as the twenty-seven
+harness tests above: this entry records what one PR measured, and the live
+figure belongs in `CLAUDE.md` and `docs/testing.md`, which carry it. It read
+"is 886" in the present tense until a later branch moved it — and the two
+sentences sat four paragraphs apart in this one entry, one of them already
+pinned. **A treatment applied to one number and not to its neighbour is the
+half-applied reconciliation this file's own rule forbids**, which is what makes
+this worth a paragraph rather than a silent edit.
 
 ---
 

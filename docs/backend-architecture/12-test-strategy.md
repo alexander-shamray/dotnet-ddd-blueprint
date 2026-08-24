@@ -1872,7 +1872,8 @@ public async Task Commands_are_sent_and_events_are_published()
 > the test that flakes, and it flakes on a loaded runner and nowhere else.
 > Measured here — the first occurrence was fixed by interleaving waits into
 > the single test that had failed, twenty unfenced publishes remained across
-> fourteen of the suite's twenty-seven harness tests, and the very run that
+> fourteen of the twenty-seven harness tests the suite held then, and the very
+> run that
 > merged the fix went red on the next one. A helper that publishes and then
 > waits for **that message** to be consumed leaves nothing to forget, which is
 > the argument the assembly-wide parallelisation attribute won over a shared

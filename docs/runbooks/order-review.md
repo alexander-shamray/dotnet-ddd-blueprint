@@ -128,6 +128,16 @@ release the reservation, and ten minutes later `StockReleased` had not arrived.
 place for a saga to be stuck, which is why §9.6 gives compensation a timeout
 like any other wait.
 
+**This row means the release did not complete, and since
+[ADR-024](../backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+it means nothing else.** A `ReleaseStock` publishes `StockReleased` whether or
+not a reservation was held, so "there was never anything to release" is no
+longer one of the ways to get here — which used to be reachable through
+`StockReservationFailed`, an event that *proves* no reservation exists. Before
+that was settled, step 1 could legitimately find nothing and the row was
+telling you about a contract gap rather than about stock. It is now always
+about stock or about delivery.
+
 1. Check Inventory for the reservation. If it was released and the event was
    lost, reconcile and move on.
 2. If it is still held, release it — through Inventory's own API so its
@@ -260,6 +270,13 @@ holding. Nothing can recall it: §3.2 gives Inventory no way to be told to keep
 a reservation after all. Reconcile the reservation with Inventory as part of
 stopping the despatch, rather than assuming the release was correct.
 
+**That is a difference in what the saga sent, not in where the stock ended
+up**, and reading it as the latter is the mistake this page used to invite.
+§3.2 has Inventory consuming `OrderCancelled` **directly**, so on *either* path
+the cancellation itself told it to release. **Expect the reservation to be free
+on both**, and treat the `Confirmed` path's missing `ReleaseStock` as one fewer
+message rather than as stock still held.
+
 **Only one of the two is necessarily a customer cancelling**, and this paragraph
 said both were. `cancelled_after_confirmation` is reached only through an
 `OrderCancelled` arriving at the saga — in `Confirmed` directly, or in
@@ -378,13 +395,18 @@ still in the broker. It is harmless — it will find no instance and be discarde
 queue depth. On the `Compensating` path it was never armed at all: the saga
 left `AwaitingConfirmation` without ever entering `Confirmed`.
 
-2. **Stop the despatch if it has not left.** From `Confirmed` the saga
-   deliberately does *not* send `ReleaseStock`: a reservation being picked is
-   not one Inventory can safely be told to drop on a state machine's word. Ask
-   Shipping, then release the reservation through Inventory's own API if the
-   parcel is still in the warehouse. **From `Compensating` the release is
-   already gone**, so the same conversation with Shipping ends in reinstating a
-   reservation rather than releasing one.
+2. **Stop the despatch if it has not left.** Ask Shipping first; the
+   reservation question is the same on both paths and is answered above. From
+   `Confirmed` the saga deliberately sends no `ReleaseStock` — a reservation
+   being picked is not one Inventory can safely be told to drop on a state
+   machine's word — but §3.2 has Inventory releasing off `OrderCancelled`
+   anyway, so **the restraint saves a message and not the stock**. This step
+   used to send you to release a reservation that is normally already free, and
+   to miss the real hazard: a picked parcel whose stock Inventory dropped on
+   the cancellation. On both paths the conversation with Shipping therefore
+   ends in **reinstating** a reservation if the parcel is still in the
+   warehouse, not in releasing one. The contract question behind that is
+   [#141](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/141).
 3. **If it already shipped**, this is a return rather than a cancellation, and
    the order's own state will say so — §5.4 refuses to cancel a `Shipped`
    order, so a row here means the aggregate was cancelled before despatch.
@@ -416,9 +438,18 @@ heading and then explained two paragraphs down that there would not be one.
    table.
    - **Gone** — the ordinary case, but it does **not** by itself prove the
      stock came back. `Compensating` has two exits and both finalise:
-     `StockReleased`, which is the reservation actually released, and the
-     ten-minute `ReleaseTimeout`, which gives up on it and raises a
-     `stock_not_released` row. **Check for that second row before deciding
+     `StockReleased`, and the ten-minute `ReleaseTimeout`, which gives up on
+     it and raises a `stock_not_released` row.
+
+     **`StockReleased` is not proof that a reservation was released**, and
+     this branch read "the reservation actually released" until
+     [ADR-024](../backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+     made that false. It reports a postcondition — Inventory holds no stock
+     for this order — so it is published for a release that found nothing and
+     for a reserve refused against the tombstone, neither of which freed
+     anything. As evidence it is worth exactly "Inventory says no stock is
+     held", which is what an operator needs and is a weaker claim than a
+     state change. **Check for that second row before deciding
      stock needs nothing** — if it is there, the reservation may still be
      held and [that section](#stock_not_released) is the procedure.
 

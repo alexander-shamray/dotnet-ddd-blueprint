@@ -156,8 +156,8 @@ public class OrderFulfilmentSagaTests
     /// <para>
     /// <b>The barrier is here rather than at the call sites, and that is the
     /// whole fix.</b> #107 was closed by interleaving waits into the one test
-    /// that had failed; fourteen of this file's twenty-seven harness tests
-    /// still had twenty unfenced publishes between them, and the next one
+    /// that had failed; fourteen of the twenty-seven harness tests this file
+    /// held then still had twenty unfenced publishes between them, and the next
     /// failed on the very run that merged the fix. Per-site discipline fails
     /// open — the test that forgets is the test that flakes, and it flakes on a
     /// loaded runner and nowhere else. A barrier inside the helper every test
@@ -1013,10 +1013,11 @@ public class OrderFulfilmentSagaTests
         //
         // **The name says REQUESTS release, and the two words are the whole
         // of what this harness can see.** It observes a ReleaseStock sent;
-        // whether Inventory acted on a reservation is #125, and under that
-        // ordering it may not have. A name claiming the reservation was
-        // released makes a green test look like proof of the one guarantee
-        // the implementation now says it cannot give.
+        // what Inventory does with it is ADR-024's, and there is no Inventory
+        // in this process to do it. A name claiming the reservation was
+        // released would make a green test look like proof of a guarantee
+        // nothing here can observe — which was #125's shape before the ADR
+        // closed it, and is still true of what the harness sees.
         //
         // The trailing "and never charges" went for the same reason, and its
         // sibling one state over lost that phrase in an earlier round: the
@@ -1446,6 +1447,140 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public async Task A_release_that_overtakes_the_cancellation_is_absorbed_and_the_compensation_still_ends()
+    {
+        // #129, and the arrival order nothing covered. §3.2 has Inventory
+        // consuming OrderCancelled DIRECTLY, so one publication starts two
+        // races to this endpoint — the saga's own copy of the event, and the
+        // StockReleased Inventory derives from it. Every other cancellation
+        // test in this file delivers the event first; this one delivers the
+        // release first, which is the half that used to fault.
+        //
+        // **The second publish is the assertion that matters, and it is
+        // ADR-024 standing in for a service nobody has written.** Absorbing
+        // the early release is safe only because the saga's own ReleaseStock
+        // is answered whatever Inventory already did with the event. An
+        // Inventory that answered the command only when a reservation was held
+        // would leave this instance in Compensating until ReleaseTimeout and
+        // file a stock_not_released review for stock that came back — so what
+        // this test drives is the contract, not merely the branch.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.AwaitingStock)).ShouldNotBeNull();
+
+            StockReleased overtaking = SagaContracts.StockReleased(orderId);
+            await Publish(harness, overtaking);
+
+            (await Consumed<StockReleased>(harness, m => m.MessageId == overtaking.MessageId))
+                .ShouldBeTrue();
+
+            // The claim the branch exists for. Before this change AwaitingStock
+            // declared nothing for StockReleased, so the arrival raised
+            // UnhandledEventException and spent §9.8's five retries — six
+            // deliveries over about seventy seconds — hoping the cancellation
+            // would land first.
+            //
+            // Consumed says only that it arrived: the harness records a
+            // delivery whether the pipeline returned or threw, so every
+            // assertion below would stay green through a fault. This is the
+            // one that would not.
+            ConsumeFaults<StockReleased>(harness).ShouldAllBe(e => e == null);
+
+            // Absorbed rather than acted on — the wait is untouched.
+            (await saga.Exists(orderId, x => x.AwaitingStock)).ShouldNotBeNull();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(orderId, Customer, CancelReasons.CustomerRequest));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            // ADR-024's first guarantee, driven: Inventory answers the command
+            // although it released on the event a moment ago, because
+            // StockReleased reports the postcondition rather than a state
+            // change. This is the publish that closes #129's objection to
+            // absorbing the first one.
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.CustomerRequest))
+                    .ShouldBeTrue();
+
+            // Nothing escalated. The whole point of the ADR is that this
+            // ordinary interleaving does not reach a human.
+            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orderId))
+                .ShouldBeFalse();
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task A_release_arriving_after_the_confirmation_is_absorbed_rather_than_faulted()
+    {
+        // **#129's fourth door, which #129 does not name and neither did the
+        // machine.** The issue enumerates the three states whose
+        // OrderCancelled branch sends a release; Confirmed is the state whose
+        // branch deliberately sends none, and Inventory releases on the event
+        // regardless (§3.2). So the release arrives here too.
+        //
+        // **And here the retry discards where elsewhere it rescues.** The
+        // other three doors are races the retry envelope usually wins, because
+        // a later attempt finds the instance moved to Compensating.
+        // Confirmed's OrderCancelled branch finalises, so by the second
+        // attempt there is no instance — and a non-initial event correlating
+        // to none is consumed cleanly, which
+        // An_event_for_an_order_with_no_instance_is_discarded_in_silence
+        // pins. So the unwritten door loses the release quietly rather than
+        // paging, and what this line buys is a clean FIRST delivery.
+        //
+        // Absorbing loses nothing: this state waits on no release, and the
+        // cancellation that caused it raises cancelled_after_confirmation on
+        // its own branch — the row an operator works both loose ends from.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "PSP-REF-129"));
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+
+            StockReleased released = SagaContracts.StockReleased(orderId);
+            await Publish(harness, released);
+
+            (await Consumed<StockReleased>(harness, m => m.MessageId == released.MessageId))
+                .ShouldBeTrue();
+
+            ConsumeFaults<StockReleased>(harness).ShouldAllBe(e => e == null);
+
+            // Nothing sent and nothing moved: a despatch is still expected and
+            // this event is not evidence against it.
+            (await NotYetSent<CancelOrder>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orderId))
+                .ShouldBeFalse();
+
+            (await saga.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull();
+        }
+    }
+
+    [Fact]
     public async Task A_second_confirmation_in_Confirmed_is_absorbed_rather_than_faulted()
     {
         // **The rollout case, and the one this branch would have paged on.**
@@ -1658,18 +1793,7 @@ public class OrderFulfilmentSagaTests
             $"{nameof(saga.DespatchTimeout)}.Received"
         ];
 
-        string[] declared =
-        [
-            .. typeof(OrderFulfilmentSaga)
-                .GetProperties()
-                .Where(pi => typeof(Event).IsAssignableFrom(pi.PropertyType))
-                .Select(pi => pi.Name),
-            .. typeof(OrderFulfilmentSaga)
-                .GetProperties()
-                .Where(pi => pi.PropertyType.IsGenericType &&
-                    pi.PropertyType.GetGenericTypeDefinition() == typeof(Schedule<,>))
-                .Select(pi => $"{pi.Name}.Received")
-        ];
+        string[] declared = DeclaredEvents();
 
         declared.ShouldNotBeEmpty("the reflection scan found no events on this machine");
 
@@ -1699,25 +1823,75 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
-    public void The_two_states_a_confirmation_can_reach_write_it_out()
+    public void The_four_states_before_Compensating_write_out_what_they_accept()
     {
-        // **The residual above, closed for the two states #126 created and
-        // narrowed — and it is here because leaving it open cost this branch
-        // two defects.** The partition test one method up reads
-        // NextEvents(Compensating) and nothing else, so it demanded the
-        // OrderConfirmed branch there and said nothing about the two states
-        // that actually carry the new event. Both were missed on the first
-        // pass: a second OrderConfirmed in Confirmed faulted, and a
-        // ShipmentDispatched beating the acknowledgement into
-        // AwaitingConfirmation faulted.
+        // **The residual above, and it is now closed for every state rather
+        // than for the two #126 created.** The partition test one method up
+        // reads NextEvents(Compensating) and nothing else, so it demanded the
+        // OrderConfirmed branch there and said nothing about the states that
+        // actually carry the new event. Both were missed on the first pass: a
+        // second OrderConfirmed in Confirmed faulted, and a ShipmentDispatched
+        // beating the acknowledgement into AwaitingConfirmation faulted.
         //
-        // **A test whose subject is what the gate is looking at**, which is
-        // this repository's most-repeated lesson arriving in the one place it
-        // had not been applied. It is deliberately NOT a general sweep over
-        // every state: what makes a claim here checkable is naming the events
-        // a state can receive and why, and that argument has to be written
-        // per state rather than generated.
+        // **Leaving the other two out cost a third defect, which is why the
+        // list grew.** #129 is one event — Inventory's StockReleased, derived
+        // from an OrderCancelled this saga has not consumed yet — arriving in
+        // FOUR states with no branch for it, and the issue itself names only
+        // three: Confirmed was missed because nothing here was looking at it.
+        // A gate that covers three of the four surfaces reports the fourth as
+        // fine, which is this repository's most-repeated failure and was
+        // sitting inside the test written to catch it.
+        //
+        // **Still not a generated sweep.** What makes a claim checkable is
+        // naming the events a state can receive AND why, and that argument has
+        // to be written per state.
+        //
+        // **What this method is NOT is a partition, and saying it was is how
+        // this test came to overstate itself.** Compensating one method up
+        // classifies every DECLARED event into reachable and not, so a new
+        // event nobody thought about fails there. Accepts below compares
+        // NextEvents against a written list and nothing else — so an event
+        // declared with no branch in this state and no entry in this list
+        // changes neither side and passes. That is the fail-open shape this
+        // file exists to refuse, in the method written to refuse it.
+        //
+        // Per-state classification would close it and costs four
+        // nine-element lists whose entries are mostly "belongs to another
+        // state". Every_declared_event_is_handled_in_some_state below closes
+        // the same hole from the other end and reads the machine for both
+        // sides, so nothing has to be kept in step by hand.
         OrderFulfilmentSaga saga = new();
+
+        // AwaitingStock is entered with ReserveStock in flight. Inventory
+        // answers either way, the five-minute wait bounds it, and a
+        // cancellation compensates. StockReleased is the fourth because
+        // Inventory releases on OrderCancelled itself (§3.2), so it can beat
+        // the saga's own copy of that event here.
+        Accepts(
+            saga,
+            saga.AwaitingStock,
+            [
+                nameof(saga.StockReserved),
+                nameof(saga.StockReservationFailed),
+                nameof(saga.OrderCancelled),
+                nameof(saga.StockReleased),
+                $"{nameof(saga.StockTimeout)}.Received"
+            ]);
+
+        // AwaitingPayment is the same shape one step on: the PSP answers
+        // either way, fifteen minutes bounds it, a cancellation compensates,
+        // and the derived release can arrive before the cancellation that
+        // caused it.
+        Accepts(
+            saga,
+            saga.AwaitingPayment,
+            [
+                nameof(saga.PaymentAuthorised),
+                nameof(saga.PaymentDeclined),
+                nameof(saga.OrderCancelled),
+                nameof(saga.StockReleased),
+                $"{nameof(saga.PaymentTimeout)}.Received"
+            ]);
 
         // AwaitingConfirmation is entered with ConfirmOrder in flight. The
         // acknowledgement ends the wait; a cancellation compensates; the
@@ -1731,6 +1905,7 @@ public class OrderFulfilmentSagaTests
                 nameof(saga.OrderConfirmed),
                 nameof(saga.OrderCancelled),
                 nameof(saga.ShipmentDispatched),
+                nameof(saga.StockReleased),
                 $"{nameof(saga.ConfirmationTimeout)}.Received"
             ]);
 
@@ -1738,6 +1913,13 @@ public class OrderFulfilmentSagaTests
         // duplicate — from §9.5's unrecorded redelivery, or from a rolling
         // deploy handing a new replica an instance an old one advanced. It is
         // absorbed rather than faulted, and the saga argues that at the line.
+        //
+        // **StockReleased is here for a different reason from the other three
+        // states', and that difference is the fourth door.** Those send a
+        // release and absorb the early copy of its answer; this one sends none
+        // — a reservation being picked must not be dropped — so the arrival is
+        // Inventory acting on the event alone, and nothing here is waiting on
+        // it.
         Accepts(
             saga,
             saga.Confirmed,
@@ -1745,9 +1927,81 @@ public class OrderFulfilmentSagaTests
                 nameof(saga.OrderConfirmed),
                 nameof(saga.OrderCancelled),
                 nameof(saga.ShipmentDispatched),
+                nameof(saga.StockReleased),
                 $"{nameof(saga.DespatchTimeout)}.Received"
             ]);
     }
+
+    [Fact]
+    public void Every_declared_event_is_handled_in_some_state()
+    {
+        // **The hole the two partition tests leave between them, closed
+        // without a sixth hand-written list.** Compensating classifies every
+        // declared event; the four states before it compare NextEvents to a
+        // written list. So an event declared with no branch ANYWHERE and no
+        // entry in any list is absent from both sides of all five assertions
+        // and passes them all — which is exactly what a new Event<T> property
+        // looks like on the day somebody adds one and forgets the transition.
+        //
+        // **Both sides of this one are read from the machine**, which is what
+        // makes it hold without maintenance: the left is reflection over the
+        // declared properties, the right is NextEvents over the declared
+        // states. There is no list to forget to update, and no exemption list
+        // either — every event this machine declares is legitimately
+        // receivable somewhere, including OrderPlaced, which Initially
+        // handles in Initial.
+        //
+        // It is deliberately weaker than a per-state partition and is not a
+        // substitute for one: it says an event is handled SOMEWHERE, not that
+        // it is handled everywhere it can arrive. That second claim is what
+        // the per-state arguments above are for, and #129 is what it costs
+        // when one of them is missing.
+        OrderFulfilmentSaga saga = new();
+
+        string[] declared = DeclaredEvents();
+        declared.ShouldNotBeEmpty("the reflection scan found no events on this machine");
+
+        string[] handled =
+        [
+            .. saga.States
+                .SelectMany(saga.NextEvents)
+                .Select(e => e.Name)
+                .Where(n => !n.EndsWith(".AnyReceived", StringComparison.Ordinal))
+                .Distinct()
+        ];
+
+        declared
+            .Except(handled)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ShouldBeEmpty(
+                "every event this machine declares must be receivable in at least one state. " +
+                "One that is receivable nowhere is a binding on the saga's queue with no " +
+                "transition behind it, which faults on every delivery and reaches the error " +
+                "queue once §9.8's five retries are spent.");
+    }
+
+    /// <summary>
+    /// Every event name the machine declares, including one per
+    /// <see cref="Schedule{TInstance, TMessage}"/> in the <c>.Received</c> form
+    /// <c>NextEvents</c> reports them under.
+    /// </summary>
+    /// <remarks>
+    /// Extracted rather than copied: two tests classify against this set, and a
+    /// second scan that drifted from the first would make one of them quietly
+    /// narrower — the failure both of them exist to catch.
+    /// </remarks>
+    private static string[] DeclaredEvents() =>
+    [
+        .. typeof(OrderFulfilmentSaga)
+            .GetProperties()
+            .Where(pi => typeof(Event).IsAssignableFrom(pi.PropertyType))
+            .Select(pi => pi.Name),
+        .. typeof(OrderFulfilmentSaga)
+            .GetProperties()
+            .Where(pi => pi.PropertyType.IsGenericType &&
+                pi.PropertyType.GetGenericTypeDefinition() == typeof(Schedule<,>))
+            .Select(pi => $"{pi.Name}.Received")
+    ];
 
     private static void Accepts(OrderFulfilmentSaga saga, State state, string[] expected) =>
         saga.NextEvents(state)

@@ -115,6 +115,56 @@ self-edge, which is a simplification rather than a claim: the collaboration is
 real, it is asynchronous like every other, and it obeys the same rule that the
 return leg is an event.
 
+**A cell names a message; it does not say what the message means when there is
+nothing to do.** `ReleaseStock` is where that gap was load-bearing, and it is
+now closed here rather than assumed in the saga that sends it. Inventory owes
+two guarantees, both recorded in
+[ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation):
+
+- **A `ReleaseStock` always publishes `StockReleased`**, including for a
+  reservation that was never held or has already been released. The event
+  reports the postcondition — no stock is held for this order — rather than a
+  state change, so the sender gets an answer whatever the prior state was.
+- **A `ReleaseStock` for an order whose `ReserveStock` has not arrived is
+  remembered**, and the `ReserveStock` that follows is refused — answering with
+  `StockReleased`, the same postcondition, rather than with
+  `StockReservationFailed`, which means an out-of-stock decision and requires
+  `UnavailableProductIds` a refusal of this kind does not have.
+  [§9.4](09-messaging.md) orders nothing between two deliveries, so a
+  cancellation can reach Inventory before the reservation it undoes; without
+  this the reserve creates a hold for an order that is already cancelled and
+  nobody is left waiting to notice.
+
+**A pair of cells does not state a derivation either, and that is the same gap
+one message over.** `OrderCancelled` sits in Inventory's Consumes column and
+`StockReleased` in its Publishes column, and every reader has been joining the
+two by hand. The join is now written down, because [§9.6](09-messaging.md)
+stands four `Ignore(StockReleased)` branches on it and one of them is the only
+thing between a cancelled confirmed order and a fault:
+
+- **Consuming `OrderCancelled` releases the stock and publishes
+  `StockReleased`**, on the same terms as a `ReleaseStock` — the same
+  postcondition, published whether or not a reservation was held. So one
+  cancellation has **two** independent routes to the event, and §9.4 orders
+  nothing between them.
+
+> **The second producer is what the saga's absorption is for**, and citing this
+> section for it was a mis-citation until this bullet existed. Payments'
+> `OrderCancelled` → void is argued in prose in §9.6 for the same reason: a
+> table can say which messages cross a boundary and cannot say that one causes
+> another. Where such a derivation becomes load-bearing — and a pager path is
+> as load-bearing as it gets — it belongs in a sentence rather than in the
+> reader's head.
+
+> **Both guarantees exist because the saga's only alternative to an answer is a
+> pager.** [§9.6](09-messaging.md)'s `Compensating` leaves either on
+> `StockReleased` or on a ten-minute timeout that raises a
+> `stock_not_released` review for a human. `StockReservationFailed` reaches
+> that state having proved no reservation was ever taken, so under the other
+> reading the *routine* path escalates, naming stranded stock that does not
+> exist. This is a rule about a service nobody has written, which is exactly
+> when it is cheapest to write down.
+
 Note the shapes this produces. **Shipping** and **Notifications** expose no
 public write API at all — they are pure event consumers. **Notifications** is
 the simplest possible service and the last one built, and those two facts are
