@@ -1776,10 +1776,17 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
             -- The insert branch is what lets this handler arrive before any
             -- order references the product, which in the ordinary flow it
             -- always does: PlaceOrder reads ordering.ProductPrices, and the
-            -- same event fills that too. HOLDLOCK for the same reason the two
-            -- upserts above carry it: this branch makes concurrent deliveries
-            -- for one key able to both insert, and the endpoint's retry would
-            -- absorb the resulting violation rather than surface it.
+            -- same event fills that too. HOLDLOCK for the same reason
+            -- ProductPriceProjection's two upserts carry it: this branch makes
+            -- concurrent deliveries for one key able to both insert, and the
+            -- endpoint's retry would absorb the violation rather than surface
+            -- it. Note it is NOT the two OrderSummaries MERGEs in this
+            -- class, which carry none. That asymmetry predates this table and
+            -- is not defended here: §9.4's dispatcher claims with READPAST, so
+            -- a second replica can hold the next batch while the first holds
+            -- its own, and two lifecycle events for one order can be in
+            -- flight together. Whether those MERGEs are owed the same hint is
+            -- an open question rather than a settled no.
             WHEN MATCHED AND target.UpdatedAt < @OccurredAt THEN
                 UPDATE SET Name = @Name, ThumbnailUrl = @Thumbnail, UpdatedAt = @OccurredAt;
             """,

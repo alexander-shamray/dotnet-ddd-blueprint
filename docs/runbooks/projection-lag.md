@@ -30,8 +30,12 @@ it before anything else.
   the broker at `ordering-catalog-events` and **never touch this lane**.
   `ordering.Products` is the second, written by `OrderSummaryProjection` from
   the same endpoint, and it is the one a customer notices: a summary resolves
-  its product names from that table, so a stale or unfilled row shows an order
-  with fewer products than it has rather than with the wrong ones.
+  its product names from that table. **The two failures there look different
+  and it is worth knowing which you are looking at.** An *unfilled* row —
+  nothing has ever named the product — drops it from the response, so the
+  order shows fewer products than it has. A *stale* row — a rename Catalog
+  published and this table has not applied — returns the previous name, which
+  is the wrong one and looks entirely healthy.
   [§13.7](../backend-architecture/13-observability.md) records that their
   staleness has no direct signal yet, and that gap is real: if prices are stale,
   this alert will not fire and neither will anything else.
