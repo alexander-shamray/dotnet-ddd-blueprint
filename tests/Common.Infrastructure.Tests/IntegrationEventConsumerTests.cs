@@ -132,7 +132,11 @@ public class IntegrationEventConsumerTests
         // other publisher writes it" was true. It was not.
         await harness.Bus.Publish(
             new ProbeEvent { MessageId = messageId, CorrelationId = messageId, OccurredAt = Now },
-            c => c.MessageId = messageId,
+            c =>
+            {
+                c.MessageId = messageId;
+                c.CorrelationId = messageId;
+            },
             TestContext.Current.CancellationToken);
 
         (await harness.Consumed.Any<ProbeEvent>(TestContext.Current.CancellationToken)).ShouldBeTrue();
@@ -155,7 +159,11 @@ public class IntegrationEventConsumerTests
         var messageId = Guid.CreateVersion7();
         await harness.Bus.Publish(
             new UnhandledEvent { MessageId = messageId, CorrelationId = messageId, OccurredAt = Now },
-            c => c.MessageId = messageId,
+            c =>
+            {
+                c.MessageId = messageId;
+                c.CorrelationId = messageId;
+            },
             TestContext.Current.CancellationToken);
 
         // §9.4's "empty is a decision" table: configuring this consumer for the
@@ -191,7 +199,11 @@ public class IntegrationEventConsumerTests
         var messageId = Guid.CreateVersion7();
         await harness.Bus.Publish(
             new ProbeEvent { MessageId = messageId, CorrelationId = messageId, OccurredAt = Now },
-            c => c.MessageId = messageId,
+            c =>
+            {
+                c.MessageId = messageId;
+                c.CorrelationId = messageId;
+            },
             TestContext.Current.CancellationToken);
 
         (await harness.Consumed.Any<ProbeEvent>(TestContext.Current.CancellationToken)).ShouldBeTrue();

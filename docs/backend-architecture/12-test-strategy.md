@@ -1893,7 +1893,10 @@ public async Task Commands_are_sent_and_events_are_published()
 >         {
 >             // §9.1: body, row, header and inbox key are one GUID.
 >             if (message is IIntegrationEvent integrationEvent)
+>             {
 >                 context.MessageId = integrationEvent.MessageId;
+>                 context.CorrelationId = integrationEvent.CorrelationId;
+>             }
 >
 >             messageId = context.MessageId;
 >         },
@@ -1912,8 +1915,11 @@ public async Task Commands_are_sent_and_events_are_published()
 > kinds of message carry** — not because a contract has a second identity. It
 > has not: §9.1's body, row, header and inbox key are one GUID, and
 > `IIntegrationEvent` says the envelope's value is *the* message id "not a
-> second one". So the helper **writes** it, as `OutboxDispatcher` does; what it
-> reads back for a contract is the envelope's own value. A message with no
+> second one" — **and that `CorrelationId` follows the same rule for the same
+> reason**. So the helper writes **both**, as `OutboxDispatcher` does; what it
+> reads back for a contract is the envelope's own value. Copying only the
+> message id is the half-measure this sample shipped first, which leaves the
+> correlation as the second identity the rule is about. A message with no
 > envelope — a scheduled timeout, or any bare record — needs no such write,
 > which is why the rule is about contracts rather than about publishes. A
 > saga's scheduled timeouts are not contracts

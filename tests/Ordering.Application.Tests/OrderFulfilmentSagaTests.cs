@@ -221,8 +221,17 @@ public class OrderFulfilmentSagaTests
                 // comment calls easy to write and hard to see. It was written
                 // here, and nothing failed — which is exactly the cost it
                 // names.
+                // **Both ids, because §9.1's rule is not only about
+                // MessageId.** IIntegrationEvent says CorrelationId "follows
+                // the same rule for the same reason", and OutboxDispatcher
+                // copies both. Copying one was this fix's own half-measure:
+                // the commit that removed a second identity left the other
+                // one standing.
                 if (message is IIntegrationEvent integrationEvent)
+                {
                     context.MessageId = integrationEvent.MessageId;
+                    context.CorrelationId = integrationEvent.CorrelationId;
+                }
 
                 // A scheduled expiry is not a contract (Appendix D) and has no
                 // envelope, so the send context is what both kinds have. That
