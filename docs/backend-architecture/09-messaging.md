@@ -1907,16 +1907,19 @@ stateDiagram-v2
     AwaitingStock --> [*] : StockReservationFailed → CancelOrder
     AwaitingStock --> [*] : StockTimeout 5m → CancelOrder
     AwaitingStock --> Compensating : OrderCancelled → ReleaseStock
+    AwaitingStock --> AwaitingStock : StockReleased → absorbed
 
     AwaitingPayment --> AwaitingConfirmation : PaymentAuthorised → ConfirmOrder
     AwaitingPayment --> Compensating : PaymentDeclined → ReleaseStock
     AwaitingPayment --> Compensating : PaymentTimeout 15m → ReleaseStock
     AwaitingPayment --> Compensating : OrderCancelled → ReleaseStock
+    AwaitingPayment --> AwaitingPayment : StockReleased → absorbed
 
     AwaitingConfirmation --> Confirmed : OrderConfirmed
     AwaitingConfirmation --> Compensating : OrderCancelled → ReleaseStock
     AwaitingConfirmation --> [*] : ConfirmationTimeout 10m → FlagOrderForReview not_confirmed
     AwaitingConfirmation --> [*] : ShipmentDispatched → MarkOrderShipped
+    AwaitingConfirmation --> AwaitingConfirmation : StockReleased → absorbed
 
     Compensating --> [*] : StockReleased → CancelOrder
     Compensating --> [*] : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview
@@ -1924,7 +1927,7 @@ stateDiagram-v2
     Compensating --> Compensating : OrderConfirmed → FlagOrderForReview cancelled_after_confirmation
     Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed, PaymentDeclined → absorbed
 
-    Confirmed --> Confirmed : OrderConfirmed → absorbed
+    Confirmed --> Confirmed : OrderConfirmed, StockReleased → absorbed
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
     Confirmed --> [*] : OrderCancelled → FlagOrderForReview cancelled_after_confirmation
@@ -2341,7 +2344,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx => ctx.Saga.CancelReason = ctx.Message.Reason)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
-                .TransitionTo(Compensating));
+                .TransitionTo(Compensating),
+
+            // Inventory's release, derived from the cancellation this state
+            // has not consumed yet: §3.2 has Inventory consuming
+            // OrderCancelled directly, so one publication starts two races to
+            // this queue and the release can win. Absorbed rather than left to
+            // fault — and sound only because ADR-024 has Inventory answer the
+            // ReleaseStock above whatever it already did with the event, so
+            // Compensating's exit does not depend on the copy discarded here.
+            Ignore(StockReleased));
 
         During(
             AwaitingPayment,
@@ -2398,7 +2410,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx => ctx.Saga.CancelReason = ctx.Message.Reason)
                 .Send(InventoryQueue, ctx => new ReleaseStock(ctx.Saga.OrderId))
                 .Schedule(ReleaseTimeout, ctx => new StockReleaseExpired(ctx.Saga.OrderId))
-                .TransitionTo(Compensating));
+                .TransitionTo(Compensating),
+
+            // The same early release, second door. This state's own
+            // ReleaseStock is still what Compensating waits on.
+            Ignore(StockReleased));
 
         // ConfirmOrder is in flight and nothing downstream knows anything yet:
         // the aggregate is still AwaitingPayment, no OrderConfirmed has been
@@ -2450,7 +2466,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Send(
                     OrderingQueue,
                     ctx => new MarkOrderShipped(ctx.Saga.OrderId, ctx.Message.TrackingNumber))
-                .Finalize());
+                .Finalize(),
+
+            // Third door, same argument.
+            Ignore(StockReleased));
 
         During(
             Confirmed,
@@ -2519,7 +2538,18 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // in turn. StockReserved one state back has no Ignore for exactly
             // that reason — losing an AuthorisePayment is not losing a
             // backstop.
-            Ignore(OrderConfirmed));
+            Ignore(OrderConfirmed),
+
+            // The fourth door, and the one whose reason differs. The three
+            // states above absorb the early copy of an answer they are still
+            // going to get; this one sends no ReleaseStock at all — a
+            // reservation being picked must not be dropped — so what arrives
+            // is Inventory acting on OrderCancelled alone, and nothing here is
+            // waiting on it. Absorbed for that reason rather than ADR-024's,
+            // and the cancellation raises cancelled_after_confirmation on its
+            // own branch above, which is the row both loose ends are worked
+            // from.
+            Ignore(StockReleased));
 
         During(
             Compensating,
@@ -2595,13 +2625,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // are races by design rather than misroutes, and both are written
             // for the same reason as the line above.
             //
-            // What this does NOT establish is that the reservation was
-            // released. §9.4 orders nothing, so Inventory may handle the
-            // release before the reserve it undoes: the release is then a
-            // no-op, the reserve creates a reservation, and the StockReserved
-            // that follows is ignored here with nothing sent after it. An
-            // earlier revision argued the case away with "ReleaseStock is
-            // already in flight", which is true and is not the same claim.
+            // §9.4 orders nothing, so Inventory may handle the release
+            // before the reserve it undoes: the release is then a no-op and
+            // the reserve would create a reservation nobody wants. That was
+            // #125, and ADR-024 closes it in §3.2 rather than here —
+            // Inventory remembers a release for an order whose ReserveStock
+            // has not arrived and refuses the reserve that follows with
+            // StockReservationFailed. An earlier revision argued the case away
+            // with "ReleaseStock is already in flight", which is true and is
+            // not the same claim; what replaces it is a guarantee from the
+            // only participant that still holds both facts.
             Ignore(StockReserved),
             Ignore(StockReservationFailed),
 
@@ -2761,13 +2794,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > repository's most-repeated failure, and this is it arriving in the test
 > written to catch that failure.**
 >
-> `AwaitingConfirmation` and `Confirmed` now have partitions of their own, so
-> three of the five states are checked. The remaining two are not, and that is
-> the residual as it now stands: a newly declared event joining the machine
-> without a branch in `AwaitingStock` or `AwaitingPayment` still fails no test.
-> **The sweep was deliberately not generalised** — what makes a partition
-> checkable is naming the events a state can receive *and why*, which is an
-> argument per state rather than something a loop can produce.
+> **All five states have partitions now, and leaving the last two out cost a
+> third defect before they did.** The residual used to read "three of the five
+> are checked", and what it was hiding is exactly what a residual of that shape
+> hides: `Ignore(StockReleased)` was owed in four states and
+> [#129](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/129)
+> named three, because `Confirmed` was the one nothing was looking at. The
+> issue and the gate had the same blind spot, which is why the fix is the
+> partition rather than the branch.
+>
+> **The sweep is still not generalised** — what makes a partition checkable is
+> naming the events a state can receive *and why*, which is an argument per
+> state rather than something a loop can produce. What changed is that the
+> argument is now written five times instead of three.
 
 > **A cancellation has two origins and the saga used to see one.** The saga's
 > own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
@@ -2786,7 +2825,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, recording `OrderCancelled.Reason` — this does not stop the charge |
 > | `AwaitingConfirmation` | The card is authorised, and **nothing downstream has been told** — `ConfirmOrder` is in flight, so no `OrderConfirmed` has been published and Shipping has no despatch to prepare | `AwaitingPayment`'s compensation unchanged, one state later: release, wait, cancel. It escalates nothing, because Payments voids off `OrderCancelled` itself and there is no despatch to stop. **What it cannot see is whether the aggregate confirmed a moment before the customer cancelled** — that is caught in `Compensating` below, on the confirmation's arrival |
 > | `Confirmed` | The card is authorised **and Shipping has been told** | Escalate — `cancelled_after_confirmation`, because a despatch may still be moving — and finalise. A second `OrderConfirmed` is absorbed here rather than faulted: it is either §9.5's unrecorded redelivery or a rollout handing this replica an instance the previous release advanced |
-> | `Compensating` | A cancellation is already the outcome — but the money, the reservation and the **confirmation** may still land | Every arrival written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway; `When(PaymentAuthorised)` escalates `payment_authorised_during_compensation`; `When(OrderConfirmed)` escalates `cancelled_after_confirmation`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation** — §9.4 orders nothing, so a release handled before its reserve is a no-op and the reservation that follows it is stranded. Named here rather than argued away, because this row used to close the case with "`ReleaseStock` is already in flight" |
+> | `Compensating` | A cancellation is already the outcome — but the money, the reservation and the **confirmation** may still land | Every arrival written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved`, `StockReservationFailed` and `PaymentDeclined`, since both exits cancel the order anyway; `When(PaymentAuthorised)` escalates `payment_authorised_during_compensation`; `When(OrderConfirmed)` escalates `cancelled_after_confirmation`. **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation**, and it is [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation) rather than this machine that makes that safe: §9.4 orders nothing, so a release handled before its reserve would otherwise strand the reservation that follows it. Inventory owes the tombstone; this row used to close the case with "`ReleaseStock` is already in flight" |
 >
 > **The money is a gap the last three rows state rather than close.** Undoing
 > an authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
@@ -2827,13 +2866,31 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > the same thing both times, because that arrival is precisely the evidence
 > that Shipping was told. The money is what all three raisings have in common.
 >
-> One consequence follows and it is real: the reservation on a confirmed order
-> is left alone, because one being picked is not Inventory's to drop on a
-> saga's word. **On the `Compensating` raising a `ReleaseStock` has already
-> gone out** — the state was entered on the premise that no confirmation had
-> happened — and nothing can recall it, because §3.2 gives Inventory no way
-> to be told to keep a reservation after all. The row is what carries that,
-> which is the same thing it has always done for the money.
+> One consequence follows: the **saga** leaves the reservation on a confirmed
+> order alone, because one being picked is not Inventory's to drop on a state
+> machine's word. **What that does not do is leave the reservation held**, and
+> this passage read as though it did. §3.2 has Inventory consuming
+> `OrderCancelled` directly, so the cancellation that raises this row has
+> already told it to release; what the saga withholds is a second, redundant
+> instruction, not the release itself. The `Ignore(StockReleased)` in
+> `Confirmed` is that fact arriving as an event — Inventory answering a
+> cancellation this saga never forwarded.
+>
+> **On the `Compensating` raising a `ReleaseStock` has gone out as well** —
+> the state was entered on the premise that no confirmation had happened — and
+> nothing can recall either one, because §3.2 gives Inventory no way to be told
+> to keep a reservation after all. So the two raisings differ in what the saga
+> sent and not in where the stock ends up, which is the opposite of what the
+> contrast used to say. The row is what carries it, as it has always done for
+> the money.
+>
+> **Whether Inventory should decline to release for an order it knows was
+> confirmed is a [§3.2](03-bounded-contexts.md) question nobody had asked**,
+> and it is where the picked-parcel hazard actually lives — not in this
+> machine, which has no way to raise it and now says so rather than implying
+> its restraint is the mitigation. It is filed as
+> [#141](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/141),
+> because a hazard named only in prose is a decision nothing re-checks.
 >
 > **A late `StockReserved` after a cancellation is a different case from the
 > `StockTimeout` strand, and this callout has now been wrong about it
@@ -2843,16 +2900,65 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > release at all.
 >
 > **What that does not establish is that the reservation was released**, and
-> the previous revision of this paragraph said it did. §9.4 orders nothing, so
+> a previous revision of this paragraph said it did. §9.4 orders nothing, so
 > Inventory may handle the release before the reserve it undoes: the release
 > finds nothing, the reserve then creates a reservation, and the
-> `StockReserved` that follows is ignored with nothing sent after it. That is
+> `StockReserved` that follows is ignored with nothing sent after it. That was
 > **[#125](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/125)**,
-> and the sharp part is that neither path writes an `OrderReviews` row — the
+> and the sharp part was that neither path writes an `OrderReviews` row — the
 > only review a cancel path raises is `stock_not_released`, and only if
 > `ReleaseTimeout` fires, which it does not when the release completed. So
-> there is no signal, and "the machine works this, not a human" is exactly
-> the sentence that was wrong.
+> there was no signal at all.
+>
+> **It is closed in [§3.2](03-bounded-contexts.md), not here, and the reason
+> is worth carrying.**
+> [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+> has Inventory remember a release for an order whose `ReserveStock` has not
+> arrived and refuse the reserve that follows with `StockReservationFailed`.
+> The saga cannot do the equivalent: under the same ADR the no-op release has
+> already published `StockReleased`, so `Compensating` has already finalised
+> by the time the late `StockReserved` exists, and a branch written for it is
+> a branch nothing reaches. **The cheap fix was unreachable rather than merely
+> weaker**, and only the participant that still holds both facts can reconcile
+> them.
+
+> **One cancellation starts two races to this queue, and only one of them is
+> a transition.** [§3.2](03-bounded-contexts.md) has Inventory consuming
+> `OrderCancelled` **directly** and publishing `StockReleased` off it,
+> independently of the `ReleaseStock` the saga sends — so a release derived
+> from that very event can reach the saga before the saga has consumed its own
+> copy. **Four states can be holding an instance when it does**: the three
+> whose cancellation branch sends a release, and `Confirmed`, whose branch
+> deliberately sends none. Each writes the arrival out with an `Ignore`.
+>
+> **Left unwritten, three of the four are a race the retry envelope usually
+> wins, and the fourth is a race it cannot win.** §9.8 gives the endpoint five
+> attempts over roughly seventy seconds, and a later attempt normally finds the
+> instance moved to `Compensating`, so the event is delivered late rather than
+> lost. `Confirmed`'s cancellation branch **finalises**, so by the second
+> attempt there is no instance — and an event correlating to none is consumed
+> cleanly. **That door is therefore silent rather than loud**: one fault, then
+> clean acks and a discarded release, with nothing on §13.6's pager unless the
+> cancellation is still unconsumed after all five attempts, which is the same
+> backlog condition the other three have.
+>
+> It was also the door
+> [#129](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/129)
+> did not name, and the partition test did not cover — the same blind spot in
+> both, which is the argument for closing it in the test rather than only in
+> the machine.
+>
+> **`Ignore` is correct because of
+> [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation),
+> and was not correct without it.** Absorbing the early copy discards it, so
+> `Compensating`'s exit has to come from somewhere else — and it does: the
+> cancellation branch sends its own `ReleaseStock`, which the ADR has Inventory
+> answer whether or not it already released on the event. Under the reading
+> that a release of nothing has nothing to report, this line would trade a
+> transient race for a **certain** wrong answer: the instance would wait out
+> `ReleaseTimeout` and raise `stock_not_released` for a reservation that came
+> back an hour earlier, sending an operator to chase stock that is already on
+> the shelf. The chapter change and the contract change are one change.
 
 ### Where an escalation lands
 
