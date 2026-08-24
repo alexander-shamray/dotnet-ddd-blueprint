@@ -750,6 +750,22 @@ own line rather than sending a reader to a file that does not hold it.
   that it refused, and a second test asserts *why*, against the options
   pipeline where nothing races. Measured on this repository: intermittent on a
   two-core CI runner, never once locally.
+- **Fixing the instance of a race that failed leaves every other instance
+  armed, and per-site discipline is what makes them instances.** The saga
+  suite's flake (#107) was closed by interleaving waits into the one test that
+  had failed; twenty unfenced publishes remained across fourteen of that file's
+  twenty-seven harness tests, and **the CI run of the merge commit that closed
+  it went red on the next one**. A publish returns when the message reaches the
+  transport, not when the consumer has handled it — so the failure surfaces at
+  the next waiting assertion, which bills the inactivity bound and reports a
+  command the saga did not send. **Move the barrier into the helper every test
+  already calls.** It leaves nothing to forget, which is the argument
+  `Common.Web.Tests`' assembly-wide parallelisation attribute won over a shared
+  collection, and it costs nothing on a green run. Fence on the **message's own
+  id**: a type-level wait matches the first delivery and silently fences
+  nothing wherever a suite delivers one type twice. And give the barrier a test
+  whose subject is the barrier — every other test stays green without it on any
+  machine a developer has, which is exactly why one is owed.
 - **A declared-inputs list checks itself against the workflow, never against
   the reads — so an omission is invisible from inside the gate.** The Helm
   tree's `SOURCE_INPUTS` pattern was adopted twice more and then failed a third
