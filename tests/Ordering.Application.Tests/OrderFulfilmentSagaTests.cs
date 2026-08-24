@@ -1811,8 +1811,9 @@ public class OrderFulfilmentSagaTests
     public async Task A_publish_returns_only_after_the_saga_has_consumed_that_message()
     {
         // **The subject is the barrier, not the saga**, and this file needs one
-        // because every other test here would stay green if the barrier were
-        // removed — on this machine. They went green on the branch that shipped
+        // because every PRE-EXISTING test here would stay green if the barrier
+        // were removed — no longer every test, since the deterministic guard
+        // below fails too, and that is the point of it — on this machine. They went green on the branch that shipped
         // twenty unfenced publishes, and CI failed on the merge commit.
         //
         // A test whose subject is what a gate is looking at is what this
@@ -1983,7 +1984,15 @@ public class OrderFulfilmentSagaTests
             {
                 // The consumer has the message and is holding it. Nothing here
                 // waits on a clock: the barrier is either open or it is not.
-                await GateConsumer.Arrived.Task;
+                //
+                // **Bounded, for the reason the finally below exists.** If the
+                // publish faulted or the probe never routed, an unbounded await
+                // here hangs the run rather than failing it — the same hang the
+                // finally was added to prevent, one step earlier and reached by
+                // a different fault. WaitAsync turns it into a timeout that
+                // names the wait.
+                await GateConsumer.Arrived.Task
+                    .WaitAsync(InactivityTimeout, TestContext.Current.CancellationToken);
                 publish.IsCompleted.ShouldBeFalse(
                     "Publish returned while its own message was still inside the consumer, " +
                     "so it is not a barrier at all.");
@@ -2004,7 +2013,8 @@ public class OrderFulfilmentSagaTests
             Task second = Publish(harness, new GateProbe(Guid.CreateVersion7()));
             try
             {
-                await GateConsumer.Arrived.Task;
+                await GateConsumer.Arrived.Task
+                    .WaitAsync(InactivityTimeout, TestContext.Current.CancellationToken);
                 second.IsCompleted.ShouldBeFalse(
                     "Publish returned once SOME message of the type had been consumed rather " +
                     "than its own — which is the type-level wait, and it fences nothing.");

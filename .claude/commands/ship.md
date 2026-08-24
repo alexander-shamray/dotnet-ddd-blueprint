@@ -1015,12 +1015,12 @@ same argument as never calling a branch clean because asking failed.
    |---|---|
    | Clean, on two consecutive passes | Convergence, the outcome the loop is for |
    | Skipped on limits | Quota, not a verdict; reported as skipped, and final |
-   | Unconverged at the twelfth check | A budget ran out, which is not a reason to withhold the second reviewer |
+   | Unconverged at the sixth check | A budget ran out, which is not a reason to withhold the second reviewer |
 
    **The third row was missing and step 7 asserted it anyway.** That step opens
    by saying both loops have finished — *clean, all-resolved, skipped on
    limits, or unconverged at a ceiling* — while this step admitted only the
-   first two, so a Grok loop that spent its twelfth check reached an assertion
+   first two, so a Grok loop that spent its last check reached an assertion
    nothing could satisfy and the chain simply had no next instruction. Step 7
    already argues that a ceiling is a budget running out rather than a
    verdict, and that argument applies here first: a branch Grok had more to

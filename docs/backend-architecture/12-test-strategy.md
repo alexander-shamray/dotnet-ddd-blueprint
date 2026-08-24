@@ -1942,7 +1942,7 @@ public async Task Commands_are_sent_and_events_are_published()
 > message **no consumer takes at all**, which is the case worth the ten seconds.
 
 > **A barrier is only ever observed working, so give it a test whose subject is
-> the barrier.** Every other test in a saga suite stays green with the wait
+> the barrier.** Every test a saga suite already had stays green with the wait
 > removed — on an unloaded machine, which is every machine a developer has.
 > The one that does not is a test that publishes and then reads the record **as
 > of now**, on a cancelled token, asserting the transition's command is already

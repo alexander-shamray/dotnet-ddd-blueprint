@@ -131,12 +131,14 @@ happening. What it spends the inactivity bound on is a message no consumer takes
 — measured at 10.0 s against a type the machine does not declare — and that is a
 real defect reported at the line that caused it.
 
-**The barrier has a test whose subject is the barrier, and it had to.** Every
-other test in the file stays green with the fence removed, on this machine and
-on any developer's; that is precisely the property that let twenty instances
-ship. `A_publish_returns_only_after_the_saga_has_consumed_that_message`
-publishes and then reads the record **as of now**, on a spent token, asserting
-the `ReserveStock` the `Initially` transition owes is already recorded. It was
+**The barrier has tests whose subject is the barrier, and it had to.** Every
+*pre-existing* test in the file stays green with the fence removed, on this
+machine and on any developer's; that is precisely the property that let twenty
+instances ship. There are two guards now and neither stays green, which is what
+the plural is for.
+`A_publish_returns_only_after_the_saga_has_consumed_that_message` publishes and
+then reads the record **as of now**, on a spent token, asserting the
+`ReserveStock` the `Initially` transition owes is already recorded. It was
 observed red both ways the helper can break — with no wait at all, and with a
 wait on the type rather than the id — before the fix was trusted.
 
