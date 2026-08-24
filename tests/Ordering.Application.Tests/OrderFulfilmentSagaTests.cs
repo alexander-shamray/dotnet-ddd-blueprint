@@ -1793,18 +1793,7 @@ public class OrderFulfilmentSagaTests
             $"{nameof(saga.DespatchTimeout)}.Received"
         ];
 
-        string[] declared =
-        [
-            .. typeof(OrderFulfilmentSaga)
-                .GetProperties()
-                .Where(pi => typeof(Event).IsAssignableFrom(pi.PropertyType))
-                .Select(pi => pi.Name),
-            .. typeof(OrderFulfilmentSaga)
-                .GetProperties()
-                .Where(pi => pi.PropertyType.IsGenericType &&
-                    pi.PropertyType.GetGenericTypeDefinition() == typeof(Schedule<,>))
-                .Select(pi => $"{pi.Name}.Received")
-        ];
+        string[] declared = DeclaredEvents();
 
         declared.ShouldNotBeEmpty("the reflection scan found no events on this machine");
 
@@ -1855,8 +1844,22 @@ public class OrderFulfilmentSagaTests
         //
         // **Still not a generated sweep.** What makes a claim checkable is
         // naming the events a state can receive AND why, and that argument has
-        // to be written per state. What changed is that all five states now
-        // have one — the four here and Compensating one method up.
+        // to be written per state.
+        //
+        // **What this method is NOT is a partition, and saying it was is how
+        // this test came to overstate itself.** Compensating one method up
+        // classifies every DECLARED event into reachable and not, so a new
+        // event nobody thought about fails there. Accepts below compares
+        // NextEvents against a written list and nothing else — so an event
+        // declared with no branch in this state and no entry in this list
+        // changes neither side and passes. That is the fail-open shape this
+        // file exists to refuse, in the method written to refuse it.
+        //
+        // Per-state classification would close it and costs four
+        // nine-element lists whose entries are mostly "belongs to another
+        // state". Every_declared_event_is_handled_in_some_state below closes
+        // the same hole from the other end and reads the machine for both
+        // sides, so nothing has to be kept in step by hand.
         OrderFulfilmentSaga saga = new();
 
         // AwaitingStock is entered with ReserveStock in flight. Inventory
@@ -1928,6 +1931,76 @@ public class OrderFulfilmentSagaTests
                 $"{nameof(saga.DespatchTimeout)}.Received"
             ]);
     }
+
+    [Fact]
+    public void Every_declared_event_is_handled_in_some_state()
+    {
+        // **The hole the two partition tests leave between them, closed
+        // without a sixth hand-written list.** Compensating classifies every
+        // declared event; the four states before it compare NextEvents to a
+        // written list. So an event declared with no branch ANYWHERE and no
+        // entry in any list is absent from both sides of all five assertions
+        // and passes them all — which is exactly what a new Event<T> property
+        // looks like on the day somebody adds one and forgets the transition.
+        //
+        // **Both sides of this one are read from the machine**, which is what
+        // makes it hold without maintenance: the left is reflection over the
+        // declared properties, the right is NextEvents over the declared
+        // states. There is no list to forget to update, and no exemption list
+        // either — every event this machine declares is legitimately
+        // receivable somewhere, including OrderPlaced, which Initially
+        // handles in Initial.
+        //
+        // It is deliberately weaker than a per-state partition and is not a
+        // substitute for one: it says an event is handled SOMEWHERE, not that
+        // it is handled everywhere it can arrive. That second claim is what
+        // the per-state arguments above are for, and #129 is what it costs
+        // when one of them is missing.
+        OrderFulfilmentSaga saga = new();
+
+        string[] declared = DeclaredEvents();
+        declared.ShouldNotBeEmpty("the reflection scan found no events on this machine");
+
+        string[] handled =
+        [
+            .. saga.States
+                .SelectMany(saga.NextEvents)
+                .Select(e => e.Name)
+                .Where(n => !n.EndsWith(".AnyReceived", StringComparison.Ordinal))
+                .Distinct()
+        ];
+
+        declared
+            .Except(handled)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ShouldBeEmpty(
+                "every event this machine declares must be receivable in at least one state. " +
+                "One that is receivable nowhere is a binding on the saga's queue with no " +
+                "transition behind it, which §9.6 sends to the error queue on first delivery.");
+    }
+
+    /// <summary>
+    /// Every event name the machine declares, including one per
+    /// <see cref="Schedule{TInstance, TMessage}"/> in the <c>.Received</c> form
+    /// <c>NextEvents</c> reports them under.
+    /// </summary>
+    /// <remarks>
+    /// Extracted rather than copied: two tests classify against this set, and a
+    /// second scan that drifted from the first would make one of them quietly
+    /// narrower — the failure both of them exist to catch.
+    /// </remarks>
+    private static string[] DeclaredEvents() =>
+    [
+        .. typeof(OrderFulfilmentSaga)
+            .GetProperties()
+            .Where(pi => typeof(Event).IsAssignableFrom(pi.PropertyType))
+            .Select(pi => pi.Name),
+        .. typeof(OrderFulfilmentSaga)
+            .GetProperties()
+            .Where(pi => pi.PropertyType.IsGenericType &&
+                pi.PropertyType.GetGenericTypeDefinition() == typeof(Schedule<,>))
+            .Select(pi => $"{pi.Name}.Received")
+    ];
 
     private static void Accepts(OrderFulfilmentSaga saga, State state, string[] expected) =>
         saga.NextEvents(state)

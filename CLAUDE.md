@@ -489,7 +489,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 888 tests — so the build rules and the drift rules below
+and `dotnet test` runs 889 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -1037,7 +1037,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 700 of 888, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 701 of 889, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1149,8 +1149,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 700 of
-the 888 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 701 of
+the 889 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 188, needing the daemon exactly as
 before.
 
@@ -1162,7 +1162,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (682) and integration (188), which is the 700 above split at the
+(18), unit (683) and integration (188), which is the 701 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.

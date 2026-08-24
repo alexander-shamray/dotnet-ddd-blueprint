@@ -2630,7 +2630,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // the reserve would create a reservation nobody wants. That was
             // #125, and ADR-024 closes it in §3.2 rather than here —
             // Inventory remembers a release for an order whose ReserveStock
-            // has not arrived and refuses the reserve that follows with
+            // has not arrived and refuses the reserve that follows,
+            // answering with StockReleased rather than
             // StockReservationFailed. An earlier revision argued the case away
             // with "ReleaseStock is already in flight", which is true and is
             // not the same claim; what replaces it is a guarantee from the
@@ -2807,6 +2808,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > naming the events a state can receive *and why*, which is an argument per
 > state rather than something a loop can produce. What changed is that the
 > argument is now written five times instead of three.
+>
+> **One of those five is a partition and four are lists, and the difference is
+> load-bearing.** `Compensating` classifies every *declared* event into
+> reachable and not, so an event nobody thought about fails there. The other
+> four compare `NextEvents` against a written list, so an event declared with
+> no branch in that state and no entry in that list changes neither side and
+> passes — the fail-open shape this chapter's own residual is about. A third
+> test closes it from the other end: every declared event must be receivable
+> in **some** state, with both sides read from the machine rather than from a
+> sixth list. Measured, because a gate nobody has seen red is a gate nobody has
+> established is looking at anything — declaring an unhandled event fails it,
+> and classifying that event as unreachable in `Compensating` leaves every
+> other assertion in the file green.
 
 > **A cancellation has two origins and the saga used to see one.** The saga's
 > own `CancelOrder` is always paired with `Finalize()`, so the workflow ends
@@ -2914,7 +2928,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > is worth carrying.**
 > [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
 > has Inventory remember a release for an order whose `ReserveStock` has not
-> arrived and refuse the reserve that follows with `StockReservationFailed`.
+> arrived and refuse the reserve that follows, answering with `StockReleased`
+> — the same postcondition, and not `StockReservationFailed`, which reports
+> unavailable products this refusal does not have.
 > The saga cannot do the equivalent: under the same ADR the no-op release has
 > already published `StockReleased`, so `Compensating` has already finalised
 > by the time the late `StockReserved` exists, and a branch written for it is

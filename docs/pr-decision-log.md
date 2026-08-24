@@ -96,7 +96,9 @@ and that is the whole argument.
 publishes, the saga finalises on it, and the `StockReserved` that follows
 correlates to nothing. So the ADR also has Inventory *remember* a release for
 an order whose `ReserveStock` has not arrived and refuse the reserve that
-follows with `StockReservationFailed`.
+follows — answering with `StockReleased`, the same postcondition, rather than
+with `StockReservationFailed`, which reports unavailable products a refusal of
+that kind does not have.
 
 > **The cheap saga-side fix is unreachable rather than merely weaker, and
 > noticing that is what stopped it being written.** #125 offers sending a
@@ -126,9 +128,18 @@ lost with one fault behind it and nothing on the pager.
 five states are checked" — is exactly where `Confirmed`'s door hid, because
 that test asserted the events a state accepts and nobody had added the release
 to either list. A gate covering three of four surfaces reports the fourth as
-fine. The partition now covers all five states, and the two behavioural tests
-were each observed red against the branch removed, separately, so neither is
-passing on the other's account.
+fine. The per-state arguments now cover all five states, and the two
+behavioural tests were each observed red against the branch removed,
+separately, so neither is passing on the other's account.
+
+**"The partition now covers all five states" is what this said, and only one of
+the five is a partition.** `Compensating` classifies every declared event; the
+other four compare `NextEvents` to a written list and pass when a new event is
+missing from both. So the sentence claimed the fail-closed property for four
+checks that do not have it — the overstatement this entry is otherwise about,
+made about the fix for it. A third test now asserts that every declared event is
+receivable somewhere, both sides read from the machine, and it was observed red
+against an unhandled event that every other assertion in the file accepted.
 
 **`Ignore` is correct because of the ADR and was not correct without it**, and
 the ordering of those two halves is the point rather than a footnote. #129
@@ -265,7 +276,7 @@ barrier through a race and the second settles it by construction.
 **Pinned to then rather than restated**, on the same terms as the twenty-seven
 harness tests above: this entry records what one PR measured, and the live
 figure belongs in `CLAUDE.md` and `docs/testing.md`, which carry it. It read
-"is 886" in the present tense until a later branch made it 888 — and the two
+"is 886" in the present tense until a later branch moved it — and the two
 sentences sat four paragraphs apart in this one entry, one of them already
 pinned. **A treatment applied to one number and not to its neighbour is the
 half-applied reconciliation this file's own rule forbids**, which is what makes

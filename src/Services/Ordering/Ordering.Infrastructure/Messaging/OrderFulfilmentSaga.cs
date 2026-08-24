@@ -990,8 +990,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // reserve it was meant to undo. That was #125, and it is closed in
             // §3.2 rather than here: ADR-024 has Inventory REMEMBER a release
             // for an order whose ReserveStock has not arrived and refuse the
-            // reserve that follows with StockReservationFailed, so no
-            // reservation is created for an order this saga has cancelled.
+            // reserve that follows — answering with StockReleased, the same
+            // postcondition — so no reservation is created for an order this
+            // saga has cancelled. NOT StockReservationFailed, which reports
+            // unavailable products a refusal of that kind does not have; this
+            // comment named it until a review read the event's own record.
             //
             // **It could not be closed here, and that is worth stating because
             // the saga-side fix was the obvious one.** Sending a second
