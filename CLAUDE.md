@@ -489,7 +489,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 884 tests — so the build rules and the drift rules below
+and `dotnet test` runs 886 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -750,6 +750,22 @@ own line rather than sending a reader to a file that does not hold it.
   that it refused, and a second test asserts *why*, against the options
   pipeline where nothing races. Measured on this repository: intermittent on a
   two-core CI runner, never once locally.
+- **Fixing the instance of a race that failed leaves every other instance
+  armed, and per-site discipline is what makes them instances.** The saga
+  suite's flake (#107) was closed by interleaving waits into the one test that
+  had failed; twenty unfenced publishes remained across fourteen of that file's
+  twenty-seven harness tests, and **the CI run of the merge commit that closed
+  it went red on the next one**. A publish returns when the message reaches the
+  transport, not when the consumer has handled it — so the failure surfaces at
+  the next waiting assertion, which bills the inactivity bound and reports a
+  command the saga did not send. **Move the barrier into the helper every test
+  already calls.** It leaves nothing to forget, which is the argument
+  `Common.Web.Tests`' assembly-wide parallelisation attribute won over a shared
+  collection, and it costs nothing on a green run. Fence on the **message's own
+  id**: a type-level wait matches the first delivery and silently fences
+  nothing wherever a suite delivers one type twice. And give the barrier a test
+  whose subject is the barrier — every other test stays green without it on any
+  machine a developer has, which is exactly why one is owed.
 - **A declared-inputs list checks itself against the workflow, never against
   the reads — so an omission is invisible from inside the gate.** The Helm
   tree's `SOURCE_INPUTS` pattern was adopted twice more and then failed a third
@@ -1009,7 +1025,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 696 of 884, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 698 of 886, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1121,8 +1137,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 696 of
-the 884 and starts no container — measured with `docker events`, not inferred —
+category runs a smaller suite and says which. `Category!=Integration` is 698 of
+the 886 and starts no container — measured with `docker events`, not inferred —
 and `Category=Integration` is the other 188, needing the daemon exactly as
 before.
 
@@ -1134,7 +1150,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (678) and integration (188), which is the 696 above split at the
+(18), unit (680) and integration (188), which is the 698 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1281,7 +1297,7 @@ Run `/validate-blueprint` after any substantive edit.
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
   admonition syntax. Two forms are named and recurring — `**Trap — …**`
-  (17) for a mistake worth naming, and `**Decision — …**` (8), which always
+  (18) for a mistake worth naming, and `**Decision — …**` (8), which always
   points at the ADR that records it:
 
   ```markdown

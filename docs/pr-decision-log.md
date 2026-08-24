@@ -68,6 +68,114 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The barrier that was twenty call sites, and the run that proved it (#107)
+
+**No `PR-NN` heading**, on the terms the entries below set: this is a defect fix
+against §12.5, which the plan has no row for.
+
+**`main` went red on the merge commit that closed #107.** That issue was the
+saga suite flaking under a full-solution parallel run — a test failing after ten
+seconds saying the saga did not send a command. It was closed by interleaving
+waits into `Payment_declined_releases_stock_before_cancelling`, the one test
+that had been observed failing, with a comment arguing the mechanism correctly
+and at length. The next CI run failed on
+`A_payment_timeout_compensates_with_its_own_reason`, ten seconds,
+`Sent<ReleaseStock>` false.
+
+**The diagnosis was right and its reach was not.** A publish returns when the
+message reaches the transport, not when the saga has consumed it, so two
+consecutive publishes are a race: the second event reaches the endpoint before
+anything has created the instance — discarded in silence, since a non-initial
+event correlating to nothing is consumed cleanly — or before the instance has
+reached the state that handles it, which faults. Neither is visible where it
+happens. The test runs on and the *next* waiting assertion bills the inactivity
+bound, so the failure is reported four assertions away from its cause, wearing
+the saga's message rather than the runner's.
+
+**An audit of the file found twenty unfenced publishes across fourteen of its
+twenty-seven harness tests.** Three of the twenty publish a scheduled expiry,
+which is the worst case: an expiry arriving early lands in a state with no
+branch for it, and `ReleaseTimeout` in particular can only be handled in
+`Compensating`, three transitions downstream.
+
+**The counterfactual was measured rather than argued**, because the race does
+not reproduce on a developer's machine — twelve concurrent runs of the suite
+here passed, all in two seconds. Forcing the losing order instead —
+`PaymentAuthorisationExpired` published before `StockReserved` — gives
+`ReleaseStock` not sent, after 10.1 s. That is the CI failure exactly: the same
+assertion, the same value, the same duration.
+
+**The fix is not twenty more waits, and that is the whole decision.** Per-site
+discipline is what produced twenty instances of one defect: it fails open, the
+test that forgets is the test that flakes, and it flakes on a loaded runner and
+nowhere else — so the suite that forgets looks identical to the suite that does
+not, on every machine anyone will run it on. The barrier moved into
+`Publish`, the helper every test in the file already calls, which leaves nothing
+to forget. That is the argument `Common.Web.Tests`' assembly-wide
+parallelisation attribute won over a shared collection, arriving at the same
+answer from the same direction.
+
+**It fences on the message's own id, not its type.** Tests in this file deliver
+one type twice — the redelivery, the duplicate confirmation, and now the
+barrier's own test — and a
+type-level wait matches the first delivery and returns immediately, fencing
+nothing for exactly the tests whose subject is a second arrival. Named in the
+helper rather than counted, because a count of them is a number nobody re-runs —
+this entry said four before anything measured it. The id comes off the send
+context rather than the contract, because the saga's five scheduled expiries are
+not contracts (Appendix D) and carry no §9.1 envelope.
+
+**It costs nothing on a green run.** The suite runs in the same one second it
+did before, because the consume the fence waits for is the one already
+happening. What it spends the inactivity bound on is a message no consumer takes
+— measured at 10.0 s against a type the machine does not declare — and that is a
+real defect reported at the line that caused it.
+
+**The barrier has tests whose subject is the barrier, and it had to.** Every
+*pre-existing* test in the file stays green with the fence removed, on this
+machine and on any developer's; that is precisely the property that let twenty
+instances ship. There are two guards now and neither stays green, which is what
+the plural is for.
+`A_publish_returns_only_after_the_saga_has_consumed_that_message` publishes and
+then reads the record **as of now**, on a spent token, asserting the
+`ReserveStock` the `Initially` transition owes is already recorded. It was
+observed red both ways the helper can break — with no wait at all, and with a
+wait on the type rather than the id — before the fix was trusted.
+
+**The two reds are not the same strength, and saying so is the point.** The
+no-wait arm fails the first assertion deterministically. The type-level arm
+fails only the second, and that one is a race by construction: the
+early-returning publish leaves the duplicate's consume in flight, so the
+spent-token read usually sees one and may legitimately see two. It was observed
+red; it is not guaranteed red. **A counterfactual nobody can re-run is not
+evidence the next reader can check**, so the distinction is written into the
+test rather than rounded off into "observed red".
+
+**The test is named for the consume and not the transition**, because its own
+second stimulus falsifies the stronger name: a duplicate `StockReserved` lands
+in `AwaitingPayment`, which declares neither a branch nor an `Ignore` for it, so
+no transition runs at all. It faults — the default §9.6 keeps — and the test
+says so with a `ConsumeFaults` assertion rather than leaving a message on the
+error queue unremarked. That assertion earns its place twice: it is also what
+proves the two deliveries are distinct and each reached the machine, where a
+`Consumed` count alone reads the same whether the pipeline returned or threw.
+
+**§12.5's own first sample published three events back to back**, so the chapter
+was teaching the race while the file below it was failing on it. The sample now
+interleaves its waits, and three callouts carry the mechanism, the reason the
+barrier belongs in the helper, and the reason a barrier needs a test of its own.
+The suite's explicit `Sent<…>` waits stay: they fenced and now only assert —
+that each transition sent the command it owes — which is what they were worth
+keeping for, and the comment beside them says so rather than reading as a
+template for the next test.
+
+`dotnet test Platform.slnx` is 886, up from 884, and the fast half is 698 —
+two new tests, both the barrier's: one driving the saga, and one driving a
+consumer the test holds open, because the first can only observe the barrier
+through a race and the second settles it by construction.
+
+---
+
 ## The state named for a command's intent (#126)
 
 **No `PR-NN` heading**, on the terms the entries below set: Appendix C's plan is

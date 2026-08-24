@@ -120,8 +120,23 @@ public class IntegrationEventConsumerTests
         await harness.Start();
 
         var messageId = Guid.CreateVersion7();
+
+        // The callback is §9.1's rule, not ceremony: body, row, header and
+        // inbox key are ONE GUID, and IIntegrationEvent says the envelope's
+        // value is "THE message id, not a second one". Without it MassTransit
+        // mints its own header and the event has two identities — and NOTHING
+        // FAILS, because every assertion here reads the payload. That is the
+        // exact cost that comment predicts, and these three publishes were
+        // sitting in it: found while a saga-suite helper was being fixed for
+        // the same thing, by a reviewer checking whether the claim "every
+        // other publisher writes it" was true. It was not.
         await harness.Bus.Publish(
             new ProbeEvent { MessageId = messageId, CorrelationId = messageId, OccurredAt = Now },
+            c =>
+            {
+                c.MessageId = messageId;
+                c.CorrelationId = messageId;
+            },
             TestContext.Current.CancellationToken);
 
         (await harness.Consumed.Any<ProbeEvent>(TestContext.Current.CancellationToken)).ShouldBeTrue();
@@ -144,6 +159,11 @@ public class IntegrationEventConsumerTests
         var messageId = Guid.CreateVersion7();
         await harness.Bus.Publish(
             new UnhandledEvent { MessageId = messageId, CorrelationId = messageId, OccurredAt = Now },
+            c =>
+            {
+                c.MessageId = messageId;
+                c.CorrelationId = messageId;
+            },
             TestContext.Current.CancellationToken);
 
         // §9.4's "empty is a decision" table: configuring this consumer for the
@@ -179,6 +199,11 @@ public class IntegrationEventConsumerTests
         var messageId = Guid.CreateVersion7();
         await harness.Bus.Publish(
             new ProbeEvent { MessageId = messageId, CorrelationId = messageId, OccurredAt = Now },
+            c =>
+            {
+                c.MessageId = messageId;
+                c.CorrelationId = messageId;
+            },
             TestContext.Current.CancellationToken);
 
         (await harness.Consumed.Any<ProbeEvent>(TestContext.Current.CancellationToken)).ShouldBeTrue();

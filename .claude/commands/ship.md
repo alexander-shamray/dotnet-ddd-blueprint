@@ -845,7 +845,7 @@ same argument as never calling a branch clean because asking failed.
      is reported with the option taken and the option rejected. What must not
      happen is the quiet version — a row silently reclassified as `Fixed`,
      which loses both the question and the answer.
-   - **Two consecutive clean rounds end it; twelve rounds is the ceiling.**
+   - **Two consecutive clean rounds end it; six rounds is the ceiling.**
      Two clauses, and the first is deliberately *two* — **in this loop only**.
      Clean here means a pass that leaves no `suggestions.md` — a full review
      with nothing to write, or a recheck that removes the file; step 6 states
@@ -857,14 +857,15 @@ same argument as never calling a branch clean because asking failed.
      also subsumes "never end on a round that produced a fix", since a round
      with findings is not clean and resets the count.
 
-     Failing that, stop at twelve and hand over what survives — saying plainly
+     Failing that, stop at six and hand over what survives — saying plainly
      that the loop ended on its ceiling rather than on convergence, because
      those are different states and only one of them is evidence.
 
-     **Step 5's twelve is a count of Grok checks per PR, not per session** —
-     this loop and step 6 each carry a twelve of their own. Every
+     **Step 5's six is a count of Grok checks per PR, not per session**, and
+     the two loops no longer share a number: this one carries six, step 6 still
+     carries twelve. Every
      `grok-review.sh` invocation is one check — a full review and a recheck
-     count the same — and this loop's ceiling is **no more than twelve of them
+     count the same — and this loop's ceiling is **no more than six of them
      against one PR**, carried across resumed `/ship` runs rather than reset
      each time the chain re-enters. A skip on limits (exit 12) is not a check
      and does not count; a review that ran and reported does.
@@ -902,7 +903,7 @@ same argument as never calling a branch clean because asking failed.
      **The two orders fail in opposite directions and only one is safe** —
      written after, an interrupted run has spent the check and left no record,
      and the resumed run spends a thirteenth; written before, the worst case is
-     a reservation for a check that never ran, which wastes one of the twelve
+     a reservation for a check that never ran, which wastes one of the six
      and never exceeds it. The helper writes it immediately before the review's
      own `docker run`, which is what makes the accounting tight: **every path
      that can refuse before that line spends nothing** — a dirty tree, no
@@ -915,7 +916,8 @@ same argument as never calling a branch clean because asking failed.
      helper exits 13 before the model call. That stays: after a failed read the
      state is precisely what is not known, and releasing on it would return a
      slot on the strength of a lookup that did not complete. The cost is bounded
-     at one check in twelve; guessing the other way is not. So **exit 12 no longer posts a release**, because it has no
+     at one check in six; guessing the other way is not. So **exit 12 no
+     longer posts a release**, because it has no
      reservation to give one back for; the verb survives for a human
      reconciling a slot spent wrongly, and for `count`, which must still fold a
      released row out of a PR's existing history.
@@ -938,15 +940,15 @@ same argument as never calling a branch clean because asking failed.
      post exactly the lines above to a PR of this repository, and is
      edit-denied to the session that invokes it. Keep the running count in
      the report as well — the report line is for the reader, the ledger is
-     for the machine — and when the twelfth is spent, stop and say the PR
+     for the machine — and when the sixth is spent, stop and say the PR
      reached its Grok ceiling. When the loop ends clean instead, say so on
      the ledger — `grok-ledger.sh <n> converge <N>` — because a resumed run
      reading bare spend at the ceiling cannot tell convergence from
      exhaustion, and the difference is whether it reports the Grok half
      finished or blocked.
 
-     The ceiling — then one number shared by both loops, as its size still
-     is — was three, and three was wrong. By its seventh Copilot round
+     The ceiling — then one number shared by both loops, where the two now
+     differ — was three, and three was wrong. By its seventh Copilot round
      PR-11's findings had gone 10 → 4 → 3 → 1 → 1 → 3 → 1, every one accepted,
      and rounds four through seven caught a documented-but-unenforced
      constraint, an assertion that could not fail in one direction, and a
@@ -972,6 +974,49 @@ same argument as never calling a branch clean because asking failed.
      when it stops asking a person: bounded review, honestly measured, rather
      than an unbounded loop nobody is waiting on.
 
+     **The ceiling is six now, on the caller's instruction, and the paragraphs
+     above are the argument against it.** They are left standing rather than
+     rewritten: PR-11's rounds four through seven each caught a real defect,
+     and its round eight was clean with every later round finding more — so
+     the recorded evidence says a small ceiling ships defects, and six is
+     nearer three than twelve. That is the cost of the change, not a reason
+     the change is wrong; the caller owns the budget. What it means in
+     practice is that **the two-clean-passes rule will more often lose to the
+     ceiling**, since a recheck and a full pass are two of the six — so a
+     branch with findings in round one has at most two chances to converge
+     before the budget is gone. Report which of the two ended the loop, and
+     never round a ceiling up into convergence.
+
+     **The enforcement half still says twelve, and this is a prose bound until
+     it does not.** `grok-ledger.sh` accepts slots `1..12`, writes `n/12` into
+     every ledger comment and trusts only that shape; `grok-review.sh` refuses
+     a slot outside `1..12`. Both are under `.claude/scripts/**`, which
+     `.claude/settings.json` denies this session, so six binds because this
+     file says so and not because anything refuses a seventh. **A bound whose
+     two halves disagree is the shape this repo has already paid for** — it is
+     safe only in this direction, six being narrower than twelve. **The reach is
+     worth stating exactly**: a run that follows this file stops at six, and a
+     resumed or hand-typed `grok-review.sh 7 full` is accepted by both helpers
+     and reserves a seventh paid check with the ledger's validation still green.
+     Nothing refuses it. So the cap is a rule an agent obeys, not a limit a
+     machine imposes.
+
+     Closing it is a human's edit with the deny lifted, and it carries a
+     migration hazard worth naming first: the `/12` is part of the ledger's
+     *comment format*, so changing it to `/6` orphans every row already
+     posted — `count` would match none of them, read zero, and re-arm the cap
+     on a PR that had spent it. A migration has to keep **reading** the old
+     shape while **writing** the new one, and its test has to cover a PR whose
+     ledger holds both.
+
+     **Reverting this file to twelve is the other way to make the two halves
+     agree, and it is not taken.** The caller asked for six; a reviewer's
+     preference for a consistent pair does not outrank that, and the direction
+     of the disagreement is the safe one. What the gap costs is stated here
+     rather than closed, which is the honest half of a bound only one side of
+     which is enforceable from inside a session that may not edit its own
+     helpers.
+
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
    silently skipped and never substituted with a self-review. The exit-12
@@ -987,12 +1032,12 @@ same argument as never calling a branch clean because asking failed.
    |---|---|
    | Clean, on two consecutive passes | Convergence, the outcome the loop is for |
    | Skipped on limits | Quota, not a verdict; reported as skipped, and final |
-   | Unconverged at the twelfth check | A budget ran out, which is not a reason to withhold the second reviewer |
+   | Unconverged at the sixth check | A budget ran out, which is not a reason to withhold the second reviewer |
 
    **The third row was missing and step 7 asserted it anyway.** That step opens
    by saying both loops have finished — *clean, all-resolved, skipped on
    limits, or unconverged at a ceiling* — while this step admitted only the
-   first two, so a Grok loop that spent its twelfth check reached an assertion
+   first two, so a Grok loop that spent its last check reached an assertion
    nothing could satisfy and the chain simply had no next instruction. Step 7
    already argues that a ceiling is a budget running out rather than a
    verdict, and that argument applies here first: a branch Grok had more to
@@ -1264,7 +1309,7 @@ same argument as never calling a branch clean because asking failed.
    and reported on a branch that does not exist upstream. The fetch and a
    `git pull --ff-only` therefore belong **before step 5**, not only here:
    reviewing the wrong tree is a wasted round of somebody's budget, and there
-   are twelve of them.
+   are six of them.
 
    **A fast-forward that will not fast-forward is divergence**, which is
    another session's history against this one's, and it stops the chain for
@@ -1273,7 +1318,8 @@ same argument as never calling a branch clean because asking failed.
 
    **Non-empty is not a stop, because there is an obvious right answer.** The
    run goes back: commit — **scoped**, always — push, and re-enter both review
-   loops for whatever each has left of its twelve, then return to the **top of
+   loops for whatever each has left of its own ceiling — six for Grok, twelve
+   for Copilot — then return to the **top of
    this step**, not to this gate. The top is where `suggestions.md` is
    removed, and re-entering the Grok loop is exactly what puts it back. That
    is what a resumed `/ship` would do from the *on a branch with an open PR*
@@ -1460,7 +1506,8 @@ Then one line per step: done, skipped and why, or stopped and what is needed —
 including the push, which reports which of its three states it found even when
 that state was "nothing to do". Each review loop reports one line per round —
 findings raised, findings fixed, and what each round pushed — its running
-check count against its twelve (the PR carries the durable copy: step 5's
+check count against its own ceiling — six for Grok, twelve for Copilot — (the
+PR carries the durable copy: step 5's
 ledger comments, step 6's timeline events; the report line is the
 human-readable echo), and how it ended, in that loop's own vocabulary: step 5
 clean, skipped on limits (final — one reviewer, not two), or stopped

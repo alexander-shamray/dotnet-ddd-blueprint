@@ -59,13 +59,20 @@ SOLUTION = ROOT / "Platform.slnx"
 #
 # MEASURED, not guessed: `dotnet test Platform.slnx --no-build -c Release` under
 # each stage's filter on this repository, summed over the thirteen per-project
-# totals — 18 + 671 + 188 = 877, which is the figure CLAUDE.md and
-# docs/testing.md carry and the sum docs/testing.md points at ("689 and 188
-# summing to 877", 689 being the architecture and unit stages together).
+# totals — 18 + 671 + 188 = 877 when PR-25 set these floors.
 #
 # The integration figure read 187 until it was checked against CI rather than
 # against the previous copy of itself, and 18 + 649 + 187 does not make the
 # 854 the same three files carried. A restated number is a claim to reconcile.
+#
+# **So this comment no longer says what CLAUDE.md and docs/testing.md carry**,
+# and the removal is the point rather than tidying. It used to, and the sentence
+# went stale the first time a PR added a test — silently, because nothing here
+# reads those files and no floor moves when they change. A cross-reference a
+# gate cannot check is a third copy of a number, which is what the paragraph
+# above is about. The suite's live totals are those two files' to state; what
+# this comment owes is the run these floors were derived from, and that run is
+# in the past and stays where it is.
 #
 # THE NUMBERS BELOW ARE NOT THOSE COUNTS, and the gap is deliberate. A floor
 # set at the measurement is a ratchet: it fails on the day somebody legitimately

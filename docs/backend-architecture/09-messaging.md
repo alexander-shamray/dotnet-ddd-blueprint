@@ -3153,8 +3153,12 @@ cfg.UseDelayedMessageScheduler();
 > The first `OrderPlaced` then faults onto the error queue, and §12.5's harness
 > reports it as *the saga did not send* after waiting out its inactivity
 > bound — the assertion's own message, describing a registration rather than a
-> transition. Measured by deleting both lines: eleven of that suite's thirteen
-> tests fail, every one as a timeout, and not one of them names the cause.
+> transition. Measured by deleting both lines: eleven of the **thirteen** saga
+> tests PR-21 shipped fail, every one as a timeout, and not one of them names
+> the cause. **The count is pinned to that suite and does not re-run to it** —
+> the file has grown since, so a reader reproducing this gets a different
+> ratio. §12.5 carries the same measurement and the same caveat; this was the
+> third copy and the one that still read as a claim about the live suite.
 
 [ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
 records the choice and what it costs. The short of it: on RabbitMQ this

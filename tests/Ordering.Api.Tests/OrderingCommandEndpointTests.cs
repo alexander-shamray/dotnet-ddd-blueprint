@@ -437,7 +437,14 @@ public sealed class OrderingCommandEndpointTests(ServiceFixture fixture) : IAsyn
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .Publish(reserved, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+            .Publish(
+                reserved,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = reserved.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
     }
 
     /// <summary>

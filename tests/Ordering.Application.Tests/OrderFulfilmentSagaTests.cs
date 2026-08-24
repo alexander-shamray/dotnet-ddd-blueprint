@@ -1,3 +1,4 @@
+using Common.Contracts;
 using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
 using Common.Contracts.Payments.V1;
@@ -59,13 +60,15 @@ public class OrderFulfilmentSagaTests
     /// <b>Measured by deleting both lines: 11 of the 13 tests this file held
     /// when the measurement was taken fail, and every one of them fails as a
     /// TIMEOUT rather than as an error.</b> The count is left as measured
-    /// rather than rescaled to the 25 tests here now — a ratio nobody re-ran
+    /// rather than rescaled to the suite here now — a ratio nobody re-ran
     /// is not evidence about a suite that has since grown.
-    /// The two survivors are the structural pair the file then ended with —
-    /// there is a third beside them now, and it would survive the same way.
-    /// They
+    /// The two survivors are the structural pair the file then ended with, and
+    /// the ones beside them now would survive the same way. <b>How many of
+    /// those there are is deliberately not written here</b>: this sentence has
+    /// said "a third" while there were four, and a count kept in prose beside a
+    /// measurement it is not part of is a count nobody re-checks. They
     /// construct the state machine and never start a bus — correctly, and
-    /// worth knowing, because they are the two that would keep a deleted
+    /// worth knowing, because they are the ones that would keep a deleted
     /// registration looking half-covered. What the eleven do not do is say
     /// why: the saga's exception is faulted onto the error queue, the
     /// assertion waits out its inactivity bound and reports the command it
@@ -108,25 +111,153 @@ public class OrderFulfilmentSagaTests
     }
 
     /// <summary>
-    /// The helpers below exist to carry one argument, and it is the one
-    /// xUnit1051 requires on every call that accepts a token — spelled out at
-    /// each of the forty call sites it would bury the assertions.
+    /// Publishes, and does not return until <em>that</em> message has been
+    /// consumed — by whatever is bound to it, which is usually the saga and in
+    /// the barrier's own guard is a consumer the test holds open. A fault
+    /// counts as consumed: the harness records a delivery whether the pipeline
+    /// returned or threw, so this is a claim about ordering and never about
+    /// outcome. The wait is the point: without it two consecutive publishes are
+    /// a race, and losing it fails a later assertion wearing the wrong
+    /// component's name rather than the runner's.
     /// </summary>
     /// <remarks>
+    /// <b>This and the helpers under it exist to carry one argument</b>, and it
+    /// is the one xUnit1051 requires on every call that accepts a token —
+    /// spelled out at each of the call sites it would bury the assertions.
     /// They also keep §9.6's distinction visible at the call site: a command is
     /// <see cref="Sent"/> and an event is published, the harness records the
     /// two separately, and a test that asks the wrong list fails while looking
-    /// like a saga defect.
+    /// like a saga defect. There is no waiting <c>Published</c> sibling of
+    /// <see cref="Sent"/>, because nothing here asserts a publish positively:
+    /// every message this saga emits is a command, and the one published
+    /// assertion in the suite is the negative that proves it.
+    /// <see cref="NotYetPublished"/> is that one.
     /// <para>
-    /// There is no waiting <c>Published</c> sibling of <see cref="Sent"/>,
-    /// because nothing here asserts a publish positively: every message this
-    /// saga emits is a command, and the one published assertion in the suite is
-    /// the negative that proves it. <see cref="NotYetPublished"/> is that one.
+    /// <b>A publish returns when the message reaches the transport, not when
+    /// the saga has consumed it.</b> So a test that publishes
+    /// <c>OrderPlaced</c> and then <c>StockReserved</c> is asking for the
+    /// second to be handled in <c>AwaitingStock</c> while nothing has put the
+    /// instance there — and the reverse arrival is discarded in silence when no
+    /// instance exists yet — see
+    /// <see cref="An_event_for_an_order_with_no_instance_is_discarded_in_silence"/>
+    /// — or faults when the state has no branch for it. Neither outcome is
+    /// visible where it happens: the test runs on, and the <em>next</em> waiting
+    /// assertion bills the full inactivity bound and reports a command the saga
+    /// did not send.
+    /// </para>
+    /// <para>
+    /// <b>Measured rather than argued.</b> Forcing the losing order of
+    /// <see cref="A_payment_timeout_compensates_with_its_own_reason"/> — the
+    /// scheduled expiry published before <c>StockReserved</c> — gives
+    /// <c>ReleaseStock</c> not sent, after 10.1 s. That is exactly what CI
+    /// reported on the merge commit of #135: the same assertion, false, at ten
+    /// seconds.
+    /// </para>
+    /// <para>
+    /// <b>The barrier is here rather than at the call sites, and that is the
+    /// whole fix.</b> #107 was closed by interleaving waits into the one test
+    /// that had failed; fourteen of this file's twenty-seven harness tests
+    /// still had twenty unfenced publishes between them, and the next one
+    /// failed on the very run that merged the fix. Per-site discipline fails
+    /// open — the test that forgets is the test that flakes, and it flakes on a
+    /// loaded runner and nowhere else. A barrier inside the helper every test
+    /// already calls leaves nothing to forget, which is the argument
+    /// <c>Common.Web.Tests</c>' assembly-wide parallelisation attribute won
+    /// over a shared collection.
+    /// </para>
+    /// <para>
+    /// <b>The wait is on this message's own id, not on its type.</b>
+    /// <see cref="A_redelivered_event_faults_rather_than_being_absorbed_silently"/>
+    /// and <see cref="A_second_confirmation_in_Confirmed_is_absorbed_rather_than_faulted"/>
+    /// each deliver one type twice, and a type-level wait would match the first
+    /// delivery and return immediately, fencing nothing for exactly the tests
+    /// whose subject is a second arrival. They are named rather than counted
+    /// because a count of them is a number nobody re-runs. The send context is
+    /// what is read because it is the handle <em>both</em> kinds of message
+    /// carry — a scheduled expiry has no envelope — and <b>not</b> because a
+    /// contract has an id of its own there: this helper writes the envelope
+    /// onto it, so for a contract the two are one value (§9.1).
+    /// </para>
+    /// <para>
+    /// <b>It costs nothing on a green run</b> — the consume has already
+    /// happened or is about to, so this returns in milliseconds. Measured: the
+    /// suite runs in the same one second it did unfenced.
+    /// <b>A fault releases it too</b>, which is what makes that true rather
+    /// than lucky: the harness records a delivery whether the pipeline returned
+    /// or threw, so an event the machine has no branch for satisfies this
+    /// barrier as readily as one it handles. The barrier is about ordering and
+    /// never about outcome, and a test that cares which it got reads
+    /// <see cref="ConsumeFaults"/>.
+    /// What it does spend the inactivity bound on is a message
+    /// <em>no consumer takes at all</em> — for this harness, a type the machine
+    /// does not declare. Measured at 10.0 s, and worth it: that is a real
+    /// defect, and the assertion below names it where it happened.
+    /// </para>
+    /// <para>
+    /// The explicit <see cref="Sent"/> waits the tests still carry are not
+    /// redundant with this. They fenced, and now they only assert — that the
+    /// transition sent the command it owes — which is what they were always
+    /// worth keeping for.
     /// </para>
     /// </remarks>
-    private static Task Publish<T>(ITestHarness harness, T message)
-        where T : class =>
-        harness.Bus.Publish(message, TestContext.Current.CancellationToken);
+    private static async Task Publish<T>(ITestHarness harness, T message)
+        where T : class
+    {
+        Guid? messageId = null;
+        await harness.Bus.Publish(
+            message,
+            context =>
+            {
+                // §9.1: body, row, header and inbox key are ONE GUID, and
+                // IIntegrationEvent says so in its own words — the envelope's
+                // value is "THE message id, not a second one", and that
+                // CorrelationId follows the same rule. Every publisher of a
+                // contract in this repository copies both, OutboxDispatcher
+                // included — though that was MADE true, twice, rather than
+                // found so. The claim first went in as "every other
+                // publisher"; a reviewer checked it and found three publishes
+                // in IntegrationEventConsumerTests doing exactly this. It then
+                // went in again covering only MessageId, and a reviewer
+                // checked THAT and found seven contract publishers copying one
+                // id of the two. Both sweeps are in this branch.
+                // A harness that let MassTransit mint its own would
+                // give every event two identities, which is the state that
+                // comment calls easy to write and hard to see. It was written
+                // here, and nothing failed — which is exactly the cost it
+                // names.
+                // **Both ids, because §9.1's rule is not only about
+                // MessageId.** IIntegrationEvent says CorrelationId "follows
+                // the same rule for the same reason", and OutboxDispatcher
+                // copies both. Copying one was this fix's own half-measure:
+                // the commit that removed a second identity left the other
+                // one standing.
+                if (message is IIntegrationEvent integrationEvent)
+                {
+                    context.MessageId = integrationEvent.MessageId;
+                    context.CorrelationId = integrationEvent.CorrelationId;
+                }
+
+                // A scheduled expiry is not a contract (Appendix D) and has no
+                // envelope, so the send context is what both kinds have. That
+                // — not a second identity — is why the wait reads it.
+                messageId = context.MessageId;
+            },
+            TestContext.Current.CancellationToken);
+
+        // Unset, this degrades into the type-level wait the paragraph above
+        // rejects — null == null matches the first consume of T and fences
+        // nothing — so the barrier fails loudly rather than quietly weakening.
+        messageId.ShouldNotBeNull();
+
+        // The message names no consumer, and that is a correction rather than
+        // a generalisation: it said "must reach the saga" while the barrier
+        // also fences the gated probe, so a routing failure in that test
+        // reported a saga it never registered.
+        (await ConsumedWithId<T>(harness, messageId)).ShouldBeTrue(
+            $"a published {typeof(T).Name} was never consumed, so this barrier cannot say the " +
+            "next publish is ordered after it — an unfenced publish is a race the runner loses " +
+            "under load, and it fails a later assertion wearing the wrong component's name.");
+    }
 
     private static Task<bool> Sent<T>(ITestHarness harness, Func<T, bool> match)
         where T : class =>
@@ -135,6 +266,22 @@ public class OrderFulfilmentSagaTests
     private static Task<bool> Consumed<T>(ITestHarness harness, Func<T, bool> match)
         where T : class =>
         harness.Consumed.Any<T>(m => match(m.Context.Message), TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// <see cref="Consumed"/> over the send context's message id, which is what
+    /// <see cref="Publish"/> needs and no test does.
+    /// </summary>
+    /// <remarks>
+    /// <b>For a contract this is the envelope's own value</b>, because
+    /// <see cref="Publish"/> writes it there — §9.1's body, row, header and
+    /// inbox key are one GUID, and nothing here is entitled to a second. The
+    /// send context is read rather than the payload because the saga's five
+    /// scheduled expiries are not contracts (Appendix D) and have no envelope;
+    /// it is the one handle both kinds carry, not a different id.
+    /// </remarks>
+    private static Task<bool> ConsumedWithId<T>(ITestHarness harness, Guid? messageId)
+        where T : class =>
+        harness.Consumed.Any<T>(m => m.Context.MessageId == messageId, TestContext.Current.CancellationToken);
 
     /// <summary>
     /// A negative assertion, read as of now: no wait, no deadline for a late
@@ -155,9 +302,19 @@ public class OrderFulfilmentSagaTests
     /// <para>
     /// A <em>deadline</em> would be the wrong tool and fails open: a window is
     /// something a late-sending saga fits inside, and a later positive would
-    /// then accept the very command the negative was there to forbid. The
-    /// caller's job is to put a positive assertion before each of these, so
-    /// that "not yet" has a point in time to be false at.
+    /// then accept the very command the negative was there to forbid. So
+    /// "not yet" needs a point in time to be false at.
+    /// </para>
+    /// <para>
+    /// <b>Where the negative follows a publish, <see cref="Publish"/> is that
+    /// point</b> and the caller supplies nothing — it returns only once the
+    /// saga has consumed the message, which is the strongest point in time
+    /// available. This used to read "the caller's job is to put a positive
+    /// assertion before each of these", and that was the whole defect: a job
+    /// left to callers is a job fourteen of them did not do. What is still the
+    /// caller's is a negative asserted anywhere <em>else</em> — after a
+    /// scheduled message the test did not publish, or partway through a
+    /// transition chain — where nothing has pinned the moment for it.
     /// </para>
     /// </remarks>
     private static Task<bool> NotYetSent<T>(ITestHarness harness, Func<T, bool> match)
@@ -208,8 +365,9 @@ public class OrderFulfilmentSagaTests
     /// (§9.6 keeps MassTransit's default), and every negative in this file would
     /// stay green through it — the transition did not run, which is what the
     /// negative asserts, and the message went to the error queue, which is
-    /// what nothing asked. Read this list after a positive has pinned the
-    /// point in time, exactly as the negatives are.
+    /// what nothing asked. Read this list once the delivery it asks about has
+    /// been pinned — which, for a message the test published, is what
+    /// <see cref="Publish"/> already did before returning.
     /// <para>
     /// <b><see cref="Spent"/>, and it is load-bearing rather than tidy.</b>
     /// The token-less overload enumerates until the harness's inactivity bound
@@ -277,19 +435,27 @@ public class OrderFulfilmentSagaTests
         {
             var orderId = Guid.CreateVersion7();
 
-            // **Each publish waits for the transition it depends on, and #107
-            // is why.** Publish returns when the message reaches the transport,
-            // not when the saga has consumed it, and nothing ordered these
-            // three — so under a loaded parallel run PaymentDeclined could
-            // reach the endpoint before OrderPlaced had created the instance
-            // (discarded in silence) or before StockReserved had moved it to
-            // AwaitingPayment (a state with no decline branch, so a fault).
+            // **These two waits are assertions now and not the ordering, and
+            // the difference is #107's whole second act.** They were added here
+            // as the fix for it: a publish returns when the message reaches the
+            // transport, not when the saga has consumed it, so under a loaded
+            // parallel run PaymentDeclined could reach the endpoint before
+            // OrderPlaced had created the instance (discarded in silence) or
+            // before StockReserved had moved it to AwaitingPayment (a state
+            // with no decline branch, so a fault) — and both landed on the
+            // ReleaseStock assertion below, which burned the inactivity timeout
+            // and failed wearing "the saga did not send".
             //
-            // Both landed on the ReleaseStock assertion below, which then
-            // burned the full inactivity timeout and failed wearing "the saga
-            // did not send" — the misattribution this file's header warns
-            // about. The waits are assertions about the machine in their own
-            // right, so they cost nothing but the two lines.
+            // Fixing the one test that had failed left twenty unfenced
+            // publishes in fourteen others, and the merge commit's own CI run
+            // failed on one of them. The ordering is Publish's job from that
+            // change on. What these lines still do is assert the machine sent
+            // the command each transition owes, which is what they were worth
+            // keeping for.
+            //
+            // **They are therefore not a template.** A test that needs no such
+            // assertion does not need a wait either; the barrier is not
+            // something a call site can forget.
             await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
             (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
 
@@ -301,9 +467,12 @@ public class OrderFulfilmentSagaTests
             (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
 
             // CancelOrder must not be sent until stock is confirmed released —
-            // and "not yet" needs a point in time to be false *at*. The saga
-            // consuming PaymentDeclined is that point.
-            (await Consumed<PaymentDeclined>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+            // and "not yet" needs a point in time to be false *at*. The Publish
+            // three lines up IS that point now: it returned only once the saga
+            // had consumed PaymentDeclined. A Consumed<PaymentDeclined> stood
+            // here to establish it and was deleted when the barrier moved into
+            // the helper — a second wait for the same fact reads as though the
+            // first were not enough.
             (await NotYetSent<CancelOrder>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
 
             await Publish(harness, SagaContracts.StockReleased(orderId));
@@ -710,10 +879,13 @@ public class OrderFulfilmentSagaTests
         {
             var orderId = Guid.CreateVersion7();
 
-            // Waited between rather than published in a burst, for #107's
-            // reason: this chain grew a fifth message with #126, and a
-            // reordering inside it would fail on the MarkOrderShipped
-            // assertion below wearing "the saga did not send".
+            // The Sent lines assert the command each transition owes; they
+            // are NOT the ordering, which is Publish's job. This chain grew a
+            // fifth message with #126 and is the longest here, so it is the
+            // one where the difference matters most — and the comment that
+            // stood here credited the waits with #107's fix, which is the
+            // template the payment-declined test four hundred lines up was
+            // rewritten to retire.
             await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
             (await Sent<ReserveStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
 
@@ -1313,6 +1485,19 @@ public class OrderFulfilmentSagaTests
             // the second delivery has been consumed at all — measured: the test
             // passed against a machine with no branch here until this wait was
             // added, which is the vacuous-pass shape §12.5 keeps warning about.
+            //
+            // **`Publish` supplies that wait itself now, and this line is no
+            // longer a second claim.** It was, while the helper let MassTransit
+            // mint its own header: payload id and transport id were different
+            // values, so only this line spoke about the payload. Since the
+            // alignment they are one value (§9.1), and the barrier already
+            // waited on it. Kept as the assertion that the *payload* carries
+            // the duplicate's id — which is what the ConsumeFaults read below
+            // is about to be scoped by — and NOT as a claim that it can tell a
+            // second fact from a second delivery of the first. Nothing here
+            // can: two deliveries of one message share an id by design, which
+            // is §9.5's inbox's problem and the residual the barrier's own
+            // test names.
             OrderConfirmed duplicate = SagaContracts.OrderConfirmed(orderId, Customer);
             await Publish(harness, duplicate);
 
@@ -1640,6 +1825,227 @@ public class OrderFulfilmentSagaTests
             // this event into a review row, and it cannot run for an instance
             // that is gone.
             (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orphan)).ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task A_publish_returns_only_after_the_saga_has_consumed_that_message()
+    {
+        // **The subject is the barrier, not the saga**, and this file needs one
+        // because every PRE-EXISTING test here would stay green if the barrier
+        // were removed — no longer every test, since the deterministic guard
+        // below fails too, and that is the point of it — on this machine. They went green on the branch that shipped
+        // twenty unfenced publishes, and CI failed on the merge commit.
+        //
+        // A test whose subject is what a gate is looking at is what this
+        // repository owes every gate it has, and the reason is that a barrier
+        // is only ever observed working.
+        //
+        // **CONSUMED, not "transitioned", and the name says so on purpose.**
+        // The barrier's guarantee is that the saga has taken delivery, which
+        // is the ordering property every caller needs; whether a transition
+        // ran is the machine's business and is not always yes. The second
+        // half of this test is the case that proves it — a StockReserved in
+        // AwaitingPayment runs nothing at all. An earlier name here said
+        // "the transition it triggers has run" and was falsified by the test's
+        // own second stimulus.
+        //
+        // Read as of NOW, on a spent token: if
+        // Publish returned before the saga had consumed OrderPlaced, the
+        // command the Initially transition sends would not be recorded yet and
+        // this is false.
+        //
+        // **Observed red both ways the helper can break, and the two reds are
+        // not the same strength.** Against the helper as it was — no wait at
+        // all — this first assertion fails deterministically, in under a
+        // second. Against a wait on the message TYPE rather than its id it is
+        // the SECOND assertion that fails, and that one is a race by
+        // construction: the early-returning publish leaves the duplicate's
+        // consume in flight, so the spent-token read below usually sees one
+        // and may legitimately see two. It was observed red; it is not
+        // guaranteed red, and the difference is written down rather than
+        // rounded off, because a counterfactual nobody can re-run is not
+        // evidence the next reader can check.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+
+            harness.Sent
+                .Select<ReserveStock>(Spent())
+                .Count(m => m.Context.Message.OrderId == orderId)
+                .ShouldBe(1);
+
+            // **Two StockReserved facts, not one object published twice**, and
+            // the difference is §9.1's. The fence reads the send context, and
+            // for a contract Publish writes the envelope onto it — so two
+            // separate SagaContracts calls are two envelope ids and two
+            // deliveries the fence can tell apart. Publishing one object twice
+            // would put ONE id on the wire twice, which is what §9.5's inbox
+            // exists to dedupe and what this barrier therefore cannot separate.
+            //
+            // That residual is real and named rather than papered over: the
+            // barrier distinguishes deliveries of DIFFERENT messages, never two
+            // deliveries of the same one. This test used to be the second case,
+            // which only worked because the helper was minting a second
+            // identity §9.1 forbids.
+            //
+            // A type-level wait fails here, on the count below rather than on
+            // the one above: it is satisfied by the first delivery and returns
+            // with the second still in flight.
+            StockReserved first = SagaContracts.StockReserved(orderId);
+            StockReserved second = SagaContracts.StockReserved(orderId);
+            await Publish(harness, first);
+            await Publish(harness, second);
+
+            harness.Consumed
+                .Select<StockReserved>(Spent())
+                .Count(m => m.Context.Message.OrderId == orderId)
+                .ShouldBe(2);
+
+            // **The second delivery faults, and saying so is not decoration.**
+            // It lands in AwaitingPayment, which declares no StockReserved
+            // branch — the machine's default, asserted one test over by
+            // A_redelivered_event_faults_rather_than_being_absorbed_silently.
+            // Left unstated it would be a test quietly pushing a message onto
+            // the error queue, which is the thing §13.6 pages on. Stated, it is
+            // also the stronger claim: exactly one of the two consumes threw,
+            // so the two are genuinely distinct deliveries that each reached
+            // the state machine rather than one delivery counted twice.
+            ConsumeFaults<StockReserved>(harness)
+                .Count(e => e != null)
+                .ShouldBe(1);
+        }
+    }
+
+    /// <summary>
+    /// A consumer that does not return until the test lets it, so "did
+    /// <see cref="Publish"/> wait?" has an answer that does not depend on
+    /// timing.
+    /// </summary>
+    /// <remarks>
+    /// <b>The saga cannot be this consumer.</b> Its transitions return
+    /// immediately, so every question about the barrier asked through it is
+    /// answered by whichever of two fast operations happened to finish first —
+    /// which is how the type-level counterfactual next door ended up a race
+    /// that was observed red rather than one that is red. A consumer the test
+    /// holds open removes the timing from the question entirely.
+    /// </remarks>
+    private sealed class GateConsumer : IConsumer<GateProbe>
+    {
+        internal static TaskCompletionSource Arrived { get; private set; } = new();
+
+        internal static TaskCompletionSource Release { get; private set; } = new();
+
+        internal static void Reset()
+        {
+            Arrived = new TaskCompletionSource();
+            Release = new TaskCompletionSource();
+        }
+
+        public async Task Consume(ConsumeContext<GateProbe> context)
+        {
+            Arrived.TrySetResult();
+            await Release.Task;
+        }
+    }
+
+    /// <summary>
+    /// Not an <c>IIntegrationEvent</c>, deliberately: it never crosses a
+    /// service boundary, so §4.3 and §9.1 have nothing to say about it, and
+    /// giving it an envelope would only add a second thing to keep true.
+    /// </summary>
+    private sealed record GateProbe(Guid Id);
+
+    [Fact]
+    public async Task A_publish_does_not_return_while_its_own_message_is_still_being_consumed()
+    {
+        // **The deterministic half of the barrier's guarantee**, and it exists
+        // because the test above cannot supply it. That one drives the saga,
+        // whose transitions return at once, so it can only observe the barrier
+        // through a race it has to describe honestly — a type-level wait fails
+        // it *usually*. Copilot raised that on this branch and was right: a
+        // regression guard that usually fails is the fail-open shape this whole
+        // change exists to close, wearing a test's clothes.
+        //
+        // Here the consumer is held open by the test, so both halves are
+        // settled by construction rather than by which operation won:
+        //
+        //   1. Publish must not return while ITS message is unconsumed.
+        //   2. It must not be satisfied by a DIFFERENT message of the same
+        //      type — which is exactly what a type-level wait does.
+        GateConsumer.Reset();
+
+        ServiceProvider provider = new ServiceCollection()
+            .AddMassTransitTestHarness(x =>
+            {
+                x.SetTestTimeouts(TestTimeout, InactivityTimeout);
+                x.AddConsumer<GateConsumer>();
+                x.UsingInMemory((context, cfg) => cfg.ConfigureEndpoints(context));
+            })
+            .BuildServiceProvider(true);
+
+        await using (provider)
+        {
+            ITestHarness harness = provider.GetRequiredService<ITestHarness>();
+            await harness.Start();
+
+            // **The release goes in a finally, and that is not tidiness.**
+            // Written without one, a FAILING assertion leaves the consumer
+            // blocked for ever: the harness never drains, disposal never
+            // returns, and the run hangs instead of going red. Measured that
+            // way round — the first counterfactual of this test deadlocked a
+            // ten-minute runner rather than reporting — which is a worse
+            // failure than the race it was written to remove, since a hang on
+            // CI burns the job's whole budget and names nothing.
+            Task publish = Publish(harness, new GateProbe(Guid.CreateVersion7()));
+            try
+            {
+                // The consumer has the message and is holding it. Nothing here
+                // waits on a clock: the barrier is either open or it is not.
+                //
+                // **Bounded, for the reason the finally below exists.** If the
+                // publish faulted or the probe never routed, an unbounded await
+                // here hangs the run rather than failing it — the same hang the
+                // finally was added to prevent, one step earlier and reached by
+                // a different fault. WaitAsync turns it into a timeout that
+                // names the wait.
+                await GateConsumer.Arrived.Task
+                    .WaitAsync(InactivityTimeout, TestContext.Current.CancellationToken);
+                publish.IsCompleted.ShouldBeFalse(
+                    "Publish returned while its own message was still inside the consumer, " +
+                    "so it is not a barrier at all.");
+            }
+            finally
+            {
+                GateConsumer.Release.TrySetResult();
+            }
+
+            await publish;
+
+            // And now the second half. The first probe is consumed, so a
+            // type-level wait is already satisfied and would return at once;
+            // an id-level wait cannot be, because this message has not been
+            // delivered yet. Same construction, no timing.
+            GateConsumer.Reset();
+
+            Task second = Publish(harness, new GateProbe(Guid.CreateVersion7()));
+            try
+            {
+                await GateConsumer.Arrived.Task
+                    .WaitAsync(InactivityTimeout, TestContext.Current.CancellationToken);
+                second.IsCompleted.ShouldBeFalse(
+                    "Publish returned once SOME message of the type had been consumed rather " +
+                    "than its own — which is the type-level wait, and it fences nothing.");
+            }
+            finally
+            {
+                GateConsumer.Release.TrySetResult();
+            }
+
+            await second;
         }
     }
 }
