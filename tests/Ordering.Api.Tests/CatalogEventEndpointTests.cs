@@ -288,7 +288,14 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .Publish(published, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+            .Publish(
+                published,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = published.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
     }
 
     private async Task PublishChangeAsync(Guid product, decimal amount, string currency)
@@ -311,7 +318,14 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .Publish(changed, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+            .Publish(
+                changed,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = changed.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
     }
 
     private async Task PublishDiscontinuedAsync(Guid product)
@@ -330,7 +344,14 @@ public sealed class CatalogEventEndpointTests(ServiceFixture fixture) : IAsyncLi
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .Publish(discontinued, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+            .Publish(
+                discontinued,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = discontinued.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
     }
 
     /// <summary>

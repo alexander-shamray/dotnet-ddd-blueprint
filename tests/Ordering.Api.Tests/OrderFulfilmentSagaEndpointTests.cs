@@ -293,7 +293,14 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .Publish(placed, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+            .Publish(
+                placed,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = placed.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
     }
 
     private async Task PublishReservedAsync(Guid orderId, Guid messageId)
@@ -316,7 +323,14 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .Publish(reserved, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+            .Publish(
+                reserved,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = reserved.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
     }
 
     private async Task PublishReservationFailedAsync(Guid orderId, Guid messageId)
@@ -336,7 +350,14 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
 
         await fixture.Factory.Services
             .GetRequiredService<IBus>()
-            .Publish(failed, c => c.MessageId = messageId, TestContext.Current.CancellationToken);
+            .Publish(
+                failed,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = failed.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
     }
 
     private static async Task Eventually(Func<Task<int>> read, int expected, string because)

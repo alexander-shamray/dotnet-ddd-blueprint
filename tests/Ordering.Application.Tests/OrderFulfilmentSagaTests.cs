@@ -210,12 +210,16 @@ public class OrderFulfilmentSagaTests
             {
                 // §9.1: body, row, header and inbox key are ONE GUID, and
                 // IIntegrationEvent says so in its own words — the envelope's
-                // value is "THE message id, not a second one". Every publisher
-                // of a contract in this repository writes it, OutboxDispatcher
-                // included — though that was MADE true rather than found so:
-                // the claim went in as "every other publisher", a reviewer
-                // checked it, and IntegrationEventConsumerTests had three
-                // publishes doing exactly this. They were fixed with this.
+                // value is "THE message id, not a second one", and that
+                // CorrelationId follows the same rule. Every publisher of a
+                // contract in this repository copies both, OutboxDispatcher
+                // included — though that was MADE true, twice, rather than
+                // found so. The claim first went in as "every other
+                // publisher"; a reviewer checked it and found three publishes
+                // in IntegrationEventConsumerTests doing exactly this. It then
+                // went in again covering only MessageId, and a reviewer
+                // checked THAT and found seven contract publishers copying one
+                // id of the two. Both sweeps are in this branch.
                 // A harness that let MassTransit mint its own would
                 // give every event two identities, which is the state that
                 // comment calls easy to write and hard to see. It was written

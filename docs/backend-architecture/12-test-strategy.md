@@ -1907,10 +1907,18 @@ public async Task Commands_are_sent_and_events_are_published()
 >     (await harness.Consumed.Any<T>(
 >         m => m.Context.MessageId == messageId,
 >         TestContext.Current.CancellationToken))
->             .ShouldBeTrue($"a published {typeof(T).Name} must reach the saga first");
+>             .ShouldBeTrue(
+>                 $"a published {typeof(T).Name} was never consumed, so this barrier "
+>                 + "cannot say the next publish is ordered after it");
 > }
 > ```
 >
+> **The failure text names no consumer**, and that is not fastidiousness: the
+> helper fences whatever is bound to the message, which in a saga suite is the
+> saga and in the barrier's own guard is a consumer the test holds open. A
+> message naming the saga sends a reader of a routing failure to a component
+> that was never registered.
+
 > **The wait reads the send context because that is the one handle both
 > kinds of message carry** — not because a contract has a second identity. It
 > has not: §9.1's body, row, header and inbox key are one GUID, and
