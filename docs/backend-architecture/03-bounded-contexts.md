@@ -132,6 +132,27 @@ two guarantees, both recorded in
   undoes; without this the reserve creates a hold for an order that is already
   cancelled and nobody is left waiting to notice.
 
+**A pair of cells does not state a derivation either, and that is the same gap
+one message over.** `OrderCancelled` sits in Inventory's Consumes column and
+`StockReleased` in its Publishes column, and every reader has been joining the
+two by hand. The join is now written down, because [§9.6](09-messaging.md)
+stands four `Ignore(StockReleased)` branches on it and one of them is the only
+thing between a cancelled confirmed order and a fault:
+
+- **Consuming `OrderCancelled` releases the stock and publishes
+  `StockReleased`**, on the same terms as a `ReleaseStock` — the same
+  postcondition, published whether or not a reservation was held. So one
+  cancellation has **two** independent routes to the event, and §9.4 orders
+  nothing between them.
+
+> **The second producer is what the saga's absorption is for**, and citing this
+> section for it was a mis-citation until this bullet existed. Payments'
+> `OrderCancelled` → void is argued in prose in §9.6 for the same reason: a
+> table can say which messages cross a boundary and cannot say that one causes
+> another. Where such a derivation becomes load-bearing — and a pager path is
+> as load-bearing as it gets — it belongs in a sentence rather than in the
+> reader's head.
+
 > **Both guarantees exist because the saga's only alternative to an answer is a
 > pager.** [§9.6](09-messaging.md)'s `Compensating` leaves either on
 > `StockReleased` or on a ten-minute timeout that raises a

@@ -136,8 +136,11 @@ the instance waits out `ReleaseTimeout` and raises `stock_not_released` for a
 reservation that came back. True under the second reading of #130 and false
 under the first, because the saga's own `ReleaseStock` is then answered
 whatever Inventory did with the event. **A code change that is only sound
-because of a contract change has to land with it**, and the four `Ignore`
-lines each say so at the site.
+because of a contract change has to land with it**, and the three `Ignore`
+lines that depend on it say so at the site. The fourth is `Confirmed`'s, which
+refuses the dependency in as many words, and is the subject two paragraphs
+down — writing "the four" here and carving it out there is the collapse this
+entry warns about, committed inside the entry that warns about it.
 
 **Nothing enforces the ADR until Inventory exists, and that is stated rather
 than gated.** No test can hold an unwritten service to a contract. What stands

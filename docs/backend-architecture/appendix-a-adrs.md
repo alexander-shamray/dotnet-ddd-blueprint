@@ -822,11 +822,13 @@ open with "check whether there was ever a reservation".
 service to a contract, and this repository's own rule is that a list of things
 known to be missing needs something asserting they are still missing. What
 stands in for it here is that every place the machine leans on it says so at
-the line — the three `Ignore(StockReleased)` sites that send a release, the two
-cancellation branches above them, and `Compensating`'s absorbing pair — so an
-Inventory built to a different rule contradicts a paragraph rather than failing
-silently. **No total is given for those sites** for the reason the Why section
-declines one.
+the line: `AwaitingStock`, `AwaitingPayment` and `AwaitingConfirmation`'s
+`Ignore(StockReleased)`, the cancellation branches those three states absorb
+for, and `Compensating`'s `Ignore(StockReserved)` and
+`Ignore(StockReservationFailed)`. So an Inventory built to a different rule
+contradicts a paragraph rather than failing silently. **The sites are named
+rather than counted** for the reason the Why section declines a count — a
+figure over a set the next branch can add to is one nothing recomputes.
 
 ---
 

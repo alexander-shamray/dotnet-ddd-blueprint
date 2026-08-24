@@ -2948,17 +2948,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > both, which is the argument for closing it in the test rather than only in
 > the machine.
 >
-> **`Ignore` is correct because of
-> [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation),
+> **In the three states that send a release, `Ignore` is correct because of
+> [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
 > and was not correct without it.** Absorbing the early copy discards it, so
 > `Compensating`'s exit has to come from somewhere else — and it does: the
 > cancellation branch sends its own `ReleaseStock`, which the ADR has Inventory
-> answer whether or not it already released on the event. Under the reading
-> that a release of nothing has nothing to report, this line would trade a
-> transient race for a **certain** wrong answer: the instance would wait out
-> `ReleaseTimeout` and raise `stock_not_released` for a reservation that came
-> back an hour earlier, sending an operator to chase stock that is already on
-> the shelf. The chapter change and the contract change are one change.
+> answer whether or not it already released on the event. **`Confirmed` is
+> outside this paragraph**, for the reason two paragraphs up: it sends no
+> release, so it has no exit to lose and nothing to make sound.
+>
+> Under the reading that a release of nothing has nothing to report, those
+> three lines would trade a transient race for a **certain** wrong answer: the
+> instance would wait out `ReleaseTimeout` and raise `stock_not_released` for a
+> reservation that came back an hour earlier, sending an operator to chase
+> stock that is already on the shelf. The chapter change and the contract
+> change are one change.
 
 ### Where an escalation lands
 

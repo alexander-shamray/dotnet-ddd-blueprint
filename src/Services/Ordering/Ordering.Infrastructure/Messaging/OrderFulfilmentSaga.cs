@@ -663,9 +663,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // OrderCancelled branch sends a ReleaseStock that ADR-024 has
             // Inventory answer, so the early copy can go.
             //
-            // This state's enumeration went stale the moment #126 split it out
-            // of Confirmed, which is why the AwaitingStock comment writes the
-            // three states out rather than counting them.
+            // This state's enumeration went stale the moment #126 split it
+            // out of Confirmed, which is why the AwaitingStock comment writes
+            // all four states out rather than counting them — and why this
+            // sentence said "three" until that comment was read again.
             Ignore(StockReleased));
 
         During(
