@@ -1384,6 +1384,61 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public async Task The_payment_timeout_door_re_arms_its_own_wait_and_the_second_expiry_ends_it()
+    {
+        // **The door the test above does not cover, and the one where the
+        // bound had to be built rather than inherited.** Cancelling in
+        // AwaitingPayment leaves the original fifteen-minute wait armed, so
+        // that door gets its bound for free. Reaching Compensating through
+        // PaymentTimeout.Received does not: the wait it would have relied on
+        // is the one that just fired.
+        //
+        // So that branch re-arms it, and this test is the reason the re-arm
+        // cannot be quietly dropped — without it PaymentVerdictOutstanding
+        // stays set with nothing left to clear it, and an order cancelled on
+        // a slow PSP holds its instance until §13.6's unfinalised-saga alert
+        // pages someone. A leak, in the one place the join could produce one.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+
+            (await Sent<AuthorisePayment>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            // The PSP goes quiet and the first wait ends. Compensation starts,
+            // and the verdict stays outstanding because a timeout is not one.
+            await Publish(harness, new PaymentAuthorisationExpired(orderId));
+
+            (await Sent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeTrue();
+
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+
+            (await Sent<CancelOrder>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == CancelReasons.PaymentTimeout))
+                    .ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            // The stock half is settled and the saga still will not end,
+            // because this door arrived owing a verdict.
+            (await saga.Exists(orderId, x => x.Compensating)).ShouldNotBeNull();
+
+            // The SECOND expiry — the one the branch armed on its way in.
+            await Publish(harness, new PaymentAuthorisationExpired(orderId));
+
+            (await saga.NotExists(orderId)).ShouldBeNull();
+
+            // And the bound escalates nothing, on this door as on the other.
+            (await NotYetSent<FlagOrderForReview>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
+        }
+    }
+
+    [Fact]
     public async Task A_decline_after_the_release_settles_the_join_without_escalating()
     {
         // A decline is an ANSWER, which is the half that changed. It still

@@ -155,8 +155,8 @@ that visible: a list of what a state accepts would have stayed green, because
 nothing was missing from it.
 
 **Counts pinned to this branch**, in the form the entry below uses: the
-solution runs 895 tests, 707 of them outside `Category=Integration`, and the
-three CI stages are 18, 689 and 188. Reconciled against a local
+solution runs 896 tests, 708 of them outside `Category=Integration`, and the
+three CI stages are 18, 690 and 188. Reconciled against a local
 `dotnet test Platform.slnx` and owed a check against this branch's own CI run,
 which is the arithmetic this file names for exactly this case.
 
