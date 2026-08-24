@@ -940,7 +940,7 @@ same argument as never calling a branch clean because asking failed.
      post exactly the lines above to a PR of this repository, and is
      edit-denied to the session that invokes it. Keep the running count in
      the report as well — the report line is for the reader, the ledger is
-     for the machine — and when the twelfth is spent, stop and say the PR
+     for the machine — and when the sixth is spent, stop and say the PR
      reached its Grok ceiling. When the loop ends clean instead, say so on
      the ledger — `grok-ledger.sh <n> converge <N>` — because a resumed run
      reading bare spend at the ceiling cannot tell convergence from

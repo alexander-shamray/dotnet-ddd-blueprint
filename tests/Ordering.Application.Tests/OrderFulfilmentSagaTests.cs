@@ -233,9 +233,9 @@ public class OrderFulfilmentSagaTests
         messageId.ShouldNotBeNull();
 
         (await ConsumedWithId<T>(harness, messageId)).ShouldBeTrue(
-                $"a published {typeof(T).Name} must reach the saga before the test publishes " +
-                "the message that depends on it — an unfenced publish is a race the runner " +
-                "loses under load, and it fails a later assertion wearing the saga's message.");
+            $"a published {typeof(T).Name} must reach the saga before the test publishes " +
+            "the message that depends on it — an unfenced publish is a race the runner " +
+            "loses under load, and it fails a later assertion wearing the saga's message.");
     }
 
     private static Task<bool> Sent<T>(ITestHarness harness, Func<T, bool> match)
@@ -1895,6 +1895,126 @@ public class OrderFulfilmentSagaTests
             ConsumeFaults<StockReserved>(harness)
                 .Count(e => e != null)
                 .ShouldBe(1);
+        }
+    }
+
+    /// <summary>
+    /// A consumer that does not return until the test lets it, so "did
+    /// <see cref="Publish"/> wait?" has an answer that does not depend on
+    /// timing.
+    /// </summary>
+    /// <remarks>
+    /// <b>The saga cannot be this consumer.</b> Its transitions return
+    /// immediately, so every question about the barrier asked through it is
+    /// answered by whichever of two fast operations happened to finish first —
+    /// which is how the type-level counterfactual next door ended up a race
+    /// that was observed red rather than one that is red. A consumer the test
+    /// holds open removes the timing from the question entirely.
+    /// </remarks>
+    private sealed class GateConsumer : IConsumer<GateProbe>
+    {
+        internal static TaskCompletionSource Arrived { get; private set; } = new();
+
+        internal static TaskCompletionSource Release { get; private set; } = new();
+
+        internal static void Reset()
+        {
+            Arrived = new TaskCompletionSource();
+            Release = new TaskCompletionSource();
+        }
+
+        public async Task Consume(ConsumeContext<GateProbe> context)
+        {
+            Arrived.TrySetResult();
+            await Release.Task;
+        }
+    }
+
+    /// <summary>
+    /// Not an <c>IIntegrationEvent</c>, deliberately: it never crosses a
+    /// service boundary, so §4.3 and §9.1 have nothing to say about it, and
+    /// giving it an envelope would only add a second thing to keep true.
+    /// </summary>
+    private sealed record GateProbe(Guid Id);
+
+    [Fact]
+    public async Task A_publish_does_not_return_while_its_own_message_is_still_being_consumed()
+    {
+        // **The deterministic half of the barrier's guarantee**, and it exists
+        // because the test above cannot supply it. That one drives the saga,
+        // whose transitions return at once, so it can only observe the barrier
+        // through a race it has to describe honestly — a type-level wait fails
+        // it *usually*. Copilot raised that on this branch and was right: a
+        // regression guard that usually fails is the fail-open shape this whole
+        // change exists to close, wearing a test's clothes.
+        //
+        // Here the consumer is held open by the test, so both halves are
+        // settled by construction rather than by which operation won:
+        //
+        //   1. Publish must not return while ITS message is unconsumed.
+        //   2. It must not be satisfied by a DIFFERENT message of the same
+        //      type — which is exactly what a type-level wait does.
+        GateConsumer.Reset();
+
+        ServiceProvider provider = new ServiceCollection()
+            .AddMassTransitTestHarness(x =>
+            {
+                x.SetTestTimeouts(TestTimeout, InactivityTimeout);
+                x.AddConsumer<GateConsumer>();
+                x.UsingInMemory((context, cfg) => cfg.ConfigureEndpoints(context));
+            })
+            .BuildServiceProvider(true);
+
+        await using (provider)
+        {
+            ITestHarness harness = provider.GetRequiredService<ITestHarness>();
+            await harness.Start();
+
+            // **The release goes in a finally, and that is not tidiness.**
+            // Written without one, a FAILING assertion leaves the consumer
+            // blocked for ever: the harness never drains, disposal never
+            // returns, and the run hangs instead of going red. Measured that
+            // way round — the first counterfactual of this test deadlocked a
+            // ten-minute runner rather than reporting — which is a worse
+            // failure than the race it was written to remove, since a hang on
+            // CI burns the job's whole budget and names nothing.
+            Task publish = Publish(harness, new GateProbe(Guid.CreateVersion7()));
+            try
+            {
+                // The consumer has the message and is holding it. Nothing here
+                // waits on a clock: the barrier is either open or it is not.
+                await GateConsumer.Arrived.Task;
+                publish.IsCompleted.ShouldBeFalse(
+                    "Publish returned while its own message was still inside the consumer, " +
+                    "so it is not a barrier at all.");
+            }
+            finally
+            {
+                GateConsumer.Release.TrySetResult();
+            }
+
+            await publish;
+
+            // And now the second half. The first probe is consumed, so a
+            // type-level wait is already satisfied and would return at once;
+            // an id-level wait cannot be, because this message has not been
+            // delivered yet. Same construction, no timing.
+            GateConsumer.Reset();
+
+            Task second = Publish(harness, new GateProbe(Guid.CreateVersion7()));
+            try
+            {
+                await GateConsumer.Arrived.Task;
+                second.IsCompleted.ShouldBeFalse(
+                    "Publish returned once SOME message of the type had been consumed rather " +
+                    "than its own — which is the type-level wait, and it fences nothing.");
+            }
+            finally
+            {
+                GateConsumer.Release.TrySetResult();
+            }
+
+            await second;
         }
     }
 }

@@ -1854,7 +1854,8 @@ public async Task Commands_are_sent_and_events_are_published()
 > reaches the transport, not when the saga has consumed it, and nothing orders
 > two publishes against each other. **The backticked name matters here**: the
 > samples above call a suite helper also called `Publish`, and that one waits.
-> The trap is about the transport call underneath it. So `StockReserved` behind `OrderPlaced` can
+> The trap is about the transport call underneath it. So `StockReserved` behind
+> `OrderPlaced` can
 > reach the endpoint before anything has created the instance — discarded in
 > silence, since a non-initial event with no instance is consumed cleanly — or
 > before the instance has reached the state that handles it, which faults. The
@@ -1914,7 +1915,8 @@ public async Task Commands_are_sent_and_events_are_published()
 > second one". So the helper **writes** it, as `OutboxDispatcher` does; what it
 > reads back for a contract is the envelope's own value. A message with no
 > envelope — a scheduled timeout, or any bare record — needs no such write,
-> which is why the rule is about contracts rather than about publishes. A saga's scheduled timeouts are not contracts
+> which is why the rule is about contracts rather than about publishes. A
+> saga's scheduled timeouts are not contracts
 > (Appendix D) and have no envelope, which is the case the send context covers
 > and the payload cannot.
 >
@@ -1950,9 +1952,26 @@ public async Task Commands_are_sent_and_events_are_published()
 > wait on the message *type* it does not: a type delivered once is fenced
 > correctly, so what fails is a later assertion over a **duplicate** — and only
 > as a race, since the early-returning publish leaves the second consume in
-> flight and the spent-token read may legitimately see it. So the suite needs a
-> stimulus that delivers one type twice, and the second red is a red that was
-> observed rather than one a reader can re-run.
+> flight and the spent-token read may legitimately see it.
+
+> **A guard that usually fails is the fail-open shape wearing a test's
+> clothes**, so the barrier gets a second test that does not ask the saga. A
+> state machine's transitions return at once, so every question put through one
+> is answered by whichever of two fast operations finished first. Register a
+> consumer the test **holds open** — one that signals arrival and then awaits a
+> `TaskCompletionSource` the test owns — and both halves stop depending on
+> timing: publish, wait for arrival, and assert the publish task is *not*
+> complete. It is false at once if the helper does not wait, and false again
+> for a second message of an already-consumed type, which is precisely the
+> type-level wait. Measured on this repository: red on three runs of three for
+> each arm, where the saga-driven version was red once and honest about it.
+>
+> **Release the gate in a `finally`.** Without one, a failing assertion leaves
+> the consumer blocked, the harness never drains and disposal never returns —
+> so the run **hangs** instead of going red. Measured that way round, on the
+> first counterfactual this test was put through: a ten-minute runner spent and
+> nothing named. A hang is a worse outcome than the race it replaces, because
+> a red says which assertion and a hang says nothing at all.
 
 > **Trap — the harness gives up after 1.2 seconds, and the timeout named
 > `TestTimeout` is not the one that says so.** An `Any(…)` ends at the

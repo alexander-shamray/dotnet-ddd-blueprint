@@ -167,8 +167,10 @@ that each transition sent the command it owes — which is what they were worth
 keeping for, and the comment beside them says so rather than reading as a
 template for the next test.
 
-`dotnet test Platform.slnx` is 885, up from 884, and the fast half is 697 —
-one new test, the barrier's own.
+`dotnet test Platform.slnx` is 886, up from 884, and the fast half is 698 —
+two new tests, both the barrier's: one driving the saga, and one driving a
+consumer the test holds open, because the first can only observe the barrier
+through a race and the second settles it by construction.
 
 ---
 
