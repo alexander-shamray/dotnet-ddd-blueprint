@@ -171,12 +171,14 @@ rather than the breaking-change paragraph below.
 > message, wrong for a well-formed one from a newer producer, and the
 > escalation reaches the error queue on the first attempt.
 >
-> **The vocabulary case is closed by ordering alone; the binding case is
-> not.** Teach the mapper the new codes, deploy everywhere, then enable the
-> transitions that emit them, and instance two cannot happen. A binding is
-> harder because the consumer and the producer are *the same deployable* and
-> the queue is shared, so no ordering of releases separates them —
-> [§15.5](15-cicd-deployment.md) carries what that costs the canary.
+> **The vocabulary case is closed by ordering alone; the binding case costs a
+> release.** Teach the mapper the new codes, deploy everywhere, then enable the
+> transitions that emit them — the two halves are already in different builds,
+> so the rule is free. A binding is harder because the consumer and the
+> producer are in the *same* build: whatever declares `Event<T>` is what starts
+> publishing `T`, so ordering the deploy separates nothing and the change has
+> to be **split across two releases** before there is an order to impose.
+> [§15.5](15-cicd-deployment.md) carries that and the alternative to it.
 >
 > **`<queue>_skipped` is watched from [§13.6](13-observability.md).** The rule
 > above is a rule and not a hope because a message skipped during a rollout

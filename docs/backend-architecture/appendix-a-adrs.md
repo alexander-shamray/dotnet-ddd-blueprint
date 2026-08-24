@@ -1010,9 +1010,10 @@ answered.
 makes the canary a second release of the same chart answering the same
 Service, so both tracks consume the same queue for the length of the ladder —
 roughly forty minutes at four rungs. The consumer and producer of a saga event
-are the same build, so no ordering separates them and the old track is bound to
-neither. Splitting the release is the usual answer and it is a real cost, paid
-per binding.
+are in the same build, so ordering the *deploy* separates nothing — for the
+length of the ladder the old track is bound to neither. What separates them is
+splitting the change across two *releases*, which is the usual answer and a
+real cost, paid per binding.
 
 **This is an ordering constraint and not a coordinated deploy**, and the
 distinction is the one §9.2 closes on. A lockstep deploy is what this

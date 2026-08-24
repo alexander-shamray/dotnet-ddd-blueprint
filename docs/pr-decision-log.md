@@ -103,10 +103,18 @@ queue on the first attempt. Loud and silent, closed by the same rule:
 and running them together is what made this look like one problem with one fix.
 A mapper can learn a code a release early. A saga cannot learn an event a
 release early, because the build that declares `Event<T>` is the build that
-publishes `T` — consumer and producer are the same deployable and the queue is
-shared, so no ordering of releases separates them. §15.5 now carries what that
-costs: split the release, or cut over without overlap and do not call it a
-canary.
+publishes `T` — consumer and producer are in the same build, so ordering the
+deploy separates nothing and the change has to be **split across two releases
+before there is an order to impose**. §15.5 now carries that, and the
+alternative to it: cut over without overlap and do not call it a canary.
+
+> **"No ordering separates them" is what both this entry and §9.2 said first,
+> and it contradicted §15.5 two files away**, which prescribes the split. The
+> true claim is narrower and is the one worth carrying: ordering *a deploy*
+> separates nothing when both halves are one artefact, and the fix is to make
+> them two artefacts. The overstatement survived writing the rule, the ADR and
+> the chapter, and was caught reading the finished section back rather than by
+> any check.
 
 > **A rule with no detection is advice.** The alert is what makes this an ADR
 > rather than a paragraph — `SkippedQueueDepth` pages within a minute, where
