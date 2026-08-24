@@ -1119,11 +1119,20 @@ retires it by construction rather than guarding it.
 
 **The chapter's "one table, no joins" claim is narrowed, and it said so twice.**
 The history query is now two statements. The second is one round trip
-for the whole page rather than one per row, seeks a primary key, and is bounded
-by the same clamp as the first — against a patch handler that scanned every
-summary in the table on every rename. The trade is a key lookup per distinct
-product on a page of at most a hundred, and it is the better half of the
-exchange.
+for the whole page rather than one per row, seeks a primary key, and carries
+its ids as a single JSON parameter read through `OPENJSON` — against a patch
+handler that scanned every summary in the table on every rename.
+
+**It is deliberately not an expanded `IN` list, and the first draft of this
+ADR said it was bounded by the page clamp.** The clamp bounds *rows* at a
+hundred and each row admits a hundred items, so the distinct ids reach ten
+thousand — and an `IN` list of that size exceeds SQL Server's 2,100-parameter
+ceiling and fails the request outright. **A limit one multiplication away from
+a stated bound is exactly the kind a reassurance hides**, which is why the
+count is written out here rather than deferred to the clamp. What the trade
+actually buys is a key lookup per distinct product against a handler that
+scanned the whole table on every rename, and it is still the better half of
+the exchange.
 
 **The stored payload loses its member names, which removes a hazard rather
 than moving it.** `SummaryProduct` was one type doing two jobs, and its three

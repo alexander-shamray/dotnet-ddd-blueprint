@@ -1984,17 +1984,24 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
         ORDER BY PlacedAt DESC, OrderId DESC;
         """;
 
-    // One statement for the whole page rather than one per row: the ids are
-    // already in hand, the page is clamped (§6.5), and Dapper expands an array
-    // into an IN list. A product Catalog has not published yet resolves to
-    // nothing and drops out of the row — this section shows a name or shows no
-    // product, where it used to show an empty string for every product on
-    // every order.
+    // One statement for the whole page rather than one per row. The ids
+    // arrive as ONE parameter holding a JSON array, not as an expanded IN
+    // list, and the difference is a hard limit rather than a preference: a
+    // page is clamped to 100 orders (§6.5) and PlaceOrder admits 100 items
+    // (§10.5's validator), so an IN list is 10,000 parameters at the top of
+    // its range against SQL Server's ceiling of 2,100. The clamp bounds the
+    // number of ROWS and multiplies the number of IDS, which is the step that
+    // makes "bounded by the same clamp" the wrong reassurance.
+    //
+    // A product Catalog has not published yet matches no row here and drops
+    // out — this section shows a name or shows no product, where it used to
+    // show an empty string for every product on every order.
     private const string NamesSql =
         """
-        SELECT Id = ProductId, Name, Thumb = ThumbnailUrl
-        FROM ordering.Products
-        WHERE ProductId IN @ProductIds;
+        SELECT Id = p.ProductId, p.Name, Thumb = p.ThumbnailUrl
+        FROM ordering.Products p
+        INNER JOIN OPENJSON(@ProductIds) j
+            ON p.ProductId = CAST(j.value AS uniqueidentifier);
         """;
 
     public async Task<CursorPage<OrderSummaryDto>> HandleAsync(GetOrderSummariesQuery query, CancellationToken ct)
@@ -2026,16 +2033,17 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
         Guid[][] lineProducts = [.. page.Select(r => JsonSerializer.Deserialize<Guid[]>(r.Products)!)];
         Guid[] productIds = [.. lineProducts.SelectMany(ids => ids).Distinct()];
 
-        // An empty IN list is not a query Dapper can expand, and an empty page
-        // is the ordinary first request from a customer with no orders — the
-        // same guard IProductPriceReader's implementation carries, for the
-        // same reason. Skipping is not defensive here; it is the common case.
+        // An empty page is the ordinary first request from a customer with no
+        // orders, and skipping saves the round trip. Note this is no longer
+        // the guard IProductPriceReader carries: OPENJSON over '[]' is a legal
+        // query returning nothing, where an empty IN list is one Dapper cannot
+        // expand at all. The reason changed with the statement above it.
         IReadOnlyDictionary<Guid, SummaryProduct> named = productIds.Length == 0
             ? new Dictionary<Guid, SummaryProduct>()
             : (await connection.QueryAsync<SummaryProduct>(
                 new CommandDefinition(
                     NamesSql,
-                    new { ProductIds = productIds },
+                    new { ProductIds = JsonSerializer.Serialize(productIds) },
                     cancellationToken: ct))).ToDictionary(p => p.Id);
 
         OrderSummaryDto[] items =
@@ -2089,10 +2097,17 @@ deliberately, so each row costs a lookup. That is the right trade at a page of
 twenty and the wrong one at a page of a thousand, which is another reason the
 `limit` is clamped (§6.5).
 
-The second statement is bounded by the same clamp. It is **one** round trip for
-the page rather than one per row, and it seeks a primary key — so what it adds
-is a key lookup per distinct product on a page of at most a hundred, against a
-patch handler that used to scan every summary in the table on every rename.
+The second statement is **one** round trip for the page rather than one per
+row, and it seeks a primary key — so what it adds is a key lookup per distinct
+product, against a patch handler that used to scan every summary in the table
+on every rename.
+
+**What it is not is bounded by the page clamp, and saying so was the error
+worth naming.** The clamp bounds rows; each row carries up to §10.5's hundred
+items, so the ids multiply to ten thousand at the top of the range. That is why
+they travel as one JSON parameter read through `OPENJSON` rather than as an
+expanded `IN` list, which at that size exceeds SQL Server's 2,100-parameter
+limit and fails the request outright.
 
 The benefit being bought is visible in the shape of both: no `GROUP BY`, no
 cross-service call, and a page size that bounds each of them. Level 1

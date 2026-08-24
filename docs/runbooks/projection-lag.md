@@ -28,14 +28,18 @@ it before anything else.
   `ordering.ProductPrices` is the worked case — it is written by
   `ProductPriceProjection` from Catalog's integration events, which arrive over
   the broker at `ordering-catalog-events` and **never touch this lane**.
-  `ordering.Products` is the second, written by `OrderSummaryProjection` from
-  the same endpoint, and it is the one a customer notices: a summary resolves
-  its product names from that table. **The two failures there look different
-  and it is worth knowing which you are looking at.** An *unfilled* row —
-  nothing has ever named the product — drops it from the response, so the
-  order shows fewer products than it has. A *stale* row — a rename Catalog
-  published and this table has not applied — returns the previous name, which
-  is the wrong one and looks entirely healthy.
+  `ordering.Products` **will be** the second, and is not built yet — §6.6
+  specifies it and `OrderSummaryProjection` does not exist in `src/`, so the
+  table is not in the database today. Do not go looking for it on this page's
+  account: an operator querying it now gets an invalid object name, which is
+  the deployment being incomplete rather than the projection being stale.
+  Recorded here so the diagnostic is written before the first incident rather
+  than after it. **When it lands, the two failures will look different and
+  telling them apart is the whole of the triage.** An *unfilled* row — nothing
+  has ever named the product — drops it from the response, so the order shows
+  fewer products than it has. A *stale* row — a rename Catalog published and
+  this table has not applied — returns the previous name, which is the wrong
+  one and looks entirely healthy.
   [§13.7](../backend-architecture/13-observability.md) records that their
   staleness has no direct signal yet, and that gap is real: if prices are stale,
   this alert will not fire and neither will anything else.
