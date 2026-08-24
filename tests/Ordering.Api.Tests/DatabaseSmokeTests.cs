@@ -59,7 +59,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // product-level withdrawal watermark that projection consults on the
         // one branch a per-row guard cannot cover (§6.6) — and, since PR-21,
         // §9.6's saga instance store with the operations queue its escalations
-        // land in, plus the token column #126's confirmation wait needs.
+        // land in, plus the token column #126's confirmation wait needs and
+        // the two flags #124's Compensating join reads.
         //
         // **The length is asserted from the list rather than as a literal, and
         // #126 is why.** It was written out as `ShouldBe(8)` beside eight named
@@ -78,7 +79,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
             "_AddProductPrices",
             "_AddProductWithdrawals",
             "_AddFulfilmentSaga",
-            "_AddSagaConfirmationTimeout"
+            "_AddSagaConfirmationTimeout",
+            "_AddSagaPaymentVerdictJoin"
         ];
 
         string[] applied = await fixture.AppliedMigrationsAsync();
