@@ -1481,8 +1481,10 @@ public sealed class ProductPriceProjection(IDbConnectionFactory connections)
 ```
 
 `ProjectedPriceReader` (§6.4) filters on `IsAvailable = 1`, so a discontinued
-product produces the same `ProductsUnavailable` failure as one that was never
-published — which is what the customer experiences either way.
+product produces the same `ProductsUnavailable` failure as one this service
+holds no price for at all — which is what the customer experiences either way.
+Note which condition that is: **not** a product whose `ProductPublished` never
+arrived, since `PriceChanged` reaches the same insert branch and lists it.
 
 > **A projection with no publisher is worse than a remote call.** If Catalog has
 > never emitted `ProductPublished` for a product — nor a `PriceChanged` that
