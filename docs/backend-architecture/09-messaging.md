@@ -2050,9 +2050,11 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 //
 // NOT because the order is unchanged — and not because it changed either,
 // which is what this comment claimed next until a review read the states.
-// payment_authorised_during_compensation is raised from Compensating, whose exits are
-// where CancelOrder is sent, so on the decline and payment-timeout doors
-// the order is still uncancelled when the row is written. The aggregate's
+// payment_authorised_during_compensation is raised from Compensating, and
+// CancelOrder is sent by that state's stock exits — so whether the order is
+// cancelled when the row is written depends on whether the stock half has
+// settled, and since #124 that exit no longer ends the instance, so both
+// orderings are reachable. The row does not say which. The aggregate's
 // state is simply not what decides where the row lives.
 // It lands in an operations table instead.
 public sealed record FlagOrderForReview(Guid OrderId, string Reason);
@@ -2723,7 +2725,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // Written, not left to OnUnhandledEvent, because a reader cannot
             // tell a decision from an omission. Reaching Compensating means a
             // cancellation is already the outcome, so the customer's request
-            // adds nothing to do — and both exits cancel the order anyway,
+            // adds nothing to do — and the stock exits cancel the order anyway,
             // which Order.Cancel absorbs idempotently (§5.4).
             Ignore(OrderCancelled),
 
@@ -3338,7 +3340,8 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     public string Currency { get; set; } = null!;
     public DateTimeOffset StartedAt { get; set; }
 
-    // Set on entry to Compensating, read by both exits from it. `null!` like
+    // Set on entry to Compensating, read by its two stock exits — the
+    // transitions that send CancelOrder. `null!` like
     // CurrentState and Currency above: the state machine guarantees it is
     // written before any transition reads it, so the property is not nullable
     // even though the column is — a saga that never compensates stores NULL,

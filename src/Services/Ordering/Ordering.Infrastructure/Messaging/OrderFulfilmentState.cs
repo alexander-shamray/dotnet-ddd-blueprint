@@ -38,7 +38,8 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     public DateTimeOffset StartedAt { get; set; }
 
     /// <summary>
-    /// Set on entry to <c>Compensating</c>, read by both exits from it.
+    /// Set on entry to <c>Compensating</c>, read by the two stock exits from
+    /// it — the transitions that send <c>CancelOrder</c>.
     /// <c>null!</c> like <see cref="CurrentState"/> and <see cref="Currency"/>
     /// above: the state machine guarantees it is written before any transition
     /// reads it, so the property is not nullable even though the column is — a

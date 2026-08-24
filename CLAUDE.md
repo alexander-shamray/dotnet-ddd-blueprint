@@ -1013,7 +1013,11 @@ own line rather than sending a reader to a file that does not hold it.
   nothing publish anything — was still open, and answering it deleted the cheap
   one: the no-op release publishes, so the exit has already finalised the
   instance and the branch that would send the second release is one nothing
-  enters. **Two open questions were being weighed independently and one decided
+  enters. (**Still true after #124 made that exit conditional**, and it is
+  worth knowing why rather than re-deriving it: a late `StockReserved` can only
+  reach `Compensating` through the `AwaitingStock` door, which never sent an
+  `AuthorisePayment`, so no verdict is ever outstanding on the one path this
+  argument is about.) **Two open questions were being weighed independently and one decided
   the other.** Before ranking options by cost, ask whether each can still run
   once its neighbours are settled.
 - **Where two mechanisms answer one question and only one of them is editable,
