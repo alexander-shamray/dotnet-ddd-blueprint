@@ -2795,18 +2795,18 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > repository's most-repeated failure, and this is it arriving in the test
 > written to catch that failure.**
 >
-> **All five states have partitions now, and leaving the last two out cost a
-> third defect before they did.** The residual used to read "three of the five
-> are checked", and what it was hiding is exactly what a residual of that shape
-> hides: `Ignore(StockReleased)` was owed in four states and
+> **All five states carry a written argument now, and leaving the last two out
+> cost a third defect before they did.** The residual used to read "three of
+> the five are checked", and what it was hiding is exactly what a residual of
+> that shape hides: `Ignore(StockReleased)` was owed in four states and
 > [#129](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/129)
 > named three, because `Confirmed` was the one nothing was looking at. The
-> issue and the gate had the same blind spot, which is why the fix is the
-> partition rather than the branch.
+> issue and the gate had the same blind spot, which is why the fix belongs in
+> the test rather than only in the branch.
 >
-> **The sweep is still not generalised** — what makes a partition checkable is
-> naming the events a state can receive *and why*, which is an argument per
-> state rather than something a loop can produce. What changed is that the
+> **The sweep is still not generalised** — what makes a state's acceptance
+> checkable is naming the events it can receive *and why*, which is an argument
+> per state rather than something a loop can produce. What changed is that the
 > argument is now written five times instead of three.
 >
 > **One of those five is a partition and four are lists, and the difference is
