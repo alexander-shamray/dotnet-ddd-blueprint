@@ -1176,9 +1176,25 @@ watermark is the property the whole table shape was chosen for (ADR-027), and
 nothing above tests it. Publish, rename, then redeliver the first event: the
 newer name stands.
 
+Two more cases exist because a *branch* of the reader has no case above, which
+is the same argument as the replay and worth keeping separate from the design
+grid:
+
+| | |
+|---|---|
+| **The unresolved id** | Read the page **before** delivering `ProductPublished`. The unnamed product is absent from `Products` and `LineCount` still counts it. Without this, deleting the reader's `Where(named.ContainsKey)` filter — and throwing on the dictionary lookup instead — satisfies every other case here |
+| **The wide page** | Seed enough orders to put more than 2,100 distinct ids on one page: twenty-two orders of a hundred items reaches 2,200, which is well inside §6.5's clamp of a hundred orders. The page returns. Without this, an implementation that expands the ids into an `IN` list passes every other case, because they all use a handful of products, and fails in production on SQL Server's parameter ceiling |
+
+**The second is the one that would otherwise be documentation rather than a
+rule.** ADR-027 argues the parameter limit at length and the sample uses
+`OPENJSON` because of it; nothing above would notice the `IN` list coming back.
+A limit stated in prose and enforced by no case is the shape this repository
+already names — a claim that reads as settled and is not.
+
 So the ordinary flow is what catches the design that shipped, the late arrival
-is what catches the cheaper repair that would otherwise look equivalent, and
-the replay is what catches an update path neither of the others enters. A
+is what catches the cheaper repair that would otherwise look equivalent, the
+replay is what catches an update path neither of the others enters, and the
+last two catch reader branches that no case about the *design* reaches. A
 suite carrying only one of them leaves a whole design indistinguishable from
 this one — which is §12.4's rule about negatives applied to a design rather
 than to an assertion: a case that two candidates both satisfy is not evidence
