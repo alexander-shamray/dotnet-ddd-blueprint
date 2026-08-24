@@ -210,6 +210,38 @@ would cause a side effect the inbox filter does not cover — §9.5 makes
 redelivery of the same `MessageId` a no-op *inside* the handler's transaction,
 and says nothing about what a handler did outside the database.
 
+### Escalate — the message is fine and so is the consumer
+
+**One arrival here is neither a bug nor a broken dependency, and replaying it
+can never work.** A `PaymentAuthorised` on `ordering-fulfilment-saga` whose
+fault is a missing saga instance means Payments authorised a card for an order
+whose fulfilment saga had already finished — normally one this platform
+cancelled. §9.6 faults that arrival deliberately rather than letting
+MassTransit's default consume it silently, because the alternative is money
+moving with nothing raised anywhere
+([#124](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/124)).
+
+Recognise it by the two together: the queue is
+`ordering-fulfilment-saga_error`, and the fault names a saga instance that
+could not be found rather than an exception from a transition. Then:
+
+1. **Do not replay.** The instance is deleted and will not come back, so a
+   replay faults again on the same message. This is the one case in this
+   runbook where replay is wrong even though the message is well formed.
+2. **Take the order id from the message and follow
+   [`order-review.md`](order-review.md)'s
+   `payment_authorised_during_compensation` procedure**, which is written for
+   exactly this money question. The row it expects may not exist — that is the
+   point of this arrival: the saga was gone before it could raise one, so the
+   error-queue message is standing in for the row.
+3. **Discard with a record once the money is resolved**, on the terms below.
+
+> **A run of these is a different signal from one of them.** A single arrival
+> is an interleaving §9.6 bounds but cannot prevent. Several for the same
+> period means Payments is answering later than the saga's thirty-minute
+> verdict bound, which is a conversation with Payments about latency rather
+> than an incident in Ordering.
+
 ### Fix first — the consumer has a bug
 
 Then neither replay nor discard is right yet. Leave the messages parked, ship
@@ -226,6 +258,15 @@ the policy may be too tight for that dependency. If a *deterministic* fault
 consumed every attempt, retrying it at all was wasted — a poison message should
 fail fast, and MassTransit's `Ignore<T>` for known-terminal exception types is
 the lever.
+
+**The missing-instance arrival above is the case where that answer is "it was
+supposed to".** Nothing failed: §9.6 chose the error queue as the destination
+because it is the only channel that reaches a human, and the five retries in
+front of it are known to be wasted — a deleted saga instance does not return.
+They are accepted rather than filtered because excluding them means naming a
+MassTransit exception type in `ordering-fulfilment-saga`'s retry policy, and a
+minute of backoff on an arrival this rare is cheaper than one endpoint's ladder
+differing from every other endpoint's.
 
 ## Closing it
 

@@ -78,10 +78,18 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // so it now names them instead of numbering them.
     //
     // "Cancel this order" has two origins and only one of them was reaching
-    // the machine. The saga's own CancelOrder is always paired with Finalize,
-    // so the workflow ends with it; §11.4's customer endpoint cancels the
-    // AGGREGATE and ended nothing, leaving the saga to reserve stock and
-    // authorise a card for an order the customer had already cancelled.
+    // the machine. Every CancelOrder the saga sends is on a branch that ends
+    // the workflow; §11.4's customer endpoint cancels the AGGREGATE and ended
+    // nothing, leaving the saga to reserve stock and authorise a card for an
+    // order the customer had already cancelled.
+    //
+    // **"Always paired with Finalize" is what this said, and #124 made it
+    // false in the letter while leaving it true in the substance.**
+    // Compensating's two stock exits send CancelOrder and then finalise
+    // CONDITIONALLY, so the command can go out with the instance still live —
+    // waiting on a payment verdict and nothing else. The order is cancelled
+    // at that point either way, which is the property this paragraph needs;
+    // what is no longer true is that the send and the deletion are one act.
     //
     // **Declaring it binds OrderCancelled to an EXISTING queue, and #131
     // is what that costs during a rollout.** Both releases consume

@@ -29,9 +29,11 @@ groups:
       # OrderFulfilmentState. §9.6's state machine persists every saga, so the
       # reading is a query away — there is simply no instrument over it.
       #
-      # The state exclusion is not a refinement, it is the alert: AwaitingStock
-      # times out in 5 minutes, AwaitingConfirmation and Compensating in 10 and
-      # AwaitingPayment in 15,
+      # The state exclusion is not a refinement, it is the alert: every wait in
+      # §9.6 other than the despatch one is bounded well inside an hour — five
+      # minutes for the reservation, ten for a confirmation and ten for a stock
+      # release, fifteen for a payment verdict, and thirty where Compensating
+      # inherits an unanswered verdict and re-arms the wait once (#124) —
       # but the despatch wait is THREE DAYS by design. An unqualified hour would
       # page on the healthy path for most of a saga's real lifetime, and a
       # despatch that genuinely expires escalates to OrdersAwaitingReview below
@@ -89,14 +91,15 @@ groups:
       # row ages to an hour, so there is no instance left to be stuck — but
       # "the saga has already finalised" is a property of the REASON, not
       # of the row, and this comment used to state it as though it were
-      # universal. Two reasons are raised mid-wait from Compensating and can
-      # sit beside a live instance: payment_authorised_during_compensation,
-      # and — since #126 — cancelled_after_confirmation, whose Compensating
-      # branch escalates an OrderConfirmed arriving after the state was
-      # entered and deliberately does not finalise. The rest are raised on
-      # the way out. The instance is nonetheless usually gone by the hour
-      # this measures, because Compensating's two exits are both well
-      # inside it.
+      # universal. Reasons raised mid-wait from Compensating can sit beside
+      # a live instance: payment_authorised_during_compensation, and — since
+      # #126 — cancelled_after_confirmation, whose Compensating branch
+      # escalates an OrderConfirmed arriving after the state was entered and
+      # deliberately does not finalise. The rest are raised on the way out.
+      # The instance is nonetheless usually gone by the hour this measures,
+      # because every wait that can hold Compensating open ends well inside
+      # one: the ten-minute release wait, and since #124 a payment verdict
+      # bounded at thirty minutes from AuthorisePayment.
       #
       # "Every other reason is raised on the way out" was the shape this
       # comment had after its first correction, and #126 falsified it the
@@ -104,6 +107,18 @@ groups:
       # asserted over a vocabulary that grows. What holds is the predicate:
       # a reason raised by a branch with no Finalize can outlive its row's
       # first hour, and only the branch knows.
+      #
+      # #124 narrowed that predicate without breaking it, and the narrowing
+      # is worth stating because it runs in the direction nobody checks.
+      # Compensating now finalises on a JOIN — the stock half settled and no
+      # payment verdict outstanding — so the branch raising
+      # payment_authorised_during_compensation carries a CONDITIONAL Finalize:
+      # it ends the instance in the same transition that raises the row when
+      # the stock half has already settled, and leaves it standing when it
+      # has not. So "raised mid-wait" no longer implies a live instance
+      # either. The predicate holds with "no Finalize" read as "no
+      # UNCONDITIONAL Finalize", and the branch alone stopped being able to
+      # answer — the instance is what says which.
       - alert: OrdersAwaitingReview
         expr: max by (service_name) (ordering_order_reviews_oldest_age_seconds) > 3600
         for: 5m
@@ -122,8 +137,10 @@ groups:
             knows whether it has, so a manual refund may be the second one.
             The saga has
             usually finalised by now, so the saga-age alert will not catch it
-            — but check before assuming, because two reasons are raised
-            mid-wait. The runbook branches on all of it.
+            — but check the instance before assuming rather than reading the
+            reason: some are raised mid-wait, and since #124 one of them
+            finalises or not depending on what else the saga was still owed.
+            The runbook branches on all of it.
           runbook_url: docs/runbooks/order-review.md
 
       # OWED AN INSTRUMENT, AND IT IS THE ONE NO GATE HERE CAN WATCH.
