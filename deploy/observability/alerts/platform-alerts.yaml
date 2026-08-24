@@ -220,6 +220,14 @@ groups:
       # No `for` any longer than the sibling's: the depth does not decay on its
       # own, so waiting only delays the page. What clears it is a human
       # draining the queue, which is the runbook.
+      #
+      # The `_skipped` suffix is read off the shipped assemblies rather than
+      # off MassTransit's documentation: it is a UTF-16 literal in
+      # MassTransit.RabbitMqTransport.dll and MassTransit.Abstractions.dll
+      # 8.5.3, beside `_error`, which is the pair the two selectors here
+      # depend on. A suffix this alert has wrong selects nothing and reports a
+      # clean queue, so it is worth checking against the binary on a version
+      # bump rather than assuming.
       - alert: SkippedQueueDepth
         expr: sum by (queue) (rabbitmq_queue_messages{queue=~".+_skipped"}) > 0
         for: 1m
