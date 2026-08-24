@@ -119,7 +119,7 @@ public sealed class ProductPriceProjectionTests(ServiceFixture fixture) : IAsync
             "§6.6 flags rather than deletes, because an order placed last month has to stay explicable");
         (await ReadPriceAsync(product, "EUR")).ShouldBeNull(
             "the reader filters on IsAvailable, so the customer meets the same ProductsUnavailable as for " +
-            "a product that was never published");
+            "a product this service holds no price for at all");
     }
 
     [Fact]
