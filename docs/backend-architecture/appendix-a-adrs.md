@@ -1143,9 +1143,9 @@ case-sensitive binding — the quiet failure §6.6 spends a callout on — has
 nothing left to fail on.
 
 **Nothing in `src/` changes, and that is why this is cheap now and would not
-have been later.** `OrderSummaryProjection` is unbuilt: §6.6 is a specification
-five services are still to be written from, and Appendix C carries no row that
-builds `OrderSummaries` at all. The same correction after that row lands is a
+have been later.** `OrderSummaryProjection` is unbuilt and Appendix C carries
+no row that builds `OrderSummaries` at all, so there is no shipped code to
+correct and no data to migrate. The same correction after that row lands is a
 migration, a backfill and a projection rebuild.
 
 **What this does not do is remove the second copy.** `ordering.Products` is

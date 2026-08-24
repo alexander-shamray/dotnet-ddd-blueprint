@@ -1142,11 +1142,11 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > up the ability to run the fast half alone, which is what §15.1's pipeline
 > ordering depends on.
 
-### The order summary's two names
+### The order summary's product names
 
-§6.6's projection is the worked case for a pair of tests whose subjects are two
-*different* counterfactuals, and it is here because the design it replaced
-looked correct and could not deliver its payload
+§6.6's projection is the worked case for a set of tests whose subjects are
+*different* counterfactuals rather than different inputs, and it is here
+because the design it replaced looked correct and could not deliver its payload
 ([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
 
 | | |
@@ -1166,17 +1166,28 @@ resolve on read).
 | Names read at insert time | passes | **fails** — the price row arrived without a name, and nothing revisits the summary once one exists |
 | Ids resolved on read | passes | passes |
 
-So the ordinary flow is what catches the design that shipped, and the late
-arrival is what catches the cheaper repair that would otherwise look
-equivalent. A suite carrying only one of them leaves a whole design
-indistinguishable from this one — which is §12.4's rule about negatives applied
-to a design rather than to an assertion: a case that two candidates both
-satisfy is not evidence about which is present.
+A third case is owed for a different reason, and it is the one a suite reaches
+last: **a rename, and then a replay of the older event.** Both cases above
+insert a row that was absent, so both exercise only the `MERGE`'s
+`WHEN NOT MATCHED` branch — an implementation whose `WHEN MATCHED` arm dropped
+the `target.UpdatedAt < @OccurredAt` guard passes them both while silently
+letting a stale `ProductPublished` overwrite a newer name. The per-product
+watermark is the property the whole table shape was chosen for (ADR-027), and
+nothing above tests it. Publish, rename, then redeliver the first event: the
+newer name stands.
 
-**Both are §12.4-level tests and both belong in `Ordering.Api.Tests`, which is
-not a contradiction.** The level is about what they touch — the projection
-writes through Dapper against a real schema, so an in-memory double would
-assert on the double — and the project is about where the fixture lives.
+So the ordinary flow is what catches the design that shipped, the late arrival
+is what catches the cheaper repair that would otherwise look equivalent, and
+the replay is what catches an update path neither of the others enters. A
+suite carrying only one of them leaves a whole design indistinguishable from
+this one — which is §12.4's rule about negatives applied to a design rather
+than to an assertion: a case that two candidates both satisfy is not evidence
+about which is present.
+
+**All three are §12.4-level tests and all three belong in `Ordering.Api.Tests`,
+which is not a contradiction.** The level is about what they touch — the
+projection writes through Dapper against a real schema, so an in-memory double
+would assert on the double — and the project is about where the fixture lives.
 `Ordering.Application.Tests` deliberately carries no `Ordering.TestSupport`
 reference and says so in its csproj, so Ordering's real-schema tests are homed
 one project over; `ProductPriceProjectionTests` is already there for exactly

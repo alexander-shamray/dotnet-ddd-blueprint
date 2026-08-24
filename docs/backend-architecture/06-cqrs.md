@@ -1933,7 +1933,8 @@ namespace Ordering.Application.Orders.GetOrderSummaries;
 // the names and images live in Catalog.
 //
 // LineCount is the order's, Products is what could be named. They can differ:
-// a product Catalog has not published yet resolves to nothing and drops out of
+// a product this projection has not yet applied a ProductPublished for
+// resolves to nothing and drops out of
 // the list, where the count is written once from the order and never moves.
 // LineCount is the one to trust for "how many lines"; Products answers "which
 // of them can be shown", and a client rendering the second against the first
@@ -1993,9 +1994,13 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
     // number of ROWS and multiplies the number of IDS, which is the step that
     // makes "bounded by the same clamp" the wrong reassurance.
     //
-    // A product Catalog has not published yet matches no row here and drops
-    // out — this section shows a name or shows no product, where it used to
-    // show an empty string for every product on every order.
+    // A product this projection has not applied a ProductPublished for
+    // matches no row here and drops out. Note the condition is Ordering's
+    // knowledge, not Catalog's act: Product.Publish is the factory, so every
+    // product Catalog holds was published, and an absent row means the event
+    // has not reached this table — dropped before the queue was bound, or
+    // still in flight. This section then shows a name or shows no product,
+    // where it used to show an empty string for every product on every order.
     private const string NamesSql =
         """
         SELECT Id = p.ProductId, p.Name, Thumb = p.ThumbnailUrl
