@@ -342,6 +342,41 @@ allow-list that replaced one. Both observed red: `OwnerId` on
 `AuthorisePayment` fails only the new test, and a `LegacyPayerId` entry nothing
 carries fails only the pairing.
 
+**The first version of that allow-list approved a *name*, and an approval that
+is not scoped is an approval that leaks.** `PaymentReference` is approved for
+`ConfirmOrder`; a flat list of names therefore permitted it on
+`AuthorisePayment` too, and a new command assembled entirely out of names
+already in use would have passed with nobody adding a line — the forced review
+never happening, which was the only thing the gate was for. Approvals are
+`(contract, member)` pairs now, checked in both directions. Measured: adding
+`PaymentReference` to `AuthorisePayment` passes the flat version and fails the
+scoped one.
+
+**And the root discovery still failed open, one level above the hole it was
+built to close.** `RootsOf` calls a non-event a root when nothing else in the
+universe carries it — so an **event** declaring a property of a command's type
+removes that command from the roots, and nothing then reaches it, because only
+events do. A subject on a command dispatched to its own queue would travel
+unjudged. That is the shared-payload false negative exactly, moved up a level,
+in the fix for the shared-payload false negative.
+
+Inference cannot settle it: making a type carried only by events a root is
+attempt two, which fails `PlacedLine`, and §9.1 gives no positive marker for a
+command. **So the roots are declared and inference audits the declaration**, in
+both directions — a command added to the contracts and not declared shows up as
+an inferred root nobody listed, and a command inference *loses* shows up as a
+declared root inference cannot see. The judged set is built from the
+declaration, so the gate does not lose a command while the pairing tells
+somebody it happened. This is the repository's own answer to a list that
+drifts: declare it once, and assert the other copy matches.
+
+The probe universe now holds an event carrying a command, because nothing in
+the live contracts has that shape and the hole could otherwise only be argued.
+**Its control asserts the failure**, not the fix — inference must still lose
+that command — on the awaiting-signal gate's discipline: a list of things known
+to be missing needs something asserting they are still missing, or the day the
+premise changes passes unnoticed.
+
 **And for five of those six spellings the control was uninformative too.** The
 positive control pointed the detector at `OrderPlaced.CustomerId` and nothing
 else, so misspelling or deleting `Buyer`, `Payer`, `Subject`, `User` or
@@ -468,8 +503,8 @@ migrations against a named list — failed on the eleventh, in the integration
 half. The list is the assertion and the length is derived from it, so the fix
 was one row; #126 had already removed the literal that would have made it two.
 
-**Counts pinned to this branch**: the solution runs 912 tests, 722 of them
-outside `Category=Integration`, and the three CI stages are 18, 704 and 190.
+**Counts pinned to this branch**: the solution runs 914 tests, 724 of them
+outside `Category=Integration`, and the three CI stages are 18, 706 and 190.
 Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
 head of this branch was reconciled against **its own CI run**, whose log summed
 to 899 over twenty-four per-project stage totals — the check this file names

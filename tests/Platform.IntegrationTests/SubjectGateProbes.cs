@@ -79,4 +79,32 @@ internal static class SubjectGateProbes
         typeof(SharedLine),
         typeof(EventOnlyLine)
     ];
+
+    /// <summary>
+    /// A command dispatched to its own queue, which an event also happens to
+    /// carry. Nothing in the live contracts has this shape, so the hole it
+    /// demonstrates could only ever be argued rather than measured.
+    /// </summary>
+    internal sealed record CarriedCommand(Guid OrderId, Guid CustomerId);
+
+    /// <summary>
+    /// The event that swallows it. Root inference asks whether anything in the
+    /// universe carries a type, and this does — so <c>CarriedCommand</c> stops
+    /// being a root, and nothing reaches it, because only an event does.
+    /// </summary>
+    internal sealed record CommandCarryingEvent(Guid OrderId, CarriedCommand Echo) : IIntegrationEvent
+    {
+        public Guid MessageId => Guid.Empty;
+
+        public Guid CorrelationId => Guid.Empty;
+
+        public DateTimeOffset OccurredAt => DateTimeOffset.MinValue;
+    }
+
+    /// <summary>The two of them, as a universe the roots test can drive.</summary>
+    internal static Type[] EventCarriesCommandUniverse =>
+    [
+        typeof(CarriedCommand),
+        typeof(CommandCarryingEvent)
+    ];
 }

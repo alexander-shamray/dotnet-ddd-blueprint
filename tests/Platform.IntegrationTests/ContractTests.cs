@@ -368,7 +368,40 @@ public class ContractTests
     /// in.
     /// </para>
     /// </remarks>
-    private static readonly Type[] Commands = JudgedTypesOf(Contracts);
+    /// <summary>
+    /// The command roots the subject rule judges — §3.2's Accepts columns read
+    /// across, declared rather than inferred.
+    /// </summary>
+    /// <remarks>
+    /// <b>Inference alone fails open, and the shape is the one this gate has
+    /// already been caught by twice.</b> <see cref="RootsOf"/> calls a
+    /// non-event a root when nothing else carries it, so an <em>event</em>
+    /// declaring a property of a command's type removes that command from the
+    /// roots — and nothing then reaches it, because only events do. A subject
+    /// on a command dispatched to its own queue would travel unjudged, which is
+    /// the shared-payload false negative one level up.
+    /// <para>
+    /// So the judged set is built from this list, and
+    /// <see cref="Inferred_command_roots_and_the_declared_list_agree"/> pins
+    /// the list against inference in <b>both</b> directions: a command added to
+    /// the contracts and not here fails, and a command that inference loses
+    /// fails. A declared list nothing checks is the drift this repository
+    /// closes by declaring once and asserting the copies match — the list is
+    /// the assertion, and inference is what audits it.
+    /// </para>
+    /// </remarks>
+    private static readonly Type[] DeclaredCommandRoots =
+    [
+        typeof(AuthorisePayment),
+        typeof(CancelOrder),
+        typeof(ConfirmOrder),
+        typeof(MarkOrderShipped),
+        typeof(FlagOrderForReview),
+        typeof(ReserveStock),
+        typeof(ReleaseStock)
+    ];
+
+    private static readonly Type[] Commands = JudgedTypesOf(Contracts, DeclaredCommandRoots);
 
     /// <summary>
     /// The judged set of a type universe: its command roots, plus everything
@@ -382,9 +415,8 @@ public class ContractTests
     /// method exists to prevent could only be measured by hand and never
     /// pinned.
     /// </remarks>
-    private static Type[] JudgedTypesOf(IReadOnlyCollection<Type> universe)
+    private static Type[] JudgedTypesOf(IReadOnlyCollection<Type> universe, Type[] roots)
     {
-        Type[] roots = RootsOf(universe);
         HashSet<Type> judged = [.. roots];
         Queue<Type> pending = new(roots);
 
@@ -472,8 +504,10 @@ public class ContractTests
         ];
 
         offenders.ShouldBeEmpty(
-            "a command carries no principal, so a subject on one is unverifiable " +
-            "at the receiver (ADR-028): " +
+            "the subject of a money-movement decision is the deciding service's to derive " +
+            "from its own record, so a subject here transports an authority the receiver " +
+            "already holds — a second source for a decision that must have exactly one " +
+            "(ADR-028): " +
             string.Join(", ", offenders.Select(o => $"{o.Command}.{o.Member}")));
     }
 
@@ -498,17 +532,24 @@ public class ContractTests
     /// red build rather than a reader who might notice.
     /// </para>
     /// </remarks>
-    private static readonly string[] ApprovedCommandMembers =
+    private static readonly (Type Contract, string Member)[] ApprovedCommandMembers =
     [
-        "OrderId",           // the correlation every command names
-        "Lines",             // ReserveStock's payload
-        "ProductId",         // StockLine
-        "Quantity",          // StockLine
-        "Amount",            // AuthorisePayment — instruction, not authority
-        "Currency",          // AuthorisePayment — the same
-        "Reason",            // CancelOrder, FlagOrderForReview
-        "PaymentReference",  // ConfirmOrder
-        "TrackingNumber"     // MarkOrderShipped
+        (typeof(AuthorisePayment), "OrderId"),
+        (typeof(AuthorisePayment), "Amount"),      // instruction, not authority
+        (typeof(AuthorisePayment), "Currency"),    // the same
+        (typeof(CancelOrder), "OrderId"),
+        (typeof(CancelOrder), "Reason"),
+        (typeof(ConfirmOrder), "OrderId"),
+        (typeof(ConfirmOrder), "PaymentReference"),
+        (typeof(MarkOrderShipped), "OrderId"),
+        (typeof(MarkOrderShipped), "TrackingNumber"),
+        (typeof(FlagOrderForReview), "OrderId"),
+        (typeof(FlagOrderForReview), "Reason"),
+        (typeof(ReserveStock), "OrderId"),
+        (typeof(ReserveStock), "Lines"),
+        (typeof(ReleaseStock), "OrderId"),
+        (typeof(StockLine), "ProductId"),
+        (typeof(StockLine), "Quantity")
     ];
 
     [Fact]
@@ -525,12 +566,18 @@ public class ContractTests
         // ApprovedCommandMembers written by somebody who had to think about
         // it. ADR-028 and §12 both state the rule that way rather than as
         // mechanically settled, because it is not.
+        // **Scoped to the contract that approved it, not to the name.** A flat
+        // list of names lets an approval leak: `PaymentReference` approved for
+        // ConfirmOrder would silently permit it on AuthorisePayment, and a new
+        // command assembled entirely from names already in use would pass
+        // without anyone adding a line — the forced review never happening,
+        // which is the only thing this gate was for.
         (string Command, string Member)[] unapproved =
         [
             .. Commands
                 .SelectMany(t => t
                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(p => !ApprovedCommandMembers.Contains(p.Name, StringComparer.Ordinal))
+                    .Where(p => !ApprovedCommandMembers.Contains((t, p.Name)))
                     .Select(p => (t.FullName!, p.Name)))
         ];
 
@@ -547,17 +594,17 @@ public class ContractTests
         // left behind by a removed member is a name pre-approved for whatever
         // arrives under it next, which is a deny-list hole reintroduced inside
         // the allow-list that replaced one.
-        string[] live =
+        (Type Contract, string Member)[] live =
         [
             .. Commands
-                .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                .Select(p => p.Name)
-                .Distinct(StringComparer.Ordinal)
+                .SelectMany(t => t
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Select(p => (t, p.Name)))
         ];
 
         ApprovedCommandMembers.ShouldBeSubsetOf(
             live,
-            "an approved name no command carries is a seat reserved for the next member " +
+            "an approved pair no command carries is a seat reserved for the next member " +
             "to take without review");
     }
 
@@ -655,18 +702,7 @@ public class ContractTests
         // discovery silently dropped the other four — the coverage failure
         // this repository keeps rediscovering, reproduced inside the control
         // written to prevent it.
-        Type[] commandRoots =
-        [
-            typeof(AuthorisePayment),
-            typeof(CancelOrder),
-            typeof(ConfirmOrder),
-            typeof(MarkOrderShipped),
-            typeof(FlagOrderForReview),
-            typeof(ReserveStock),
-            typeof(ReleaseStock)
-        ];
-
-        foreach (Type root in commandRoots)
+        foreach (Type root in DeclaredCommandRoots)
             Commands.ShouldContain(root);
 
         // A payload only a command carries stays judged: a subject one level
@@ -685,6 +721,60 @@ public class ContractTests
     }
 
     [Fact]
+    public void Inferred_command_roots_and_the_declared_list_agree()
+    {
+        // The declared list is what the gate judges, so on its own it is a list
+        // nothing checks — which is the drift this repository closes by
+        // declaring once and asserting the copies match. Inference is the other
+        // copy, and pairing them catches both failures it has.
+        //
+        // A command added to the contracts and not declared here shows up as an
+        // inferred root nobody listed: unjudged today, red now, and the fix is
+        // a line somebody had to write.
+        //
+        // A command REMOVED from inference is the subtler one and the reason
+        // this test exists at all. RootsOf calls a non-event a root when
+        // nothing else carries it, so an EVENT declaring a property of a
+        // command's type takes that command out of the roots — and nothing then
+        // reaches it, because only events do. Judging from the declared list
+        // means the gate does not lose it; this assertion means nobody loses
+        // the fact that it happened.
+        Type[] inferred = RootsOf(Contracts);
+
+        inferred.ShouldBe(DeclaredCommandRoots, ignoreOrder: true);
+    }
+
+    [Fact]
+    public void Inference_alone_loses_a_command_an_event_carries()
+    {
+        // The measurement behind the paragraph above, pinned rather than
+        // argued — and the reason the declared list is not ceremony. The probe
+        // universe holds an event whose property is a command's type, which is
+        // exactly what removes that command from the inferred roots.
+        //
+        // Asserted as a FAILING inference, not a passing one: this test's
+        // subject is the hole, so it must go red on the day inference stops
+        // having it. That is the same discipline as the awaiting-signal alert
+        // gate — a list of things known to be missing needs something asserting
+        // they are still missing.
+        Type[] inferred = RootsOf(SubjectGateProbes.EventCarriesCommandUniverse);
+
+        inferred.ShouldNotContain(
+            typeof(SubjectGateProbes.CarriedCommand),
+            "inference cannot see this command as a root, which is why the roots are declared");
+
+        // And the declared-root path judges it anyway, which is the property
+        // the real gate depends on.
+        Type[] judged = JudgedTypesOf(
+            SubjectGateProbes.EventCarriesCommandUniverse,
+            [typeof(SubjectGateProbes.CarriedCommand)]);
+
+        judged.ShouldContain(
+            typeof(SubjectGateProbes.CarriedCommand),
+            "a declared command root is judged whatever an event happens to carry");
+    }
+
+    [Fact]
     public void A_payload_shared_by_a_command_and_an_event_stays_judged()
     {
         // **The regression this gate's definition took four attempts to get
@@ -694,7 +784,7 @@ public class ContractTests
         // closure" implementation — which exempted exactly this shape, because
         // an event reached it, and let a subject travel on the command
         // unjudged. Synthetic types are the only way to hold that closed.
-        Type[] judged = JudgedTypesOf(SubjectGateProbes.Universe);
+        Type[] judged = JudgedTypesOf(SubjectGateProbes.Universe, RootsOf(SubjectGateProbes.Universe));
 
         judged.ShouldContain(
             typeof(SubjectGateProbes.SharedLine),
