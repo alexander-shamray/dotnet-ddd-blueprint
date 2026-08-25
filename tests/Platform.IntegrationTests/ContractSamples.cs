@@ -201,7 +201,7 @@ internal static class ContractSamples
         Registry.TryGetValue(contract, out Func<object>? sample) ? sample()
             : throw new InvalidOperationException(
                 $"No sample for the contract '{contract.FullName}'. A V1 contract's members are " +
-                "required apart from any §12.6 lists as additive, so nothing can construct " +
+                "required apart from any additive member §12.6 lists, so nothing can construct " +
                 "one by reflection — " +
                 "add an entry to ContractSamples.");
 

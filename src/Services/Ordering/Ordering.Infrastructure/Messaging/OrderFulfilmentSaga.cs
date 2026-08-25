@@ -1454,8 +1454,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     /// </remarks>
     private static Task NoInstanceForCancellation(ConsumeContext<OrderCancelled> context)
     {
-        // Allow-list. Absent is the expand-phase tolerance argued at the
-        // registration; workflow is this service's own echo.
+        // Allow-list. Absent is the permanent V1 tolerance argued at the
+        // registration — a retained payload can arrive indefinitely — and
+        // workflow is this service's own echo.
         if (context.Message.Origin is null or CancelOrigins.Workflow)
             return Task.CompletedTask;
 

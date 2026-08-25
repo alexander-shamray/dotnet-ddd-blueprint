@@ -110,9 +110,20 @@ files an error-queue entry for every ordinary cancellation for the length of
 every deploy — a certainty. Discarding on absent holds the pre-#123 behaviour
 across the deploy and leaves the race open for that window — a possibility.
 **A guaranteed incident is worse than a bounded exposure**, so absent
-discards, and it is §15.5's expand phase with a contract phase owed rather
-than a reading of absent as an origin. A test pins it so it cannot be tidied
-away as an oversight.
+discards rather than being read as an origin. A test pins it so it cannot be
+tidied away as an oversight.
+
+**And the exposure is not bounded by the deploy, which this entry said and
+the review corrected.** It called the tolerance §15.5's expand phase with a
+contract phase owed — a later release making `Origin` required. That
+tightening is a breaking change inside V1: a payload predating the field has
+no bound on when it can arrive, because `error-queue.md` keeps a message
+until somebody handles it and a replay can reintroduce one at any time, so
+requiring the member would fail deserialisation before the branch above
+could read the absent value. §9.2 sends that to a V2. **An additive member
+stays optional for the life of its contract version**, and the promised
+phase was a scheduled breakage in the clothes of rigour — which is why it
+survived several review rounds: it was the tidier claim.
 
 **Faulting buys a second thing nobody asked for, and it is not noise.** A
 cancellation arriving after the saga finalised down a `FlagOrderForReview`

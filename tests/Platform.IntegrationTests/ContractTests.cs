@@ -201,7 +201,12 @@ public class ContractTests
                 .. type
                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                     .Where(p => p.SetMethod is not null && !IsAlwaysSupplied(p, type))
-                    .Select(p => $"{type.Name}.{p.Name}")
+                    // Fully qualified, because the exemption list is — §9.2 has
+                    // two versions of a contract live at once during a
+                    // deprecation, so a simple name cannot say which one an
+                    // entry is about. Both sides have to agree or the Except
+                    // below silently stops matching and un-exempts the member.
+                    .Select(p => $"{type.FullName}.{p.Name}")
             ];
 
             // Subtracted from the FAILURES rather than from the candidates, so
@@ -260,8 +265,9 @@ public class ContractTests
         // #123. Absent means "published before this field existed", and §9.6's
         // saga discards on it — permanently, because a payload that old can
         // still arrive from the error queue or a replay. It leaves this list
-        // when V1 does.
-        "OrderCancelled.Origin"
+        // when V1 is retired, which is what the fully qualified key makes
+        // checkable.
+        "Common.Contracts.Ordering.V1.OrderCancelled.Origin"
     ];
 
     [Fact]
@@ -302,17 +308,31 @@ public class ContractTests
         // goes to die: an entry outlives the contract it was written for,
         // nothing says so, and a name that resolves to nothing reads exactly
         // like a live exemption. This fails from both directions — a name that
-        // no longer resolves, which is what a V2 replacing V1 produces, and a
+        // no longer resolves, which is what retiring a version produces, and a
         // member that has somehow become always-supplied.
+        //
+        // **Keyed by the FULLY QUALIFIED name, because §9.2 has two versions
+        // live at once during a deprecation.** A simple name resolved with
+        // SingleOrDefault does not merely exempt the wrong one — it throws the
+        // moment `Ordering.V2.OrderCancelled` exists beside V1's, so this gate
+        // would fail for a reason that has nothing to do with what it checks,
+        // and the clearing story above ("the entry goes when the version does")
+        // could never actually be reached. The version is the whole point of
+        // the entry, so it belongs in the key.
         foreach (string entry in AdditiveMembers)
         {
-            string[] parts = entry.Split('.');
-            parts.Length.ShouldBe(2, $"{entry} must be spelt Type.Member");
+            int split = entry.LastIndexOf('.');
+            split.ShouldBeGreaterThan(0, $"{entry} must be spelt Namespace.Type.Member");
 
-            Type? type = Contracts.SingleOrDefault(t => t.Name == parts[0]);
-            type.ShouldNotBeNull($"{entry} names no public contract — a V2 has replaced it and the entry belongs in that commit");
+            string typeName = entry[..split];
+            string memberName = entry[(split + 1)..];
 
-            PropertyInfo? property = type.GetProperty(parts[1], BindingFlags.Public | BindingFlags.Instance);
+            Type? type = Contracts.SingleOrDefault(t => t.FullName == typeName);
+            type.ShouldNotBeNull(
+                $"{entry} names no public contract — that version has been retired " +
+                "and the entry belongs in the commit that retired it");
+
+            PropertyInfo? property = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Instance);
             property.ShouldNotBeNull($"{entry} names no member of {type.Name}");
 
             IsAlwaysSupplied(property, type).ShouldBeFalse(
