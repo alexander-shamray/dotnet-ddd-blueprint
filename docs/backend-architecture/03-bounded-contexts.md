@@ -19,7 +19,7 @@ graph LR
     CAT -->|product + price events| ORD
     ORD -->|ReserveStock<br/>ReleaseStock| INV
     INV -->|StockReserved / Failed<br/>StockReleased| ORD
-    ORD -->|AuthorisePayment| PAY
+    ORD -->|AuthorisePayment<br/>OrderPlaced| PAY
     PAY -->|PaymentAuthorised / Declined| ORD
     ORD -->|OrderConfirmed| SHP
     SHP -->|ShipmentDispatched| ORD
@@ -63,7 +63,7 @@ subscriber silently executing your business commands.
 | **Catalog** | Product, Category, Price | `ProductPublished`, `PriceChanged`, `ProductDiscontinued` | `StockLevelChanged` | — |
 | **Ordering** | Order, OrderLine, the fulfilment saga | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled` | `OrderPlaced` (its own — the saga starts on it), `OrderCancelled` (its own — the saga stops on it), `OrderConfirmed` (its own — the saga waits on it), `ProductPublished`, `PriceChanged`, `ProductDiscontinued`, `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | `CancelOrder`, `ConfirmOrder`, `MarkOrderShipped`, `FlagOrderForReview` |
 | **Inventory** | StockItem, Reservation | `StockReserved`, `StockReservationFailed`, `StockReleased`, `StockLevelChanged` | `OrderCancelled`, `ShipmentDispatched` | `ReserveStock`, `ReleaseStock` |
-| **Payments** | PaymentIntent, Refund | `PaymentAuthorised`, `PaymentDeclined`, `PaymentRefunded` | `OrderCancelled` | `AuthorisePayment` |
+| **Payments** | PaymentIntent, Refund | `PaymentAuthorised`, `PaymentDeclined`, `PaymentRefunded` | `OrderPlaced`, `OrderCancelled` | `AuthorisePayment` |
 | **Shipping** | Shipment, TrackingEvent | `ShipmentDispatched`, `ShipmentDelivered` | `OrderConfirmed` | — |
 | **Notifications** | NotificationLog | — | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled`, `PaymentDeclined`, `PaymentRefunded`, `ShipmentDispatched`, `ShipmentDelivered` | — |
 
@@ -114,6 +114,67 @@ this is the platform's only one. The context map above draws no Ordering
 self-edge, which is a simplification rather than a claim: the collaboration is
 real, it is asynchronous like every other, and it obeys the same rule that the
 return leg is an event.
+
+**Payments subscribes to `OrderPlaced` to build its own record of the order —
+the payer, the total and the currency.** The payer is the one it cannot do
+without, and
+[ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+forbids `AuthorisePayment` from carrying one: the subject of a money-movement
+decision is the deciding service's to derive, not the sender's to state, and a
+subject on that command would transport an authority the receiver already
+holds. The subject reaches Payments through the event instead, where it was
+bound from a real principal at Ordering's endpoint (§11.4), and the command's
+arrival is what makes it look the payer up.
+
+**The other two fields are not incidental, which is why the record is of the
+order rather than of the payer.** `OrderPlaced` carries `TotalAmount` and
+`Currency` — §9.6's saga reads both off it — and holding them is what lets
+Payments *disagree* with the `AuthorisePayment` it is handed rather than merely
+obey it.
+
+**That record also settles why the subject is omitted and the other two are
+not, and it is not because only they can be checked.** Once the payer is in
+the record, a supplied `CustomerId` would be just as checkable — so
+checkability separates none of the three. The line ADR-028 draws is
+**instruction versus authority**: the amount and the currency are what to do,
+the sender decides them, and a mismatch is a consistency check; the subject is
+on whose behalf, and a transported authority is a second source for a decision
+that must have exactly one.
+
+**The platform already does this twice, and the closer of the two is the price
+projection.** [§6.4](06-cqrs.md)'s `PlaceOrder` reads
+`ordering.ProductPrices` — a local projection of Catalog's price events, and
+`IProductPriceReader` is documented as *never a remote call* — so a command
+handler that needs another service's fact looks it up in a table Ordering owns.
+That is exactly Payments' shape: a **write-path** lookup, on the path that
+decides, against a record built from events.
+[ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)
+is the same mechanism on the read path, for product **names** rather than
+prices — the two tables are deliberately distinct, and `ordering.ProductPrices`
+has never carried a name.
+
+What differs is what the local copy buys. There, a synchronous hop avoided;
+here, an assertion nobody could verify replaced by a record the service owns.
+
+> **The subscription is a precondition, not a decoration, and the ordering
+> between the two messages is not guaranteed.** §9.4 orders nothing between two
+> deliveries, so an `AuthorisePayment` can arrive at Payments before the
+> `OrderPlaced` it would be resolved against — the same race the
+> `ReleaseStock` bullet below records, one service over. **A missing
+> record is a wait, not a decline.** Payments must not publish
+> `PaymentDeclined`, which is a business verdict about a payer it has not yet
+> identified.
+>
+> **What it must not do either is rely on the ordinary retry envelope, and an
+> earlier version of this callout did.** §9.8's command policy is five
+> exponential in-memory retries capped at a minute; a reorder outlasting that
+> reaches the error queue [§13.6](13-observability.md) pages on, turning a
+> routine race into an operational fault in about a minute. **A wait needs a
+> mechanism that lasts as long as the wait.** Payments' command endpoint
+> therefore needs **delayed redelivery** — ADR-021's delayed exchange is
+> already on this broker — with a window reaching §9.6's fifteen-minute payment
+> timeout, so an order whose `OrderPlaced` never arrives compensates on that
+> timeout rather than paging long before it.
 
 **A cell names a message; it does not say what the message means when there is
 nothing to do.** `ReleaseStock` is where that gap was load-bearing, and it is

@@ -68,6 +68,493 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The subject that crossed a boundary nothing checked (#63)
+
+§11.4's subject rule — *a subject identifier is bound from the principal, never
+from the request* — carried an exclusion for the message path, and the
+exclusion was honest: a command arriving over the broker has no principal, so
+there is nothing for `ICurrentUser` to answer with. What the chapter said next
+is what this PR came back for. It said the question of what the message side
+*should* do was open, and left `AuthorisePayment` naming the customer whose
+instrument Payments would charge.
+
+**An open question in a specification is a decision taken by default.** For as
+long as the callout stood, the default was "carry the subject as a field", and
+it was reachable from a request body: #54 closed the HTTP end of that chain and
+#43 closed the ownership check behind it, but the value they made trustworthy
+was re-emitted onto `OrderPlaced`, copied to the saga instance, and sent on to
+Payments as an ordinary message field with nothing left that could check it.
+Two of the chain's four links were closed and the path was still open, exactly
+as #63 predicted at filing.
+
+**The fix is a word, and finding the word was most of the work.** The message
+path cannot *bind* — there is no principal — so the rule there is
+**re-derive**: the service that owns the decision resolves the subject from its
+own record, built from an event whose subject was bound from a principal.
+`OrderPlaced` already carries such a value. Payments consumes it, keeps its own
+record of who an order belongs to, and looks the payer up when the command
+arrives. That is ADR-028, and §3.2's Payments row gained `OrderPlaced` to make
+the precondition a contract rather than an implementation note.
+
+**The precedent is one service over, and picking the right one took a review
+round.** The first draft cited ADR-027 everywhere — Ordering resolving product
+*names* from a projection it owns — and then §3.2 described that ADR as being
+about *prices*, which it is not: ADR-027 is careful that
+`ordering.ProductPrices` has never carried a name, and the two tables are
+distinct on purpose. One precedent, three sites, two different readings.
+
+The closer analogue is the **price** projection and not the name one, which is
+what made the slip easy to miss: §6.4's `PlaceOrder` reads
+`ordering.ProductPrices` behind an `IProductPriceReader` documented as *never a
+remote call*, so a handler needing another service's fact **on the deciding
+path** looks it up locally. That is Payments' shape exactly — write path, at
+the moment of decision. ADR-027 is the same mechanism on the read path, for
+names. All three sites now say so, and say which is which. Same mechanism,
+different purchase — a synchronous hop avoided there, an unverifiable assertion
+removed here.
+
+**Why the contract narrowed instead of emptying, which is the question a
+reviewer asks first.** `Amount` and `Currency` stayed. The line between them
+and the subject is **instruction versus authority**: the amount and the
+currency are what to do, the sender decides them, and Payments may refuse a
+mismatch against its record as a consistency check between two parties who both
+have a view. The subject is on whose behalf, and that is the deciding service's
+to derive. A money-movement command carries its instruction and never its
+authority — the reusable half of this PR, and what decides the next such
+contract without re-running the argument.
+
+**That is the second formulation, and the first was falsified by this change's
+own design.** It said the line was *whether the receiver can disagree* — a
+field the receiver can check is a claim, one it cannot check is an assertion —
+and Copilot pointed out that Payments' record holds the payer as well as the
+total, so a supplied `CustomerId` would be exactly as checkable as the amount.
+Checkability separates none of the three. **The rule was refuted by the
+paragraph two above it**, which is where the record's contents are specified.
+
+The replacement is stronger rather than a retreat. A transported authority is a
+second source for a decision that must have exactly one; the check that would
+catch a mismatched subject is a check somebody has to remember to perform; and
+a redundant authority-bearing field is precisely the one a later call site
+reads *instead of* deriving — cheaper, identical in the happy case, wrong
+exactly when it matters. Removing the field removes the possibility rather than
+guarding against it.
+
+**Worth recording because the falsified version was the sentence this PR was
+proudest of**, restated in six places and offered as guidance for future
+contracts. A rule that generalises is the most expensive kind to get wrong, and
+the thing that caught it was reading the rule against the design in the same
+document rather than against the case that motivated it.
+
+**The reviewer's best finding was a rule the branch broke without noticing:
+§9.2 requires a version bump to remove a field.** `AuthorisePayment` lost
+`CustomerId` from `Payments.V1` in place, and §9.2's standing remedy is a `V2`
+with both published for a deprecation window. The branch had an argument for
+the exception — Payments does not exist, so `V1` has no consumer — and had not
+written it anywhere, which is exactly the one-rule failure: a reader greps §9.2,
+finds "removing a field requires a new version", and finds this change doing
+otherwise with nothing to say why.
+
+**Writing it down turned up the sharper half, which the original argument had
+missed.** The exception is not merely that the version bump is *unnecessary*
+here; for this class of change it is *wrong*. A `V2` alongside `V1` keeps the
+version carrying the subject published and consumable for the whole window —
+so the standard remedy would re-arm the defect the change exists to remove.
+"Unnecessary" and "counterproductive" are different claims, and only the second
+justifies putting an exception into a chapter rather than a footnote in a PR.
+
+So §9.2 gained the exception as a **rule** with two required conditions — no
+consumer in `Platform.slnx`, and an ADR recording it so "there was no consumer"
+is checkable later — plus the note that it expires the moment a consumer
+exists. That is the same window §9.1 already describes from the other side:
+`ShippingAddressV1` was four fields short for as long as nothing populated it,
+and the PR that becomes a contract's first producer is the last one that can
+fix its shape for free.
+
+**The saga instance lost its `CustomerId` too, and that is the structural half
+rather than tidying.** The field had exactly one reader — the send this PR
+removed. Left in place, all it could still do is offer itself to the next
+transition that wants a customer, which is how the subject finds its way back
+onto a message a release later. Removing it means no command the machine sends
+carries a subject. **Not "every command names an order and nothing else"**,
+which is how this was first written and is false of three of them —
+`ReserveStock` carries its lines, `AuthorisePayment` its amount and currency,
+`CancelOrder` its reason. Grok caught it, and the correction is worth keeping
+because the wrong version reads as the stronger claim: what these commands have
+in common is an absence, not a shape, and a rule stated as a shape invites the
+next reader to defend a uniformity that was never true. Ordering is not short
+of the value either way: `ordering.Orders` owns it, bound at the endpoint.
+
+**Removing the property is one release; removing the column is two, and the
+first draft got that wrong.** `dotnet ef migrations add` scaffolded a
+`DROP COLUMN` and warned about data loss, which is the visible half. The
+invisible half is §7.4 and §15.5: migrations run ahead of the deploy, the
+previous release keeps serving beside the new one, and *that* release's saga
+writes this column on every `OrderPlaced`. A drop would have failed those
+inserts for the length of the ladder and left a rollback with no column at all.
+So the column is mapped as a **shadow property** — unreachable from the
+instance, so the control still holds — with a database default, and the drop is
+owed to a release where nothing writes it.
+
+**The default's shape is decided by the old build reading the new build's
+rows.** Rolling forward, the new build's `INSERT` omits the column and SQL
+Server supplies the default; a nullable column would serve equally well. The
+old build materialises a non-nullable `Guid` from rows the new build wrote —
+and a nullable column throws there rather than reading empty. `NOT NULL` with a
+default is the one shape that survives both. The value is `Guid.Empty` on
+`AddSagaPaymentVerdictJoin`'s terms one release back: the conservative choice
+rather than merely a legal one, because it is **nobody**, where any other
+default would name a real subject that was never that order's.
+
+**Copilot found that "the old build" was written throughout as a rollback, and
+it is mostly not one.** §15.5's canary runs both releases at once over the same
+queues, so the ordinary ladder produces the case: a new pod creates the
+instance with the column defaulted, an old pod takes the next event for that
+correlation, reads `Guid.Empty`, and sends its four-field `AuthorisePayment`
+naming nobody. Reachable on every deploy rather than only on the way back from
+one — and every site here had framed it as the rare direction.
+
+**The finding did not change the design, and saying why is the point.** Two
+releases are enough *here* for the same reason the in-place contract change is
+allowed at all — nothing consumes the command, so the legacy message reaches no
+decision, and an empty payer is a charge that fails visibly rather than one
+aimed at the wrong customer. What it changed is the guidance: a platform whose
+Payments is live needs **three** releases — stop sending the field, drop the
+property, drop the column — which is §7.4's own sequence with its *stop writing
+the old one* step performed rather than skipped. The blueprint is a
+specification somebody else will follow with Payments running, so a sequence
+that is safe only under a condition it never states is a defect in the
+specification even when the code is right.
+
+**The gate is one assertion and the controls it cannot do without.**
+`No_command_contract_carries_a_subject` asserts no command contract declares a
+member spelled like a subject, and an empty offender set is exactly what a
+broken detector produces — so one control points the same detector at
+`OrderPlaced` and requires it to find the `CustomerId` ADR-028 *keeps*, one
+names the command roots the judged set must contain and the exemptions it must
+not, since a filter that selects nothing makes the rule vacuous while leaving
+it green, and one pairs the spelling vocabulary against the probe that
+exercises it, so a spelling added to the detector and to nothing else fails the
+build. The cases themselves are generated from that vocabulary rather than
+listed beside it, for the reason argued further down: a case list is a second
+copy, and a second copy is what went stale here twice.
+**No count of them is written here on purpose.** Successive review rounds each
+added one, so any figure stated at any point in that would have been wrong by
+the next round — which is the argument `CLAUDE.md` makes about its own line
+count and the blueprint makes about its callout totals, arriving inside a
+single branch rather than across several.
+
+**Defining "command" took four attempts, and each fix opened the next fault.**
+The first spelling read every contract. The second narrowed to those not
+implementing `IIntegrationEvent`, citing §9.1 — which states that implication
+one way only. Copilot pointed out the converse admits the line types events
+carry, and an event is *permitted* a subject: had `OrderPlaced` factored its
+`CustomerId` into `PlacedLine`, the gate would have failed the build on a shape
+this very ADR requires. **A gate that refuses what the rule allows is a false
+failure, and the "fails wide is safe" argument written beside it was true of
+coverage and false of correctness.**
+
+The third subtracted everything reachable from an event, and Copilot found the
+hole that opened one round later: a payload carried by **both** a command and an
+event became exempt *because an event reached it*, so a subject inside it would
+travel on the command unjudged. **The fix for a false positive had created a
+false negative on the exact path the rule exists to close** — and the second
+fault is the worse one, because a refused build gets looked at and a silent pass
+does not.
+
+The fourth builds the judged set **up from the command roots** — the commands
+plus everything they carry — which settles both: a shared payload is judged
+because a command reaches it, and a purely-event payload is not because none
+does. The consequence is worth stating rather than leaving implicit: a type
+shared between a command and an event may not carry a subject at all, since the
+command side forbids what the event side permits.
+
+**Three directions measured, not argued**: a `CustomerId` in `PlacedLine`
+passes; the same field in `StockLine` fails naming the member; and the same
+field in a `PlacedLine` that a command also carries fails. The first would have
+failed under attempt two, and the third would have passed under attempt three.
+
+**The reusable half is about the shape of the correction rather than this
+gate.** Two of the four attempts were fixes that introduced the opposite
+defect, and neither was caught by the tests that existed at the time — the
+suite was green after attempt two and green after attempt three. What found
+them both was someone asking what the *set* contained, not what the assertion
+returned.
+
+**Then a fifth round found the same hole through the type system rather than
+through the definition.** `ElementType` unwrapped a generic only when it had
+exactly one argument — true of every collection this platform uses, which is
+what made the gap read as completeness — so a member typed
+`IReadOnlyDictionary<string, SomePayload>` would have left `SomePayload`
+outside the closure and its subject unjudged. The traversal now visits every
+generic argument.
+
+**And the round's better finding was that none of it was pinned.** All three
+directions had been *measured* during development and reverted, so nothing in
+the committed suite would notice a return to attempt three: the live contracts
+have no payload shared between a command and an event, so every assertion over
+them stays green under the rejected implementation. Measured once and reverted
+is pinned by nothing — the same failure as a gate observed only in the green
+direction, one level up.
+
+What closes it is four synthetic contracts in the test assembly — a command
+reaching a shared payload through a two-argument generic, an event carrying
+that payload and one of its own — driven through the same algorithm as a type
+universe of their own. The closure had to become a function of a universe
+rather than a fixed field to allow that, which is the shape worth carrying:
+**an algorithm that can only be run against production data can only be tested
+with the cases production happens to contain.** Both counterfactuals were then
+re-measured against the committed tests: reverting to attempt three fails the
+shared-payload case with the other thirteen green, and restoring the
+single-argument unwrap fails both new cases.
+
+**The coverage control named three command roots of seven**, which is the
+repository's most-repeated failure reproduced inside the control written to
+prevent it: discovery could have dropped `ReserveStock`, `ReleaseStock`,
+`MarkOrderShipped` and `FlagOrderForReview` while the gate stayed green. It
+names all seven now, read across §3.2's Accepts columns.
+
+**The spelling list is incomplete by construction and says so.** It matches
+`Customer`, `Buyer`, `Payer`, `Subject`, `User` and `Principal` as substrings,
+so a subject added under a name nobody predicted gets past. That is stated at
+the site rather than papered over — the control keeps the gate from being
+*uninformative*, which is a different property from keeping it complete, and
+conflating the two is how this repository's gates have failed before.
+
+**Stating it was not the same as handling it, and review said so on the last
+round.** A documented hole is still a hole: ADR-028 read *the rule is enforced
+rather than reviewed* and §12 read *each is mechanical*, while `OwnerId` walked
+through — measured, not argued, and the sharp part of the measurement is that
+`No_command_contract_carries_a_subject` stayed **green** for it. This
+repository had already paid for exactly this shape once and written the fix
+down: *a deny-list of terminal states passes every state nobody listed …
+enumerate what is acceptable.* The subject test is a deny-list of six
+substrings.
+
+So the gate gained its allow-list half: every member the judged commands may
+carry is enumerated, and a name absent from that list fails the build. **It
+decides nothing** — it cannot tell whether `OwnerId` is a subject — and that
+is the honest claim: it converts a member added silently into a member added over
+a red build, which is the scaffold's rule that a tool refusing input it has
+never been shown beats one that guesses. A second test refuses a **stale**
+entry, because an approved name no command carries is a seat reserved for
+whatever arrives under it next — the deny-list hole reintroduced inside the
+allow-list that replaced one. Both observed red: `OwnerId` on
+`AuthorisePayment` fails only the new test, and a `LegacyPayerId` entry nothing
+carries fails only the pairing.
+
+**The first version of that allow-list approved a *name*, and an approval that
+is not scoped is an approval that leaks.** `PaymentReference` is approved for
+`ConfirmOrder`; a flat list of names therefore permitted it on
+`AuthorisePayment` too, and a new command assembled entirely out of names
+already in use would have passed with nobody adding a line — the forced review
+never happening, which was the only thing the gate was for. Approvals are
+`(contract, member)` pairs now, checked in both directions. Measured: adding
+`PaymentReference` to `AuthorisePayment` passes the flat version and fails the
+scoped one.
+
+**And the root discovery still failed open, one level above the hole it was
+built to close.** `RootsOf` calls a non-event a root when nothing else in the
+universe carries it — so an **event** declaring a property of a command's type
+removes that command from the roots, and nothing then reaches it, because only
+events do. A subject on a command dispatched to its own queue would travel
+unjudged. That is the shared-payload false negative exactly, moved up a level,
+in the fix for the shared-payload false negative.
+
+Inference cannot settle it: making a type carried only by events a root is
+attempt two, which fails `PlacedLine`, and §9.1 gives no positive marker for a
+command. **So the roots are declared and inference audits the declaration**, in
+both directions — a command added to the contracts and not declared shows up as
+an inferred root nobody listed, and a command inference *loses* shows up as a
+declared root inference cannot see. The judged set is built from the
+declaration, so the gate does not lose a command while the pairing tells
+somebody it happened. This is the repository's own answer to a list that
+drifts: declare it once, and assert the other copy matches.
+
+The probe universe now holds an event carrying a command, because nothing in
+the live contracts has that shape and the hole could otherwise only be argued.
+**Its control asserts the failure**, not the fix — inference must still lose
+that command — on the awaiting-signal gate's discipline: a list of things known
+to be missing needs something asserting they are still missing, or the day the
+premise changes passes unnoticed.
+
+**That pairing still had one blind spot, and it is the intersection of the two
+mistakes it was built for.** Each half catches one: a command inference loses,
+and a command nobody declared. A contract that is *both* — carried only by an
+event **and** absent from the declared roots — drops out of the inferred set
+and the declared set alike, so the equality holds and nothing inspects the
+type. Measured, and the measurement is the whole argument: a `RefundOrder`
+record carrying a `CustomerId`, referenced from `OrderPlaced` and declared
+nowhere, left **both** `Inferred_command_roots_and_the_declared_list_agree` and
+`No_command_contract_carries_a_subject` green.
+
+**No structural test can close it, and saying why is the point.** Whether a
+type is dispatched as a command is not a fact the type system holds: §9.1
+defines a command by what it does *not* implement, and a positive `ICommand`
+marker — the obvious fix — only moves the forgetting to the marker, since a
+new command that omits it is lost exactly as before. What *is* decidable is
+whether a person has classified the type at all. So every non-event contract must
+appear in the declared roots or in a declared payload list, and one in neither
+fails the build. It does not say what the new type is; it refuses to let it
+arrive unlooked-at, which is the scaffold's rule an assembly over and the same
+move the member allow-list makes one level down. A stale entry is refused in
+the same test, for the reason every list here refuses one: a classification for
+a type that has gone is a seat reserved for whatever takes the name next.
+
+**Four rounds in a row found a fail-open in the previous round's fix**, each a
+level up from the last: the spelling cases, the member names, the roots, the
+classification. That is not a run of bad luck. **A gate built by narrowing what
+it inspects has a boundary, and the boundary is where the next hole is** — so
+the question to ask of one is not "does it catch the case I have" but "what
+does it decline to look at", and the answer is a place rather than a case.
+
+**And for five of those six spellings the control was uninformative too.** The
+positive control pointed the detector at `OrderPlaced.CustomerId` and nothing
+else, so misspelling or deleting `Buyer`, `Payer`, `Subject`, `User` or
+`Principal` left every assertion green. **The coverage failure this repository
+keeps rediscovering, inside the control written to prevent it** — the same
+shape as naming three command roots of seven, one round earlier and one level
+down. A probe now declares a member per spelling and a second test pairs list
+and probe by size. Measured: misspelling one entry fails exactly that case and
+leaves the rest of the file green.
+
+**That fix then had the same defect, and the sentence describing it was the
+tell.** It was written as *parameterised over the vocabulary itself rather than
+a copy of it* while the cases were an `InlineData` row per spelling — a copy,
+with `SubjectSpellings.ShouldContain(spelling)` beside it and a comment
+claiming the pairing failed in either direction. It failed in one. A spelling
+added to the list **and** to the probe, but not to the rows, satisfied that
+assertion vacuously, matched the size check exactly, and generated no case: the
+same entry unobserved, one layer above where it had just been fixed. The cases
+are generated from the list now, so there is no second copy to forget — the
+argument §12.5's publish barrier wins over per-test discipline, one suite along.
+
+**Counterfactual, because nothing in the file can distinguish these.** Add a
+seventh spelling and its probe member and count the cases: the old shape ran
+six and passed, the new one runs seven. Remove the probe member and keep the
+spelling and the generated case fails by name alongside the size check —
+so the case is exercised rather than merely counted.
+
+**Three of this branch's controls have now had the defect they exist to
+catch**, one of them twice, which is worth stating as a rule rather than as a
+coincidence: *a control is code, and the reason it exists applies to it.*
+Asking "what would make this gate green while the property is false" is a
+question to ask of the control as well as of the rule — and the answer is never
+in the suite, because a control that covers less than it claims is green by
+construction. **Every instance here was found by review and none by a test**,
+which is the part that generalises: the check that settles it is a
+counterfactual somebody has to run.
+
+**What this does not close is #44, and the residual is written into three
+files rather than left to a reader.** One shared RabbitMQ principal still
+writes every queue, so anyone reaching the bus can still send an
+`AuthorisePayment`. What that command **alone** no longer does is carry the
+payer: a forged one naming a real order re-triggers that order's own
+authorisation instead of redirecting one at a customer of the sender's
+choosing.
+
+**The residual said more than that for two review rounds, and Copilot caught
+it saying two things that cannot both be true.** The paragraph claimed broker
+access could no longer choose who is charged, and three sentences later
+conceded that a forged `OrderPlaced` seeds Payments' record. Both cannot hold:
+forge the event, then send the command, and the payer is chosen in two messages
+where one used to do it. **Payer selection is narrowed, not removed.**
+
+What the narrowing actually buys is cost and visibility. The added message is
+an **event other services consume** — Ordering's own saga starts on
+`OrderPlaced`, and Notifications tells the customer — so a forged one runs a
+fulfilment saga for an order the write model has no row for and emails somebody
+about an order they never placed. The single forged command left none of that
+behind. Capability unchanged; evidence very much not.
+
+**This is the second residual overclaim on this branch, and the pattern is the
+lesson.** The first named §8.5 as absorbing a duplicate it cannot reach; this
+one described a narrowing as a closure. Both came from writing the residual
+immediately after the fix, while the fix is the salient thing — and both were
+falsifiable from a paragraph already in the same file. **The check is to ask
+whether the same attacker, with the same access, reaches the same outcome by a
+route the document itself already describes.** Twice here the answer was yes.
+
+**The first draft of that residual named §8.5 as absorbing the duplicate, and
+§8.5 cannot reach it.** `IdempotencyBehavior` is an Application-pipeline
+behaviour constrained to `IIdempotentCommand` and keyed on a `CommandId`;
+`AuthorisePayment` implements neither and, being a `Common.Contracts` message,
+never enters that pipeline. §9.5's inbox is the broker-side control and keys on
+`(MessageId, Endpoint)`, which a forger chooses freshly — it suppresses an
+accidental redelivery, not a deliberate second send. **A residual that names a
+control which does not cover it is worse than one that names none**, because
+the citation is what stops the next reader checking. What survives is the
+smaller claim — a forged command alone re-triggers rather than redirects —
+plus an owed rule for the service that does not exist yet: Payments must make
+authorisation idempotent per order against its own `PaymentIntent`. This is the
+repository's own lesson arriving from the other side: *a registered name is not
+a live signal*, one layer up, where the name was a whole mechanism.
+
+**One consequence belongs to a service nobody has written, which is when it is
+cheapest to write down.** §9.4 orders nothing between two deliveries, so an
+`AuthorisePayment` can overtake the `OrderPlaced` it resolves against — the
+race §3.2 already records for `ReleaseStock` and `ReserveStock`. **A missing
+record is a wait, not a decline.** Payments must not publish `PaymentDeclined`,
+which is a business verdict about a payer it has not identified.
+
+**Saying that and then naming the ordinary retry envelope as the wait is the
+third overclaim of this shape on this branch.** The first draft said to fault
+the command and let retries carry it until §9.6's fifteen-minute timeout.
+§9.8's command policy is five exponential in-memory attempts capped at a
+minute, so the message reaches the paged error queue about fourteen minutes
+early: a race this very entry calls routine becomes an operational fault, and
+the timeout that was supposed to bound the wait never runs. **A wait needs a
+mechanism that lasts as long as the wait**, and the endpoint takes delayed
+redelivery — ADR-021's delayed exchange is already on this broker — with a
+window reaching that timeout.
+
+**All three overclaims share a shape worth naming.** §8.5's idempotency, the
+broker residual, and now the retry envelope: each cited an existing mechanism
+by name as covering a case, and in each the mechanism's actual parameters —
+which interface it constrains, which key it uses, how many attempts over how
+long — put the case outside it. **Citing a mechanism is not checking its
+bounds**, and a named control reads as a checked one to everybody downstream.
+
+**The expand/contract guarantee was an argument until Copilot asked for a
+measurement.** Every site claimed the new build's `INSERT` omits the retained
+column and the database default supplies `Guid.Empty`; nothing tested it. The
+smoke test checks the migration was *applied*, which is a different claim, and
+the saga endpoint test read only the row count and `CurrentState`. Two
+integration tests now close it — one asserting a row this build writes stores
+`Guid.Empty`, one asserting the default constraint exists — and they are
+deliberately separate, because a row could read empty from something having
+written that value, where the constraint makes it a property of the schema.
+The value is what the whole mixed-version argument rests on: empty names
+nobody, and any other default names a customer who never placed the order.
+
+**The failing test was in the half that needs a daemon, which is the argument
+for running both halves before believing a green one.** Three new contract
+tests passed in the fast suite and `DatabaseSmokeTests` — which counts applied
+migrations against a named list — failed on the eleventh, in the integration
+half. The list is the assertion and the length is derived from it, so the fix
+was one row; #126 had already removed the literal that would have made it two.
+
+**Counts pinned to this branch**: the solution runs 915 tests, 725 of them
+outside `Category=Integration`, and the three CI stages are 18, 707 and 190.
+Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
+head of this branch was reconciled against **its own CI run**, whose log summed
+to 899 over twenty-four per-project stage totals — the check this file names
+for a restated number, performed rather than left owed. Several later review
+rounds each added tests, and each time the **stage** was settled by
+re-measuring the fast half rather than by assuming: the behavioural migration
+tests are integration and left the fast half where it was, where every
+`ContractTests` addition is unit and moved it. That distinction is not cosmetic
+— the three stages have separate floors in `.github/pipeline-gate/`, so
+guessing which one grew is guessing which floor to raise. **The intermediate
+totals are deliberately not written out.** Each was superseded by the next
+round, and a chronology of superseded figures is a row of numbers a reader can
+check against nothing while every one of them contradicts the paragraph's own
+opening sentence. Every `ContractTests` case lands in the **unit** stage,
+because that stage's filter is `FullyQualifiedName!~ArchitectureTests` and
+`Platform.IntegrationTests.ContractTests` matches neither that nor
+`Category=Integration`, whatever the project's name suggests.
+
+---
+
 ## The copy that was filled only by accident (#121)
 
 §6.6's order summary wrote each product's name and thumbnail into every order's

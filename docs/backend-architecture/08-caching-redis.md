@@ -548,11 +548,19 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 >   surviving inside the fix for it.
 > - **The message path shares one bucket by construction**, because §9.4's
 >   broker has a single principal. Every sender of every command type claims
->   under `"system"`. That is not made worse by anything here, and it is not
->   made better either: §11.4 records the message path's subject as an open
->   question, and an exclusion from a rule is not a decision about what to do
->   instead. Naming a fixed segment is the smallest thing that keeps a
->   principal-less command from claiming under no subject at all.
+>   under `"system"`. That is not made worse by anything here, and
+>   [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+>   does not make it better either, which is worth stating precisely because
+>   that ADR *did* settle what §11.4 used to leave open. It rules that a
+>   message-borne command carries no subject and that the receiving service
+>   re-derives one from its own record — a rule about the **subject of the
+>   decision**, resolved at the far end. The key's subject segment is a
+>   different quantity: it identifies *the claimant* at the near end, and on
+>   this path there is still exactly one. Naming a fixed segment remains the
+>   smallest thing that keeps a principal-less command from claiming under no
+>   subject at all, and per-service broker identity
+>   ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44))
+>   is what would ever split this bucket.
 
 > **Trap — JSON round-tripping the `Result` itself.** It is the obvious body for
 > both halves and it cannot work in either direction. `System.Text.Json`

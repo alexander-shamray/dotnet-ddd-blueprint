@@ -391,7 +391,6 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx =>
                 {
                     ctx.Saga.OrderId = ctx.Message.OrderId;
-                    ctx.Saga.CustomerId = ctx.Message.CustomerId;
                     ctx.Saga.Total = ctx.Message.TotalAmount;
                     ctx.Saga.Currency = ctx.Message.Currency;
                     ctx.Saga.StartedAt = ctx.Message.OccurredAt;
@@ -420,11 +419,27 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx => ctx.Saga.PaymentVerdictOutstanding = true)
                 // Currency travels with the amount — a bare decimal is a
                 // charge waiting to be made in the wrong denomination.
+                //
+                // **No subject travels with either** (ADR-028, #63). Payments
+                // decides whose instrument is charged, and the subject of that
+                // decision is Payments' to derive rather than this saga's to
+                // state: it resolves the payer from its own record of the
+                // order, built from the OrderPlaced it consumes (§3.2). A
+                // customer identifier here would transport an authority the
+                // receiver already holds.
+                //
+                // The amount and the currency stay, and NOT because only they
+                // are checkable — that was this comment's first argument and
+                // the record above refutes it, since a supplied CustomerId
+                // would be just as checkable. They stay because they are the
+                // instruction: what to authorise, decided by the sender. The
+                // subject is the authority — on whose behalf — and that is the
+                // receiver's to derive, because a transported authority is a
+                // second source for a decision that must have one.
                 .Send(
                     PaymentsQueue,
                     ctx => new AuthorisePayment(
                         ctx.Saga.OrderId,
-                        ctx.Saga.CustomerId,
                         ctx.Saga.Total,
                         ctx.Saga.Currency))
                 // Arm the next wait in the same activity that begins it.

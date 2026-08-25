@@ -60,7 +60,11 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // one branch a per-row guard cannot cover (§6.6) — and, since PR-21,
         // §9.6's saga instance store with the operations queue its escalations
         // land in, plus the token column #126's confirmation wait needs and
-        // the two flags #124's Compensating join reads.
+        // the two flags #124's Compensating join reads. The newest one adds no
+        // column at all: it defaults the saga's CustomerId so the instance can
+        // stop writing it (ADR-028, #63), which is the expand half of §7.4's
+        // expand/contract — the DROP is a later release's, because §15.5 will
+        // not let a migration break the build still serving beside it.
         //
         // **The length is asserted from the list rather than as a literal, and
         // #126 is why.** It was written out as `ShouldBe(8)` beside eight named
@@ -80,7 +84,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
             "_AddProductWithdrawals",
             "_AddFulfilmentSaga",
             "_AddSagaConfirmationTimeout",
-            "_AddSagaPaymentVerdictJoin"
+            "_AddSagaPaymentVerdictJoin",
+            "_DefaultSagaCustomerIdForRemoval"
         ];
 
         string[] applied = await fixture.AppliedMigrationsAsync();

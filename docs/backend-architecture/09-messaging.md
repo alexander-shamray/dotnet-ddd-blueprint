@@ -199,6 +199,38 @@ There is no shortcut here. A "just this once" breaking change to a live contract
 means a coordinated deploy, and coordinated deploys are the thing this
 architecture exists to avoid.
 
+> **A contract with no consumer is not live, and that is the one exception —
+> stated here so it is a rule rather than an argument made at each site.**
+> The deprecation window above exists to let consumers migrate independently.
+> Where a version has none — no service deserialises it, and the service that
+> will has not been built — there is nobody to migrate, and a V2 buys a window
+> for an audience of nobody. The contract may then be changed in place.
+>
+> **Two conditions, both required.** No **service** in the solution may consume
+> the version — a fact about which consumers are registered, not a judgement;
+> and the change must be recorded in an ADR, so that "there was no consumer" is
+> something a later reader can check rather than take on trust.
+>
+> **A test is not a consumer, and the distinction has to be stated or the
+> condition is unusable.** §12.6's suite round-trips every contract through the
+> bus serialiser, so *something* deserialises every version this platform
+> owns — but a test moves with the contract in the same commit, which is
+> precisely what a deprecation window exists to make unnecessary. What the
+> window protects is a deployable that ships on its own schedule. The moment a
+> consumer exists the rule above binds with no exception, and the window for
+> the cheap edit has closed — which is the same observation §9.1 makes about
+> `ShippingAddressV1` from the other direction: the PR that becomes a
+> contract's first producer is the last one that can fix its shape for free.
+>
+> **For one class of change the deprecation window is not merely useless but
+> harmful**, and it is worth naming because it inverts the rule's intent. When
+> the point of the change is that a field *must not be on the wire* —
+> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> removing the subject from `AuthorisePayment` is the worked case — emitting
+> V1 alongside V2 keeps the offending shape published, and consumable, for the
+> length of the window. The standard remedy would re-arm the defect it was
+> asked to fix.
+
 ## 9.3 Domain event → integration event: the allow-list mapper
 
 [§5.5](05-tactical-ddd.md) states the principle — never publish a domain event to the bus. This is the
@@ -2069,8 +2101,33 @@ public sealed record StockLine(Guid ProductId, int Quantity);
 ```csharp
 namespace Common.Contracts.Payments.V1;
 
-public sealed record AuthorisePayment(Guid OrderId, Guid CustomerId, decimal Amount, string Currency);
+// No subject, and the omission is the control (ADR-028). This command decides
+// whose instrument is charged, and that subject is Payments' to derive rather
+// than the sender's to state: it resolves the payer from its own record of the
+// order, built from the OrderPlaced it consumes (§3.2). A CustomerId here
+// would transport an authority the receiver already holds — a second source
+// for a decision that must have one. Amount and Currency stay because they are
+// the instruction rather than the authority.
+public sealed record AuthorisePayment(Guid OrderId, decimal Amount, string Currency);
 ```
+
+> **An instruction travels; an authority is derived — and that is why this
+> contract narrowed rather than emptied.**
+> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> carries the argument. `Amount` and `Currency` say *what to do*: the sender
+> decides them, so they travel, and Payments may refuse a mismatch against its
+> own record as a consistency check. A subject says *on whose behalf*, which is
+> the deciding service's to derive.
+>
+> **It is not that only one of them is checkable, which is what this callout
+> first claimed.** Payments holds the order — payer included — so a supplied
+> `CustomerId` would be as checkable as the amount. The record this decision
+> introduces is what refutes that reading. What survives is stronger: a
+> transported authority is a second source for a decision that must have
+> exactly one, a check that exists is not a check that is performed, and the
+> field that is absent cannot be the one a later code path reads instead of the
+> record. [§11.4](11-identity-authorization.md)'s subject rule reaches the
+> message path on those terms rather than excluding it.
 
 ```csharp
 namespace Common.Contracts.Ordering.V1;
@@ -2377,7 +2434,6 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx =>
                 {
                     ctx.Saga.OrderId = ctx.Message.OrderId;
-                    ctx.Saga.CustomerId = ctx.Message.CustomerId;
                     ctx.Saga.Total = ctx.Message.TotalAmount;
                     ctx.Saga.Currency = ctx.Message.Currency;
                     ctx.Saga.StartedAt = ctx.Message.OccurredAt;
@@ -2404,12 +2460,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 // inferred later from a state name (#124).
                 .Then(ctx => ctx.Saga.PaymentVerdictOutstanding = true)
                 // Currency travels with the amount — a bare decimal is a
-                // charge waiting to be made in the wrong denomination.
+                // charge waiting to be made in the wrong denomination. No
+                // subject travels with either: Payments resolves the payer
+                // from its own record of the order (ADR-028, §3.2).
                 .Send(
                     PaymentsQueue,
                     ctx => new AuthorisePayment(
                         ctx.Saga.OrderId,
-                        ctx.Saga.CustomerId,
                         ctx.Saga.Total,
                         ctx.Saga.Currency))
                 // Arm the next wait in the same activity that begins it.
@@ -3381,7 +3438,14 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     // was finished, and wrong again after every transition added since.
     public Guid OrderId { get; set; }
 
-    public Guid CustomerId { get; set; }
+    // No CustomerId, and its absence is load-bearing (ADR-028). The instance
+    // carried one for exactly one reader — the AuthorisePayment that named the
+    // subject Payments would charge — and with that field gone from the
+    // contract, all a copy here could still do is offer itself to the next
+    // transition that wants a customer. No command this machine sends carries
+    // a subject — not "names an order and nothing else", which is false of
+    // ReserveStock, AuthorisePayment and CancelOrder alike. ordering.Orders
+    // still owns the value, bound from the principal at the endpoint (§11.4).
     public decimal Total { get; set; }
     public string Currency { get; set; } = null!;
     public DateTimeOffset StartedAt { get; set; }
@@ -3458,7 +3522,25 @@ CREATE TABLE ordering.OrderFulfilmentStates
     CorrelationId              UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
     CurrentState               VARCHAR(64)      NOT NULL,
     OrderId                    UNIQUEIDENTIFIER NOT NULL,
-    CustomerId                 UNIQUEIDENTIFIER NOT NULL,
+    -- Inert from this release and dropped by a later one (ADR-028). The
+    -- instance no longer declares it, so nothing reads or writes it here; the
+    -- column survives because §15.5 requires the migration to be backward
+    -- compatible with the release still serving beside it, and that release's
+    -- saga writes this column on every OrderPlaced. NOT NULL with a default is
+    -- the one shape that survives both directions: rolling forward the new
+    -- build's INSERT omits it, and the old build materialises a non-nullable
+    -- Guid from rows the new build wrote. The empty GUID is the conservative
+    -- value — it is nobody, where any other default would name a real subject
+    -- that was never this order's.
+    --
+    -- The old build reading these rows is the ordinary canary and not only a
+    -- rollback: §15.5 runs both releases over the same queues, so an old pod
+    -- can step an instance a new pod created and send its four-field
+    -- AuthorisePayment naming nobody. Acceptable only because nothing consumes
+    -- that command yet — with a live Payments this removal takes THREE
+    -- releases, §7.4's sequence including the "stop writing the old one" step
+    -- these two skip.
+    CustomerId                 UNIQUEIDENTIFIER NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
     Total                      DECIMAL(19,4)    NOT NULL,
     Currency                   CHAR(3)          NOT NULL,
     StartedAt                  DATETIMEOFFSET   NOT NULL,

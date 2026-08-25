@@ -2207,8 +2207,82 @@ second is the consumer-driven contract at the end of this section.
 
 The contract assembly's rules are all stated elsewhere as things reviewers
 should notice: §9.1's "a contract may not name a domain type", §9.2's versioned
-namespace, `required` members. Each is mechanical, so each is a test rather than
-a review note.
+namespace, `required` members, and — since
+[ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject) —
+that a command carries no subject. The first three are mechanical, so each is a
+test rather than a review note.
+
+**The fourth is not, and saying so is the honest half.** "Spelled like a
+subject" is a list of six substrings, so `OwnerId` passes it — the deny-list
+failure this repository has already paid for once, in a check that enumerated
+the terminal states it refused instead of the one it accepted. What makes the
+rule hold is the allow-list beside it: every member the judged commands may
+carry is enumerated, and a name absent from that list fails the build. That
+does not classify the new member — it forces somebody to, which is the most a
+test can do about a rule whose vocabulary cannot be closed.
+
+**The fourth is the one whose gate needs a gate**, and it is worth saying here
+rather than only at the test. The other three fail against a type that is
+present: a domain type named, a namespace misspelt, a member not `required`.
+This one asserts an **absence**, so an empty result is both what success looks
+like and what a broken detector looks like. It therefore ships with controls
+rather than alone — pointing the detector at a contract that *does* carry a
+subject and requiring it to find one, naming every command root the judged set
+must contain, asserting the exempt types are excluded, and exercising **every
+declared spelling** rather than the first — because a gate that has only ever
+been observed green is one nobody has established is looking at anything.
+
+**No count of them here, deliberately**: review added to that number twice, and
+a stated total is the half that goes stale. What the set is for is checkable;
+how many there are is not worth a second place to be wrong.
+
+**The spelling vocabulary is the case worth naming, because the control had the
+defect it exists to catch — twice, and the second time inside the fix for the
+first.** Six spellings were declared and one was exercised, so removing or
+misspelling any of the other five left every assertion green — the coverage
+failure this repository keeps rediscovering, reproduced inside the control
+written to prevent it. The fix parameterised the assertion, added a probe
+carrying one member per spelling, and paired the two by size; its comment
+claimed that pairing failed in either direction.
+
+**It did not, because the cases were a second copy of the vocabulary.** A
+spelling added to the list *and* to the probe, but not to the case list,
+satisfied the size check exactly and generated no case — the same entry
+unobserved, one layer up from where it was fixed. The cases are now generated
+from the list, which is the only shape with nothing to forget: the argument
+§12.5's publish barrier wins over per-test discipline, arriving one suite along
+and one round later.
+
+> **A control is code, and the reason it exists applies to it.** Both rounds of
+> this were caught by review rather than by the suite, and neither could have
+> been caught by the suite: a control that covers less than it claims is green
+> by construction. What settles it is the counterfactual — add the seventh
+> spelling, add its probe member, and count the cases. Six meant the claim was
+> false and seven means it holds, and no assertion in the file distinguishes
+> those two.
+
+**Deciding what it judges is the other half, and both obvious answers are
+wrong in opposite directions.** §9.1 says commands do not implement
+`IIntegrationEvent` and nothing about the converse. *Every non-event* therefore
+also selects the line types events carry — and an event is *permitted* a
+subject, so judging them refuses a shape ADR-028 allows. *Non-events minus what
+events carry* fixes that and opens a worse hole: a payload carried by a command
+**and** an event goes exempt because an event reaches it, letting a subject
+travel on the command unjudged.
+
+The set is built **up from the command roots** instead — the commands plus
+everything they carry — so a shared payload is judged and a purely-event one is
+not.
+
+**The closure is a function of a type universe rather than a fixed field, and
+that is a testability decision rather than a stylistic one.** The real
+contracts have no payload shared between a command and an event, so the
+false negative above cannot be reproduced with them: every assertion over the
+live set stays green under the rejected implementation. Four synthetic
+contracts in the test assembly supply the case, driven through the same
+algorithm — which is only possible because it takes its universe as an
+argument. **An algorithm that can only be run against production data can only
+be tested with the cases production happens to contain.**
 
 This is the one suite that references every service, which is why it has its own
 project and why that project holds nothing else:

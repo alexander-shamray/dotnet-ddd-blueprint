@@ -69,7 +69,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..027),
+                             15-cicd-deployment, appendix A (ADR-001..028),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -489,7 +489,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 896 tests — so the build rules and the drift rules below
+and `dotnet test` runs 915 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -1041,7 +1041,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 708 of 896, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 725 of 915, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1153,9 +1153,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 708 of
-the 896 and starts no container — measured with `docker events`, not inferred —
-and `Category=Integration` is the other 188, needing the daemon exactly as
+category runs a smaller suite and says which. `Category!=Integration` is 725 of
+the 915 and starts no container — measured with `docker events`, not inferred —
+and `Category=Integration` is the other 190, needing the daemon exactly as
 before.
 
 **The integration half read 187 for two branches and the arithmetic never
@@ -1166,7 +1166,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (690) and integration (188), which is the 708 above split at the
+(18), unit (707) and integration (190), which is the 725 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1957,7 +1957,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-028) and keep the
+  (currently ADR-029) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to
