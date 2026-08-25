@@ -1098,8 +1098,9 @@ defect. **`.github/workflows/ci.yml` and `docs/testing.md` enumerate the same
 subjects and are reconciled in the same change** — all three used to open the
 list with a count, and all three have dropped it, because that numeral said
 four, then five, then six, and was stale again inside the pull request that
-added these two. The feed cases drive `copilot_partition` directly — a stranger dropped,
-every Copilot spelling and the owner admitted, a near-miss login refused, and
+added these two. The feed cases drive `copilot_partition` directly — a
+stranger dropped, every Copilot spelling and the owner admitted, a near-miss
+login refused, and
 the load-bearing one, that a dropped item's body reaches *neither* stdout nor
 stderr. Beside them sit structural cases whose subject is the call sites: that
 all three helpers source the one allow-list and none restates a login, that

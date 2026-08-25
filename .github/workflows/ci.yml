@@ -52,7 +52,10 @@ jobs:
   # check it claims, and whether the label helper leaves a free parameter a
   # finding could steer. Five of those six shipped wrong; the sixth is a grant
   # that was closed by moving it into a helper, and the suite is what keeps it
-  # closed. Since #56 and #33 it also covers what a Copilot feed helper admits, what it reports about what it dropped, and that no command can reach those feeds outside the fixed helpers; and which paths the harness denies itself.
+  # closed. Since #56 and #33 it also covers what a Copilot feed helper
+  # admits, what it reports about what it dropped, and that no command can
+  # reach those feeds outside the fixed helpers; and which paths the harness
+  # denies itself.
   #
   # **The count that used to open this paragraph is gone, and its removal is
   # the fourth correction rather than the first.** It said four, then five,

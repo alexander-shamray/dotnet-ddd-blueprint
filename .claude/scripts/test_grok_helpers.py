@@ -1583,20 +1583,70 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
             if not line.lstrip().startswith("#") and line.strip()
         ]
 
-    def test_the_result_file_is_never_written_to_a_stream(self):
-        # `cat "$result"` was the original. Anything that pours the file into
-        # stdout or stderr is the same defect wearing a different command, so
-        # the readers are enumerated rather than the one spelling banned —
-        # the correction this suite already had to make once, for the gh
-        # grants.
-        pourers = ("cat", "tee", "head", "tail", "less", "more", "printf", "echo")
-        for line in self.code_lines():
-            if '"$result"' not in line:
-                continue
-            first = line.strip().split()[0].lstrip("(){ ")
+    # Every legitimate use of the reviewer's result file, enumerated. An
+    # ALLOW-list, and it is the SECOND inversion this pull request has had to
+    # make: the first version banned `cat`, `tee`, `head` and friends by name,
+    # which `jq -r . "$result"`, `sed`, `awk` or `base64` walk straight past.
+    # A deny-list passes every spelling nobody thought of — written down in
+    # this repository twice already, and reimplemented here anyway.
+    #
+    # The point of pinning the whole set rather than the dangerous half: a
+    # newly introduced read fails this case whatever it is, so it has to be
+    # looked at rather than merely not resembling a mistake someone listed.
+    ALLOWED_RESULT_USES = (
+        ("result=$(mktemp", "created"),
+        ('rm -f "$result"', "cleaned up on exit"),
+        ('--output-format json >"$result"', "written by the reviewer"),
+        ('[ -s "$result" ]', "emptiness check"),
+        ('"$result" 2>/dev/null) ||', "stopReason extracted"),
+        ("jq -r '.cancellationCategory // empty' \"$result\"",
+         "cancellation category extracted"),
+    )
+
+    def result_lines(self):
+        # Both spellings: the assignment that creates it names the variable
+        # bare, every later use dereferences it. Matching only `$result` misses
+        # the creation, which is the entry whose absence would mean the file is
+        # never made at all.
+        return [
+            line for line in self.code_lines()
+            if "$result" in line or "result=$(" in line
+        ]
+
+    def test_every_use_of_the_result_file_is_one_of_the_known_ones(self):
+        for line in self.result_lines():
             with self.subTest(line=line.strip()):
-                self.assertNotIn(first, pourers,
-                                 "the reviewer's transcript must not reach a stream")
+                matched = [
+                    why for token, why in self.ALLOWED_RESULT_USES if token in line
+                ]
+                self.assertEqual(
+                    1, len(matched),
+                    "a new read of the reviewer's transcript: it must be reviewed "
+                    "and added here deliberately, not merely differ from a listed "
+                    "mistake")
+
+    def test_every_known_use_is_still_present(self):
+        # The other direction, which is the half a declared list cannot check
+        # about itself. Without this the case above passes when a use it names
+        # disappears — including the stopReason extraction, whose absence is
+        # what turns a missing suggestions.md from a clean verdict into a
+        # silent failure.
+        lines = self.result_lines()
+        for token, why in self.ALLOWED_RESULT_USES:
+            with self.subTest(use=why):
+                self.assertTrue(any(token in line for line in lines),
+                                f"the {why} use is gone")
+
+    def test_no_read_of_it_is_an_unbounded_dump(self):
+        # The specific escape the deny-list version could not see: `jq -r .`
+        # emits the whole document, and it is neither `cat` nor anything else
+        # a list of streaming commands would have caught. Every jq over the
+        # transcript must name a field.
+        for line in self.result_lines():
+            if "jq" not in line:
+                continue
+            with self.subTest(line=line.strip()):
+                self.assertNotRegex(line, r"jq\s+(-[a-zA-Z]+\s+)*['\"]?\.['\"]?\s")
 
     def test_the_verdict_is_still_parsed_out_of_it(self):
         # The positive control. Every assertion above would pass against a
