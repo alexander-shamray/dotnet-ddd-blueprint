@@ -301,6 +301,24 @@ instance; its outbox query answers the rest, by showing whether this order's
      correlates, compensates, and releases whatever was reserved. This is the
      one faulted arrival on this page replay can fix, and the order matters —
      replayed before the placement lands, it faults again.
+   - **The `OrderPlaced` row is there and `ProcessedAt` is set, and still no
+     saga exists.** The dispatcher published it and the saga never consumed
+     it, which is a delivery fault rather than an outbox one: the binding or
+     the consumer was absent when it arrived, so the placement went to
+     `ordering-fulfilment-saga_skipped` with nothing to correlate it to.
+     [`skipped-queue.md`](skipped-queue.md) is the procedure. **Restore the
+     placement first and this message second** — the same ordering the
+     branch above needs, for the same reason.
+
+     > **This branch was missing and the tree read as though it were
+     > complete.** `ProcessedAt` proves publication and nothing about
+     > consumption, which the bullet below already says — so a placement that
+     > was published, skipped, and never consumed fitted neither "unsent or
+     > failing" nor "no row at all", and an operator following the tree would
+     > have fallen through to the discard. **A decision tree with no branch
+     > for a reachable state is worse than one that admits it stops**, because
+     > the reader takes the nearest branch rather than stopping.
+
    - **There is no `OrderPlaced` row at all** — and **this does not mean the
      placement was never published.** §9.4's retention purge deletes
      *processed* outbox rows after seven days
