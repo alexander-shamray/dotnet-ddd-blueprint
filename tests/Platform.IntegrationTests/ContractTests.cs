@@ -305,35 +305,29 @@ public class ContractTests
     ];
 
     /// <summary>
-    /// Every contract type some other contract carries as a member.
+    /// The command roots of a type universe: a member of it that is not an
+    /// event and that nothing else in it carries.
     /// </summary>
     /// <remarks>
-    /// Computed rather than listed, because a list here is a second inventory
-    /// to reconcile and this one changes whenever a contract gains a member.
-    /// </remarks>
-    private static readonly HashSet<Type> CarriedBySomething =
-    [
-        .. Contracts.SelectMany(CarriedContractTypes)
-    ];
-
-    /// <summary>
-    /// The command roots: a contract that is not an event and that nothing
-    /// else carries.
-    /// </summary>
-    /// <remarks>
-    /// Nothing carries `ReserveStock`, so it is a root; `StockLine` is carried
-    /// by it and is therefore a payload rather than a root. The seven roots
-    /// this resolves to are §3.2's Accepts columns read across, and
+    /// Nothing carries <c>ReserveStock</c>, so it is a root; <c>StockLine</c>
+    /// is carried by it and is therefore a payload rather than a root. The
+    /// seven this resolves to over the real contracts are §3.2's Accepts
+    /// columns read across, and
     /// <see cref="The_set_the_subject_gate_reads_holds_the_real_commands"/>
     /// names them so that discovery losing one is a failure rather than a
-    /// smaller judged set.
+    /// quietly smaller judged set.
     /// </remarks>
-    private static readonly Type[] CommandRoots =
-    [
-        .. Contracts
-            .Where(t => !typeof(IIntegrationEvent).IsAssignableFrom(t))
-            .Where(t => !CarriedBySomething.Contains(t))
-    ];
+    private static Type[] RootsOf(IReadOnlyCollection<Type> universe)
+    {
+        HashSet<Type> carried = [.. universe.SelectMany(t => CarriedContractTypes(t, universe))];
+
+        return
+        [
+            .. universe
+                .Where(t => !typeof(IIntegrationEvent).IsAssignableFrom(t))
+                .Where(t => !carried.Contains(t))
+        ];
+    }
 
     /// <summary>
     /// What the subject rule judges: the command roots, and everything a
@@ -373,47 +367,81 @@ public class ContractTests
     /// in.
     /// </para>
     /// </remarks>
-    private static readonly Type[] Commands = [.. BuildCommandClosure()];
+    private static readonly Type[] Commands = JudgedTypesOf(Contracts);
 
-    private static HashSet<Type> BuildCommandClosure()
+    /// <summary>
+    /// The judged set of a type universe: its command roots, plus everything
+    /// those carry transitively.
+    /// </summary>
+    /// <remarks>
+    /// A function of a universe rather than a fixed field, so that
+    /// <see cref="A_payload_shared_by_a_command_and_an_event_stays_judged"/>
+    /// can drive the same algorithm with synthetic types. The real contracts
+    /// have no shared payload today, so without that the regression this
+    /// method exists to prevent could only be measured by hand and never
+    /// pinned.
+    /// </remarks>
+    private static Type[] JudgedTypesOf(IReadOnlyCollection<Type> universe)
     {
-        HashSet<Type> judged = [.. CommandRoots];
-        Queue<Type> pending = new(CommandRoots);
+        Type[] roots = RootsOf(universe);
+        HashSet<Type> judged = [.. roots];
+        Queue<Type> pending = new(roots);
 
         while (pending.Count > 0)
         {
-            foreach (Type next in CarriedContractTypes(pending.Dequeue()))
+            foreach (Type next in CarriedContractTypes(pending.Dequeue(), universe))
             {
                 if (judged.Add(next))
                     pending.Enqueue(next);
             }
         }
 
-        return judged;
+        return [.. judged];
     }
 
-    private static IEnumerable<Type> CarriedContractTypes(Type type) =>
+    private static IEnumerable<Type> CarriedContractTypes(
+        Type type,
+        IReadOnlyCollection<Type> universe) =>
         type
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => ElementType(p.PropertyType))
-            .Where(Contracts.Contains);
+            .SelectMany(p => MembersOfUniverse(p.PropertyType, universe));
 
     /// <summary>
-    /// The type a member contributes to the payload graph: an element type for
-    /// a collection, the type itself otherwise.
+    /// Every type of the universe a member's declared type reaches — itself,
+    /// an array's element type, or <b>any</b> of a generic's arguments.
     /// </summary>
-    private static Type ElementType(Type type)
+    /// <remarks>
+    /// <b>All the arguments, not the single one.</b> An earlier revision
+    /// unwrapped a generic only when it had exactly one argument, which is the
+    /// shape of every collection this platform uses today and therefore looked
+    /// complete. A member typed
+    /// <c>IReadOnlyDictionary&lt;string, SomePayload&gt;</c> would have left
+    /// <c>SomePayload</c> outside the closure, so a subject inside it would
+    /// have travelled on the command with the gate silently green — the same
+    /// false negative the shared-payload case produced, reached through the
+    /// type system rather than through the definition.
+    /// </remarks>
+    private static IEnumerable<Type> MembersOfUniverse(
+        Type type,
+        IReadOnlyCollection<Type> universe)
     {
-        if (type == typeof(string))
-            return type;
+        if (universe.Contains(type))
+            yield return type;
 
-        if (type.IsArray)
-            return type.GetElementType()!;
+        if (type.IsArray && type.GetElementType() is Type element)
+        {
+            foreach (Type reached in MembersOfUniverse(element, universe))
+                yield return reached;
+        }
 
-        if (type.IsGenericType && type.GetGenericArguments() is [Type single])
-            return single;
+        if (!type.IsGenericType)
+            yield break;
 
-        return type;
+        foreach (Type argument in type.GetGenericArguments())
+        {
+            foreach (Type reached in MembersOfUniverse(argument, universe))
+                yield return reached;
+        }
     }
 
     private static PropertyInfo[] SubjectMembers(Type type) =>
@@ -513,6 +541,57 @@ public class ContractTests
         Commands.ShouldNotContain(
             typeof(PlacedLine),
             "a line type an event carries is part of that event, so it inherits the exemption");
+    }
+
+    [Fact]
+    public void A_payload_shared_by_a_command_and_an_event_stays_judged()
+    {
+        // **The regression this gate's definition took four attempts to get
+        // right, pinned rather than measured.** The live contracts have no
+        // payload shared between a command and an event, so every assertion
+        // over them stays green under the rejected "non-events minus the event
+        // closure" implementation — which exempted exactly this shape, because
+        // an event reached it, and let a subject travel on the command
+        // unjudged. Synthetic types are the only way to hold that closed.
+        Type[] judged = JudgedTypesOf(SubjectGateProbes.Universe);
+
+        judged.ShouldContain(
+            typeof(SubjectGateProbes.SharedLine),
+            "a command reaches this type, so the command side's rule applies to it — an event " +
+            "also reaching it is what the rejected implementation wrongly treated as an exemption");
+
+        // The other direction, in the same universe: an exemption that must
+        // survive, or the fix for the false negative would have reinstated the
+        // false positive it replaced.
+        judged.ShouldNotContain(
+            typeof(SubjectGateProbes.EventOnlyLine),
+            "no command reaches this type, and an event is permitted a subject");
+
+        // And the gate must actually see the subject once the type is judged,
+        // which is the step that turns membership into a build failure.
+        SubjectMembers(typeof(SubjectGateProbes.SharedLine))
+            .Select(p => p.Name)
+            .ShouldContain(nameof(SubjectGateProbes.SharedLine.CustomerId));
+    }
+
+    [Fact]
+    public void A_payload_reached_through_a_two_argument_generic_is_judged()
+    {
+        // `ProbeCommand` carries its payload as
+        // IReadOnlyDictionary<string, SharedLine>. An earlier revision unwrapped
+        // a generic only when it had exactly one argument — true of every
+        // collection this platform uses today, which is what made the gap look
+        // like completeness — so the value type fell outside the closure and
+        // its subject travelled unjudged.
+        //
+        // The assertion above already fails if this regresses, since SharedLine
+        // is reached only through that dictionary. This one names the reason,
+        // so a failure reports which of the two defects came back.
+        CarriedContractTypes(typeof(SubjectGateProbes.ProbeCommand), SubjectGateProbes.Universe)
+            .ShouldContain(
+                typeof(SubjectGateProbes.SharedLine),
+                "every generic argument is part of the payload graph, not only the single one " +
+                "a one-argument collection happens to have");
     }
 
     private static string Names(IEnumerable<Type> types) =>

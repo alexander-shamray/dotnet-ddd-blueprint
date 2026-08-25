@@ -248,6 +248,33 @@ suite was green after attempt two and green after attempt three. What found
 them both was someone asking what the *set* contained, not what the assertion
 returned.
 
+**Then a fifth round found the same hole through the type system rather than
+through the definition.** `ElementType` unwrapped a generic only when it had
+exactly one argument — true of every collection this platform uses, which is
+what made the gap read as completeness — so a member typed
+`IReadOnlyDictionary<string, SomePayload>` would have left `SomePayload`
+outside the closure and its subject unjudged. The traversal now visits every
+generic argument.
+
+**And the round's better finding was that none of it was pinned.** All three
+directions had been *measured* during development and reverted, so nothing in
+the committed suite would notice a return to attempt three: the live contracts
+have no payload shared between a command and an event, so every assertion over
+them stays green under the rejected implementation. Measured once and reverted
+is pinned by nothing — the same failure as a gate observed only in the green
+direction, one level up.
+
+What closes it is four synthetic contracts in the test assembly — a command
+reaching a shared payload through a two-argument generic, an event carrying
+that payload and one of its own — driven through the same algorithm as a type
+universe of their own. The closure had to become a function of a universe
+rather than a fixed field to allow that, which is the shape worth carrying:
+**an algorithm that can only be run against production data can only be tested
+with the cases production happens to contain.** Both counterfactuals were then
+re-measured against the committed tests: reverting to attempt three fails the
+shared-payload case with the other thirteen green, and restoring the
+single-argument unwrap fails both new cases.
+
 **The coverage control named three command roots of seven**, which is the
 repository's most-repeated failure reproduced inside the control written to
 prevent it: discovery could have dropped `ReserveStock`, `ReleaseStock`,
@@ -335,16 +362,18 @@ migrations against a named list — failed on the eleventh, in the integration
 half. The list is the assertion and the length is derived from it, so the fix
 was one row; #126 had already removed the literal that would have made it two.
 
-**Counts pinned to this branch**: the solution runs 901 tests, 711 of them
-outside `Category=Integration`, and the three CI stages are 18, 693 and 190.
+**Counts pinned to this branch**: the solution runs 903 tests, 713 of them
+outside `Category=Integration`, and the three CI stages are 18, 695 and 190.
 Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
 head of this branch was reconciled against **its own CI run**, whose log summed
 to 899 over twenty-four per-project stage totals — the check this file names
-for a restated number, performed rather than left owed. The two behavioural
-tests a later review round added take it to 901, and they are integration
-rather than unit: the fast half was re-measured at 711 rather than assumed,
-which is how their stage was settled. The three contract tests land in the
-**unit**
+for a restated number, performed rather than left owed. Two later review rounds
+each added tests, and each time the **stage** was settled by re-measuring the
+fast half rather than by assuming: the two behavioural migration tests are
+integration (fast stayed 711), and the two shared-payload pins are unit (fast
+moved to 713). That distinction is not cosmetic — the three stages have
+separate floors in `.github/pipeline-gate/`, so guessing which one grew is
+guessing which floor to raise. The five contract tests land in the **unit**
 stage, because that stage's filter is `FullyQualifiedName!~ArchitectureTests`
 and `Platform.IntegrationTests.ContractTests` matches neither that nor
 `Category=Integration`, whatever the project's name suggests.

@@ -1351,15 +1351,21 @@ is worth stating: it may not carry a subject at all, because the command side
 forbids what the event side permits, and the stricter rule is the direction a
 gate must fail in.
 
-Three controls sit beside the rule, because an absence-assert cannot fail
+Controls sit beside the rule, because an absence-assert cannot fail
 informatively on its own: one points the detector at `OrderPlaced` and requires
 it to find the `CustomerId` this ADR keeps; one names all seven command roots
 §3.2's Accepts columns list, so discovery cannot quietly drop four of them; and
-one asserts the exemptions really are excluded. Both directions were measured
-against injected subjects — one in an event's line type, which must pass, and
-one in a command's payload, which must fail. A gate that quietly stops covering
-its surface is this repository's most-repeated failure, and an empty offender
-set reads the same whether the rule holds or the detector broke.
+one asserts the exemptions really are excluded. A gate that quietly stops
+covering its surface is this repository's most-repeated failure, and an empty
+offender set reads the same whether the rule holds or the detector broke.
+
+**The shared-payload case is pinned with synthetic contracts, because the real
+ones cannot express it.** No live payload is carried by both a command and an
+event, so every assertion over the contract assembly stays green under the
+rejected definition — the defect could be measured by hand and not held closed.
+Four probe types in the test assembly supply the shape and are driven through
+the same closure, which is why that closure takes its type universe as an
+argument rather than reading a field.
 
 ---
 

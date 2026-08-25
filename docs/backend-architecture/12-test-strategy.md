@@ -2234,8 +2234,17 @@ travel on the command unjudged.
 
 The set is built **up from the command roots** instead — the commands plus
 everything they carry — so a shared payload is judged and a purely-event one is
-not. All three directions were measured against an injected subject rather than
-argued.
+not.
+
+**The closure is a function of a type universe rather than a fixed field, and
+that is a testability decision rather than a stylistic one.** The real
+contracts have no payload shared between a command and an event, so the
+false negative above cannot be reproduced with them: every assertion over the
+live set stays green under the rejected implementation. Four synthetic
+contracts in the test assembly supply the case, driven through the same
+algorithm — which is only possible because it takes its universe as an
+argument. **An algorithm that can only be run against production data can only
+be tested with the cases production happens to contain.**
 
 This is the one suite that references every service, which is why it has its own
 project and why that project holds nothing else:
