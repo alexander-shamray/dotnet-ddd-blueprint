@@ -2010,7 +2010,7 @@ stateDiagram-v2
     AwaitingPayment --> AwaitingPayment : StockReleased → cancellation recorded
     AwaitingPayment --> AwaitingPayment : PaymentAuthorised (cancellation observed) → FlagOrderForReview payment_authorised_during_compensation
 
-    AwaitingConfirmation --> Confirmed : OrderConfirmed
+    AwaitingConfirmation --> Confirmed : OrderConfirmed (+ FlagOrderForReview cancelled_after_confirmation if a cancellation was observed)
     AwaitingConfirmation --> Compensating : OrderCancelled → ReleaseStock
     AwaitingConfirmation --> [*] : ConfirmationTimeout 10m → FlagOrderForReview not_confirmed
     AwaitingConfirmation --> [*] : ShipmentDispatched → MarkOrderShipped (+ FlagOrderForReview cancelled_after_confirmation if a cancellation was observed)
@@ -2710,8 +2710,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // The acknowledgement, and the first moment a despatch can be
             // expected — which is why DespatchTimeout is armed here rather
             // than one state back.
+            //
+            // A confirmation arriving after an observed cancellation raises the
+            // row on the way through (#143) and still transitions: the aggregate
+            // committed the status, so the machine may not claim a state the
+            // order has left. It is the same event Compensating escalates on one
+            // state along, for the same reason — Shipping has now been told after
+            // a cancellation reached Inventory. **This raising leaves the
+            // instance ALIVE**, unlike the despatch branches, which finalise.
             When(OrderConfirmed)
                 .Unschedule(ConfirmationTimeout)
+                .If(
+                    ctx => ctx.Saga.CancellationObserved,
+                    cancelled => cancelled
+                        .Send(
+                            OrderingQueue,
+                            ctx => new FlagOrderForReview(
+                                ctx.Saga.OrderId,
+                                ReviewReasons.CancelledAfterConfirmation)))
                 .Schedule(DespatchTimeout, ctx => new DespatchExpired(ctx.Saga.OrderId))
                 .TransitionTo(Confirmed),
 
@@ -3302,8 +3318,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > it waits for**, which is [ADR-025](appendix-a-adrs.md#adr-025--a-saga-state-that-waits-on-two-services-finalises-on-neither-alone)'s rule applied to a
 > fact instead of a join. A `StockReleased` arriving in a state that sent no
 > release proves a cancellation reached Inventory, so the four states that
-> absorb one record `CancellationObserved` on the instance, and those four
-> forward transitions ask. **It narrows the window rather than closing it**: a
+> absorb one record `CancellationObserved` on the instance, and **every**
+> forward transition in them asks — `StockReserved`, `PaymentAuthorised`,
+> `OrderConfirmed` and both despatches. **Not "those four", which is what
+> this said**: `AwaitingConfirmation`'s `OrderConfirmed` was the fifth and
+> was the one left unguarded, so a confirmation could advance to `Confirmed`
+> and arm a three-day wait with nothing recording the cancellation at all.
+> **It narrows the window rather than closing it**: a
 > cancellation Inventory has not consumed yet leaves no trace at all, and
 > nothing short of ordering Ordering's own outbox per aggregate reaches that.
 >

@@ -96,20 +96,32 @@ groups:
       # #126 — cancelled_after_confirmation, whose Compensating branch
       # escalates an OrderConfirmed arriving after the state was entered and
       # deliberately does not finalise. The rest are raised on the way out.
-      # #143 adds a third, and it is the one this comment could not have
-      # covered: payment_authorised_during_compensation is now also raised
-      # from AwaitingPayment, where no compensation has started at all —
-      # the instance observed an early StockReleased, withheld its
-      # ConfirmOrder and is waiting for its own OrderCancelled.
+      # #143 adds TWO more, and the second breaks the timing argument that
+      # used to close this comment. payment_authorised_during_compensation
+      # is now also raised from AwaitingPayment, where no compensation has
+      # started at all — the instance observed an early StockReleased,
+      # withheld its ConfirmOrder and is waiting for its own OrderCancelled.
+      # And cancelled_after_confirmation is now raised from
+      # AwaitingConfirmation, by an OrderConfirmed arriving after a
+      # cancellation was observed; that branch escalates and then
+      # TRANSITIONS TO Confirmed, where the instance can sit out the
+      # three-day despatch wait.
       #
-      # The instance is nonetheless usually gone by the hour this measures,
-      # and the bound is per WAIT rather than per state — which is the
-      # correction #143 forces, since the previous wording justified it by
-      # "every wait that can hold Compensating open" and one of these no
-      # longer runs there. The ten-minute release wait, a payment verdict
-      # bounded at thirty minutes from AuthorisePayment (#124), and the
-      # fifteen-minute PaymentTimeout left armed behind the AwaitingPayment
-      # raising: each ends well inside the hour.
+      # So "every newly live row is bounded well inside the hour" is FALSE,
+      # and stating it would have been the third universal this comment got
+      # wrong. The bound is per WAIT rather than per state, and the waits
+      # differ by three orders of magnitude: the ten-minute release wait, a
+      # payment verdict bounded at thirty minutes from AuthorisePayment
+      # (#124) and the fifteen-minute PaymentTimeout behind the
+      # AwaitingPayment raising all end well inside the hour — the
+      # AwaitingConfirmation raising does not, and an operator meeting that
+      # row should expect a live instance in Confirmed rather than a
+      # finalised one.
+      #
+      # That is a reason to read CurrentState rather than to infer it, which
+      # is what order-review.md's step 2 now says. StuckSaga's own four-day
+      # branch is what bounds this case, and the two alerts coinciding on
+      # one order is the ordinary shape of it rather than a double fault.
       #
       # "Every other reason is raised on the way out" was the shape this
       # comment had after its first correction, and #126 falsified it the

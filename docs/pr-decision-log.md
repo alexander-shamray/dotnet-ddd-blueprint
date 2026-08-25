@@ -127,7 +127,9 @@ carry one such answer, not the rest. What is recorded here is not an
 obligation but a piece of knowledge: a `StockReleased` arriving in a state
 that sent no `ReleaseStock` **proves** a cancellation reached Inventory, and
 the four states that absorb one now set `CancellationObserved` instead of
-discarding it. Four forward transitions ask.
+discarding it, and every forward transition in those states asks — named
+rather than counted, because the first draft of this sentence said four and
+`AwaitingConfirmation`'s `OrderConfirmed` was the fifth.
 
 **The money row is the one that justifies the column.** `AwaitingStock` +
 `StockReserved` sent an `AuthorisePayment` for an order already being

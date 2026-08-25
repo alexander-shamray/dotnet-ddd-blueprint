@@ -152,10 +152,20 @@ forward transition in those states asks before acting (#143):
   `PaymentVerdictOutstanding = 0` has already escalated the money: expect a
   review row ([`order-review.md`](order-review.md)), and do not read the
   cleared verdict as nothing having happened.
-- **`AwaitingConfirmation` and `Confirmed`** — nothing is withheld. A
-  `ShipmentDispatched` still sends `MarkOrderShipped` and finalises; the flag
-  only adds a `cancelled_after_confirmation` row on the way out. An instance
-  sitting in either of these is not sitting still because of this flag.
+- **`AwaitingConfirmation` and `Confirmed`** — nothing is withheld, and the
+  flag adds a `cancelled_after_confirmation` row on two different kinds of
+  exit. A `ShipmentDispatched` still sends `MarkOrderShipped` and
+  **finalises**, so the row is written on the way out and the instance is
+  gone. An `OrderConfirmed` in `AwaitingConfirmation` raises the same row and
+  then **transitions to `Confirmed`**, so the instance is **alive** and can
+  sit out the three-day despatch wait — which is the one path where this flag
+  and a long-lived row go together, and the reason `Confirmed` has its own
+  four-day branch in this alert rather than the hour.
+
+  So a row in `Confirmed` with `CancellationObserved = 1` is **not** an
+  instance sitting still because of the flag: it is waiting on Shipping, as
+  any confirmed order does, with a cancellation already escalated. Read the
+  `OrderReviews` row before treating it as a stall.
 
 **Past the hour this alert measures, an instance withholding a forward step is
 a missing timeout rather than a missing cancellation.** Both backstops are
