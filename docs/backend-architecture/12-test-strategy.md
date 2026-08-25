@@ -98,7 +98,8 @@ public class OrderCancellationTests
     {
         Order order = OrderBuilder.Shipped();
 
-        Action act = () => order.Cancel(CancellationReason.CustomerRequest, DateTimeOffset.UtcNow);
+        Action act = () =>
+            order.Cancel(CancellationReason.CustomerRequest, CancellationOrigin.User, DateTimeOffset.UtcNow);
 
         act
             .ShouldThrow<DomainException>()
@@ -123,13 +124,13 @@ red test; make it compile first, then watch it fail.
 **Green** — the minimum change that passes:
 
 ```csharp
-public void Cancel(CancellationReason reason, DateTimeOffset now)
+public void Cancel(CancellationReason reason, CancellationOrigin origin, DateTimeOffset now)
 {
     if (Status is OrderStatus.Shipped or OrderStatus.Delivered)
         throw new DomainException($"A {Status} order cannot be cancelled.");
 
     Status = OrderStatus.Cancelled;
-    Raise(new OrderCancelledDomainEvent(Id, CustomerId, reason, now));
+    Raise(new OrderCancelledDomainEvent(Id, CustomerId, reason, origin, now));
 }
 ```
 
@@ -141,9 +142,9 @@ add the idempotency case as its own test first:
 public void Cancelling_twice_is_idempotent()
 {
     Order order = OrderBuilder.AwaitingPayment();
-    order.Cancel(CancellationReason.CustomerRequest, Now);
+    order.Cancel(CancellationReason.CustomerRequest, CancellationOrigin.User, Now);
 
-    order.Cancel(CancellationReason.CustomerRequest, Now);
+    order.Cancel(CancellationReason.CustomerRequest, CancellationOrigin.User, Now);
 
     order.Status.ShouldBe(OrderStatus.Cancelled);
     order.DomainEvents.OfType<OrderCancelledDomainEvent>().Count().ShouldBe(1);
@@ -1845,8 +1846,9 @@ public async Task Payment_declined_releases_stock_before_cancelling()
 
     var orderId = Guid.CreateVersion7();
 
-    // Every member of every V1 contract is `required` — the §9.1 envelope
-    // included — so there is no partial construction to elide anywhere here,
+    // Every member of every V1 contract is `required` unless §12.6's
+    // additive-member list names it — the §9.1 envelope included, and none of
+    // these — so there is no partial construction to elide anywhere here,
     // and a builder keeps that from filling the test. `new StockReserved
     // { OrderId = orderId }` does not compile: the three envelope members are
     // as required as the payload, which is the point of §9.1 declaring them on
@@ -2291,10 +2293,11 @@ project and why that project holds nothing else:
 public class ContractTests
 {
     // Concrete types only. The assembly also holds IIntegrationEvent (§9.1)
-    // and the static code vocabularies (CancelReasons, ReviewReasons), and a
-    // filter of "everything public under Common.Contracts" would demand a
-    // versioned namespace of an interface that is deliberately shared across
-    // all of them — and then ask ContractSamples for an instance of it.
+    // and the static code vocabularies (CancelReasons, CancelOrigins,
+    // ReviewReasons), and a filter of "everything public under
+    // Common.Contracts" would demand a versioned namespace of an interface
+    // that is deliberately shared across all of them — and then ask
+    // ContractSamples for an instance of it.
     private static readonly Type[] Contracts =
     [
         .. typeof(OrderPlaced).Assembly.GetTypes().Where(IsContract)
@@ -2379,7 +2382,8 @@ every one of them to appear in the JSON — which is also what fails when a memb
 is added to a record and not to its sample.
 
 `ContractSamples.Create` is the reason this suite stays honest as contracts
-grow. Every member of a V1 contract is `required` (§12.5), so there is no
+grow. Every member of a V1 contract is `required` unless §12.6's
+additive-member list names it, so there is no
 reflection shortcut that constructs one — a new contract without a sample fails
 here rather than being quietly skipped, which is the failure mode of every
 "iterate over all the types" test that defaults to `Activator.CreateInstance`.
@@ -2407,6 +2411,45 @@ public parameterless constructor must mark every settable property.
 > dropped the member entirely, which turns the assertion it feeds into one that
 > cannot fail. The same rule makes `OccurredAt` a fixed instant with a non-zero
 > offset: `DateTimeOffset.MinValue` survives every serialiser bug there is.
+
+> **Trap — the rule and [§9.2](09-messaging.md)'s additive change cannot both
+> be obeyed, and the first member to be added found it.** §9.2 says a new
+> *optional* field is additive and needs no version bump. The rule above says
+> no contract may be constructible incompletely. So the additive path §9.2
+> promises had no reachable shape here until something tried to take it, and
+> what settled which side gives way was a measurement rather than an argument:
+> `System.Text.Json` refuses a payload missing a `required` member —
+> *JSON deserialization for type … was missing required properties* — so a
+> member shipped `required` faults every message the previous build staged and
+> has not yet published. On a rolling deploy that is not an edge case, it is
+> the ordinary state for the length of the deploy.
+>
+> **So the safe shape is the one the rule forbids, and the gate admits it by
+> name rather than everywhere.** A member added to a live contract is listed
+> in the suite beside the assertion that reads it, and the list is subtracted
+> from the *failures* rather than from the candidates — there is no narrowed
+> selection to pass vacuously. What makes that safe rather than a hole is a
+> second test whose subject is the list: it fails if the entry names nothing,
+> and again if the member has somehow become always-supplied. **A list of
+> deliberate gaps is only honest while something re-checks that they are still
+> gaps** — the same shape §13.6's unloaded alerts and their gate are in.
+
+> **The entry clears when the contract version does, and an earlier revision
+> of this callout said it clears when the member becomes `required`.** That
+> tightening is a breaking change and not a tidy-up: a payload predating the
+> field has no bound on how long it can arrive — `docs/runbooks/error-queue.md`
+> keeps a message until somebody handles it, outliving even its outbox row's
+> purge, and a replay can reintroduce one at any time — so requiring the member
+> would fail deserialisation on every retained one, before any consumer branch
+> could read the absent value. [§9.2](09-messaging.md) sends a breaking change
+> to a new version, so an additive member stays optional for the life of the
+> version it was added to, and the listing goes when that version does.
+>
+> **The first framing was "§15.5's expand phase with a contract phase owed",
+> and it was wrong in the direction that reads as rigour.** It promised a
+> future tightening, which sounds like the exemption being temporary and is
+> actually a scheduled breakage — the honest version is a permanent tolerance
+> with a stated reason, which is the less tidy claim and the true one.
 
 ### Consumer-driven contracts
 

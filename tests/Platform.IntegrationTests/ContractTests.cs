@@ -201,12 +201,143 @@ public class ContractTests
                 .. type
                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                     .Where(p => p.SetMethod is not null && !IsAlwaysSupplied(p, type))
-                    .Select(p => $"{type.Name}.{p.Name}")
+                    // Fully qualified, because the exemption list is — §9.2 has
+                    // two versions of a contract live at once during a
+                    // deprecation, so a simple name cannot say which one an
+                    // entry is about. Both sides have to agree or the Except
+                    // below silently stops matching and un-exempts the member.
+                    .Select(p => $"{type.FullName}.{p.Name}")
             ];
 
-            optional.ShouldBeEmpty(
+            // Subtracted from the FAILURES rather than from the candidates, so
+            // there is no narrowed selection to pass vacuously — the same shape
+            // the composition-root gate ended up in after three attempts at
+            // filtering what it looked at.
+            string[] unexplained = [.. optional.Except(AdditiveMembers)];
+
+            unexplained.ShouldBeEmpty(
                 $"{type.FullName} can be constructed without these, so a producer can omit them " +
                 "and every consumer reads a default (§12.6)");
+        }
+    }
+
+    /// <summary>
+    /// Members added to a contract that was already live. They are optional
+    /// for the life of that contract version, and the entry clears when the
+    /// version does (§9.2).
+    /// </summary>
+    /// <remarks>
+    /// <b>This list exists because the rule above and §9.2 could not both be
+    /// obeyed, and the first additive member found it.</b> §9.2 says a new
+    /// optional field is additive and needs no version bump; the rule above
+    /// says no contract may be constructible half-filled. Measured rather than
+    /// argued: <c>System.Text.Json</c> throws
+    /// <c>JsonException: … was missing required properties</c>, so a member
+    /// shipped as <c>required</c> faults any payload that predates it.
+    /// <b>The safe shape is the one the rule forbade</b>, so the rule admits
+    /// it by name instead of everywhere.
+    /// <para>
+    /// <b>It is optional for the LIFE of the contract, not for the length of a
+    /// deploy — and an earlier revision of this comment had that wrong.</b> It
+    /// called the exemption §15.5's expand phase and said a contract phase was
+    /// owed that would make the member <c>required</c>. That later tightening
+    /// is a <b>breaking change inside V1</b>: a payload predating the field has
+    /// no bound on how long it can survive — <c>docs/runbooks/error-queue.md</c>
+    /// says a message waits there until somebody handles it, outliving even
+    /// its outbox row's purge, and a replay can reintroduce it at any time —
+    /// so making the member <c>required</c> would fail deserialisation before
+    /// any consumer branch could apply the absent-value reading. §9.2 sends a
+    /// breaking change to a new version, so the tightening, if it is ever
+    /// wanted, is a V2 rather than an edit to this one.
+    /// </para>
+    /// <para>
+    /// <b>It still clears itself; the trigger is the contract's retirement
+    /// rather than the member's tightening.</b> The companion test below fails
+    /// when an entry names no public contract, so a V2 replacing V1 forces the
+    /// entry out — and it fails the other way too, if a member somehow becomes
+    /// always-supplied. A list of deliberate gaps is only honest while
+    /// something re-checks that they are still gaps, which is the shape
+    /// <c>awaiting-signal.yaml</c>'s unloaded alerts are in.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] AdditiveMembers =
+    [
+        // #123. Absent means "published before this field existed", and §9.6's
+        // saga discards on it — permanently, because a payload that old can
+        // still arrive from the error queue or a replay. It leaves this list
+        // when V1 is retired, which is what the fully qualified key makes
+        // checkable.
+        "Common.Contracts.Ordering.V1.OrderCancelled.Origin"
+    ];
+
+    [Fact]
+    public void A_payload_predating_an_additive_member_still_deserialises()
+    {
+        // **The property the whole exemption rests on, measured rather than
+        // assumed.** §9.6 discards an OrderCancelled whose Origin is absent, on
+        // the reading that absent means "published before the field existed" —
+        // and that branch is only reachable if the payload deserialises at all.
+        // System.Text.Json refuses a missing `required` member outright, so had
+        // this member shipped required the message would fault before any saga
+        // branch saw it, and the discard would be unreachable code beside a
+        // chapter describing it.
+        //
+        // A hand-written payload rather than a serialised sample with the field
+        // removed: what is being modelled is a producer that never knew the
+        // member, and a round-trip through today's contract cannot produce one.
+        string beforeTheField = """
+            {"MessageId":"0199a1e0-0000-7000-8000-000000000001",
+             "CorrelationId":"0199a1e0-0000-7000-8000-000000000002",
+             "OccurredAt":"2026-08-25T12:00:00+00:00",
+             "OrderId":"0199a1e0-0000-7000-8000-000000000003",
+             "CustomerId":"0199a1e0-0000-7000-8000-000000000004",
+             "Reason":"customer_request"}
+            """;
+
+        OrderCancelled? deserialised = JsonSerializer.Deserialize<OrderCancelled>(beforeTheField);
+
+        deserialised.ShouldNotBeNull();
+        deserialised.Origin.ShouldBeNull("absent is what §9.6's discard branch reads");
+        deserialised.Reason.ShouldBe(CancelReasons.CustomerRequest);
+    }
+
+    [Fact]
+    public void Every_additive_member_is_still_additive()
+    {
+        // The gate on the list, without which the list is where the rule above
+        // goes to die: an entry outlives the contract it was written for,
+        // nothing says so, and a name that resolves to nothing reads exactly
+        // like a live exemption. This fails from both directions — a name that
+        // no longer resolves, which is what retiring a version produces, and a
+        // member that has somehow become always-supplied.
+        //
+        // **Keyed by the FULLY QUALIFIED name, because §9.2 has two versions
+        // live at once during a deprecation.** A simple name resolved with
+        // SingleOrDefault does not merely exempt the wrong one — it throws the
+        // moment `Ordering.V2.OrderCancelled` exists beside V1's, so this gate
+        // would fail for a reason that has nothing to do with what it checks,
+        // and the clearing story above ("the entry goes when the version does")
+        // could never actually be reached. The version is the whole point of
+        // the entry, so it belongs in the key.
+        foreach (string entry in AdditiveMembers)
+        {
+            int split = entry.LastIndexOf('.');
+            split.ShouldBeGreaterThan(0, $"{entry} must be spelt Namespace.Type.Member");
+
+            string typeName = entry[..split];
+            string memberName = entry[(split + 1)..];
+
+            Type? type = Contracts.SingleOrDefault(t => t.FullName == typeName);
+            type.ShouldNotBeNull(
+                $"{entry} names no public contract — that version has been retired " +
+                "and the entry belongs in the commit that retired it");
+
+            PropertyInfo? property = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Instance);
+            property.ShouldNotBeNull($"{entry} names no member of {type.Name}");
+
+            IsAlwaysSupplied(property, type).ShouldBeFalse(
+                $"{entry} is now always supplied, so this entry describes something " +
+                "that is no longer true (§12.6)");
         }
     }
 

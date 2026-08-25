@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using Common.Contracts.Ordering.V1;
+using Common.Infrastructure.Outbox;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Ordering.Api.Endpoints;
 using Ordering.Application.Orders;
@@ -136,6 +138,34 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
         (await StatusOfAsync(order)).ShouldBe(nameof(OrderStatus.AwaitingStock));
     }
 
+    [Fact]
+    public async Task A_cancellation_through_this_endpoint_publishes_the_user_origin()
+    {
+        // **The other half of #123's translation, and it can only be proved
+        // here.** A User-origin command dispatched in a bare scope has no
+        // principal, so §11.4's ownership guard fails closed and returns
+        // NotFound before an origin is ever written — which is the guard
+        // working, and why the sibling assertion in SagaCommandHandlerTests
+        // covers the System case alone. A real request is what supplies the
+        // caller this path needs.
+        //
+        // Inverting the handler's switch would tag this cancellation as the
+        // workflow's own echo, and §9.6 would then discard it on a missing
+        // instance instead of faulting — the silent loss #123 exists to close.
+        OrderId order = await SeedOrderAsync(Bob);
+
+        HttpResponseMessage response = await CancelAsync(order, asUser: Bob);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        OutboxMessage row = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
+
+        row.Payload.ShouldContain(
+            $"\"Origin\":\"{CancelOrigins.User}\"",
+            Case.Sensitive,
+            "a cancellation with a principal behind it is not this workflow's echo");
+    }
+
     /// <summary>
     /// §12.4's shared seeding helper, on the fixture rather than here so both
     /// suites reach one implementation of "an order that exists".
@@ -185,6 +215,61 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await StatusOfAsync(order)).ShouldBe(nameof(OrderStatus.AwaitingStock));
+    }
+
+    [Theory]
+    [InlineData(nameof(OrderStatus.Shipped))]
+    [InlineData(nameof(OrderStatus.Delivered))]
+    public async Task An_order_past_despatch_is_refused_with_422_and_the_shipped_code(string status)
+    {
+        // **#109's second half: the producer had no test at all.** Every
+        // occurrence of AlreadyShipped under tests/ was a sample string —
+        // §10.5's 422 was unproven and §9.8's dashboard series was built on a
+        // code nothing had ever been shown to emit. OrderTests covers the
+        // domain THROW, which is the half that already worked; nothing covered
+        // the catch, the mapping or the status code.
+        //
+        // **Delivered is arranged directly because nothing reaches it.**
+        // OrderStatus declares it and no transition sets it — §9.6 has no
+        // ShipmentDelivered — so the guard in Order.Cancel is written for a
+        // status the aggregate cannot get to on its own. Driving the row there
+        // is what makes the guard testable rather than decorative, and it is
+        // the case that would have caught the message defect: the old
+        // description said "A shipped order cannot be cancelled" and this
+        // customer's order was delivered.
+        OrderId order = await SeedOrderAsync(Bob);
+        await fixture.ExecuteAsync(
+            "UPDATE ordering.Orders SET Status = {0} WHERE Id = {1}",
+            status,
+            order.Value);
+
+        HttpResponseMessage response = await CancelAsync(order, Bob);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+
+        ProblemDetails? problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(
+            TestContext.Current.CancellationToken);
+
+        problem.ShouldNotBeNull();
+        problem.Extensions["code"]?.ToString().ShouldBe(
+            "order.already_shipped",
+            "the code is a §9.8 dimension value and splitting it would halve the series");
+        // **The exact string, not the absence of the old one.** Asserting only
+        // that the detail no longer contains "A shipped order" rejects one
+        // obsolete substring and passes for a blank detail, a truncated one,
+        // or any other wrong message — which leaves #109's actual subject, the
+        // customer-visible wording, unpinned by the test written to pin it.
+        //
+        // Pinning the prose makes it a thing a later edit has to come here and
+        // change, and that is the cost being accepted rather than an oversight:
+        // this sentence is served to a customer, and #109 was filed because it
+        // said something untrue to half of them.
+        problem.Detail.ShouldBe(
+            "An order that has already shipped cannot be cancelled; raise a return instead.",
+            $"a {status} order's customer reads this, and naming one of the two " +
+                "statuses is what #109 was filed for");
+
+        (await StatusOfAsync(order)).ShouldBe(status, "a refusal must not have cancelled anything");
     }
 
     private Task<string> StatusOfAsync(OrderId order) =>

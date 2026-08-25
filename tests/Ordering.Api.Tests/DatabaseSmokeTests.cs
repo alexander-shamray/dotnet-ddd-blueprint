@@ -85,7 +85,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
             "_AddFulfilmentSaga",
             "_AddSagaConfirmationTimeout",
             "_AddSagaPaymentVerdictJoin",
-            "_DefaultSagaCustomerIdForRemoval"
+            "_DefaultSagaCustomerIdForRemoval",
+            "_AddSagaCancellationObserved"
         ];
 
         string[] applied = await fixture.AppliedMigrationsAsync();

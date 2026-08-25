@@ -104,11 +104,15 @@ insufficient.
 3. **Record it against the release.** A skipped queue after a deploy is a
    §9.2 violation and the next release of that service should not repeat it.
 
-> **Replay is right here and wrong for the arrival `error-queue.md` names.**
+> **Replay is right here, and on the error queue it depends on the arrival.**
 > These messages were never refused on their merits — no consumer saw them —
-> so once the consumer exists they succeed. That is the opposite of a
-> `PaymentAuthorised` whose saga instance is gone, which faults every time it
-> is replayed.
+> so once the consumer exists they succeed. A `PaymentAuthorised` whose saga
+> instance is gone is the opposite: it faults every time it is replayed,
+> because a deleted instance does not come back. A faulted `OrderCancelled`
+> ([#123](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/123))
+> sits between them — replaying it works only once the `OrderPlaced` that
+> creates the instance has landed, which is why
+> [`error-queue.md`](error-queue.md) reads the outbox before deciding.
 
 ### A binding the service should declare is missing
 

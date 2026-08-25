@@ -42,9 +42,13 @@ public sealed record MarkOrderShipped(Guid OrderId, string TrackingNumber);
 
 /// <summary>
 /// Escalate an order to a human (§9.6) — the path for anything the workflow
-/// cannot resolve itself. <b>Two of its four reasons are a wait with no
-/// automatic compensation and two are not</b>, and this summary said only the
-/// first until the second arrived.
+/// cannot resolve itself. <b><c>not_despatched</c>, <c>stock_not_released</c>
+/// and <c>not_confirmed</c> are a wait with no automatic compensation;
+/// <c>cancelled_after_confirmation</c> and
+/// <c>payment_authorised_during_compensation</c> are not</b>, and this summary
+/// said only the first group until the second arrived. <b>Named rather than
+/// counted</b>: it read "two of four" while <see cref="ReviewReasons"/> had
+/// five.
 /// <para>
 /// The shared condition of the other two is <b>authorised money in a workflow
 /// whose outcome is cancellation</b> — deliberately not "a cancellation landing
@@ -114,6 +118,40 @@ public static class CancelReasons
 }
 
 /// <summary>
+/// The wire vocabulary for <see cref="OrderCancelled.Origin"/> — who asked for
+/// a cancellation, which <see cref="CancelReasons"/> deliberately does not say.
+/// </summary>
+/// <remarks>
+/// <b>Two members and no third, because the question is a partition rather
+/// than a list.</b> §9.6's saga asks one thing of this field — did this
+/// workflow cause the cancellation — so every origin that is not
+/// <see cref="Workflow"/> answers the same way, and adding a member for each
+/// new ingress would invite a consumer to switch on it and forget one. A
+/// finer vocabulary belongs on a field that is read for a finer purpose.
+/// </remarks>
+public static class CancelOrigins
+{
+    /// <summary>
+    /// §11.4's endpoint, with a principal behind it — the customer, or an
+    /// operator holding <c>orders:admin</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>An absent <see cref="OrderCancelled.Origin"/> does NOT read as this.</b>
+    /// It means the event was published before the field existed, and a
+    /// consumer holds whatever it did then — see that type's remarks. Reading
+    /// absent as a user origin is the direction that faults every ordinary
+    /// cancellation for the length of a rolling deploy.
+    /// </remarks>
+    public const string User = "user";
+
+    /// <summary>
+    /// §9.6's fulfilment saga compensating — the <c>CancelOrder</c> one of its
+    /// own branches sent, arriving with no principal at all.
+    /// </summary>
+    public const string Workflow = "workflow";
+}
+
+/// <summary>
 /// The wire vocabulary for <see cref="FlagOrderForReview.Reason"/> (§9.6).
 /// </summary>
 public static class ReviewReasons
@@ -171,10 +209,13 @@ public static class ReviewReasons
     /// This is a <see cref="ReviewReasons"/> code and not a
     /// <see cref="CancelReasons"/> one because what needs a person is the
     /// money — <b>not</b> because the order is already cancelled, which this
-    /// line used to say and which is only true on one of the three paths
-    /// into <c>Compensating</c>. From a decline or a payment timeout the
-    /// <c>CancelOrder</c> is still owed at the state's exit, so this row can
-    /// precede the cancellation entirely.
+    /// line used to say and which does not hold on every door. From a decline
+    /// or a payment timeout into <c>Compensating</c> the <c>CancelOrder</c> is
+    /// still owed at that state's exit, so this row can precede the
+    /// cancellation entirely. On the <c>AwaitingPayment</c> door #143 added it
+    /// does hold — the flag is set by a release derived from an
+    /// <c>OrderCancelled</c> already committed — which is why the claim is
+    /// about the door and never about the code.
     /// <para>
     /// <b>It was <c>cancelled_after_payment</c>, and the name asserted that
     /// order.</b> True on the two cancellation doors, false on the other two,
@@ -189,8 +230,13 @@ public static class ReviewReasons
     /// </para>
     /// <para>
     /// <see cref="CancelledAfterConfirmation"/> keeps its name deliberately:
-    /// it is raised only when an <c>OrderCancelled</c> reaches the saga in
-    /// <c>Confirmed</c>, so the order it asserts holds on its one path.
+    /// every door onto it is downstream of a confirmation, so the order the
+    /// name asserts holds on all of them. <b>"Its one path" is what this said,
+    /// and it has not been one path since #126</b> gave <c>Compensating</c> a
+    /// raising on a late <c>OrderConfirmed</c>; #143 added the two despatch
+    /// branches, where a cancellation was observed before the parcel was
+    /// reported. Named by what they share rather than counted, for the reason
+    /// the summary above gives.
     /// </para>
     /// </remarks>
     public const string PaymentAuthorisedDuringCompensation = "payment_authorised_during_compensation";

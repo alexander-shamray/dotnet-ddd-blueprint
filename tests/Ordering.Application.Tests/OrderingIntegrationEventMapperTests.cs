@@ -124,7 +124,12 @@ public class OrderingIntegrationEventMapperTests
         // names are not the contract, and must never become it — a consumer
         // branching on "OutOfStock" would break the day the enum is renamed.
         IReadOnlyList<object> mapped = Mapper().Map(
-            [new OrderCancelledDomainEvent(Order, Customer, CancellationReason.PaymentTimeout, Raised)]);
+            [new OrderCancelledDomainEvent(
+                Order,
+                Customer,
+                CancellationReason.PaymentTimeout,
+                CancellationOrigin.Workflow,
+                Raised)]);
 
         OrderCancelled cancelled = mapped.ShouldHaveSingleItem().ShouldBeOfType<OrderCancelled>();
 
@@ -133,6 +138,34 @@ public class OrderingIntegrationEventMapperTests
             "the saga sends payment_timeout and the published fact has to say the same thing — §13.3 " +
             "tags orders.cancelled with it, and a decline and a silent PSP are a different incident");
         cancelled.Reason.ShouldNotBe(nameof(CancellationReason.PaymentTimeout));
+    }
+
+    [Theory]
+    [InlineData(CancellationOrigin.User, CancelOrigins.User)]
+    [InlineData(CancellationOrigin.Workflow, CancelOrigins.Workflow)]
+    public void A_cancellation_carries_its_origin_onto_the_wire(
+        CancellationOrigin origin,
+        string expected)
+    {
+        // #123's discriminator. The saga reads this field and nothing else to
+        // decide whether a cancellation with no instance is its own echo, so a
+        // mapper that dropped it would reinstate the silent discard with every
+        // other test still green — the field is optional on the contract, so
+        // absent is a legal shape rather than a deserialisation failure.
+        IReadOnlyList<object> mapped = Mapper().Map(
+            [
+                new OrderCancelledDomainEvent(
+                    Order,
+                    Customer,
+                    CancellationReason.CustomerRequest,
+                    origin,
+                    Raised)
+            ]);
+
+        OrderCancelled cancelled = mapped.ShouldHaveSingleItem().ShouldBeOfType<OrderCancelled>();
+
+        cancelled.Origin.ShouldBe(expected);
+        cancelled.Origin.ShouldNotBe(nameof(CancellationOrigin.Workflow));
     }
 
     [Fact]
@@ -161,7 +194,12 @@ public class OrderingIntegrationEventMapperTests
         IReadOnlyList<object> mapped = Mapper().Map(
             [
                 new OrderPlacedDomainEvent(Order, Customer, Money.Of(129.98m, "EUR"), Lines(), Raised),
-                new OrderCancelledDomainEvent(Order, Customer, CancellationReason.OutOfStock, Raised)
+                new OrderCancelledDomainEvent(
+                    Order,
+                    Customer,
+                    CancellationReason.OutOfStock,
+                    CancellationOrigin.Workflow,
+                    Raised)
             ]);
 
         mapped.Count.ShouldBe(2);

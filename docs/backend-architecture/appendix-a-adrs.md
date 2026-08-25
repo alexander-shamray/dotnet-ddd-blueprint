@@ -848,6 +848,19 @@ three sites that send one.
 > collapsing the four into one reason is what an earlier revision of this
 > paragraph did.
 
+> **Whether the event should reach Inventory at all is
+> [ADR-029](#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word)'s
+> question rather than this one's, and it keeps it.** This ADR takes the direct
+> subscription as given and makes the early arrival harmless; that one asks
+> whether to delete it and declines, because a cancellation that finds no
+> instance to send a `ReleaseStock` would otherwise release nothing, and
+> because the early arrival is the only evidence a cancellation gives the saga.
+> So the absorptions this ADR names, here and under *Nothing enforces it*
+> below, have since stopped being an `Ignore`: each records the arrival on the
+> instance, and forward transitions are guarded on what it recorded (§9.6).
+> What this ADR establishes — that the discarded copy costs the saga nothing —
+> is unchanged; what the copy is *for* is not.
+
 **A `stock_not_released` review now means what it says.** It is raised only when
 a release genuinely never completed, so
 [`order-review.md`](../runbooks/order-review.md)'s procedure no longer has to
@@ -858,12 +871,22 @@ service to a contract, and this repository's own rule is that a list of things
 known to be missing needs something asserting they are still missing. What
 stands in for it here is that every place the machine leans on it says so at
 the line: `AwaitingStock`, `AwaitingPayment` and `AwaitingConfirmation`'s
-`Ignore(StockReleased)`, the cancellation branches those three states absorb
+`When(StockReleased)`, the cancellation branches those three states absorb
 for, and `Compensating`'s `Ignore(StockReserved)` and
 `Ignore(StockReservationFailed)`. So an Inventory built to a different rule
 contradicts a paragraph rather than failing silently. **The sites are named
 rather than counted** for the reason the Why section declines a count — a
 figure over a set the next branch can add to is one nothing recomputes.
+
+> **The first three were spelled `Ignore(StockReleased)` until #143, and the
+> spelling is updated here rather than left standing.** An ADR is superseded
+> and never rewritten, and nothing above has been: the decision, its two
+> guarantees and every argument for them are untouched. What changed is an
+> **index** — this paragraph exists so an Inventory implementer can find the
+> lines that lean on the ADR, and a name that greps to this file and not to
+> the machine defeats the only job it has. The callout above records that
+> those absorptions stopped being an `Ignore`; this is the same fact where
+> somebody would look it up.
 
 ## ADR-025 — A saga state that waits on two services finalises on neither alone
 
@@ -951,6 +974,27 @@ ADR-024 has answered for every release including a no-op one, it can never be
 a routine arrival at a finalised instance. **Recovering the review row instead
 would mean persisting the obligation outside the saga**, which is a bigger
 change than this one and is not taken here.
+
+> **The contrast with `OrderCancelled` has since been narrowed, and this
+> paragraph is left as written.** It reads that event as Ordering's own echo
+> without qualification, which was true of every arrival when this ADR was
+> taken and is true of only some of them now:
+> [#123](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/123)
+> gave the contract an `Origin` field, so §9.6 asks rather than assuming and
+> faults for anything it cannot account for. The distinction this ADR draws —
+> **provenance, not timing** — is what survived and is what the field makes
+> mechanical; only the claim that provenance was unavailable for a
+> cancellation has moved. Recorded here rather than edited above, because an
+> ADR is superseded and never rewritten.
+
+**The instance carries facts as well as obligations, and the second use is
+§9.6's `CancellationObserved`.** An early `StockReleased` absorbed in a state
+that sent no release proves a cancellation reached Inventory
+([ADR-029](#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word)),
+and the saga records that where it observes it and guards its forward
+transitions on it. Nothing is outstanding and no exit joins on it, so rule 1 is
+the half that generalises: the place a fact a state name cannot carry belongs
+is the instance, and only rules 2 and 3 are about waiting.
 
 **Nothing enforces the rule beyond §9.6.** No gate reads a state machine for
 states that wait on two participants, and the only one this platform has is
@@ -1423,6 +1467,78 @@ rejected definition — the defect could be measured by hand and not held closed
 Four probe types in the test assembly supply the shape and are driven through
 the same closure, which is why that closure takes its type universe as an
 argument rather than reading a field.
+
+## ADR-029 — Inventory releases on the cancellation, not on the saga's word
+
+**Decision.** Inventory goes on consuming `OrderCancelled` directly, as
+[§3.2](03-bounded-contexts.md) has always given it, and releases the stock it
+holds for that order **whatever state §9.6's saga is in**. `ReleaseStock` does
+not become the only trigger. The saga's `Confirmed` branch continues to send no
+release, and that restraint is now documented for what it is: it withholds a
+**second** instruction, not the first.
+
+**Why.** [#141](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/141)
+asked whether Inventory should decline to release for an order it knows reached
+`Confirmed`, and named three sketches. Making `ReleaseStock` the only trigger
+was called the cleanest and largest. It is neither, once two things beside it
+are read together.
+
+**The second producer is a safety net rather than a duplication.** With
+`ReleaseStock` as the only trigger, a customer's stock comes back only if a
+saga instance exists to send the command. §9.6 finalises down several branches,
+some of them before any despatch has been arranged, and a cancellation arriving
+after any of them would then release nothing at all — the reservation held
+until a person noticed. Removing the direct subscription buys tidiness in the
+diagram and pays for it with a single point of failure on the one obligation
+the customer can see.
+
+**And it is the only evidence a cancellation gives the saga.**
+[#143](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143)
+turns on a `StockReleased` arriving in a state that sent no release: that
+arrival *proves* a cancellation reached Inventory, and it is what four states
+now record on the instance — `CancellationObserved`, which is
+[ADR-025](#adr-025--a-saga-state-that-waits-on-two-services-finalises-on-neither-alone)'s
+first rule applied to a fact rather than to an obligation — so a forward step
+can be withheld. It exists only
+because Inventory consumes the event directly. So the two issues cannot be
+settled independently in the direction they were filed — taking #141's option 2
+would delete the mechanism #143's fix is built on, and leave the saga with no
+way to know a cancellation is in flight until its own copy lands.
+
+> **Two open questions were being weighed independently and one decides the
+> other.** #141 ranked its sketches by cost while #143 was still open beside
+> it; answering #143 removes the cheapest of them from the table entirely. The
+> same shape closed #125, and it is worth the second recording: before ranking
+> options by cost, ask whether each survives its neighbours being settled.
+
+**What the restraint is actually for, then.** Reaching `Confirmed` means a
+despatch may be moving, and a reservation being picked is not one Inventory can
+safely be told to drop on a state machine's word. That argument is about the
+*command*, and it survives: the saga does not issue one. It was never an
+argument about the reservation surviving, and three documents implied it was
+until the PR that wrote `Confirmed`'s fourth absorption corrected them.
+
+**Consequences.**
+
+- **A picked parcel's reservation is released, and no mechanism prevents it.**
+  §9.6 raises `cancelled_after_confirmation` and an operator reinstates the
+  reservation by hand if the parcel is still in the warehouse;
+  `docs/runbooks/order-review.md` step 2 owns that procedure and already says
+  so. This ADR does not close that gap — it records that the gap is Inventory's
+  to close when Inventory exists, and that closing it needs Inventory to know
+  the order was confirmed.
+- **The closing move is available and is not taken here.** #141's sketch 1 —
+  Inventory declining to release for an order it has seen confirmed — needs
+  `OrderConfirmed` in Inventory's Consumes column, which §3.2 does not give it
+  and no chapter asks for. Adding a subscription to a service with no code, for
+  a case no runbook has yet worked, is a decision better taken by whoever builds
+  it against a real picking process.
+- **One cancellation keeps two independent routes to `StockReleased`**, and
+  ADR-024's guarantees are what make that safe rather than racy. This decision
+  depends on that one; neither is correct alone.
+- **Nothing enforces any of it until Inventory is built.** Like ADR-024, this
+  is a commitment on a service that does not exist, which is the cheapest moment
+  to take it and the reason it is written down rather than assumed.
 
 ---
 

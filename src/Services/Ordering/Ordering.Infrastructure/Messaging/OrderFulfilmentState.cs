@@ -111,6 +111,39 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     /// </remarks>
     public bool StockReleaseSettled { get; set; }
 
+    /// <summary>
+    /// A cancellation is in flight that this instance has not been told about
+    /// directly. Set where a <c>StockReleased</c> arrives in a state that sent
+    /// no <c>ReleaseStock</c>, which is Inventory acting on an
+    /// <c>OrderCancelled</c> the saga has not consumed yet
+    /// (<a href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143">#143</a>).
+    /// </summary>
+    /// <remarks>
+    /// <b>An obligation the machine carries rather than an event it waits
+    /// for</b>, which is ADR-025's rule applied to a fact rather than to a
+    /// join: what is known is recorded where it is learnt, and every forward
+    /// transition asks. Without it the four states that absorb an early
+    /// release keep their ordinary transitions in the meantime, so a
+    /// <c>StockReserved</c> winning the next lock sends an
+    /// <c>AuthorisePayment</c> for an order already being cancelled, and a
+    /// <c>ShipmentDispatched</c> finalises the instance clean.
+    /// <para>
+    /// <b>This narrows the window and does not close it.</b>
+    /// <c>StockReleased</c> is the only evidence the saga can see, and it
+    /// exists only because §3.2 has Inventory consuming <c>OrderCancelled</c>
+    /// directly (ADR-029). A cancellation Inventory has not yet consumed
+    /// leaves no trace here at all, and nothing short of ordering Ordering's
+    /// own outbox per aggregate closes that.
+    /// </para>
+    /// <para>
+    /// <b>Never cleared.</b> A cancellation does not stop being in flight, and
+    /// the states that read it either compensate or finalise, so there is no
+    /// transition that would legitimately unset it — a reset would be a way to
+    /// lose the fact, not a way to use it.
+    /// </para>
+    /// </remarks>
+    public bool CancellationObserved { get; set; }
+
     // One token per schedule — Unschedule needs the specific token, so two
     // waits cannot share a field.
     //

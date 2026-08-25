@@ -212,18 +212,28 @@ and says nothing about what a handler did outside the database.
 
 ### Escalate — the message is fine and so is the consumer
 
-**One arrival here is neither a bug nor a broken dependency, and replaying it
-can never work.** A `PaymentAuthorised` on `ordering-fulfilment-saga` whose
-fault is a missing saga instance means Payments authorised a card for an order
-whose fulfilment saga had already finished — normally one this platform
-cancelled. §9.6 faults that arrival deliberately rather than letting
-MassTransit's default consume it silently, because the alternative is money
-moving with nothing raised anywhere
-([#124](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/124)).
+**Some arrivals here are neither a bug nor a broken dependency.** §9.6's saga
+faults deliberately on `PaymentAuthorised`, and on an `OrderCancelled` this
+service cannot account for
+([#124](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/124),
+[#123](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/123)),
+rather than letting MassTransit's default consume either silently — because
+the alternative is money moving, or a customer's cancellation vanishing, with
+nothing raised anywhere.
 
-Recognise it by the two together: the queue is
-`ordering-fulfilment-saga_error`, and the fault names a saga instance that
-could not be found rather than an exception from a transition. Then:
+**Recognise them by the same two things, because they were built to read
+alike.** The queue is `ordering-fulfilment-saga_error`, and `MT-Fault-Message`
+names a saga instance that could not be found rather than an exception thrown
+inside a transition: the cancellation branch raises the same `SagaException`
+`Fault()` raises, deliberately, so one recognition covers both. **The message
+type then selects the procedure**, and it is in the body's `messageType` rather
+than in a header — [`skipped-queue.md`](skipped-queue.md) says where.
+
+#### `PaymentAuthorised` — money moved on an order nothing is tracking
+
+Payments authorised a card for an order whose fulfilment saga had already
+finished, normally one this platform cancelled. Replaying it can never work.
+Then:
 
 1. **Do not replay.** The instance is deleted and will not come back, so a
    replay faults again on the same message. This is the one case in this
@@ -242,6 +252,122 @@ could not be found rather than an exception from a transition. Then:
 > verdict bound, which is a conversation with Payments about latency rather
 > than an incident in Ordering.
 
+#### `OrderCancelled` — a cancellation with no workflow to stop
+
+Something cancelled the order and no saga instance existed to hear it. Only
+the arrivals this service can prove are its own are discarded: the saga's echo,
+which carries an `Origin` of `workflow`, and an absent `Origin`, which is a
+rolling deploy publishing from before the field existed. **Everything else
+faults, so `user` is the EXPECTED value here rather than the only possible
+one** — the branch is an allow-list, and a blank, a malformed field or a
+vocabulary member some future release starts sending reaches this queue
+exactly as a customer's cancellation does.
+
+**So read `Origin` first, and branch on it before anything else.** A value
+of `user` is a real cancellation and the two procedures below are for it.
+**Anything else is a contract failure rather than an order to recover**:
+some producer is sending an origin this build does not know, which is a
+deployment problem (§9.2, ADR-026) and not something replaying the message
+fixes. Find the producer, record the value, and take it to whoever owns that
+release; do not run the recovery below on it, because it assumes a customer
+asked and that is the one thing an unknown origin does not establish.
+
+> **The suite says this can happen rather than the prose merely allowing
+> it.**
+> `A_cancellation_carrying_an_unknown_origin_faults_rather_than_being_discarded`
+> publishes `operations_console` and asserts the fault, which is what an
+> allow-list is worth having for — and what makes "everything here is a user
+> cancellation" a claim this page cannot make.
+
+For a `user` origin there are two ways to get here, and they want opposite
+things.
+
+**Read `Origin` and the order id off the body, then ask whether the saga ever
+existed.** [`stuck-saga.md`](stuck-saga.md)'s first query answers it for a live
+instance; its outbox query answers the rest, by showing whether this order's
+`OrderPlaced` was ever dispatched.
+
+1. **The cancellation overtook its own `OrderPlaced`.** §9.4 orders nothing
+   between two of Ordering's own outbox rows, so a cancellation can reach the
+   saga's queue before the placement that creates the instance. §9.8's retry
+   envelope — about seventy seconds — normally covers that gap, which is why
+   the arrival faults rather than being discarded: the retries are what give
+   the placement time to land. **Reaching this queue means it did not land
+   inside that envelope**, so find the `OrderPlaced` row before deciding
+   anything.
+   - **The `OrderPlaced` row is unsent or failing** — an outbox fault, and
+     [`outbox-broker.md`](outbox-broker.md) is the procedure. Fix it, let the
+     placement create the instance, and **then replay this message**: it
+     correlates, compensates, and releases whatever was reserved. This is the
+     one faulted arrival on this page replay can fix, and the order matters —
+     replayed before the placement lands, it faults again.
+   - **The `OrderPlaced` row is there and `ProcessedAt` is set, and still no
+     saga exists.** The dispatcher published it and the saga never consumed
+     it, which is a delivery fault rather than an outbox one: the binding or
+     the consumer was absent when it arrived, so the placement went to
+     `ordering-fulfilment-saga_skipped` with nothing to correlate it to.
+     [`skipped-queue.md`](skipped-queue.md) is the procedure. **Restore the
+     placement first and this message second** — the same ordering the
+     branch above needs, for the same reason.
+
+     > **This branch was missing and the tree read as though it were
+     > complete.** `ProcessedAt` proves publication and nothing about
+     > consumption, which the bullet below already says — so a placement that
+     > was published, skipped, and never consumed fitted neither "unsent or
+     > failing" nor "no row at all", and an operator following the tree would
+     > have fallen through to the discard. **A decision tree with no branch
+     > for a reachable state is worse than one that admits it stops**, because
+     > the reader takes the nearest branch rather than stopping.
+
+   - **There is no `OrderPlaced` row at all** — and **this does not mean the
+     placement was never published.** §9.4's retention purge deletes
+     *processed* outbox rows after seven days
+     (`RetentionPolicy.OutboxWindow`), while a message sits in the error
+     queue until somebody handles it — so on an order older than that window
+     the absence is the purge rather than the evidence. `ProcessedAt` would
+     not settle it either: it records that the dispatcher published the row,
+     not that the saga consumed it.
+
+     **So establish what happened downstream before discarding anything.**
+     Read the order's own age and status, look for an
+     `ordering.OrderReviews` row, and ask Inventory and Payments whether
+     this order id ever reached them. Only where the order is inside the
+     retention window, has no review row and neither service has heard of
+     it is "nothing downstream ever heard of this order" a conclusion:
+     confirm the order reads `Cancelled`, record the message, and discard
+     it. Otherwise treat it as case 2 below — a cancellation with real
+     downstream work behind it, which is a person's to reconcile.
+
+     > **This bullet said the absence proved it, and that was an
+     > instruction to destroy a real cancellation.** Stock reserved and a
+     > card authorised eight days ago leave no outbox row and every other
+     > trace; discarding on the strength of the missing one loses the only
+     > record that the customer asked. **An absence is evidence only where
+     > something guarantees the thing would still be there**, and a
+     > retention window is precisely the guarantee this repository does not
+     > have.
+2. **The saga had already finalised, down a branch that escalated.** A
+   `not_confirmed` or `not_despatched` timeout finalises the instance and
+   leaves the order live, so a customer cancelling afterwards has nothing to
+   correlate to; so does a despatch reaching an instance that had already
+   observed the cancellation, which finalises on the `MarkOrderShipped` and
+   raises `cancelled_after_confirmation` on the way out. **Do not replay** —
+   the instance is gone and will not come back. The order is already in front
+   of a person: find its row in `ordering.OrderReviews` and take the
+   cancellation to whoever is working it
+   ([`order-review.md`](order-review.md)), because "the customer has since
+   cancelled" changes what that person should do — a `not_despatched` review
+   becomes a refund conversation rather than an expedite. Discard with a
+   record once it has been passed on.
+
+> **A run of these says placements are not reaching the saga at all.** One is
+> an interleaving §9.6 bounds but cannot prevent. Several for the same period
+> mean `OrderPlaced` is not reaching `ordering-fulfilment-saga` at all — an
+> outbox that stopped, or a binding lost in a rollout — and the cancellations
+> are only the visible half of it, because a placement that never arrives is
+> silent. Check that endpoint's depth and
+> [`outbox-broker.md`](outbox-broker.md) before working them one at a time.
+
 ### Fix first — the consumer has a bug
 
 Then neither replay nor discard is right yet. Leave the messages parked, ship
@@ -259,14 +385,20 @@ consumed every attempt, retrying it at all was wasted — a poison message shoul
 fail fast, and MassTransit's `Ignore<T>` for known-terminal exception types is
 the lever.
 
-**The missing-instance arrival above is the case where that answer is "it was
+**The missing-instance arrivals above are the case where that answer is "it was
 supposed to".** Nothing failed: §9.6 chose the error queue as the destination
-because it is the only channel that reaches a human, and the five retries in
-front of it are known to be wasted — a deleted saga instance does not return.
-They are accepted rather than filtered because excluding them means naming a
-MassTransit exception type in `ordering-fulfilment-saga`'s retry policy, and a
-minute of backoff on an arrival this rare is cheaper than one endpoint's ladder
-differing from every other endpoint's.
+because it is the only channel that reaches a human.
+
+**What the retries in front of them are worth differs by arrival, and reading
+them as waste in both directions is the mistake.** For `PaymentAuthorised` they
+are known to be wasted — a deleted saga instance does not return — and are
+accepted rather than filtered because excluding them means naming a MassTransit
+exception type in `ordering-fulfilment-saga`'s retry policy, and a minute of
+backoff on an arrival this rare is cheaper than one endpoint's ladder differing
+from every other endpoint's. For an `OrderCancelled` racing its own
+`OrderPlaced` they are the mechanism rather than the cost: about seventy
+seconds is what the placement still in flight has to land in, and a message
+that reaches this queue has already spent it.
 
 ## Closing it
 

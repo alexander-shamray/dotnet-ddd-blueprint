@@ -68,6 +68,169 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The cancellation the saga could not see (#123, #143, #141, #109)
+
+Three of these are one defect at three distances. A cancellation reaches
+§9.6's saga on `OrderCancelled`, and everything the machine does about one
+starts there — so every interval in which that event has *not* arrived is an
+interval in which the saga acts as though nothing happened. #123 is the
+interval before the instance exists, #143 the interval while it exists and is
+holding a different event, and #141 the question of who releases the stock
+while both are running.
+
+**`Reason` is not the discriminator, and the branch that nearly shipped is
+worth recording before the one that did.** #123's own issue offered it as the
+cheapest option: the saga's echoes carry `out_of_stock`, `stock_timeout`,
+`payment_declined` and `payment_timeout`, so `customer_request` is the
+customer's. It is false, the chapter already said so, and the argument had to
+be re-derived anyway because the issue outranked it in the reading order.
+§11.4's endpoint parses the whole five-code `CancellationReasons` map, so a
+caller may cancel with `payment_declined`; and the saga forwards whatever
+reason it recorded, so its own compensation carries `customer_request`
+whenever a customer's cancellation is what started it. **A field that a caller
+chooses cannot answer a question about provenance**, and the test that pins
+this pairs `out_of_stock` with a user origin precisely because a
+`Reason`-based branch passes every test that only ever pairs
+`customer_request` with a customer.
+
+**What closed it was the route the chapter named first — an added
+discriminator — and the enum for it already existed one layer out.**
+`CommandOrigin` has distinguished §11.4's endpoint from the saga's broker
+command since #63, for the ownership check; it simply never travelled onto the
+event. So the chain is `CommandOrigin` → `CancellationOrigin` (domain) →
+`OrderCancelled.Origin` (a `CancelOrigins` code), written as a literal at the
+handler and never bound from a request, which is what keeps it from being a
+value a caller can claim. §9.2 makes a new **optional** field additive, so
+there is no V2.
+
+**The absent case is the half that had to be got right, and both readings are
+defensible until you price them.** A rolling deploy has instances publishing
+before they populate the field. Faulting on absent closes #123 immediately and
+files an error-queue entry for every ordinary cancellation for the length of
+every deploy — a certainty. Discarding on absent holds the pre-#123 behaviour
+across the deploy and leaves the race open for that window — a possibility.
+**A guaranteed incident is worse than a bounded exposure**, so absent
+discards rather than being read as an origin. A test pins it so it cannot be
+tidied away as an oversight.
+
+**And the exposure is not bounded by the deploy, which this entry said and
+the review corrected.** It called the tolerance §15.5's expand phase with a
+contract phase owed — a later release making `Origin` required. That
+tightening is a breaking change inside V1: a payload predating the field has
+no bound on when it can arrive, because `error-queue.md` keeps a message
+until somebody handles it and a replay can reintroduce one at any time, so
+requiring the member would fail deserialisation before the branch above
+could read the absent value. §9.2 sends that to a V2. **An additive member
+stays optional for the life of its contract version**, and the promised
+phase was a scheduled breakage in the clothes of rigour — which is why it
+survived several review rounds: it was the tidier claim.
+
+**Faulting buys a second thing nobody asked for, and it is not noise.** A
+cancellation arriving after the saga finalised down a `FlagOrderForReview`
+branch also faults. The order is already in front of a person, and "the
+customer then cancelled it" is the next thing that person needs. The exception
+raised is the `SagaException` `Fault()` would have raised — deliberately, so
+`error-queue.md` works both arrivals through one procedure rather than two.
+
+**#143 is ADR-025's rule applied to a fact rather than to a join.** That ADR
+says what is outstanding is recorded on the instance and a state name can
+carry one such answer, not the rest. What is recorded here is not an
+obligation but a piece of knowledge: a `StockReleased` arriving in a state
+that sent no `ReleaseStock` **proves** a cancellation reached Inventory, and
+the four states that absorb one now set `CancellationObserved` instead of
+discarding it, and every forward transition in those states asks — named
+rather than counted, because the first draft of this sentence said four and
+`AwaitingConfirmation`'s `OrderConfirmed` was the fifth.
+
+**The money row is the one that justifies the column.** `AwaitingStock` +
+`StockReserved` sent an `AuthorisePayment` for an order already being
+cancelled; it now withholds it and waits where its own `OrderCancelled` branch
+can still be reached. **The deliberate absence there is the `Unschedule`**:
+`StockTimeout` stays armed, because an instance that withholds a forward step
+and never gets its cancellation needs a bound, and this state already has one.
+The same shape governs `AwaitingPayment`, where `PaymentTimeout` is left armed
+on the observed branch for the same reason.
+
+**The two terminal rows lose the instance rather than the money, and that is
+the sharper failure.** `ShipmentDispatched` in `AwaitingConfirmation` and in
+`Confirmed` finalises, so a cancellation in flight then correlates to nothing:
+no review row, and — before #123 — no fault either. Both branches now raise
+`cancelled_after_confirmation` before finalising. **`MarkOrderShipped` still
+goes on both, and the aggregate refuses it.** The flag is set only by a
+`StockReleased` Inventory published off an `OrderCancelled` staged in the
+transaction that set the order `Cancelled` (ADR-029), so on this path the
+order is already cancelled and `MarkOrderShippedHandler` answers
+`order.not_shippable`. It is sent anyway because §5.4 gives the aggregate the
+transition and a state machine does not get to predict its answer from a
+flag — an inference one ordering premise away from leaving a shipment
+unrecorded with nothing saying so.
+
+**The justification this paragraph carried was that withholding would leave
+the aggregate claiming `Confirmed`, and it is false on the one path the flag
+names.** It survived the review round that named it, in this file and in the
+test recording the same send, because the fix was applied to the two sites
+the finding cited rather than to a grep for the sentence — which is this
+repository's own rule about resuming from the list and not from the error,
+met in the round after the one that states it.
+
+**#141 could not be decided on its own terms, and finding that out is the
+entry's most reusable half.** It asked whether Inventory should decline to
+release for an order it knows reached `Confirmed`, and ranked three sketches
+by cost — calling "`ReleaseStock` becomes the only trigger" the cleanest and
+largest. Answering #143 deletes that option: the second producer is the *only*
+evidence a cancellation gives the saga, so removing it reopens every race
+#143's guards close. It is also a safety net, since with the saga as sole
+author the stock comes back only if an instance exists to send the command,
+and §9.6 finalises down several branches before any despatch. ADR-029 records
+keeping it. **Two open questions were being weighed independently and one
+decided the other** — the same shape #125 met, and the second time is what
+makes it a rule: before ranking options by cost, ask whether each survives its
+neighbours being settled.
+
+**What the restraint was always for.** `Confirmed` sends no `ReleaseStock`
+because a reservation being picked is not one Inventory can be told to drop on
+a state machine's word. That argument is about the *command* and survives
+intact; it was never an argument about the reservation surviving, and the
+picked-parcel gap stays open as Inventory's to close.
+
+**#109 rode along because it shares a file and a test with the rest.**
+`Order.Cancel` refuses `Shipped` **or** `Delivered` and its own message
+interpolates the real status; `CancelOrderHandler` catches the
+`DomainException` and discards that text for `OrderErrors.AlreadyShipped`,
+which named only the first. So the accurate sentence was thrown and the
+inaccurate one served. The description broadened and **the code did not** —
+`order.already_shipped` is a dimension value on §9.8's dashboard, and a second
+code would silently halve every series built on it. The producer had no test
+at all: every occurrence under `tests/` was a sample string, so §10.5's 422
+was unproven. `Delivered` is arranged directly in that test, because
+`OrderStatus` declares it and no transition reaches it — the guard is written
+for a status the aggregate cannot get to on its own, which is what makes
+arranging it the only way to hold the guard to anything.
+
+**#128 was in scope and is not in this PR, for a reason the log already
+carried.** The saga's in-memory outbox is a dual write, and the fix —
+`AddEntityFrameworkOutbox` with `UseBusOutbox` — means running MassTransit's
+transactional outbox alongside §9.4's hand-rolled one. §9.3 forbids a second
+outbox table set in as many words. That is a §9 decision about owning two
+outboxes, it wants an ADR, and PR-21's entry said so before this branch
+existed. Nothing here makes it less true.
+
+**Every guard was observed red before it was trusted.** Six of the seven new
+saga tests were run against a machine patched back to its previous behaviour
+— the missing-instance branch returning unconditionally and every
+`CancellationObserved` guard forced to its unguarded side — and all six
+failed. **The seventh is deliberately not in that set**, and which one it is
+says what the branch changed: the test that an `OrderCancelled` published
+before `Origin` existed is still discarded passes against both machines,
+because holding that behaviour unchanged across a rolling deploy is the
+whole of what it asserts. The first attempt at
+that measurement was **invalid and looked fine**: the patch script normalised
+the file's line endings, the build failed IDE0055, and the run executed a
+stale assembly and reported six passes. A counterfactual that does not rebuild
+is a claim about a run nobody performed, wearing the evidence of one.
+
+---
+
 ## The subject that crossed a boundary nothing checked (#63)
 
 §11.4's subject rule — *a subject identifier is bound from the principal, never
@@ -830,6 +993,16 @@ like the same kind of discriminator for a cancellation and is not, because
 send `payment_declined` and the code carries no origin. That residual is
 already written at the registration and stays there.
 
+**Both halves of that paragraph have since been overtaken, and the argument
+in it is why.** #123 gave `OrderCancelled` an `Origin` field and a missing
+instance branch that faults for anything it cannot account for, so
+`PaymentAuthorised` is no longer the only event treated that way — and the
+residual is closed rather than standing at the registration. What held is
+the reasoning: **provenance rather than timing** is what licenses a fault,
+and the reason `Reason` could not transfer is exactly the reason a field
+written at the entry point could. Reconciled in place rather than rewritten,
+per this file's header.
+
 **Three of the five new tests were observed red against the unconditional
 `Finalize`, and the fourth was the interesting one.** The decline test passed
 both ways — a decline reaching no instance is discarded, so "no instance, no
@@ -937,9 +1110,12 @@ the instance waits out `ReleaseTimeout` and raises `stock_not_released` for a
 reservation that came back. True under the second reading of #130 and false
 under the first, because the saga's own `ReleaseStock` is then answered
 whatever Inventory did with the event. **A code change that is only sound
-because of a contract change has to land with it**, and the three `Ignore`
-lines that depend on it say so at the site. The fourth is `Confirmed`'s, which
-refuses the dependency in as many words, and is the subject two paragraphs
+because of a contract change has to land with it**, and the three absorbing
+lines that depend on it say so at the site. (They were `Ignore` lines when
+this was written; #143 made each of them record the arrival instead, which
+changes what the absorption is *for* and not whether it is sound.) The fourth
+is `Confirmed`'s, which refuses the dependency in as many words, and is the
+subject two paragraphs
 down — writing "the four" here and carving it out there is the collapse this
 entry warns about, committed inside the entry that warns about it.
 

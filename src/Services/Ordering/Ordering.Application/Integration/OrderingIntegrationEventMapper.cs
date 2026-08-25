@@ -95,7 +95,18 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
         // The wire vocabulary, through the one map that owns it (§9.6). The
         // enum's member names are not the contract and must never become it —
         // CancellationReasons.ToCode is what keeps the two spellings apart.
-        Reason = CancellationReasons.ToCode(e.Reason)
+        Reason = CancellationReasons.ToCode(e.Reason),
+        // Populated from this release on. §9.6's saga discards an ABSENT origin
+        // on the same path as its own echo, and that is a TOLERANCE rather
+        // than an identification: absent means "published before the field
+        // existed", which holds the pre-#123 behaviour for as long as such a
+        // payload can still arrive — indefinitely, since the error queue keeps
+        // one until it is handled. Reading it as an origin
+        // in either direction is the inference this field exists to replace —
+        // as User it would fault every cancellation an older instance
+        // published, and as Workflow it would outlive the deploy that
+        // justifies it.
+        Origin = CancellationOrigins.ToCode(e.Origin)
     };
 
     // A value object decomposed into primitives, which is the whole of what

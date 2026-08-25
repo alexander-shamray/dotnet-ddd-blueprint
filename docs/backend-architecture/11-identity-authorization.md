@@ -428,6 +428,23 @@ public static class CancellationReasons
 
     public static string ToCode(CancellationReason reason) => ToCodeMap[reason];
 }
+
+// The sibling, and it goes ONE WAY only — nothing parses an origin, because
+// no ingress accepts one. That asymmetry is the design rather than an
+// omission: a reason is what a caller sends, an origin is written as a
+// literal at the entry point that knows it (CommandOrigin, above), and a
+// TryParse here would be the first door onto a value a caller could claim.
+public static class CancellationOrigins
+{
+    private static readonly FrozenDictionary<CancellationOrigin, string> ToCodeMap =
+        new Dictionary<CancellationOrigin, string>
+        {
+            [CancellationOrigin.User] = CancelOrigins.User,
+            [CancellationOrigin.Workflow] = CancelOrigins.Workflow
+        }.ToFrozenDictionary();
+
+    public static string ToCode(CancellationOrigin origin) => ToCodeMap[origin];
+}
 ```
 
 Coarse permission checks live at the endpoint. **Resource-level checks — "is
@@ -456,14 +473,26 @@ public sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser cur
             return Result.Failure(OrderErrors.NotFound);
         }
 
+        // The origin travels onto the event so §9.6's saga can tell its own
+        // echo from a cancellation somebody else caused. THIS is the entry
+        // point that knows the answer, which is why the value is written as a
+        // literal here and never bound from the request. Anything not provably
+        // the workflow is User — the direction that makes the saga fault rather
+        // than discard, so a CommandOrigin member added later fails loudly.
+        CancellationOrigin origin = command.InitiatedBy switch
+        {
+            CommandOrigin.System => CancellationOrigin.Workflow,
+            _ => CancellationOrigin.User
+        };
+
         // The aggregate still owns the transition — this handler decides who
         // may ask, not whether the order is in a state that permits it (§5.4).
-        // The catch translates the refusal rather than the rule: a shipped
-        // order throws, and without this the caller gets a 500 for asking a
+        // The catch translates the refusal rather than the rule: an order past
+        // despatch throws, and without this the caller gets a 500 for asking a
         // question the model answers. §10.5 already carries the error.
         try
         {
-            order.Cancel(command.Reason, clock.GetUtcNow());
+            order.Cancel(command.Reason, origin, clock.GetUtcNow());
         }
         catch (DomainException)
         {

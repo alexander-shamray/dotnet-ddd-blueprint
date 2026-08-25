@@ -1096,7 +1096,7 @@ third outcome, because a key that never varies has nothing to validate.
 > environments.** If every value in it would be the same in Compose, in the test
 > fixture and in production, it is not configuration — it is a constant that has
 > been given a deployment obligation and four places to be forgotten. `MaxAttempts`
-> (§9.4), the dispatcher's tick, the saga's four delays (§9.6) and
+> (§9.4), the dispatcher's tick, the saga's schedule delays (§9.6) and
 > `ServiceOptions.OperationTimeout` are all constants for exactly this reason.
 > `Identity:Client` earns its options type by holding a secret that must differ
 > per environment, and it is the only thing here that does.

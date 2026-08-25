@@ -489,7 +489,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 915 tests — so the build rules and the drift rules below
+and `dotnet test` runs 936 tests — so the build rules and the drift rules below
 are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -623,9 +623,27 @@ own line rather than sending a reader to a file that does not hold it.
   rule were correct until a second caller existed.
 - **"A test that would pass" is a claim about a run nobody performed.** Measure
   the counterfactual — three such claims in one PR were all the opposite of
-  what happens.
+  what happens. **And a counterfactual that does not rebuild is the same
+  claim wearing the evidence of a measurement**: patching a file to its old
+  behaviour with a script that normalised the line endings failed IDE0055, so
+  `--no-build` ran the stale assembly and reported six passes where the same
+  six fail. Read the build result before reading the test result — a green
+  counterfactual is the outcome that should be checked hardest, because it is
+  the one that says the tests are worthless.
 - **A measurement says what the code *does*; it never says what it *may* do.**
   Fetch the specification section and paste the sentence.
+- **A field a caller chooses cannot answer a question about provenance**,
+  however strongly its values correlate with one. §9.6's saga needed to tell
+  its own echo of a cancellation from somebody else's, and
+  `OrderCancelled.Reason` looked like the discriminator because the saga's
+  four reasons and the customer's one partition the vocabulary — until you
+  read §11.4, whose endpoint parses **all five** codes. The correlation was
+  real and the inference was not. What closed it was a field written as a
+  literal at the entry point that knows the answer and never bound from a
+  request, which is the same rule `CommandOrigin` one layer out already
+  states. **Ask what would be true if the caller were hostile, or merely
+  unusual** — the two give the same answer here, and only the second has to
+  be plausible for the branch to be wrong.
 - **A rule whose stated test is a string match will be enforced as one**, by a
   reviewer or by whoever greps next. State the rule, not the grep. This one's
   argument is the `.ToArray()` narrowing in the C# style section below, not the
@@ -1019,7 +1037,11 @@ own line rather than sending a reader to a file that does not hold it.
   `AuthorisePayment`, so no verdict is ever outstanding on the one path this
   argument is about.) **Two open questions were being weighed independently and one decided
   the other.** Before ranking options by cost, ask whether each can still run
-  once its neighbours are settled.
+  once its neighbours are settled. **It has now happened twice, which is what
+  makes it a rule rather than an anecdote**: #141 ranked "make `ReleaseStock`
+  the only trigger" as its cleanest option while #143 was open beside it, and
+  answering #143 deleted that option — the second producer #141 would remove
+  is the only evidence #143's fix reads.
 - **Where two mechanisms answer one question and only one of them is editable,
   the editable one is where the lie lives.** GitHub honours closing keywords in
   a PR body and in a commit body independently, and
@@ -1041,7 +1063,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 725 of 915, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 740 of 936, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1192,9 +1214,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 725 of
-the 915 and starts no container — measured with `docker events`, not inferred —
-and `Category=Integration` is the other 190, needing the daemon exactly as
+category runs a smaller suite and says which. `Category!=Integration` is 740 of
+the 936 and starts no container — measured with `docker events`, not inferred —
+and `Category=Integration` is the other 196, needing the daemon exactly as
 before.
 
 **The integration half read 187 for two branches and the arithmetic never
@@ -1205,7 +1227,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (707) and integration (190), which is the 725 above split at the
+(18), unit (722) and integration (196), which is the 740 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1352,7 +1374,7 @@ Run `/validate-blueprint` after any substantive edit.
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
   admonition syntax. Two forms are named and recurring — `**Trap — …**`
-  (18) for a mistake worth naming, and `**Decision — …**` (9), which always
+  (19) for a mistake worth naming, and `**Decision — …**` (10), which always
   points at the ADR that records it:
 
   ```markdown
@@ -1996,7 +2018,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-029) and keep the
+  (currently ADR-030) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to
