@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -174,7 +174,7 @@ none. The helper counts
 `review_requested` events for Copilot, this loop makes exactly one per round,
 and each lands exactly one review — so **a request is outstanding when that
 count exceeds the number of landed Copilot reviews**, and both numbers are
-readable with what is already granted (`gh pr view <n> --json reviews` supplies
+readable with what is already granted (`pr-review-bodies.sh <n>` supplies
 the second). When one is outstanding, wait for its review rather than
 inheriting the verdict of the one before it. A request that never produces a
 review is the timeout case this step already covers, reported as the loop not
@@ -218,7 +218,7 @@ and not at its neighbour looks like.
 > recommended turned out to be right for a reason it never gave.
 
 **All-resolved needs three reads, not one**, because no single call carries the
-three signals it is defined over. `gh pr view <n> --json reviews` gives the
+three signals it is defined over. `pr-review-bodies.sh <n>` gives the
 review bodies, their suppressed blocks and the `commit` oid — and nothing else:
 **it does not return inline review comments, and it does not return thread
 resolution state.** Deciding step 6 is not owed from that call alone would skip
@@ -226,12 +226,25 @@ two of the three clean signals while reporting that all three were checked. So
 the resume runs the same read-only intake `/review-copilot` does:
 
 ```bash
+bash .claude/scripts/pr-review-bodies.sh <n>       # review bodies
 bash .claude/scripts/pr-review-comments.sh <n>     # inline comments
 bash .claude/scripts/pr-review-threads.sh <n>      # <thread-id> <isResolved> …
 ```
 
-Both are read-only with fixed endpoints, which is why they can be granted to a
-step that only wants to look. An unresolved thread from an earlier round is
+All three are read-only with fixed endpoints, which is why they can be granted
+to a step that only wants to look.
+
+**Two of them filter by author as of #56, and this step reports their counts
+like `/review-copilot` does.** `pr-review-bodies.sh` and
+`pr-review-comments.sh` admit Copilot's three logins plus the repository
+owner's, drop everything else before stdout, and print an admitted/dropped
+count to stderr. This step used to filter the same two feeds in prose, on two
+*different* logins — inline comments on `Copilot`, review bodies on
+`copilot-pull-request-reviewer` — which is exactly the split that let a
+two-string allow-list look complete. One list, declared once in
+`copilot-authors.sh`, now serves both. `pr-review-threads.sh` is unfiltered by
+construction and needs no filter: it returns thread ids and resolution state,
+never a body. An unresolved thread from an earlier round is
 exactly the state a fresh clean review never repeats, and it is the one the
 oid cannot see.
 
@@ -245,7 +258,7 @@ three is still owed at round nine, which is the entire reason that signal
 exists.
 
 **Join on the timestamp, not on a review id — the two sides do not share
-one.** `gh pr view --json reviews` reports a GraphQL node id
+one.** `pr-review-bodies.sh` reports a GraphQL node id
 (`PRR_kwDOTuTjXM8AAAABI_IalQ`) and the REST helper reports a numeric
 `pull_request_review_id` (`4898036373`). Comparing them matches **nothing**,
 which does not merely fail — it drops every comment and reports a review full
@@ -1106,8 +1119,9 @@ same argument as never calling a branch clean because asking failed.
 
    2. **Wait for the review to land** — a new review by
       `copilot-pull-request-reviewer` newer than the request. (That is the
-      login GraphQL reports and the one `gh pr view --json reviews` filters
-      on; REST spells the same account `copilot-pull-request-reviewer[bot]`.
+      login GraphQL reports and the one `pr-review-bodies.sh` admits; REST
+      spells the same account `copilot-pull-request-reviewer[bot]`, which the
+      same allow-list admits too.
       Both are the finished review's author — neither is the request
       target.) It takes minutes, and a clean one still posts (with zero
       comments), so landing is observable either way.
