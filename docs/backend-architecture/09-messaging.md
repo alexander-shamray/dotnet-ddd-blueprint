@@ -147,17 +147,21 @@ Consumers deserialising an unknown field ignore it.
 **"Optional" is doing more work in that sentence than it looks, because
 [§12.6](12-test-strategy.md)'s gate forbids an optional member — with one
 exemption, which is the rest of this paragraph.** Every member of a live
-contract here is `required` unless that gate's mid-rollout list names it, and
+contract here is `required` unless that gate's additive-member list names it,
+and
 the rule is enforced rather than observed. A member added as `required` is
 therefore **not** an additive change
 whatever this section calls it: `System.Text.Json` refuses a payload missing
 one, so the new build faults every message the old build staged and has not yet
 published — measured, not reasoned about. So an added member ships **optional
-first**, which is §15.5's expand phase; it is listed in §12.6's suite as
-halfway through a rollout, and the release that makes it `required` is the
-contract phase that removes the listing. Two releases, exactly as the callout
-below asks of a vocabulary member, and for the same reason: the consumer has to
-be able to cope with the shape it will meet.
+first and stays optional for the life of that contract version**; it is listed
+in §12.6's suite by name, and the listing goes when the version does. **Not
+"until the rollout ends", which is what this said**: a payload predating the
+field has no bound on how long it can arrive — the error queue holds a message
+until somebody handles it, outliving even its outbox row — so tightening the
+member to `required` later would fail deserialisation on every retained one,
+before any consumer branch could read the absent value. That is a breaking
+change, and the paragraph below sends those to a new version.
 
 **That tolerance is about fields and does not extend to anything else that can
 be added.** A consumer ignores a field it does not know because the
@@ -2393,7 +2397,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // An allow-list of two, because the other shape passes every spelling
         // nobody thought of: CancelOrigins.Workflow is the echo, and a null
         // Origin is an instance publishing from before the field existed —
-        // §15.5's expand phase, with a contract phase owed.
+        // permanent for this contract version — see §9.2.
         Event(
             () => OrderCancelled,
             x =>
@@ -3195,11 +3199,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > **The absent case is a tolerance and not a reading.** A rolling deploy has
 > instances publishing this event before they populate `Origin`, so absent is
 > discarded — the pre-#123 behaviour, held for the length of the deploy. It is
-> §15.5's expand phase with a **contract phase owed**: once no instance
-> publishes without the field, absent becomes an unknown like any other and the
-> branch goes. Faulting on absent instead would file an error-queue entry for
-> every ordinary cancellation on the way through every deploy, which is a
-> guaranteed incident traded against a race that is open only across one.
+> **permanent for this contract version.** An earlier revision called it
+> §15.5's expand phase and said a contract phase was owed that would make
+> `Origin` required; that tightening breaks every retained payload predating
+> the field, which §9.2 makes a V2 rather than an edit. Faulting on absent
+> instead would file an error-queue entry for every ordinary cancellation on
+> the way through every deploy, which is a guaranteed incident traded against
+> a race open only for a payload old enough to predate the field.
 >
 > **What faulting buys past the race is the case nothing else reports.** A
 > cancellation arriving after the saga finalised down a `FlagOrderForReview`

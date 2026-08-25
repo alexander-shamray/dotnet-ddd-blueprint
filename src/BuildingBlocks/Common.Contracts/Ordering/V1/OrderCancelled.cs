@@ -46,10 +46,13 @@ namespace Common.Contracts.Ordering.V1;
 /// optional field additive, so this is not a V2; ADR-026's ordering still
 /// applies inside the one service, because a rolling deploy has instances
 /// publishing this event before they populate it. A consumer must therefore
-/// hold whatever it did before the field for the length of that deploy —
-/// §9.6's saga discards on absent for exactly that reason — and that tolerance
-/// is §15.5's expand phase with a contract phase owed, not a permanent
-/// reading.
+/// hold whatever it did before the field — §9.6's saga discards on absent for
+/// exactly that reason — and it holds it <b>permanently</b> rather than for
+/// the length of a deploy. A payload predating the field has no bound on how
+/// long it can survive: the error queue keeps a message until somebody
+/// handles it, and a replay can reintroduce one at any time. Making this
+/// member <c>required</c> later would fail deserialisation before any
+/// consumer branch ran, which is a breaking change §9.2 sends to a V2.
 /// </para>
 /// </remarks>
 public sealed record OrderCancelled : IIntegrationEvent

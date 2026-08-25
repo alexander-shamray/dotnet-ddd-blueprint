@@ -120,9 +120,17 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
         // Copilot named that, and the fence it asked for is **not observable
         // here**: UseMessageRetry wraps the pipeline, so retries run inside it
         // and no fault reaches an IReceiveObserver or IConsumeObserver until
-        // the ladder is exhausted at about fifty-seven seconds, past this
-        // suite's budget. Measured, by writing both observers and watching them
-        // stay silent for the whole wait.
+        // the ladder is exhausted — about seventy seconds, which is this
+        // repository's own figure for it and well past this suite's budget.
+        // Measured, by writing both observers and watching them stay silent for
+        // the whole wait.
+        //
+        // **No per-attempt arithmetic here, deliberately.** An earlier revision
+        // wrote the ladder out as 1s, 3s, 7s, 15s, 31s and priced it at
+        // fifty-seven — both a contradiction of the seventy this corpus states
+        // everywhere else and a determinism the policy does not have. The only
+        // property this test needs is that the shortest ladder still outlasts
+        // thirty seconds.
         //
         // Closing it needs a signal the platform does not have — a first-attempt
         // hook, or a shorter ladder on a test-only endpoint. Stated rather than

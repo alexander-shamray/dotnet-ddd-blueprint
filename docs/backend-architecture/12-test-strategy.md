@@ -1847,7 +1847,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     var orderId = Guid.CreateVersion7();
 
     // Every member of every V1 contract is `required` unless §12.6's
-    // mid-rollout list names it — the §9.1 envelope included, and none of
+    // additive-member list names it — the §9.1 envelope included, and none of
     // these — so there is no partial construction to elide anywhere here,
     // and a builder keeps that from filling the test. `new StockReserved
     // { OrderId = orderId }` does not compile: the three envelope members are
@@ -2382,8 +2382,8 @@ every one of them to appear in the JSON — which is also what fails when a memb
 is added to a record and not to its sample.
 
 `ContractSamples.Create` is the reason this suite stays honest as contracts
-grow. Every member of a V1 contract is `required` unless §12.6's mid-rollout
-list names it, so there is no
+grow. Every member of a V1 contract is `required` unless §12.6's
+additive-member list names it, so there is no
 reflection shortcut that constructs one — a new contract without a sample fails
 here rather than being quietly skipped, which is the failure mode of every
 "iterate over all the types" test that defaults to `Activator.CreateInstance`.
@@ -2425,15 +2425,31 @@ public parameterless constructor must mark every settable property.
 > the ordinary state for the length of the deploy.
 >
 > **So the safe shape is the one the rule forbids, and the gate admits it by
-> name rather than everywhere.** A member halfway through being added is listed
+> name rather than everywhere.** A member added to a live contract is listed
 > in the suite beside the assertion that reads it, and the list is subtracted
 > from the *failures* rather than from the candidates — there is no narrowed
 > selection to pass vacuously. What makes that safe rather than a hole is a
-> second test whose subject is the list: it fails when an entry stops being
-> optional, so the release that makes the member `required` cannot leave the
-> exemption standing, and it fails again if the entry names nothing. **A list
-> of deliberate gaps is only honest while something re-checks that they are
-> still gaps** — the same shape §13.6's unloaded alerts and their gate are in.
+> second test whose subject is the list: it fails if the entry names nothing,
+> and again if the member has somehow become always-supplied. **A list of
+> deliberate gaps is only honest while something re-checks that they are still
+> gaps** — the same shape §13.6's unloaded alerts and their gate are in.
+
+> **The entry clears when the contract version does, and an earlier revision
+> of this callout said it clears when the member becomes `required`.** That
+> tightening is a breaking change and not a tidy-up: a payload predating the
+> field has no bound on how long it can arrive — `docs/runbooks/error-queue.md`
+> keeps a message until somebody handles it, outliving even its outbox row's
+> purge, and a replay can reintroduce one at any time — so requiring the member
+> would fail deserialisation on every retained one, before any consumer branch
+> could read the absent value. [§9.2](09-messaging.md) sends a breaking change
+> to a new version, so an additive member stays optional for the life of the
+> version it was added to, and the listing goes when that version does.
+>
+> **The first framing was "§15.5's expand phase with a contract phase owed",
+> and it was wrong in the direction that reads as rigour.** It promised a
+> future tightening, which sounds like the exemption being temporary and is
+> actually a scheduled breakage — the honest version is a permanent tolerance
+> with a stated reason, which is the less tidy claim and the true one.
 
 ### Consumer-driven contracts
 

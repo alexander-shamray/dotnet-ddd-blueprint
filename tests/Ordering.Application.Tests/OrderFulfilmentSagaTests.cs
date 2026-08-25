@@ -2526,16 +2526,17 @@ public class OrderFulfilmentSagaTests
     [Fact]
     public async Task A_cancellation_published_before_the_origin_field_existed_is_discarded()
     {
-        // **§15.5's expand phase, pinned so it cannot be tidied away as an
-        // oversight.** A rolling deploy has instances publishing this event
-        // before they populate Origin, and faulting on absent would file an
-        // error-queue entry for every ordinary cancellation for the length of
-        // the deploy — a guaranteed incident, traded against #123's race being
-        // open across it, which is bounded.
+        // **Pinned so it cannot be tidied away as an oversight.** A rolling
+        // deploy has instances publishing this event before they populate
+        // Origin, and faulting on absent would file an error-queue entry for
+        // every ordinary cancellation for the length of the deploy — a
+        // guaranteed incident.
         //
-        // **This is a tolerance with a contract phase owed**, not a reading of
-        // absent as an origin. When no instance publishes without the field,
-        // the branch goes and this test goes with it.
+        // **And the tolerance is permanent for this contract version**, not a
+        // phase with a tightening owed: a payload predating the field can still
+        // arrive from the error queue or a replay long after every instance
+        // populates it, and making Origin required would fail deserialisation
+        // before this branch ran at all. This test goes when V1 does.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {

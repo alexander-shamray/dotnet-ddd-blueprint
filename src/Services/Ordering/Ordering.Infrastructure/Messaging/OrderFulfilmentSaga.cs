@@ -311,16 +311,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         //
         //   workflow — the echo above. The routine case, and the only one this
         //              service can prove is its own.
-        //   absent   — an instance publishing from before the field existed.
-        //              §15.5's expand phase, not an unknown: it holds the
-        //              pre-#123 behaviour for the length of a rolling deploy
-        //              rather than faulting every ordinary cancellation on the
-        //              way through it. **This is a tolerance with a contract
-        //              phase owed** — once no instance publishes without the
-        //              field, absent becomes an unknown like any other and
-        //              this branch goes. Until then #123's race is still open
-        //              across a deploy, which is bounded where the alternative
-        //              is a guaranteed incident on every one.
+        //   absent   — a payload published before the field existed. Not an
+        //              unknown: it holds the pre-#123 behaviour rather than
+        //              faulting every ordinary cancellation on the way through
+        //              a deploy. **And it holds it permanently.** An earlier
+        //              revision called this §15.5's expand phase and said a
+        //              contract phase was owed that would make Origin
+        //              required; that tightening is a breaking change inside
+        //              V1, because such a payload has no bound on how long it
+        //              can survive — the error queue keeps a message until
+        //              somebody handles it, and a replay can bring one back at
+        //              any time — and it would then fail deserialisation before
+        //              reaching this branch at all. §9.2 sends that to a V2.
+        //              So #123's race stays open for a payload old enough to
+        //              predate the field, which is the price of not breaking
+        //              every retained one.
         //
         // A user origin is what #123 is about: the cancellation reached the
         // aggregate and the saga either has not seen its OrderPlaced yet or

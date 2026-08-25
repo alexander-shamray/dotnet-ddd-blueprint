@@ -208,7 +208,7 @@ public class ContractTests
             // there is no narrowed selection to pass vacuously — the same shape
             // the composition-root gate ended up in after three attempts at
             // filtering what it looked at.
-            string[] unexplained = [.. optional.Except(MidRolloutMembers)];
+            string[] unexplained = [.. optional.Except(AdditiveMembers)];
 
             unexplained.ShouldBeEmpty(
                 $"{type.FullName} can be constructed without these, so a producer can omit them " +
@@ -217,9 +217,9 @@ public class ContractTests
     }
 
     /// <summary>
-    /// Members that are deliberately not <c>required</c> because they are
-    /// halfway through being added to a live contract (§9.2, §15.5's expand
-    /// phase). Each owes a contract phase that makes it <c>required</c>.
+    /// Members added to a contract that was already live. They are optional
+    /// for the life of that contract version, and the entry clears when the
+    /// version does (§9.2).
     /// </summary>
     /// <remarks>
     /// <b>This list exists because the rule above and §9.2 could not both be
@@ -228,34 +228,46 @@ public class ContractTests
     /// says no contract may be constructible half-filled. Measured rather than
     /// argued: <c>System.Text.Json</c> throws
     /// <c>JsonException: … was missing required properties</c>, so a member
-    /// shipped as <c>required</c> faults every message the previous build
-    /// staged and has not yet published — a rolling deploy's ordinary state.
+    /// shipped as <c>required</c> faults any payload that predates it.
     /// <b>The safe shape is the one the rule forbade</b>, so the rule admits
     /// it by name instead of everywhere.
     /// <para>
-    /// <b>It is self-clearing, which is the whole reason it is safe to have.</b>
-    /// The companion test below fails when an entry stops being optional, so
-    /// the release that makes the member <c>required</c> cannot leave the
-    /// exemption standing — and an entry cannot quietly become permanent, which
-    /// is what a list of known exceptions usually becomes. Same shape as
-    /// <c>awaiting-signal.yaml</c>'s unloaded alerts and their gate: a list of
-    /// deliberate gaps is only honest while something re-checks that they are
-    /// still gaps.
+    /// <b>It is optional for the LIFE of the contract, not for the length of a
+    /// deploy — and an earlier revision of this comment had that wrong.</b> It
+    /// called the exemption §15.5's expand phase and said a contract phase was
+    /// owed that would make the member <c>required</c>. That later tightening
+    /// is a <b>breaking change inside V1</b>: a payload predating the field has
+    /// no bound on how long it can survive — <c>docs/runbooks/error-queue.md</c>
+    /// says a message waits there until somebody handles it, outliving even
+    /// its outbox row's purge, and a replay can reintroduce it at any time —
+    /// so making the member <c>required</c> would fail deserialisation before
+    /// any consumer branch could apply the absent-value reading. §9.2 sends a
+    /// breaking change to a new version, so the tightening, if it is ever
+    /// wanted, is a V2 rather than an edit to this one.
+    /// </para>
+    /// <para>
+    /// <b>It still clears itself; the trigger is the contract's retirement
+    /// rather than the member's tightening.</b> The companion test below fails
+    /// when an entry names no public contract, so a V2 replacing V1 forces the
+    /// entry out — and it fails the other way too, if a member somehow becomes
+    /// always-supplied. A list of deliberate gaps is only honest while
+    /// something re-checks that they are still gaps, which is the shape
+    /// <c>awaiting-signal.yaml</c>'s unloaded alerts are in.
     /// </para>
     /// </remarks>
-    private static readonly string[] MidRolloutMembers =
+    private static readonly string[] AdditiveMembers =
     [
-        // #123. Absent means "published before this field existed" and §9.6's
-        // saga discards on it, holding the pre-#123 behaviour for the length of
-        // a deploy. The contract phase is owed once no instance publishes
-        // without it.
+        // #123. Absent means "published before this field existed", and §9.6's
+        // saga discards on it — permanently, because a payload that old can
+        // still arrive from the error queue or a replay. It leaves this list
+        // when V1 does.
         "OrderCancelled.Origin"
     ];
 
     [Fact]
-    public void A_payload_predating_a_mid_rollout_member_still_deserialises()
+    public void A_payload_predating_an_additive_member_still_deserialises()
     {
-        // **The property the whole expand phase rests on, measured rather than
+        // **The property the whole exemption rests on, measured rather than
         // assumed.** §9.6 discards an OrderCancelled whose Origin is absent, on
         // the reading that absent means "published before the field existed" —
         // and that branch is only reachable if the payload deserialises at all.
@@ -284,27 +296,28 @@ public class ContractTests
     }
 
     [Fact]
-    public void Every_mid_rollout_member_is_still_mid_rollout()
+    public void Every_additive_member_is_still_additive()
     {
         // The gate on the list, without which the list is where the rule above
-        // goes to die: an entry outlives its rollout, nothing says so, and the
-        // exemption reads as a property of the contract rather than of a
-        // release. This fails from both directions — a member that has become
-        // required, and a name that no longer resolves at all.
-        foreach (string entry in MidRolloutMembers)
+        // goes to die: an entry outlives the contract it was written for,
+        // nothing says so, and a name that resolves to nothing reads exactly
+        // like a live exemption. This fails from both directions — a name that
+        // no longer resolves, which is what a V2 replacing V1 produces, and a
+        // member that has somehow become always-supplied.
+        foreach (string entry in AdditiveMembers)
         {
             string[] parts = entry.Split('.');
             parts.Length.ShouldBe(2, $"{entry} must be spelt Type.Member");
 
             Type? type = Contracts.SingleOrDefault(t => t.Name == parts[0]);
-            type.ShouldNotBeNull($"{entry} names no public contract — the exemption outlived its type");
+            type.ShouldNotBeNull($"{entry} names no public contract — a V2 has replaced it and the entry belongs in that commit");
 
             PropertyInfo? property = type.GetProperty(parts[1], BindingFlags.Public | BindingFlags.Instance);
             property.ShouldNotBeNull($"{entry} names no member of {type.Name}");
 
             IsAlwaysSupplied(property, type).ShouldBeFalse(
-                $"{entry} is now always supplied, so its rollout is over and the exemption " +
-                "belongs in the commit that ended it (§12.6)");
+                $"{entry} is now always supplied, so this entry describes something " +
+                "that is no longer true (§12.6)");
         }
     }
 

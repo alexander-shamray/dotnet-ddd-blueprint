@@ -99,8 +99,9 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
         // Populated from this release on. §9.6's saga discards an ABSENT origin
         // on the same path as its own echo, and that is a TOLERANCE rather
         // than an identification: absent means "published before the field
-        // existed", which holds the pre-#123 behaviour for the length of a
-        // rolling deploy and is owed a contract phase. Reading it as an origin
+        // existed", which holds the pre-#123 behaviour for as long as such a
+        // payload can still arrive — indefinitely, since the error queue keeps
+        // one until it is handled. Reading it as an origin
         // in either direction is the inference this field exists to replace —
         // as User it would fault every cancellation an older instance
         // published, and as Workflow it would outlive the deploy that

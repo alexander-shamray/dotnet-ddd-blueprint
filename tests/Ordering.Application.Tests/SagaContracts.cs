@@ -11,7 +11,7 @@ namespace Ordering.Application.Tests;
 /// <remarks>
 /// <b>A builder rather than object initialisers at each call site, and §12.5
 /// says why.</b> Every member of every V1 contract is <c>required</c> unless
-/// §12.6's mid-rollout list names it — the §9.1 envelope included, and none
+/// §12.6's additive-member list names it — the §9.1 envelope included, and none
 /// of these — so <c>new StockReserved { OrderId = orderId }</c>
 /// does not compile and there is no partial construction to elide. Written out
 /// per test, the three envelope members would be most of every saga test.
