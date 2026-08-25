@@ -448,12 +448,35 @@ set -e
 # A mention inside the review's own prose cannot be mistaken for the verdict
 # either — `.stopReason` names a field, where a regex only ever named a
 # substring.
+# Reduce a reviewer-supplied field to something that cannot carry an
+# instruction: an identifier alphabet, truncated. `tr -cd` deletes the
+# complement of the set, so newlines, quotes and spaces are gone rather than
+# escaped — escaping is a property of the consumer and this value is printed
+# straight to a terminal and into /ship's context.
+safe_token() {
+  printf '%.40s' "$(printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-')"
+}
+
 stop=$(jq -r 'if type == "object" then (.stopReason // "<absent>") else "<not-an-object>" end' \
          "$result" 2>/dev/null) ||
   { echo "grok's output is not valid JSON; the review did not run and suggestions.md is left as it was" >&2; exit 6; }
 if [ "$stop" != "$stop_ok" ]; then
-  jq -r '.cancellationCategory // empty' "$result" 2>/dev/null >&2 || true
-  echo "grok did not finish its turn — the root stopReason is \"$stop\", not \"$stop_ok\"; the review did not run and suggestions.md is left as it was" >&2
+  # **The rejected path crossed the boundary the accepted path does not (#52).**
+  # `$stop` and `.cancellationCategory` are fields of a document the reviewer
+  # wrote, and both were echoed verbatim — so a run that produced no clean
+  # verdict handed /ship reviewer-authored prose anyway, complete with any
+  # newlines it chose. Removing `cat "$result"` closed the success path and
+  # left this one open, which is what a fix aimed at a line rather than at a
+  # property looks like.
+  #
+  # Both are now reduced to a token alphabet before they are printed. A real
+  # stopReason or cancellation category is a bare identifier, so nothing
+  # diagnostic is lost; anything else arrives as the characters of it that
+  # could not carry an instruction.
+  category_raw=$(jq -r '.cancellationCategory // empty' "$result" 2>/dev/null)
+  category=$(safe_token "$category_raw")
+  [ -z "$category" ] || echo "grok reported cancellation category: $category" >&2
+  echo "grok did not finish its turn — the root stopReason is \"$(safe_token "$stop")\", not \"$stop_ok\"; the review did not run and suggestions.md is left as it was" >&2
   exit 6
 fi
 # **The verdict is extracted; the transcript is not printed (#52).** Every byte

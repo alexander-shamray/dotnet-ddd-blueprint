@@ -30,4 +30,24 @@ case "$branch" in
 esac
 [[ "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/()-]*$ ]] ||
   { echo "not a branch name this helper will take: $branch" >&2; exit 2; }
-gh pr list --state all --head "$branch" --json number,state,url
+# **`--head` filters on the branch NAME and nothing else**, which is not the
+# question being asked. It matches across forks, so an outside contributor's
+# pull request from a same-named branch is a candidate here — and /ship step 0
+# reads this to decide whether the branch landed, /pr to decide whether one is
+# already open. Acting on a stranger's pull request is the failure.
+#
+# grok-review.sh:139 already carries this check and the argument for it, and
+# this helper shipped without it: a fix that closes a hole by name and leaves
+# it open by provenance has moved the defect rather than removed it — written
+# down one file away, in a comment, and reimplemented wrong here anyway.
+#
+# Both sides of the comparison are properties of the filesystem: `gh repo view`
+# reads the checkout, and the branch came from `git branch --show-current` or
+# was shape-checked above. The value reaches jq through `--arg`, never as
+# program text.
+repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) ||
+  { echo "cannot resolve this checkout's repository" >&2; exit 2; }
+gh pr list --state all --head "$branch" --json number,state,url,headRepository |
+  jq --arg repo "$repo" \
+    '[ .[] | select((.headRepository.nameWithOwner // "") == $repo)
+       | {number, state, url} ]'

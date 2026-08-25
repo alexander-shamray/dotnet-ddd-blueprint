@@ -1,14 +1,21 @@
 """The review loop's helpers, tested where they decide.
 
-Five of this directory's scripts carry a judgement that the whole /ship loop
-rests on, and until now none of them had a test.
+The scripts in this directory carry the judgements the whole /ship loop and
+both sweeps rest on, and until this suite existed none of them had a test.
 
-**Six judgements, five of which shipped wrong.** Each of those five is
-reproduced as a case that fails against the old behaviour — a gate only ever
-observed green is one nobody has established is looking at anything, which is
-the rule the .github/**-gate suites are already written to. The sixth, the label
-helper's confinement, never shipped wrong; its cases keep a closed grant closed
-rather than catching anything.
+**Almost every subject below shipped wrong**, and each of those is reproduced
+as a case that fails against the old behaviour — a gate only ever observed
+green is one nobody has established is looking at anything, which is the rule
+the .github/**-gate suites are already written to. One subject is the
+exception and is marked as such: the label helper's confinement never shipped
+wrong, and its cases keep a closed grant closed rather than catching anything.
+
+**No count opens this list, in this file or in the three that mirror it.**
+`.github/workflows/ci.yml`, `docs/testing.md` and `CLAUDE.md` enumerate the
+same subjects, and the numeral that used to lead all four said four, then five,
+then six, and was stale again inside the pull request that added the last of
+them. A figure restated in four places goes stale in all four at once; the
+enumerations are what a reader compares.
 
 **The regression negatives are paired with positive controls, and those are not
 decoration.** A negative that passes because a pattern matches *nothing* is
@@ -34,6 +41,21 @@ What is under test, and which issue each half closes:
         label in any repository. This one is the odd entry: it never shipped
         wrong. It is a grant closed by moving it into a helper, and these cases
         are what keep it closed rather than what caught it.
+  #56   /review-copilot read three comment feeds and filtered none of them,
+        holding `Edit`, in a loop /ship runs unattended. The cases cover what a
+        feed helper admits, that a dropped item's BODY reaches neither stream,
+        and that no command can reach those feeds outside the fixed helpers.
+  #33   the deny list guarded the helpers and not the files that grant them.
+        The cases cover every control-surface path in both spellings, that no
+        rule is spelled `Write(`, and that the worktree root is never denied —
+        the over-reach that would deny editing the repository itself.
+  #52   grok-review.sh printed the reviewer's whole transcript to the caller's
+        context, and printed two reviewer-controlled fields on its rejected
+        path after that was fixed. The cases enumerate every legitimate read of
+        the result file and refuse any other, including a widened one.
+  #57   the sweeps' de-duplication gate treated any open issue as tracking, so
+        a stranger could suppress a finding and end the sweep. The cases cover
+        both copies of the gate and every phrasing it has retired.
 
 Two rules the suite is written to, both of them this repository's:
 
@@ -1627,7 +1649,14 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
         # 2>/dev/null)` and left the filter unchecked — rewriting it to
         # `.stopReason, .` emitted the whole transcript while every case passed.
         (re.escape(STOP_EXTRACTION), "stopReason extracted"),
-        (r"jq -r '\.cancellationCategory // empty' \"\$result\" 2>/dev/null >&2",
+        # Assigned rather than piped to stderr since #148 round 9: the raw
+        # value is reviewer-authored and was printed verbatim, so it is now
+        # reduced to a token alphabet by safe_token before anything sees it.
+        # This entry changed because the SCRIPT changed, and the gate caught
+        # that on its first run — which is the property it exists for: a new
+        # read of the transcript has to be looked at, including mine.
+        (r"category_raw=\$\(jq -r '\.cancellationCategory // empty' "
+         r"\"\$result\" 2>/dev/null\)",
          "cancellation category extracted"),
     )
 
