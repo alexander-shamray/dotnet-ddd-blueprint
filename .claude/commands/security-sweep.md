@@ -262,9 +262,9 @@ or above.** Three gates, and each drops candidates the round must not file:
 - **Not already tracked.** Before filing, enumerate the **whole** issue set —
   `gh issue list --state all --limit 1000`, because the default 30 hides older
   issues and lets a duplicate straight through — and match each finding against
-  it. An open issue whose author is the repository **owner**, or which carries a
-  maintainer-applied label, blocks a re-file — as does a `wontfix` or an
-  accepted-risk record meeting the same test. **An issue meeting neither
+  it. An open issue **opened by the repository owner**
+  blocks a re-file — as does a `wontfix` or an accepted-risk record meeting
+  the same test. **An issue meeting neither
   condition is not tracking and blocks nothing**; the paragraph below says why.
   This sentence is qualified rather than left general because the sweep reads
   this file as its instructions, and a summary that states the old rule
@@ -300,16 +300,23 @@ gh issue list --state all --limit 1000 --json number,title,state,labels,author
 gh repo view --json owner --jq .owner.login      # already granted
 ```
 
-An issue may suppress a candidate only if **either** holds:
+An issue may suppress a candidate only if its `author.login` is the
+repository owner's login, resolved from the checkout by the second command —
+never typed from memory, for `gh-label-ensure.sh`'s reason: a login taken as a
+parameter is a login a finding gets to choose.
 
-- its `author.login` is the repository owner's login, resolved from the
-  checkout by the second command — never typed from memory, for
-  `gh-label-ensure.sh`'s reason: a login taken as a parameter is a login a
-  finding gets to choose; **or**
-- it carries a label this repository's vocabulary applies (`security`, `bug`,
-  `critical`, `high`, `medium`, `low`). A non-collaborator cannot set labels at
-  creation on a public repository, so a label is a maintainer's touch even when
-  the body is not.
+**A label is deliberately NOT a second sufficient condition, and it was one
+until a review round asked what a label proves.** A non-collaborator cannot
+set one at creation, so a label does look like a maintainer's touch — but it
+is applied to an issue, not to an issue's *contents*, and the author can edit
+the title and body afterwards while the label stays. So the signal a sweep
+would be trusting is "a maintainer once looked at something that lived at this
+number", which is not the claim the gate needs. Authorship is not editable;
+that is the whole of why it is the test.
+
+The cost is real and is the safe direction: an issue opened by a collaborator
+who is not the owner no longer suppresses, so a genuine duplicate gets filed
+again. A duplicate that says why beats a confirmed finding nobody wrote down.
 
 **An issue meeting neither is not tracking, and "not tracking" means the
 candidate is untracked.** So it does not merely fail to suppress — the finding

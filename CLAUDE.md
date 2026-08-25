@@ -1092,10 +1092,18 @@ parameter a finding could steer. **Five of those six shipped wrong, so each is
 reproduced as a case that fails against the old behaviour** — the sixth is a
 grant closed by moving it into a helper, and the suite is what keeps it closed.
 
-**#56 and #33 added two more subjects, and both are of the sixth kind rather
+**Four issues added subjects since, and all four are of the sixth kind rather
 than the first five**: they keep a closed hole closed instead of reproducing a
-defect. **`.github/workflows/ci.yml` and `docs/testing.md` enumerate the same
-subjects and are reconciled in the same change** — all three used to open the
+defect that shipped. **#56** — what a feed helper admits, what it reports about
+what it dropped, and that no command reaches those feeds outside the helpers.
+**#33** — which paths the harness denies itself, and that the worktree root is
+not among them. **#52** — that the reviewer's transcript reaches no stream, and
+that the one bounded read of it cannot be widened. **#57** — that both sweeps
+still state who may suppress a finding, and that neither has drifted back to
+the unconditional rule.
+
+**`.github/workflows/ci.yml` and `docs/testing.md` enumerate the same subjects
+and are reconciled in the same change** — all three used to open the
 list with a count, and all three have dropped it, because that numeral said
 four, then five, then six, and was stale again inside the pull request that
 added these two. The feed cases drive `copilot_partition` directly — a

@@ -79,10 +79,14 @@ before a slot is reserved, whether the sweeps' worktree guard is the
 direct-child check it claims, and whether the label helper leaves a free
 parameter a finding could steer. That last is the one that never shipped
 wrong — it is a grant closed by moving it into a helper, and the suite is what
-keeps it closed. Since #56 and #33 it also covers what a Copilot feed helper
-admits, what it reports about what it dropped, and that no command can reach
-those feeds outside the fixed helpers; and which paths the harness denies
-itself — both of that last kind.
+keeps it closed. Four issues added subjects since, all of that last kind:
+**#56**, what a Copilot feed helper admits, what it reports about what it
+dropped, and that no command can reach those feeds outside the fixed helpers;
+**#33**, which paths the harness denies itself and that the worktree root is
+not among them; **#52**, that the reviewer's transcript reaches no stream and
+that the one bounded read of it cannot be widened; and **#57**, that both
+sweeps still state who may suppress a finding and that neither has drifted back
+to the unconditional rule.
 
 **No count opens that list any more**, here or in `.github/workflows/ci.yml` or
 `CLAUDE.md`, and the three enumerations are what a reader compares instead. The

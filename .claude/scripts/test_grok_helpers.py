@@ -73,6 +73,7 @@ FEEDS = {
     "review bodies": SCRIPTS / "pr-review-bodies.sh",
     "issue comments": SCRIPTS / "pr-issue-comments.sh",
 }
+NEWLINE = chr(10)  # spelled this way so patch scripts cannot mangle it
 SETTINGS = SCRIPTS.parent / "settings.json"
 COMMANDS = SCRIPTS.parent / "commands"
 DROP = SCRIPTS / "git-worktree-drop.sh"
@@ -1559,6 +1560,15 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
                 self.assertIn(f"bash .claude/scripts/{path.name}:*", frontmatter)
 
 
+# The one bounded read of the reviewer transcript, spelled out so the
+# allow-list can require it exactly. grok-review.sh writes it across two
+# physical lines with a backslash continuation; this is the joined form.
+STOP_EXTRACTION = (
+    'stop=$(jq -r \'if type == "object" then (.stopReason // "<absent>") '
+    'else "<not-an-object>" end\' "$result" 2>/dev/null)'
+)
+
+
 class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
     """#52 — grok-review.sh printed the whole reviewer transcript to stdout.
 
@@ -1604,9 +1614,19 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
     ALLOWED_RESULT_USES = (
         (r'result=\$\(mktemp .*\)', "created"),
         (r'rm -f "\$result" 2>/dev/null', "cleaned up on exit"),
-        (r'grok .*>"\$result"', "written by the reviewer"),
+        # `docker run`, not `grok`: the invocation is a multi-line command and
+        # the physical line naming the file starts with `grok`. Joining the
+        # continuations showed what the command actually is — which is the
+        # point of joining them, and it corrected this entry on the first run.
+        (r'docker run .* grok -p "/review-branch" --permission-mode bypassPermissions --output-format json >"\$result"',
+         "written by the reviewer"),
         (r'\[ -s "\$result" \]', "emptiness check"),
-        (r'"\$result" 2>/dev/null\)', "stopReason extracted"),
+        # The whole command, escaped from a literal rather than written as a
+        # loose pattern. Its jq filter sits on the physical line ABOVE the one
+        # naming the file, so a tail-only pattern validated `"$result"
+        # 2>/dev/null)` and left the filter unchecked — rewriting it to
+        # `.stopReason, .` emitted the whole transcript while every case passed.
+        (re.escape(STOP_EXTRACTION), "stopReason extracted"),
         (r"jq -r '\.cancellationCategory // empty' \"\$result\" 2>/dev/null >&2",
          "cancellation category extracted"),
     )
@@ -1618,16 +1638,45 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
         expansion, and matching only one of them is how a check reports a
         clean file it never looked at.
         """
-        found = []
-        for line in self.code_lines():
-            normalised = line.replace("${result}", "$result")
-            if "$result" not in normalised and "result=$(" not in normalised:
+        return [
+            (whole, command)
+            for whole in self.joined_lines(self.code_lines())
+            for command in self.commands_touching(whole)
+        ]
+
+    @staticmethod
+    def joined_lines(lines):
+        """Fold backslash continuations into the command they belong to.
+
+        A shell command split across physical lines is one command, and
+        checking the lines separately validates only the fragment that happens
+        to carry `$result`. The stopReason extraction is exactly that shape —
+        its jq filter sits on the line ABOVE the one naming the file — so
+        rewriting that filter to `.stopReason, .` emitted the whole transcript
+        while every check passed. Found by review, not by this suite.
+        """
+        joined, buffer = [], ""
+        for line in lines:
+            stripped = line.rstrip()
+            if stripped.endswith("\\"):
+                buffer += stripped[:-1].strip() + " "
                 continue
-            for command in re.split(r"\|\||&&|;|\|", normalised):
-                command = command.strip()
-                if "$result" in command or "result=$(" in command:
-                    found.append((line.strip(), command))
-        return found
+            joined.append((buffer + stripped.strip()).strip())
+            buffer = ""
+        if buffer:
+            joined.append(buffer.strip())
+        return joined
+
+    @staticmethod
+    def commands_touching(whole):
+        normalised = whole.replace("${result}", "$result")
+        if "$result" not in normalised and "result=$(" not in normalised:
+            return []
+        return [
+            command.strip()
+            for command in re.split(r"\|\||&&|;|\|", normalised)
+            if "$result" in command or "result=$(" in command
+        ]
 
     def test_every_command_touching_the_result_file_is_a_known_one(self):
         for line, command in self.result_commands():
@@ -1664,7 +1713,8 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
         clean = REVIEW.read_text(encoding="utf-8")
         for escape in ('cat "$result"', 'jq -r . "$result"', 'sed -n p "$result"',
                        'base64 "$result"', 'cat "${result}"',
-                       'rm -f "$result"; cat "$result"'):
+                       'rm -f "$result"; cat "$result"',
+                       'jq -r "." "$result"'):
             with self.subTest(escape=escape):
                 spiked = clean.replace(
                     'echo "grok finished its turn',
@@ -1677,20 +1727,47 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
                 ]
                 self.assertTrue(offenders, f"{escape} was not caught")
 
+    def test_widening_the_bounded_read_is_refused(self):
+        """The escape a tail-only pattern could not see (#148 round 7).
+
+        The stopReason extraction spans two physical lines, so an allow-list
+        matching only the fragment that names the file left its jq FILTER
+        unchecked — and `.stopReason, .` emits the whole document from the
+        command the allow-list had just approved. Nothing is injected here;
+        the existing read is widened, which is why it needed its own case.
+        """
+        clean = REVIEW.read_text(encoding="utf-8")
+        for widened in (".stopReason, .", ". // .stopReason", ".stopReason, .[]"):
+            with self.subTest(filter=widened):
+                # Only in code. The header comments discuss `.stopReason` at
+                # length, and mutating the first occurrence in the whole file
+                # rewrote a comment and left the command alone — a mutation
+                # test that changes nothing passes for the wrong reason, which
+                # is the failure this suite exists to refuse.
+                mutated = NEWLINE.join(
+                    line if line.lstrip().startswith("#")
+                    else line.replace(".stopReason", widened)
+                    for line in clean.splitlines()
+                )
+                self.assertNotEqual(clean, mutated, "the filter moved")
+                offenders = [
+                    command for command in self.commands_in(mutated)
+                    if not any(re.fullmatch(pattern, command)
+                               for pattern, _ in self.ALLOWED_RESULT_USES)
+                ]
+                self.assertTrue(offenders, f"`{widened}` was not caught")
+
     def commands_in(self, text):
         """result_commands() over arbitrary text — for the falsification above."""
-        found = []
-        for line in text.splitlines():
-            if line.lstrip().startswith("#") or not line.strip():
-                continue
-            normalised = line.replace("${result}", "$result")
-            if "$result" not in normalised and "result=$(" not in normalised:
-                continue
-            for command in re.split(r"\|\||&&|;|\|", normalised):
-                command = command.strip()
-                if "$result" in command or "result=$(" in command:
-                    found.append(command)
-        return found
+        lines = [
+            line for line in text.splitlines()
+            if not line.lstrip().startswith("#") and line.strip()
+        ]
+        return [
+            command
+            for whole in self.joined_lines(lines)
+            for command in self.commands_touching(whole)
+        ]
 
     def test_the_verdict_is_still_parsed_out_of_it(self):
         # The positive control. Every assertion above would pass against a
@@ -1740,9 +1817,13 @@ class BothSweepsAgreeOnWhatSuppresses(unittest.TestCase):
     SWEEPS = ("security-sweep.md", "bug-sweep.md")
 
     REQUIRED = (
-        "author is the repository **owner**",
-        "maintainer-applied label",
+        "opened by the repository owner",
         "is not tracking and blocks nothing",
+        # A label was a second sufficient condition until a review asked what
+        # one proves: it is applied to an issue, not to its contents, and the
+        # author can rewrite the body afterwards while it stays. Authorship is
+        # not editable. This entry pins that the weaker signal stayed retired.
+        "deliberately NOT a second sufficient condition",
     )
 
     # The exact phrasing the gate had before #57, which is what "drifting back"
