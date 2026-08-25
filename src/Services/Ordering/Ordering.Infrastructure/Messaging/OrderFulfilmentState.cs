@@ -29,8 +29,18 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     /// </summary>
     public Guid OrderId { get; set; }
 
-    public Guid CustomerId { get; set; }
-
+    // There is no CustomerId here, and its absence is load-bearing rather
+    // than an omission (ADR-028, #63). The instance carried one until it was
+    // removed, for exactly one reader: the AuthorisePayment that named the
+    // subject whose instrument Payments would charge. That field is gone from
+    // the contract, so the only thing a copy on the instance could still do is
+    // offer itself to the next transition that wants a customer — which is how
+    // the subject would find its way back onto a message. Every command this
+    // machine sends now names an order and nothing else.
+    //
+    // Ordering is not short of the value: ordering.Orders owns it, bound from
+    // the principal at the endpoint (§11.4's subject rule). What the saga must
+    // not be is a second, message-borne copy of it.
     public decimal Total { get; set; }
 
     public string Currency { get; set; } = null!;
