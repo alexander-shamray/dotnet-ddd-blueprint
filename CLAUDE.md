@@ -1091,6 +1091,20 @@ direct-child check it claims, and whether the label helper leaves a free
 parameter a finding could steer. **Five of those six shipped wrong, so each is
 reproduced as a case that fails against the old behaviour** — the sixth is a
 grant closed by moving it into a helper, and the suite is what keeps it closed.
+
+**#56 and #33 added two more subjects, and both are of the sixth kind rather
+than the first five**: they keep a closed hole closed instead of reproducing a
+defect. The feed cases drive `copilot_partition` directly — a stranger dropped,
+every Copilot spelling and the owner admitted, a near-miss login refused, and
+the load-bearing one, that a dropped item's body reaches *neither* stdout nor
+stderr. Beside them sit structural cases whose subject is the call sites: that
+all three helpers source the one allow-list and none restates a login, that
+each resolves that list *before* fetching its feed, and that
+`review-copilot.md`'s frontmatter grants the three helpers and no longer grants
+`Bash(gh pr view:*)`. The deny-list cases read `settings.json` and assert all
+five control-surface paths in both spellings, that no rule is spelled `Write(`,
+and — the positive control — that the deny list was found at all.
+
 Paired with
 positive controls, which are not decoration: a negative that passes because the
 pattern matches *nothing* is this repository's most-repeated failure wearing a
@@ -2055,15 +2069,36 @@ than a gap. This has been "fixed" twice by adding the twin back, and both times
 it broke startup. **A reviewer who has not run the harness cannot see this;
 check a permission claim against the harness before acting on it.**
 
-**`Edit(.claude/scripts/**)` and `Edit(.claude/sandbox/**)` bind the agent's own
-tooling.** The review loops grant those helpers by name, so a session that
-could rewrite one before invoking it would make every fixed endpoint a fiction.
-The sandbox `Dockerfile` is on the list for the same reason at one remove: it
-is a *build input to the security boundary*, so a session able to edit it could
-add an entrypoint reading the credentials the following `docker run` mounts in.
-Changing either is a human's edit, made with the deny lifted. Like the push
-denies it is defence in depth — `Bash` redirection can still write a file —
-but it removes the quiet path.
+**Five paths bind the agent's own tooling**, in both spellings each:
+`.claude/scripts/**`, `.claude/sandbox/**`, `.claude/commands/**`,
+`.claude/agents/**` and `.claude/settings.json`. The review loops grant those
+helpers by name, so a session that could rewrite one before invoking it would
+make every fixed endpoint a fiction. The sandbox `Dockerfile` is on the list
+for the same reason at one remove: it is a *build input to the security
+boundary*, so a session able to edit it could add an entrypoint reading the
+credentials the following `docker run` mounts in.
+
+**The last three arrived with #33, and the argument for them is the first two's
+applied one level up.** `commands/`, `agents/` and `settings.json` are the
+files that *grant* what the first two protect. Ten commands carry an
+unrestricted `Edit` or `Write` and three of them read untrusted input by
+design, so a single applied edit could append a grant to a command's
+`allowed-tools`, remove a line from this deny list, or rewrite
+`.claude/agents/security-auditor.md` — whose read-only guarantee is precisely
+its `Read, Grep, Glob` tool list, as `/security-sweep` says outright: read-only
+there "is a property of the agent's tool grant, not a word in its prompt".
+
+**`settings.json`'s own entry self-locks, and that is a working constraint, not
+a curiosity.** Once it denies itself, the session cannot edit it again —
+including to undo the edit. So a change to it is one edit that lands complete,
+and it goes **last** in any PR that also touches `commands/` or `scripts/`;
+split across two edits, the second is refused and whatever the first omitted
+ships missing.
+
+Changing any of the five is a human's edit, made with the deny lifted. Like the
+push denies it is defence in depth — `Bash` redirection can still write a file,
+and `.claude/hooks/**` is **not** on the list because no hook is configured
+here — but it removes the quiet path.
 
 **The external review runs in a container over a disposable clone — not a
 worktree — and its one residual is egress.** The boundary is
@@ -2212,11 +2247,20 @@ as long as the frontmatter rows had. The lesson survives with its converse
 attached: frontmatter is the grant nobody reads twice, and the global file is
 the one everybody assumes somebody else already read.
 
-**Six grants remain wider than the operations they buy**, and all six are
-known residuals rather than oversights. **This paragraph is the inventory and
-no command file keeps a second total** — `ship.md`'s callout carried one, and
-it went stale the moment a branch pinned that file's fetch grant. Two are
-`/ship`'s:
+**This paragraph is the inventory of grants wider than the operations they buy,
+and no command file keeps a second total** — `ship.md`'s callout carried one,
+and it went stale the moment a branch pinned that file's fetch grant.
+
+**The entries are numbered and the numbering is stable; the headline count that
+used to open this paragraph is gone on purpose.** It read "six" and was made
+false by #56 closing the fourth, which is the third time a restated total in
+this file has rotted — the callout totals and the test count went the same way,
+and the fix that held there was to drop the number and keep the named entries.
+Ordinals are kept even where an entry is closed, so a cross-reference to "the
+fourth" still lands, and each entry says its own state. Read the entries; do
+not count them here.
+
+Two are `/ship`'s:
 `Bash(git worktree remove:*)` admits the `-f` that discards work, and
 `Bash(gh pr merge --merge:*)` admits a trailing `--admin` that merges past
 failing checks. Helpers are owed for both; until someone with the
@@ -2245,46 +2289,54 @@ denied by name, so what is left is the flag nobody has enumerated yet. The
 honest fix is the helper the transport issue asked for — a
 `git-fetch-origin.sh` taking a branch name and nothing else.
 
-The fourth is not a git grant and is the one a reader is most likely to miss:
-**`/review-copilot` triages three comment feeds that no filter narrows by
-author.** `pr-review-comments.sh` returns every inline comment on the PR, and
-both `gh pr view --json` feeds are unfiltered by construction, while `ship.md`
-filters the same data by author. **Not "on `Copilot` authorship", which is the
-shorthand this very change set retired one file over**: step 6 filters two
-feeds by two *different* logins — inline comments on `Copilot`, review bodies
-on `copilot-pull-request-reviewer` — and issue comments on neither, because
-step 6 does not read that feed at all. Treating the two it does read as one
-identity is exactly what let a two-string allow-list look complete.
+The fourth **was** `/review-copilot`'s three unfiltered comment feeds, and #56
+closed it. It is kept here in the past tense rather than deleted, because what
+made it survive three revisions is worth more than the fix: each revision
+narrowed the claim and none of them narrowed it to something enforceable.
 
-**`copilot-pull-request-reviewer[bot]` is REST's spelling and belongs to no
-feed either command uses**, which is measured rather than reasoned: it comes
-from `/pulls/{n}/reviews`, while the one REST endpoint in play —
-`/pulls/{n}/comments`, behind `pr-review-comments.sh` — reports `Copilot`, and
-the review-body feed is GraphQL and reports
-`copilot-pull-request-reviewer`. An earlier revision of this paragraph called
-the issue-comment login the REST spelling; `gh pr view` loads `reviews` and
-`comments` through one exporter, so that could never have been true.
+**What landed.** All three feeds are behind helpers — `pr-review-bodies.sh`,
+`pr-review-comments.sh`, `pr-issue-comments.sh` — filtering on one allow-list
+declared once in `copilot-authors.sh` and each printing an admitted/dropped
+count. `Bash(gh pr view:*)` is gone from `review-copilot.md`'s frontmatter,
+which is the half that makes it enforcement rather than courtesy: that command
+used `gh pr view` for nothing but the two GraphQL feeds, and `settings.json`
+carries no `gh` allow, so a raw call prompts — a stall in the unattended loop
+instead of a silent pass. `ship.md` keeps its `gh pr view` grant, because it
+uses that command for much else, but its review-body and inline reads go
+through the same helpers, so the two commands now share one list instead of
+holding two prose rules that disagreed.
 
-**What the issue-comment feed actually reports is unobserved, and a revision of
-this paragraph asserted it as measured.** Six PRs were checked — #112, #101,
-#100, #99, #98, #94 — and none carries a Copilot-authored issue comment, so the
-shared exporter says what the login *must* be and nothing has seen it. The
-login stays admitted, because admitting a spelling that never arrives costs
-nothing; it is not evidence, because an asserted measurement that never
-happened stops the next reader checking. The command
-now states the filter and reports the count it dropped, but that is prose.
+**Three things the fix deliberately does not do.** It admits the repository
+owner alongside Copilot's three logins, because the decision table has three
+rows and dropping the owner would take away the input for the middle one —
+measured on PR #147, 21 of 43 inline comments and 21 of 33 review bodies are
+the owner's. It reports a dropped item's author and location but **never its
+body**, since printing the text one stream over would put the injection vector
+back into the transcript the filter exists to keep it out of — which narrowed
+the *Anyone else* row from "report what it asked for" to a count and a
+location, a deliberate loss of detail. And it is **not authentication**: a
+GitHub login is not verified, so the filter refuses the ordinary stranger and
+would not refuse a takeover of one of the four admitted logins.
+`grok-ledger.sh`'s collaborator-permission check is the stronger form and is
+not reached for, because Copilot is not a collaborator and a permission check
+would drop the whole review.
 
-**The enforceable version is all three feeds behind fixed helpers, not one**,
-and an earlier revision of this residual said "the helper" as though
-`pr-review-comments.sh` were the whole surface. It is the inline feed only; the
-two `gh pr view` reads arrive unfiltered, and the review body is the one
-carrying the suppressed-comments block — the feed every finding that mattered
-has actually come from. Filtering the least important of the three would read
-as a closed residual, which is worse than the open one. Each helper needs the
-author filter *and* the dropped count, since the count is what makes a skipped
-filter visible; all of it is a human's edit made with the
-`Edit(.claude/scripts/**)` deny lifted. Until it lands, do not run `/ship`'s
-Copilot loop unattended on a PR that outside contributors can comment on.
+**The measured logins, which the fix did not change.**
+`copilot-pull-request-reviewer[bot]` is REST's spelling, from
+`/pulls/{n}/reviews` — an endpoint no helper here calls. The one REST endpoint
+in play, `/pulls/{n}/comments`, reports `Copilot`; the two GraphQL feeds report
+the bare `copilot-pull-request-reviewer`. An earlier revision of this paragraph
+called the issue-comment login REST's; `gh pr view` loads `reviews` and
+`comments` through one exporter, so that could never have been true. All three
+spellings stay admitted, because admitting one that never arrives costs
+nothing and missing one that does is the direction that fails open.
+
+**The issue-comment feed's Copilot login is still unobserved**, and a revision
+of this paragraph once asserted it as measured. Seven PRs have now been checked
+— #112, #101, #100, #99, #98, #94 and #147, the last through the new helper
+itself — and none carries a Copilot-authored issue comment. So the shared
+exporter says what the login *must* be and nothing has seen it. Not evidence:
+an asserted measurement that never happened stops the next reader checking.
 
 The fifth is **`git push` under the two sweeps**, and it is the one that looks
 closed and is not. Both commands state a read-only boundary, and both used to
