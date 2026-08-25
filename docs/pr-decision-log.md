@@ -232,8 +232,11 @@ broken detector produces — so one control points the same detector at
 `OrderPlaced` and requires it to find the `CustomerId` ADR-028 *keeps*, one
 names the command roots the judged set must contain and the exemptions it must
 not, since a filter that selects nothing makes the rule vacuous while leaving
-it green, and one pairs the spelling vocabulary against the cases that exercise
-it, so a spelling added to the detector and to nothing else fails the build.
+it green, and one pairs the spelling vocabulary against the probe that
+exercises it, so a spelling added to the detector and to nothing else fails the
+build. The cases themselves are generated from that vocabulary rather than
+listed beside it, for the reason argued further down: a case list is a second
+copy, and a second copy is what went stale here twice.
 **No count of them is written here on purpose.** Successive review rounds each
 added one, so any figure stated at any point in that would have been wrong by
 the next round — which is the argument `CLAUDE.md` makes about its own line
@@ -323,17 +326,36 @@ else, so misspelling or deleting `Buyer`, `Payer`, `Subject`, `User` or
 `Principal` left every assertion green. **The coverage failure this repository
 keeps rediscovering, inside the control written to prevent it** — the same
 shape as naming three command roots of seven, one round earlier and one level
-down. A probe now declares a member per spelling, the assertion is
-parameterised over the vocabulary itself rather than a copy of it, and a second
-test pairs list and probe by size so an added spelling cannot arrive
-unobserved. Measured: misspelling one entry fails exactly that case and leaves
-the other twenty green.
+down. A probe now declares a member per spelling and a second test pairs list
+and probe by size. Measured: misspelling one entry fails exactly that case and
+leaves the rest of the file green.
 
-**Two of this branch's controls have now had the defect they exist to catch**,
-which is worth stating as a rule rather than as a coincidence: *a control is
-code, and the reason it exists applies to it.* Asking "what would make this
-gate green while the property is false" is a question to ask of the control as
-well as of the rule.
+**That fix then had the same defect, and the sentence describing it was the
+tell.** It was written as *parameterised over the vocabulary itself rather than
+a copy of it* while the cases were an `InlineData` row per spelling — a copy,
+with `SubjectSpellings.ShouldContain(spelling)` beside it and a comment
+claiming the pairing failed in either direction. It failed in one. A spelling
+added to the list **and** to the probe, but not to the rows, satisfied that
+assertion vacuously, matched the size check exactly, and generated no case: the
+same entry unobserved, one layer above where it had just been fixed. The cases
+are generated from the list now, so there is no second copy to forget — the
+argument §12.5's publish barrier wins over per-test discipline, one suite along.
+
+**Counterfactual, because nothing in the file can distinguish these.** Add a
+seventh spelling and its probe member and count the cases: the old shape ran
+six and passed, the new one runs seven. Remove the probe member and keep the
+spelling and the generated case fails by name alongside the size check —
+so the case is exercised rather than merely counted.
+
+**Three of this branch's controls have now had the defect they exist to
+catch**, one of them twice, which is worth stating as a rule rather than as a
+coincidence: *a control is code, and the reason it exists applies to it.*
+Asking "what would make this gate green while the property is false" is a
+question to ask of the control as well as of the rule — and the answer is never
+in the suite, because a control that covers less than it claims is green by
+construction. **Every instance here was found by review and none by a test**,
+which is the part that generalises: the check that settles it is a
+counterfactual somebody has to run.
 
 **What this does not close is #44, and the residual is written into three
 files rather than left to a reader.** One shared RabbitMQ principal still

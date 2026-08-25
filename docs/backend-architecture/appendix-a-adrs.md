@@ -1383,7 +1383,10 @@ it to find the `CustomerId` this ADR keeps; one names all seven command roots
 §3.2's Accepts columns list, so discovery cannot quietly drop four of them; one
 asserts the exemptions really are excluded; and one exercises **every declared
 subject spelling** rather than the first, after review found five of the six
-unobserved — a control carrying the coverage defect it exists to catch.
+unobserved — a control carrying the coverage defect it exists to catch. Its
+cases are **generated from the vocabulary**, because the fix's own first
+attempt restated the vocabulary as a case list and a spelling added to
+everything except that list arrived unobserved all over again.
 
 A gate that quietly stops
 covering its surface is this repository's most-repeated failure, and an empty

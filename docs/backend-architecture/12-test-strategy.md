@@ -2228,12 +2228,29 @@ a stated total is the half that goes stale. What the set is for is checkable;
 how many there are is not worth a second place to be wrong.
 
 **The spelling vocabulary is the case worth naming, because the control had the
-defect it exists to catch.** Six spellings were declared and one was exercised,
-so removing or misspelling any of the other five left every assertion green —
-the coverage failure this repository keeps rediscovering, reproduced inside the
-control written to prevent it. A probe now carries one member per spelling, the
-assertion is parameterised over the vocabulary, and a second test pairs the two
-lists by size so an added spelling cannot arrive unobserved.
+defect it exists to catch — twice, and the second time inside the fix for the
+first.** Six spellings were declared and one was exercised, so removing or
+misspelling any of the other five left every assertion green — the coverage
+failure this repository keeps rediscovering, reproduced inside the control
+written to prevent it. The fix parameterised the assertion, added a probe
+carrying one member per spelling, and paired the two by size; its comment
+claimed that pairing failed in either direction.
+
+**It did not, because the cases were a second copy of the vocabulary.** A
+spelling added to the list *and* to the probe, but not to the case list,
+satisfied the size check exactly and generated no case — the same entry
+unobserved, one layer up from where it was fixed. The cases are now generated
+from the list, which is the only shape with nothing to forget: the argument
+§12.5's publish barrier wins over per-test discipline, arriving one suite along
+and one round later.
+
+> **A control is code, and the reason it exists applies to it.** Both rounds of
+> this were caught by review rather than by the suite, and neither could have
+> been caught by the suite: a control that covers less than it claims is green
+> by construction. What settles it is the counterfactual — add the seventh
+> spelling, add its probe member, and count the cases. Six meant the claim was
+> false and seven means it holds, and no assertion in the file distinguishes
+> those two.
 
 **Deciding what it judges is the other half, and both obvious answers are
 wrong in opposite directions.** §9.1 says commands do not implement

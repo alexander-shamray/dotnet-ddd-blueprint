@@ -496,13 +496,15 @@ public class ContractTests
             .ShouldContain(nameof(OrderPlaced.CustomerId));
     }
 
+    /// <summary>
+    /// The declared vocabulary, as theory cases. Reading
+    /// <see cref="SubjectSpellings"/> rather than restating it is the whole
+    /// point — see the remarks on the test below.
+    /// </summary>
+    public static TheoryData<string> DeclaredSpellings => new(SubjectSpellings);
+
     [Theory]
-    [InlineData("Customer")]
-    [InlineData("Buyer")]
-    [InlineData("Payer")]
-    [InlineData("Subject")]
-    [InlineData("User")]
-    [InlineData("Principal")]
+    [MemberData(nameof(DeclaredSpellings))]
     public void Every_declared_subject_spelling_is_detected(string spelling)
     {
         // **The control above exercises one entry of six**, so removing or
@@ -512,11 +514,16 @@ public class ContractTests
         // it. A probe carries one member per spelling and each is asserted by
         // name, so a vocabulary entry cannot be lost silently.
         //
-        // Driven off the list itself rather than a second copy: the InlineData
-        // is the expected vocabulary, and this assertion fails if the two ever
-        // disagree in either direction.
-        SubjectSpellings.ShouldContain(spelling);
-
+        // **The cases are generated from the list, because a second copy of it
+        // reopened the same hole one layer up.** This was an `InlineData` row
+        // per spelling with `SubjectSpellings.ShouldContain(spelling)` beside
+        // it, and a comment claiming that pairing failed "in either
+        // direction". It did not: a spelling added to the list WITH a probe
+        // member but WITHOUT its row satisfied that assertion vacuously and
+        // the size check exactly, so the new entry was never exercised and
+        // nothing said so. A generated case cannot be forgotten, which is the
+        // same argument the saga's publish barrier won over per-test
+        // discipline — leave nothing to remember.
         string[] found =
         [
             .. SubjectMembers(typeof(SubjectGateProbes.EverySpelling)).Select(p => p.Name)
@@ -531,9 +538,13 @@ public class ContractTests
     public void The_spelling_vocabulary_and_its_controls_stay_the_same_size()
     {
         // The other direction of the same pairing: a spelling ADDED to the
-        // list without a probe member and an InlineData row would be a
-        // vocabulary entry no test ever exercises, which is how the six became
-        // one-observed in the first place.
+        // list without a probe member would be a vocabulary entry the theory
+        // above generates a case for and nothing can satisfy — informative,
+        // but only once the probe is the thing being compared. This pins the
+        // probe to the list so a spelling REMOVED from the list cannot leave a
+        // stranded member behind, which the theory alone never sees: it
+        // enumerates the list, so an entry that has gone takes its case with
+        // it.
         SubjectSpellings.Length.ShouldBe(
             typeof(SubjectGateProbes.EverySpelling)
                 .GetProperties(BindingFlags.Public | BindingFlags.Instance)
