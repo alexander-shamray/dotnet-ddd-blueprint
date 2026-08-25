@@ -224,12 +224,32 @@ conflating the two is how this repository's gates have failed before.
 **What this does not close is #44, and the residual is written into three
 files rather than left to a reader.** One shared RabbitMQ principal still
 writes every queue, so anyone reaching the bus can still send an
-`AuthorisePayment`. What they can no longer do is choose *who* it charges: a
-forged command naming a real order re-triggers that order's own authorisation
-instead of redirecting one at a customer of the sender's choosing — a duplicate
-charge rather than a misdirected one. A forged `OrderPlaced` could still seed a
-false record; that is the same issue and a broader compromise, visible to every
-consumer of that event rather than to none.
+`AuthorisePayment`. What that command **alone** no longer does is carry the
+payer: a forged one naming a real order re-triggers that order's own
+authorisation instead of redirecting one at a customer of the sender's
+choosing.
+
+**The residual said more than that for two review rounds, and Copilot caught
+it saying two things that cannot both be true.** The paragraph claimed broker
+access could no longer choose who is charged, and three sentences later
+conceded that a forged `OrderPlaced` seeds Payments' record. Both cannot hold:
+forge the event, then send the command, and the payer is chosen in two messages
+where one used to do it. **Payer selection is narrowed, not removed.**
+
+What the narrowing actually buys is cost and visibility. The added message is
+an **event other services consume** — Ordering's own saga starts on
+`OrderPlaced`, and Notifications tells the customer — so a forged one runs a
+fulfilment saga for an order the write model has no row for and emails somebody
+about an order they never placed. The single forged command left none of that
+behind. Capability unchanged; evidence very much not.
+
+**This is the second residual overclaim on this branch, and the pattern is the
+lesson.** The first named §8.5 as absorbing a duplicate it cannot reach; this
+one described a narrowing as a closure. Both came from writing the residual
+immediately after the fix, while the fix is the salient thing — and both were
+falsifiable from a paragraph already in the same file. **The check is to ask
+whether the same attacker, with the same access, reaches the same outcome by a
+route the document itself already describes.** Twice here the answer was yes.
 
 **The first draft of that residual named §8.5 as absorbing the duplicate, and
 §8.5 cannot reach it.** `IdempotencyBehavior` is an Application-pipeline
@@ -239,12 +259,12 @@ never enters that pipeline. §9.5's inbox is the broker-side control and keys on
 `(MessageId, Endpoint)`, which a forger chooses freshly — it suppresses an
 accidental redelivery, not a deliberate second send. **A residual that names a
 control which does not cover it is worse than one that names none**, because
-the citation is what stops the next reader checking. What survives is the true
-and smaller claim — misdirected becomes duplicate — plus an owed rule for the
-service that does not exist yet: Payments must make authorisation idempotent
-per order against its own `PaymentIntent`. This is the repository's own lesson
-arriving from the other side: *a registered name is not a live signal*, one
-layer up, where the name was a whole mechanism.
+the citation is what stops the next reader checking. What survives is the
+smaller claim — a forged command alone re-triggers rather than redirects —
+plus an owed rule for the service that does not exist yet: Payments must make
+authorisation idempotent per order against its own `PaymentIntent`. This is the
+repository's own lesson arriving from the other side: *a registered name is not
+a live signal*, one layer up, where the name was a whole mechanism.
 
 **One consequence belongs to a service nobody has written, which is when it is
 cheapest to write down.** §9.4 orders nothing between two deliveries, so an

@@ -673,10 +673,20 @@ vocabulary either way.
 > named.** The broker still has one shared principal
 > ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44),
 > §9.4's callout), so anyone able to publish can still send an
-> `AuthorisePayment`. What they can no longer do is choose *who* it charges: a
-> forged command naming a real order now re-triggers that order's own
+> `AuthorisePayment`. What that command **alone** no longer does is carry the
+> payer: a forged one naming a real order re-triggers that order's own
 > authorisation rather than redirecting one at a customer of the sender's
-> choosing. Per-service broker identity is what closes the rest.
+> choosing.
+>
+> **Payer selection is not gone, and saying it was is the overclaim this
+> callout has to avoid.** The same principal can forge the `OrderPlaced` that
+> seeds Payments' record and then send the command, which selects a payer in
+> two messages where one used to do. The gain is cost and visibility rather
+> than capability — the added message is an event Ordering's own saga and
+> Notifications both consume, so it starts a fulfilment saga for an order the
+> write model has no row for and tells a customer about an order they never
+> placed. Per-service broker identity or verifiable event provenance is what
+> closes it; this rule does not.
 
 This is one rule with three consequences, and the worked slices show all three:
 `PlaceOrderCommand` ([§6.4](06-cqrs.md)) carries no `CustomerId` and its handler

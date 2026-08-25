@@ -1261,11 +1261,27 @@ whose `OrderPlaced` never arrives compensates rather than hanging.
 RabbitMQ principal still writes every queue
 ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44)),
 so anyone reaching the bus can still send an `AuthorisePayment`. What they can
-no longer do is choose who it charges: a forged command naming a real order
-re-triggers that order's own authorisation rather than redirecting one at a
-customer of the sender's choosing. That converts a **misdirected** charge into
-a **duplicate** one, which is a strictly smaller failure and not an absorbed
-one.
+no longer do with **that command alone** is choose who it charges: a forged
+command naming a real order re-triggers that order's own authorisation rather
+than redirecting one at a customer of the sender's choosing.
+
+> **The same principal can still select a payer, and an earlier draft of this
+> ADR claimed otherwise while documenting the route two paragraphs below.**
+> Forging an `OrderPlaced` seeds Payments' record, and a forged
+> `AuthorisePayment` after it charges whoever that record names. So this is a
+> narrowing, not a closure, and the honest statement of it is that **the
+> command alone no longer carries the payer** — not that payer selection is
+> gone.
+>
+> What the narrowing buys is cost and visibility rather than capability. The
+> attack is now two messages on two exchanges instead of one, and the added
+> one is an **event other services consume**: Ordering's own saga starts on
+> `OrderPlaced` (§3.2), so a forged one runs a fulfilment saga for an order the
+> write model has no row for, and Notifications sends a customer a message
+> about an order they never placed. The single forged command left no such
+> trace. What removes the capability is per-service broker identity
+> ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44))
+> or verifiable event provenance; nothing in this ADR does.
 
 > **Nothing in this platform absorbs that duplicate today, and naming a control
 > that does not reach it would be worse than naming none.** [§8.5](08-caching-redis.md)'s
