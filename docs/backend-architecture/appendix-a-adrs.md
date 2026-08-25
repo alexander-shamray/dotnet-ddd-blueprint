@@ -1187,10 +1187,20 @@ in a field nothing on the receiving side could check
 
 The rule that closes it is not "bind on the message path" — there is nothing to
 bind from — but **re-derive**, and what makes re-derivation available is that
-the subject is already written down somewhere trustworthy. `OrderPlaced`
-carries a `CustomerId` bound from the principal at Ordering's endpoint, so a
-service that consumes it holds the same fact with a provenance the command
-never had.
+the subject is already written down somewhere else. `OrderPlaced` carries a
+`CustomerId` bound from the principal at Ordering's endpoint, so a service that
+consumes it holds the same fact from a party that authenticated somebody,
+rather than from a sender that merely asserted one.
+
+**That is a statement about the legitimate path and not about the event's
+provenance**, and the difference is the residual this ADR closes with: nothing
+authenticates an `OrderPlaced`, so the shared broker principal
+([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44))
+can forge one and seed a payer of its choosing. What this decision buys is that
+the **command** no longer offers a payer-selection field — a narrowing whose
+exact reach is argued below. Calling the event-backed value *trustworthy* would
+be claiming authenticated provenance the platform does not have until #44 or
+event signing exists, and an earlier draft of this paragraph did.
 
 **Not every field is the same question, and the line between them is
 instruction versus authority.** `Amount` and `Currency` say *what to do*. The
@@ -1350,8 +1360,22 @@ column — which is §7.4's own sequence with its *stop writing the old one* ste
 performed rather than skipped. Skipping a step is what having no consumer buys,
 and it buys nothing once there is one.
 
-**The rule is enforced rather than reviewed.** `ContractTests` asserts that no
-command contract declares a member spelled like a subject.
+**The rule is gated in two halves, and only together do they force a
+decision.** `ContractTests` asserts that no command contract declares a member
+spelled like a subject — a list of six spellings, and therefore a
+**deny-list**, which passes every spelling nobody predicted: `OwnerId` reaches
+Payments with that assertion green, measured rather than argued. So a second
+test enumerates **every member the judged commands are approved to carry**, and
+any name absent from it fails the build.
+
+**The allow-list does not decide whether a new member is a subject; it makes
+adding one impossible to do quietly.** The verdict is still a person's, and the
+build going red is what puts it in front of them — the scaffold's rule, that a
+tool refusing input it has never been shown beats one that guesses, and the fix
+this repository already applied to a terminal-state check that listed what it
+refused instead of what it accepted. Stated this way because the earlier
+wording — *enforced rather than reviewed* — claimed a completeness a
+substring list cannot have.
 
 **Defining "command" is the part that had to be got right, because the obvious
 definitions fail in opposite directions.** §9.1

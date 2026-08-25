@@ -320,6 +320,28 @@ the site rather than papered over — the control keeps the gate from being
 *uninformative*, which is a different property from keeping it complete, and
 conflating the two is how this repository's gates have failed before.
 
+**Stating it was not the same as handling it, and review said so on the last
+round.** A documented hole is still a hole: ADR-028 read *the rule is enforced
+rather than reviewed* and §12 read *each is mechanical*, while `OwnerId` walked
+through — measured, not argued, and the sharp part of the measurement is that
+`No_command_contract_carries_a_subject` stayed **green** for it. This
+repository had already paid for exactly this shape once and written the fix
+down: *a deny-list of terminal states passes every state nobody listed …
+enumerate what is acceptable.* The subject test is a deny-list of six
+substrings.
+
+So the gate gained its allow-list half: every member the judged commands may
+carry is enumerated, and a name absent from that list fails the build. **It
+decides nothing** — it cannot tell whether `OwnerId` is a subject — and that
+is the honest claim: it converts a member added silently into a member added over
+a red build, which is the scaffold's rule that a tool refusing input it has
+never been shown beats one that guesses. A second test refuses a **stale**
+entry, because an approved name no command carries is a seat reserved for
+whatever arrives under it next — the deny-list hole reintroduced inside the
+allow-list that replaced one. Both observed red: `OwnerId` on
+`AuthorisePayment` fails only the new test, and a `LegacyPayerId` entry nothing
+carries fails only the pairing.
+
 **And for five of those six spellings the control was uninformative too.** The
 positive control pointed the detector at `OrderPlaced.CustomerId` and nothing
 else, so misspelling or deleting `Buyer`, `Payer`, `Subject`, `User` or
@@ -446,8 +468,8 @@ migrations against a named list — failed on the eleventh, in the integration
 half. The list is the assertion and the length is derived from it, so the fix
 was one row; #126 had already removed the literal that would have made it two.
 
-**Counts pinned to this branch**: the solution runs 910 tests, 720 of them
-outside `Category=Integration`, and the three CI stages are 18, 702 and 190.
+**Counts pinned to this branch**: the solution runs 912 tests, 722 of them
+outside `Category=Integration`, and the three CI stages are 18, 704 and 190.
 Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
 head of this branch was reconciled against **its own CI run**, whose log summed
 to 899 over twenty-four per-project stage totals — the check this file names

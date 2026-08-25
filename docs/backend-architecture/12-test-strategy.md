@@ -2209,8 +2209,17 @@ The contract assembly's rules are all stated elsewhere as things reviewers
 should notice: §9.1's "a contract may not name a domain type", §9.2's versioned
 namespace, `required` members, and — since
 [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject) —
-that a command carries no subject. Each is mechanical, so each is a test rather
-than a review note.
+that a command carries no subject. The first three are mechanical, so each is a
+test rather than a review note.
+
+**The fourth is not, and saying so is the honest half.** "Spelled like a
+subject" is a list of six substrings, so `OwnerId` passes it — the deny-list
+failure this repository has already paid for once, in a check that enumerated
+the terminal states it refused instead of the one it accepted. What makes the
+rule hold is the allow-list beside it: every member the judged commands may
+carry is enumerated, and a name absent from that list fails the build. That
+does not classify the new member — it forces somebody to, which is the most a
+test can do about a rule whose vocabulary cannot be closed.
 
 **The fourth is the one whose gate needs a gate**, and it is worth saying here
 rather than only at the test. The other three fail against a type that is

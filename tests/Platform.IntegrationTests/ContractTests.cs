@@ -477,6 +477,90 @@ public class ContractTests
             string.Join(", ", offenders.Select(o => $"{o.Command}.{o.Member}")));
     }
 
+    /// <summary>
+    /// Every member the judged commands are approved to carry. Not a
+    /// description of them — a gate: a name absent from here fails the build.
+    /// </summary>
+    /// <remarks>
+    /// <b>The subject rule is a deny-list and this is the allow-list beside
+    /// it.</b> <see cref="SubjectSpellings"/> rejects six substrings, so
+    /// <c>OwnerId</c> or <c>AccountHolderId</c> walks past it — the failure
+    /// mode <c>CLAUDE.md</c> records against the Grok verdict check, which
+    /// refused a list of terminal states and passed every state nobody had
+    /// thought of. Enumerating what is acceptable is what closed that one.
+    /// <para>
+    /// <b>What this buys is a forced decision, not a verdict.</b> It cannot
+    /// tell whether a new member is a subject; it makes adding one impossible
+    /// to do silently, which is the scaffold's rule — a tool that refuses
+    /// input it has never been shown beats one that guesses. So the escape
+    /// narrows from "any spelling nobody predicted" to "a spelling somebody
+    /// approved into this list", and that somebody is a reviewer looking at a
+    /// red build rather than a reader who might notice.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] ApprovedCommandMembers =
+    [
+        "OrderId",           // the correlation every command names
+        "Lines",             // ReserveStock's payload
+        "ProductId",         // StockLine
+        "Quantity",          // StockLine
+        "Amount",            // AuthorisePayment — instruction, not authority
+        "Currency",          // AuthorisePayment — the same
+        "Reason",            // CancelOrder, FlagOrderForReview
+        "PaymentReference",  // ConfirmOrder
+        "TrackingNumber"     // MarkOrderShipped
+    ];
+
+    [Fact]
+    public void No_command_contract_carries_an_unapproved_member()
+    {
+        // The allow-list half of ADR-028's rule. The subject test above is a
+        // deny-list of six substrings, so a subject spelled `OwnerId` reaches
+        // Payments with every assertion green — and no list of spellings can
+        // be complete, which its own remarks say. This one fails on any member
+        // nobody has approved, whatever it is called.
+        //
+        // It does not decide whether the new member is a subject. It makes the
+        // question unavoidable: the build goes red, and the fix is a line in
+        // ApprovedCommandMembers written by somebody who had to think about
+        // it. ADR-028 and §12 both state the rule that way rather than as
+        // mechanically settled, because it is not.
+        (string Command, string Member)[] unapproved =
+        [
+            .. Commands
+                .SelectMany(t => t
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(p => !ApprovedCommandMembers.Contains(p.Name, StringComparer.Ordinal))
+                    .Select(p => (t.FullName!, p.Name)))
+        ];
+
+        unapproved.ShouldBeEmpty(
+            "a member on a judged command is a decision under ADR-028, so it is approved " +
+            "explicitly or it is not there: " +
+            string.Join(", ", unapproved.Select(u => $"{u.Command}.{u.Member}")));
+    }
+
+    [Fact]
+    public void The_approved_member_list_holds_nothing_the_commands_have_dropped()
+    {
+        // The other direction, and the reason it is not optional: an entry
+        // left behind by a removed member is a name pre-approved for whatever
+        // arrives under it next, which is a deny-list hole reintroduced inside
+        // the allow-list that replaced one.
+        string[] live =
+        [
+            .. Commands
+                .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                .Select(p => p.Name)
+                .Distinct(StringComparer.Ordinal)
+        ];
+
+        ApprovedCommandMembers.ShouldBeSubsetOf(
+            live,
+            "an approved name no command carries is a seat reserved for the next member " +
+            "to take without review");
+    }
+
     [Fact]
     public void A_subject_is_detectable_on_a_contract_that_carries_one()
     {
