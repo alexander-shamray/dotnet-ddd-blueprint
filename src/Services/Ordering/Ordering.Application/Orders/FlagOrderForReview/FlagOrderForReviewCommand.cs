@@ -7,9 +7,13 @@ namespace Ordering.Application.Orders.FlagOrderForReview;
 /// cannot finish itself.
 /// <para>
 /// <b>Not "a wait with no automatic compensation", which this said.</b> That
-/// describes two of <see cref="Common.Contracts.Ordering.V1.ReviewReasons"/>'s
-/// four codes. The other two are raised the moment an authorisation turns up
-/// against a workflow ending in cancellation — no wait, and nothing ran out.
+/// describes <c>not_despatched</c>, <c>stock_not_released</c> and
+/// <c>not_confirmed</c>, and not the other two of
+/// <see cref="Common.Contracts.Ordering.V1.ReviewReasons"/>'s codes, which are
+/// raised against a workflow ending in cancellation — no wait, and nothing ran
+/// out. <b>Named rather than counted</b>: this said "two of four" while there
+/// were five, and "the moment an authorisation turns up" while #143 also
+/// raises <c>cancelled_after_confirmation</c> on two despatch branches.
 /// A caller taught the narrower contract would read a
 /// <c>payment_authorised_during_compensation</c> row as a stall.
 /// </para>
