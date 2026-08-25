@@ -377,6 +377,36 @@ that command — on the awaiting-signal gate's discipline: a list of things know
 to be missing needs something asserting they are still missing, or the day the
 premise changes passes unnoticed.
 
+**That pairing still had one blind spot, and it is the intersection of the two
+mistakes it was built for.** Each half catches one: a command inference loses,
+and a command nobody declared. A contract that is *both* — carried only by an
+event **and** absent from the declared roots — drops out of the inferred set
+and the declared set alike, so the equality holds and nothing inspects the
+type. Measured, and the measurement is the whole argument: a `RefundOrder`
+record carrying a `CustomerId`, referenced from `OrderPlaced` and declared
+nowhere, left **both** `Inferred_command_roots_and_the_declared_list_agree` and
+`No_command_contract_carries_a_subject` green.
+
+**No structural test can close it, and saying why is the point.** Whether a
+type is dispatched as a command is not a fact the type system holds: §9.1
+defines a command by what it does *not* implement, and a positive `ICommand`
+marker — the obvious fix — only moves the forgetting to the marker, since a
+new command that omits it is lost exactly as before. What *is* decidable is
+whether a person has classified the type at all. So every non-event contract must
+appear in the declared roots or in a declared payload list, and one in neither
+fails the build. It does not say what the new type is; it refuses to let it
+arrive unlooked-at, which is the scaffold's rule an assembly over and the same
+move the member allow-list makes one level down. A stale entry is refused in
+the same test, for the reason every list here refuses one: a classification for
+a type that has gone is a seat reserved for whatever takes the name next.
+
+**Four rounds in a row found a fail-open in the previous round's fix**, each a
+level up from the last: the spelling cases, the member names, the roots, the
+classification. That is not a run of bad luck. **A gate built by narrowing what
+it inspects has a boundary, and the boundary is where the next hole is** — so
+the question to ask of one is not "does it catch the case I have" but "what
+does it decline to look at", and the answer is a place rather than a case.
+
 **And for five of those six spellings the control was uninformative too.** The
 positive control pointed the detector at `OrderPlaced.CustomerId` and nothing
 else, so misspelling or deleting `Buyer`, `Payer`, `Subject`, `User` or
@@ -503,8 +533,8 @@ migrations against a named list — failed on the eleventh, in the integration
 half. The list is the assertion and the length is derived from it, so the fix
 was one row; #126 had already removed the literal that would have made it two.
 
-**Counts pinned to this branch**: the solution runs 914 tests, 724 of them
-outside `Category=Integration`, and the three CI stages are 18, 706 and 190.
+**Counts pinned to this branch**: the solution runs 915 tests, 725 of them
+outside `Category=Integration`, and the three CI stages are 18, 707 and 190.
 Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
 head of this branch was reconciled against **its own CI run**, whose log summed
 to 899 over twenty-four per-project stage totals — the check this file names

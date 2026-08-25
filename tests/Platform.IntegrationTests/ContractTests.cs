@@ -401,6 +401,36 @@ public class ContractTests
         typeof(ReleaseStock)
     ];
 
+    /// <summary>
+    /// Every non-event contract that is <em>not</em> a command root — the
+    /// payload records, each named with what carries it.
+    /// </summary>
+    /// <remarks>
+    /// <b>This list exists to make the classification exhaustive, which is the
+    /// only thing that closes the gate's last fail-open.</b> Pairing declared
+    /// roots against <see cref="RootsOf"/> catches a command inference loses
+    /// and a command nobody declared — but not one that is <em>both</em>: a new
+    /// contract carried only by an event and absent from
+    /// <see cref="DeclaredCommandRoots"/> drops out of both sides, so the
+    /// equality holds and no gate ever inspects it.
+    /// <para>
+    /// No structural test can settle it, because "is this type dispatched as a
+    /// command" is not a fact the type system holds — §9.1 defines a command by
+    /// what it does <em>not</em> implement, and a positive marker only moves
+    /// the forgetting to the marker. What can be settled is that every contract
+    /// has been <b>classified by somebody</b>. A type in neither list fails the
+    /// build, which is the scaffold's rule one assembly over: a tool refusing
+    /// input it has never been shown beats one that guesses.
+    /// </para>
+    /// </remarks>
+    private static readonly Type[] DeclaredPayloads =
+    [
+        typeof(StockLine),          // ReserveStock — judged, a command reaches it
+        typeof(PlacedLine),         // OrderPlaced — exempt, only an event reaches it
+        typeof(ConfirmedLine),      // OrderConfirmed — the same
+        typeof(ShippingAddressV1)   // OrderConfirmed — the same
+    ];
+
     private static readonly Type[] Commands = JudgedTypesOf(Contracts, DeclaredCommandRoots);
 
     /// <summary>
@@ -742,6 +772,45 @@ public class ContractTests
         Type[] inferred = RootsOf(Contracts);
 
         inferred.ShouldBe(DeclaredCommandRoots, ignoreOrder: true);
+    }
+
+    [Fact]
+    public void Every_non_event_contract_is_declared_a_command_or_a_payload()
+    {
+        // **The pairing above has one blind spot and this is it.** A contract
+        // that is BOTH carried only by an event AND absent from
+        // DeclaredCommandRoots drops out of the inferred roots and the declared
+        // roots alike, so that equality holds while no gate ever inspects the
+        // type. Each half of the pairing sees one of those mistakes; neither
+        // sees them together, which is the case a real new command most easily
+        // arrives in.
+        //
+        // No structural test can decide whether such a type is dispatched — the
+        // type system does not hold that fact, §9.1 defines a command by what
+        // it does not implement, and a positive marker only relocates the
+        // forgetting to the marker. What IS decidable is whether a human has
+        // classified it. Anything in neither list fails here, so a contract
+        // cannot enter the assembly unlooked-at.
+        Type[] classified = [.. DeclaredCommandRoots, .. DeclaredPayloads];
+
+        Type[] unclassified =
+        [
+            .. Contracts
+                .Where(t => !typeof(IIntegrationEvent).IsAssignableFrom(t))
+                .Where(t => !classified.Contains(t))
+        ];
+
+        unclassified.ShouldBeEmpty(
+            "a non-event contract is a command or a payload, and which one is a decision " +
+            "ADR-028 needs taken rather than inferred: " +
+            string.Join(", ", unclassified.Select(t => t.FullName)));
+
+        // And the other direction, on the allow-list's own argument: a
+        // classification for a type that no longer exists is a seat reserved
+        // for whatever takes the name next.
+        classified.ShouldBeSubsetOf(
+            Contracts,
+            "a declared command or payload the assembly no longer holds is a stale entry");
     }
 
     [Fact]
