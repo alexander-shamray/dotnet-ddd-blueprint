@@ -130,8 +130,16 @@ it look the payer up.
 order rather than of the payer.** `OrderPlaced` carries `TotalAmount` and
 `Currency` — §9.6's saga reads both off it — and holding them is what lets
 Payments *disagree* with the `AuthorisePayment` it is handed rather than merely
-obey it. A record of the payer alone would leave the amount as unverifiable as
-the subject used to be, which is the distinction ADR-028 turns on.
+obey it.
+
+**That record also settles why the subject is omitted and the other two are
+not, and it is not because only they can be checked.** Once the payer is in
+the record, a supplied `CustomerId` would be just as checkable — so
+checkability separates none of the three. The line ADR-028 draws is
+**instruction versus authority**: the amount and the currency are what to do,
+the sender decides them, and a mismatch is a consistency check; the subject is
+on whose behalf, and a transported authority is a second source for a decision
+that must have exactly one.
 
 **The platform already does this twice, and the closer of the two is the price
 projection.** [§6.4](06-cqrs.md)'s `PlaceOrder` reads
@@ -153,11 +161,20 @@ here, an assertion nobody could verify replaced by a record the service owns.
 > deliveries, so an `AuthorisePayment` can arrive at Payments before the
 > `OrderPlaced` it would be resolved against — the same race the
 > `ReleaseStock` bullet below records, one service over. **A missing
-> record is a wait, not a decline.** Payments must fault the command so the
-> retry envelope redelivers it, and must not publish `PaymentDeclined`, which
-> is a business verdict about a payer it has not yet identified. §9.6's
-> fifteen-minute payment timeout is what bounds the wait: an order whose
-> `OrderPlaced` never arrives compensates on that timeout rather than hanging.
+> record is a wait, not a decline.** Payments must not publish
+> `PaymentDeclined`, which is a business verdict about a payer it has not yet
+> identified.
+>
+> **What it must not do either is rely on the ordinary retry envelope, and an
+> earlier version of this callout did.** §9.8's command policy is five
+> exponential in-memory retries capped at a minute; a reorder outlasting that
+> reaches the error queue [§13.6](13-observability.md) pages on, turning a
+> routine race into an operational fault in about a minute. **A wait needs a
+> mechanism that lasts as long as the wait.** Payments' command endpoint
+> therefore needs **delayed redelivery** — ADR-021's delayed exchange is
+> already on this broker — with a window reaching §9.6's fifteen-minute payment
+> timeout, so an order whose `OrderPlaced` never arrives compensates on that
+> timeout rather than paging long before it.
 
 **A cell names a message; it does not say what the message means when there is
 nothing to do.** `ReleaseStock` is where that gap was load-bearing, and it is

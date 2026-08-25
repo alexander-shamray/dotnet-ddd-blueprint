@@ -426,10 +426,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 // customer identifier here would be that decision taken from
                 // a field nothing on the receiving side can check. Payments
                 // resolves the payer from its own record of the order, built
-                // from the OrderPlaced it consumes (§3.2). The amount and the
-                // currency stay because Payments holds that record and can
-                // disagree with them; it holds nothing that would contradict
-                // a subject.
+                // from the OrderPlaced it consumes (§3.2).
+                //
+                // The amount and the currency stay, and NOT because only they
+                // are checkable — that was this comment's first argument and
+                // the record above refutes it, since a supplied CustomerId
+                // would be just as checkable. They stay because they are the
+                // instruction: what to authorise, decided by the sender. The
+                // subject is the authority — on whose behalf — and that is the
+                // receiver's to derive, because a transported authority is a
+                // second source for a decision that must have one.
                 .Send(
                     PaymentsQueue,
                     ctx => new AuthorisePayment(

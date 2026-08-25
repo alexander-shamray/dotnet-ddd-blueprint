@@ -1192,14 +1192,30 @@ carries a `CustomerId` bound from the principal at Ordering's endpoint, so a
 service that consumes it holds the same fact with a provenance the command
 never had.
 
-**Not every field is the same question, and the line between them is whether
-the receiver can disagree.** Payments holds the order, so it can compare
-`Amount` and `Currency` against its record and refuse a mismatch — a wrong
-value in either is detectable at the far end. It holds nothing that would
-contradict a subject, so a subject is the one field a wrong value passes
-through undetected. A field the receiver can check is a claim; a field it
-cannot check is an assertion. Money-movement commands may carry claims and may
-not carry assertions.
+**Not every field is the same question, and the line between them is
+instruction versus authority.** `Amount` and `Currency` say *what to do*. The
+sender decides them, so they must travel, and Payments may compare them against
+its record and refuse a mismatch — a consistency check between two parties who
+both have a view. A subject says *on whose behalf*, and that is not the
+sender's to state: it is the deciding service's to derive.
+
+**The reason is not that only the subject is uncheckable, and getting that
+wrong is instructive.** An earlier draft of this ADR argued exactly that — a
+field the receiver can check is a claim, one it cannot check is an assertion —
+and the record this decision *itself introduces* refutes it. Payments stores
+the payer along with the total, so a supplied `CustomerId` would be as
+checkable as the amount; checkability separates none of the three.
+
+What survives is stronger than the argument it replaces. **A transported
+authority is a second source for a decision that must have exactly one.** The
+check that would catch a mismatched subject is a check somebody has to
+remember to perform, and a redundant authority-bearing field is precisely the
+one a later code path reads *instead of* deriving — cheaper at the call site,
+identical in the happy case, wrong exactly when it matters. Removing the field
+removes the possibility rather than guarding against it.
+
+**So a money-movement command carries its instruction and never its
+authority**, and that is the form to apply to the next such contract.
 
 **The precedent is one service over, and the closer of the two is §6.4's price
 projection.** `PlaceOrder` reads `ordering.ProductPrices` — Catalog's price
@@ -1251,11 +1267,21 @@ exception.
 **A command can arrive before the record it resolves against.** §9.4 orders
 nothing between two deliveries, so an `AuthorisePayment` can overtake the
 `OrderPlaced` it needs — the shape §3.2 already records for `ReleaseStock` and
-`ReserveStock`. **A missing record is a wait, not a decline**: Payments faults
-the command so the retry envelope redelivers it, and must not publish
-`PaymentDeclined`, which is a business verdict about a payer it has not
-identified. §9.6's fifteen-minute payment timeout bounds the wait, so an order
-whose `OrderPlaced` never arrives compensates rather than hanging.
+`ReserveStock`. **A missing record is a wait, not a decline**: Payments must
+not publish `PaymentDeclined`, which is a business verdict about a payer it has
+not identified.
+
+**The wait needs a mechanism that lasts as long as the wait, which the ordinary
+retry envelope does not.** An earlier draft of this ADR said to fault the
+command and let retries carry it, and §9.8's command policy is five exponential
+in-memory attempts capped at a minute — so a reorder outlasting that reaches
+the error queue §13.6 pages on, making an operational fault out of a race this
+ADR calls routine, roughly fourteen minutes before the timeout that was
+supposed to bound it. **Payments' command endpoint takes delayed
+redelivery** — [ADR-021](#adr-021--saga-timeouts-are-scheduled-by-the-broker)'s
+delayed exchange is already on this broker — with a window reaching §9.6's
+fifteen-minute payment timeout, so an order whose `OrderPlaced` never arrives
+compensates on that timeout rather than paging well before it.
 
 **This narrows the broker exposure and does not close it.** One shared
 RabbitMQ principal still writes every queue

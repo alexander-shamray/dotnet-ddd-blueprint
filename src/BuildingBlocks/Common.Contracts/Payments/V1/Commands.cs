@@ -17,11 +17,20 @@ namespace Common.Contracts.Payments.V1;
 /// <c>OrderPlaced</c> it consumes (§3.2).
 /// </para>
 /// <para>
-/// <b><c>Amount</c> and <c>Currency</c> stay, and the difference is whether
-/// the receiver can disagree.</b> Payments holds the order, so it can compare
-/// these two against it and refuse a mismatch; it holds nothing that would
-/// contradict a subject. A field the receiver can check is a claim, and a
-/// field it cannot check is an assertion — this contract carries claims.
+/// <b><c>Amount</c> and <c>Currency</c> stay, and the difference is not
+/// checkability.</b> Payments holds the order, so it could compare a supplied
+/// <c>CustomerId</c> against its record exactly as it compares these two —
+/// which is why the checkability argument this paragraph used to make was
+/// wrong, and wrong because of the record this very decision introduces.
+/// </para>
+/// <para>
+/// The line that does hold is <b>instruction versus authority</b>. These two
+/// say <em>what to do</em>, the sender decides them, and the receiver may
+/// refuse a mismatch as a consistency check. A subject says <em>on whose
+/// behalf</em>, and that is the receiver's own to derive: transporting it
+/// creates a second source for a decision that must have exactly one. A check
+/// that exists is not a check that is performed, and the field that is not
+/// there cannot be the one a later code path reads instead of the record.
 /// </para>
 /// </remarks>
 public sealed record AuthorisePayment(Guid OrderId, decimal Amount, string Currency);

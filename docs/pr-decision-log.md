@@ -115,12 +115,35 @@ removed here.
 
 **Why the contract narrowed instead of emptying, which is the question a
 reviewer asks first.** `Amount` and `Currency` stayed. The line between them
-and the subject is not importance, it is **whether the receiver can
-disagree**: Payments holds the order, so it can compare an amount against it
-and refuse a mismatch, and it holds nothing at all that would contradict a
-subject. A field the receiver can check is a claim; a field it cannot check is
-an assertion. That sentence is the reusable half of this PR, and it decides the
-next money-bearing contract without re-running the argument.
+and the subject is **instruction versus authority**: the amount and the
+currency are what to do, the sender decides them, and Payments may refuse a
+mismatch against its record as a consistency check between two parties who both
+have a view. The subject is on whose behalf, and that is the deciding service's
+to derive. A money-movement command carries its instruction and never its
+authority — the reusable half of this PR, and what decides the next such
+contract without re-running the argument.
+
+**That is the second formulation, and the first was falsified by this change's
+own design.** It said the line was *whether the receiver can disagree* — a
+field the receiver can check is a claim, one it cannot check is an assertion —
+and Copilot pointed out that Payments' record holds the payer as well as the
+total, so a supplied `CustomerId` would be exactly as checkable as the amount.
+Checkability separates none of the three. **The rule was refuted by the
+paragraph two above it**, which is where the record's contents are specified.
+
+The replacement is stronger rather than a retreat. A transported authority is a
+second source for a decision that must have exactly one; the check that would
+catch a mismatched subject is a check somebody has to remember to perform; and
+a redundant authority-bearing field is precisely the one a later call site
+reads *instead of* deriving — cheaper, identical in the happy case, wrong
+exactly when it matters. Removing the field removes the possibility rather than
+guarding against it.
+
+**Worth recording because the falsified version was the sentence this PR was
+proudest of**, restated in six places and offered as guidance for future
+contracts. A rule that generalises is the most expensive kind to get wrong, and
+the thing that caught it was reading the rule against the design in the same
+document rather than against the case that motivated it.
 
 **The reviewer's best finding was a rule the branch broke without noticing:
 §9.2 requires a version bump to remove a field.** `AuthorisePayment` lost
@@ -337,11 +360,26 @@ a live signal*, one layer up, where the name was a whole mechanism.
 cheapest to write down.** §9.4 orders nothing between two deliveries, so an
 `AuthorisePayment` can overtake the `OrderPlaced` it resolves against — the
 race §3.2 already records for `ReleaseStock` and `ReserveStock`. **A missing
-record is a wait, not a decline.** Payments faults the command so the retry
-envelope redelivers it, and must not publish `PaymentDeclined`, which is a
-business verdict about a payer it has not identified. §9.6's fifteen-minute
-payment timeout bounds the wait, so an order whose `OrderPlaced` never arrives
-compensates rather than hanging.
+record is a wait, not a decline.** Payments must not publish `PaymentDeclined`,
+which is a business verdict about a payer it has not identified.
+
+**Saying that and then naming the ordinary retry envelope as the wait is the
+third overclaim of this shape on this branch.** The first draft said to fault
+the command and let retries carry it until §9.6's fifteen-minute timeout.
+§9.8's command policy is five exponential in-memory attempts capped at a
+minute, so the message reaches the paged error queue about fourteen minutes
+early: a race this very entry calls routine becomes an operational fault, and
+the timeout that was supposed to bound the wait never runs. **A wait needs a
+mechanism that lasts as long as the wait**, and the endpoint takes delayed
+redelivery — ADR-021's delayed exchange is already on this broker — with a
+window reaching that timeout.
+
+**All three overclaims share a shape worth naming.** §8.5's idempotency, the
+broker residual, and now the retry envelope: each cited an existing mechanism
+by name as covering a case, and in each the mechanism's actual parameters —
+which interface it constrains, which key it uses, how many attempts over how
+long — put the case outside it. **Citing a mechanism is not checking its
+bounds**, and a named control reads as a checked one to everybody downstream.
 
 **The expand/contract guarantee was an argument until Copilot asked for a
 measurement.** Every site claimed the new build's `INSERT` omits the retained

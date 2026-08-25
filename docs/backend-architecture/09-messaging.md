@@ -2110,16 +2110,23 @@ namespace Common.Contracts.Payments.V1;
 public sealed record AuthorisePayment(Guid OrderId, decimal Amount, string Currency);
 ```
 
-> **A field the receiver can check is a claim; a field it cannot check is an
-> assertion, and only one of those belongs on a money-movement command.**
-> That is the whole of
-> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject),
-> and it is why this contract narrowed rather than emptied. Payments holds the
-> order, so it can compare `Amount` and `Currency` against it and refuse a
-> mismatch; it holds nothing that would contradict a subject, so a subject is
-> the one field a wrong value passes through undetected. [§11.4](11-identity-authorization.md)'s
-> subject rule now reaches the message path on those terms rather than
-> excluding it.
+> **An instruction travels; an authority is derived — and that is why this
+> contract narrowed rather than emptied.**
+> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> carries the argument. `Amount` and `Currency` say *what to do*: the sender
+> decides them, so they travel, and Payments may refuse a mismatch against its
+> own record as a consistency check. A subject says *on whose behalf*, which is
+> the deciding service's to derive.
+>
+> **It is not that only one of them is checkable, which is what this callout
+> first claimed.** Payments holds the order — payer included — so a supplied
+> `CustomerId` would be as checkable as the amount. The record this decision
+> introduces is what refutes that reading. What survives is stronger: a
+> transported authority is a second source for a decision that must have
+> exactly one, a check that exists is not a check that is performed, and the
+> field that is absent cannot be the one a later code path reads instead of the
+> record. [§11.4](11-identity-authorization.md)'s subject rule reaches the
+> message path on those terms rather than excluding it.
 
 ```csharp
 namespace Common.Contracts.Ordering.V1;

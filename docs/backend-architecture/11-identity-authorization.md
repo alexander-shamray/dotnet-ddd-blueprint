@@ -662,12 +662,20 @@ vocabulary either way.
 > §9.6's `AuthorisePayment` accordingly carries no `CustomerId` at all, and
 > Payments resolves the payer from the `OrderPlaced` it consumes ([§3.2](03-bounded-contexts.md)).
 >
-> **What decides which fields may stay is whether the receiver can disagree
-> with them.** `Amount` and `Currency` remain on that command because Payments
-> holds the order and can refuse a mismatch; a subject is the one field it
-> holds nothing to contradict, so a wrong value passes through undetected.
-> A field the receiver can check is a claim, and a field it cannot check is an
-> assertion.
+> **What decides which fields may stay is instruction versus authority.**
+> `Amount` and `Currency` remain on that command because they are what to do:
+> the sender decides them, and Payments may refuse a mismatch against its
+> record as a consistency check. The subject is on whose behalf, and that is
+> the deciding service's to derive — a transported authority is a second source
+> for a decision that must have exactly one, and a check that exists is not a
+> check that is performed.
+>
+> **The distinction is not checkability, which is what this callout first
+> said.** Payments' record holds the payer as well as the total, so a supplied
+> `CustomerId` would be as checkable as the amount; the record §3.2 requires is
+> what refutes that reading. The surviving argument is stronger rather than
+> weaker: the field that is absent cannot be the one a later code path reads
+> instead of the record.
 >
 > **This narrows the exposure rather than closing it, and the residual is
 > named.** The broker still has one shared principal
