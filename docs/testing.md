@@ -79,7 +79,8 @@ before a slot is reserved, whether the sweeps' worktree guard is the
 direct-child check it claims, and whether the label helper leaves a free
 parameter a finding could steer. That last is the one that never shipped
 wrong — it is a grant closed by moving it into a helper, and the suite is what
-keeps it closed. Four issues added subjects since, all of that last kind:
+keeps it closed. Four issues added subjects since, and those are regression
+cases of the first kind — each fails against behaviour that shipped:
 **#56**, what a Copilot feed helper admits, what it reports about what it
 dropped, and that no command can reach those feeds outside the fixed helpers;
 **#33**, which paths the harness denies itself and that the worktree root is

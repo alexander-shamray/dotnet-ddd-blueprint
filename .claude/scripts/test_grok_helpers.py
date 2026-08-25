@@ -1794,11 +1794,18 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
 class BothSweepsAgreeOnWhatSuppresses(unittest.TestCase):
     """#57 — the de-duplication gate, and the two copies of it.
 
-    An issue only blocks a re-file if the repository owner opened it or a
-    maintainer labelled it. The repository is public, so without that test any
-    account could file "<topic> is tracked" and have the next sweep suppress
-    the real finding — and because a suppressed candidate used to leave a
-    clean round, it ended the sweep and reported convergence.
+    An issue only blocks a re-file if the **repository owner opened it**. The
+    repository is public, so without that test any account could file "<topic>
+    is tracked" and have the next sweep suppress the real finding — and because
+    a suppressed candidate used to leave a clean round, it ended the sweep and
+    reported convergence.
+
+    **A maintainer-applied label was a second sufficient condition and is not
+    one any more.** A non-collaborator cannot set a label at creation, so it
+    looked like a maintainer's touch; but a label is applied to an issue rather
+    than to an issue's contents, and the author can rewrite the body afterwards
+    while it stays. Authorship cannot be edited, which is why it is the whole
+    test. The cases below pin that the weaker signal stayed retired.
 
     **What this pins is the weaker half, and saying which is the point.** The
     predicate is prose that an agent follows, not code that runs, so these
@@ -1826,10 +1833,21 @@ class BothSweepsAgreeOnWhatSuppresses(unittest.TestCase):
         "deliberately NOT a second sufficient condition",
     )
 
-    # The exact phrasing the gate had before #57, which is what "drifting back"
-    # would look like. Kept as a literal because it is a historical string
-    # rather than a rule — if it ever reappears, the condition has been dropped.
-    RETIRED = "An open issue, a `wontfix`, or an accepted-risk record blocks a re-file"
+    # Phrasings this gate has retired, each a literal because each is a
+    # historical string rather than a rule. If one reappears, a condition that
+    # was deliberately removed has come back.
+    #
+    # The second entry is the label rule, and it needed its own entry: the
+    # first version of this negative refused only the pre-#57 sentence, so it
+    # passed while both files still said "neither the owner's nor labelled" —
+    # which preserves the editable-label suppression path the gate above
+    # rejects. A negative that names one retired form and not the other is the
+    # half-covering gate this suite keeps finding.
+    RETIRED = (
+        "An open issue, a `wontfix`, or an accepted-risk record blocks a re-file",
+        "neither the owner's nor labelled",
+        "maintainer-applied label",
+    )
 
     def sweep(self, name):
         """The file with its wrapping collapsed.
@@ -1850,12 +1868,14 @@ class BothSweepsAgreeOnWhatSuppresses(unittest.TestCase):
                 with self.subTest(sweep=name, phrase=phrase):
                     self.assertIn(phrase, self.sweep(name))
 
-    def test_neither_sweep_still_carries_the_unconditional_rule(self):
-        # The negative, and it was observed against the pre-#57 text: both
-        # files matched this string before the gate was qualified.
+    def test_neither_sweep_carries_a_retired_rule(self):
+        # Observed against the real history in both directions: the pre-#57
+        # sentence is present in `main`'s copies of both files, and the label
+        # condition is present in this branch's own earlier commits.
         for name in self.SWEEPS:
-            with self.subTest(sweep=name):
-                self.assertNotIn(self.RETIRED, self.sweep(name))
+            for retired in self.RETIRED:
+                with self.subTest(sweep=name, retired=retired):
+                    self.assertNotIn(retired, self.sweep(name))
 
     def test_an_untracked_match_files_rather_than_suppressing(self):
         # The correction the first fix needed. Reporting the candidate as

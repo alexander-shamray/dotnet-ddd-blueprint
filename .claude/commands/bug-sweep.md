@@ -552,7 +552,7 @@ stop the issue from ever being written — which is most of what they wanted. A
 gate that downgrades the report and keeps the outcome has moved the symptom.
 
 Name the near-miss in the round summary — `#NN by <login> names the same lines
-and is neither the owner's nor labelled` — so a human can see the collision and
+and was not opened by the owner` — so a human can see the collision and
 close one as a duplicate if it is one. That is a note beside a filed issue,
 never a substitute for filing it, and a duplicate that says why beats a finding
 nobody wrote down.
@@ -787,8 +787,8 @@ verification, sat below the bar, or was already tracked. The loop stops on a
 clean round or at the seventh, whichever comes first.
 
 **"Already tracked" means tracked by the gate's test, not merely matched by an
-open issue (#57).** A candidate matched only by an issue that is neither the
-owner's nor labelled is **filed**, so such a round is unclean for the ordinary
+open issue (#57).** A candidate matched only by an issue that is not the
+owner's is **filed**, so such a round is unclean for the ordinary
 reason — it filed something — and needs no special case here. That is the point
 of deciding it at the gate: a stranger's issue can neither suppress the filing
 nor end the sweep, because it never counted as tracking in the first place.

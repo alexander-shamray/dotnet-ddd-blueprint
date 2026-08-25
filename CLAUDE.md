@@ -1092,9 +1092,16 @@ parameter a finding could steer. **Five of those six shipped wrong, so each is
 reproduced as a case that fails against the old behaviour** — the sixth is a
 grant closed by moving it into a helper, and the suite is what keeps it closed.
 
-**Four issues added subjects since, and all four are of the sixth kind rather
-than the first five**: they keep a closed hole closed instead of reproducing a
-defect that shipped. **#56** — what a feed helper admits, what it reports about
+**Four issues added subjects since, and they are of the first kind rather than
+the sixth — regression cases, each failing against behaviour that shipped.**
+An earlier revision of this paragraph classified them the other way, as a
+closed hole kept closed like the label helper's, and that was wrong on the
+evidence: #56's stranger case fails against the unfiltered helper, #33's deny
+assertions were *observed* red against the old settings file before the rule
+was added, #52's transcript check fails against the `cat` it replaced, and
+#57's retired-rule case fails against `main`'s copies of both sweeps. Calling a
+case weaker evidence than it is understates the suite, which is the opposite of
+this file's usual error and no better. **#56** — what a feed helper admits, what it reports about
 what it dropped, and that no command reaches those feeds outside the helpers.
 **#33** — which paths the harness denies itself, and that the worktree root is
 not among them. **#52** — that the reviewer's transcript reaches no stream, and
