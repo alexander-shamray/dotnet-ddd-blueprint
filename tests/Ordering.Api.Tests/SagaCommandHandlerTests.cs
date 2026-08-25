@@ -152,38 +152,40 @@ public sealed class SagaCommandHandlerTests(ServiceFixture fixture) : IAsyncLife
             .ShouldBe(OrderErrors.NotFound);
     }
 
-    [Theory]
-    [InlineData(CommandOrigin.System, CancelOrigins.Workflow)]
-    [InlineData(CommandOrigin.User, CancelOrigins.User)]
-    public async Task The_commands_origin_decides_the_published_events_origin(
-        CommandOrigin initiatedBy,
-        string expected)
+    [Fact]
+    public async Task A_system_initiated_cancellation_publishes_the_workflow_origin()
     {
-        // **The one translation #123 rests on, and nothing exercised it.**
+        // **The half of #123's translation that this tier can reach.**
         // OrderTests proves the aggregate carries whatever origin it is handed
-        // and the mapper suite proves the enum reaches the wire, but the switch
-        // BETWEEN them was covered by neither — so inverting System and User in
-        // the handler would leave every one of those tests green while tagging
-        // real saga cancellations as user requests and customer cancellations as
-        // this workflow's own echo. §9.6 then discards exactly the arrivals it
-        // exists to fault. Copilot found the gap.
+        // and the mapper suite proves the enum reaches the wire; the switch
+        // between them was covered by neither, so inverting System and User in
+        // the handler left every test green while making §9.6 discard exactly
+        // the arrivals it exists to fault. Copilot found the gap.
+        //
+        // **Only the System case belongs here, and the reason is §11.4 rather
+        // than convenience.** A User-origin command dispatched in a bare scope
+        // has no principal — ICurrentUser is HttpContextCurrentUser — so the
+        // ownership guard fails closed and returns NotFound before any origin is
+        // written. That is the guard working, so the User half is proved over
+        // HTTP in OrderOwnershipTests, where a caller exists.
         //
         // Read off the OUTBOX row rather than the domain event: that is the
         // payload a consumer sees, so it covers the mapper and the handler in
         // one assertion and cannot pass on a translation that stops halfway.
         Guid orderId = await fixture.SeedOrderAsync(Customer);
 
-        (await DispatchAsync(
-            new CancelOrderCommand(orderId, CancellationReason.CustomerRequest, initiatedBy)))
+        (await DispatchAsync(new CancelOrderCommand(
+            orderId,
+            CancellationReason.CustomerRequest,
+            CommandOrigin.System)))
             .IsSuccess.ShouldBeTrue();
 
-        OutboxMessage row = (await fixture.OutboxAsync())
-            .ShouldHaveSingleItem();
+        OutboxMessage row = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
 
         row.Payload.ShouldContain(
-            $"\"Origin\":\"{expected}\"",
+            $"\"Origin\":\"{CancelOrigins.Workflow}\"",
             Case.Sensitive,
-            "the origin a consumer reads is the one this handler chose");
+            "the saga's own CancelOrder must echo back as this workflow's doing");
     }
 
     private async Task<Result> DispatchAsync(ICommand<Result> command)

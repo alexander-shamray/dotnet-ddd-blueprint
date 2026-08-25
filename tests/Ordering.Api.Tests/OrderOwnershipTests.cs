@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Common.Contracts.Ordering.V1;
+using Common.Infrastructure.Outbox;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Ordering.Api.Endpoints;
@@ -135,6 +136,34 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await StatusOfAsync(order)).ShouldBe(nameof(OrderStatus.AwaitingStock));
+    }
+
+    [Fact]
+    public async Task A_cancellation_through_this_endpoint_publishes_the_user_origin()
+    {
+        // **The other half of #123's translation, and it can only be proved
+        // here.** A User-origin command dispatched in a bare scope has no
+        // principal, so §11.4's ownership guard fails closed and returns
+        // NotFound before an origin is ever written — which is the guard
+        // working, and why the sibling assertion in SagaCommandHandlerTests
+        // covers the System case alone. A real request is what supplies the
+        // caller this path needs.
+        //
+        // Inverting the handler's switch would tag this cancellation as the
+        // workflow's own echo, and §9.6 would then discard it on a missing
+        // instance instead of faulting — the silent loss #123 exists to close.
+        OrderId order = await SeedOrderAsync(Bob);
+
+        HttpResponseMessage response = await CancelAsync(order, asUser: Bob);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        OutboxMessage row = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
+
+        row.Payload.ShouldContain(
+            $"\"Origin\":\"{CancelOrigins.User}\"",
+            Case.Sensitive,
+            "a cancellation with a principal behind it is not this workflow's echo");
     }
 
     /// <summary>
