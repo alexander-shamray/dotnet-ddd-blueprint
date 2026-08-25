@@ -152,9 +152,18 @@ next reviewer reads as settled.
 > deliberately not reached for here, because Copilot is not a collaborator and
 > a permission check would drop the whole review. So the filter refuses the
 > *ordinary* stranger and would not refuse an account that had taken over one
-> of the four admitted logins. And it binds this command only: `/ship`'s step 6
-> reads the same feeds through the same helpers, but anything that calls
-> `gh pr view --json reviews` directly is filtered by nothing.
+> of the four admitted logins.
+>
+> **It does not bind this command only, and an earlier revision of this callout
+> said it did.** Dropping the grant here would have withheld nothing while
+> `/ship` still held its own: `/ship` invokes this command as a skill, and
+> `allowed-tools` entries are cumulative auto-approvals rather than a
+> whitelist — so the unattended path, which is the path #56 was filed about,
+> kept an unfiltered route. **No command grants `Bash(gh pr view:*)` any
+> more.** `ship.md` reads a PR's state through `pr-state.sh` and `pr.md` feeds
+> the closure gate through `pr-closure-input.sh`, both with fixed field sets.
+> Whether a skill inherits its caller's grants has still never been measured
+> here; the point is that it no longer decides anything.
 
 The scripts under `.claude/scripts/` are the whole of this command's API
 surface, and that is the point: a `Bash` permission rule matches a command

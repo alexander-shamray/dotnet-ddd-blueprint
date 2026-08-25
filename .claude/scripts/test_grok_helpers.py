@@ -1380,6 +1380,39 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
                 self.assertEqual(2, result.returncode)
                 self.assertNotIn("pwned", result.stdout)
 
+    def test_no_command_grants_the_raw_feed_route(self):
+        """#148's review: dropping the grant from one file withheld nothing.
+
+        /ship invokes /review-copilot as a skill while holding its own
+        `Bash(gh pr view:*)`, and `allowed-tools` entries are cumulative
+        auto-approvals rather than a whitelist — so the narrower grant one file
+        over left `--json reviews` reachable on the unattended path, which is
+        the path #56 was filed about.
+
+        Whether a skill invocation inherits its caller's frontmatter grants has
+        never been measured here. This case makes the question moot instead of
+        answering it: with no `gh pr view` grant in ANY command, neither
+        inheritance rule leaves an unfiltered route to the feeds.
+        """
+        for path in sorted(COMMANDS.glob("*.md")):
+            with self.subTest(command=path.name):
+                frontmatter = path.read_text(encoding="utf-8").split("---")[1]
+                self.assertNotIn("Bash(gh pr view:*)", frontmatter)
+
+    def test_ship_reads_pr_state_through_the_fixed_helper(self):
+        # The positive control for the case above, and the reason it is safe:
+        # /ship genuinely needs a PR's state, so refusing the broad grant only
+        # works if something replaced it. A helper with a fixed field set does
+        # — and fixed matters, because a caller that chooses fields can choose
+        # `reviews`.
+        text = (COMMANDS / "ship.md").read_text(encoding="utf-8")
+        frontmatter = text.split("---")[1]
+        self.assertIn("bash .claude/scripts/pr-state.sh:*", frontmatter)
+        helper = (SCRIPTS / "pr-state.sh").read_text(encoding="utf-8")
+        self.assertIn("--json state,mergeable,mergeStateStatus,headRefOid,mergeCommit",
+                      helper)
+        self.assertNotIn("$2", helper)
+
     def test_review_copilot_grants_the_helpers_and_not_the_raw_feed(self):
         # The step that turns the filter from a courtesy into enforcement. The
         # command used `gh pr view` for nothing but the two GraphQL feeds, so
@@ -1414,7 +1447,7 @@ class HarnessControlSurfaceIsDenied(unittest.TestCase):
         deny = self.deny()
         for path in (".claude/scripts/**", ".claude/sandbox/**",
                      ".claude/commands/**", ".claude/agents/**",
-                     ".claude/settings.json"):
+                     ".claude/settings.json", ".claude/settings.local.json"):
             for prefix in ("", "./"):
                 with self.subTest(path=path, prefix=prefix):
                     self.assertIn(f"Edit({prefix}{path})", deny)
@@ -1427,6 +1460,34 @@ class HarnessControlSurfaceIsDenied(unittest.TestCase):
         for rule in self.deny():
             with self.subTest(rule=rule):
                 self.assertFalse(rule.startswith("Write("))
+
+    def test_every_loaded_settings_file_is_denied(self):
+        """The gap #148's review found: `settings.json` was denied and
+        `settings.local.json` was not, though Claude Code loads both and
+        .gitignore names the second as the per-developer override. A deny on
+        the exact file cannot cover a sibling, so an enumerated list is only as
+        complete as the listing it was written against.
+
+        Not solved by denying `.claude/**` wholesale, which was considered and
+        rejected: `.claude/worktrees/` is where /branch puts working
+        checkouts, so that blanket would deny editing the repository itself
+        while a worktree run is live.
+        """
+        deny = self.deny()
+        for name in ("settings.json", "settings.local.json"):
+            for prefix in ("", "./"):
+                with self.subTest(name=name, prefix=prefix):
+                    self.assertIn(f"Edit({prefix}.claude/{name})", deny)
+
+    def test_the_worktree_root_is_not_denied(self):
+        # The other side of the case above — a control that over-reaches breaks
+        # the flow it was meant to protect, and would be found at the worst
+        # moment. Nothing may deny the worktree root.
+        for rule in self.deny():
+            with self.subTest(rule=rule):
+                self.assertNotIn(".claude/worktrees", rule)
+                self.assertNotEqual("Edit(.claude/**)", rule)
+                self.assertNotEqual("Edit(./.claude/**)", rule)
 
     def test_the_deny_list_is_actually_read(self):
         # The positive control. Every assertion above would pass against a file

@@ -2069,9 +2069,11 @@ than a gap. This has been "fixed" twice by adding the twin back, and both times
 it broke startup. **A reviewer who has not run the harness cannot see this;
 check a permission claim against the harness before acting on it.**
 
-**Five paths bind the agent's own tooling**, in both spellings each:
+**The `Edit` denies bind the agent's own tooling**, in both spellings each:
 `.claude/scripts/**`, `.claude/sandbox/**`, `.claude/commands/**`,
-`.claude/agents/**` and `.claude/settings.json`. The review loops grant those
+`.claude/agents/**`, `.claude/settings.json` and `.claude/settings.local.json`.
+Read the list, do not count it here — it has already grown twice, once inside
+the pull request that introduced it. The review loops grant those
 helpers by name, so a session that could rewrite one before invoking it would
 make every fixed endpoint a fiction. The sandbox `Dockerfile` is on the list
 for the same reason at one remove: it is a *build input to the security
@@ -2095,7 +2097,15 @@ and it goes **last** in any PR that also touches `commands/` or `scripts/`;
 split across two edits, the second is refused and whatever the first omitted
 ships missing.
 
-Changing any of the five is a human's edit, made with the deny lifted. Like the
+**`.claude/settings.local.json` was the gap a review found**, and it is the
+enumeration lesson in miniature: an exact-file rule cannot cover a sibling, and
+Claude Code loads both files. Denying `.claude/**` wholesale was considered and
+refused — `.claude/worktrees/` is where `/branch` puts working checkouts, so
+that blanket would deny editing the repository itself while a worktree run is
+live. A test pins both halves: every loaded settings file denied, and the
+worktree root never denied.
+
+Changing any of them is a human's edit, made with the deny lifted. Like the
 push denies it is defence in depth — `Bash` redirection can still write a file,
 and `.claude/hooks/**` is **not** on the list because no hook is configured
 here — but it removes the quiet path.
@@ -2301,10 +2311,24 @@ count. `Bash(gh pr view:*)` is gone from `review-copilot.md`'s frontmatter,
 which is the half that makes it enforcement rather than courtesy: that command
 used `gh pr view` for nothing but the two GraphQL feeds, and `settings.json`
 carries no `gh` allow, so a raw call prompts — a stall in the unattended loop
-instead of a silent pass. `ship.md` keeps its `gh pr view` grant, because it
-uses that command for much else, but its review-body and inline reads go
-through the same helpers, so the two commands now share one list instead of
-holding two prose rules that disagreed.
+instead of a silent pass.
+
+**One file was not enough, and the review of the PR that closed this is what
+established it.** `/ship` invokes `/review-copilot` as a skill while holding
+its own frontmatter grants, and `allowed-tools` entries are cumulative
+auto-approvals rather than a whitelist — so a grant removed in one file and
+kept in its caller withholds nothing on the unattended path, which is the path
+the issue was about. **No command grants `Bash(gh pr view:*)` any more**:
+`ship.md` reads state through `pr-state.sh`, `pr.md` feeds the closure gate
+through `pr-closure-input.sh`, and both fix their field sets, because a caller
+that chooses fields can choose `reviews`. `ship.md`'s review-body and inline
+reads go through the same feed helpers `/review-copilot` uses, so the two
+commands share one list instead of holding two prose rules that disagreed.
+
+**`pr.md` was the third holder and was found by a test, not by reading.** The
+issue named two commands; the case whose subject is *every* command's
+frontmatter caught the third. That is the gate-coverage lesson paying for
+itself inside the change that added the gate.
 
 **Three things the fix deliberately does not do.** It admits the repository
 owner alongside Copilot's three logins, because the decision table has three

@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(bash .claude/scripts/pr-state.sh:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -114,7 +114,7 @@ that reaches a merge — so the rows below say what is owed *between* them:
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
 | On a branch whose PR was **closed unmerged** | **Stop.** Somebody decided this branch does not land, and the open-PR read cannot see that: with no open PR the *clean and pushed* row would send the run to `/pr`, which refuses only an **open** one — so the chain would open a replacement and merge it, overriding a deliberate closure with no human in the loop. Report the closed PR and its number |
-   | On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With nothing left in the workspace, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty tree or commits made after the merge the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
+   | On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `pr-state.sh` reporting `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With nothing left in the workspace, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty tree or commits made after the merge the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
 
 **Step 0's teardown targets a worktree that is already finished; step 7's
 targets the one this run just merged. Exactly one of them owns any given
@@ -196,7 +196,7 @@ no PR has ever existed for this branch; otherwise the newest row reads `OPEN`,
 distinguishes — including the two that used to need a second call and the one
 that used to need a failed one.
 
-**`gh pr view --json state` cannot be that read, and the reason is an exit
+**`pr-state.sh` cannot be that read, and the reason is an exit
 code rather than a preference.** With no PR for the current branch it exits
 non-zero, and *forked but never PR'd* is what step 1 produces on every run —
 so the commonest state in the table would have been classified through a
@@ -355,13 +355,13 @@ same argument as never calling a branch clean because asking failed.
    ```
 
    **Every read exits 0 whatever it finds, and that is deliberate.**
-   `gh pr view --json state` on a branch with no PR exits non-zero, and
+   `pr-state.sh` on a branch with no PR exits non-zero, and
    *forked but never PR'd* is not exotic — it is what step 1 produces on every
    run. Classifying the ordinary case through a failed command, in a chain
    whose first stop rule is that a non-zero exit means the step did not run,
    is a contradiction rather than a nicety. `gh pr list --state merged --head`
    answers with a row or with `[]`, measured both ways on this repository.
-   `gh pr view --json state` keeps its job one section up, in the resume
+   `pr-state.sh` keeps its job one section up, in the resume
    table, where the question is *which* state and there is a PR to ask about.
 
    **The merge read is not redundant with `origin/main..HEAD`, and the
@@ -431,7 +431,7 @@ same argument as never calling a branch clean because asking failed.
    edits or the later commits belong to whatever comes next. Nor may either be
    adopted onto this branch, tempting as step 1's already-on-a-branch override
    makes it: a second PR cut
-   from a merged branch leaves `gh pr view --json state` answering `MERGED`
+   from a merged branch leaves `pr-state.sh` answering `MERGED`
    from the *first* one on every later resume, so the branch becomes unreadable
    to this command permanently. Report what the workspace still holds and the
    directory holding it, and end there. **That is not one of the six stops** —
@@ -1284,7 +1284,7 @@ same argument as never calling a branch clean because asking failed.
    Three things genuinely gate it, and none is a judgement:
 
    ```bash
-   gh pr view <n> --json state,mergeable,mergeStateStatus,headRefOid
+   bash .claude/scripts/pr-state.sh <n>
    gh pr checks <n> --watch --fail-fast
    git status --short              # empty
    git log <headRefOid>..HEAD      # empty: this workspace holds nothing extra
@@ -1417,7 +1417,7 @@ same argument as never calling a branch clean because asking failed.
    would have been satisfied by a commit that is no longer the head. **It is
    the only guard in this step that fails closed**, and it costs one argument.
 
-   **The oid comes from the `gh pr view` read that returned a *known*
+   **The oid comes from the `pr-state.sh` read that returned a *known*
    mergeability** — the last one of the poll above, not the first. This
    sentence used to say "captured before polling", which was unambiguous when
    the only wait in this step was the one on checks and became a
@@ -1462,7 +1462,7 @@ same argument as never calling a branch clean because asking failed.
    step 1 produced:
 
    ```bash
-   gh pr view <n> --json state,mergeCommit              # 1. MERGED, with an oid
+   bash .claude/scripts/pr-state.sh <n>                 # 1. MERGED, with an oid
    #    ExitWorktree({action: "keep"})                  # 2. forked runs only — a tool, not bash
    bash .claude/scripts/git-switch-existing.sh main     # 3. in-place runs only
    git pull --ff-only                                   # 4. main, now containing the merge
