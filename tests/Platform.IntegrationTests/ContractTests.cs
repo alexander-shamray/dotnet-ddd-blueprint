@@ -15,9 +15,17 @@ namespace Platform.IntegrationTests;
 /// genuinely <em>between</em> services is the contract assembly, and its rules
 /// are all stated elsewhere as things a reviewer should notice — §9.1's "a
 /// contract may not name a domain type", §9.2's versioned namespace,
-/// <c>required</c> members. Each is mechanical, so each is a test rather than a
-/// review note.
+/// <c>required</c> members, and — since ADR-028 — that a command carries no
+/// subject. Each is mechanical, so each is a test rather than a review note.
 /// </summary>
+/// <remarks>
+/// <b>The fourth is the one whose gate needs a gate.</b> The first three fail
+/// against a type that is <em>present</em> — a domain type named, a namespace
+/// misspelt, a member not <c>required</c>. The subject rule asserts an
+/// <em>absence</em>, so an empty result is both what success looks like and
+/// what a broken detector looks like, which is why it ships with two controls
+/// rather than alone.
+/// </remarks>
 public class ContractTests
 {
     /// <summary>

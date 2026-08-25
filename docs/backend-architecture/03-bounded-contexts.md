@@ -132,11 +132,19 @@ Payments *disagree* with the `AuthorisePayment` it is handed rather than merely
 obey it. A record of the payer alone would leave the amount as unverifiable as
 the subject used to be, which is the distinction ADR-028 turns on.
 
-**This is [§6.6](06-cqrs.md)'s shape one service over**, and the precedent is
-deliberate: Ordering keeps a local projection of Catalog's prices rather than
-asking Catalog at read time
-([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
-The difference is what the local copy buys — there, a synchronous hop avoided;
+**The platform already does this twice, and the closer of the two is the price
+projection.** [§6.4](06-cqrs.md)'s `PlaceOrder` reads
+`ordering.ProductPrices` — a local projection of Catalog's price events, and
+`IProductPriceReader` is documented as *never a remote call* — so a command
+handler that needs another service's fact looks it up in a table Ordering owns.
+That is exactly Payments' shape: a **write-path** lookup, on the path that
+decides, against a record built from events.
+[ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)
+is the same mechanism on the read path, for product **names** rather than
+prices — the two tables are deliberately distinct, and `ordering.ProductPrices`
+has never carried a name.
+
+What differs is what the local copy buys. There, a synchronous hop avoided;
 here, an assertion nobody could verify replaced by a record the service owns.
 
 > **The subscription is a precondition, not a decoration, and the ordering

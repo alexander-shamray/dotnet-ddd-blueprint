@@ -96,11 +96,22 @@ record of who an order belongs to, and looks the payer up when the command
 arrives. That is ADR-028, and §3.2's Payments row gained `OrderPlaced` to make
 the precondition a contract rather than an implementation note.
 
-**The precedent is ADR-027, one service over, and citing it was not
-decoration.** Ordering resolves product names from a projection it owns rather
-than asking Catalog; Payments resolves the payer from a record it owns rather
-than reading the sender's word for it. Same mechanism, different purchase — a
-synchronous hop avoided there, an unverifiable assertion removed here.
+**The precedent is one service over, and picking the right one took a review
+round.** The first draft cited ADR-027 everywhere — Ordering resolving product
+*names* from a projection it owns — and then §3.2 described that ADR as being
+about *prices*, which it is not: ADR-027 is careful that
+`ordering.ProductPrices` has never carried a name, and the two tables are
+distinct on purpose. One precedent, three sites, two different readings.
+
+The closer analogue is the **price** projection and not the name one, which is
+what made the slip easy to miss: §6.4's `PlaceOrder` reads
+`ordering.ProductPrices` behind an `IProductPriceReader` documented as *never a
+remote call*, so a handler needing another service's fact **on the deciding
+path** looks it up locally. That is Payments' shape exactly — write path, at
+the moment of decision. ADR-027 is the same mechanism on the read path, for
+names. All three sites now say so, and say which is which. Same mechanism,
+different purchase — a synchronous hop avoided there, an unverifiable assertion
+removed here.
 
 **Why the contract narrowed instead of emptying, which is the question a
 reviewer asks first.** `Amount` and `Currency` stayed. The line between them

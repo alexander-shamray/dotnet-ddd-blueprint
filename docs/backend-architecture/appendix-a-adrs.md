@@ -1201,11 +1201,17 @@ through undetected. A field the receiver can check is a claim; a field it
 cannot check is an assertion. Money-movement commands may carry claims and may
 not carry assertions.
 
-**The precedent is [ADR-027](#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally), one service over.** Ordering
-resolves product names from a projection it owns rather than asking Catalog;
-Payments resolves the payer from a record it owns rather than reading the
-sender's word for it. The mechanism is the same — a local record built from
-events — and only the thing it buys differs: there a synchronous hop avoided,
+**The precedent is one service over, and the closer of the two is §6.4's price
+projection.** `PlaceOrder` reads `ordering.ProductPrices` — Catalog's price
+events projected into a table Ordering owns, behind an `IProductPriceReader`
+documented as *never a remote call* — so a handler needing another service's
+fact on the deciding path looks it up locally. Payments' lookup is the same
+shape: write path, at the moment of decision, against a record built from
+events. [ADR-027](#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)
+is the same mechanism on the **read** path and for product **names**; the two
+tables are distinct and `ordering.ProductPrices` has never carried a name.
+
+Only the thing the local copy buys differs: there a synchronous hop avoided,
 here an unverifiable assertion removed.
 
 **Consequences.**
