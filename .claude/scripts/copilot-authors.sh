@@ -84,9 +84,38 @@ copilot_admitted_json() {
 # over. What is reported — author and location — is enough to find the comment
 # on the PR page by hand, and reads as no instruction.
 #
+# **The LABEL must be server-generated, and this is subtler than the body.**
+# Withholding the body while printing `.path` was the first version of this
+# helper, and a review caught it: on a pull request the *author* chooses the
+# filenames, git permits a newline inside one, and `jq -r` prints it verbatim.
+# So a stranger could open a PR carrying a file whose name is two lines of
+# prompt text, comment on it, have the comment dropped, and still land that
+# text in the triage transcript through the very report saying it was dropped.
+# Pass `.html_url`, `.url` or `.submittedAt` — fields GitHub generates — never
+# `.path`, and never anything else the pull request supplies.
+#
+# `clean` below is the belt to that braces: every reported field is coerced to
+# printable ASCII and truncated, so a future caller passing the wrong
+# expression gets a mangled label rather than a working injection. It is not
+# the control — choosing a server-generated field is — but together they mean
+# neither mistake alone is sufficient.
+#
 # The count is reported even when it is zero. A filter that prints nothing when
 # it drops nothing is indistinguishable from one that never ran, which is this
 # repository's most-repeated failure wearing a helper's clothes.
+# Printable-ASCII coercion for every field the dropped report prints. See the
+# LABEL paragraph above: this is the second line of defence, not the first.
+#
+# The class is written as the literal range space-to-tilde rather than as
+# `\u0020-\u007e`, and that is not a style choice. The escaped form has to
+# survive a bash single-quoted string on its way into a jq program, and the
+# first version of this line did not: jq read the doubled backslash as an
+# escaped backslash and built a class of literal characters, which quietly
+# replaced the `y` in `mallory` and every space. It sanitised, so it looked
+# like it worked. Only running it against a known-good login showed the class
+# was matching the wrong thing — the positive control earning its place again.
+CLEAN_DEF='def clean: tostring | gsub("[^ -~]"; "?") | .[0:200];'
+
 copilot_partition() {
   local authors="$1" author_expr="$2" label_expr="$3" feed="$4"
   local input admitted dropped_count dropped_lines
@@ -95,9 +124,9 @@ copilot_partition() {
   admitted=$(jq --argjson a "$authors" \
     "[ .[] | select((${author_expr}) as \$l | \$a | index(\$l)) ]" <<<"$input")
   dropped_lines=$(jq -r --argjson a "$authors" \
-    "[ .[] | select(((${author_expr}) as \$l | \$a | index(\$l)) | not) ] |
-     .[] | \"  dropped \" + ((${author_expr}) // \"(no login)\") + \" at \" +
-     (((${label_expr}) // \"(no location)\") | tostring)" <<<"$input")
+    "${CLEAN_DEF} [ .[] | select(((${author_expr}) as \$l | \$a | index(\$l)) | not) ] |
+     .[] | \"  dropped \" + (((${author_expr}) // \"(no login)\") | clean) + \" at \" +
+     (((${label_expr}) // \"(no location)\") | clean)" <<<"$input")
   dropped_count=$(jq --argjson a "$authors" \
     "[ .[] | select(((${author_expr}) as \$l | \$a | index(\$l)) | not) ] | length" \
     <<<"$input")

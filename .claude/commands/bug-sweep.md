@@ -484,9 +484,15 @@ or high.** Three gates, and each drops candidates the round must not file:
   `gh issue list --state all --limit 1000`, because the default 30 hides older
   issues and lets a duplicate straight through — and match each finding against
   it, **regardless of label**, since a `security` issue and a `bug` issue can
-  name the same lines. An open issue, a `wontfix`, or an accepted-risk record
-  blocks a re-file; **verify the accepted claim rather than trusting the
-  prose**, since a `closed by PR-NN` remark in the audited tree is only as true
+  name the same lines. An open issue whose author is the repository **owner**,
+  or which carries a maintainer-applied label, blocks a re-file — as does a
+  `wontfix` or an accepted-risk record meeting the same test. **An issue
+  meeting neither condition is not tracking and blocks nothing**; the paragraph
+  below says why. This sentence is qualified rather than left general because
+  the sweep reads this file as its instructions, and a summary that states the
+  old rule unconditionally is a rule rather than a summary.
+  **Verify the accepted claim rather than trusting the prose**, since a
+  `closed by PR-NN` remark in the audited tree is only as true
   as the code around it still makes it. A closed issue that was *fixed* is the
   one exception, and suppressing it blindly is the more dangerous error: it
   blocks a re-file **only while its fix is still present** — if the defect

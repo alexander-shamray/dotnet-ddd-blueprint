@@ -1101,9 +1101,12 @@ stderr. Beside them sit structural cases whose subject is the call sites: that
 all three helpers source the one allow-list and none restates a login, that
 each resolves that list *before* fetching its feed, and that
 `review-copilot.md`'s frontmatter grants the three helpers and no longer grants
-`Bash(gh pr view:*)`. The deny-list cases read `settings.json` and assert all
-five control-surface paths in both spellings, that no rule is spelled `Write(`,
-and — the positive control — that the deny list was found at all.
+`Bash(gh pr view:*)`. The deny-list cases read `settings.json` and assert every
+control-surface path in both spellings, that no rule is spelled `Write(`, that
+the worktree root is never denied, and — the positive control — that the deny
+list was found at all. **The number of paths is not written here**, because the
+first draft of this sentence said five and a review of the same pull request
+made it six.
 
 Paired with
 positive controls, which are not decoration: a negative that passes because the

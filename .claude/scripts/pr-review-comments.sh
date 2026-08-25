@@ -25,4 +25,4 @@ pr="${1:?usage: pr-review-comments.sh <pr-number>}"
 admitted=$(copilot_admitted_json)
 gh api "repos/{owner}/{repo}/pulls/$pr/comments" --paginate |
   jq -s 'add // []' |
-  copilot_partition "$admitted" '.user.login' '.path' 'inline comments'
+  copilot_partition "$admitted" '.user.login' '.html_url' 'inline comments'
