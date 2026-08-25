@@ -172,16 +172,35 @@ So the column is mapped as a **shadow property** — unreachable from the
 instance, so the control still holds — with a database default, and the drop is
 owed to a release where nothing writes it.
 
-**The default's shape is decided by the rollback, not by the roll-forward, and
-only one of those is the ordinary path.** Rolling forward, the new build's
-`INSERT` omits the column and SQL Server supplies the default; a nullable
-column would serve equally well. Rolling *back*, the old build materialises a
-non-nullable `Guid` from rows the new build wrote — and a nullable column
-throws there rather than reading empty. `NOT NULL` with a default is the one
-shape that survives both directions. The value is `Guid.Empty` on
-`AddSagaPaymentVerdictJoin`'s terms one release back: it is the conservative
-choice rather than merely a legal one, because it is **nobody**, where any
-other default would name a real subject that was never that order's.
+**The default's shape is decided by the old build reading the new build's
+rows.** Rolling forward, the new build's `INSERT` omits the column and SQL
+Server supplies the default; a nullable column would serve equally well. The
+old build materialises a non-nullable `Guid` from rows the new build wrote —
+and a nullable column throws there rather than reading empty. `NOT NULL` with a
+default is the one shape that survives both. The value is `Guid.Empty` on
+`AddSagaPaymentVerdictJoin`'s terms one release back: the conservative choice
+rather than merely a legal one, because it is **nobody**, where any other
+default would name a real subject that was never that order's.
+
+**Copilot found that "the old build" was written throughout as a rollback, and
+it is mostly not one.** §15.5's canary runs both releases at once over the same
+queues, so the ordinary ladder produces the case: a new pod creates the
+instance with the column defaulted, an old pod takes the next event for that
+correlation, reads `Guid.Empty`, and sends its four-field `AuthorisePayment`
+naming nobody. Reachable on every deploy rather than only on the way back from
+one — and every site here had framed it as the rare direction.
+
+**The finding did not change the design, and saying why is the point.** Two
+releases are enough *here* for the same reason the in-place contract change is
+allowed at all — nothing consumes the command, so the legacy message reaches no
+decision, and an empty payer is a charge that fails visibly rather than one
+aimed at the wrong customer. What it changed is the guidance: a platform whose
+Payments is live needs **three** releases — stop sending the field, drop the
+property, drop the column — which is §7.4's own sequence with its *stop writing
+the old one* step performed rather than skipped. The blueprint is a
+specification somebody else will follow with Payments running, so a sequence
+that is safe only under a condition it never states is a defect in the
+specification even when the code is right.
 
 **The gate is three tests, and two of them exist because the first one cannot
 fail informatively on its own.** `No_command_contract_carries_a_subject`

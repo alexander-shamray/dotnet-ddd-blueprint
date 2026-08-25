@@ -3520,10 +3520,18 @@ CREATE TABLE ordering.OrderFulfilmentStates
     -- compatible with the release still serving beside it, and that release's
     -- saga writes this column on every OrderPlaced. NOT NULL with a default is
     -- the one shape that survives both directions: rolling forward the new
-    -- build's INSERT omits it, and rolling back the old build materialises a
-    -- non-nullable Guid from rows the new build wrote. The empty GUID is the
-    -- conservative value — it is nobody, where any other default would name a
-    -- real subject that was never this order's.
+    -- build's INSERT omits it, and the old build materialises a non-nullable
+    -- Guid from rows the new build wrote. The empty GUID is the conservative
+    -- value — it is nobody, where any other default would name a real subject
+    -- that was never this order's.
+    --
+    -- The old build reading these rows is the ordinary canary and not only a
+    -- rollback: §15.5 runs both releases over the same queues, so an old pod
+    -- can step an instance a new pod created and send its four-field
+    -- AuthorisePayment naming nobody. Acceptable only because nothing consumes
+    -- that command yet — with a live Payments this removal takes THREE
+    -- releases, §7.4's sequence including the "stop writing the old one" step
+    -- these two skip.
     CustomerId                 UNIQUEIDENTIFIER NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
     Total                      DECIMAL(19,4)    NOT NULL,
     Currency                   CHAR(3)          NOT NULL,

@@ -23,14 +23,29 @@ namespace Ordering.Infrastructure.Persistence.Migrations;
 /// So this release makes the column safe to stop writing, and the drop is the
 /// contract half, owed to a release where nothing writes it.
 /// <para>
-/// <b>The default is what makes it safe in <em>both</em> directions, and only
-/// one of them is the ordinary rollout.</b> Rolling forward, the new build's
-/// generated <c>INSERT</c> does not name the column and SQL Server supplies
-/// the default. Rolling back is the direction that decides the column's
-/// nullability: the old build materialises a non-nullable <c>Guid</c> from
-/// rows the new build wrote, so a nullable column would throw on
-/// materialisation rather than merely read empty. <c>NOT NULL</c> with a
-/// default is the one shape that survives both.
+/// <b>The default is what makes it safe in <em>both</em> directions.</b>
+/// Rolling forward, the new build's generated <c>INSERT</c> does not name the
+/// column and SQL Server supplies the default. The old build materialises a
+/// non-nullable <c>Guid</c> from rows the new build wrote, so a nullable
+/// column would throw on materialisation rather than merely read empty.
+/// <c>NOT NULL</c> with a default is the one shape that survives both.
+/// </para>
+/// <para>
+/// <b>The old build reading these rows is the ordinary canary, not only a
+/// rollback</b> — an earlier draft of this file called it the latter, which
+/// understated how often it happens. §15.5 runs both releases at once over the
+/// same queues, so a new pod can create the instance and an old pod take the
+/// next event for it, read <c>Guid.Empty</c>, and send its four-field
+/// <c>AuthorisePayment</c> naming nobody.
+/// </para>
+/// <para>
+/// <b>What makes that acceptable is the condition §9.2's in-place exception
+/// already rests on: nothing consumes the command.</b> Payments is unbuilt, so
+/// the legacy message reaches no decision, and an empty payer is a charge that
+/// fails visibly rather than one aimed at the wrong customer. With a live
+/// Payments this removal needs <em>three</em> releases — stop sending the
+/// field, drop the property, drop the column — which is §7.4's own sequence
+/// with its "stop writing the old one" step performed rather than skipped.
 /// </para>
 /// <para>
 /// <b><c>Guid.Empty</c> is the conservative value rather than merely a legal

@@ -68,11 +68,28 @@ internal sealed class OrderFulfilmentStateConfiguration : IEntityTypeConfigurati
         // conservative value rather than merely a legal one — the same
         // argument AddSagaPaymentVerdictJoin makes for its two columns, one
         // release on. The new build's INSERT does not name this column, so
-        // SQL Server supplies the default; and on a ROLLBACK the old build
-        // materialises a non-nullable Guid from rows the new build wrote, so
-        // the column must not be nullable and must not be absent. It reads
-        // Guid.Empty, which is nobody — where a nullable column would throw on
-        // materialisation and a dropped one would fail the INSERT outright.
+        // SQL Server supplies the default; the old build materialises a
+        // non-nullable Guid from rows the new build wrote, so the column must
+        // not be nullable and must not be absent. It reads Guid.Empty, which
+        // is nobody — where a nullable column would throw on materialisation
+        // and a dropped one would fail the INSERT outright.
+        //
+        // **That old build is not only a rollback, and framing it as one was
+        // this comment's mistake.** §15.5's canary runs both releases at once
+        // over the same queues, so the ordinary ladder produces it: a new pod
+        // creates the instance with this column defaulted, an old pod picks up
+        // the next event for that correlation, materialises Guid.Empty, and
+        // sends its four-field AuthorisePayment naming nobody. Reachable on
+        // every deploy, not only on the way back from one.
+        //
+        // **What makes it acceptable here is the same condition §9.2's
+        // in-place exception rests on: nothing consumes that command.**
+        // Payments is unbuilt, so the legacy message reaches no decision.
+        // A platform with a live Payments needs THREE releases rather than
+        // two — stop sending the field, then drop the property, then drop the
+        // column — which is §7.4's sequence with its "stop writing the old
+        // one" step performed rather than skipped. Skipping it is what this
+        // release can afford and a live consumer could not.
         //
         // The contract half — DROP COLUMN — is a later release's, once no
         // build that writes it is still running.

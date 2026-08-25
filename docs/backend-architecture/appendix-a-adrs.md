@@ -1289,11 +1289,24 @@ every migration to be backward compatible with the release serving beside it,
 and that release's saga writes `ordering.OrderFulfilmentStates.CustomerId` on
 every `OrderPlaced`. So this release maps the column as a shadow property with
 a conservative default — `NOT NULL DEFAULT '00000000-…'`, the one shape that
-survives a roll-forward whose `INSERT` omits it *and* a rollback that
-materialises a non-nullable `Guid` from rows the new build wrote — and the
+survives a roll-forward whose `INSERT` omits it *and* an old build
+materialising a non-nullable `Guid` from rows the new build wrote — and the
 `DROP COLUMN` is owed to a release where nothing writes it. The empty GUID is
 nobody, where any other default would name a real subject that was never that
 order's.
+
+**Two releases are enough here and would not be with a live consumer, and the
+difference is worth stating because the shorter sequence looks complete.**
+§15.5's canary runs both releases at once over the same queues, so the ordinary
+ladder — not merely a rollback — lets a new pod create the instance with the
+column defaulted and an old pod take the next event for it, read `Guid.Empty`
+and send its four-field `AuthorisePayment` naming nobody. That reaches no
+decision today for the same reason the in-place contract change is allowed at
+all: nothing consumes the command. A platform whose Payments is live needs
+**three** releases — stop sending the field, drop the property, drop the
+column — which is §7.4's own sequence with its *stop writing the old one* step
+performed rather than skipped. Skipping a step is what having no consumer buys,
+and it buys nothing once there is one.
 
 **The rule is enforced rather than reviewed.** `ContractTests` asserts that no
 command contract — a contract that does not implement `IIntegrationEvent`,
