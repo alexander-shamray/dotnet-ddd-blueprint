@@ -95,6 +95,57 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     }
 
     [Fact]
+    public async Task A_cancellation_that_overtakes_its_placement_is_rescued_by_the_retry()
+    {
+        // **#123's whole argument for faulting rather than discarding, and
+        // §12.5's suite cannot express it.** That harness registers no
+        // UseMessageRetry, so its tests prove the callback faults ONCE and
+        // nothing more — while the reason a fault is the right answer is that
+        // §9.8's envelope gives the placement time to land and a later attempt
+        // correlates. A fault that never recovers would be a regression this
+        // branch argued for in prose and never measured. Copilot found the gap.
+        //
+        // The ladder is Exponential(5, 1s, 1min, 2s): deliveries at roughly 0,
+        // 1s, 3s, 7s, 15s and 31s. Publishing the placement 1.5 seconds in puts
+        // it after the first two attempts — both of which provably found no
+        // instance, because nothing had created one — and before the third,
+        // which is the delivery under test. The gap is deliberate rather than
+        // incidental: without it the placement could win the race and the
+        // assertion would pass on the ordinary path, proving nothing about
+        // recovery.
+        var orderId = Guid.CreateVersion7();
+
+        await PublishCancelledAsync(orderId, Guid.CreateVersion7(), CancelOrigins.User);
+
+        await Task.Delay(TimeSpan.FromSeconds(1.5), TestContext.Current.CancellationToken);
+
+        (await SagaRowsAsync(orderId)).ShouldBe(
+            0,
+            "the arrange half is that the cancellation arrived FIRST — if a row " +
+                "exists here the ordering under test never happened");
+
+        await PublishPlacedAsync(orderId, Guid.CreateVersion7());
+
+        // The row has to exist before its state can be read at all — ScalarAsync
+        // throws on an empty result rather than answering, so polling the state
+        // directly would die on the first read instead of waiting.
+        await Eventually(
+            () => SagaRowsAsync(orderId),
+            expected: 1,
+            because: "the placement creates the instance the retry needs");
+
+        await Eventually(
+            () => fixture.ScalarAsync<string>(
+                "SELECT Value = CurrentState FROM ordering.OrderFulfilmentStates " +
+                "WHERE CorrelationId = {0}",
+                orderId),
+            expected: "Compensating",
+            because: "a retried delivery has to correlate to the instance the " +
+                "placement created and compensate; reaching the error queue " +
+                "instead is the outcome #123 chose faulting to avoid");
+    }
+
+    [Fact]
     public async Task An_observed_cancellation_is_persisted_and_withholds_the_authorisation()
     {
         // **#143's flag is written by one delivery and read by a later one, and
@@ -416,6 +467,33 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
                 {
                     c.MessageId = messageId;
                     c.CorrelationId = placed.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
+    }
+
+    private async Task PublishCancelledAsync(Guid orderId, Guid messageId, string origin)
+    {
+        OrderCancelled cancelled = new()
+        {
+            MessageId = messageId,
+            CorrelationId = orderId,
+            OccurredAt = DateTimeOffset.UtcNow,
+            OrderId = orderId,
+            CustomerId = Customer,
+            Reason = CancelReasons.CustomerRequest,
+            Origin = origin
+        };
+
+        _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
+
+        await fixture.Factory.Services
+            .GetRequiredService<IBus>()
+            .Publish(
+                cancelled,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = cancelled.CorrelationId;
                 },
                 TestContext.Current.CancellationToken);
     }
