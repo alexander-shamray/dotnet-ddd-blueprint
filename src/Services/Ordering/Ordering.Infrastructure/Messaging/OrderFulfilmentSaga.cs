@@ -391,7 +391,6 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx =>
                 {
                     ctx.Saga.OrderId = ctx.Message.OrderId;
-                    ctx.Saga.CustomerId = ctx.Message.CustomerId;
                     ctx.Saga.Total = ctx.Message.TotalAmount;
                     ctx.Saga.Currency = ctx.Message.Currency;
                     ctx.Saga.StartedAt = ctx.Message.OccurredAt;
@@ -420,11 +419,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx => ctx.Saga.PaymentVerdictOutstanding = true)
                 // Currency travels with the amount — a bare decimal is a
                 // charge waiting to be made in the wrong denomination.
+                //
+                // **No subject travels with either** (ADR-028, #63). Payments
+                // decides whose instrument is charged, and this command
+                // arrives over a broker that carries no principal — so a
+                // customer identifier here would be that decision taken from
+                // a field nothing on the receiving side can check. Payments
+                // resolves the payer from its own record of the order, built
+                // from the OrderPlaced it consumes (§3.2). The amount and the
+                // currency stay because Payments holds that record and can
+                // disagree with them; it holds nothing that would contradict
+                // a subject.
                 .Send(
                     PaymentsQueue,
                     ctx => new AuthorisePayment(
                         ctx.Saga.OrderId,
-                        ctx.Saga.CustomerId,
                         ctx.Saga.Total,
                         ctx.Saga.Currency))
                 // Arm the next wait in the same activity that begins it.

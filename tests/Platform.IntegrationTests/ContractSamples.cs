@@ -170,7 +170,7 @@ internal static class ContractSamples
             Amount = 999.98m,
             Currency = "EUR"
         },
-        [typeof(AuthorisePayment)] = () => new AuthorisePayment(Order, Customer, 999.98m, "EUR"),
+        [typeof(AuthorisePayment)] = () => new AuthorisePayment(Order, 999.98m, "EUR"),
         [typeof(ShipmentDispatched)] = () => new ShipmentDispatched
         {
             MessageId = Message,

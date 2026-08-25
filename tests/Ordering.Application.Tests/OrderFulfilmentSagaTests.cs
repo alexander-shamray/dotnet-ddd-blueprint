@@ -691,7 +691,6 @@ public class OrderFulfilmentSagaTests
             // waiting to be made in the wrong denomination (§9.6).
             (await Sent<AuthorisePayment>(harness, m =>
                 m.OrderId == orderId &&
-                m.CustomerId == Customer &&
                 m.Amount == SagaContracts.Total &&
                 m.Currency == SagaContracts.Currency))
                     .ShouldBeTrue();

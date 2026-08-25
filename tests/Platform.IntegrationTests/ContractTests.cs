@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Common.Contracts;
 using Common.Contracts.Ordering.V1;
+using Common.Contracts.Payments.V1;
 using Shouldly;
 using Xunit;
 
@@ -270,6 +271,132 @@ public class ContractTests
 
             onTheWire.ShouldBe(declared, ignoreOrder: true, type.FullName);
         }
+    }
+
+    /// <summary>
+    /// The spellings a subject identifier has reached this repository under.
+    /// Matched as a substring of the property name, so <c>CustomerId</c>,
+    /// <c>BuyerId</c> and a bare <c>Customer</c> all land.
+    /// </summary>
+    /// <remarks>
+    /// <b>A list, and therefore incomplete by construction</b> — the reason
+    /// <see cref="A_subject_is_detectable_on_a_contract_that_carries_one"/>
+    /// sits beside this one. A reviewer adding a subject under a spelling
+    /// nobody predicted gets past this gate, and the positive control is what
+    /// keeps the gate from being uninformative rather than what closes that.
+    /// </remarks>
+    private static readonly string[] SubjectSpellings =
+    [
+        "Customer",
+        "Buyer",
+        "Payer",
+        "Subject",
+        "User",
+        "Principal"
+    ];
+
+    /// <summary>
+    /// Every contract that does not implement <see cref="IIntegrationEvent"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>That is a superset of the commands, and the name is the nearest
+    /// short word rather than an exact one.</b> §9.1 states the one-way
+    /// implication — <c>CancelOrder</c>'s remarks say commands "deliberately do
+    /// not implement <see cref="IIntegrationEvent"/>" — and the converse does
+    /// not follow: this also selects the payload records events carry
+    /// (<c>PlacedLine</c>, <c>ConfirmedLine</c>, <c>StockLine</c>,
+    /// <c>ShippingAddressV1</c>) and this suite's own discovery probes.
+    /// <para>
+    /// The widening is in the safe direction and is kept deliberately. ADR-028
+    /// is about a subject reaching a decision the receiver cannot check, and a
+    /// payload record nested in a command would carry one just as effectively
+    /// as a top-level member — so judging more than the commands refuses more,
+    /// never less. What it must not do is make the rule *read* as narrower than
+    /// it is, which is why this says so rather than calling the set "commands"
+    /// and leaving a reader to assume §9.1 licensed it.
+    /// </para>
+    /// </remarks>
+    private static readonly Type[] NonEvents =
+    [
+        .. Contracts.Where(t => !typeof(IIntegrationEvent).IsAssignableFrom(t))
+    ];
+
+    private static PropertyInfo[] SubjectMembers(Type type) =>
+    [
+        .. type
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => SubjectSpellings.Any(s =>
+                p.Name.Contains(s, StringComparison.OrdinalIgnoreCase)))
+    ];
+
+    [Fact]
+    public void No_command_contract_carries_a_subject()
+    {
+        // §11.4's subject rule, applied to the path that rule excluded until
+        // ADR-028 settled it (#63). A command crossing the broker arrives with
+        // no principal, so a subject identifier on one is a decision about
+        // whose money moves taken from a field the receiver cannot check. The
+        // owning service re-derives the subject from its own record instead.
+        //
+        // Events are exempt and must be: OrderPlaced carries the CustomerId
+        // that IS the record Payments builds from, and it is bound from the
+        // principal at Ordering's endpoint before it is ever published.
+        (string Command, string Member)[] offenders =
+        [
+            .. NonEvents
+                .SelectMany(t => SubjectMembers(t).Select(p => (t.FullName!, p.Name)))
+        ];
+
+        offenders.ShouldBeEmpty(
+            "a command carries no principal, so a subject on one is unverifiable " +
+            "at the receiver (ADR-028): " +
+            string.Join(", ", offenders.Select(o => $"{o.Command}.{o.Member}")));
+    }
+
+    [Fact]
+    public void A_subject_is_detectable_on_a_contract_that_carries_one()
+    {
+        // The positive control, and it is not decoration. The test above
+        // passes if SubjectMembers matches nothing at all — a misspelt
+        // spelling list, a BindingFlags mistake, a Contracts array that went
+        // empty — and an empty offender set reads identically either way.
+        // This repository's most-repeated failure is a gate that quietly stops
+        // covering its surface, so the detector is pointed at a type known to
+        // carry a subject and required to find it.
+        //
+        // OrderPlaced is that type BY DESIGN rather than by accident: it is
+        // the event Payments builds its record of the payer from (§3.2), so it
+        // is the one contract whose CustomerId ADR-028 requires to stay.
+        SubjectMembers(typeof(OrderPlaced))
+            .Select(p => p.Name)
+            .ShouldContain(nameof(OrderPlaced.CustomerId));
+    }
+
+    [Fact]
+    public void The_set_the_subject_gate_reads_holds_the_real_commands()
+    {
+        // The other half of the same argument, one level up: the control above
+        // proves the detector works and says nothing about what it is pointed
+        // at. NonEvents is a filter over Contracts, and a filter that selects
+        // nothing makes No_command_contract_carries_a_subject vacuous while
+        // leaving it green.
+        //
+        // **Not merely non-empty, and the difference is this suite's own
+        // probes.** NonEvents legitimately holds payload records and the two
+        // discovery probes UnversionedProbe and NestingProbe.NestedProbe, so a
+        // ShouldNotBeEmpty here would still pass with every real command
+        // filtered out — a control satisfied by the fixtures it was meant to
+        // see past. Name the commands the rule exists for instead.
+        NonEvents.ShouldContain(typeof(AuthorisePayment));
+        NonEvents.ShouldContain(typeof(CancelOrder));
+        NonEvents.ShouldContain(typeof(ConfirmOrder));
+
+        // And the filter must exclude something, or it is not a filter and the
+        // gate is being applied to events it must not be applied to.
+        NonEvents.ShouldNotContain(
+            typeof(OrderPlaced),
+            "events are exempt from the subject rule, and OrderPlaced is the one " +
+            "ADR-028 requires to keep its CustomerId");
     }
 
     private static string Names(IEnumerable<Type> types) =>
