@@ -174,11 +174,10 @@ public sealed class SagaCommandHandlerTests(ServiceFixture fixture) : IAsyncLife
         // one assertion and cannot pass on a translation that stops halfway.
         Guid orderId = await fixture.SeedOrderAsync(Customer);
 
-        (await DispatchAsync(new CancelOrderCommand(
-            orderId,
-            CancellationReason.CustomerRequest,
-            CommandOrigin.System)))
-            .IsSuccess.ShouldBeTrue();
+        Result cancelled = await DispatchAsync(
+            new CancelOrderCommand(orderId, CancellationReason.CustomerRequest, CommandOrigin.System));
+
+        cancelled.IsSuccess.ShouldBeTrue();
 
         OutboxMessage row = (await fixture.OutboxAsync()).ShouldHaveSingleItem();
 
