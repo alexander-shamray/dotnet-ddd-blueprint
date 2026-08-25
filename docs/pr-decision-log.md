@@ -211,22 +211,42 @@ points the same detector at `OrderPlaced` and requires it to find the
 must contain and the exemptions it must not, since a filter that selects
 nothing makes the rule vacuous while leaving it green.
 
-**Defining "command" took three attempts, and the middle one was wrong in the
-direction nobody checks.** The first spelling read every contract; the second
-narrowed to those not implementing `IIntegrationEvent`, citing §9.1 — which
-states that implication one way only. Copilot pointed out the converse admits
-the line types events carry, and an event is *permitted* a subject: had
-`OrderPlaced` factored its `CustomerId` into `PlacedLine`, the gate would have
-failed the build on a shape this very ADR requires. **A gate that refuses
-something the rule allows is a false failure, and the "fails wide is safe"
-argument written beside it was true of coverage and false of correctness.**
+**Defining "command" took four attempts, and each fix opened the next fault.**
+The first spelling read every contract. The second narrowed to those not
+implementing `IIntegrationEvent`, citing §9.1 — which states that implication
+one way only. Copilot pointed out the converse admits the line types events
+carry, and an event is *permitted* a subject: had `OrderPlaced` factored its
+`CustomerId` into `PlacedLine`, the gate would have failed the build on a shape
+this very ADR requires. **A gate that refuses what the rule allows is a false
+failure, and the "fails wide is safe" argument written beside it was true of
+coverage and false of correctness.**
 
-The set is now every non-event **minus everything reachable from an event's
-property graph** — the command roots plus payloads only a command carries — so
-`StockLine` stays judged because `ReserveStock` is a command. Both directions
-were measured rather than argued: a `CustomerId` injected into `PlacedLine`
-passes, and the same field injected into `StockLine` fails naming the member.
-The first of those two would have failed before this correction.
+The third subtracted everything reachable from an event, and Copilot found the
+hole that opened one round later: a payload carried by **both** a command and an
+event became exempt *because an event reached it*, so a subject inside it would
+travel on the command unjudged. **The fix for a false positive had created a
+false negative on the exact path the rule exists to close** — and the second
+fault is the worse one, because a refused build gets looked at and a silent pass
+does not.
+
+The fourth builds the judged set **up from the command roots** — the commands
+plus everything they carry — which settles both: a shared payload is judged
+because a command reaches it, and a purely-event payload is not because none
+does. The consequence is worth stating rather than leaving implicit: a type
+shared between a command and an event may not carry a subject at all, since the
+command side forbids what the event side permits.
+
+**Three directions measured, not argued**: a `CustomerId` in `PlacedLine`
+passes; the same field in `StockLine` fails naming the member; and the same
+field in a `PlacedLine` that a command also carries fails. The first would have
+failed under attempt two, and the third would have passed under attempt three.
+
+**The reusable half is about the shape of the correction rather than this
+gate.** Two of the four attempts were fixes that introduced the opposite
+defect, and neither was caught by the tests that existed at the time — the
+suite was green after attempt two and green after attempt three. What found
+them both was someone asking what the *set* contained, not what the assertion
+returned.
 
 **The coverage control named three command roots of seven**, which is the
 repository's most-repeated failure reproduced inside the control written to

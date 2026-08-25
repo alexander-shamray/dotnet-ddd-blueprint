@@ -1327,17 +1327,29 @@ and it buys nothing once there is one.
 **The rule is enforced rather than reviewed.** `ContractTests` asserts that no
 command contract declares a member spelled like a subject.
 
-**Defining "command" is the part that had to be got right, and the obvious
-definition is wrong in a way that matters.** §9.1 states one direction only —
-commands do not implement `IIntegrationEvent` — and the converse sweeps in the
-payload records events carry. An event is **allowed** a subject; `OrderPlaced`
-carries the one this ADR requires it to keep. So a gate over every non-event
-would fail the build on an event that factored that field into its line type,
-refusing a shape this decision permits. The judged set is therefore every
-non-event **minus everything reachable from an event's property graph**, which
-leaves the command roots and the payloads only a command carries. `StockLine`
-stays judged, because a subject one level inside `ReserveStock` reaches the same
-decision as a top-level one.
+**Defining "command" is the part that had to be got right, and it took three
+attempts because the obvious definitions fail in opposite directions.** §9.1
+states one implication only — commands do not implement `IIntegrationEvent` —
+so the converse is not available:
+
+- **Every non-event refuses what the rule allows.** It sweeps in the payload
+  records events carry, and an event is *permitted* a subject: `OrderPlaced`
+  holds the one this ADR requires it to keep. An event that factored that field
+  into its line type would fail a build for doing something legal.
+- **Non-events minus the event closure lets one through.** That was the fix for
+  the first and it created a worse fault: a payload carried by *both* a command
+  and an event became exempt because an event reached it, so a subject inside it
+  would travel on the command unjudged — a false negative on the exact path this
+  decision exists to close.
+
+**Reachability from a command root settles both.** The judged set is the
+commands plus everything they carry transitively, so a shared payload is judged
+(a command reaches it) and a purely-event payload is not (none does).
+`StockLine` is judged through `ReserveStock`, because a subject one level down
+reaches the same decision as a top-level one. The consequence for a shared type
+is worth stating: it may not carry a subject at all, because the command side
+forbids what the event side permits, and the stricter rule is the direction a
+gate must fail in.
 
 Three controls sit beside the rule, because an absence-assert cannot fail
 informatively on its own: one points the detector at `OrderPlaced` and requires

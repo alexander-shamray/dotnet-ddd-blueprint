@@ -115,18 +115,19 @@ self-edge, which is a simplification rather than a claim: the collaboration is
 real, it is asynchronous like every other, and it obeys the same rule that the
 return leg is an event.
 
-**Payments subscribes to `OrderPlaced` for one reason, and it is not that it
-needs the order.** It needs the *payer*, and
+**Payments subscribes to `OrderPlaced` to build its own record of the order —
+the payer, the total and the currency.** The payer is the one it cannot do
+without, and
 [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
 forbids `AuthorisePayment` from carrying one: a command crosses the broker with
 no principal behind it (§11.4), so a subject on that command would decide whose
-instrument is charged from a field the receiving service cannot check. Payments
-builds its own record of the order instead, from the event whose `CustomerId`
-was bound from a real principal at Ordering's endpoint, and resolves the payer
-locally when the command arrives.
+instrument is charged from a field the receiving service cannot check. The
+subject reaches Payments through the event instead, where it was bound from a
+real principal at Ordering's endpoint, and the command's arrival is what makes
+it look the payer up.
 
-**That record keeps the total and the currency as well as the payer**, and the
-extra two are not incidental. `OrderPlaced` carries `TotalAmount` and
+**The other two fields are not incidental, which is why the record is of the
+order rather than of the payer.** `OrderPlaced` carries `TotalAmount` and
 `Currency` — §9.6's saga reads both off it — and holding them is what lets
 Payments *disagree* with the `AuthorisePayment` it is handed rather than merely
 obey it. A record of the payer alone would leave the amount as unverifiable as

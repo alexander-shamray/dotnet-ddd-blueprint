@@ -2223,14 +2223,19 @@ contain, and one asserting the exempt types are excluded — because a gate that
 has only ever been observed green is one nobody has established is looking at
 anything.
 
-**Deciding what it judges is the other half, and "not an event" is the wrong
-answer.** §9.1 says commands do not implement `IIntegrationEvent` and nothing
-about the converse, so that predicate also selects the line types events carry —
-and an event is *permitted* a subject. Judging them would refuse a shape
-ADR-028 allows, which is a false build failure rather than a missed one. The
-set is every non-event **minus everything reachable from an event's property
-graph**: the command roots, plus the payloads only a command carries. Both
-directions were measured against an injected subject rather than argued.
+**Deciding what it judges is the other half, and both obvious answers are
+wrong in opposite directions.** §9.1 says commands do not implement
+`IIntegrationEvent` and nothing about the converse. *Every non-event* therefore
+also selects the line types events carry — and an event is *permitted* a
+subject, so judging them refuses a shape ADR-028 allows. *Non-events minus what
+events carry* fixes that and opens a worse hole: a payload carried by a command
+**and** an event goes exempt because an event reaches it, letting a subject
+travel on the command unjudged.
+
+The set is built **up from the command roots** instead — the commands plus
+everything they carry — so a shared payload is judged and a purely-event one is
+not. All three directions were measured against an injected subject rather than
+argued.
 
 This is the one suite that references every service, which is why it has its own
 project and why that project holds nothing else:

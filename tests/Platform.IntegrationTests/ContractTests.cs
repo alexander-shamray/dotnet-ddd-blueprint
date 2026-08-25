@@ -305,67 +305,91 @@ public class ContractTests
     ];
 
     /// <summary>
-    /// Every contract type an integration event carries, transitively — the
-    /// line types, and anything those carry in turn.
+    /// Every contract type some other contract carries as a member.
     /// </summary>
     /// <remarks>
     /// Computed rather than listed, because a list here is a second inventory
     /// to reconcile and this one changes whenever a contract gains a member.
     /// </remarks>
-    private static readonly HashSet<Type> CarriedByAnEvent = BuildEventPayloadClosure();
+    private static readonly HashSet<Type> CarriedBySomething =
+    [
+        .. Contracts.SelectMany(CarriedContractTypes)
+    ];
 
     /// <summary>
-    /// The command roots and the payload types only a command carries.
+    /// The command roots: a contract that is not an event and that nothing
+    /// else carries.
     /// </summary>
     /// <remarks>
-    /// <b>"Not an event" is not the same as "a command", and the difference is
-    /// not merely pedantic — it decides whether this gate can refuse a legal
-    /// contract.</b> §9.1 states the one-way implication only: commands
-    /// "deliberately do not implement <see cref="IIntegrationEvent"/>". The
-    /// converse would sweep in the payload records events carry —
-    /// <c>PlacedLine</c>, <c>ConfirmedLine</c>, <c>ShippingAddressV1</c> — and
-    /// an event is **allowed** a subject. <c>OrderPlaced</c> carries the
-    /// <c>CustomerId</c> ADR-028 requires it to keep; an event that factored
-    /// the same field into its line type would be doing something the rule
-    /// permits, and a gate over every non-event would fail the build for it.
-    /// <para>
-    /// So the subtraction is the definition. Everything reachable from an
-    /// event's property graph is exempt, exactly as the event itself is, and
-    /// what remains is the commands plus the payloads only they carry.
-    /// <c>StockLine</c> stays judged — <c>ReserveStock</c> is a command — which
-    /// is the half that must not be lost: a subject nested one level down in a
-    /// command reaches the same decision as a top-level one.
-    /// </para>
-    /// <para>
-    /// An earlier revision judged every non-event and called the widening safe
-    /// on the grounds that it "refuses more, never less". True of coverage and
-    /// false of correctness: refusing more includes refusing shapes the rule
-    /// allows.
-    /// </para>
+    /// Nothing carries `ReserveStock`, so it is a root; `StockLine` is carried
+    /// by it and is therefore a payload rather than a root. The seven roots
+    /// this resolves to are §3.2's Accepts columns read across, and
+    /// <see cref="The_set_the_subject_gate_reads_holds_the_real_commands"/>
+    /// names them so that discovery losing one is a failure rather than a
+    /// smaller judged set.
     /// </remarks>
-    private static readonly Type[] Commands =
+    private static readonly Type[] CommandRoots =
     [
         .. Contracts
             .Where(t => !typeof(IIntegrationEvent).IsAssignableFrom(t))
-            .Where(t => !CarriedByAnEvent.Contains(t))
+            .Where(t => !CarriedBySomething.Contains(t))
     ];
 
-    private static HashSet<Type> BuildEventPayloadClosure()
+    /// <summary>
+    /// What the subject rule judges: the command roots, and everything a
+    /// command carries transitively.
+    /// </summary>
+    /// <remarks>
+    /// <b>Built <em>up</em> from the commands, not subtracted from the
+    /// contracts, and the two are not equivalent.</b> §9.1 states one
+    /// implication only — commands "deliberately do not implement
+    /// <see cref="IIntegrationEvent"/>" — so neither "every contract" nor
+    /// "every non-event" is the judged set:
+    /// <list type="bullet">
+    /// <item><b>Every non-event refuses shapes the rule allows.</b> It sweeps
+    /// in the line types events carry, and an event is *permitted* a subject —
+    /// <c>OrderPlaced</c> carries the <c>CustomerId</c> ADR-028 requires it to
+    /// keep. An event that factored that field into its line type would fail a
+    /// build for doing something legal.</item>
+    /// <item><b>Non-events minus the event closure lets one through.</b> That
+    /// was the fix for the first problem and it created a worse one: a payload
+    /// carried by *both* a command and an event became exempt because an event
+    /// reached it — so a subject inside it would travel on the command,
+    /// unjudged. A false negative on the exact path this rule exists to close.
+    /// </item>
+    /// </list>
+    /// <para>
+    /// Reachability from a command root settles both. A shared payload is
+    /// judged, because a command reaches it; a purely-event payload is not,
+    /// because no command does. <c>StockLine</c> is judged via
+    /// <c>ReserveStock</c> — a subject one level down reaches the same decision
+    /// as a top-level one — and <c>PlacedLine</c> is not.
+    /// </para>
+    /// <para>
+    /// The consequence for a shared payload is worth stating rather than
+    /// leaving implicit: a type carried by a command and an event alike may not
+    /// carry a subject, because the command side forbids what the event side
+    /// permits. The stricter rule wins, which is the direction a gate must fail
+    /// in.
+    /// </para>
+    /// </remarks>
+    private static readonly Type[] Commands = [.. BuildCommandClosure()];
+
+    private static HashSet<Type> BuildCommandClosure()
     {
-        HashSet<Type> carried = [];
-        Queue<Type> pending = new(
-            Contracts.Where(t => typeof(IIntegrationEvent).IsAssignableFrom(t)));
+        HashSet<Type> judged = [.. CommandRoots];
+        Queue<Type> pending = new(CommandRoots);
 
         while (pending.Count > 0)
         {
             foreach (Type next in CarriedContractTypes(pending.Dequeue()))
             {
-                if (carried.Add(next))
+                if (judged.Add(next))
                     pending.Enqueue(next);
             }
         }
 
-        return carried;
+        return judged;
     }
 
     private static IEnumerable<Type> CarriedContractTypes(Type type) =>
@@ -448,14 +472,14 @@ public class ContractTests
     {
         // The other half of the same argument, one level up: the control above
         // proves the detector works and says nothing about what it is pointed
-        // at. NonEvents is a filter over Contracts, and a filter that selects
-        // nothing makes No_command_contract_carries_a_subject vacuous while
-        // leaving it green.
+        // at. Commands is a closure over CommandRoots, and a discovery that
+        // finds no roots makes No_command_contract_carries_a_subject vacuous
+        // while leaving it green.
         //
         // **Not merely non-empty, and the difference is StockLine.** Commands
-        // legitimately holds a payload record only a command carries, so a
-        // ShouldNotBeEmpty here would still pass with every command root
-        // filtered out. Name the roots the rule exists for instead.
+        // legitimately holds a payload a command carries, so a ShouldNotBeEmpty
+        // here would still pass with every command root lost. Name the roots
+        // the rule exists for instead.
         //
         // **All seven of them, which is §3.2's Accepts columns read across.**
         // An earlier revision named three and would have stayed green while
