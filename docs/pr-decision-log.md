@@ -204,15 +204,35 @@ specification even when the code is right.
 
 **The gate is three tests, and two of them exist because the first one cannot
 fail informatively on its own.** `No_command_contract_carries_a_subject`
-reflects over every contract that does not implement `IIntegrationEvent` —
-§9.1's own command/event distinction, stated on `CancelOrder` — and asserts
-none declares a member spelled like a subject. An empty offender set is exactly
-what a broken detector produces, so a positive control points the same detector
-at `OrderPlaced` and requires it to find the `CustomerId` ADR-028 *keeps*; a
-third asserts the command set is non-empty and a proper subset of the
-contracts, since a filter that selects nothing makes the rule vacuous while
-leaving it green. All three were observed against a reintroduced `CustomerId`:
-the rule went red naming the offending member, and both controls stayed green.
+asserts no command contract declares a member spelled like a subject. An empty
+offender set is exactly what a broken detector produces, so a positive control
+points the same detector at `OrderPlaced` and requires it to find the
+`CustomerId` ADR-028 *keeps*; a third names the command roots the judged set
+must contain and the exemptions it must not, since a filter that selects
+nothing makes the rule vacuous while leaving it green.
+
+**Defining "command" took three attempts, and the middle one was wrong in the
+direction nobody checks.** The first spelling read every contract; the second
+narrowed to those not implementing `IIntegrationEvent`, citing §9.1 — which
+states that implication one way only. Copilot pointed out the converse admits
+the line types events carry, and an event is *permitted* a subject: had
+`OrderPlaced` factored its `CustomerId` into `PlacedLine`, the gate would have
+failed the build on a shape this very ADR requires. **A gate that refuses
+something the rule allows is a false failure, and the "fails wide is safe"
+argument written beside it was true of coverage and false of correctness.**
+
+The set is now every non-event **minus everything reachable from an event's
+property graph** — the command roots plus payloads only a command carries — so
+`StockLine` stays judged because `ReserveStock` is a command. Both directions
+were measured rather than argued: a `CustomerId` injected into `PlacedLine`
+passes, and the same field injected into `StockLine` fails naming the member.
+The first of those two would have failed before this correction.
+
+**The coverage control named three command roots of seven**, which is the
+repository's most-repeated failure reproduced inside the control written to
+prevent it: discovery could have dropped `ReserveStock`, `ReleaseStock`,
+`MarkOrderShipped` and `FlagOrderForReview` while the gate stayed green. It
+names all seven now, read across §3.2's Accepts columns.
 
 **The spelling list is incomplete by construction and says so.** It matches
 `Customer`, `Buyer`, `Payer`, `Subject`, `User` and `Principal` as substrings,
@@ -276,6 +296,18 @@ business verdict about a payer it has not identified. §9.6's fifteen-minute
 payment timeout bounds the wait, so an order whose `OrderPlaced` never arrives
 compensates rather than hanging.
 
+**The expand/contract guarantee was an argument until Copilot asked for a
+measurement.** Every site claimed the new build's `INSERT` omits the retained
+column and the database default supplies `Guid.Empty`; nothing tested it. The
+smoke test checks the migration was *applied*, which is a different claim, and
+the saga endpoint test read only the row count and `CurrentState`. Two
+integration tests now close it — one asserting a row this build writes stores
+`Guid.Empty`, one asserting the default constraint exists — and they are
+deliberately separate, because a row could read empty from something having
+written that value, where the constraint makes it a property of the schema.
+The value is what the whole mixed-version argument rests on: empty names
+nobody, and any other default names a customer who never placed the order.
+
 **The failing test was in the half that needs a daemon, which is the argument
 for running both halves before believing a green one.** Three new contract
 tests passed in the fast suite and `DatabaseSmokeTests` — which counts applied
@@ -283,12 +315,16 @@ migrations against a named list — failed on the eleventh, in the integration
 half. The list is the assertion and the length is derived from it, so the fix
 was one row; #126 had already removed the literal that would have made it two.
 
-**Counts pinned to this branch**: the solution runs 899 tests, 711 of them
-outside `Category=Integration`, and the three CI stages are 18, 693 and 188.
-Reconciled against a full local `dotnet test Platform.slnx` **and against this
-branch's own CI run**, whose log sums to 899 over its twenty-four per-project
-stage totals — the check this file names for a restated number, performed
-rather than left owed. The three new tests land in the **unit**
+**Counts pinned to this branch**: the solution runs 901 tests, 711 of them
+outside `Category=Integration`, and the three CI stages are 18, 693 and 190.
+Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
+head of this branch was reconciled against **its own CI run**, whose log summed
+to 899 over twenty-four per-project stage totals — the check this file names
+for a restated number, performed rather than left owed. The two behavioural
+tests a later review round added take it to 901, and they are integration
+rather than unit: the fast half was re-measured at 711 rather than assumed,
+which is how their stage was settled. The three contract tests land in the
+**unit**
 stage, because that stage's filter is `FullyQualifiedName!~ArchitectureTests`
 and `Platform.IntegrationTests.ContractTests` matches neither that nor
 `Category=Integration`, whatever the project's name suggests.

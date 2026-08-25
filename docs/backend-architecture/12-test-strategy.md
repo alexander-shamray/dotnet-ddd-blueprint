@@ -2216,11 +2216,21 @@ than a review note.
 rather than only at the test. The other three fail against a type that is
 present: a domain type named, a namespace misspelt, a member not `required`.
 This one asserts an **absence**, so an empty result is both what success looks
-like and what a broken detector looks like. It therefore ships with two
+like and what a broken detector looks like. It therefore ships with three
 controls — one pointing the detector at a contract that *does* carry a subject
-and requiring it to find one, and one naming the commands the judged set must
-contain — because a gate that has only ever been observed green is one nobody
-has established is looking at anything.
+and requiring it to find one, one naming every command root the judged set must
+contain, and one asserting the exempt types are excluded — because a gate that
+has only ever been observed green is one nobody has established is looking at
+anything.
+
+**Deciding what it judges is the other half, and "not an event" is the wrong
+answer.** §9.1 says commands do not implement `IIntegrationEvent` and nothing
+about the converse, so that predicate also selects the line types events carry —
+and an event is *permitted* a subject. Judging them would refuse a shape
+ADR-028 allows, which is a false build failure rather than a missed one. The
+set is every non-event **minus everything reachable from an event's property
+graph**: the command roots, plus the payloads only a command carries. Both
+directions were measured against an injected subject rather than argued.
 
 This is the one suite that references every service, which is why it has its own
 project and why that project holds nothing else:

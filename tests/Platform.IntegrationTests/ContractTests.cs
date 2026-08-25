@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Common.Contracts;
+using Common.Contracts.Inventory.V1;
 using Common.Contracts.Ordering.V1;
 using Common.Contracts.Payments.V1;
 using Shouldly;
@@ -304,30 +305,92 @@ public class ContractTests
     ];
 
     /// <summary>
-    /// Every contract that does not implement <see cref="IIntegrationEvent"/>.
+    /// Every contract type an integration event carries, transitively — the
+    /// line types, and anything those carry in turn.
     /// </summary>
     /// <remarks>
-    /// <b>That is a superset of the commands, and the name is the nearest
-    /// short word rather than an exact one.</b> §9.1 states the one-way
-    /// implication — <c>CancelOrder</c>'s remarks say commands "deliberately do
-    /// not implement <see cref="IIntegrationEvent"/>" — and the converse does
-    /// not follow: this also selects the payload records events carry
-    /// (<c>PlacedLine</c>, <c>ConfirmedLine</c>, <c>StockLine</c>,
-    /// <c>ShippingAddressV1</c>).
+    /// Computed rather than listed, because a list here is a second inventory
+    /// to reconcile and this one changes whenever a contract gains a member.
+    /// </remarks>
+    private static readonly HashSet<Type> CarriedByAnEvent = BuildEventPayloadClosure();
+
+    /// <summary>
+    /// The command roots and the payload types only a command carries.
+    /// </summary>
+    /// <remarks>
+    /// <b>"Not an event" is not the same as "a command", and the difference is
+    /// not merely pedantic — it decides whether this gate can refuse a legal
+    /// contract.</b> §9.1 states the one-way implication only: commands
+    /// "deliberately do not implement <see cref="IIntegrationEvent"/>". The
+    /// converse would sweep in the payload records events carry —
+    /// <c>PlacedLine</c>, <c>ConfirmedLine</c>, <c>ShippingAddressV1</c> — and
+    /// an event is **allowed** a subject. <c>OrderPlaced</c> carries the
+    /// <c>CustomerId</c> ADR-028 requires it to keep; an event that factored
+    /// the same field into its line type would be doing something the rule
+    /// permits, and a gate over every non-event would fail the build for it.
     /// <para>
-    /// The widening is in the safe direction and is kept deliberately. ADR-028
-    /// is about a subject reaching a decision the receiver cannot check, and a
-    /// payload record nested in a command would carry one just as effectively
-    /// as a top-level member — so judging more than the commands refuses more,
-    /// never less. What it must not do is make the rule *read* as narrower than
-    /// it is, which is why this says so rather than calling the set "commands"
-    /// and leaving a reader to assume §9.1 licensed it.
+    /// So the subtraction is the definition. Everything reachable from an
+    /// event's property graph is exempt, exactly as the event itself is, and
+    /// what remains is the commands plus the payloads only they carry.
+    /// <c>StockLine</c> stays judged — <c>ReserveStock</c> is a command — which
+    /// is the half that must not be lost: a subject nested one level down in a
+    /// command reaches the same decision as a top-level one.
+    /// </para>
+    /// <para>
+    /// An earlier revision judged every non-event and called the widening safe
+    /// on the grounds that it "refuses more, never less". True of coverage and
+    /// false of correctness: refusing more includes refusing shapes the rule
+    /// allows.
     /// </para>
     /// </remarks>
-    private static readonly Type[] NonEvents =
+    private static readonly Type[] Commands =
     [
-        .. Contracts.Where(t => !typeof(IIntegrationEvent).IsAssignableFrom(t))
+        .. Contracts
+            .Where(t => !typeof(IIntegrationEvent).IsAssignableFrom(t))
+            .Where(t => !CarriedByAnEvent.Contains(t))
     ];
+
+    private static HashSet<Type> BuildEventPayloadClosure()
+    {
+        HashSet<Type> carried = [];
+        Queue<Type> pending = new(
+            Contracts.Where(t => typeof(IIntegrationEvent).IsAssignableFrom(t)));
+
+        while (pending.Count > 0)
+        {
+            foreach (Type next in CarriedContractTypes(pending.Dequeue()))
+            {
+                if (carried.Add(next))
+                    pending.Enqueue(next);
+            }
+        }
+
+        return carried;
+    }
+
+    private static IEnumerable<Type> CarriedContractTypes(Type type) =>
+        type
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Select(p => ElementType(p.PropertyType))
+            .Where(Contracts.Contains);
+
+    /// <summary>
+    /// The type a member contributes to the payload graph: an element type for
+    /// a collection, the type itself otherwise.
+    /// </summary>
+    private static Type ElementType(Type type)
+    {
+        if (type == typeof(string))
+            return type;
+
+        if (type.IsArray)
+            return type.GetElementType()!;
+
+        if (type.IsGenericType && type.GetGenericArguments() is [Type single])
+            return single;
+
+        return type;
+    }
 
     private static PropertyInfo[] SubjectMembers(Type type) =>
     [
@@ -351,7 +414,7 @@ public class ContractTests
         // principal at Ordering's endpoint before it is ever published.
         (string Command, string Member)[] offenders =
         [
-            .. NonEvents
+            .. Commands
                 .SelectMany(t => SubjectMembers(t).Select(p => (t.FullName!, p.Name)))
         ];
 
@@ -389,27 +452,43 @@ public class ContractTests
         // nothing makes No_command_contract_carries_a_subject vacuous while
         // leaving it green.
         //
-        // **Not merely non-empty, and the difference is the payload records.**
-        // NonEvents legitimately holds PlacedLine, ConfirmedLine, StockLine and
-        // ShippingAddressV1, so a ShouldNotBeEmpty here would still pass with
-        // every real command filtered out. Name the commands the rule exists
-        // for instead.
+        // **Not merely non-empty, and the difference is StockLine.** Commands
+        // legitimately holds a payload record only a command carries, so a
+        // ShouldNotBeEmpty here would still pass with every command root
+        // filtered out. Name the roots the rule exists for instead.
         //
-        // An earlier revision of this comment said the discovery probes were
-        // in that set too. They are not, and UnversionedProbe's own remarks
-        // say so: Contracts is built from typeof(OrderPlaced).Assembly, and
-        // the probes live in this one. Only the predicate is ever asked about
-        // them.
-        NonEvents.ShouldContain(typeof(AuthorisePayment));
-        NonEvents.ShouldContain(typeof(CancelOrder));
-        NonEvents.ShouldContain(typeof(ConfirmOrder));
+        // **All seven of them, which is §3.2's Accepts columns read across.**
+        // An earlier revision named three and would have stayed green while
+        // discovery silently dropped the other four — the coverage failure
+        // this repository keeps rediscovering, reproduced inside the control
+        // written to prevent it.
+        Type[] commandRoots =
+        [
+            typeof(AuthorisePayment),
+            typeof(CancelOrder),
+            typeof(ConfirmOrder),
+            typeof(MarkOrderShipped),
+            typeof(FlagOrderForReview),
+            typeof(ReserveStock),
+            typeof(ReleaseStock)
+        ];
 
-        // And the filter must exclude something, or it is not a filter and the
-        // gate is being applied to events it must not be applied to.
-        NonEvents.ShouldNotContain(
+        foreach (Type root in commandRoots)
+            Commands.ShouldContain(root);
+
+        // A payload only a command carries stays judged: a subject one level
+        // down reaches the same decision as a top-level one.
+        Commands.ShouldContain(typeof(StockLine));
+
+        // And the exemptions must actually be excluded, or the gate is being
+        // applied to events — which ADR-028 permits a subject.
+        Commands.ShouldNotContain(
             typeof(OrderPlaced),
-            "events are exempt from the subject rule, and OrderPlaced is the one " +
-            "ADR-028 requires to keep its CustomerId");
+            "events are exempt, and OrderPlaced is the one ADR-028 requires to keep its CustomerId");
+
+        Commands.ShouldNotContain(
+            typeof(PlacedLine),
+            "a line type an event carries is part of that event, so it inherits the exemption");
     }
 
     private static string Names(IEnumerable<Type> types) =>

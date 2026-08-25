@@ -1325,13 +1325,29 @@ performed rather than skipped. Skipping a step is what having no consumer buys,
 and it buys nothing once there is one.
 
 **The rule is enforced rather than reviewed.** `ContractTests` asserts that no
-command contract — a contract that does not implement `IIntegrationEvent`,
-§9.1's own distinction — declares a member spelled like a subject. Two controls
-sit beside it: one pointing the detector at `OrderPlaced`, which must keep its
-`CustomerId`, and one asserting the command set is non-empty and a proper
-subset of the contracts. A gate that quietly stops covering its surface is this
-repository's most-repeated failure, and an empty offender set reads the same
-whether the rule holds or the detector broke.
+command contract declares a member spelled like a subject.
+
+**Defining "command" is the part that had to be got right, and the obvious
+definition is wrong in a way that matters.** §9.1 states one direction only —
+commands do not implement `IIntegrationEvent` — and the converse sweeps in the
+payload records events carry. An event is **allowed** a subject; `OrderPlaced`
+carries the one this ADR requires it to keep. So a gate over every non-event
+would fail the build on an event that factored that field into its line type,
+refusing a shape this decision permits. The judged set is therefore every
+non-event **minus everything reachable from an event's property graph**, which
+leaves the command roots and the payloads only a command carries. `StockLine`
+stays judged, because a subject one level inside `ReserveStock` reaches the same
+decision as a top-level one.
+
+Three controls sit beside the rule, because an absence-assert cannot fail
+informatively on its own: one points the detector at `OrderPlaced` and requires
+it to find the `CustomerId` this ADR keeps; one names all seven command roots
+§3.2's Accepts columns list, so discovery cannot quietly drop four of them; and
+one asserts the exemptions really are excluded. Both directions were measured
+against injected subjects — one in an event's line type, which must pass, and
+one in a command's payload, which must fail. A gate that quietly stops covering
+its surface is this repository's most-repeated failure, and an empty offender
+set reads the same whether the rule holds or the detector broke.
 
 ---
 

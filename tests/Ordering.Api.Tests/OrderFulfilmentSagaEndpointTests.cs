@@ -95,6 +95,63 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     }
 
     [Fact]
+    public async Task A_row_this_build_writes_defaults_the_retained_CustomerId_to_empty()
+    {
+        // The behavioural half of ADR-028's expand/contract, and until this
+        // test it was an argument rather than a measurement. The instance no
+        // longer declares CustomerId, so the generated INSERT does not name
+        // that column; what supplies it is the database default this branch's
+        // migration adds. Nothing else in the suite watches that — the smoke
+        // test checks the migration was applied, which is not the same claim.
+        //
+        // **What rests on the value being Guid.Empty is the mixed-version
+        // window.** §15.5 runs two releases at once over the same queues, so a
+        // pod on the previous build can step an instance this one created,
+        // materialise this column into its non-nullable Guid, and send its
+        // four-field AuthorisePayment. Empty means it names nobody; any other
+        // value would name a real customer who never placed this order.
+        var orderId = Guid.CreateVersion7();
+
+        await PublishPlacedAsync(orderId, Guid.CreateVersion7());
+
+        await Eventually(
+            () => SagaRowsAsync(orderId),
+            expected: 1,
+            because: "the row has to exist before its column values mean anything");
+
+        (await fixture.ScalarAsync<Guid>(
+            "SELECT Value = CustomerId FROM ordering.OrderFulfilmentStates WHERE CorrelationId = {0}",
+            orderId))
+            .ShouldBe(
+                Guid.Empty,
+                "the instance does not write this column, so the database default is the only thing " +
+                "that can have supplied it — and empty is what makes an old build's read name nobody");
+    }
+
+    [Fact]
+    public async Task The_retained_CustomerId_column_carries_a_default_constraint()
+    {
+        // The mechanism behind the test above, asserted separately because the
+        // two can fail apart. A row could read empty because something wrote
+        // Guid.Empty into it; the constraint is what makes the value a
+        // property of the schema rather than of one insert path.
+        (await fixture.ScalarAsync<int>(
+            """
+            SELECT Value = COUNT(*)
+            FROM sys.default_constraints d
+            INNER JOIN sys.columns c
+                ON c.object_id = d.parent_object_id
+                AND c.column_id = d.parent_column_id
+            WHERE d.parent_object_id = OBJECT_ID('ordering.OrderFulfilmentStates')
+                AND c.name = 'CustomerId'
+            """))
+            .ShouldBe(
+                1,
+                "§15.5 forbids dropping a column the previous release still writes, so the column " +
+                "survives this release with a default that lets this build's INSERT omit it");
+    }
+
+    [Fact]
     public async Task A_replayed_OrderPlaced_does_not_restart_a_finished_saga()
     {
         // **The one that made the saga endpoint take an inbox filter.**
