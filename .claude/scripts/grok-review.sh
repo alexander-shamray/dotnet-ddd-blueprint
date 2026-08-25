@@ -150,6 +150,14 @@ branch=$(git branch --show-current)
 # anything a caller or a finding supplied.
 repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) ||
   { echo "cannot resolve this checkout's repository" >&2; exit 2; }
+# **Blank counts as missing, and `||` does not see it.** `gh` printing an empty
+# string exits 0, so the guard above passes and `$repo` is "" — and the
+# comparison below then matches every row whose head repository is absent,
+# which `// ""` renders as "" too. A deleted fork reports exactly that. So the
+# filter would admit a stranger's pull request precisely when it could not
+# establish whose it was, which is the fail-open direction.
+[ -n "$repo" ] ||
+  { echo "this checkout's repository resolved to nothing" >&2; exit 2; }
 # Tab-separated and filtered in awk rather than inside --jq, because gh's --jq
 # takes no --arg: embedding "$repo" in the jq program would put a shell value
 # into a program text, which is the shape this directory exists to avoid.
@@ -448,15 +456,50 @@ set -e
 # A mention inside the review's own prose cannot be mistaken for the verdict
 # either — `.stopReason` names a field, where a regex only ever named a
 # substring.
+# Reduce a reviewer-supplied field to something that cannot carry an
+# instruction: an identifier alphabet, truncated. `tr -cd` deletes the
+# complement of the set, so newlines, quotes and spaces are gone rather than
+# escaped — escaping is a property of the consumer and this value is printed
+# straight to a terminal and into /ship's context.
+safe_token() {
+  printf '%.40s' "$(printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-')"
+}
+
 stop=$(jq -r 'if type == "object" then (.stopReason // "<absent>") else "<not-an-object>" end' \
          "$result" 2>/dev/null) ||
   { echo "grok's output is not valid JSON; the review did not run and suggestions.md is left as it was" >&2; exit 6; }
 if [ "$stop" != "$stop_ok" ]; then
-  jq -r '.cancellationCategory // empty' "$result" 2>/dev/null >&2 || true
-  echo "grok did not finish its turn — the root stopReason is \"$stop\", not \"$stop_ok\"; the review did not run and suggestions.md is left as it was" >&2
+  # **The rejected path crossed the boundary the accepted path does not (#52).**
+  # `$stop` and `.cancellationCategory` are fields of a document the reviewer
+  # wrote, and both were echoed verbatim — so a run that produced no clean
+  # verdict handed /ship reviewer-authored prose anyway, complete with any
+  # newlines it chose. Removing `cat "$result"` closed the success path and
+  # left this one open, which is what a fix aimed at a line rather than at a
+  # property looks like.
+  #
+  # Both are now reduced to a token alphabet before they are printed. A real
+  # stopReason or cancellation category is a bare identifier, so nothing
+  # diagnostic is lost; anything else arrives as the characters of it that
+  # could not carry an instruction.
+  category_raw=$(jq -r '.cancellationCategory // empty' "$result" 2>/dev/null)
+  category=$(safe_token "$category_raw")
+  [ -z "$category" ] || echo "grok reported cancellation category: $category" >&2
+  echo "grok did not finish its turn — the root stopReason is \"$(safe_token "$stop")\", not \"$stop_ok\"; the review did not run and suggestions.md is left as it was" >&2
   exit 6
 fi
-cat "$result"
+# **The verdict is extracted; the transcript is not printed (#52).** Every byte
+# of $result is reviewer-authored, and `cat`ting it put that text into the
+# caller's context as prose — where /review-grok reads it holding `Edit` and
+# `Write`, and /ship runs that triage unattended in a loop. Nothing ever read
+# this stdout: ship.md's step 5 branches on the exit code and on whether
+# suggestions.md exists, review-grok.md names no stdout at all, and
+# test_grok_helpers.py asserts nothing about it. So the transcript was a second,
+# unguarded crossing that bought no caller anything.
+#
+# The findings still cross, deliberately and by ONE route: suggestions.md,
+# imported below under the shape guards. One reviewer-controlled artefact, named
+# and checked, beats the same text arriving twice with only one arrival guarded.
+echo "grok finished its turn (stopReason \"$stop\") — findings, if any, are in suggestions.md" >&2
 # Import the one artefact the review owns. Its absence is the clean verdict —
 # trustworthy only because the checks above have ruled out a cancelled run.
 #

@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(bash .claude/scripts/pr-state.sh:*), Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -114,7 +114,7 @@ that reaches a merge — so the rows below say what is owed *between* them:
 | On a branch, tree clean and pushed | `/pr`, then the review loops |
 | On a branch with an open PR | The review loops (steps 5–6), Grok before Copilot — and, if the tree is dirty, checks, `/commit` **scoped to the implementation paths** and a push first, so the reviewers read what the PR will actually carry. Never unscoped while `suggestions.md` is on disk: that file is Grok's working state, and the unscoped form sweeps untracked files into the commit |
 | On a branch whose PR was **closed unmerged** | **Stop.** Somebody decided this branch does not land, and the open-PR read cannot see that: with no open PR the *clean and pushed* row would send the run to `/pr`, which refuses only an **open** one — so the chain would open a replacement and merge it, overriding a deliberate closure with no human in the loop. Report the closed PR and its number |
-   | On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `gh pr view --json state` reading `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With nothing left in the workspace, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty tree or commits made after the merge the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
+   | On a branch whose PR is **already merged** | **Step 0 alone, and then the run is over.** `pr-state.sh` reporting `MERGED` is the check, and it comes before the review loops rather than after them — re-requesting a review on a merged PR spends a round of somebody's budget on a branch nobody can change. With nothing left in the workspace, step 0's teardown is a complete one (switch, pull, remove, prune); with a dirty tree or commits made after the merge the branch is **not** finished, step 0 stays put and tears nothing down, and the run still ends here. Either way step 7 has nothing left to do: there is no PR to merge |
 
 **Step 0's teardown targets a worktree that is already finished; step 7's
 targets the one this run just merged. Exactly one of them owns any given
@@ -174,7 +174,7 @@ none. The helper counts
 `review_requested` events for Copilot, this loop makes exactly one per round,
 and each lands exactly one review — so **a request is outstanding when that
 count exceeds the number of landed Copilot reviews**, and both numbers are
-readable with what is already granted (`gh pr view <n> --json reviews` supplies
+readable with what is already granted (`pr-review-bodies.sh <n>` supplies
 the second). When one is outstanding, wait for its review rather than
 inheriting the verdict of the one before it. A request that never produces a
 review is the timeout case this step already covers, reported as the loop not
@@ -187,7 +187,7 @@ review inside step 5, not whether step 5 runs) answer all seven rows and the
 Grok half. Read them before doing anything.
 
 ```bash
-gh pr list --state all --head <branch> --json number,state
+bash .claude/scripts/pr-for-branch.sh <branch>
 ```
 
 **One call, four outcomes, and it exits 0 for every one of them.** Empty means
@@ -196,7 +196,7 @@ no PR has ever existed for this branch; otherwise the newest row reads `OPEN`,
 distinguishes — including the two that used to need a second call and the one
 that used to need a failed one.
 
-**`gh pr view --json state` cannot be that read, and the reason is an exit
+**`pr-state.sh` cannot be that read, and the reason is an exit
 code rather than a preference.** With no PR for the current branch it exits
 non-zero, and *forked but never PR'd* is what step 1 produces on every run —
 so the commonest state in the table would have been classified through a
@@ -218,7 +218,7 @@ and not at its neighbour looks like.
 > recommended turned out to be right for a reason it never gave.
 
 **All-resolved needs three reads, not one**, because no single call carries the
-three signals it is defined over. `gh pr view <n> --json reviews` gives the
+three signals it is defined over. `pr-review-bodies.sh <n>` gives the
 review bodies, their suppressed blocks and the `commit` oid — and nothing else:
 **it does not return inline review comments, and it does not return thread
 resolution state.** Deciding step 6 is not owed from that call alone would skip
@@ -226,26 +226,41 @@ two of the three clean signals while reporting that all three were checked. So
 the resume runs the same read-only intake `/review-copilot` does:
 
 ```bash
+bash .claude/scripts/pr-review-bodies.sh <n>       # review bodies
 bash .claude/scripts/pr-review-comments.sh <n>     # inline comments
 bash .claude/scripts/pr-review-threads.sh <n>      # <thread-id> <isResolved> …
 ```
 
-Both are read-only with fixed endpoints, which is why they can be granted to a
-step that only wants to look. An unresolved thread from an earlier round is
+All three are read-only with fixed endpoints, which is why they can be granted
+to a step that only wants to look.
+
+**Two of them filter by author as of #56, and this step reports their counts
+like `/review-copilot` does.** `pr-review-bodies.sh` and
+`pr-review-comments.sh` admit Copilot's three logins plus the repository
+owner's, drop everything else before stdout, and print an admitted/dropped
+count to stderr. This step used to filter the same two feeds in prose, on two
+*different* logins — inline comments on `Copilot`, review bodies on
+`copilot-pull-request-reviewer` — which is exactly the split that let a
+two-string allow-list look complete. One list, declared once in
+`copilot-authors.sh`, now serves both. `pr-review-threads.sh` is unfiltered by
+construction and needs no filter: it returns thread ids and resolution state,
+never a body. An unresolved thread from an earlier round is
 exactly the state a fresh clean review never repeats, and it is the one the
 oid cannot see.
 
-**The two reads are scoped differently, and getting that backwards fails in
-both directions.** `pr-review-comments.sh` returns *every* inline comment the
-PR has ever carried, replies included — so on any PR whose earlier rounds found
-something, its output is non-empty forever and a resume reading it whole would
-never see a clean review again. It has to be joined to the candidate review.
+**The reads are scoped differently, and getting that backwards fails in
+both directions.** `pr-review-comments.sh` returns every **admitted** inline
+comment the PR has ever carried, replies included — every round's, not this
+round's, and the author filter narrows *who* it returns rather than *when* — so
+on any PR whose earlier rounds found something, its output is non-empty forever
+and a resume reading it whole would never see a clean review again. It has to
+be joined to the candidate review.
 **Threads are the opposite and stay global**: an unresolved thread from round
 three is still owed at round nine, which is the entire reason that signal
 exists.
 
 **Join on the timestamp, not on a review id — the two sides do not share
-one.** `gh pr view --json reviews` reports a GraphQL node id
+one.** `pr-review-bodies.sh` reports a GraphQL node id
 (`PRR_kwDOTuTjXM8AAAABI_IalQ`) and the REST helper reports a numeric
 `pull_request_review_id` (`4898036373`). Comparing them matches **nothing**,
 which does not merely fail — it drops every comment and reports a review full
@@ -323,7 +338,7 @@ same argument as never calling a branch clean because asking failed.
 
    **The detached row is not a special case of the others, it is the absence
    of the thing they read.** `git branch --show-current` prints nothing, so
-   `gh pr list --head <branch>` has no argument and the promised exit-zero
+   `pr-for-branch.sh <branch>` has no argument and the promised exit-zero
    classification cannot be attempted, let alone answered — the step would
    stop on a malformed command before `/branch` ever got the chance to make a
    branch out of the state. `/branch` handles this deliberately (it is the
@@ -338,17 +353,28 @@ same argument as never calling a branch clean because asking failed.
    git fetch origin main                      # or the next read is stale
    git status --short                         # empty: nothing uncommitted
    git log origin/main..HEAD                  # empty: nothing main lacks
-   gh pr list --state merged --head <branch>  # non-empty: it landed
+   bash .claude/scripts/pr-for-branch.sh <branch>   # a row with state MERGED:
+                                                   # it landed. Any other row
+                                                   # is a PR, not a merge.
    ```
 
    **Every read exits 0 whatever it finds, and that is deliberate.**
-   `gh pr view --json state` on a branch with no PR exits non-zero, and
+   `pr-state.sh` on a branch with no PR exits non-zero, and
    *forked but never PR'd* is not exotic — it is what step 1 produces on every
    run. Classifying the ordinary case through a failed command, in a chain
    whose first stop rule is that a non-zero exit means the step did not run,
-   is a contradiction rather than a nicety. `gh pr list --state merged --head`
-   answers with a row or with `[]`, measured both ways on this repository.
-   `gh pr view --json state` keeps its job one section up, in the resume
+   is a contradiction rather than a nicety. `pr-for-branch.sh` answers with a
+   row or with `[]`, measured both ways on this repository.
+
+   **It is not filtered to merged, and the read above must do that itself.**
+   The call it replaced was `gh pr list --state merged --head <branch>`, where
+   emptiness *was* the answer; the helper fixes `--state all`, because the
+   resume table one section up needs the other states from the same call. So
+   **look for a row whose `state` is `MERGED`** — a non-empty result means a
+   pull request exists, which is true of an OPEN one too, and treating that as
+   "it landed" would classify an unmerged branch as finished and tear the
+   workspace down.
+   `pr-state.sh` keeps its job one section up, in the resume
    table, where the question is *which* state and there is a PR to ask about.
 
    **The merge read is not redundant with `origin/main..HEAD`, and the
@@ -418,7 +444,7 @@ same argument as never calling a branch clean because asking failed.
    edits or the later commits belong to whatever comes next. Nor may either be
    adopted onto this branch, tempting as step 1's already-on-a-branch override
    makes it: a second PR cut
-   from a merged branch leaves `gh pr view --json state` answering `MERGED`
+   from a merged branch leaves `pr-state.sh` answering `MERGED`
    from the *first* one on every later resume, so the branch becomes unreadable
    to this command permanently. Report what the workspace still holds and the
    directory holding it, and end there. **That is not one of the six stops** —
@@ -1106,8 +1132,9 @@ same argument as never calling a branch clean because asking failed.
 
    2. **Wait for the review to land** — a new review by
       `copilot-pull-request-reviewer` newer than the request. (That is the
-      login GraphQL reports and the one `gh pr view --json reviews` filters
-      on; REST spells the same account `copilot-pull-request-reviewer[bot]`.
+      login GraphQL reports and the one `pr-review-bodies.sh` admits; REST
+      spells the same account `copilot-pull-request-reviewer[bot]`, which the
+      same allow-list admits too.
       Both are the finished review's author — neither is the request
       target.) It takes minutes, and a clean one still posts (with zero
       comments), so landing is observable either way.
@@ -1270,7 +1297,7 @@ same argument as never calling a branch clean because asking failed.
    Three things genuinely gate it, and none is a judgement:
 
    ```bash
-   gh pr view <n> --json state,mergeable,mergeStateStatus,headRefOid
+   bash .claude/scripts/pr-state.sh <n>
    gh pr checks <n> --watch --fail-fast
    git status --short              # empty
    git log <headRefOid>..HEAD      # empty: this workspace holds nothing extra
@@ -1403,7 +1430,7 @@ same argument as never calling a branch clean because asking failed.
    would have been satisfied by a commit that is no longer the head. **It is
    the only guard in this step that fails closed**, and it costs one argument.
 
-   **The oid comes from the `gh pr view` read that returned a *known*
+   **The oid comes from the `pr-state.sh` read that returned a *known*
    mergeability** — the last one of the poll above, not the first. This
    sentence used to say "captured before polling", which was unambiguous when
    the only wait in this step was the one on checks and became a
@@ -1448,7 +1475,7 @@ same argument as never calling a branch clean because asking failed.
    step 1 produced:
 
    ```bash
-   gh pr view <n> --json state,mergeCommit              # 1. MERGED, with an oid
+   bash .claude/scripts/pr-state.sh <n>                 # 1. MERGED, with an oid
    #    ExitWorktree({action: "keep"})                  # 2. forked runs only — a tool, not bash
    bash .claude/scripts/git-switch-existing.sh main     # 3. in-place runs only
    git pull --ff-only                                   # 4. main, now containing the merge

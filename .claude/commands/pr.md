@@ -1,7 +1,7 @@
 ---
 description: Open a pull request with a body in the house form
 argument-hint: "[title — omit to derive it from the commits]"
-allowed-tools: Read, Grep, Glob, Write, Bash(git status:*), Bash(git log:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git push -u origin:*), Bash(git push origin:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr list:*)
+allowed-tools: Read, Grep, Glob, Write, Bash(git status:*), Bash(git log:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git push -u origin:*), Bash(git push origin:*), Bash(gh pr create:*), Bash(bash .claude/scripts/pr-closure-input.sh:*), Bash(bash .claude/scripts/pr-for-branch.sh:*)
 ---
 
 Open a PR for the current branch. Title: $1 — if empty, derive it from the
@@ -116,12 +116,12 @@ description makes — a bare `Closes` line under the table is enough on its own.
 Run it yourself as soon as the pull request exists, if you want the answer
 before the workflow reports it — **not before opening, which is what this
 said**:
-`gh pr view <n>` needs a pull request to view, and
+`pr-closure-input.sh` needs a pull request to read, and
 `closingIssuesReferences` is GitHub's parse of a body it has not been given
 yet, so there is nothing to ask about until the PR is open:
 
 ```bash
-gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
+bash .claude/scripts/pr-closure-input.sh <n> |
     py -3.12 .github/closure-gate/closure_gate.py
 ```
 
@@ -132,7 +132,7 @@ came out.
 
 ## Before opening
 
-- `gh pr list --state open` — an open PR from this branch means you are
+- `bash .claude/scripts/pr-for-branch.sh` — an OPEN row means you are
   updating, not creating. Say so and stop.
 - Confirm `/validate-blueprint` and `/check-links` have run over the change, or
   say plainly that they have not.

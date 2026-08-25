@@ -70,15 +70,30 @@ a helper's contract is its stdout and only a round trip tests what a caller
 actually captures. It is the one suite whose
 subject is agent tooling rather than the platform, and it is here on the licence
 gate's terms: it ships with the repository, CI runs it, and `dotnet test` is
-blind to it. **Six judgements, five of which shipped wrong at least once, each
-reproduced as a case that fails against the old behaviour** — what counts as a
+blind to it. **The judgements it covers, five of which shipped wrong at least
+once and are each reproduced as a case that fails against the old behaviour** —
+what counts as a
 usage limit, what counts as a review that finished, whether the check ledger can
 publish an answer on its own error path, whether every usage-limit skip happens
 before a slot is reserved, whether the sweeps' worktree guard is the
 direct-child check it claims, and whether the label helper leaves a free
 parameter a finding could steer. That last is the one that never shipped
 wrong — it is a grant closed by moving it into a helper, and the suite is what
-keeps it closed. The regression
+keeps it closed. Four issues added subjects since, and those are regression
+cases of the first kind — each fails against behaviour that shipped:
+**#56**, what a Copilot feed helper admits, what it reports about what it
+dropped, and that no command can reach those feeds outside the fixed helpers;
+**#33**, which paths the harness denies itself and that the worktree root is
+not among them; **#52**, that the reviewer's transcript reaches no stream and
+that the one bounded read of it cannot be widened; and **#57**, that both
+sweeps still state who may suppress a finding and that neither has drifted back
+to the unconditional rule.
+
+**No count opens that list any more**, here or in `.github/workflows/ci.yml` or
+`CLAUDE.md`, and the three enumerations are what a reader compares instead. The
+numeral said four, then five, then six, and was stale again inside the pull
+request that added two subjects — a figure restated in three files goes stale in
+all three at once. The regression
 negatives are paired with positive controls, and those are not decoration: a
 negative that passes because the pattern matches *nothing* is indistinguishable
 from one that works, so the accepted values and the limit pattern's status
