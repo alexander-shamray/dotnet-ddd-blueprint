@@ -871,12 +871,22 @@ service to a contract, and this repository's own rule is that a list of things
 known to be missing needs something asserting they are still missing. What
 stands in for it here is that every place the machine leans on it says so at
 the line: `AwaitingStock`, `AwaitingPayment` and `AwaitingConfirmation`'s
-`Ignore(StockReleased)`, the cancellation branches those three states absorb
+`When(StockReleased)`, the cancellation branches those three states absorb
 for, and `Compensating`'s `Ignore(StockReserved)` and
 `Ignore(StockReservationFailed)`. So an Inventory built to a different rule
 contradicts a paragraph rather than failing silently. **The sites are named
 rather than counted** for the reason the Why section declines a count — a
 figure over a set the next branch can add to is one nothing recomputes.
+
+> **The first three were spelled `Ignore(StockReleased)` until #143, and the
+> spelling is updated here rather than left standing.** An ADR is superseded
+> and never rewritten, and nothing above has been: the decision, its two
+> guarantees and every argument for them are untouched. What changed is an
+> **index** — this paragraph exists so an Inventory implementer can find the
+> lines that lean on the ADR, and a name that greps to this file and not to
+> the machine defeats the only job it has. The callout above records that
+> those absorptions stopped being an `Ignore`; this is the same fact where
+> somebody would look it up.
 
 ## ADR-025 — A saga state that waits on two services finalises on neither alone
 

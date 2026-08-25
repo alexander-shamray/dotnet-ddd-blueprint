@@ -96,10 +96,15 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
         // enum's member names are not the contract and must never become it —
         // CancellationReasons.ToCode is what keeps the two spellings apart.
         Reason = CancellationReasons.ToCode(e.Reason),
-        // Populated from this release on. §9.6's saga reads an ABSENT origin
-        // as its own echo and discards it, which is what holds the pre-#123
-        // behaviour for the length of a rolling deploy — reading absent as User
-        // would fault every cancellation an older instance published.
+        // Populated from this release on. §9.6's saga discards an ABSENT origin
+        // on the same path as its own echo, and that is a TOLERANCE rather
+        // than an identification: absent means "published before the field
+        // existed", which holds the pre-#123 behaviour for the length of a
+        // rolling deploy and is owed a contract phase. Reading it as an origin
+        // in either direction is the inference this field exists to replace —
+        // as User it would fault every cancellation an older instance
+        // published, and as Workflow it would outlive the deploy that
+        // justifies it.
         Origin = CancellationOrigins.ToCode(e.Origin)
     };
 

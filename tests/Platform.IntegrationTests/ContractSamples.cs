@@ -9,7 +9,9 @@ namespace Platform.IntegrationTests;
 /// <summary>
 /// One populated instance per contract type, hand-written. This is what keeps
 /// §12.6's suite honest as contracts grow: every member of a V1 contract is
-/// <c>required</c>, so there is no reflection shortcut that constructs one, and
+/// <c>required</c> unless §12.6's mid-rollout list names it, so there is no
+/// reflection shortcut that constructs one — the consequence survives the
+/// exemption, because the members beside it stay <c>required</c> — and
 /// a new contract without a sample fails <see cref="ContractTests"/> rather
 /// than being quietly skipped — which is the failure mode of every "iterate
 /// over all the types" test that falls back to
@@ -198,8 +200,9 @@ internal static class ContractSamples
     public static object Create(Type contract) =>
         Registry.TryGetValue(contract, out Func<object>? sample) ? sample()
             : throw new InvalidOperationException(
-                $"No sample for the contract '{contract.FullName}'. Every member of a V1 " +
-                "contract is required (§12.6), so nothing can construct one by reflection — " +
+                $"No sample for the contract '{contract.FullName}'. A V1 contract's members are " +
+                "required apart from any §12.6 lists as mid-rollout, so nothing can construct " +
+                "one by reflection — " +
                 "add an entry to ContractSamples.");
 
     /// <summary>
