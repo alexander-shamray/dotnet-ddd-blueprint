@@ -1160,6 +1160,117 @@ staleness and its own rebuild procedure — §6.6's closing trap applies to it
 exactly as written. What changes is that there is now one copy on the read path
 instead of one per order line that mentions the product.
 
+## ADR-028 — A money-movement command carries no subject
+
+**Decision.** A command that crosses the broker into a decision about whose
+money moves carries **no subject identifier**. The service that owns the
+decision resolves the subject from its own record, built from an event whose
+subject was bound from a principal.
+
+Concretely: `AuthorisePayment` is
+`(Guid OrderId, decimal Amount, string Currency)`. Payments consumes
+`OrderPlaced` ([§3.2](03-bounded-contexts.md)) and keeps its own record of the
+order — **the payer, the total and the currency**, all three of which that
+event carries — then resolves the payer from that record when the command
+arrives and checks the command's amount and currency against it. `Amount` and
+`Currency` stay on the command. Ordering's saga instance drops its `CustomerId`
+too, so the value is not available to a later transition that might put it back
+on a message.
+
+**Why.** §11.4's subject rule — *a subject identifier is bound from the
+principal, never from the request* — excluded the message path, because a
+command arriving over the broker has no principal to bind from. That exclusion
+was recorded as an open question rather than a decision, and it left
+`AuthorisePayment` naming the customer whose instrument Payments would charge
+in a field nothing on the receiving side could check
+([#63](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/63)).
+
+The rule that closes it is not "bind on the message path" — there is nothing to
+bind from — but **re-derive**, and what makes re-derivation available is that
+the subject is already written down somewhere trustworthy. `OrderPlaced`
+carries a `CustomerId` bound from the principal at Ordering's endpoint, so a
+service that consumes it holds the same fact with a provenance the command
+never had.
+
+**Not every field is the same question, and the line between them is whether
+the receiver can disagree.** Payments holds the order, so it can compare
+`Amount` and `Currency` against its record and refuse a mismatch — a wrong
+value in either is detectable at the far end. It holds nothing that would
+contradict a subject, so a subject is the one field a wrong value passes
+through undetected. A field the receiver can check is a claim; a field it
+cannot check is an assertion. Money-movement commands may carry claims and may
+not carry assertions.
+
+**The precedent is [ADR-027](#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally), one service over.** Ordering
+resolves product names from a projection it owns rather than asking Catalog;
+Payments resolves the payer from a record it owns rather than reading the
+sender's word for it. The mechanism is the same — a local record built from
+events — and only the thing it buys differs: there a synchronous hop avoided,
+here an unverifiable assertion removed.
+
+**Consequences.**
+
+**Payments cannot honour a single command until it has the projection.** The
+subscription is a precondition, not an enrichment, and the service's first PR
+owes the record before it owes a charge. §3.2's Consumes cell is where that is
+now written down.
+
+**A command can arrive before the record it resolves against.** §9.4 orders
+nothing between two deliveries, so an `AuthorisePayment` can overtake the
+`OrderPlaced` it needs — the shape §3.2 already records for `ReleaseStock` and
+`ReserveStock`. **A missing record is a wait, not a decline**: Payments faults
+the command so the retry envelope redelivers it, and must not publish
+`PaymentDeclined`, which is a business verdict about a payer it has not
+identified. §9.6's fifteen-minute payment timeout bounds the wait, so an order
+whose `OrderPlaced` never arrives compensates rather than hanging.
+
+**This narrows the broker exposure and does not close it.** One shared
+RabbitMQ principal still writes every queue
+([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44)),
+so anyone reaching the bus can still send an `AuthorisePayment`. What they can
+no longer do is choose who it charges: a forged command naming a real order
+re-triggers that order's own authorisation rather than redirecting one at a
+customer of the sender's choosing. That converts a **misdirected** charge into
+a **duplicate** one, which is a strictly smaller failure and not an absorbed
+one.
+
+> **Nothing in this platform absorbs that duplicate today, and naming a control
+> that does not reach it would be worse than naming none.** [§8.5](08-caching-redis.md)'s
+> `IdempotencyBehavior` is an Application-pipeline behaviour constrained to
+> `IIdempotentCommand` and keyed on a `CommandId`; `AuthorisePayment` has
+> neither, and as a `Common.Contracts` message it never enters that pipeline.
+> [§9.5](09-messaging.md)'s inbox is the broker-side control, and it keys on
+> `(MessageId, Endpoint)` — a forger picks a fresh `MessageId`, so the inbox
+> suppresses an accidental redelivery and not a deliberate second send. What
+> would absorb it is **Payments treating authorisation as idempotent per
+> order against its own `PaymentIntent`**, which is a rule that service's own
+> PR owes and no chapter yet states. Until then the control is #44.
+
+**A forged `OrderPlaced` could still seed a false record**, and that is the
+same issue rather than a new one: it is a broader compromise, it is visible to
+every consumer of that event rather than to none, and per-service broker
+identity is what closes both.
+
+**Dropping the saga's column takes two releases, not one.** §15.5 requires
+every migration to be backward compatible with the release serving beside it,
+and that release's saga writes `ordering.OrderFulfilmentStates.CustomerId` on
+every `OrderPlaced`. So this release maps the column as a shadow property with
+a conservative default — `NOT NULL DEFAULT '00000000-…'`, the one shape that
+survives a roll-forward whose `INSERT` omits it *and* a rollback that
+materialises a non-nullable `Guid` from rows the new build wrote — and the
+`DROP COLUMN` is owed to a release where nothing writes it. The empty GUID is
+nobody, where any other default would name a real subject that was never that
+order's.
+
+**The rule is enforced rather than reviewed.** `ContractTests` asserts that no
+command contract — a contract that does not implement `IIntegrationEvent`,
+§9.1's own distinction — declares a member spelled like a subject. Two controls
+sit beside it: one pointing the detector at `OrderPlaced`, which must keep its
+`CustomerId`, and one asserting the command set is non-empty and a proper
+subset of the contracts. A gate that quietly stops covering its surface is this
+repository's most-repeated failure, and an empty offender set reads the same
+whether the rule holds or the detector broke.
+
 ---
 
 [← §15 CI/CD](15-cicd-deployment.md) · [Index](README.md) · [Appendix B →](appendix-b-licences.md)

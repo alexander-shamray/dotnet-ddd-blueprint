@@ -2069,8 +2069,25 @@ public sealed record StockLine(Guid ProductId, int Quantity);
 ```csharp
 namespace Common.Contracts.Payments.V1;
 
-public sealed record AuthorisePayment(Guid OrderId, Guid CustomerId, decimal Amount, string Currency);
+// No subject, and the omission is the control (ADR-028). This command decides
+// whose instrument is charged and arrives over a broker carrying no principal,
+// so a CustomerId here would be that decision taken from a field the receiver
+// cannot check. Payments resolves the payer from its own record of the order,
+// built from the OrderPlaced it consumes (§3.2). Amount and Currency stay
+// because Payments holds that record and can disagree with them.
+public sealed record AuthorisePayment(Guid OrderId, decimal Amount, string Currency);
 ```
+
+> **A field the receiver can check is a claim; a field it cannot check is an
+> assertion, and only one of those belongs on a money-movement command.**
+> That is the whole of
+> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject),
+> and it is why this contract narrowed rather than emptied. Payments holds the
+> order, so it can compare `Amount` and `Currency` against it and refuse a
+> mismatch; it holds nothing that would contradict a subject, so a subject is
+> the one field a wrong value passes through undetected. [§11.4](11-identity-authorization.md)'s
+> subject rule now reaches the message path on those terms rather than
+> excluding it.
 
 ```csharp
 namespace Common.Contracts.Ordering.V1;
@@ -2377,7 +2394,6 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .Then(ctx =>
                 {
                     ctx.Saga.OrderId = ctx.Message.OrderId;
-                    ctx.Saga.CustomerId = ctx.Message.CustomerId;
                     ctx.Saga.Total = ctx.Message.TotalAmount;
                     ctx.Saga.Currency = ctx.Message.Currency;
                     ctx.Saga.StartedAt = ctx.Message.OccurredAt;
@@ -2404,12 +2420,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 // inferred later from a state name (#124).
                 .Then(ctx => ctx.Saga.PaymentVerdictOutstanding = true)
                 // Currency travels with the amount — a bare decimal is a
-                // charge waiting to be made in the wrong denomination.
+                // charge waiting to be made in the wrong denomination. No
+                // subject travels with either: Payments resolves the payer
+                // from its own record of the order (ADR-028, §3.2).
                 .Send(
                     PaymentsQueue,
                     ctx => new AuthorisePayment(
                         ctx.Saga.OrderId,
-                        ctx.Saga.CustomerId,
                         ctx.Saga.Total,
                         ctx.Saga.Currency))
                 // Arm the next wait in the same activity that begins it.
@@ -3381,7 +3398,13 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     // was finished, and wrong again after every transition added since.
     public Guid OrderId { get; set; }
 
-    public Guid CustomerId { get; set; }
+    // No CustomerId, and its absence is load-bearing (ADR-028). The instance
+    // carried one for exactly one reader — the AuthorisePayment that named the
+    // subject Payments would charge — and with that field gone from the
+    // contract, all a copy here could still do is offer itself to the next
+    // transition that wants a customer. Every command this machine sends names
+    // an order and nothing else. ordering.Orders still owns the value, bound
+    // from the principal at the endpoint (§11.4).
     public decimal Total { get; set; }
     public string Currency { get; set; } = null!;
     public DateTimeOffset StartedAt { get; set; }
@@ -3458,7 +3481,17 @@ CREATE TABLE ordering.OrderFulfilmentStates
     CorrelationId              UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
     CurrentState               VARCHAR(64)      NOT NULL,
     OrderId                    UNIQUEIDENTIFIER NOT NULL,
-    CustomerId                 UNIQUEIDENTIFIER NOT NULL,
+    -- Inert from this release and dropped by a later one (ADR-028). The
+    -- instance no longer declares it, so nothing reads or writes it here; the
+    -- column survives because §15.5 requires the migration to be backward
+    -- compatible with the release still serving beside it, and that release's
+    -- saga writes this column on every OrderPlaced. NOT NULL with a default is
+    -- the one shape that survives both directions: rolling forward the new
+    -- build's INSERT omits it, and rolling back the old build materialises a
+    -- non-nullable Guid from rows the new build wrote. The empty GUID is the
+    -- conservative value — it is nobody, where any other default would name a
+    -- real subject that was never this order's.
+    CustomerId                 UNIQUEIDENTIFIER NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
     Total                      DECIMAL(19,4)    NOT NULL,
     Currency                   CHAR(3)          NOT NULL,
     StartedAt                  DATETIMEOFFSET   NOT NULL,

@@ -651,16 +651,32 @@ vocabulary either way.
 > somebody else's subject, and no validator catches it, because `NotEmpty()` is
 > true of another customer's GUID.
 
-> **The message path is not covered by that rule, and is not yet settled.** A
-> command arriving over the broker has no principal at all — the sending
-> service is the caller — so there is nothing for `ICurrentUser` to answer
-> with, and §9.6's `AuthorisePayment` accordingly carries a `CustomerId` as a
-> message field. That is the honest state rather than an oversight: the
-> subject on a message is only as trustworthy as the broker's authorisation,
-> which today is one shared principal (§9.4's callout). Stating the rule
-> without this exclusion would put it in contradiction with the saga two
-> chapters over. What the message side should do instead is an open question,
-> not a decision this chapter has taken.
+> **The message path is covered too, and the rule there is one word
+> different: re-derived, never bound.** A command arriving over the broker has
+> no principal at all — the sending service is the caller — so there is nothing
+> for `ICurrentUser` to answer with, and binding is not available. What
+> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> settles is that this does not license carrying the subject as a field
+> instead: **the service that owns the decision resolves the subject from its
+> own record**, built from an event whose subject *was* bound from a principal.
+> §9.6's `AuthorisePayment` accordingly carries no `CustomerId` at all, and
+> Payments resolves the payer from the `OrderPlaced` it consumes ([§3.2](03-bounded-contexts.md)).
+>
+> **What decides which fields may stay is whether the receiver can disagree
+> with them.** `Amount` and `Currency` remain on that command because Payments
+> holds the order and can refuse a mismatch; a subject is the one field it
+> holds nothing to contradict, so a wrong value passes through undetected.
+> A field the receiver can check is a claim, and a field it cannot check is an
+> assertion.
+>
+> **This narrows the exposure rather than closing it, and the residual is
+> named.** The broker still has one shared principal
+> ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44),
+> §9.4's callout), so anyone able to publish can still send an
+> `AuthorisePayment`. What they can no longer do is choose *who* it charges: a
+> forged command naming a real order now re-triggers that order's own
+> authorisation rather than redirecting one at a customer of the sender's
+> choosing. Per-service broker identity is what closes the rest.
 
 This is one rule with three consequences, and the worked slices show all three:
 `PlaceOrderCommand` ([§6.4](06-cqrs.md)) carries no `CustomerId` and its handler

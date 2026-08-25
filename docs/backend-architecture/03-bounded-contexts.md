@@ -19,7 +19,7 @@ graph LR
     CAT -->|product + price events| ORD
     ORD -->|ReserveStock<br/>ReleaseStock| INV
     INV -->|StockReserved / Failed<br/>StockReleased| ORD
-    ORD -->|AuthorisePayment| PAY
+    ORD -->|AuthorisePayment<br/>OrderPlaced| PAY
     PAY -->|PaymentAuthorised / Declined| ORD
     ORD -->|OrderConfirmed| SHP
     SHP -->|ShipmentDispatched| ORD
@@ -63,7 +63,7 @@ subscriber silently executing your business commands.
 | **Catalog** | Product, Category, Price | `ProductPublished`, `PriceChanged`, `ProductDiscontinued` | `StockLevelChanged` | — |
 | **Ordering** | Order, OrderLine, the fulfilment saga | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled` | `OrderPlaced` (its own — the saga starts on it), `OrderCancelled` (its own — the saga stops on it), `OrderConfirmed` (its own — the saga waits on it), `ProductPublished`, `PriceChanged`, `ProductDiscontinued`, `StockReserved`, `StockReservationFailed`, `StockReleased`, `PaymentAuthorised`, `PaymentDeclined`, `ShipmentDispatched` | `CancelOrder`, `ConfirmOrder`, `MarkOrderShipped`, `FlagOrderForReview` |
 | **Inventory** | StockItem, Reservation | `StockReserved`, `StockReservationFailed`, `StockReleased`, `StockLevelChanged` | `OrderCancelled`, `ShipmentDispatched` | `ReserveStock`, `ReleaseStock` |
-| **Payments** | PaymentIntent, Refund | `PaymentAuthorised`, `PaymentDeclined`, `PaymentRefunded` | `OrderCancelled` | `AuthorisePayment` |
+| **Payments** | PaymentIntent, Refund | `PaymentAuthorised`, `PaymentDeclined`, `PaymentRefunded` | `OrderPlaced`, `OrderCancelled` | `AuthorisePayment` |
 | **Shipping** | Shipment, TrackingEvent | `ShipmentDispatched`, `ShipmentDelivered` | `OrderConfirmed` | — |
 | **Notifications** | NotificationLog | — | `OrderPlaced`, `OrderConfirmed`, `OrderCancelled`, `PaymentDeclined`, `PaymentRefunded`, `ShipmentDispatched`, `ShipmentDelivered` | — |
 
@@ -114,6 +114,41 @@ this is the platform's only one. The context map above draws no Ordering
 self-edge, which is a simplification rather than a claim: the collaboration is
 real, it is asynchronous like every other, and it obeys the same rule that the
 return leg is an event.
+
+**Payments subscribes to `OrderPlaced` for one reason, and it is not that it
+needs the order.** It needs the *payer*, and
+[ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+forbids `AuthorisePayment` from carrying one: a command crosses the broker with
+no principal behind it (§11.4), so a subject on that command would decide whose
+instrument is charged from a field the receiving service cannot check. Payments
+builds its own record of the order instead, from the event whose `CustomerId`
+was bound from a real principal at Ordering's endpoint, and resolves the payer
+locally when the command arrives.
+
+**That record keeps the total and the currency as well as the payer**, and the
+extra two are not incidental. `OrderPlaced` carries `TotalAmount` and
+`Currency` — §9.6's saga reads both off it — and holding them is what lets
+Payments *disagree* with the `AuthorisePayment` it is handed rather than merely
+obey it. A record of the payer alone would leave the amount as unverifiable as
+the subject used to be, which is the distinction ADR-028 turns on.
+
+**This is [§6.6](06-cqrs.md)'s shape one service over**, and the precedent is
+deliberate: Ordering keeps a local projection of Catalog's prices rather than
+asking Catalog at read time
+([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
+The difference is what the local copy buys — there, a synchronous hop avoided;
+here, an assertion nobody could verify replaced by a record the service owns.
+
+> **The subscription is a precondition, not a decoration, and the ordering
+> between the two messages is not guaranteed.** §9.4 orders nothing between two
+> deliveries, so an `AuthorisePayment` can arrive at Payments before the
+> `OrderPlaced` it would be resolved against — the same race the
+> `ReleaseStock` bullet below records, one service over. **A missing
+> record is a wait, not a decline.** Payments must fault the command so the
+> retry envelope redelivers it, and must not publish `PaymentDeclined`, which
+> is a business verdict about a payer it has not yet identified. §9.6's
+> fifteen-minute payment timeout is what bounds the wait: an order whose
+> `OrderPlaced` never arrives compensates on that timeout rather than hanging.
 
 **A cell names a message; it does not say what the message means when there is
 nothing to do.** `ReleaseStock` is where that gap was load-bearing, and it is
