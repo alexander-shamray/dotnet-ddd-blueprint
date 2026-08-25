@@ -24,8 +24,9 @@ namespace Platform.IntegrationTests;
 /// against a type that is <em>present</em> — a domain type named, a namespace
 /// misspelt, a member not <c>required</c>. The subject rule asserts an
 /// <em>absence</em>, so an empty result is both what success looks like and
-/// what a broken detector looks like, which is why it ships with two controls
-/// rather than alone.
+/// what a broken detector looks like. It therefore ships with controls rather
+/// than alone — no count here, because that number has already been wrong
+/// twice as review added to it.
 /// </remarks>
 public class ContractTests
 {
@@ -456,10 +457,10 @@ public class ContractTests
     public void No_command_contract_carries_a_subject()
     {
         // §11.4's subject rule, applied to the path that rule excluded until
-        // ADR-028 settled it (#63). A command crossing the broker arrives with
-        // no principal, so a subject identifier on one is a decision about
-        // whose money moves taken from a field the receiver cannot check. The
-        // owning service re-derives the subject from its own record instead.
+        // ADR-028 settled it (#63). The subject of a money-movement decision is
+        // the deciding service's to derive from its own record, so a subject
+        // identifier on a command transports an authority the receiver already
+        // holds — a second source for a decision that must have exactly one.
         //
         // Events are exempt and must be: OrderPlaced carries the CustomerId
         // that IS the record Payments builds from, and it is bound from the
@@ -493,6 +494,51 @@ public class ContractTests
         SubjectMembers(typeof(OrderPlaced))
             .Select(p => p.Name)
             .ShouldContain(nameof(OrderPlaced.CustomerId));
+    }
+
+    [Theory]
+    [InlineData("Customer")]
+    [InlineData("Buyer")]
+    [InlineData("Payer")]
+    [InlineData("Subject")]
+    [InlineData("User")]
+    [InlineData("Principal")]
+    public void Every_declared_subject_spelling_is_detected(string spelling)
+    {
+        // **The control above exercises one entry of six**, so removing or
+        // misspelling any of the other five left every assertion green — most
+        // of this gate's declared vocabulary unobserved, which is the coverage
+        // failure it exists to prevent, inside the control written to prevent
+        // it. A probe carries one member per spelling and each is asserted by
+        // name, so a vocabulary entry cannot be lost silently.
+        //
+        // Driven off the list itself rather than a second copy: the InlineData
+        // is the expected vocabulary, and this assertion fails if the two ever
+        // disagree in either direction.
+        SubjectSpellings.ShouldContain(spelling);
+
+        string[] found =
+        [
+            .. SubjectMembers(typeof(SubjectGateProbes.EverySpelling)).Select(p => p.Name)
+        ];
+
+        found.ShouldContain(
+            name => name.Contains(spelling, StringComparison.OrdinalIgnoreCase),
+            $"the probe declares a member spelled '{spelling}' and the detector must see it");
+    }
+
+    [Fact]
+    public void The_spelling_vocabulary_and_its_controls_stay_the_same_size()
+    {
+        // The other direction of the same pairing: a spelling ADDED to the
+        // list without a probe member and an InlineData row would be a
+        // vocabulary entry no test ever exercises, which is how the six became
+        // one-observed in the first place.
+        SubjectSpellings.Length.ShouldBe(
+            typeof(SubjectGateProbes.EverySpelling)
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Length,
+            "every declared spelling needs a probe member, or it is unobserved");
     }
 
     [Fact]

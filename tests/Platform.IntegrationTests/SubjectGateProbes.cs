@@ -54,6 +54,23 @@ internal static class SubjectGateProbes
         public required IReadOnlyList<EventOnlyLine> Own { get; init; }
     }
 
+    /// <summary>
+    /// One member per declared spelling in <c>SubjectSpellings</c>, so the
+    /// detector's whole vocabulary is exercised rather than its first entry.
+    /// </summary>
+    /// <remarks>
+    /// <b>The names are deliberately not all <c>*Id</c>.</b> The list is
+    /// matched as a case-insensitive substring, and a probe set that only used
+    /// one suffix would leave that part of the predicate unobserved too.
+    /// </remarks>
+    internal sealed record EverySpelling(
+        Guid CustomerId,
+        Guid BuyerReference,
+        Guid PayerId,
+        Guid SubjectIdentifier,
+        Guid UserId,
+        Guid PrincipalId);
+
     /// <summary>The universe those four form, in the order a reader expects.</summary>
     internal static Type[] Universe =>
     [

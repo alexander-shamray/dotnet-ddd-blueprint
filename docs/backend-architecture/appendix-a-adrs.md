@@ -1380,8 +1380,12 @@ gate must fail in.
 Controls sit beside the rule, because an absence-assert cannot fail
 informatively on its own: one points the detector at `OrderPlaced` and requires
 it to find the `CustomerId` this ADR keeps; one names all seven command roots
-§3.2's Accepts columns list, so discovery cannot quietly drop four of them; and
-one asserts the exemptions really are excluded. A gate that quietly stops
+§3.2's Accepts columns list, so discovery cannot quietly drop four of them; one
+asserts the exemptions really are excluded; and one exercises **every declared
+subject spelling** rather than the first, after review found five of the six
+unobserved — a control carrying the coverage defect it exists to catch.
+
+A gate that quietly stops
 covering its surface is this repository's most-repeated failure, and an empty
 offender set reads the same whether the rule holds or the detector broke.
 

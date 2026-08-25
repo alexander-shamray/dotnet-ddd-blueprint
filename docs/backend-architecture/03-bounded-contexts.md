@@ -119,12 +119,12 @@ return leg is an event.
 the payer, the total and the currency.** The payer is the one it cannot do
 without, and
 [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
-forbids `AuthorisePayment` from carrying one: a command crosses the broker with
-no principal behind it (§11.4), so a subject on that command would decide whose
-instrument is charged from a field the receiving service cannot check. The
-subject reaches Payments through the event instead, where it was bound from a
-real principal at Ordering's endpoint, and the command's arrival is what makes
-it look the payer up.
+forbids `AuthorisePayment` from carrying one: the subject of a money-movement
+decision is the deciding service's to derive, not the sender's to state, and a
+subject on that command would transport an authority the receiver already
+holds. The subject reaches Payments through the event instead, where it was
+bound from a real principal at Ordering's endpoint (§11.4), and the command's
+arrival is what makes it look the payer up.
 
 **The other two fields are not incidental, which is why the record is of the
 order rather than of the payer.** `OrderPlaced` carries `TotalAmount` and

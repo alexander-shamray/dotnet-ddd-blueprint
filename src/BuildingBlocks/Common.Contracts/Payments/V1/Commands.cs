@@ -9,12 +9,12 @@ namespace Common.Contracts.Payments.V1;
 /// decimal is a charge waiting to be made in the wrong denomination.
 /// <para>
 /// <b>It carries no subject, and the omission is the control</b> (ADR-028).
-/// This command decides whose payment instrument is charged, and a
-/// <c>CustomerId</c> here would be that decision taken from a field the
-/// receiver cannot check — the broker carries no principal (§11.4), so nothing
-/// on the receiving side could tell a real subject from a chosen one. Payments
-/// resolves the payer from its own record of the order instead, built from the
-/// <c>OrderPlaced</c> it consumes (§3.2).
+/// This command decides whose payment instrument is charged, and the subject of
+/// that decision is Payments' to derive rather than the sender's to state: it
+/// resolves the payer from its own record of the order, built from the
+/// <c>OrderPlaced</c> it consumes (§3.2). A <c>CustomerId</c> here would
+/// transport an authority the receiver already holds, which is a second source
+/// for a decision that must have exactly one.
 /// </para>
 /// <para>
 /// <b><c>Amount</c> and <c>Currency</c> stay, and the difference is not

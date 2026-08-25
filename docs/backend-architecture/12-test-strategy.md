@@ -2216,12 +2216,24 @@ than a review note.
 rather than only at the test. The other three fail against a type that is
 present: a domain type named, a namespace misspelt, a member not `required`.
 This one asserts an **absence**, so an empty result is both what success looks
-like and what a broken detector looks like. It therefore ships with three
-controls — one pointing the detector at a contract that *does* carry a subject
-and requiring it to find one, one naming every command root the judged set must
-contain, and one asserting the exempt types are excluded — because a gate that
-has only ever been observed green is one nobody has established is looking at
-anything.
+like and what a broken detector looks like. It therefore ships with controls
+rather than alone — pointing the detector at a contract that *does* carry a
+subject and requiring it to find one, naming every command root the judged set
+must contain, asserting the exempt types are excluded, and exercising **every
+declared spelling** rather than the first — because a gate that has only ever
+been observed green is one nobody has established is looking at anything.
+
+**No count of them here, deliberately**: review added to that number twice, and
+a stated total is the half that goes stale. What the set is for is checkable;
+how many there are is not worth a second place to be wrong.
+
+**The spelling vocabulary is the case worth naming, because the control had the
+defect it exists to catch.** Six spellings were declared and one was exercised,
+so removing or misspelling any of the other five left every assertion green —
+the coverage failure this repository keeps rediscovering, reproduced inside the
+control written to prevent it. A probe now carries one member per spelling, the
+assertion is parameterised over the vocabulary, and a second test pairs the two
+lists by size so an added spelling cannot arrive unobserved.
 
 **Deciding what it judges is the other half, and both obvious answers are
 wrong in opposite directions.** §9.1 says commands do not implement

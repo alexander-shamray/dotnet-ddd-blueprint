@@ -2102,11 +2102,12 @@ public sealed record StockLine(Guid ProductId, int Quantity);
 namespace Common.Contracts.Payments.V1;
 
 // No subject, and the omission is the control (ADR-028). This command decides
-// whose instrument is charged and arrives over a broker carrying no principal,
-// so a CustomerId here would be that decision taken from a field the receiver
-// cannot check. Payments resolves the payer from its own record of the order,
-// built from the OrderPlaced it consumes (§3.2). Amount and Currency stay
-// because Payments holds that record and can disagree with them.
+// whose instrument is charged, and that subject is Payments' to derive rather
+// than the sender's to state: it resolves the payer from its own record of the
+// order, built from the OrderPlaced it consumes (§3.2). A CustomerId here
+// would transport an authority the receiver already holds — a second source
+// for a decision that must have one. Amount and Currency stay because they are
+// the instruction rather than the authority.
 public sealed record AuthorisePayment(Guid OrderId, decimal Amount, string Currency);
 ```
 

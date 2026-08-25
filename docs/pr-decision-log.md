@@ -311,6 +311,24 @@ the site rather than papered over — the control keeps the gate from being
 *uninformative*, which is a different property from keeping it complete, and
 conflating the two is how this repository's gates have failed before.
 
+**And for five of those six spellings the control was uninformative too.** The
+positive control pointed the detector at `OrderPlaced.CustomerId` and nothing
+else, so misspelling or deleting `Buyer`, `Payer`, `Subject`, `User` or
+`Principal` left every assertion green. **The coverage failure this repository
+keeps rediscovering, inside the control written to prevent it** — the same
+shape as naming three command roots of seven, one round earlier and one level
+down. A probe now declares a member per spelling, the assertion is
+parameterised over the vocabulary itself rather than a copy of it, and a second
+test pairs list and probe by size so an added spelling cannot arrive
+unobserved. Measured: misspelling one entry fails exactly that case and leaves
+the other twenty green.
+
+**Two of this branch's controls have now had the defect they exist to catch**,
+which is worth stating as a rule rather than as a coincidence: *a control is
+code, and the reason it exists applies to it.* Asking "what would make this
+gate green while the property is false" is a question to ask of the control as
+well as of the rule.
+
 **What this does not close is #44, and the residual is written into three
 files rather than left to a reader.** One shared RabbitMQ principal still
 writes every queue, so anyone reaching the bus can still send an
@@ -400,8 +418,8 @@ migrations against a named list — failed on the eleventh, in the integration
 half. The list is the assertion and the length is derived from it, so the fix
 was one row; #126 had already removed the literal that would have made it two.
 
-**Counts pinned to this branch**: the solution runs 903 tests, 713 of them
-outside `Category=Integration`, and the three CI stages are 18, 695 and 190.
+**Counts pinned to this branch**: the solution runs 910 tests, 720 of them
+outside `Category=Integration`, and the three CI stages are 18, 702 and 190.
 Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
 head of this branch was reconciled against **its own CI run**, whose log summed
 to 899 over twenty-four per-project stage totals — the check this file names

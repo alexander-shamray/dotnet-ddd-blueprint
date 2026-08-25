@@ -421,12 +421,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 // charge waiting to be made in the wrong denomination.
                 //
                 // **No subject travels with either** (ADR-028, #63). Payments
-                // decides whose instrument is charged, and this command
-                // arrives over a broker that carries no principal — so a
-                // customer identifier here would be that decision taken from
-                // a field nothing on the receiving side can check. Payments
-                // resolves the payer from its own record of the order, built
-                // from the OrderPlaced it consumes (§3.2).
+                // decides whose instrument is charged, and the subject of that
+                // decision is Payments' to derive rather than this saga's to
+                // state: it resolves the payer from its own record of the
+                // order, built from the OrderPlaced it consumes (§3.2). A
+                // customer identifier here would transport an authority the
+                // receiver already holds.
                 //
                 // The amount and the currency stay, and NOT because only they
                 // are checkable — that was this comment's first argument and
