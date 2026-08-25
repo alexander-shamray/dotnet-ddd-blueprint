@@ -95,6 +95,66 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     }
 
     [Fact]
+    public async Task An_observed_cancellation_is_persisted_and_withholds_the_authorisation()
+    {
+        // **#143's flag is written by one delivery and read by a later one, and
+        // §12.5's suite cannot see that.** Every scenario there runs on
+        // .InMemoryRepository(), so the column, its mapping and the read-back
+        // across two consume transactions are all replaced by a double — and a
+        // guard that reads a field EF never persisted would pass there and fail
+        // in production. Copilot named the gap; this is the half that closes it.
+        var orderId = Guid.CreateVersion7();
+
+        await PublishPlacedAsync(orderId, Guid.CreateVersion7());
+
+        await Eventually(
+            () => SagaRowsAsync(orderId),
+            expected: 1,
+            because: "the arrange half");
+
+        // Inventory releasing off an OrderCancelled this saga has not consumed
+        // (ADR-029) — the arrival AwaitingStock records rather than ignores.
+        await PublishReleasedAsync(orderId, Guid.CreateVersion7());
+
+        await Eventually(
+            () => fixture.ScalarAsync<int>(
+                "SELECT Value = CAST(CancellationObserved AS int) " +
+                "FROM ordering.OrderFulfilmentStates WHERE CorrelationId = {0}",
+                orderId),
+            expected: 1,
+            because: "the recording branch has to reach the COLUMN, which is the " +
+                "half a saga harness with an in-memory repository cannot prove");
+
+        // The forward event the guard exists for. Read back on a later delivery,
+        // so this asserts the round trip rather than the assignment.
+        var reservedId = Guid.CreateVersion7();
+        await PublishReservedAsync(orderId, reservedId);
+
+        // **Fence on the delivery before reading the state, or this assertion
+        // cannot fail.** AwaitingStock is what the row already says when
+        // StockReserved is published, so an Eventually that merely waits for it
+        // returns on its first read — before the saga has consumed anything — and
+        // passes just as happily with the guard removed. Measured: it did.
+        // §9.5's inbox row is written after the consumer returns, so waiting for
+        // it is the barrier that makes the read mean something.
+        await Eventually(
+            async () => (await SagaInboxRowsAsync(reservedId)).Count,
+            expected: 1,
+            because: "the state below is only evidence once this delivery has been " +
+                "handled");
+
+        (await fixture.ScalarAsync<string>(
+            "SELECT Value = CurrentState FROM ordering.OrderFulfilmentStates " +
+            "WHERE CorrelationId = {0}",
+            orderId))
+            .ShouldBe(
+                "AwaitingStock",
+                "an unguarded StockReserved sends AuthorisePayment and moves to " +
+                "AwaitingPayment; the state column is where withholding is visible " +
+                "without a harness to count sends with");
+    }
+
+    [Fact]
     public async Task A_row_this_build_writes_defaults_the_retained_CustomerId_to_empty()
     {
         // The behavioural half of ADR-028's expand/contract, and until this
@@ -360,6 +420,33 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
                 TestContext.Current.CancellationToken);
     }
 
+    private async Task PublishReleasedAsync(Guid orderId, Guid messageId)
+    {
+        StockReleased released = new()
+        {
+            MessageId = messageId,
+            CorrelationId = orderId,
+            OccurredAt = DateTimeOffset.UtcNow,
+            OrderId = orderId
+        };
+
+        // One consumer in this service, unlike StockReserved above: §3.2 gives
+        // StockReleased to the saga alone, so the saga queue is the whole
+        // drain list.
+        _published.Add((messageId, DependencyInjection.FulfilmentSagaQueue));
+
+        await fixture.Factory.Services
+            .GetRequiredService<IBus>()
+            .Publish(
+                released,
+                c =>
+                {
+                    c.MessageId = messageId;
+                    c.CorrelationId = released.CorrelationId;
+                },
+                TestContext.Current.CancellationToken);
+    }
+
     private async Task PublishReservedAsync(Guid orderId, Guid messageId)
     {
         StockReserved reserved = new()
@@ -417,16 +504,22 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
                 TestContext.Current.CancellationToken);
     }
 
-    private static async Task Eventually(Func<Task<int>> read, int expected, string because)
+    private static Task Eventually(Func<Task<int>> read, int expected, string because) =>
+        Eventually<int>(read, expected, because);
+
+    // Generic since #143 needed the state COLUMN as well as a row count — the
+    // int overload above is kept so no existing call site had to move, which
+    // is what keeps this change out of the diff of tests it is not about.
+    private static async Task Eventually<T>(Func<Task<T>> read, T expected, string because)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow + DeliveryBudget;
-        int actual = 0;
+        T actual = default!;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
             actual = await read();
 
-            if (actual == expected)
+            if (EqualityComparer<T>.Default.Equals(actual, expected))
                 return;
 
             await Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);

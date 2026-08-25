@@ -554,12 +554,16 @@ finalised saga. An earlier version of this section asserted a live instance in
 its heading and then explained two paragraphs down that there would not be one.
 
 **The #143 raising is mid-wait in a different state and is bounded by a
-different timeout.** In `AwaitingPayment` nothing has been sent and nothing has
-settled: the instance is waiting for its own copy of the `OrderCancelled`
-Inventory already acted on, and the fifteen-minute `PaymentTimeout` armed when
-`AuthorisePayment` went out is what ends that wait — it compensates exactly as
-it would have. Minutes again, against an alert measured in hours, so the
-ordinary case is still a finalised saga. **So step 2 is a branch, not an
+different timeout.** In `AwaitingPayment` the payment verdict **has**
+settled — the authorisation is what raised this row, and the branch cleared
+`PaymentVerdictOutstanding` on the way — and the review command **has** gone
+out. Do not go looking for a payment response: it already arrived. What was
+withheld is the `ConfirmOrder`, and what has not happened is the saga
+consuming its own copy of the `OrderCancelled` Inventory already acted on.
+The fifteen-minute `PaymentTimeout` armed when `AuthorisePayment` went out is
+what ends that wait — it compensates exactly as it would have. Minutes again,
+against an alert measured in hours, so the ordinary case is still a finalised
+saga. **So step 2 is a branch, not an
 instruction, and `CurrentState` is half of it**:
 
 2. **Look for the instance**, by `CorrelationId = OrderId` in the saga state

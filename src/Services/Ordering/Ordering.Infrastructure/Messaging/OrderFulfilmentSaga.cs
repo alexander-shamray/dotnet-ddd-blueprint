@@ -540,8 +540,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // holding an instance when it does: AwaitingStock, AwaitingPayment
             // and — since #126 — AwaitingConfirmation, each of which sends a
             // release of its own, plus Confirmed, which deliberately does not.
-            // Each writes the arrival out with an Ignore and argues it at the
-            // site. The four are enumerated rather than counted because this
+            // Each writes the arrival out and argues it at the site — with a
+            // RECORDING branch since #143, not an Ignore, because the arrival
+            // is the only evidence a cancellation gives this machine before
+            // its own copy lands. The four are enumerated rather than counted
+            // because this
             // note said "the three states" until Confirmed was read, and #129
             // names three as well.
             //
@@ -563,7 +566,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // none, so the derived StockReleased landed in a branchless state
             // every time with no retry able to rescue it, because nothing
             // would move the state. #117 narrowed that certainty to an
-            // interleaving; the Ignore below closes what was left.
+            // interleaving; the recording branch below closes what was left.
             When(OrderCancelled)
                 .Unschedule(StockTimeout)
                 // **The event's reason, not a literal — and this line read
@@ -743,7 +746,8 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             //
             // The two-races note on the AwaitingStock branch above applies
             // here unchanged, and so does its answer: this state writes the
-            // early release out with an Ignore below, on ADR-024's terms.
+            // early release out below, on ADR-024's terms — recording it since
+            // #143 rather than ignoring it.
             // **The payment wait is NOT unscheduled here, and that absence is
             // the load-bearing part of this branch.** Every other exit from
             // this state either has the verdict or has stopped wanting it;
