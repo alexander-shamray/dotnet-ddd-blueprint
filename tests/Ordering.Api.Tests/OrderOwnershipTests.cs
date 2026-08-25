@@ -254,11 +254,20 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
         problem.Extensions["code"]?.ToString().ShouldBe(
             "order.already_shipped",
             "the code is a §9.8 dimension value and splitting it would halve the series");
-        string detail = problem.Detail.ShouldNotBeNull();
-        detail.ShouldNotContain(
-            "A shipped order",
-            Case.Sensitive,
-            "a delivered order's customer must not be told it shipped (#109)");
+        // **The exact string, not the absence of the old one.** Asserting only
+        // that the detail no longer contains "A shipped order" rejects one
+        // obsolete substring and passes for a blank detail, a truncated one,
+        // or any other wrong message — which leaves #109's actual subject, the
+        // customer-visible wording, unpinned by the test written to pin it.
+        //
+        // Pinning the prose makes it a thing a later edit has to come here and
+        // change, and that is the cost being accepted rather than an oversight:
+        // this sentence is served to a customer, and #109 was filed because it
+        // said something untrue to half of them.
+        problem.Detail.ShouldBe(
+            "An order that has already shipped cannot be cancelled; raise a return instead.",
+            $"a {status} order's customer reads this, and naming one of the two " +
+                "statuses is what #109 was filed for");
 
         (await StatusOfAsync(order)).ShouldBe(status, "a refusal must not have cancelled anything");
     }
