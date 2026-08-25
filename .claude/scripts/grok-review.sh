@@ -456,7 +456,19 @@ if [ "$stop" != "$stop_ok" ]; then
   echo "grok did not finish its turn — the root stopReason is \"$stop\", not \"$stop_ok\"; the review did not run and suggestions.md is left as it was" >&2
   exit 6
 fi
-cat "$result"
+# **The verdict is extracted; the transcript is not printed (#52).** Every byte
+# of $result is reviewer-authored, and `cat`ting it put that text into the
+# caller's context as prose — where /review-grok reads it holding `Edit` and
+# `Write`, and /ship runs that triage unattended in a loop. Nothing ever read
+# this stdout: ship.md's step 5 branches on the exit code and on whether
+# suggestions.md exists, review-grok.md names no stdout at all, and
+# test_grok_helpers.py asserts nothing about it. So the transcript was a second,
+# unguarded crossing that bought no caller anything.
+#
+# The findings still cross, deliberately and by ONE route: suggestions.md,
+# imported below under the shape guards. One reviewer-controlled artefact, named
+# and checked, beats the same text arriving twice with only one arrival guarded.
+echo "grok finished its turn (stopReason \"$stop\") — findings, if any, are in suggestions.md" >&2
 # Import the one artefact the review owns. Its absence is the clean verdict —
 # trustworthy only because the checks above have ruled out a cancelled run.
 #
