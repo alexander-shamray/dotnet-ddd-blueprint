@@ -257,9 +257,29 @@ Then:
 Something cancelled the order and no saga instance existed to hear it. Only
 the arrivals this service can prove are its own are discarded: the saga's echo,
 which carries an `Origin` of `workflow`, and an absent `Origin`, which is a
-rolling deploy publishing from before the field existed. **What reaches this
-queue therefore carries an `Origin` of `user`** — somebody asked, through
-§11.4's endpoint — and there are two ways to get here that want opposite
+rolling deploy publishing from before the field existed. **Everything else
+faults, so `user` is the EXPECTED value here rather than the only possible
+one** — the branch is an allow-list, and a blank, a malformed field or a
+vocabulary member some future release starts sending reaches this queue
+exactly as a customer's cancellation does.
+
+**So read `Origin` first, and branch on it before anything else.** A value
+of `user` is a real cancellation and the two procedures below are for it.
+**Anything else is a contract failure rather than an order to recover**:
+some producer is sending an origin this build does not know, which is a
+deployment problem (§9.2, ADR-026) and not something replaying the message
+fixes. Find the producer, record the value, and take it to whoever owns that
+release; do not run the recovery below on it, because it assumes a customer
+asked and that is the one thing an unknown origin does not establish.
+
+> **The suite says this can happen rather than the prose merely allowing
+> it.**
+> `A_cancellation_carrying_an_unknown_origin_faults_rather_than_being_discarded`
+> publishes `operations_console` and asserts the fault, which is what an
+> allow-list is worth having for — and what makes "everything here is a user
+> cancellation" a claim this page cannot make.
+
+For a `user` origin there are two ways to get here, and they want opposite
 things.
 
 **Read `Origin` and the order id off the body, then ask whether the saga ever
@@ -281,9 +301,33 @@ instance; its outbox query answers the rest, by showing whether this order's
      correlates, compensates, and releases whatever was reserved. This is the
      one faulted arrival on this page replay can fix, and the order matters —
      replayed before the placement lands, it faults again.
-   - **There is no `OrderPlaced` row at all** — nothing downstream ever heard
-     of this order, so no reservation was taken and no card was authorised.
-     Confirm the order reads `Cancelled`, record the message, and discard it.
+   - **There is no `OrderPlaced` row at all** — and **this does not mean the
+     placement was never published.** §9.4's retention purge deletes
+     *processed* outbox rows after seven days
+     (`RetentionPolicy.OutboxWindow`), while a message sits in the error
+     queue until somebody handles it — so on an order older than that window
+     the absence is the purge rather than the evidence. `ProcessedAt` would
+     not settle it either: it records that the dispatcher published the row,
+     not that the saga consumed it.
+
+     **So establish what happened downstream before discarding anything.**
+     Read the order's own age and status, look for an
+     `ordering.OrderReviews` row, and ask Inventory and Payments whether
+     this order id ever reached them. Only where the order is inside the
+     retention window, has no review row and neither service has heard of
+     it is "nothing downstream ever heard of this order" a conclusion:
+     confirm the order reads `Cancelled`, record the message, and discard
+     it. Otherwise treat it as case 2 below — a cancellation with real
+     downstream work behind it, which is a person's to reconcile.
+
+     > **This bullet said the absence proved it, and that was an
+     > instruction to destroy a real cancellation.** Stock reserved and a
+     > card authorised eight days ago leave no outbox row and every other
+     > trace; discarding on the strength of the missing one loses the only
+     > record that the customer asked. **An absence is evidence only where
+     > something guarantees the thing would still be there**, and a
+     > retention window is precisely the guarantee this repository does not
+     > have.
 2. **The saga had already finalised, down a branch that escalated.** A
    `not_confirmed` or `not_despatched` timeout finalises the instance and
    leaves the order live, so a customer cancelling afterwards has nothing to
