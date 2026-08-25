@@ -1101,7 +1101,9 @@ assertions were *observed* red against the old settings file before the rule
 was added, #52's transcript check fails against the `cat` it replaced, and
 #57's retired-rule case fails against `main`'s copies of both sweeps. Calling a
 case weaker evidence than it is understates the suite, which is the opposite of
-this file's usual error and no better. **#56** — what a feed helper admits, what it reports about
+this file's usual error and no better.
+
+**#56** — what a feed helper admits, what it reports about
 what it dropped, and that no command reaches those feeds outside the helpers.
 **#33** — which paths the harness denies itself, and that the worktree root is
 not among them. **#52** — that the reviewer's transcript reaches no stream, and
