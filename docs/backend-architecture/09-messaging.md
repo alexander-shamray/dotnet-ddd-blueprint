@@ -2324,9 +2324,15 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
     // Ordering's own, alongside OrderPlaced above and OrderConfirmed below.
     // "Cancel this order" has
-    // two origins: the saga's own CancelOrder, always paired with Finalize, and
-    // §11.4's customer endpoint, which cancels the AGGREGATE and ends nothing.
-    // Without this the second was invisible to the machine.
+    // two origins: the saga's own CancelOrder, and §11.4's customer endpoint,
+    // which cancels the AGGREGATE and ends nothing. Without this the second
+    // was invisible to the machine.
+    //
+    // NOT "always paired with Finalize" — #124 made that false in the letter:
+    // Compensating's stock exits finalise CONDITIONALLY, so a CancelOrder can
+    // go out with the instance still live and waiting on a payment verdict.
+    // The order is cancelled either way; the send and the deletion are simply
+    // no longer one act.
     //
     // The event now says WHICH — OrderCancelled.Origin, a CancelOrigins code
     // (#123) — because the machine has to tell them apart when no instance
@@ -2374,9 +2380,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
         // Discarded when no instance exists ONLY for the arrivals this service
         // can account for, and faulted otherwise (#123). The routine case is
-        // the echo: every cancellation the saga causes ends in Finalize, so the
-        // OrderCancelled the aggregate then publishes arrives at a queue whose
-        // instance has just been deleted. What used to be discarded beside it
+        // the echo: the OrderCancelled the aggregate publishes after a
+        // CancelOrder this saga sent. It reaches a DELETED instance whenever
+        // that send finalised — and since #124 Compensating's stock exits
+        // finalise conditionally, so the same echo can instead land on a live
+        // instance, where Compensating's Ignore(OrderCancelled) absorbs it.
+        // This line answers for the first case. What used to be discarded
+        // beside it
         // was a customer's cancellation overtaking its own OrderPlaced, and
         // that one has to be loud.
         //
@@ -3137,9 +3147,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 >
 > **The default is right for an arrival this service can prove is its own
 > echo, and for nothing else — and "prove" is the word that had to become
-> mechanical.** Every cancellation the saga causes ends in `Finalize`, so the
-> `OrderCancelled` the aggregate then publishes arrives at a deleted instance
-> on the ordinary path; ADR-024 has `StockReleased` answered for every release
+> mechanical.** A cancellation the saga caused is echoed by the aggregate, and
+> reaches a deleted instance whenever the `CancelOrder` that caused it also
+> finalised — **not every one, which is what this said**: since #124
+> `Compensating`'s stock exits finalise only once the payment half is settled,
+> so the echo can equally land on a live instance and be absorbed there. Either
+> way the order is cancelled; only the deletion moved. ADR-024 has
+> `StockReleased` answered for every release
 > including a no-op one, so it does too. `StockReleased` keeps the default
 > outright. `PaymentAuthorised` cannot make the claim at all — Payments
 > produces it — so it takes `OnMissingInstance(m => m.Fault())` and reaches the

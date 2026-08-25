@@ -428,6 +428,23 @@ public static class CancellationReasons
 
     public static string ToCode(CancellationReason reason) => ToCodeMap[reason];
 }
+
+// The sibling, and it goes ONE WAY only — nothing parses an origin, because
+// no ingress accepts one. That asymmetry is the design rather than an
+// omission: a reason is what a caller sends, an origin is written as a
+// literal at the entry point that knows it (CommandOrigin, above), and a
+// TryParse here would be the first door onto a value a caller could claim.
+public static class CancellationOrigins
+{
+    private static readonly FrozenDictionary<CancellationOrigin, string> ToCodeMap =
+        new Dictionary<CancellationOrigin, string>
+        {
+            [CancellationOrigin.User] = CancelOrigins.User,
+            [CancellationOrigin.Workflow] = CancelOrigins.Workflow
+        }.ToFrozenDictionary();
+
+    public static string ToCode(CancellationOrigin origin) => ToCodeMap[origin];
+}
 ```
 
 Coarse permission checks live at the endpoint. **Resource-level checks — "is

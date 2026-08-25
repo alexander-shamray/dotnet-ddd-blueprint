@@ -1584,11 +1584,18 @@ public class OrderFulfilmentSagaTests
     public async Task A_cancellation_the_saga_itself_caused_finds_no_instance_and_is_discarded()
     {
         // The routine case, and the one that would have made this fix worse
-        // than the defect: every cancellation the saga causes ends in
-        // Finalize, so the OrderCancelled the aggregate then publishes arrives
-        // at a queue whose instance has just been deleted. A missing instance
-        // must be discarded rather than faulted, or every cancelled order
-        // files an error-queue entry and pages someone (§13.6).
+        // than the defect: this order's CancelOrder went out of a branch that
+        // finalises, so the OrderCancelled the aggregate then publishes
+        // arrives at a queue whose instance has just been deleted. A missing
+        // instance must be discarded rather than faulted, or every cancelled
+        // order files an error-queue entry and pages someone (§13.6).
+        //
+        // **Not every cancellation the saga causes reaches a deleted
+        // instance**, which is what this comment said: since #124
+        // Compensating's stock exits finalise conditionally, so that echo can
+        // land on a live instance and be absorbed there instead. This test
+        // drives StockReservationFailed precisely because its branch does
+        // finalise unconditionally.
         //
         // **What makes it the echo is CancelOrigins.Workflow, and #123 turned
         // that from a description into the condition.** The publish below

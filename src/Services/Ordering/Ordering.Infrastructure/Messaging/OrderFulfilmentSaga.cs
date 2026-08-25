@@ -266,9 +266,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
         // Discarded when no instance exists ONLY for the arrivals this service
         // can account for, and faulted otherwise. The routine case is the echo:
-        // every cancellation the saga itself causes ends in Finalize, and the
-        // OrderCancelled the aggregate then publishes arrives at a queue whose
-        // instance has just been deleted.
+        // the OrderCancelled the aggregate publishes after a CancelOrder this
+        // saga sent, arriving at a queue whose instance has just been deleted.
+        //
+        // **Not "every cancellation the saga causes", which is what this said
+        // and which the property comment above already retracted.** #124 made
+        // Compensating's stock exits finalise CONDITIONALLY, so an echo can
+        // land on a LIVE instance instead, where that state's
+        // Ignore(OrderCancelled) absorbs it. The order is cancelled on both
+        // paths; this line answers only for the one where the join had already
+        // finished.
         //
         // **This USED to state MassTransit's default rather than change it**, and
         // the default is measured: a non-initial event correlating to no instance
