@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(bash .claude/scripts/pr-state.sh:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(bash .claude/scripts/pr-state.sh:*), Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -187,7 +187,7 @@ review inside step 5, not whether step 5 runs) answer all seven rows and the
 Grok half. Read them before doing anything.
 
 ```bash
-gh pr list --state all --head <branch> --json number,state
+bash .claude/scripts/pr-for-branch.sh <branch>
 ```
 
 **One call, four outcomes, and it exits 0 for every one of them.** Empty means
@@ -338,7 +338,7 @@ same argument as never calling a branch clean because asking failed.
 
    **The detached row is not a special case of the others, it is the absence
    of the thing they read.** `git branch --show-current` prints nothing, so
-   `gh pr list --head <branch>` has no argument and the promised exit-zero
+   `pr-for-branch.sh <branch>` has no argument and the promised exit-zero
    classification cannot be attempted, let alone answered — the step would
    stop on a malformed command before `/branch` ever got the chance to make a
    branch out of the state. `/branch` handles this deliberately (it is the
@@ -353,7 +353,7 @@ same argument as never calling a branch clean because asking failed.
    git fetch origin main                      # or the next read is stale
    git status --short                         # empty: nothing uncommitted
    git log origin/main..HEAD                  # empty: nothing main lacks
-   gh pr list --state merged --head <branch>  # non-empty: it landed
+   bash .claude/scripts/pr-for-branch.sh <branch>   # a MERGED row: it landed
    ```
 
    **Every read exits 0 whatever it finds, and that is deliberate.**
@@ -361,7 +361,7 @@ same argument as never calling a branch clean because asking failed.
    *forked but never PR'd* is not exotic — it is what step 1 produces on every
    run. Classifying the ordinary case through a failed command, in a chain
    whose first stop rule is that a non-zero exit means the step did not run,
-   is a contradiction rather than a nicety. `gh pr list --state merged --head`
+   is a contradiction rather than a nicety. `pr-for-branch.sh`, filtered to MERGED,
    answers with a row or with `[]`, measured both ways on this repository.
    `pr-state.sh` keeps its job one section up, in the resume
    table, where the question is *which* state and there is a PR to ask about.

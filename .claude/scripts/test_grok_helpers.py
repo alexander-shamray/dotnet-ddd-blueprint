@@ -1434,24 +1434,102 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
                 self.assertEqual(2, result.returncode)
                 self.assertNotIn("pwned", result.stdout)
 
-    def test_no_command_grants_the_raw_feed_route(self):
-        """#148's review: dropping the grant from one file withheld nothing.
+    # Every `gh` subcommand a command may be granted. An ALLOW-list, not a
+    # deny-list, and that is the correction #148's third review round forced:
+    # the first version of this case banned `Bash(gh pr view:*)` by name and
+    # passed while three commands still granted `Bash(gh pr list:*)` — which
+    # reaches the same fields. A deny-list passes every spelling nobody
+    # thought of, which is the lesson this file already carries about the Grok
+    # verdict check, arriving one gate over.
+    GH_GRANTS_THAT_CANNOT_REACH_A_FEED = {
+        "gh pr create",
+        "gh pr diff",
+        "gh pr checks",
+        "gh pr merge --merge",
+        "gh issue list",
+        "gh issue view",
+        "gh issue create",
+        "gh repo view",
+    }
 
-        /ship invokes /review-copilot as a skill while holding its own
-        `Bash(gh pr view:*)`, and `allowed-tools` entries are cumulative
-        auto-approvals rather than a whitelist — so the narrower grant one file
-        over left `--json reviews` reachable on the unattended path, which is
-        the path #56 was filed about.
+    def granted_bash(self, path):
+        frontmatter = path.read_text(encoding="utf-8").split("---")[1]
+        line = next(
+            (ln for ln in frontmatter.splitlines()
+             if ln.startswith("allowed-tools:")), "")
+        return re.findall(r"Bash\(([^)]*)\)", line)
 
-        Whether a skill invocation inherits its caller's frontmatter grants has
-        never been measured here. This case makes the question moot instead of
-        answering it: with no `gh pr view` grant in ANY command, neither
-        inheritance rule leaves an unfiltered route to the feeds.
+    def test_no_command_can_fetch_a_feed_outside_the_fixed_helpers(self):
+        """#56, and the invariant its first two fixes only appeared to hold.
+
+        `gh pr view --json reviews` and `gh pr list --json reviews,comments`
+        both return full review bodies and issue comments — measured on this
+        repository, where `gh pr list --state all --limit 1 --json
+        number,reviews` handed back a 2,457-character review body. So a command
+        holding either grant bypasses all three author-filtering helpers, and
+        /ship holds its grants while running /review-copilot as a skill.
+
+        Written as an allow-list because the deny-list version of this case
+        passed while `gh pr list` was still granted in three files.
         """
         for path in sorted(COMMANDS.glob("*.md")):
-            with self.subTest(command=path.name):
-                frontmatter = path.read_text(encoding="utf-8").split("---")[1]
-                self.assertNotIn("Bash(gh pr view:*)", frontmatter)
+            for grant in self.granted_bash(path):
+                command = grant[:-2] if grant.endswith(":*") else grant
+                if not command.startswith("gh "):
+                    continue
+                with self.subTest(command=path.name, grant=grant):
+                    self.assertIn(
+                        command, self.GH_GRANTS_THAT_CANNOT_REACH_A_FEED,
+                        f"{path.name} grants `{grant}`, which is not on the list of "
+                        "gh subcommands established not to reach --json "
+                        "reviews/comments. Add a fixed helper, or extend the list "
+                        "with a measurement.")
+
+    def test_the_allow_list_is_not_vacuous(self):
+        # The positive control. The case above iterates grants, so a parser
+        # that found none would pass it in silence — which is this repository's
+        # most-repeated failure. At least one real `gh` grant must be seen, and
+        # the two banned spellings must genuinely be absent from the list.
+        seen = [
+            grant for path in COMMANDS.glob("*.md")
+            for grant in self.granted_bash(path) if grant.startswith("gh ")
+        ]
+        self.assertGreater(len(seen), 4)
+        for banned in ("gh pr view", "gh pr list", "gh api"):
+            self.assertNotIn(banned, self.GH_GRANTS_THAT_CANNOT_REACH_A_FEED)
+
+    def test_the_branch_lookup_goes_through_the_fixed_helper(self):
+        # The replacement for `gh pr list`. All three commands wanted the same
+        # harmless thing from it — which pull requests exist for a branch — so
+        # one helper with a fixed field set serves all three.
+        helper = SCRIPTS / "pr-for-branch.sh"
+        self.assertTrue(helper.exists())
+        text = helper.read_text(encoding="utf-8")
+        self.assertIn("--json number,state,url", text)
+        # Comments stripped: the helper's header explains the hazard by naming
+        # the very fields it must not request, and prose cannot drift into use.
+        code = [
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        ]
+        for line in code:
+            self.assertNotIn("reviews", line)
+            self.assertNotIn("comments", line)
+        for name in ("pr.md", "review-copilot.md", "ship.md"):
+            with self.subTest(command=name):
+                frontmatter = (COMMANDS / name).read_text(
+                    encoding="utf-8").split("---")[1]
+                self.assertIn("bash .claude/scripts/pr-for-branch.sh:*", frontmatter)
+
+    def test_the_branch_lookup_refuses_a_flag_shaped_branch(self):
+        # It reaches an argument position, and `gh pr list` has flags that
+        # change what comes back.
+        for bad in ("--json", "-q", "--state all --json reviews"):
+            with self.subTest(branch=bad):
+                result = subprocess.run(
+                    [BASH, str(SCRIPTS / "pr-for-branch.sh"), bad],
+                    capture_output=True, text=True)
+                self.assertEqual(2, result.returncode)
+                self.assertNotIn("reviews", result.stdout)
 
     def test_ship_reads_pr_state_through_the_fixed_helper(self):
         # The positive control for the case above, and the reason it is safe:

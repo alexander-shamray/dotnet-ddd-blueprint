@@ -1,7 +1,7 @@
 ---
 description: Triage Copilot's review comments on a PR — verify each before acting on it
 argument-hint: "[PR number — omit for the current branch's PR]"
-allowed-tools: Read, Grep, Glob, Edit, Bash(gh pr list:*), Bash(gh pr diff:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-comment-reply.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/pr-thread-resolve.sh:*), Bash(git log:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a)
+allowed-tools: Read, Grep, Glob, Edit, Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(gh pr diff:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-comment-reply.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/pr-thread-resolve.sh:*), Bash(git log:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a)
 ---
 
 Work through the Copilot review on PR $1 — if empty, the PR for the current
@@ -159,9 +159,12 @@ next reviewer reads as settled.
 > `/ship` still held its own: `/ship` invokes this command as a skill, and
 > `allowed-tools` entries are cumulative auto-approvals rather than a
 > whitelist — so the unattended path, which is the path #56 was filed about,
-> kept an unfiltered route. **No command grants `Bash(gh pr view:*)` any
-> more.** `ship.md` reads a PR's state through `pr-state.sh` and `pr.md` feeds
-> the closure gate through `pr-closure-input.sh`, both with fixed field sets.
+> kept an unfiltered route. **No command grants `Bash(gh pr view:*)` — or
+> `Bash(gh pr list:*)`, which reaches `--json reviews,comments` just as
+> directly and took a third review round to notice — any more.** `ship.md`
+> reads a PR's state through `pr-state.sh`, `pr.md` feeds the closure gate
+> through `pr-closure-input.sh`, all three resolve a branch's PR through
+> `pr-for-branch.sh`, and every one fixes its field set.
 > Whether a skill inherits its caller's grants has still never been measured
 > here; the point is that it no longer decides anything.
 
@@ -277,10 +280,19 @@ Finish with the thread state: how many were marked `done`, how many `rejected`,
 how many resolved, and — named individually — any left open as `Ask`.
 
 **State the author-filter count on its own line, always, including when it is
-zero.** How many items each feed returned, and how many were dropped for being
-authored by none of the three Copilot spellings, named individually with their
-author. A
-run that omits the line has not established it read the authors at all — the
+zero.** How many items each feed admitted and how many it dropped — the two
+numbers each helper prints to stderr — with the dropped ones named individually
+by author and location.
+
+**Dropped means authored by none of the FOUR admitted identities**, which is
+Copilot's three spellings plus the repository owner's login. An earlier
+revision of this paragraph said "none of the three Copilot spellings", written
+before the owner was admitted, and it made this section disagree with the
+decision table two hundred lines above: an owner-authored item satisfies that
+wording while the helper reports it as admitted. The owner's items are
+admitted, and they are how you know which threads you have already answered.
+
+A run that omits the line has not established it read the authors at all — the
 same reason this repository asserts what a gate is looking at rather than what
 it found — and zero is the answer a reader most needs stated, because it is
 the one indistinguishable from not having looked.

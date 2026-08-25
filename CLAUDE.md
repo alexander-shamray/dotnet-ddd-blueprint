@@ -2321,10 +2321,29 @@ established it.** `/ship` invokes `/review-copilot` as a skill while holding
 its own frontmatter grants, and `allowed-tools` entries are cumulative
 auto-approvals rather than a whitelist — so a grant removed in one file and
 kept in its caller withholds nothing on the unattended path, which is the path
-the issue was about. **No command grants `Bash(gh pr view:*)` any more**:
-`ship.md` reads state through `pr-state.sh`, `pr.md` feeds the closure gate
-through `pr-closure-input.sh`, and both fix their field sets, because a caller
-that chooses fields can choose `reviews`. `ship.md`'s review-body and inline
+the issue was about.
+
+**And `gh pr view` was not the only door, which took a third review round to
+find.** `gh pr list --json reviews,comments` returns the same review bodies and
+issue comments for every pull request at once — measured here, a 2,457-character
+Copilot review body out of `gh pr list --state all --limit 1 --json
+number,reviews`. Three commands kept that grant for the harmless job of finding
+a branch's pull request, and it was a complete bypass of all three filtering
+helpers. **No command grants `Bash(gh pr view:*)` or `Bash(gh pr list:*)` any
+more**: `ship.md` reads state through `pr-state.sh`, `pr.md` feeds the closure
+gate through `pr-closure-input.sh`, all three resolve a branch's PR through
+`pr-for-branch.sh`, and every one fixes its field set, because a caller that
+chooses fields can choose `reviews`.
+
+**The gate that pins this is an ALLOW-list of `gh` subcommands, and it is the
+second one in this repository to be rewritten that way.** Its first version
+banned `gh pr view` by name and passed while three files still granted
+`gh pr list` — a deny-list passing every spelling nobody thought of, which is
+exactly what the Grok verdict check did before it was inverted. `gh issue view`
+and `gh issue list` stay admitted on a measurement rather than an assumption:
+`gh issue view <pr-number> --json comments` returns an empty array, because
+`gh` keeps issues and pull requests distinct even though GitHub's model does
+not. `ship.md`'s review-body and inline
 reads go through the same feed helpers `/review-copilot` uses, so the two
 commands share one list instead of holding two prose rules that disagreed.
 
