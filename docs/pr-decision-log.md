@@ -143,9 +143,22 @@ the sharper failure.** `ShipmentDispatched` in `AwaitingConfirmation` and in
 `Confirmed` finalises, so a cancellation in flight then correlates to nothing:
 no review row, and — before #123 — no fault either. Both branches now raise
 `cancelled_after_confirmation` before finalising. **`MarkOrderShipped` still
-goes on both**, and that is not a compromise: a parcel that left is a fact,
-and withholding it would leave the aggregate claiming `Confirmed` for an order
-in a van.
+goes on both, and the aggregate refuses it.** The flag is set only by a
+`StockReleased` Inventory published off an `OrderCancelled` staged in the
+transaction that set the order `Cancelled` (ADR-029), so on this path the
+order is already cancelled and `MarkOrderShippedHandler` answers
+`order.not_shippable`. It is sent anyway because §5.4 gives the aggregate the
+transition and a state machine does not get to predict its answer from a
+flag — an inference one ordering premise away from leaving a shipment
+unrecorded with nothing saying so.
+
+**The justification this paragraph carried was that withholding would leave
+the aggregate claiming `Confirmed`, and it is false on the one path the flag
+names.** It survived the review round that named it, in this file and in the
+test recording the same send, because the fix was applied to the two sites
+the finding cited rather than to a grep for the sentence — which is this
+repository's own rule about resuming from the list and not from the error,
+met in the round after the one that states it.
 
 **#141 could not be decided on its own terms, and finding that out is the
 entry's most reusable half.** It asked whether Inventory should decline to

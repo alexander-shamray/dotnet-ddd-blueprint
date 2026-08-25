@@ -2594,9 +2594,15 @@ public class OrderFulfilmentSagaTests
         // Nothing anywhere recorded that the order was cancelled after
         // despatch.
         //
-        // **MarkOrderShipped still goes**, and that is not a compromise: a
-        // parcel that left is a fact, and withholding it would leave the
-        // aggregate claiming Confirmed for an order in a van.
+        // **MarkOrderShipped still goes, and the aggregate refuses it.** The
+        // flag is set only by a StockReleased Inventory published off an
+        // OrderCancelled staged in the transaction that cancelled the order
+        // (ADR-029), so MarkOrderShippedHandler answers order.not_shippable
+        // here. The assertion below is therefore that the COMMAND is sent —
+        // §5.4 gives the aggregate the transition and this machine does not
+        // predict its answer from a flag — and not that the order records a
+        // despatch. Nothing in this suite could see the difference: the
+        // harness has no aggregate behind the queue.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
