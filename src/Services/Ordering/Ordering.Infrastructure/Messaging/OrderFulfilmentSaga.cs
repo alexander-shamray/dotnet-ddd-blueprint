@@ -224,16 +224,20 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
         Event(() => StockReservationFailed, x => x.CorrelateById(m => m.Message.OrderId));
 
-        // **The one event whose missing instance is a fault rather than the
-        // default, and the reason is that it can never be this service's own
-        // echo.** Payments produces PaymentAuthorised. Ordering produces
-        // OrderCancelled, StockReleased is answered for an order rather than
-        // a reservation (ADR-024), and both of those reach a finalised
-        // instance on the ordinary path — so discarding them quietly is
-        // right. An authorisation does not: every state that can receive one
-        // has a transition for it, so an authorisation with no instance means
-        // the machine stopped waiting while Payments was still going to
-        // answer, and money moved on an order this saga cancelled.
+        // **The one event whose missing instance is ALWAYS a fault, and the
+        // reason is that it can never be this service's own echo.** Payments
+        // produces PaymentAuthorised, so no arrival of it is ever routine.
+        // StockReleased is answered for an order rather than a reservation
+        // (ADR-024) and reaches a finalised instance on the ordinary path, so
+        // it keeps the quiet default outright. OrderCancelled is the one in
+        // between since #123 — some of its arrivals are this service's echo
+        // and some are not, so it takes neither and asks Origin. **This is
+        // therefore no longer the only OnMissingInstance override**, which is
+        // what the sentence above used to claim. An authorisation admits no
+        // such question: every state that can receive one has a transition for
+        // it, so an authorisation with no instance means the machine stopped
+        // waiting while Payments was still going to answer, and money moved on
+        // an order this saga cancelled.
         //
         // **Silence was the whole severity of #124**, not the loss itself.
         // The join below keeps the instance alive for the interleaving that
@@ -860,12 +864,30 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // happened.
             //
             // **MarkOrderShipped goes either way, and the review row is what
-            // the cancellation adds (#143).** A parcel that left is a fact,
-            // not a decision — withholding it would leave the aggregate
-            // claiming Confirmed for an order in a van. What a cancellation in
-            // flight changes is that finalising here deletes the instance its
+            // the cancellation adds (#143).** What a cancellation in flight
+            // changes is that finalising here deletes the instance its
             // OrderCancelled would have correlated to, so the row is raised
             // now, while there is still something to raise it from.
+            //
+            // **On the observed branch the aggregate will REFUSE the command,
+            // and it is still sent.** CancellationObserved is set only by a
+            // StockReleased this saga did not ask for, which Inventory
+            // published off an OrderCancelled staged in the transaction that
+            // set the order Cancelled (ADR-029) — so by the time a despatch
+            // lands the order is cancelled and MarkOrderShippedHandler answers
+            // order.not_shippable, a Rule failure CommandConsumer acks and
+            // counts (§9.8). Sending anyway is §5.4's rule kept rather than a
+            // wasted message: the aggregate owns the transition and this
+            // machine does not get to predict its answer from a flag. Were
+            // that inference ever wrong — one ordering premise away — the
+            // shipment would go unrecorded with nothing saying so.
+            //
+            // **An earlier revision justified this by saying withholding would
+            // leave the aggregate claiming Confirmed**, which is false on the
+            // one path the flag names, and `order-review.md` said so in the
+            // same change. The operator asks Shipping; the tracking number
+            // dies with the refused command and the row carries no field for
+            // it.
             When(ShipmentDispatched)
                 .Unschedule(ConfirmationTimeout)
                 .Send(
@@ -901,8 +923,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         During(
             Confirmed,
             // The same pairing as AwaitingConfirmation's despatch branch, and
-            // for the same reason (#143): the shipment is reported whatever
-            // else is true, and a cancellation already seen gets its row here
+            // for the same reason (#143): the command is SENT whatever else is
+            // true — sent, not necessarily accepted, for the reason that branch
+            // gives — and a cancellation already seen gets its row here
             // rather than losing it to the Finalize. This state is where
             // cancelled_after_confirmation is normally raised — by
             // When(OrderCancelled) below — and this branch is the interleaving

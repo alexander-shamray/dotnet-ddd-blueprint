@@ -2392,11 +2392,14 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 x.OnMissingInstance(m => m.ExecuteAsync(NoInstanceForCancellation));
             });
 
-        // Faulted when no instance exists, and it is the only event here
-        // treated that way. Payments produces PaymentAuthorised, so unlike
-        // OrderCancelled above — this service's own echo — or StockReleased,
-        // which ADR-024 has answered for every release including a no-op one,
-        // it can never be a routine arrival at a finalised instance. Every
+        // Faulted when no instance exists, and it is the one event here
+        // ALWAYS treated that way — not the only override, which is what this
+        // comment said before OrderCancelled above gained one. Payments
+        // produces PaymentAuthorised, so unlike StockReleased, which ADR-024
+        // has answered for every release including a no-op one, and unlike
+        // OrderCancelled, some of whose arrivals are this service's echo and
+        // some are not, it can never be a routine arrival at a finalised
+        // instance. Every
         // state that can receive one has a transition for it, so an
         // authorisation correlating to nothing means the machine stopped
         // waiting while Payments was still going to answer, and money moved
@@ -2734,10 +2737,15 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // order only FROM OrderConfirmed, so a despatch arriving at all
             // proves the aggregate committed.
             // MarkOrderShipped goes either way and the review row is what a
-            // cancellation adds (#143). A parcel that left is a fact, not a
-            // decision; what a cancellation in flight changes is that
-            // finalising here deletes the instance its OrderCancelled would
-            // have correlated to.
+            // cancellation adds (#143): what a cancellation in flight changes
+            // is that finalising here deletes the instance its OrderCancelled
+            // would have correlated to.
+            //
+            // On the observed branch the aggregate REFUSES the command — the
+            // flag implies the order is already Cancelled (ADR-029), so
+            // MarkOrderShippedHandler answers order.not_shippable — and it is
+            // sent regardless, because §5.4 gives the aggregate the transition
+            // and this machine does not predict its answer from a flag.
             When(ShipmentDispatched)
                 .Unschedule(ConfirmationTimeout)
                 .Send(
