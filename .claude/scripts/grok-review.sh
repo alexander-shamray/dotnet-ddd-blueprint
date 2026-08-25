@@ -150,6 +150,14 @@ branch=$(git branch --show-current)
 # anything a caller or a finding supplied.
 repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) ||
   { echo "cannot resolve this checkout's repository" >&2; exit 2; }
+# **Blank counts as missing, and `||` does not see it.** `gh` printing an empty
+# string exits 0, so the guard above passes and `$repo` is "" — and the
+# comparison below then matches every row whose head repository is absent,
+# which `// ""` renders as "" too. A deleted fork reports exactly that. So the
+# filter would admit a stranger's pull request precisely when it could not
+# establish whose it was, which is the fail-open direction.
+[ -n "$repo" ] ||
+  { echo "this checkout's repository resolved to nothing" >&2; exit 2; }
 # Tab-separated and filtered in awk rather than inside --jq, because gh's --jq
 # takes no --arg: embedding "$repo" in the jq program would put a shell value
 # into a program text, which is the shape this directory exists to avoid.
