@@ -1559,6 +1559,67 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
                 self.assertIn(f"bash .claude/scripts/{path.name}:*", frontmatter)
 
 
+class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
+    """#52 — grok-review.sh printed the whole reviewer transcript to stdout.
+
+    /review-grok reads what lands in its context holding `Edit` and `Write`,
+    and /ship runs that triage unattended and commits what it changes, so
+    every byte of a reviewer-authored file arriving as prose was a second,
+    unguarded crossing. The findings still cross by one route — suggestions.md,
+    under the symlink and regular-file guards — and that is the design.
+
+    **This case exists because the change is invisible to every other test.**
+    Nothing reads that stdout, which is what made the removal safe and also
+    what makes its return silent: a future `cat "$result"` would reopen #52
+    with CI green. Structural rather than executed, because reaching the line
+    means standing up a container, an API key and a clone — so what is pinned
+    is that the script does not contain the crossing, which is the property.
+    """
+
+    def code_lines(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        return [
+            line for line in text.splitlines()
+            if not line.lstrip().startswith("#") and line.strip()
+        ]
+
+    def test_the_result_file_is_never_written_to_a_stream(self):
+        # `cat "$result"` was the original. Anything that pours the file into
+        # stdout or stderr is the same defect wearing a different command, so
+        # the readers are enumerated rather than the one spelling banned —
+        # the correction this suite already had to make once, for the gh
+        # grants.
+        pourers = ("cat", "tee", "head", "tail", "less", "more", "printf", "echo")
+        for line in self.code_lines():
+            if '"$result"' not in line:
+                continue
+            first = line.strip().split()[0].lstrip("(){ ")
+            with self.subTest(line=line.strip()):
+                self.assertNotIn(first, pourers,
+                                 "the reviewer's transcript must not reach a stream")
+
+    def test_the_verdict_is_still_parsed_out_of_it(self):
+        # The positive control. Every assertion above would pass against a
+        # script that had stopped reading `$result` altogether — which would
+        # take the stop-reason check with it, and that check is what makes an
+        # absent suggestions.md a clean verdict rather than a silent failure.
+        code = self.code_lines()
+        self.assertTrue(any('.stopReason' in line for line in code))
+        self.assertTrue(any('stop_ok' in line for line in code))
+
+    def test_a_status_line_replaces_it_on_stderr(self):
+        # Not decoration: a helper that goes quiet on success is one nobody can
+        # tell from a helper that did not run, which is the same argument the
+        # feed filters' zero-count line rests on.
+        code = self.code_lines()
+        status = [
+            line for line in code
+            if "grok finished its turn" in line
+        ]
+        self.assertEqual(1, len(status))
+        self.assertIn(">&2", status[0])
+
+
 class HarnessControlSurfaceIsDenied(unittest.TestCase):
     """#33 — the deny list guarded the helpers and not the files that grant them.
 

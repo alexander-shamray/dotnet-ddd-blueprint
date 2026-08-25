@@ -52,13 +52,18 @@ jobs:
   # check it claims, and whether the label helper leaves a free parameter a
   # finding could steer. Five of those six shipped wrong; the sixth is a grant
   # that was closed by moving it into a helper, and the suite is what keeps it
-  # closed.
+  # closed. Since #56 and #33 it also covers what a Copilot feed helper admits, what it reports about what it dropped, and that no command can reach those feeds outside the fixed helpers; and which paths the harness denies itself.
   #
-  # Six, and the count is load-bearing rather than decorative: `CLAUDE.md` and
-  # `docs/testing.md` enumerate the same six, and a list of what a gate is
-  # looking at that quietly drops the newest surface is the failure this
-  # repository names as its most-repeated — which is exactly how this list came
-  # to say four, then five, before a reviewer counted it against the suite.
+  # **The count that used to open this paragraph is gone, and its removal is
+  # the fourth correction rather than the first.** It said four, then five,
+  # then six — each time because a reviewer counted it against the suite — and
+  # then six again while this pull request added two more subjects. A number
+  # restated in three files goes stale in all three at once; what a reviewer
+  # can actually check is whether the ENUMERATION here matches the one in
+  # `CLAUDE.md` and `docs/testing.md`, and that check does not need a numeral
+  # in front of it. This repository has already dropped a total for this exact
+  # reason three times: its callout counts, its residual-grant count, and its
+  # own line count.
   #
   # Beside the licence gate rather than inside `build`, on its argument: stdlib
   # Python over text and a few `bash` fragments, so it needs no restore, no

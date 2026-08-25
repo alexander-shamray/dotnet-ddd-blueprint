@@ -353,7 +353,9 @@ same argument as never calling a branch clean because asking failed.
    git fetch origin main                      # or the next read is stale
    git status --short                         # empty: nothing uncommitted
    git log origin/main..HEAD                  # empty: nothing main lacks
-   bash .claude/scripts/pr-for-branch.sh <branch>   # a MERGED row: it landed
+   bash .claude/scripts/pr-for-branch.sh <branch>   # a row with state MERGED:
+                                                   # it landed. Any other row
+                                                   # is a PR, not a merge.
    ```
 
    **Every read exits 0 whatever it finds, and that is deliberate.**
@@ -361,8 +363,17 @@ same argument as never calling a branch clean because asking failed.
    *forked but never PR'd* is not exotic — it is what step 1 produces on every
    run. Classifying the ordinary case through a failed command, in a chain
    whose first stop rule is that a non-zero exit means the step did not run,
-   is a contradiction rather than a nicety. `pr-for-branch.sh`, filtered to MERGED,
-   answers with a row or with `[]`, measured both ways on this repository.
+   is a contradiction rather than a nicety. `pr-for-branch.sh` answers with a
+   row or with `[]`, measured both ways on this repository.
+
+   **It is not filtered to merged, and the read above must do that itself.**
+   The call it replaced was `gh pr list --state merged --head <branch>`, where
+   emptiness *was* the answer; the helper fixes `--state all`, because the
+   resume table one section up needs the other states from the same call. So
+   **look for a row whose `state` is `MERGED`** — a non-empty result means a
+   pull request exists, which is true of an OPEN one too, and treating that as
+   "it landed" would classify an unmerged branch as finished and tear the
+   workspace down.
    `pr-state.sh` keeps its job one section up, in the resume
    table, where the question is *which* state and there is a PR to ask about.
 
