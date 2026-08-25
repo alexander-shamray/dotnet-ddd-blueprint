@@ -98,12 +98,12 @@ groups:
       # deliberately does not finalise. The rest are raised on the way out.
       # #143 adds a third, and it is the one this comment could not have
       # covered: payment_authorised_during_compensation is now also raised
-      # from AwaitingPayment, where no compensation has started at all --
+      # from AwaitingPayment, where no compensation has started at all —
       # the instance observed an early StockReleased, withheld its
       # ConfirmOrder and is waiting for its own OrderCancelled.
       #
       # The instance is nonetheless usually gone by the hour this measures,
-      # and the bound is per WAIT rather than per state -- which is the
+      # and the bound is per WAIT rather than per state — which is the
       # correction #143 forces, since the previous wording justified it by
       # "every wait that can hold Compensating open" and one of these no
       # longer runs there. The ten-minute release wait, a payment verdict

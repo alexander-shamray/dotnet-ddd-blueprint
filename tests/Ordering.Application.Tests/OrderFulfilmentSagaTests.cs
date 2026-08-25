@@ -2493,6 +2493,37 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public async Task A_cancellation_carrying_an_unknown_origin_faults_rather_than_being_discarded()
+    {
+        // **The test that tells an allow-list from a deny-list, and without it
+        // the two are indistinguishable here.** The other three cases cover
+        // null, workflow and user — all of which a branch reading "fault only
+        // when Origin is user" answers identically. That branch would then
+        // discard every spelling nobody thought of: a vocabulary member added
+        // later, a producer on a different version, a truncated field. This
+        // repository has a lesson about exactly that shape, and the allow-list
+        // it prescribes is only worth having if something refuses the deny-list
+        // that passes the same suite. Copilot found the gap.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orphan = Guid.CreateVersion7();
+
+            await Publish(
+                harness,
+                SagaContracts.OrderCancelled(
+                    orphan,
+                    Customer,
+                    CancelReasons.CustomerRequest,
+                    origin: "operations_console"));
+
+            (await Consumed<OrderCancelled>(harness, m => m.OrderId == orphan)).ShouldBeTrue();
+
+            ConsumeFaults<OrderCancelled>(harness).ShouldContain(e => e != null);
+        }
+    }
+
+    [Fact]
     public async Task A_cancellation_published_before_the_origin_field_existed_is_discarded()
     {
         // **§15.5's expand phase, pinned so it cannot be tidied away as an
