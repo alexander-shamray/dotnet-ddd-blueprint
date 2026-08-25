@@ -111,13 +111,44 @@ subject. A field the receiver can check is a claim; a field it cannot check is
 an assertion. That sentence is the reusable half of this PR, and it decides the
 next money-bearing contract without re-running the argument.
 
+**The reviewer's best finding was a rule the branch broke without noticing:
+§9.2 requires a version bump to remove a field.** `AuthorisePayment` lost
+`CustomerId` from `Payments.V1` in place, and §9.2's standing remedy is a `V2`
+with both published for a deprecation window. The branch had an argument for
+the exception — Payments does not exist, so `V1` has no consumer — and had not
+written it anywhere, which is exactly the one-rule failure: a reader greps §9.2,
+finds "removing a field requires a new version", and finds this change doing
+otherwise with nothing to say why.
+
+**Writing it down turned up the sharper half, which the original argument had
+missed.** The exception is not merely that the version bump is *unnecessary*
+here; for this class of change it is *wrong*. A `V2` alongside `V1` keeps the
+version carrying the subject published and consumable for the whole window —
+so the standard remedy would re-arm the defect the change exists to remove.
+"Unnecessary" and "counterproductive" are different claims, and only the second
+justifies putting an exception into a chapter rather than a footnote in a PR.
+
+So §9.2 gained the exception as a **rule** with two required conditions — no
+consumer in `Platform.slnx`, and an ADR recording it so "there was no consumer"
+is checkable later — plus the note that it expires the moment a consumer
+exists. That is the same window §9.1 already describes from the other side:
+`ShippingAddressV1` was four fields short for as long as nothing populated it,
+and the PR that becomes a contract's first producer is the last one that can
+fix its shape for free.
+
 **The saga instance lost its `CustomerId` too, and that is the structural half
 rather than tidying.** The field had exactly one reader — the send this PR
 removed. Left in place, all it could still do is offer itself to the next
 transition that wants a customer, which is how the subject finds its way back
-onto a message a release later. Removing it makes every command the machine
-sends name an order and nothing else. Ordering is not short of the value:
-`ordering.Orders` owns it, bound at the endpoint.
+onto a message a release later. Removing it means no command the machine sends
+carries a subject. **Not "every command names an order and nothing else"**,
+which is how this was first written and is false of three of them —
+`ReserveStock` carries its lines, `AuthorisePayment` its amount and currency,
+`CancelOrder` its reason. Grok caught it, and the correction is worth keeping
+because the wrong version reads as the stronger claim: what these commands have
+in common is an absence, not a shape, and a rule stated as a shape invites the
+next reader to defend a uniformity that was never true. Ordering is not short
+of the value either way: `ordering.Orders` owns it, bound at the endpoint.
 
 **Removing the property is one release; removing the column is two, and the
 first draft got that wrong.** `dotnet ef migrations add` scaffolded a

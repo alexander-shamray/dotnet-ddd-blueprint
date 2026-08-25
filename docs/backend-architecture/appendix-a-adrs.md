@@ -1210,10 +1210,27 @@ here an unverifiable assertion removed.
 
 **Consequences.**
 
+**The field is removed from `V1` in place, and [§9.2](09-messaging.md) is what
+that has to be reconciled against.** Removing a field is a breaking change and
+the standing rule is a new version with both published for a deprecation
+window. The exception taken here is the one §9.2 now states: `Payments.V1` has
+no consumer — Payments is unbuilt, nothing in `Platform.slnx` deserialises
+`AuthorisePayment` — so there is nobody for a window to serve.
+
+**And here the standard remedy would have been actively wrong, which is worth
+separating from "unnecessary".** A `V2` alongside `V1` keeps the version
+carrying the subject published and consumable for the length of the window.
+The whole point of this decision is that the subject must not be on the wire;
+dual-publish would re-arm the defect under a rule written to protect consumers
+that do not exist. The version bump is not a cost this ADR declined to pay — it
+is a step that would have undone the change.
+
 **Payments cannot honour a single command until it has the projection.** The
 subscription is a precondition, not an enrichment, and the service's first PR
 owes the record before it owes a charge. §3.2's Consumes cell is where that is
-now written down.
+now written down. It is also the moment the exception above expires: from that
+PR on, `AuthorisePayment` is a live contract and §9.2 binds it with no
+exception.
 
 **A command can arrive before the record it resolves against.** §9.4 orders
 nothing between two deliveries, so an `AuthorisePayment` can overtake the

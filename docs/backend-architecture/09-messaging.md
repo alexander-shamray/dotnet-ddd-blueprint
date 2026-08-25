@@ -199,6 +199,31 @@ There is no shortcut here. A "just this once" breaking change to a live contract
 means a coordinated deploy, and coordinated deploys are the thing this
 architecture exists to avoid.
 
+> **A contract with no consumer is not live, and that is the one exception —
+> stated here so it is a rule rather than an argument made at each site.**
+> The deprecation window above exists to let consumers migrate independently.
+> Where a version has none — no service deserialises it, and the service that
+> will has not been built — there is nobody to migrate, and a V2 buys a window
+> for an audience of nobody. The contract may then be changed in place.
+>
+> **Two conditions, both required.** The version must have no consumer *in the
+> solution*, which is a fact about `Platform.slnx` rather than a judgement; and
+> the change must be recorded in an ADR, so that "there was no consumer" is
+> something a later reader can check rather than take on trust. The moment a
+> consumer exists the rule above binds with no exception, and the window for
+> the cheap edit has closed — which is the same observation §9.1 makes about
+> `ShippingAddressV1` from the other direction: the PR that becomes a
+> contract's first producer is the last one that can fix its shape for free.
+>
+> **For one class of change the deprecation window is not merely useless but
+> harmful**, and it is worth naming because it inverts the rule's intent. When
+> the point of the change is that a field *must not be on the wire* —
+> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> removing the subject from `AuthorisePayment` is the worked case — emitting
+> V1 alongside V2 keeps the offending shape published, and consumable, for the
+> length of the window. The standard remedy would re-arm the defect it was
+> asked to fix.
+
 ## 9.3 Domain event → integration event: the allow-list mapper
 
 [§5.5](05-tactical-ddd.md) states the principle — never publish a domain event to the bus. This is the
@@ -3402,9 +3427,10 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     // carried one for exactly one reader — the AuthorisePayment that named the
     // subject Payments would charge — and with that field gone from the
     // contract, all a copy here could still do is offer itself to the next
-    // transition that wants a customer. Every command this machine sends names
-    // an order and nothing else. ordering.Orders still owns the value, bound
-    // from the principal at the endpoint (§11.4).
+    // transition that wants a customer. No command this machine sends carries
+    // a subject — not "names an order and nothing else", which is false of
+    // ReserveStock, AuthorisePayment and CancelOrder alike. ordering.Orders
+    // still owns the value, bound from the principal at the endpoint (§11.4).
     public decimal Total { get; set; }
     public string Currency { get; set; } = null!;
     public DateTimeOffset StartedAt { get; set; }

@@ -35,8 +35,12 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     // subject whose instrument Payments would charge. That field is gone from
     // the contract, so the only thing a copy on the instance could still do is
     // offer itself to the next transition that wants a customer — which is how
-    // the subject would find its way back onto a message. Every command this
-    // machine sends now names an order and nothing else.
+    // the subject would find its way back onto a message. No command this
+    // machine sends now carries a subject. Not "names an order and nothing
+    // else", which is what this said and is false of three of them:
+    // ReserveStock carries its lines, AuthorisePayment its amount and
+    // currency, CancelOrder its reason. What they have in common is the
+    // absence ADR-028 is about, not a shape.
     //
     // Ordering is not short of the value: ordering.Orders owns it, bound from
     // the principal at the endpoint (§11.4's subject rule). What the saga must
