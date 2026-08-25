@@ -96,10 +96,20 @@ groups:
       # #126 — cancelled_after_confirmation, whose Compensating branch
       # escalates an OrderConfirmed arriving after the state was entered and
       # deliberately does not finalise. The rest are raised on the way out.
+      # #143 adds a third, and it is the one this comment could not have
+      # covered: payment_authorised_during_compensation is now also raised
+      # from AwaitingPayment, where no compensation has started at all --
+      # the instance observed an early StockReleased, withheld its
+      # ConfirmOrder and is waiting for its own OrderCancelled.
+      #
       # The instance is nonetheless usually gone by the hour this measures,
-      # because every wait that can hold Compensating open ends well inside
-      # one: the ten-minute release wait, and since #124 a payment verdict
-      # bounded at thirty minutes from AuthorisePayment.
+      # and the bound is per WAIT rather than per state -- which is the
+      # correction #143 forces, since the previous wording justified it by
+      # "every wait that can hold Compensating open" and one of these no
+      # longer runs there. The ten-minute release wait, a payment verdict
+      # bounded at thirty minutes from AuthorisePayment (#124), and the
+      # fifteen-minute PaymentTimeout left armed behind the AwaitingPayment
+      # raising: each ends well inside the hour.
       #
       # "Every other reason is raised on the way out" was the shape this
       # comment had after its first correction, and #126 falsified it the

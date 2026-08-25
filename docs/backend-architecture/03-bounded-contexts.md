@@ -200,8 +200,8 @@ two guarantees, both recorded in
 one message over.** `OrderCancelled` sits in Inventory's Consumes column and
 `StockReleased` in its Publishes column, and every reader has been joining the
 two by hand. The join is now written down, because [§9.6](09-messaging.md)
-stands four `Ignore(StockReleased)` branches on it and one of them is the only
-thing between a cancelled confirmed order and a fault:
+stands every absorption of an early `StockReleased` on it, and one of those
+absorptions is the only thing between a cancelled confirmed order and a fault:
 
 - **Consuming `OrderCancelled` releases the stock and publishes
   `StockReleased`**, on the same terms as a `ReleaseStock` — the same
@@ -216,6 +216,27 @@ thing between a cancelled confirmed order and a fault:
 > another. Where such a derivation becomes load-bearing — and a pager path is
 > as load-bearing as it gets — it belongs in a sentence rather than in the
 > reader's head.
+
+> **Decision — Inventory keeps `OrderCancelled`, and the second route is held
+> deliberately rather than tolerated.** See
+> [ADR-029](appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word).
+> Routing every release through `ReleaseStock` would tidy this cell and pay for
+> it with a cancellation that releases nothing whenever no saga instance
+> survives to send the command — §9.6 finalises down several branches before
+> any despatch, and the reservation would then be held until a person noticed.
+> The direct route is also the only evidence a cancellation gives the saga: an
+> early `StockReleased` proves one reached Inventory, so the states that absorb
+> it **record** that on the instance rather than discarding it, and guard their
+> forward transitions on what they recorded.
+>
+> **The absence beside it is deliberate too.** Inventory has no
+> `OrderConfirmed` subscription, so it cannot decline a release for an order it
+> has seen confirmed, and a reservation already being picked is released like
+> any other — §9.6 raises `cancelled_after_confirmation` and
+> [`order-review.md`](../runbooks/order-review.md) has an operator reinstate it
+> by hand. Closing that properly means adding a name to this row, which is
+> Inventory's decision to take against a real picking process rather than this
+> table's to anticipate.
 
 > **Both guarantees exist because the saga's only alternative to an answer is a
 > pager.** [§9.6](09-messaging.md)'s `Compensating` settles its stock half

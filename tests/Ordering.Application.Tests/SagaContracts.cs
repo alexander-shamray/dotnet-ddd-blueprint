@@ -10,8 +10,9 @@ namespace Ordering.Application.Tests;
 /// </summary>
 /// <remarks>
 /// <b>A builder rather than object initialisers at each call site, and §12.5
-/// says why.</b> Every member of every V1 contract is <c>required</c> — the
-/// §9.1 envelope included — so <c>new StockReserved { OrderId = orderId }</c>
+/// says why.</b> Every member of every V1 contract is <c>required</c> unless
+/// §12.6's mid-rollout list names it — the §9.1 envelope included, and none
+/// of these — so <c>new StockReserved { OrderId = orderId }</c>
 /// does not compile and there is no partial construction to elide. Written out
 /// per test, the three envelope members would be most of every saga test.
 /// <para>
@@ -106,16 +107,35 @@ internal static class SagaContracts
     /// the failure PR-26 named — so this is stated rather than left to be
     /// inferred from the parameter.
     /// </para>
+    /// <para>
+    /// <b><c>origin</c> defaults to <see cref="CancelOrigins.User"/>, and the
+    /// direction of that default is the decision (#123).</b> It is the only
+    /// origin the saga's missing-instance branch faults on, so a test that
+    /// forgets to state one gets the loud behaviour rather than the silent
+    /// discard — the reverse default would let a test pass by being ignored.
+    /// It is also the commoner case in this file: most of these publishes are
+    /// a customer cancelling mid-workflow, where the instance exists and the
+    /// origin is not read at all.
+    /// </para>
+    /// <para>
+    /// Pass <see cref="CancelOrigins.Workflow"/> for the saga's own echo, and
+    /// <c>null</c> for a publisher predating the field.
+    /// </para>
     /// </remarks>
-    internal static OrderCancelled OrderCancelled(Guid orderId, Guid customerId, string reason) => new()
-    {
-        MessageId = Guid.CreateVersion7(),
-        CorrelationId = orderId,
-        OccurredAt = Occurred,
-        OrderId = orderId,
-        CustomerId = customerId,
-        Reason = reason
-    };
+    internal static OrderCancelled OrderCancelled(
+        Guid orderId,
+        Guid customerId,
+        string reason,
+        string? origin = CancelOrigins.User) => new()
+        {
+            MessageId = Guid.CreateVersion7(),
+            CorrelationId = orderId,
+            OccurredAt = Occurred,
+            OrderId = orderId,
+            CustomerId = customerId,
+            Reason = reason,
+            Origin = origin
+        };
 
     /// <summary>
     /// The acknowledgement §9.6's <c>AwaitingConfirmation</c> waits for
@@ -124,7 +144,7 @@ internal static class SagaContracts
     /// </summary>
     /// <remarks>
     /// <b>The saga reads only <c>OrderId</c> off it, and the rest is built
-    /// anyway.</b> Every member of a V1 contract is <c>required</c>, so there
+    /// anyway.</b> Every member of THIS contract is <c>required</c>, so there
     /// is no partial construction to elide — but the more useful reason is
     /// that a double which fills only the fields today's consumer happens to
     /// read teaches the next reader that the others are optional. §3.2 gives

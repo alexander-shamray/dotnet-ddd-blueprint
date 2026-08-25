@@ -144,6 +144,21 @@ Contracts live in a versioned namespace: `Common.Contracts.Ordering.V1`.
 **Additive changes** — new optional fields — do not require a version bump.
 Consumers deserialising an unknown field ignore it.
 
+**"Optional" is doing more work in that sentence than it looks, because
+[§12.6](12-test-strategy.md)'s gate forbids an optional member — with one
+exemption, which is the rest of this paragraph.** Every member of a live
+contract here is `required` unless that gate's mid-rollout list names it, and
+the rule is enforced rather than observed. A member added as `required` is
+therefore **not** an additive change
+whatever this section calls it: `System.Text.Json` refuses a payload missing
+one, so the new build faults every message the old build staged and has not yet
+published — measured, not reasoned about. So an added member ships **optional
+first**, which is §15.5's expand phase; it is listed in §12.6's suite as
+halfway through a rollout, and the release that makes it `required` is the
+contract phase that removes the listing. Two releases, exactly as the callout
+below asks of a vocabulary member, and for the same reason: the consumer has to
+be able to cope with the shape it will meet.
+
 **That tolerance is about fields and does not extend to anything else that can
 be added.** A consumer ignores a field it does not know because the
 deserialiser is built to; it does not ignore a *message type* it has no
@@ -1981,23 +1996,25 @@ persisted so the workflow survives a restart.
 stateDiagram-v2
     [*] --> AwaitingStock : OrderPlaced
 
-    AwaitingStock --> AwaitingPayment : StockReserved
+    AwaitingStock --> AwaitingPayment : StockReserved (no cancellation observed)
     AwaitingStock --> [*] : StockReservationFailed → CancelOrder
     AwaitingStock --> [*] : StockTimeout 5m → CancelOrder
     AwaitingStock --> Compensating : OrderCancelled → ReleaseStock
-    AwaitingStock --> AwaitingStock : StockReleased → absorbed
+    AwaitingStock --> AwaitingStock : StockReleased → cancellation recorded
+    AwaitingStock --> AwaitingStock : StockReserved (cancellation observed) → authorisation withheld
 
-    AwaitingPayment --> AwaitingConfirmation : PaymentAuthorised → ConfirmOrder
+    AwaitingPayment --> AwaitingConfirmation : PaymentAuthorised (no cancellation observed) → ConfirmOrder
     AwaitingPayment --> Compensating : PaymentDeclined → ReleaseStock
     AwaitingPayment --> Compensating : PaymentTimeout 15m → ReleaseStock
     AwaitingPayment --> Compensating : OrderCancelled → ReleaseStock
-    AwaitingPayment --> AwaitingPayment : StockReleased → absorbed
+    AwaitingPayment --> AwaitingPayment : StockReleased → cancellation recorded
+    AwaitingPayment --> AwaitingPayment : PaymentAuthorised (cancellation observed) → FlagOrderForReview payment_authorised_during_compensation
 
     AwaitingConfirmation --> Confirmed : OrderConfirmed
     AwaitingConfirmation --> Compensating : OrderCancelled → ReleaseStock
     AwaitingConfirmation --> [*] : ConfirmationTimeout 10m → FlagOrderForReview not_confirmed
-    AwaitingConfirmation --> [*] : ShipmentDispatched → MarkOrderShipped
-    AwaitingConfirmation --> AwaitingConfirmation : StockReleased → absorbed
+    AwaitingConfirmation --> [*] : ShipmentDispatched → MarkOrderShipped (+ FlagOrderForReview cancelled_after_confirmation if a cancellation was observed)
+    AwaitingConfirmation --> AwaitingConfirmation : StockReleased → cancellation recorded
 
     Compensating --> Compensating : StockReleased → CancelOrder (stock half settled)
     Compensating --> Compensating : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview stock_not_released (stock half settled)
@@ -2008,8 +2025,9 @@ stateDiagram-v2
     Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed → absorbed
     Compensating --> [*] : both halves settled
 
-    Confirmed --> Confirmed : OrderConfirmed, StockReleased → absorbed
-    Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped
+    Confirmed --> Confirmed : OrderConfirmed → absorbed
+    Confirmed --> Confirmed : StockReleased → cancellation recorded
+    Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped (+ FlagOrderForReview cancelled_after_confirmation if a cancellation was observed)
     Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
     Confirmed --> [*] : OrderCancelled → FlagOrderForReview cancelled_after_confirmation
 ```
@@ -2226,6 +2244,18 @@ public static class CancelReasons
     public const string CustomerRequest = "customer_request";
 }
 
+// The wire vocabulary for OrderCancelled.Origin — who asked, which the
+// reasons above deliberately do not say. Two members and no third, because
+// the question is a partition rather than a list: the saga asks one thing of
+// this field, so every origin that is not Workflow answers the same way, and
+// a member per ingress would invite a consumer to switch on it and forget
+// one.
+public static class CancelOrigins
+{
+    public const string User = "user";           // §11.4's endpoint
+    public const string Workflow = "workflow";   // §9.6's saga compensating
+}
+
 // Likewise a string: PaymentReference is Ordering's value object, and the
 // reference itself originates in Payments as an opaque provider token.
 public sealed record ConfirmOrder(Guid OrderId, string PaymentReference);
@@ -2297,6 +2327,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     // two origins: the saga's own CancelOrder, always paired with Finalize, and
     // §11.4's customer endpoint, which cancels the AGGREGATE and ends nothing.
     // Without this the second was invisible to the machine.
+    //
+    // The event now says WHICH — OrderCancelled.Origin, a CancelOrigins code
+    // (#123) — because the machine has to tell them apart when no instance
+    // correlates, and Reason cannot: §11.4 parses all five reason codes, so a
+    // caller may send any of them and the saga forwards whatever it recorded.
     public Event<OrderCancelled> OrderCancelled { get; private set; } = null!;
 
     // The acknowledgement AwaitingConfirmation waits for, and the reason that
@@ -2337,16 +2372,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         Event(() => StockReserved, x => x.CorrelateById(m => m.Message.OrderId));
         // ... remaining correlations
 
-        // Discarded when no instance exists, and this is the routine case
-        // rather than the exotic one: every cancellation the saga causes ends
-        // in Finalize, so the OrderCancelled the aggregate then publishes
-        // arrives at a queue whose instance has just been deleted.
+        // Discarded when no instance exists ONLY for the arrivals this service
+        // can account for, and faulted otherwise (#123). The routine case is
+        // the echo: every cancellation the saga causes ends in Finalize, so the
+        // OrderCancelled the aggregate then publishes arrives at a queue whose
+        // instance has just been deleted. What used to be discarded beside it
+        // was a customer's cancellation overtaking its own OrderPlaced, and
+        // that one has to be loud.
+        //
+        // An allow-list of two, because the other shape passes every spelling
+        // nobody thought of: CancelOrigins.Workflow is the echo, and a null
+        // Origin is an instance publishing from before the field existed —
+        // §15.5's expand phase, with a contract phase owed.
         Event(
             () => OrderCancelled,
             x =>
             {
                 x.CorrelateById(m => m.Message.OrderId);
-                x.OnMissingInstance(m => m.Discard());
+                x.OnMissingInstance(m => m.ExecuteAsync(NoInstanceForCancellation));
             });
 
         // Faulted when no instance exists, and it is the only event here
@@ -2451,27 +2494,39 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
         During(
             AwaitingStock,
+            // The whole forward step is conditional, and the condition is the
+            // money (#143). A StockReleased absorbed below proves a
+            // cancellation reached Inventory, so a reservation reported after
+            // it has since been released. Withholding is the whole of the
+            // observed branch — no send, no transition, and deliberately no
+            // Unschedule: this state's own OrderCancelled branch compensates
+            // properly, so the right thing is to wait where it can still be
+            // reached, and StockTimeout is what bounds that wait if the
+            // cancellation never arrives.
             When(StockReserved)
-                .Unschedule(StockTimeout)
-                // Recorded before the command is sent. From here until a
-                // verdict lands Payments owes this saga an answer, and
-                // Compensating refuses to finalise while it does — so the
-                // obligation commits with this transition rather than being
-                // inferred later from a state name (#124).
-                .Then(ctx => ctx.Saga.PaymentVerdictOutstanding = true)
-                // Currency travels with the amount — a bare decimal is a
-                // charge waiting to be made in the wrong denomination. No
-                // subject travels with either: Payments resolves the payer
-                // from its own record of the order (ADR-028, §3.2).
-                .Send(
-                    PaymentsQueue,
-                    ctx => new AuthorisePayment(
-                        ctx.Saga.OrderId,
-                        ctx.Saga.Total,
-                        ctx.Saga.Currency))
-                // Arm the next wait in the same activity that begins it.
-                .Schedule(PaymentTimeout, ctx => new PaymentAuthorisationExpired(ctx.Saga.OrderId))
-                .TransitionTo(AwaitingPayment),
+                .If(
+                    ctx => !ctx.Saga.CancellationObserved,
+                    proceed => proceed
+                        .Unschedule(StockTimeout)
+                        // Recorded before the command is sent. From here until a
+                        // verdict lands Payments owes this saga an answer, and
+                        // Compensating refuses to finalise while it does — so the
+                        // obligation commits with this transition rather than being
+                        // inferred later from a state name (#124).
+                        .Then(ctx => ctx.Saga.PaymentVerdictOutstanding = true)
+                        // Currency travels with the amount — a bare decimal is a
+                        // charge waiting to be made in the wrong denomination. No
+                        // subject travels with either: Payments resolves the payer
+                        // from its own record of the order (ADR-028, §3.2).
+                        .Send(
+                            PaymentsQueue,
+                            ctx => new AuthorisePayment(
+                                ctx.Saga.OrderId,
+                                ctx.Saga.Total,
+                                ctx.Saga.Currency))
+                        // Arm the next wait in the same activity that begins it.
+                        .Schedule(PaymentTimeout, ctx => new PaymentAuthorisationExpired(ctx.Saga.OrderId))
+                        .TransitionTo(AwaitingPayment)),
 
             When(StockReservationFailed)
                 .Unschedule(StockTimeout)
@@ -2507,12 +2562,19 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
             // Inventory's release, derived from the cancellation this state
             // has not consumed yet: §3.2 has Inventory consuming
-            // OrderCancelled directly, so one publication starts two races to
-            // this queue and the release can win. Absorbed rather than left to
-            // fault — and sound only because ADR-024 has Inventory answer the
-            // ReleaseStock above whatever it already did with the event, so
-            // Compensating's exit does not depend on the copy discarded here.
-            Ignore(StockReleased));
+            // OrderCancelled directly (ADR-029), so one publication starts two
+            // races to this queue and the release can win. Absorbed rather
+            // than left to fault — and sound only because ADR-024 has
+            // Inventory answer the ReleaseStock above whatever it already did
+            // with the event, so Compensating's exit does not depend on this
+            // copy.
+            //
+            // RECORDED rather than discarded (#143). An Ignore absorbed the
+            // fault and threw the evidence away, and this arrival is the only
+            // evidence a cancellation gives the saga before its own copy
+            // lands. The guard above is what it is for.
+            When(StockReleased)
+                .Then(ctx => ctx.Saga.CancellationObserved = true));
 
         During(
             AwaitingPayment,
@@ -2524,16 +2586,40 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             //
             // Not Finalize either way: the order is not finished at payment.
             When(PaymentAuthorised)
-                .Unschedule(PaymentTimeout)
-                // The verdict Payments owed. Cleared here and on the decline
+                // The verdict Payments owed, cleared before the branch because
+                // it is answered on both. Cleared here and on the decline
                 // below — the two arrivals that answer the question, as
                 // against the timeout that merely stops asking it.
                 .Then(ctx => ctx.Saga.PaymentVerdictOutstanding = false)
-                .Send(
-                    OrderingQueue,
-                    ctx => new ConfirmOrder(ctx.Saga.OrderId, ctx.Message.Reference))
-                .Schedule(ConfirmationTimeout, ctx => new ConfirmationExpired(ctx.Saga.OrderId))
-                .TransitionTo(AwaitingConfirmation),
+                // A cancellation observed here changes what an authorisation
+                // MEANS (#143). Confirming would turn a verdict that arrived
+                // after the customer cancelled into a confirmed order, and
+                // would consume the one arrival that raises
+                // payment_authorised_during_compensation — the success branch
+                // and the escalation read the same event.
+                //
+                // Escalate, and stay. §3.2 gives Ordering no refund command,
+                // so a row for a person is the whole of what this machine can
+                // do about money that has moved. PaymentTimeout is deliberately
+                // left armed on that branch: ADR-021's scheduler cannot cancel,
+                // so what Unschedule really clears is the token that makes the
+                // expiry handled, and leaving it set is what bounds an instance
+                // whose OrderCancelled never arrives.
+                .IfElse(
+                    ctx => ctx.Saga.CancellationObserved,
+                    observed => observed
+                        .Send(
+                            OrderingQueue,
+                            ctx => new FlagOrderForReview(
+                                ctx.Saga.OrderId,
+                                ReviewReasons.PaymentAuthorisedDuringCompensation)),
+                    proceed => proceed
+                        .Unschedule(PaymentTimeout)
+                        .Send(
+                            OrderingQueue,
+                            ctx => new ConfirmOrder(ctx.Saga.OrderId, ctx.Message.Reference))
+                        .Schedule(ConfirmationTimeout, ctx => new ConfirmationExpired(ctx.Saga.OrderId))
+                        .TransitionTo(AwaitingConfirmation)),
 
             When(PaymentDeclined)
                 .Unschedule(PaymentTimeout)
@@ -2595,8 +2681,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
                 .TransitionTo(Compensating),
 
             // The same early release, second door. This state's own
-            // ReleaseStock is still what Compensating waits on.
-            Ignore(StockReleased));
+            // ReleaseStock is still what Compensating waits on. Recorded
+            // rather than discarded (#143): the forward event that can win
+            // the next lock here is PaymentAuthorised, and the branch above
+            // asks.
+            When(StockReleased)
+                .Then(ctx => ctx.Saga.CancellationObserved = true));
 
         // ConfirmOrder is in flight and nothing downstream knows anything yet:
         // the aggregate is still AwaitingPayment, no OrderConfirmed has been
@@ -2643,23 +2733,50 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // MarkOrderShipped — and safe, because Shipping learns of the
             // order only FROM OrderConfirmed, so a despatch arriving at all
             // proves the aggregate committed.
+            // MarkOrderShipped goes either way and the review row is what a
+            // cancellation adds (#143). A parcel that left is a fact, not a
+            // decision; what a cancellation in flight changes is that
+            // finalising here deletes the instance its OrderCancelled would
+            // have correlated to.
             When(ShipmentDispatched)
                 .Unschedule(ConfirmationTimeout)
                 .Send(
                     OrderingQueue,
                     ctx => new MarkOrderShipped(ctx.Saga.OrderId, ctx.Message.TrackingNumber))
+                .If(
+                    ctx => ctx.Saga.CancellationObserved,
+                    cancelled => cancelled
+                        .Send(
+                            OrderingQueue,
+                            ctx => new FlagOrderForReview(
+                                ctx.Saga.OrderId,
+                                ReviewReasons.CancelledAfterConfirmation)))
                 .Finalize(),
 
-            // Third door, same argument.
-            Ignore(StockReleased));
+            // Third door, same argument, recorded for the branch above.
+            When(StockReleased)
+                .Then(ctx => ctx.Saga.CancellationObserved = true));
 
         During(
             Confirmed,
+            // The same pairing as AwaitingConfirmation's despatch branch and
+            // for the same reason (#143). This state is where
+            // cancelled_after_confirmation is normally raised — by
+            // When(OrderCancelled) below — and this is the interleaving where
+            // that event arrives too late to find an instance.
             When(ShipmentDispatched)
                 .Unschedule(DespatchTimeout)
                 .Send(
                     OrderingQueue,
                     ctx => new MarkOrderShipped(ctx.Saga.OrderId, ctx.Message.TrackingNumber))
+                .If(
+                    ctx => ctx.Saga.CancellationObserved,
+                    cancelled => cancelled
+                        .Send(
+                            OrderingQueue,
+                            ctx => new FlagOrderForReview(
+                                ctx.Saga.OrderId,
+                                ReviewReasons.CancelledAfterConfirmation)))
                 .Finalize(),
 
             When(DespatchTimeout.Received)
@@ -2731,7 +2848,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // and the cancellation raises cancelled_after_confirmation on its
             // own branch above, which is the row both loose ends are worked
             // from.
-            Ignore(StockReleased));
+            //
+            // Recorded rather than discarded (#143), and this is the state
+            // where that buys most: ShipmentDispatched here finalises, so a
+            // cancellation in flight would otherwise lose the instance that
+            // raises its row.
+            When(StockReleased)
+                .Then(ctx => ctx.Saga.CancellationObserved = true));
 
         // Two halves outstanding, not one. This state is reached from
         // AwaitingPayment with AuthorisePayment sent and unanswered, so
@@ -2885,6 +3008,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
         SetCompletedWhenFinalized();
     }
+
+    // What to do with an OrderCancelled that correlates to no instance (#123).
+    // It throws what Fault() would have thrown rather than an exception of its
+    // own: OnMissingInstance takes one configurator and the decision needs the
+    // message, so the built-in cannot be reached from here — and the
+    // error-queue entry then reads identically to PaymentAuthorised's, which
+    // is the one this machine already faults.
+    private static Task NoInstanceForCancellation(ConsumeContext<OrderCancelled> context)
+    {
+        if (context.Message.Origin is null or CancelOrigins.Workflow)
+            return Task.CompletedTask;
+
+        throw new SagaException(
+            $"An OrderCancelled with origin '{context.Message.Origin}' correlated to no saga instance.",
+            typeof(OrderFulfilmentState),
+            typeof(OrderCancelled),
+            context.Message.OrderId);
+    }
 }
 ```
 
@@ -2987,26 +3128,48 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > two were run together in review until it was.
 >
 > **The default is right for an arrival this service can prove is its own
-> echo, and for nothing else.** Every cancellation the saga causes ends in
-> `Finalize`, so the `OrderCancelled` the aggregate then publishes arrives at
-> a deleted instance on the ordinary path; ADR-024 has `StockReleased`
-> answered for every release including a no-op one, so it does too. Both keep
-> the default and say so at the registration. `PaymentAuthorised` cannot make
-> that claim — Payments produces it — so it takes
-> `OnMissingInstance(m => m.Fault())` and reaches the error queue instead.
+> echo, and for nothing else — and "prove" is the word that had to become
+> mechanical.** Every cancellation the saga causes ends in `Finalize`, so the
+> `OrderCancelled` the aggregate then publishes arrives at a deleted instance
+> on the ordinary path; ADR-024 has `StockReleased` answered for every release
+> including a no-op one, so it does too. `StockReleased` keeps the default
+> outright. `PaymentAuthorised` cannot make the claim at all — Payments
+> produces it — so it takes `OnMissingInstance(m => m.Fault())` and reaches the
+> error queue instead. `OrderCancelled` is the one in between: **some** of its
+> arrivals are the echo and some are not, so it takes neither and asks.
 >
-> **One consequence is open and is named rather than implied.** A customer's
-> `OrderCancelled` overtaking its own `OrderPlaced` is dropped, and the later
-> placement starts a live saga for an order the write model has already
-> cancelled — §9.4 orders nothing, and a retried publish is enough to get
-> there. It is a lifetime question rather than a transition one: the handler
-> exists and the instance does not. **`Reason` is not the discriminator that
-> would close it**, and an earlier revision of this passage thought it was —
-> §11.4's endpoint parses the whole `CancellationReasons` map, so a caller may
-> send `payment_declined` as readily as `customer_request` and the code
-> carries no origin. Closing it needs an added discriminator (a §9.2 version
-> bump) or a narrower endpoint vocabulary; see
-> [#123](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/123).
+> **What it asks is `Origin`, and that field exists because `Reason` cannot
+> answer.** An earlier revision of this passage read `Reason` as the
+> discriminator, on the premise that only a customer's cancellation carries
+> `customer_request`; §11.4's endpoint parses the whole `CancellationReasons`
+> map, so a caller may send `payment_declined` as readily, and the saga's own
+> compensation carries `customer_request` whenever that is what it forwarded.
+> The reason is what somebody asserted. `OrderCancelled.Origin` is a
+> `CancelOrigins` code written as a literal from `CommandOrigin` at the
+> handler — never bound from a request, which is what keeps it from being a
+> value a caller can claim — and §9.2 makes a new **optional** field additive,
+> so this is not a V2. That closes
+> [#123](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/123):
+> a customer's `OrderCancelled` overtaking its own `OrderPlaced` now faults,
+> and §9.8's five retries are about seventy seconds for the placement still in
+> flight to land and create the instance.
+>
+> **The absent case is a tolerance and not a reading.** A rolling deploy has
+> instances publishing this event before they populate `Origin`, so absent is
+> discarded — the pre-#123 behaviour, held for the length of the deploy. It is
+> §15.5's expand phase with a **contract phase owed**: once no instance
+> publishes without the field, absent becomes an unknown like any other and the
+> branch goes. Faulting on absent instead would file an error-queue entry for
+> every ordinary cancellation on the way through every deploy, which is a
+> guaranteed incident traded against a race that is open only across one.
+>
+> **What faulting buys past the race is the case nothing else reports.** A
+> cancellation arriving after the saga finalised down a `FlagOrderForReview`
+> branch also faults, and that is not noise: the order is already in front of a
+> person, and "the customer then cancelled it" is the next thing they need.
+> `docs/runbooks/error-queue.md` works both arrivals through one procedure,
+> because the exception raised is the `SagaException` `Fault()` would have
+> raised.
 >
 > **The other consequence used to be here and is closed.**
 > `Compensating`'s `When(PaymentAuthorised)` covered only the interleaving
@@ -3057,7 +3220,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > **All five states carry a written argument now, and leaving the last two out
 > cost a third defect before they did.** The residual used to read "three of
 > the five are checked", and what it was hiding is exactly what a residual of
-> that shape hides: `Ignore(StockReleased)` was owed in four states and
+> that shape hides: a `StockReleased` branch was owed in four states and
 > [#129](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/129)
 > named three, because `Confirmed` was the one nothing was looking at. The
 > issue and the gate had the same blind spot, which is why the fix belongs in
@@ -3099,6 +3262,28 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | `AwaitingConfirmation` | The card is authorised, and **nothing downstream has been told** — `ConfirmOrder` is in flight, so no `OrderConfirmed` has been published and Shipping has no despatch to prepare | `AwaitingPayment`'s compensation unchanged, one state later: release, wait, cancel. It escalates nothing, because Payments voids off `OrderCancelled` itself and there is no despatch to stop. **What it cannot see is whether the aggregate confirmed a moment before the customer cancelled** — that is caught in `Compensating` below, on the confirmation's arrival |
 > | `Confirmed` | The card is authorised **and Shipping has been told** | Escalate — `cancelled_after_confirmation`, because a despatch may still be moving — and finalise. A second `OrderConfirmed` is absorbed here rather than faulted: it is either §9.5's unrecorded redelivery or a rollout handing this replica an instance the previous release advanced |
 > | `Compensating` | A cancellation is already the outcome — but the money, the reservation and the **confirmation** may still land | Every arrival written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved` and `StockReservationFailed`, since the exits cancel the order anyway; `When(PaymentAuthorised)` escalates `payment_authorised_during_compensation`; `When(OrderConfirmed)` escalates `cancelled_after_confirmation`; `When(PaymentDeclined)` and `When(PaymentTimeout.Received)` escalate nothing and simply record that the verdict is in or given up on. **This state waits on two halves and finalises on neither alone** — Inventory owes a release and Payments may owe a verdict, so each exit asks about the other and `Finalize` is conditional on both being settled (#124). **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation**, and it is [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation) rather than this machine that makes that safe: §9.4 orders nothing, so a release handled before its reserve would otherwise strand the reservation that follows it. Inventory owes the tombstone; this row used to close the case with "`ReleaseStock` is already in flight" |
+>
+> **Every row above is what happens when the cancellation ARRIVES, and the
+> harder case is the interval before it does.** Each of those transitions
+> needs this machine's own copy of `OrderCancelled`; until it lands, every
+> other event keeps its ordinary transition, so a forward step can run after
+> the customer has cancelled and after Inventory has already acted on it.
+> That was
+> [#143](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143),
+> and the four rows above have four matching interleavings — an
+> `AuthorisePayment` sent for an order being cancelled, a `ConfirmOrder` sent
+> and the escalation's own event consumed by the success branch, and two
+> terminal despatches finalising the instance the cancellation would have
+> correlated to.
+>
+> **What closes it is an obligation the machine carries rather than an event
+> it waits for**, which is [ADR-025](appendix-a-adrs.md#adr-025--a-saga-state-that-waits-on-two-services-finalises-on-neither-alone)'s rule applied to a
+> fact instead of a join. A `StockReleased` arriving in a state that sent no
+> release proves a cancellation reached Inventory, so the four states that
+> absorb one record `CancellationObserved` on the instance, and those four
+> forward transitions ask. **It narrows the window rather than closing it**: a
+> cancellation Inventory has not consumed yet leaves no trace at all, and
+> nothing short of ordering Ordering's own outbox per aggregate reaches that.
 >
 > **The money is a gap the last three rows state rather than close.** Undoing
 > an authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
@@ -3145,9 +3330,13 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > this passage read as though it did. §3.2 has Inventory consuming
 > `OrderCancelled` directly, so the cancellation that raises this row has
 > already told it to release; what the saga withholds is a second, redundant
-> instruction, not the release itself. The `Ignore(StockReleased)` in
-> `Confirmed` is that fact arriving as an event — Inventory answering a
-> cancellation this saga never forwarded.
+> instruction, not the release itself — which is the decision
+> [ADR-029](appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word) now records rather than leaves to be read
+> off a comment. `Confirmed`'s `When(StockReleased)` is that fact arriving as
+> an event: Inventory answering a cancellation this saga never forwarded, and
+> since [#143](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143)
+> the branch keeps it rather than discarding it, so a despatch arriving
+> afterwards still raises the row instead of finalising clean.
 >
 > **On the `Compensating` raising a `ReleaseStock` has gone out as well** —
 > the state was entered on the premise that no confirmation had happened — and
@@ -3158,12 +3347,24 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > the money.
 >
 > **Whether Inventory should decline to release for an order it knows was
-> confirmed is a [§3.2](03-bounded-contexts.md) question nobody had asked**,
+> confirmed was a [§3.2](03-bounded-contexts.md) question nobody had asked**,
 > and it is where the picked-parcel hazard actually lives — not in this
-> machine, which has no way to raise it and now says so rather than implying
-> its restraint is the mitigation. It is filed as
-> [#141](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/141),
-> because a hazard named only in prose is a decision nothing re-checks.
+> machine, which has no way to raise it and says so rather than implying its
+> restraint is the mitigation. It was filed as
+> [#141](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/141)
+> and is answered by
+> [ADR-029](appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word): Inventory keeps `OrderCancelled` and releases
+> regardless, so the hazard stays open and is Inventory's to close when
+> Inventory exists.
+>
+> **The tempting alternative was to make `ReleaseStock` the only trigger, and
+> what refuses it is the branch two states up.** That would give the saga's
+> restraint teeth — and delete the only evidence a cancellation gives this
+> machine before its own copy lands, because a `StockReleased` nobody asked
+> for is exactly what the four doors record. #143's guards are built on the
+> second producer, so removing it would reopen the races they close. **Two
+> open questions were being weighed independently and one decided the other**,
+> which is the same shape #125 met and worth the second recording.
 >
 > **A late `StockReserved` after a cancellation is a different case from the
 > `StockTimeout` strand, and this callout has now been wrong about it
@@ -3204,7 +3405,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > from that very event can reach the saga before the saga has consumed its own
 > copy. **Four states can be holding an instance when it does**: the three
 > whose cancellation branch sends a release, and `Confirmed`, whose branch
-> deliberately sends none. Each writes the arrival out with an `Ignore`.
+> deliberately sends none. Each writes the arrival out — and since
+> [#143](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143)
+> each RECORDS it, rather than absorbing it with an `Ignore`. The arrival is
+> the only evidence a cancellation gives this machine before its own copy
+> lands, and what the four states do with it is set `CancellationObserved`
+> so the forward transitions beside them can ask.
 >
 > **Left unwritten, three of the four are a race the retry envelope usually
 > wins, and the fourth is a race it cannot win.** §9.8 gives the endpoint five
@@ -3226,9 +3432,10 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > both, which is the argument for closing it in the test rather than only in
 > the machine.
 >
-> **In the three states that send a release, `Ignore` is correct because of
+> **In the three states that send a release, absorbing is correct because of
 > [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
-> and was not correct without it.** Absorbing the early copy discards it, so
+> and was not correct without it.** Recording the arrival still consumes it
+> rather than answering with it, so
 > `Compensating`'s exit has to come from somewhere else — and it does: the
 > cancellation branch sends its own `ReleaseStock`, which the ADR has Inventory
 > answer whether or not it already released on the event. **`Confirmed` is
@@ -3486,6 +3693,18 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
     // null test answers for one settled route and not the other.
     public bool StockReleaseSettled { get; set; }
 
+    // A cancellation is in flight that this instance has not been told
+    // about directly (#143). Set where a StockReleased arrives in a state
+    // that sent no ReleaseStock, which is Inventory acting on an
+    // OrderCancelled the saga has not consumed yet (ADR-029).
+    //
+    // An obligation the machine carries rather than an event it waits for,
+    // which is ADR-025's rule applied to a fact rather than to a join.
+    // NEVER cleared: a cancellation does not stop being in flight, and the
+    // states that read it either compensate or finalise, so a reset would be
+    // a way to lose the fact rather than a way to use it.
+    public bool CancellationObserved { get; set; }
+
     // One token per schedule — Unschedule needs the specific token, so two
     // waits cannot share a field.
     //
@@ -3554,6 +3773,11 @@ CREATE TABLE ordering.OrderFulfilmentStates
     -- unconditional finalise those instances were written by.
     PaymentVerdictOutstanding  BIT              NOT NULL DEFAULT 0,
     StockReleaseSettled        BIT              NOT NULL DEFAULT 0,
+    -- What the four early-release doors record (#143), on the same terms: 0
+    -- means "no cancellation seen", which is true of every row the previous
+    -- release wrote, since that release absorbed the arrival and kept
+    -- nothing. Not backfillable for the same reason.
+    CancellationObserved       BIT              NOT NULL DEFAULT 0,
     StockTimeoutTokenId        UNIQUEIDENTIFIER NULL,
     PaymentTimeoutTokenId      UNIQUEIDENTIFIER NULL,
     ConfirmationTimeoutTokenId UNIQUEIDENTIFIER NULL,

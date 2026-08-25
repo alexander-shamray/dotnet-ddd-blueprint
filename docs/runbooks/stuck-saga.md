@@ -53,7 +53,8 @@ SELECT
     AgeMinutes   = DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()),
     CancelReason,
     PaymentVerdictOutstanding,
-    StockReleaseSettled
+    StockReleaseSettled,
+    CancellationObserved
 FROM ordering.OrderFulfilmentStates
 WHERE (CurrentState <> 'Confirmed'
         AND DATEDIFF(minute, StartedAt, SYSDATETIMEOFFSET()) > 60)
@@ -72,14 +73,26 @@ page was the one row it could not show. 5760 minutes is the four days.
 needs no completion predicate — which is also why the alert's condition is
 phrased as an age rather than as a state count.
 
-**The last two columns are the diagnosis for a `Compensating` row and say
-nothing anywhere else.** That state finalises only when both of its halves
-have settled, and `CurrentState` cannot say which one is still open. A row
-with `StockReleaseSettled = 1` has already had its `CancelOrder` sent and is
-holding for Payments; a row with `StockReleaseSettled = 0` has sent nothing
-yet, whatever the verdict flag says. In every other state
-`PaymentVerdictOutstanding` merely records that `AuthorisePayment` went out
-and no answer has come back — true and not a join.
+**`PaymentVerdictOutstanding` and `StockReleaseSettled` are the diagnosis for
+a `Compensating` row and say nothing anywhere else.** That state finalises only
+when both of its halves have settled, and `CurrentState` cannot say which one
+is still open. A row with `StockReleaseSettled = 1` has already had its
+`CancelOrder` sent and is holding for Payments; a row with
+`StockReleaseSettled = 0` has sent nothing yet, whatever the verdict flag says.
+In every other state `PaymentVerdictOutstanding` merely records that
+`AuthorisePayment` went out and no answer has come back — true and not a join.
+
+**`CancellationObserved` is the opposite: it means nothing in `Compensating`
+and is the whole diagnosis in the states that can carry it.**
+[§3.2](../backend-architecture/03-bounded-contexts.md) has Inventory consuming
+`OrderCancelled` directly
+([ADR-029](../backend-architecture/appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word)),
+so a `StockReleased` arriving in a state that sent no `ReleaseStock` proves a
+cancellation reached Inventory before this saga consumed its own copy — and
+since [#143](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143)
+the machine records that on the instance instead of absorbing it. A `1`
+therefore reads as **a cancellation is in flight and this instance knows**. It
+is never cleared, so it says nothing about how long ago that was.
 
 Group by `CurrentState` first — one stuck order is a message; twenty in the same
 state is a dependency.
@@ -116,6 +129,40 @@ unanswered — the timeout deliberately leaves the obligation standing and arms
 the wait once more, because a PSP that has not answered has not declined. A
 decline does not, and neither does anything arriving through
 `AwaitingConfirmation`, because a `PaymentAuthorised` is what got it there.
+
+**A `1` in `CancellationObserved` changes what the row is waiting for, and in
+two states it is a new way for a saga to sit still.** The instance has seen an
+early `StockReleased`, so it knows a cancellation is in flight, and every
+forward transition in those states asks before acting (#143):
+
+- **`AwaitingStock`** — a `StockReserved` arriving now is **withheld**: no
+  `AuthorisePayment`, no transition, and the instance stays here. What it is
+  waiting for is the saga's own copy of the `OrderCancelled`, whose branch in
+  this state compensates properly. **`StockTimeout` is deliberately left
+  armed** and is the backstop: the five-minute wait armed when the order was
+  placed still fires, cancels the order with `stock_timeout` — a no-op the
+  aggregate absorbs, the customer's cancellation having committed already —
+  and finalises, so nothing sits here indefinitely.
+- **`AwaitingPayment`** — a `PaymentAuthorised` arriving now clears the
+  verdict, raises `payment_authorised_during_compensation` and **withholds
+  `ConfirmOrder`**; the instance stays here, waiting for the same cancellation.
+  **`PaymentTimeout` is deliberately left armed** — the fifteen-minute wait
+  armed when `AuthorisePayment` was sent still fires and compensates exactly as
+  it would have. A row here with `CancellationObserved = 1` and
+  `PaymentVerdictOutstanding = 0` has already escalated the money: expect a
+  review row ([`order-review.md`](order-review.md)), and do not read the
+  cleared verdict as nothing having happened.
+- **`AwaitingConfirmation` and `Confirmed`** — nothing is withheld. A
+  `ShipmentDispatched` still sends `MarkOrderShipped` and finalises; the flag
+  only adds a `cancelled_after_confirmation` row on the way out. An instance
+  sitting in either of these is not sitting still because of this flag.
+
+**Past the hour this alert measures, an instance withholding a forward step is
+a missing timeout rather than a missing cancellation.** Both backstops are
+minutes long, so an hour-old instance in `AwaitingStock` or `AwaitingPayment`
+has outlived the wait that was supposed to end it whatever the flag says — the
+scheduler section below is the procedure, and the cancellation is the second
+thing to chase rather than the first.
 
 **A saga older than every timeout its state is waiting on is a timeout that
 did not arrive**, and that is a different fault from the peer being slow. It
@@ -256,18 +303,41 @@ wait expires. That is the machine working rather than a second fault. Read
 a `PaymentAuthorised` to clear it: that states money moved, and Payments'
 answer is the only thing entitled to say so.
 
-**A `PaymentAuthorised` that finds no instance now FAULTS**, which is the one
-replay on this page whose failure mode is not silence. Every other event the
-machine declares is consumed cleanly when nothing correlates —
-`OrderCancelled` says so explicitly and the rest inherit MassTransit's default;
+**An instance with `CancellationObserved = 1` is waiting for a message that
+was already published**, which narrows where to look before anything is
+published by hand. Inventory released, so the `OrderCancelled` left Ordering's
+outbox and reached the broker — what has not happened is this endpoint
+consuming its own copy. Check `ordering-fulfilment-saga`'s depth and its
+`_skipped` and `_error` queues ([`skipped-queue.md`](skipped-queue.md),
+[`error-queue.md`](error-queue.md)): the message is usually parked rather than
+lost, and getting it delivered is the whole recovery. Composing a fresh one is
+the invention this section forbids — and one carrying an `Origin` of `user`
+against an instance that has since finalised is exactly the arrival §9.6 now
+faults, so it costs a page as well as a lie.
+
+**`PaymentAuthorised` and `OrderCancelled` now FAULT when they find no
+instance, and replaying either against a finalised saga pages someone.**
 `PaymentAuthorised` is answered `OnMissingInstance(m => m.Fault())`, because
-Payments produces it and it therefore can never be Ordering's own echo
-arriving after the workflow ended. It reaches the error queue
-[§13.6](../backend-architecture/13-observability.md) pages on, with the
-message retained. So replaying one against an order whose saga has finalised
-pages someone — and that is the design, not a trap to work around: an
-authorisation with no instance means money moved on an order this saga
-cancelled ([`error-queue.md`](error-queue.md)).
+Payments produces it and it can therefore never be Ordering's own echo
+arriving after the workflow ended — an authorisation with no instance means
+money moved on an order this saga cancelled. `OrderCancelled` is answered by a
+branch rather than by a default
+([#123](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/123)):
+the saga's own echo — an `Origin` of `workflow` — is discarded, and so is an
+absent `Origin`, which is a rolling deploy publishing from before the field
+existed. **Every other origin faults**, and `user` is the one that matters: a
+cancellation somebody asked for, arriving at a saga that is not there. Both
+land in the error queue [§13.6](../backend-architecture/13-observability.md)
+pages on, with the message retained, and
+[`error-queue.md`](error-queue.md) works them.
+
+**The rest of the machine's events are still consumed cleanly when nothing
+correlates**, on MassTransit's default — `StockReleased` included, which
+[ADR-024](../backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+makes answerable for every release. An earlier version of this
+paragraph named `OrderCancelled` among them, and cited its registration as
+where that default was written down. That registration now decides instead of
+restating, so the sentence had to change with it.
 
 Record every manual action against the `OrderId`. The next person to read this
 order will find a state machine that moved without a message, and the only
