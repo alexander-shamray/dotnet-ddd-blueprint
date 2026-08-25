@@ -94,7 +94,7 @@ copilot_admitted_json() {
 # Pass `.html_url`, `.url` or `.submittedAt` — fields GitHub generates — never
 # `.path`, and never anything else the pull request supplies.
 #
-# `clean` below is the belt to that braces: every reported field is coerced to
+# `clean` below is the belt to those braces: every reported field is coerced to
 # printable ASCII and truncated, so a future caller passing the wrong
 # expression gets a mangled label rather than a working injection. It is not
 # the control — choosing a server-generated field is — but together they mean
