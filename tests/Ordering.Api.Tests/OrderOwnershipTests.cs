@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Common.Contracts.Ordering.V1;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Ordering.Api.Endpoints;
 using Ordering.Application.Orders;
@@ -185,6 +186,52 @@ public sealed class OrderOwnershipTests(ServiceFixture fixture) : IAsyncLifetime
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await StatusOfAsync(order)).ShouldBe(nameof(OrderStatus.AwaitingStock));
+    }
+
+    [Theory]
+    [InlineData(nameof(OrderStatus.Shipped))]
+    [InlineData(nameof(OrderStatus.Delivered))]
+    public async Task An_order_past_despatch_is_refused_with_422_and_the_shipped_code(string status)
+    {
+        // **#109's second half: the producer had no test at all.** Every
+        // occurrence of AlreadyShipped under tests/ was a sample string —
+        // §10.5's 422 was unproven and §9.8's dashboard series was built on a
+        // code nothing had ever been shown to emit. OrderTests covers the
+        // domain THROW, which is the half that already worked; nothing covered
+        // the catch, the mapping or the status code.
+        //
+        // **Delivered is arranged directly because nothing reaches it.**
+        // OrderStatus declares it and no transition sets it — §9.6 has no
+        // ShipmentDelivered — so the guard in Order.Cancel is written for a
+        // status the aggregate cannot get to on its own. Driving the row there
+        // is what makes the guard testable rather than decorative, and it is
+        // the case that would have caught the message defect: the old
+        // description said "A shipped order cannot be cancelled" and this
+        // customer's order was delivered.
+        OrderId order = await SeedOrderAsync(Bob);
+        await fixture.ExecuteAsync(
+            "UPDATE ordering.Orders SET Status = {0} WHERE Id = {1}",
+            status,
+            order.Value);
+
+        HttpResponseMessage response = await CancelAsync(order, Bob);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+
+        ProblemDetails? problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(
+            TestContext.Current.CancellationToken);
+
+        problem.ShouldNotBeNull();
+        problem.Extensions["code"]?.ToString().ShouldBe(
+            "order.already_shipped",
+            "the code is a §9.8 dimension value and splitting it would halve the series");
+        string detail = problem.Detail.ShouldNotBeNull();
+        detail.ShouldNotContain(
+            "A shipped order",
+            Case.Sensitive,
+            "a delivered order's customer must not be told it shipped (#109)");
+
+        (await StatusOfAsync(order)).ShouldBe(status, "a refusal must not have cancelled anything");
     }
 
     private Task<string> StatusOfAsync(OrderId order) =>

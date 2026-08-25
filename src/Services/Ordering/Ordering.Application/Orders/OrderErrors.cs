@@ -22,8 +22,26 @@ public static class OrderErrors
     public static readonly Error NotFound =
         Error.NotFound("order.not_found", "No order with that id.");
 
+    /// <summary>
+    /// Returned for a <c>Shipped</c> order <b>and for a <c>Delivered</c>
+    /// one</b>, which is why the description no longer names the first
+    /// (<a href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/109">#109</a>).
+    /// </summary>
+    /// <remarks>
+    /// <b>The text broadened and the code did not, deliberately.</b>
+    /// <c>Order.Cancel</c> refuses both statuses and its own message
+    /// interpolates the real one — so the accurate sentence was thrown and
+    /// this inaccurate one served, because <c>CancelOrderHandler</c> catches
+    /// the <c>DomainException</c> and discards its text. Splitting this into
+    /// two errors was the other option and was refused: <c>Code</c> is a
+    /// contract, <c>order.already_shipped</c> is a dimension value on §9.8's
+    /// dashboard, and a second code would silently halve every series built
+    /// on it.
+    /// </remarks>
     public static readonly Error AlreadyShipped =
-        Error.Rule("order.already_shipped", "A shipped order cannot be cancelled.");
+        Error.Rule(
+            "order.already_shipped",
+            "An order that has already shipped cannot be cancelled; raise a return instead.");
 
     /// <summary>
     /// The one <see cref="ErrorType.Unavailable"/> in this catalogue that is

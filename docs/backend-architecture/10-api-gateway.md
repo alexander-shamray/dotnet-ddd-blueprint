@@ -685,8 +685,14 @@ public static class OrderErrors
     public static readonly Error NotFound =
         Error.NotFound("order.not_found", "No order with that id.");
 
+    // Returned for Delivered as well as Shipped, so the description names
+    // neither: the code is a §9.8 dimension value and cannot be split, and a
+    // sentence naming one of two statuses tells the other one's customer
+    // something untrue.
     public static readonly Error AlreadyShipped =
-        Error.Rule("order.already_shipped", "A shipped order cannot be cancelled.");
+        Error.Rule(
+            "order.already_shipped",
+            "An order that has already shipped cannot be cancelled; raise a return instead.");
 
     // 422, not 400: the request was well-formed and the validator passed it.
     // The products are unpriceable, which is a fact about this service's state
@@ -751,7 +757,7 @@ identifier that was sitting one field away:
   "type": "https://tools.ietf.org/html/rfc9110#section-15.5.21",
   "title": "Unprocessable Entity",
   "status": 422,
-  "detail": "A shipped order cannot be cancelled.",
+  "detail": "An order that has already shipped cannot be cancelled; raise a return instead.",
   "instance": "POST /orders/018f.../cancel",
   "code": "order.already_shipped",
   "correlationId": "018f4c2e-...",
