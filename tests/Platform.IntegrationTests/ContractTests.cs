@@ -305,7 +305,7 @@ public class ContractTests
     /// not implement <see cref="IIntegrationEvent"/>" — and the converse does
     /// not follow: this also selects the payload records events carry
     /// (<c>PlacedLine</c>, <c>ConfirmedLine</c>, <c>StockLine</c>,
-    /// <c>ShippingAddressV1</c>) and this suite's own discovery probes.
+    /// <c>ShippingAddressV1</c>).
     /// <para>
     /// The widening is in the safe direction and is kept deliberately. ADR-028
     /// is about a subject reaching a decision the receiver cannot check, and a
@@ -381,12 +381,17 @@ public class ContractTests
         // nothing makes No_command_contract_carries_a_subject vacuous while
         // leaving it green.
         //
-        // **Not merely non-empty, and the difference is this suite's own
-        // probes.** NonEvents legitimately holds payload records and the two
-        // discovery probes UnversionedProbe and NestingProbe.NestedProbe, so a
-        // ShouldNotBeEmpty here would still pass with every real command
-        // filtered out — a control satisfied by the fixtures it was meant to
-        // see past. Name the commands the rule exists for instead.
+        // **Not merely non-empty, and the difference is the payload records.**
+        // NonEvents legitimately holds PlacedLine, ConfirmedLine, StockLine and
+        // ShippingAddressV1, so a ShouldNotBeEmpty here would still pass with
+        // every real command filtered out. Name the commands the rule exists
+        // for instead.
+        //
+        // An earlier revision of this comment said the discovery probes were
+        // in that set too. They are not, and UnversionedProbe's own remarks
+        // say so: Contracts is built from typeof(OrderPlaced).Assembly, and
+        // the probes live in this one. Only the predicate is ever asked about
+        // them.
         NonEvents.ShouldContain(typeof(AuthorisePayment));
         NonEvents.ShouldContain(typeof(CancelOrder));
         NonEvents.ShouldContain(typeof(ConfirmOrder));

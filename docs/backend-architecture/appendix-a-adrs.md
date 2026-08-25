@@ -1214,8 +1214,18 @@ here an unverifiable assertion removed.
 that has to be reconciled against.** Removing a field is a breaking change and
 the standing rule is a new version with both published for a deprecation
 window. The exception taken here is the one §9.2 now states: `Payments.V1` has
-no consumer — Payments is unbuilt, nothing in `Platform.slnx` deserialises
+no consumer — Payments is unbuilt, and no service in the solution consumes
 `AuthorisePayment` — so there is nobody for a window to serve.
+
+**"No consumer" and "nothing deserialises it" are not the same claim**, and an
+earlier draft of this paragraph made the second, which is false: §12.6's
+contract suite round-trips every contract through the bus serialiser, this one
+included. A test that asserts a shape is not a consumer bound to it — it moves
+with the contract in the same commit, which is exactly what a deprecation
+window exists to make unnecessary. The condition §9.2 states is about
+*services*, and it is worth keeping the two apart, because the wider claim is
+the one a reader can falsify in thirty seconds and would then have no reason to
+trust the rest.
 
 **And here the standard remedy would have been actively wrong, which is worth
 separating from "unnecessary".** A `V2` alongside `V1` keeps the version

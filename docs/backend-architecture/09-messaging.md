@@ -206,10 +206,17 @@ architecture exists to avoid.
 > will has not been built — there is nobody to migrate, and a V2 buys a window
 > for an audience of nobody. The contract may then be changed in place.
 >
-> **Two conditions, both required.** The version must have no consumer *in the
-> solution*, which is a fact about `Platform.slnx` rather than a judgement; and
-> the change must be recorded in an ADR, so that "there was no consumer" is
-> something a later reader can check rather than take on trust. The moment a
+> **Two conditions, both required.** No **service** in the solution may consume
+> the version — a fact about which consumers are registered, not a judgement;
+> and the change must be recorded in an ADR, so that "there was no consumer" is
+> something a later reader can check rather than take on trust.
+>
+> **A test is not a consumer, and the distinction has to be stated or the
+> condition is unusable.** §12.6's suite round-trips every contract through the
+> bus serialiser, so *something* deserialises every version this platform
+> owns — but a test moves with the contract in the same commit, which is
+> precisely what a deprecation window exists to make unnecessary. What the
+> window protects is a deployable that ships on its own schedule. The moment a
 > consumer exists the rule above binds with no exception, and the window for
 > the cheap edit has closed — which is the same observation §9.1 makes about
 > `ShippingAddressV1` from the other direction: the PR that becomes a

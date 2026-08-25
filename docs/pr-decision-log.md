@@ -235,8 +235,10 @@ was one row; #126 had already removed the literal that would have made it two.
 
 **Counts pinned to this branch**: the solution runs 899 tests, 711 of them
 outside `Category=Integration`, and the three CI stages are 18, 693 and 188.
-Reconciled against a full local `dotnet test Platform.slnx`, and owed a check
-against this branch's own CI run — the three new tests land in the **unit**
+Reconciled against a full local `dotnet test Platform.slnx` **and against this
+branch's own CI run**, whose log sums to 899 over its twenty-four per-project
+stage totals — the check this file names for a restated number, performed
+rather than left owed. The three new tests land in the **unit**
 stage, because that stage's filter is `FullyQualifiedName!~ArchitectureTests`
 and `Platform.IntegrationTests.ContractTests` matches neither that nor
 `Category=Integration`, whatever the project's name suggests.

@@ -2207,8 +2207,20 @@ second is the consumer-driven contract at the end of this section.
 
 The contract assembly's rules are all stated elsewhere as things reviewers
 should notice: §9.1's "a contract may not name a domain type", §9.2's versioned
-namespace, `required` members. Each is mechanical, so each is a test rather than
-a review note.
+namespace, `required` members, and — since
+[ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject) —
+that a command carries no subject. Each is mechanical, so each is a test rather
+than a review note.
+
+**The fourth is the one whose gate needs a gate**, and it is worth saying here
+rather than only at the test. The other three fail against a type that is
+present: a domain type named, a namespace misspelt, a member not `required`.
+This one asserts an **absence**, so an empty result is both what success looks
+like and what a broken detector looks like. It therefore ships with two
+controls — one pointing the detector at a contract that *does* carry a subject
+and requiring it to find one, and one naming the commands the judged set must
+contain — because a gate that has only ever been observed green is one nobody
+has established is looking at anything.
 
 This is the one suite that references every service, which is why it has its own
 project and why that project holds nothing else:
