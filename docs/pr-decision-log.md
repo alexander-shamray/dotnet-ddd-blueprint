@@ -68,6 +68,150 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The subject that crossed a boundary nothing checked (#63)
+
+§11.4's subject rule — *a subject identifier is bound from the principal, never
+from the request* — carried an exclusion for the message path, and the
+exclusion was honest: a command arriving over the broker has no principal, so
+there is nothing for `ICurrentUser` to answer with. What the chapter said next
+is what this PR came back for. It said the question of what the message side
+*should* do was open, and left `AuthorisePayment` naming the customer whose
+instrument Payments would charge.
+
+**An open question in a specification is a decision taken by default.** For as
+long as the callout stood, the default was "carry the subject as a field", and
+it was reachable from a request body: #54 closed the HTTP end of that chain and
+#43 closed the ownership check behind it, but the value they made trustworthy
+was re-emitted onto `OrderPlaced`, copied to the saga instance, and sent on to
+Payments as an ordinary message field with nothing left that could check it.
+Two of the chain's four links were closed and the path was still open, exactly
+as #63 predicted at filing.
+
+**The fix is a word, and finding the word was most of the work.** The message
+path cannot *bind* — there is no principal — so the rule there is
+**re-derive**: the service that owns the decision resolves the subject from its
+own record, built from an event whose subject was bound from a principal.
+`OrderPlaced` already carries such a value. Payments consumes it, keeps its own
+record of who an order belongs to, and looks the payer up when the command
+arrives. That is ADR-028, and §3.2's Payments row gained `OrderPlaced` to make
+the precondition a contract rather than an implementation note.
+
+**The precedent is ADR-027, one service over, and citing it was not
+decoration.** Ordering resolves product names from a projection it owns rather
+than asking Catalog; Payments resolves the payer from a record it owns rather
+than reading the sender's word for it. Same mechanism, different purchase — a
+synchronous hop avoided there, an unverifiable assertion removed here.
+
+**Why the contract narrowed instead of emptying, which is the question a
+reviewer asks first.** `Amount` and `Currency` stayed. The line between them
+and the subject is not importance, it is **whether the receiver can
+disagree**: Payments holds the order, so it can compare an amount against it
+and refuse a mismatch, and it holds nothing at all that would contradict a
+subject. A field the receiver can check is a claim; a field it cannot check is
+an assertion. That sentence is the reusable half of this PR, and it decides the
+next money-bearing contract without re-running the argument.
+
+**The saga instance lost its `CustomerId` too, and that is the structural half
+rather than tidying.** The field had exactly one reader — the send this PR
+removed. Left in place, all it could still do is offer itself to the next
+transition that wants a customer, which is how the subject finds its way back
+onto a message a release later. Removing it makes every command the machine
+sends name an order and nothing else. Ordering is not short of the value:
+`ordering.Orders` owns it, bound at the endpoint.
+
+**Removing the property is one release; removing the column is two, and the
+first draft got that wrong.** `dotnet ef migrations add` scaffolded a
+`DROP COLUMN` and warned about data loss, which is the visible half. The
+invisible half is §7.4 and §15.5: migrations run ahead of the deploy, the
+previous release keeps serving beside the new one, and *that* release's saga
+writes this column on every `OrderPlaced`. A drop would have failed those
+inserts for the length of the ladder and left a rollback with no column at all.
+So the column is mapped as a **shadow property** — unreachable from the
+instance, so the control still holds — with a database default, and the drop is
+owed to a release where nothing writes it.
+
+**The default's shape is decided by the rollback, not by the roll-forward, and
+only one of those is the ordinary path.** Rolling forward, the new build's
+`INSERT` omits the column and SQL Server supplies the default; a nullable
+column would serve equally well. Rolling *back*, the old build materialises a
+non-nullable `Guid` from rows the new build wrote — and a nullable column
+throws there rather than reading empty. `NOT NULL` with a default is the one
+shape that survives both directions. The value is `Guid.Empty` on
+`AddSagaPaymentVerdictJoin`'s terms one release back: it is the conservative
+choice rather than merely a legal one, because it is **nobody**, where any
+other default would name a real subject that was never that order's.
+
+**The gate is three tests, and two of them exist because the first one cannot
+fail informatively on its own.** `No_command_contract_carries_a_subject`
+reflects over every contract that does not implement `IIntegrationEvent` —
+§9.1's own command/event distinction, stated on `CancelOrder` — and asserts
+none declares a member spelled like a subject. An empty offender set is exactly
+what a broken detector produces, so a positive control points the same detector
+at `OrderPlaced` and requires it to find the `CustomerId` ADR-028 *keeps*; a
+third asserts the command set is non-empty and a proper subset of the
+contracts, since a filter that selects nothing makes the rule vacuous while
+leaving it green. All three were observed against a reintroduced `CustomerId`:
+the rule went red naming the offending member, and both controls stayed green.
+
+**The spelling list is incomplete by construction and says so.** It matches
+`Customer`, `Buyer`, `Payer`, `Subject`, `User` and `Principal` as substrings,
+so a subject added under a name nobody predicted gets past. That is stated at
+the site rather than papered over — the control keeps the gate from being
+*uninformative*, which is a different property from keeping it complete, and
+conflating the two is how this repository's gates have failed before.
+
+**What this does not close is #44, and the residual is written into three
+files rather than left to a reader.** One shared RabbitMQ principal still
+writes every queue, so anyone reaching the bus can still send an
+`AuthorisePayment`. What they can no longer do is choose *who* it charges: a
+forged command naming a real order re-triggers that order's own authorisation
+instead of redirecting one at a customer of the sender's choosing — a duplicate
+charge rather than a misdirected one. A forged `OrderPlaced` could still seed a
+false record; that is the same issue and a broader compromise, visible to every
+consumer of that event rather than to none.
+
+**The first draft of that residual named §8.5 as absorbing the duplicate, and
+§8.5 cannot reach it.** `IdempotencyBehavior` is an Application-pipeline
+behaviour constrained to `IIdempotentCommand` and keyed on a `CommandId`;
+`AuthorisePayment` implements neither and, being a `Common.Contracts` message,
+never enters that pipeline. §9.5's inbox is the broker-side control and keys on
+`(MessageId, Endpoint)`, which a forger chooses freshly — it suppresses an
+accidental redelivery, not a deliberate second send. **A residual that names a
+control which does not cover it is worse than one that names none**, because
+the citation is what stops the next reader checking. What survives is the true
+and smaller claim — misdirected becomes duplicate — plus an owed rule for the
+service that does not exist yet: Payments must make authorisation idempotent
+per order against its own `PaymentIntent`. This is the repository's own lesson
+arriving from the other side: *a registered name is not a live signal*, one
+layer up, where the name was a whole mechanism.
+
+**One consequence belongs to a service nobody has written, which is when it is
+cheapest to write down.** §9.4 orders nothing between two deliveries, so an
+`AuthorisePayment` can overtake the `OrderPlaced` it resolves against — the
+race §3.2 already records for `ReleaseStock` and `ReserveStock`. **A missing
+record is a wait, not a decline.** Payments faults the command so the retry
+envelope redelivers it, and must not publish `PaymentDeclined`, which is a
+business verdict about a payer it has not identified. §9.6's fifteen-minute
+payment timeout bounds the wait, so an order whose `OrderPlaced` never arrives
+compensates rather than hanging.
+
+**The failing test was in the half that needs a daemon, which is the argument
+for running both halves before believing a green one.** Three new contract
+tests passed in the fast suite and `DatabaseSmokeTests` — which counts applied
+migrations against a named list — failed on the eleventh, in the integration
+half. The list is the assertion and the length is derived from it, so the fix
+was one row; #126 had already removed the literal that would have made it two.
+
+**Counts pinned to this branch**: the solution runs 899 tests, 711 of them
+outside `Category=Integration`, and the three CI stages are 18, 693 and 188.
+Reconciled against a full local `dotnet test Platform.slnx`, and owed a check
+against this branch's own CI run — the three new tests land in the **unit**
+stage, because that stage's filter is `FullyQualifiedName!~ArchitectureTests`
+and `Platform.IntegrationTests.ContractTests` matches neither that nor
+`Category=Integration`, whatever the project's name suggests.
+
+---
+
 ## The copy that was filled only by accident (#121)
 
 §6.6's order summary wrote each product's name and thumbnail into every order's
