@@ -1583,47 +1583,63 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
             if not line.lstrip().startswith("#") and line.strip()
         ]
 
-    # Every legitimate use of the reviewer's result file, enumerated. An
-    # ALLOW-list, and it is the SECOND inversion this pull request has had to
-    # make: the first version banned `cat`, `tee`, `head` and friends by name,
-    # which `jq -r . "$result"`, `sed`, `awk` or `base64` walk straight past.
-    # A deny-list passes every spelling nobody thought of — written down in
-    # this repository twice already, and reimplemented here anyway.
+    # Every legitimate use of the reviewer's result file, as an anchored
+    # pattern matched against ONE shell command. An allow-list, and the second
+    # correction to it: the first version banned streaming commands by name,
+    # and the version after that accepted any LINE containing an allowed
+    # fragment — so `rm -f "$result"; cat "$result"` matched exactly one entry
+    # and passed while dumping the transcript.
     #
-    # The point of pinning the whole set rather than the dangerous half: a
-    # newly introduced read fails this case whatever it is, so it has to be
-    # looked at rather than merely not resembling a mistake someone listed.
+    # Two escapes closed here, both reproduced before being fixed:
+    #   `${result}`  — a different spelling of the same expansion, which the
+    #                  line filter did not recognise at all.
+    #   `a; b`       — a second command riding on an allowed line, which a
+    #                  substring test cannot see because it never asks where
+    #                  the allowed fragment ENDS.
+    #
+    # Hence: normalise the expansion, split the line into commands, and require
+    # each command that touches the file to match one pattern from end to end.
+    # A new read fails whatever it is, which is the property — not "does not
+    # resemble a mistake someone listed".
     ALLOWED_RESULT_USES = (
-        ("result=$(mktemp", "created"),
-        ('rm -f "$result"', "cleaned up on exit"),
-        ('--output-format json >"$result"', "written by the reviewer"),
-        ('[ -s "$result" ]', "emptiness check"),
-        ('"$result" 2>/dev/null) ||', "stopReason extracted"),
-        ("jq -r '.cancellationCategory // empty' \"$result\"",
+        (r'result=\$\(mktemp .*\)', "created"),
+        (r'rm -f "\$result" 2>/dev/null', "cleaned up on exit"),
+        (r'grok .*>"\$result"', "written by the reviewer"),
+        (r'\[ -s "\$result" \]', "emptiness check"),
+        (r'"\$result" 2>/dev/null\)', "stopReason extracted"),
+        (r"jq -r '\.cancellationCategory // empty' \"\$result\" 2>/dev/null >&2",
          "cancellation category extracted"),
     )
 
-    def result_lines(self):
-        # Both spellings: the assignment that creates it names the variable
-        # bare, every later use dereferences it. Matching only `$result` misses
-        # the creation, which is the entry whose absence would mean the file is
-        # never made at all.
-        return [
-            line for line in self.code_lines()
-            if "$result" in line or "result=$(" in line
-        ]
+    def result_commands(self):
+        """Every shell command in the script that touches the result file.
 
-    def test_every_use_of_the_result_file_is_one_of_the_known_ones(self):
-        for line in self.result_lines():
-            with self.subTest(line=line.strip()):
+        `${result}` is normalised to `$result` first: they are the same
+        expansion, and matching only one of them is how a check reports a
+        clean file it never looked at.
+        """
+        found = []
+        for line in self.code_lines():
+            normalised = line.replace("${result}", "$result")
+            if "$result" not in normalised and "result=$(" not in normalised:
+                continue
+            for command in re.split(r"\|\||&&|;|\|", normalised):
+                command = command.strip()
+                if "$result" in command or "result=$(" in command:
+                    found.append((line.strip(), command))
+        return found
+
+    def test_every_command_touching_the_result_file_is_a_known_one(self):
+        for line, command in self.result_commands():
+            with self.subTest(command=command):
                 matched = [
-                    why for token, why in self.ALLOWED_RESULT_USES if token in line
+                    why for pattern, why in self.ALLOWED_RESULT_USES
+                    if re.fullmatch(pattern, command)
                 ]
                 self.assertEqual(
                     1, len(matched),
-                    "a new read of the reviewer's transcript: it must be reviewed "
-                    "and added here deliberately, not merely differ from a listed "
-                    "mistake")
+                    f"unrecognised read of the reviewer's transcript in `{line}` — "
+                    "it must be reviewed and added to the allow-list deliberately")
 
     def test_every_known_use_is_still_present(self):
         # The other direction, which is the half a declared list cannot check
@@ -1631,22 +1647,50 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
         # disappears — including the stopReason extraction, whose absence is
         # what turns a missing suggestions.md from a clean verdict into a
         # silent failure.
-        lines = self.result_lines()
-        for token, why in self.ALLOWED_RESULT_USES:
+        commands = [command for _, command in self.result_commands()]
+        for pattern, why in self.ALLOWED_RESULT_USES:
             with self.subTest(use=why):
-                self.assertTrue(any(token in line for line in lines),
-                                f"the {why} use is gone")
+                self.assertTrue(
+                    any(re.fullmatch(pattern, command) for command in commands),
+                    f"the {why} use is gone")
 
-    def test_no_read_of_it_is_an_unbounded_dump(self):
-        # The specific escape the deny-list version could not see: `jq -r .`
-        # emits the whole document, and it is neither `cat` nor anything else
-        # a list of streaming commands would have caught. Every jq over the
-        # transcript must name a field.
-        for line in self.result_lines():
-            if "jq" not in line:
+    def test_the_known_bypasses_are_refused(self):
+        """The falsification, run against the predicate rather than beside it.
+
+        Each of these passed some earlier version of this check: the first four
+        walked past the deny-list of streaming commands, and the last two past
+        the substring allow-list that replaced it.
+        """
+        clean = REVIEW.read_text(encoding="utf-8")
+        for escape in ('cat "$result"', 'jq -r . "$result"', 'sed -n p "$result"',
+                       'base64 "$result"', 'cat "${result}"',
+                       'rm -f "$result"; cat "$result"'):
+            with self.subTest(escape=escape):
+                spiked = clean.replace(
+                    'echo "grok finished its turn',
+                    escape + '\necho "grok finished its turn', 1)
+                self.assertIn(escape, spiked, "the injection point moved")
+                offenders = [
+                    command for command in self.commands_in(spiked)
+                    if not any(re.fullmatch(pattern, command)
+                               for pattern, _ in self.ALLOWED_RESULT_USES)
+                ]
+                self.assertTrue(offenders, f"{escape} was not caught")
+
+    def commands_in(self, text):
+        """result_commands() over arbitrary text — for the falsification above."""
+        found = []
+        for line in text.splitlines():
+            if line.lstrip().startswith("#") or not line.strip():
                 continue
-            with self.subTest(line=line.strip()):
-                self.assertNotRegex(line, r"jq\s+(-[a-zA-Z]+\s+)*['\"]?\.['\"]?\s")
+            normalised = line.replace("${result}", "$result")
+            if "$result" not in normalised and "result=$(" not in normalised:
+                continue
+            for command in re.split(r"\|\||&&|;|\|", normalised):
+                command = command.strip()
+                if "$result" in command or "result=$(" in command:
+                    found.append(command)
+        return found
 
     def test_the_verdict_is_still_parsed_out_of_it(self):
         # The positive control. Every assertion above would pass against a
@@ -1668,6 +1712,85 @@ class TheReviewTranscriptDoesNotCrossBack(unittest.TestCase):
         ]
         self.assertEqual(1, len(status))
         self.assertIn(">&2", status[0])
+
+
+class BothSweepsAgreeOnWhatSuppresses(unittest.TestCase):
+    """#57 — the de-duplication gate, and the two copies of it.
+
+    An issue only blocks a re-file if the repository owner opened it or a
+    maintainer labelled it. The repository is public, so without that test any
+    account could file "<topic> is tracked" and have the next sweep suppress
+    the real finding — and because a suppressed candidate used to leave a
+    clean round, it ended the sweep and reported convergence.
+
+    **What this pins is the weaker half, and saying which is the point.** The
+    predicate is prose that an agent follows, not code that runs, so these
+    cases cannot prove the gate is applied — only that both files still state
+    it and that neither has drifted back to the unconditional rule. The
+    enforceable version is a helper the sweeps call, on the same argument this
+    pull request makes for the feed filters; it is #150 rather than something
+    smuggled into a review round.
+
+    Two copies is the reason a test exists at all. `security-sweep.md` and
+    `bug-sweep.md` carry this gate word for word, the issue named only the
+    first, and a rule fixed at one site and not its neighbour is a shape this
+    repository has already been caught by.
+    """
+
+    SWEEPS = ("security-sweep.md", "bug-sweep.md")
+
+    REQUIRED = (
+        "author is the repository **owner**",
+        "maintainer-applied label",
+        "is not tracking and blocks nothing",
+    )
+
+    # The exact phrasing the gate had before #57, which is what "drifting back"
+    # would look like. Kept as a literal because it is a historical string
+    # rather than a rule — if it ever reappears, the condition has been dropped.
+    RETIRED = "An open issue, a `wontfix`, or an accepted-risk record blocks a re-file"
+
+    def sweep(self, name):
+        """The file with its wrapping collapsed.
+
+        These are 80-column prose files and the two copies wrap the same
+        sentence at different points, so a literal match finds it in one and
+        not the other — measured, not guessed: the retired phrasing below is
+        present in `main`'s security-sweep.md as written and absent from
+        `main`'s bug-sweep.md, which wraps it one word earlier. A gate that
+        covers one of two copies is the failure this class exists for.
+        """
+        text = (COMMANDS / name).read_text(encoding="utf-8")
+        return " ".join(text.split())
+
+    def test_both_sweeps_state_the_trust_condition(self):
+        for name in self.SWEEPS:
+            for phrase in self.REQUIRED:
+                with self.subTest(sweep=name, phrase=phrase):
+                    self.assertIn(phrase, self.sweep(name))
+
+    def test_neither_sweep_still_carries_the_unconditional_rule(self):
+        # The negative, and it was observed against the pre-#57 text: both
+        # files matched this string before the gate was qualified.
+        for name in self.SWEEPS:
+            with self.subTest(sweep=name):
+                self.assertNotIn(self.RETIRED, self.sweep(name))
+
+    def test_an_untracked_match_files_rather_than_suppressing(self):
+        # The correction the first fix needed. Reporting the candidate as
+        # suppressed-but-unclean left the finding unfiled while the loop spun,
+        # so a stranger who could no longer END the sweep could still stop the
+        # issue from ever being written.
+        for name in self.SWEEPS:
+            with self.subTest(sweep=name):
+                self.assertIn("files normally", self.sweep(name))
+
+    def test_the_clean_round_rule_agrees_with_the_gate(self):
+        # The contradiction round 2 found: a qualifier added four paragraphs
+        # below the summary it qualifies leaves the summary as the rule.
+        for name in self.SWEEPS:
+            with self.subTest(sweep=name):
+                self.assertIn("tracked by the gate's test", self.sweep(name))
 
 
 class HarnessControlSurfaceIsDenied(unittest.TestCase):
