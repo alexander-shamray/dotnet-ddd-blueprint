@@ -105,14 +105,29 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
         // correlates. A fault that never recovers would be a regression this
         // branch argued for in prose and never measured. Copilot found the gap.
         //
-        // The ladder is Exponential(5, 1s, 1min, 2s): deliveries at roughly 0,
-        // 1s, 3s, 7s, 15s and 31s. Publishing the placement 1.5 seconds in puts
-        // it after the first two attempts — both of which provably found no
-        // instance, because nothing had created one — and before the third,
-        // which is the delivery under test. The gap is deliberate rather than
-        // incidental: without it the placement could win the race and the
-        // assertion would pass on the ordinary path, proving nothing about
-        // recovery.
+        // **What this proves, and what it cannot.** It establishes that a
+        // cancellation published before its placement still ends in
+        // Compensating rather than in the error queue — the recovery §9.8's
+        // envelope is supposed to give #123, which §12.5's harness cannot
+        // express because it registers no UseMessageRetry.
+        //
+        // **The delay is the strongest arrangement available and is not a
+        // proof.** Publish returns at the transport boundary rather than when a
+        // consumer has run, so on a loaded runner the cancellation can still be
+        // queued when the clock expires; the placement then wins, the first
+        // delivery correlates, and this passes having exercised the ordinary
+        // path. It never fails spuriously — it occasionally proves less.
+        // Copilot named that, and the fence it asked for is **not observable
+        // here**: UseMessageRetry wraps the pipeline, so retries run inside it
+        // and no fault reaches an IReceiveObserver or IConsumeObserver until
+        // the ladder is exhausted at about fifty-seven seconds, past this
+        // suite's budget. Measured, by writing both observers and watching them
+        // stay silent for the whole wait.
+        //
+        // Closing it needs a signal the platform does not have — a first-attempt
+        // hook, or a shorter ladder on a test-only endpoint. Stated rather than
+        // papered over, because the alternative is a comment claiming a
+        // determinism the code does not deliver.
         var orderId = Guid.CreateVersion7();
 
         await PublishCancelledAsync(orderId, Guid.CreateVersion7(), CancelOrigins.User);
@@ -121,8 +136,8 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
 
         (await SagaRowsAsync(orderId)).ShouldBe(
             0,
-            "the arrange half is that the cancellation arrived FIRST — if a row " +
-                "exists here the ordering under test never happened");
+            "nothing has created an instance yet, so the delivery that has " +
+                "already run found none");
 
         await PublishPlacedAsync(orderId, Guid.CreateVersion7());
 

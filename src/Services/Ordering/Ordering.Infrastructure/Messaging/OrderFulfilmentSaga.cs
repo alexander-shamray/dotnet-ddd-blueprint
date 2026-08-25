@@ -799,8 +799,31 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // same transaction (§6.3) — so it is also the first moment a
             // despatch can be expected, which is why DespatchTimeout is armed
             // here rather than one state back.
+            // **A confirmation arriving after an observed cancellation raises the
+            // row on the way through (#143), and the transition still happens.**
+            // The confirmation is a fact: the aggregate committed the status, so
+            // withholding the move would leave the machine claiming a state the
+            // order has left. What the flag adds is that Shipping has now been
+            // told AFTER a cancellation reached Inventory, which is exactly the
+            // evidence Compensating's own When(OrderConfirmed) escalates on — the
+            // same event, the same reason, one state apart.
+            //
+            // **Left unguarded this was the one forward transition that did not
+            // ask**, which made "every forward transition asks" false by one
+            // branch. Confirmed's own branches would still have caught a later
+            // despatch or cancellation, because the flag rides on the instance —
+            // but a DespatchTimeout firing from there raises not_despatched and
+            // nothing would ever have recorded the cancellation.
             When(OrderConfirmed)
                 .Unschedule(ConfirmationTimeout)
+                .If(
+                    ctx => ctx.Saga.CancellationObserved,
+                    cancelled => cancelled
+                        .Send(
+                            OrderingQueue,
+                            ctx => new FlagOrderForReview(
+                                ctx.Saga.OrderId,
+                                ReviewReasons.CancelledAfterConfirmation)))
                 .Schedule(DespatchTimeout, ctx => new DespatchExpired(ctx.Saga.OrderId))
                 .TransitionTo(Confirmed),
 

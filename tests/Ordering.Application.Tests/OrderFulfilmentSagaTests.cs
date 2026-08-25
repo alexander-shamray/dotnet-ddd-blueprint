@@ -2624,6 +2624,48 @@ public class OrderFulfilmentSagaTests
     }
 
     [Fact]
+    public async Task A_confirmation_after_an_early_release_escalates_on_its_way_to_Confirmed()
+    {
+        // **The forward transition #143 left unguarded, and the one that made
+        // "every forward transition asks" false by a branch.** A StockReleased
+        // in AwaitingConfirmation records the cancellation; the OrderConfirmed
+        // that follows then advanced to Confirmed and armed a three-day
+        // despatch wait without recording that Shipping had been told after a
+        // cancellation reached Inventory. Confirmed's own branches would have
+        // caught a later despatch or cancellation — the flag rides on the
+        // instance — but a DespatchTimeout firing from there raises
+        // not_despatched, and nothing would ever have said the order was
+        // cancelled. Copilot found it.
+        //
+        // The transition still happens: the aggregate committed the status, so
+        // the machine may not claim a state the order has left. What the guard
+        // adds is the row, which is what Compensating's own When(OrderConfirmed)
+        // raises on the same event one state along.
+        (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
+        await using (provider)
+        {
+            var orderId = Guid.CreateVersion7();
+
+            await Publish(harness, SagaContracts.OrderPlaced(orderId, Customer));
+            await Publish(harness, SagaContracts.StockReserved(orderId));
+            await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "auth-3"));
+            await Publish(harness, SagaContracts.StockReleased(orderId));
+            await Publish(harness, SagaContracts.OrderConfirmed(orderId, Customer));
+
+            (await Sent<FlagOrderForReview>(harness, m =>
+                m.OrderId == orderId &&
+                m.Reason == ReviewReasons.CancelledAfterConfirmation))
+                    .ShouldBeTrue();
+
+            ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
+                harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
+
+            (await saga.Exists(orderId, x => x.Confirmed)).ShouldNotBeNull(
+                "the confirmation is a fact and the machine still records it");
+        }
+    }
+
+    [Fact]
     public async Task A_despatch_after_an_early_release_marks_the_order_shipped_and_escalates()
     {
         // **#143's sharpest row.** Confirmed's ShipmentDispatched finalises,
