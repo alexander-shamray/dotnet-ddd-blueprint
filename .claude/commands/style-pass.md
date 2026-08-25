@@ -41,7 +41,7 @@ used to carry `Bash(python:*)`, which is a prefix grant on a general-purpose
 interpreter: `python -c "<anything>"` was auto-approved, and one `open(…,'w')`
 reaches every path the `Edit(…)` denies cover — `.claude/scripts/**`,
 `.claude/sandbox/**`, `.claude/commands/**`, `.claude/agents/**`,
-`.claude/settings.json` and `.remember/**` —
+`.claude/settings.json`, `.claude/settings.local.json` and `.remember/**` —
 while one `subprocess.run` reaches every `git push --force` and `git switch -fC`
 the deny list and the `git-*.sh` helpers exist to keep out. A rule that
 matches `python -c` cannot see what the interpreter then does, so the whole

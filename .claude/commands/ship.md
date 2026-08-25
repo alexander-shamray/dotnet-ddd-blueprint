@@ -248,11 +248,13 @@ never a body. An unresolved thread from an earlier round is
 exactly the state a fresh clean review never repeats, and it is the one the
 oid cannot see.
 
-**The two reads are scoped differently, and getting that backwards fails in
-both directions.** `pr-review-comments.sh` returns *every* inline comment the
-PR has ever carried, replies included — so on any PR whose earlier rounds found
-something, its output is non-empty forever and a resume reading it whole would
-never see a clean review again. It has to be joined to the candidate review.
+**The reads are scoped differently, and getting that backwards fails in
+both directions.** `pr-review-comments.sh` returns every **admitted** inline
+comment the PR has ever carried, replies included — every round's, not this
+round's, and the author filter narrows *who* it returns rather than *when* — so
+on any PR whose earlier rounds found something, its output is non-empty forever
+and a resume reading it whole would never see a clean review again. It has to
+be joined to the candidate review.
 **Threads are the opposite and stay global**: an unresolved thread from round
 three is still owed at round nine, which is the entire reason that signal
 exists.
