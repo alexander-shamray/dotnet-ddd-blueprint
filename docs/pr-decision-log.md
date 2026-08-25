@@ -225,14 +225,20 @@ specification somebody else will follow with Payments running, so a sequence
 that is safe only under a condition it never states is a defect in the
 specification even when the code is right.
 
-**The gate is three tests, and two of them exist because the first one cannot
-fail informatively on its own.** `No_command_contract_carries_a_subject`
-asserts no command contract declares a member spelled like a subject. An empty
-offender set is exactly what a broken detector produces, so a positive control
-points the same detector at `OrderPlaced` and requires it to find the
-`CustomerId` ADR-028 *keeps*; a third names the command roots the judged set
-must contain and the exemptions it must not, since a filter that selects
-nothing makes the rule vacuous while leaving it green.
+**The gate is one assertion and the controls it cannot do without.**
+`No_command_contract_carries_a_subject` asserts no command contract declares a
+member spelled like a subject, and an empty offender set is exactly what a
+broken detector produces — so one control points the same detector at
+`OrderPlaced` and requires it to find the `CustomerId` ADR-028 *keeps*, one
+names the command roots the judged set must contain and the exemptions it must
+not, since a filter that selects nothing makes the rule vacuous while leaving
+it green, and one pairs the spelling vocabulary against the cases that exercise
+it, so a spelling added to the detector and to nothing else fails the build.
+**No count of them is written here on purpose.** Successive review rounds each
+added one, so any figure stated at any point in that would have been wrong by
+the next round — which is the argument `CLAUDE.md` makes about its own line
+count and the blueprint makes about its callout totals, arriving inside a
+single branch rather than across several.
 
 **Defining "command" took four attempts, and each fix opened the next fault.**
 The first spelling read every contract. The second narrowed to those not
@@ -423,15 +429,19 @@ outside `Category=Integration`, and the three CI stages are 18, 702 and 190.
 Reconciled against a full local `dotnet test Platform.slnx`, and an earlier
 head of this branch was reconciled against **its own CI run**, whose log summed
 to 899 over twenty-four per-project stage totals — the check this file names
-for a restated number, performed rather than left owed. Two later review rounds
-each added tests, and each time the **stage** was settled by re-measuring the
-fast half rather than by assuming: the two behavioural migration tests are
-integration (fast stayed 711), and the two shared-payload pins are unit (fast
-moved to 713). That distinction is not cosmetic — the three stages have
-separate floors in `.github/pipeline-gate/`, so guessing which one grew is
-guessing which floor to raise. The five contract tests land in the **unit**
-stage, because that stage's filter is `FullyQualifiedName!~ArchitectureTests`
-and `Platform.IntegrationTests.ContractTests` matches neither that nor
+for a restated number, performed rather than left owed. Several later review
+rounds each added tests, and each time the **stage** was settled by
+re-measuring the fast half rather than by assuming: the behavioural migration
+tests are integration and left the fast half where it was, where every
+`ContractTests` addition is unit and moved it. That distinction is not cosmetic
+— the three stages have separate floors in `.github/pipeline-gate/`, so
+guessing which one grew is guessing which floor to raise. **The intermediate
+totals are deliberately not written out.** Each was superseded by the next
+round, and a chronology of superseded figures is a row of numbers a reader can
+check against nothing while every one of them contradicts the paragraph's own
+opening sentence. Every `ContractTests` case lands in the **unit** stage,
+because that stage's filter is `FullyQualifiedName!~ArchitectureTests` and
+`Platform.IntegrationTests.ContractTests` matches neither that nor
 `Category=Integration`, whatever the project's name suggests.
 
 ---

@@ -1353,8 +1353,8 @@ and it buys nothing once there is one.
 **The rule is enforced rather than reviewed.** `ContractTests` asserts that no
 command contract declares a member spelled like a subject.
 
-**Defining "command" is the part that had to be got right, and it took three
-attempts because the obvious definitions fail in opposite directions.** §9.1
+**Defining "command" is the part that had to be got right, because the obvious
+definitions fail in opposite directions.** §9.1
 states one implication only — commands do not implement `IIntegrationEvent` —
 so the converse is not available:
 
