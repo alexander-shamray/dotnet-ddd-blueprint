@@ -49,3 +49,29 @@ public static class CancellationReasons
 
     public static string ToCode(CancellationReason reason) => ToCodeMap[reason];
 }
+
+/// <summary>
+/// The wire vocabulary for <see cref="CancellationOrigin"/> (§9.1). One
+/// direction only — nothing parses an origin back, because no ingress accepts
+/// one.
+/// </summary>
+/// <remarks>
+/// <b>That asymmetry is the point rather than an omission.</b>
+/// <c>CancellationReasons</c> above parses because a caller sends a reason;
+/// an origin is written as a literal at the entry point that knows it
+/// (<c>CommandOrigin</c>, §11.4) and never bound from a request or a message,
+/// for the reason that type gives — a value a caller could set is a value that
+/// skips the check it exists to make. A <c>TryParse</c> here would be the
+/// first door onto exactly that.
+/// </remarks>
+public static class CancellationOrigins
+{
+    private static readonly FrozenDictionary<CancellationOrigin, string> ToCodeMap =
+        new Dictionary<CancellationOrigin, string>
+        {
+            [CancellationOrigin.User] = CancelOrigins.User,
+            [CancellationOrigin.Workflow] = CancelOrigins.Workflow
+        }.ToFrozenDictionary();
+
+    public static string ToCode(CancellationOrigin origin) => ToCodeMap[origin];
+}

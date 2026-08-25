@@ -171,14 +171,40 @@ public class OrderTests
     {
         Order order = AnOrder();
 
-        order.Cancel(CancellationReason.CustomerRequest, Now);
+        order.Cancel(CancellationReason.CustomerRequest, CancellationOrigin.User, Now);
 
         order.Status.ShouldBe(OrderStatus.Cancelled);
         OrderCancelledDomainEvent cancelled = order.DomainEvents
             .OfType<OrderCancelledDomainEvent>()
             .ShouldHaveSingleItem();
         cancelled.Reason.ShouldBe(CancellationReason.CustomerRequest);
+        cancelled.Origin.ShouldBe(CancellationOrigin.User);
         cancelled.CustomerId.ShouldBe(order.CustomerId);
+    }
+
+    [Theory]
+    [InlineData(CancellationReason.CustomerRequest, CancellationOrigin.Workflow)]
+    [InlineData(CancellationReason.PaymentDeclined, CancellationOrigin.User)]
+    public void The_origin_is_carried_independently_of_the_reason(
+        CancellationReason reason,
+        CancellationOrigin origin)
+    {
+        // #123's whole premise. §11.4's endpoint parses all five reason codes,
+        // so neither of these pairings is exotic: a customer may cancel with
+        // payment_declined, and the saga's own compensation carries whatever
+        // reason it sent — including customer_request when it is forwarding
+        // one. A test that only ever paired CustomerRequest with User would
+        // pass against an Origin derived from Reason, which is exactly the
+        // inference this field exists to replace.
+        Order order = AnOrder();
+
+        order.Cancel(reason, origin, Now);
+
+        OrderCancelledDomainEvent cancelled = order.DomainEvents
+            .OfType<OrderCancelledDomainEvent>()
+            .ShouldHaveSingleItem();
+        cancelled.Reason.ShouldBe(reason);
+        cancelled.Origin.ShouldBe(origin);
     }
 
     [Fact]
@@ -188,8 +214,8 @@ public class OrderTests
         // an error — and must not stage a second outbox row either.
         Order order = AnOrder();
 
-        order.Cancel(CancellationReason.OutOfStock, Now);
-        order.Cancel(CancellationReason.CustomerRequest, Now.AddMinutes(1));
+        order.Cancel(CancellationReason.OutOfStock, CancellationOrigin.Workflow, Now);
+        order.Cancel(CancellationReason.CustomerRequest, CancellationOrigin.User, Now.AddMinutes(1));
 
         order.Status.ShouldBe(OrderStatus.Cancelled);
         order.DomainEvents.OfType<OrderCancelledDomainEvent>().ShouldHaveSingleItem()
@@ -204,7 +230,8 @@ public class OrderTests
         order.ConfirmPayment(PaymentReference.Of("pay_1"), Now);
         order.MarkShipped(TrackingNumber.Of("TRK-1"), Now);
 
-        Should.Throw<DomainException>(() => order.Cancel(CancellationReason.CustomerRequest, Now));
+        Should.Throw<DomainException>(
+            () => order.Cancel(CancellationReason.CustomerRequest, CancellationOrigin.User, Now));
     }
 
     [Fact]

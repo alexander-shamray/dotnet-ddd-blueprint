@@ -114,6 +114,40 @@ public static class CancelReasons
 }
 
 /// <summary>
+/// The wire vocabulary for <see cref="OrderCancelled.Origin"/> — who asked for
+/// a cancellation, which <see cref="CancelReasons"/> deliberately does not say.
+/// </summary>
+/// <remarks>
+/// <b>Two members and no third, because the question is a partition rather
+/// than a list.</b> §9.6's saga asks one thing of this field — did this
+/// workflow cause the cancellation — so every origin that is not
+/// <see cref="Workflow"/> answers the same way, and adding a member for each
+/// new ingress would invite a consumer to switch on it and forget one. A
+/// finer vocabulary belongs on a field that is read for a finer purpose.
+/// </remarks>
+public static class CancelOrigins
+{
+    /// <summary>
+    /// §11.4's endpoint, with a principal behind it — the customer, or an
+    /// operator holding <c>orders:admin</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>An absent <see cref="OrderCancelled.Origin"/> does NOT read as this.</b>
+    /// It means the event was published before the field existed, and a
+    /// consumer holds whatever it did then — see that type's remarks. Reading
+    /// absent as a user origin is the direction that faults every ordinary
+    /// cancellation for the length of a rolling deploy.
+    /// </remarks>
+    public const string User = "user";
+
+    /// <summary>
+    /// §9.6's fulfilment saga compensating — the <c>CancelOrder</c> one of its
+    /// own branches sent, arriving with no principal at all.
+    /// </summary>
+    public const string Workflow = "workflow";
+}
+
+/// <summary>
 /// The wire vocabulary for <see cref="FlagOrderForReview.Reason"/> (§9.6).
 /// </summary>
 public static class ReviewReasons

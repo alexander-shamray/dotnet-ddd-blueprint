@@ -190,7 +190,12 @@ public class OutboxSerialisationTests
             [typeof(OrderShippedDomainEvent)] =
                 new OrderShippedDomainEvent(Order, Customer, TrackingNumber.Of("TRK-1"), Raised),
             [typeof(OrderCancelledDomainEvent)] =
-                new OrderCancelledDomainEvent(Order, Customer, CancellationReason.CustomerRequest, Raised)
+                new OrderCancelledDomainEvent(
+                    Order,
+                    Customer,
+                    CancellationReason.CustomerRequest,
+                    CancellationOrigin.User,
+                    Raised)
         };
 
         public static object Create(Type type) =>

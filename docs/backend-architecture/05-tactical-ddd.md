@@ -239,7 +239,11 @@ public sealed class Order : AggregateRoot<OrderId>
         Raise(new OrderShippedDomainEvent(Id, CustomerId, tracking, now));
     }
 
-    public void Cancel(CancellationReason reason, DateTimeOffset now)
+    // Origin is recorded, never checked: no invariant here turns on who
+    // asked, and §11.4 has already decided whether this caller may. It
+    // travels because §9.6's saga has to tell its own echo from a
+    // cancellation somebody else caused, and Reason cannot answer that.
+    public void Cancel(CancellationReason reason, CancellationOrigin origin, DateTimeOffset now)
     {
         if (Status is OrderStatus.Shipped or OrderStatus.Delivered)
         {
@@ -250,7 +254,7 @@ public sealed class Order : AggregateRoot<OrderId>
             return;   // Idempotent — cancelling twice is not an error.
 
         Status = OrderStatus.Cancelled;
-        Raise(new OrderCancelledDomainEvent(Id, CustomerId, reason, now));
+        Raise(new OrderCancelledDomainEvent(Id, CustomerId, reason, origin, now));
     }
 
     private void EnsureStatus(OrderStatus expected)
@@ -401,6 +405,7 @@ public sealed record OrderCancelledDomainEvent(
     OrderId OrderId,
     CustomerId CustomerId,
     CancellationReason Reason,
+    CancellationOrigin Origin,
     DateTimeOffset OccurredAt) : IDomainEvent;
 ```
 

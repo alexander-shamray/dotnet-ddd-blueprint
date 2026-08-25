@@ -11,7 +11,9 @@ namespace Common.Contracts.Ordering.V1;
 /// reserving stock and authorising a card for an order the customer had
 /// already cancelled — the endpoint is the only way a customer's cancellation
 /// reaches the workflow. A copy arriving after the saga has finalised
-/// correlates to no instance and is discarded in silence.
+/// correlates to no instance, and what happens then depends on
+/// <see cref="Origin"/>: the workflow's own echo is discarded in silence,
+/// and anything else faults onto §13.6's pager rather than vanishing.
 /// </para>
 /// <para>
 /// <b>This summary named two consumers until a review counted three.</b> §3.2
@@ -29,6 +31,26 @@ namespace Common.Contracts.Ordering.V1;
 /// <see cref="CancelOrder"/> takes on the way in, and the two vocabularies are
 /// deliberately one — a cancellation caused by a timeout is reported with the
 /// code the saga sent.
+/// <para>
+/// <b><see cref="Reason"/> does not identify the origin, which is what
+/// <see cref="Origin"/> is for.</b> §11.4's endpoint parses the whole
+/// <c>CancellationReasons</c> map, so a caller may send <c>payment_declined</c>
+/// as readily as <c>customer_request</c>: the reason is what somebody
+/// asserted, not where the request came from. §9.6's saga has to tell its own
+/// echo from a cancellation it did not cause, and read <see cref="Reason"/>
+/// for that until a review established the two are independent.
+/// </para>
+/// <para>
+/// <b><see cref="Origin"/> is optional, and absent means "published before
+/// this field existed" rather than "unknown origin".</b> §9.2 makes a new
+/// optional field additive, so this is not a V2; ADR-026's ordering still
+/// applies inside the one service, because a rolling deploy has instances
+/// publishing this event before they populate it. A consumer must therefore
+/// hold whatever it did before the field for the length of that deploy —
+/// §9.6's saga discards on absent for exactly that reason — and that tolerance
+/// is §15.5's expand phase with a contract phase owed, not a permanent
+/// reading.
+/// </para>
 /// </remarks>
 public sealed record OrderCancelled : IIntegrationEvent
 {
@@ -43,4 +65,12 @@ public sealed record OrderCancelled : IIntegrationEvent
     public required Guid CustomerId { get; init; }
 
     public required string Reason { get; init; }
+
+    /// <summary>
+    /// Who asked — a <see cref="CancelOrigins"/> code. Not
+    /// <c>required</c>, because an instance running the release before this
+    /// field was populated publishes without it; see the remarks on this type
+    /// for what a consumer owes the absent case.
+    /// </summary>
+    public string? Origin { get; init; }
 }

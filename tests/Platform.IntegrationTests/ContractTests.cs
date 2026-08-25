@@ -204,9 +204,107 @@ public class ContractTests
                     .Select(p => $"{type.Name}.{p.Name}")
             ];
 
-            optional.ShouldBeEmpty(
+            // Subtracted from the FAILURES rather than from the candidates, so
+            // there is no narrowed selection to pass vacuously — the same shape
+            // the composition-root gate ended up in after three attempts at
+            // filtering what it looked at.
+            string[] unexplained = [.. optional.Except(MidRolloutMembers)];
+
+            unexplained.ShouldBeEmpty(
                 $"{type.FullName} can be constructed without these, so a producer can omit them " +
                 "and every consumer reads a default (§12.6)");
+        }
+    }
+
+    /// <summary>
+    /// Members that are deliberately not <c>required</c> because they are
+    /// halfway through being added to a live contract (§9.2, §15.5's expand
+    /// phase). Each owes a contract phase that makes it <c>required</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>This list exists because the rule above and §9.2 could not both be
+    /// obeyed, and the first additive member found it.</b> §9.2 says a new
+    /// optional field is additive and needs no version bump; the rule above
+    /// says no contract may be constructible half-filled. Measured rather than
+    /// argued: <c>System.Text.Json</c> throws
+    /// <c>JsonException: … was missing required properties</c>, so a member
+    /// shipped as <c>required</c> faults every message the previous build
+    /// staged and has not yet published — a rolling deploy's ordinary state.
+    /// <b>The safe shape is the one the rule forbade</b>, so the rule admits
+    /// it by name instead of everywhere.
+    /// <para>
+    /// <b>It is self-clearing, which is the whole reason it is safe to have.</b>
+    /// The companion test below fails when an entry stops being optional, so
+    /// the release that makes the member <c>required</c> cannot leave the
+    /// exemption standing — and an entry cannot quietly become permanent, which
+    /// is what a list of known exceptions usually becomes. Same shape as
+    /// <c>awaiting-signal.yaml</c>'s unloaded alerts and their gate: a list of
+    /// deliberate gaps is only honest while something re-checks that they are
+    /// still gaps.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] MidRolloutMembers =
+    [
+        // #123. Absent means "published before this field existed" and §9.6's
+        // saga discards on it, holding the pre-#123 behaviour for the length of
+        // a deploy. The contract phase is owed once no instance publishes
+        // without it.
+        "OrderCancelled.Origin"
+    ];
+
+    [Fact]
+    public void A_payload_predating_a_mid_rollout_member_still_deserialises()
+    {
+        // **The property the whole expand phase rests on, measured rather than
+        // assumed.** §9.6 discards an OrderCancelled whose Origin is absent, on
+        // the reading that absent means "published before the field existed" —
+        // and that branch is only reachable if the payload deserialises at all.
+        // System.Text.Json refuses a missing `required` member outright, so had
+        // this member shipped required the message would fault before any saga
+        // branch saw it, and the discard would be unreachable code beside a
+        // chapter describing it.
+        //
+        // A hand-written payload rather than a serialised sample with the field
+        // removed: what is being modelled is a producer that never knew the
+        // member, and a round-trip through today's contract cannot produce one.
+        string beforeTheField = """
+            {"MessageId":"0199a1e0-0000-7000-8000-000000000001",
+             "CorrelationId":"0199a1e0-0000-7000-8000-000000000002",
+             "OccurredAt":"2026-08-25T12:00:00+00:00",
+             "OrderId":"0199a1e0-0000-7000-8000-000000000003",
+             "CustomerId":"0199a1e0-0000-7000-8000-000000000004",
+             "Reason":"customer_request"}
+            """;
+
+        OrderCancelled? deserialised = JsonSerializer.Deserialize<OrderCancelled>(beforeTheField);
+
+        deserialised.ShouldNotBeNull();
+        deserialised.Origin.ShouldBeNull("absent is what §9.6's discard branch reads");
+        deserialised.Reason.ShouldBe(CancelReasons.CustomerRequest);
+    }
+
+    [Fact]
+    public void Every_mid_rollout_member_is_still_mid_rollout()
+    {
+        // The gate on the list, without which the list is where the rule above
+        // goes to die: an entry outlives its rollout, nothing says so, and the
+        // exemption reads as a property of the contract rather than of a
+        // release. This fails from both directions — a member that has become
+        // required, and a name that no longer resolves at all.
+        foreach (string entry in MidRolloutMembers)
+        {
+            string[] parts = entry.Split('.');
+            parts.Length.ShouldBe(2, $"{entry} must be spelt Type.Member");
+
+            Type? type = Contracts.SingleOrDefault(t => t.Name == parts[0]);
+            type.ShouldNotBeNull($"{entry} names no public contract — the exemption outlived its type");
+
+            PropertyInfo? property = type.GetProperty(parts[1], BindingFlags.Public | BindingFlags.Instance);
+            property.ShouldNotBeNull($"{entry} names no member of {type.Name}");
+
+            IsAlwaysSupplied(property, type).ShouldBeFalse(
+                $"{entry} is now always supplied, so its rollout is over and the exemption " +
+                "belongs in the commit that ended it (§12.6)");
         }
     }
 

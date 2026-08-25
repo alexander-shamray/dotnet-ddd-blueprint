@@ -102,7 +102,8 @@ internal static class ContractSamples
             OccurredAt = Occurred,
             OrderId = Order,
             CustomerId = Customer,
-            Reason = CancelReasons.PaymentTimeout
+            Reason = CancelReasons.PaymentTimeout,
+            Origin = CancelOrigins.Workflow
         },
         [typeof(CancelOrder)] = () => new CancelOrder(Order, CancelReasons.OutOfStock),
         [typeof(ConfirmOrder)] = () => new ConfirmOrder(Order, "psp_ref_9f21"),

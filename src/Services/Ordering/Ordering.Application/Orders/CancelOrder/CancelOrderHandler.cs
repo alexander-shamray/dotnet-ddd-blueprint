@@ -47,14 +47,27 @@ public sealed class CancelOrderHandler(IOrderRepository orders, ICurrentUser cur
             return Result.Failure(OrderErrors.NotFound);
         }
 
+        // The origin travels onto the event so §9.6's saga can tell its own
+        // echo from a cancellation somebody else caused. THIS is the entry
+        // point that knows the answer, which is why the value is a literal
+        // here and never bound from the request (§11.4). Anything not provably
+        // the workflow is User, which is the direction that makes the saga
+        // fault rather than discard — so a CommandOrigin member added later
+        // fails loudly here instead of arriving as silence.
+        CancellationOrigin origin = command.InitiatedBy switch
+        {
+            CommandOrigin.System => CancellationOrigin.Workflow,
+            _ => CancellationOrigin.User
+        };
+
         // The aggregate still owns the transition — this handler decides who
         // may ask, not whether the order is in a state that permits it (§5.4).
-        // A shipped order throws, and that is a rule rather than a bug: it is
-        // translated here because the caller asked for something the model
-        // refuses, which is a 422 and not a 500.
+        // An order past despatch throws, and that is a rule rather than a bug:
+        // it is translated here because the caller asked for something the
+        // model refuses, which is a 422 and not a 500.
         try
         {
-            order.Cancel(command.Reason, clock.GetUtcNow());
+            order.Cancel(command.Reason, origin, clock.GetUtcNow());
         }
         catch (DomainException)
         {

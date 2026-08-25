@@ -37,4 +37,5 @@ public sealed record OrderCancelledDomainEvent(
     OrderId OrderId,
     CustomerId CustomerId,
     CancellationReason Reason,
+    CancellationOrigin Origin,
     DateTimeOffset OccurredAt) : IDomainEvent;
