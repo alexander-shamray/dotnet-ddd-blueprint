@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -28,12 +29,27 @@ public static class CorrelationIdExtensions
     public const string Header = "X-Correlation-Id";
 
     /// <summary>
+    /// The longest supplied ID this middleware will adopt (§10.4).
+    /// </summary>
+    /// <remarks>
+    /// Both values the fallback mints are far shorter — a 32-character trace ID
+    /// or a 36-character GUID — so the bound is generous rather than tight, and
+    /// exists to stop an unauthenticated caller choosing how much of every log
+    /// record on the platform it writes. Kestrel's own header budget is tens of
+    /// kilobytes, and this middleware runs above <c>UseAuthentication</c>
+    /// (§4.2), so the input is unauthenticated on every request that reaches a
+    /// host.
+    /// </remarks>
+    public const int MaxSuppliedLength = 128;
+
+    /// <summary>
     /// Assigns a correlation ID to any request that arrives without one, echoes
     /// it on the response, and pushes it onto the log scope.
     /// </summary>
     /// <remarks>
-    /// One middleware sits above this: <c>UseExceptionHandler</c>. That is
-    /// deliberate, and it is why the ID is written onto the <em>request</em>
+    /// Two middlewares sit above this: <c>UseSecurityHeaders</c> (§10.6), which
+    /// decides nothing about correlation, and <c>UseExceptionHandler</c>. The
+    /// second is deliberate, and it is why the ID is written onto the <em>request</em>
     /// rather than only into the log scope. An exception unwinding past here
     /// disposes the scope before the handler catches it, so the scope is gone
     /// by the time §10.5 builds the response — but <c>Request.Headers</c> is
@@ -49,13 +65,13 @@ public static class CorrelationIdExtensions
 
         return app.Use(async (context, next) =>
         {
-            // FirstOrDefault on absent headers is null; an empty header value is
-            // not, and would otherwise become a correlation ID of "".
+            // FirstOrDefault on absent headers is null; an empty header value
+            // is not, and would otherwise become a correlation ID of "".
             string? supplied = context.Request.Headers[Header].FirstOrDefault();
 
-            string correlationId = string.IsNullOrWhiteSpace(supplied)
-                ? Activity.Current?.TraceId.ToString() ?? Guid.CreateVersion7().ToString()
-                : supplied;
+            string correlationId = IsAdoptable(supplied)
+                ? supplied
+                : Activity.Current?.TraceId.ToString() ?? Guid.CreateVersion7().ToString();
 
             context.Request.Headers[Header] = correlationId;
             context.Response.Headers[Header] = correlationId;
@@ -67,5 +83,46 @@ public static class CorrelationIdExtensions
             using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
                 await next();
         });
+    }
+
+    /// <summary>
+    /// Whether a supplied header value is a plausible identifier this host is
+    /// willing to adopt, rather than merely a non-blank string.
+    /// </summary>
+    /// <remarks>
+    /// <b>Anything refused is replaced, never echoed.</b> The adopted value
+    /// reaches four places — the response header, the forwarded request, the
+    /// log scope every record for this request inherits, and §10.5's problem
+    /// body — so a value that fails here would otherwise be reflected to an
+    /// unauthenticated caller and multiplied into collector ingest by the
+    /// record count.
+    /// <para>
+    /// The alphabet is the one both fallback branches already mint from: a
+    /// 32-character hex trace ID and a dashed GUID. Underscore is admitted
+    /// beside the hyphen because an upstream edge that mints its own IDs
+    /// commonly uses it, and neither character can break a log line or a query.
+    /// Deliberately <em>not</em> narrowed to exactly a trace ID or a GUID:
+    /// §10.4's promise is that an ID chosen by the caller's own tracing
+    /// survives the hop, and this platform is not the only thing that mints
+    /// one.
+    /// </para>
+    /// <para>
+    /// Kestrel already rejects CR and LF inside a request header value, so log
+    /// splitting is not reachable through it — this is the bound on length and
+    /// alphabet, not a rescue from that.
+    /// </para>
+    /// </remarks>
+    private static bool IsAdoptable([NotNullWhen(true)] string? supplied)
+    {
+        if (supplied is not { Length: > 0 and <= MaxSuppliedLength })
+            return false;
+
+        foreach (char c in supplied)
+        {
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_'))
+                return false;
+        }
+
+        return true;
     }
 }
