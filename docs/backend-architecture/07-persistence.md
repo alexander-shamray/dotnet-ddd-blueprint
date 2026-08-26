@@ -90,6 +90,17 @@ reviews what an application-tier compromise could actually reach.
 in `IEntityTypeConfiguration<T>` classes, never in attributes on domain types —
 attributes would put an EF Core dependency in the Domain project.
 
+**One line in the solution is mapped outside a configuration class, and it is
+stated here rather than left to be discovered.** `OrderingDbContext` calls
+`modelBuilder.AddTransactionalOutboxEntities()` after the assembly scan, for
+the three tables
+[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+puts behind §9.6's saga. The entity types are MassTransit's, so no
+`IEntityTypeConfiguration<T>` of ours can carry them — the scan finds
+configurations in this assembly and those types are not in it. The rule is
+unchanged for everything the scan can reach, which is every type this
+repository defines; §7.4 lists the tables.
+
 ```csharp
 internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 {
@@ -265,6 +276,7 @@ differently:
 |---|---|---|
 | **Write model** | `Orders`, `OrderLines` | The EF model. `IEntityTypeConfiguration<T>` (§7.2) is the source of truth; `dotnet ef migrations add` produces the DDL |
 | **Read models and technical tables** | `OrderSummaries`, `ordering.Products`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects. **`ProductPrices` is the exception and states the terms**: PR-18 maps it through an `IEntityTypeConfiguration` so `migrations add` emits it beside the aggregate's tables, and the configuration is then written to produce §6.6's printed types — `char(3)`, `DEFAULT 1` — rather than EF's defaults for the CLR ones. The rule is that the shape is the chapter's; which tool writes it is negotiable, and a generated table that drifts from the DDL a later PR copies is not |
+| **A library's own technical tables** | `ordering.InboxState`, `ordering.OutboxState`, `ordering.OutboxMessage` | The EF model, from `modelBuilder.AddTransactionalOutboxEntities()` — **the one stated exception to §7.2's rule that mapping lives in `IEntityTypeConfiguration<T>` classes**, because the three entity types are MassTransit's and this repository's assembly scan never sees them ([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)). Their shape is not this blueprint's to specify either, which is the difference from the row above: the rule there is that the shape is the chapter's, and here it is the library's. **Singular, where §9.4's and §9.5's tables are plural** — `OutboxMessage` against `OutboxMessages`, so the two sets share the `ordering` schema without colliding, and a reader of the database sees five messaging tables where the chapters describe two. Ordering is the only service with any of them, because it holds the only saga |
 
 That is why [§6.6](06-cqrs.md) and [§9.4](09-messaging.md) show `CREATE TABLE` and §7.2 does not — the write
 model's schema is a projection of the aggregate, and duplicating it as SQL would
@@ -273,6 +285,13 @@ create two definitions that drift.
 **Both kinds ship in the same EF migration.** There is no second mechanism: the
 migrator job runs `Database.Migrate()` and nothing else, so hand-written DDL
 that is not inside a migration never executes.
+
+**`Database.Migrate()` and nothing else is also a security boundary, and
+[§14.3](14-local-development.md) is what keeps it one.** Development seeding
+runs from this same container, behind a gate that fails closed — an explicit
+`Seed:Enabled` flag *and* a Development environment name, both read once at the
+job host's composition root — because the hook below runs on every production
+release holding §7.1's DDL identity.
 
 ```csharp
 public partial class AddOrderSummaries : Migration

@@ -231,9 +231,20 @@ than pulled. Three ways that breaks, all of which look like a hung saga:
    node-local store; a node that was rebuilt loses whatever was pending. Nothing
    reports this — the messages simply never arrive.
 
-If the plugin and registration are fine, check the broker lane is moving at all:
-a stalled outbox means the saga's own `Send` never left the service, which is
+If the plugin and registration are fine, check the broker lane is moving at
+all: a stalled outbox means messages are not leaving the service, which is
 [`outbox-broker.md`](outbox-broker.md) rather than this.
+
+> **The saga's own `Send`s are not in the lane that runbook drains, and this
+> page said they were.** §9.4's `ordering.OutboxMessages` holds what a
+> **handler** stages; a saga sends on the bus, so its `CancelOrder`,
+> `ConfirmOrder`, `FlagOrderForReview` and scheduled expiries never appear
+> there. Since
+> [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> they are written to `ordering.OutboxMessage` — MassTransit's table, singular
+> — in the transaction that commits the instance, and delivered after it. Two
+> tables, two mechanisms, and the one to look in is decided by *who sent the
+> message* rather than by which order it concerns.
 
 ## Or the peer never answered
 
@@ -256,8 +267,28 @@ WHERE CorrelationId = @OrderId
 ORDER BY OccurredAt;
 ```
 
-A `CancelOrder` or `FlagOrderForReview` that never left is the answer, and the
-outbox runbooks take it from there.
+**That table is the wrong one for a command the saga sent, and the query is
+kept because the row it *does* find is still worth having.** What
+`ordering.OutboxMessages` holds is what a handler staged — an `OrderCancelled`
+that the `CancelOrder` produced, for instance — so a row here proves the
+command was consumed and the aggregate moved. Its **absence** proves nothing
+about the command, only that nothing downstream of it has committed yet.
+
+**For the command itself, look in `ordering.OutboxMessage`** — MassTransit's
+table, singular, where
+[ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+puts every `Send` and `Schedule` a transition makes, in the instance's own
+transaction. Rows there are delivered after that transaction commits, and each
+is joined to its triggering delivery through `InboxMessageId`/`InboxConsumerId`
+into `ordering.InboxState`, whose `LastSequenceNumber` is how far that
+delivery's sends have got. **These are MassTransit's tables and this
+repository neither writes nor prunes them**, so read the library's schema
+before drawing a conclusion from a column; what is settled here is *which*
+table to open. **Before ADR-032 there
+was no table to look in at all**, which is what made a lost command
+indistinguishable from a command nobody sent — the defect
+[#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
+closed.
 
 **For a saga in `AwaitingConfirmation` this is the first query rather than the
 last**, and what it is looking for is a `ConfirmOrder`. There is no peer to have

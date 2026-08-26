@@ -379,7 +379,16 @@ queue again and burns the trail.
 
 Worth answering before closing, because the retry policy is the thing that
 failed. §9.8's endpoint configuration sets retry, then the inbox filter, then
-the in-memory outbox, in that order. If a transient fault exhausted the retries,
+an outbox, in that order — **and which outbox depends on the endpoint**.
+Ordering's three ordinary endpoints take the in-memory one, which defers sends
+until the consumer returns; `ordering-fulfilment-saga` takes MassTransit's
+transactional outbox instead
+([ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)),
+which writes them to `ordering.OutboxMessage` in the saga instance's own
+transaction. The **order** is the same on all four and the nesting rule behind
+it is unchanged; what differs is what a failure after the commit costs, and on
+the saga's endpoint it now costs a redelivery rather than the messages.
+If a transient fault exhausted the retries,
 the policy may be too tight for that dependency. If a *deterministic* fault
 consumed every attempt, retrying it at all was wasted — a poison message should
 fail fast, and MassTransit's `Ignore<T>` for known-terminal exception types is

@@ -586,33 +586,60 @@ instruction, and `CurrentState` is half of it**:
      stock needs nothing** — if it is there, the reservation may still be
      held and [that section](#stock_not_released) is the procedure.
 
-     **Its absence proves nothing either, for the same reason the missing
-     saga row does not.** The `ReleaseTimeout` exit buffers its
+     **Its absence proves nothing either, and the reason has changed.** It
+     used to be permanent loss: the `ReleaseTimeout` exit buffered its
      `FlagOrderForReview` in the same in-memory outbox as its `CancelOrder`
-     and finalises in the same transaction, so #128's window loses both
-     sends together: a reservation still held, no review row naming it, and
-     no cancellation. **Ask Inventory whether the reservation is still
-     held** rather than reading a missing row as an answer. It is one query,
-     and it is the only check that tells "released" apart from "never
-     reported".
+     and finalised in the same transaction, so #128's window lost both
+     sends together — a reservation still held, no review row naming it,
+     and no cancellation.
+     [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+     closed that window: the exit's sends are written to
+     `ordering.OutboxMessage` in the transaction that finalises the
+     instance, so they are exactly as durable as the finalisation.
+
+     **What is left is delivery, and it is still not an answer.** The row
+     appears only once `FlagOrderForReview` has reached
+     `ordering-commands` and its handler has run, which is after the saga's
+     transaction — so a missing row can mean the command is in flight, or
+     that it is parked in the error queue
+     ([`error-queue.md`](error-queue.md)). **Ask Inventory whether the
+     reservation is still held** rather than reading a missing row as an
+     answer. It is one query, and it is the only check that tells
+     "released" apart from "not reported yet".
 
      **This page corrected the money half of that inference one revision
      ago and left the stock half standing six lines above it.** Both read an
-     absence as evidence, both are refuted by the same crash window, and
+     absence as evidence, both were refuted by the same crash window, and
      only one was fixed — which is the failure this repository keeps paying
      for: the fix goes where the finding pointed, not where the shape
-     recurs.
+     recurs. **Closing the window did not retire the lesson**: both halves
+     are still inferences from an absence, and what changed is what an
+     absence means, not whether it means anything.
 
-     **A gone instance is not proof that the cancellation was sent**, and
-     this branch said it was. `SetCompletedWhenFinalized` deletes the row
-     inside the transaction that commits the exit, while
-     `UseInMemoryOutbox` flushes the buffered `CancelOrder` only after the
-     consume pipeline returns — [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128),
-     and §9.6's crash-window callout. A crash between the two leaves
-     exactly this evidence: no instance, and no `CancelOrder` ever sent.
-     **So check for the cancellation itself, not for the absence of a
-     saga.** The order's own state, or an `OrderCancelled` row in
-     Ordering's outbox, is what settles it.
+     **A gone instance is proof that the cancellation was *staged*, and
+     not that it was sent** — and this branch has now been wrong in both
+     directions, which is why the mechanism is written out rather than the
+     conclusion. It first said a gone instance proved the cancellation was
+     sent.
+     [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
+     made that false in the strongest way: `SetCompletedWhenFinalized`
+     deletes the row inside the transaction that commits the exit, while
+     `UseInMemoryOutbox` flushed the buffered `CancelOrder` only after the
+     consume pipeline returned, so a crash between the two left no
+     instance and no `CancelOrder` ever sent.
+     [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+     put those sends in that same transaction. The two now commit
+     together, so no instance means the `CancelOrder` is durably in
+     `ordering.OutboxMessage` — MassTransit's table, singular, not §9.4's
+     `ordering.OutboxMessages`.
+
+     **What is left between staged and handled is delivery**, the same gap
+     as the stock row above. **So still check for the cancellation itself,
+     not for the absence of a saga.** The order's own state, or an
+     `OrderCancelled` row in `ordering.OutboxMessages`, is what settles
+     it. What changed is where an unanswered case points — at a delivery
+     that has not happened yet or an error queue, rather than at a message
+     nobody will ever send.
 
      **Cancelled, and no `PaymentRefunded`** — the automatic path fired and
      produced nothing, which is a failure on Payments' side rather than a

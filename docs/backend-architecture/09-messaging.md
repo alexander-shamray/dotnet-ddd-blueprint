@@ -385,14 +385,37 @@ The implementation **must not**:
 All three are mistakes a competent developer makes in good faith, which is why
 they are prohibitions rather than guidance.
 
+**The third has exactly one recorded exception, and recording it is what keeps
+it an exception.**
+[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+admits MassTransit's Entity Framework outbox on §9.6's saga receive endpoint,
+which brings a second table set into the `ordering` schema. It is that endpoint
+and no other: the platform's three ordinary receive endpoints keep
+`UseInMemoryOutbox`, and every application-level integration event still goes
+through §9.4's `OutboxMessages` and its dispatcher. The bullet's cost is paid
+rather than dodged — there really are two retention policies now, and the ADR
+says which job prunes which table and why folding them together would be worse.
+
 **One exemption: sagas.** A MassTransit state machine (§9.6) sends and publishes
 directly from its activities rather than through this port. That is correct and
-deliberate — a saga is Infrastructure, it already runs inside a consume
-transaction with `UseInMemoryOutbox` configured on its receive endpoint, so its
-outgoing messages are deferred until the consumer completes and its state
-persists. Routing saga output through the application-level outbox would add a
-second staging hop with no additional guarantee. The prohibition applies to
-**Application code**, which is where the dual-write risk actually lives.
+deliberate — a saga is Infrastructure, and its outgoing messages are staged by
+the outbox configured on its receive endpoint rather than by this port's,
+committing in the transaction that persists the instance (ADR-032).
+
+**Routing saga output through the application-level outbox is not an
+alternative to that, and the sentence here used to say it was merely a
+redundant one.** It read that doing so "would add a second staging hop with no
+additional guarantee" — true only while the in-memory outbox was believed to be
+durable, which it is not: it defers, it does not persist. The stronger objection
+is availability rather than cost. The saga's waits are scheduled messages, the
+delay is a transport feature
+([ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
+and no dispatcher of ours can replay a delay it never held — so an application
+outbox would carry `AuthorisePayment` and not `PaymentTimeout`, closing half the
+window and leaving the half with no bound at all.
+
+The prohibition applies to **Application code**, which is where the dual-write
+risk actually lives.
 
 ## 9.4 The transactional outbox
 
@@ -1075,6 +1098,18 @@ public sealed class OutboxTable
 > on a second outbox table set arriving by the back door.** Two dispatchers
 > means two retention policies, two sets of ordering guarantees, and one of
 > them being the one nobody monitors.
+>
+> **That argument is untouched by
+> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction),
+> and the difference is what makes the exception one.** The ADR admits
+> MassTransit's outbox on the saga's receive endpoint, which stages what the
+> **state machine** sends inside the consume transaction — a job this
+> dispatcher does not do and cannot be given, since a scheduled message's
+> delay is a transport feature
+> ([ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker))
+> that no dispatcher of ours could replay. A second dispatcher for *these*
+> rows would be a second answer to the question this one already answers,
+> which is exactly what the paragraph above refuses.
 
 ```csharp
 public sealed class OutboxDispatcher : BackgroundService
@@ -1831,7 +1866,18 @@ broker's longest possible redelivery delay, including time a message spends in
 the error queue before being replayed. Seven days is a starting point to check
 against RabbitMQ's configured limits, not a default to accept.
 
-Both purges — inbox and outbox (§9.4) — run from the same hosted service on a
+**Both purges — inbox and outbox (§9.4) — run from the same hosted service, and
+they are not every messaging table in the database.** Ordering's saga endpoint
+takes MassTransit's own outbox
+([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)),
+whose three tables are pruned by an `InboxCleanupService` that
+`AddEntityFrameworkOutbox` registers and that this service never reads. That is
+a second retention policy, which is the cost §9.3's prohibition names; the ADR
+takes it rather than folding the two together, because deleting an `InboxState`
+row whose outbox messages have not been delivered turns housekeeping into the
+message loss the decision exists to close.
+
+Both run on a
 slow schedule, batched so neither holds a long lock. `RetentionPurgeService` in
 `Common.Infrastructure.Messaging` is that service: it composes the two
 statements above from the registered `OutboxTable` and `InboxTable`, takes its
@@ -3137,13 +3183,21 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > written to make it true.
 >
 > **`OnUnhandledEvent(x => x.Ignore())` is the obvious answer and this
-> blueprint does not take it.** A catch-all cannot tell the three arrivals
-> apart — a genuine post-flush duplicate, a crash before the in-memory
-> outbox flushed that left the instance advanced and its commands unsent,
-> and a misroute — so it answers all three the way only the first wants.
-> The second is permanent silent loss and the third is a configuration
-> fault; both are worth six retries and one error-queue message. **What
-> makes the comment true instead is enumeration**: every event that
+> blueprint does not take it.** A catch-all cannot tell its arrivals apart — a
+> genuine duplicate the redelivery brought back, and a misroute — so it
+> answers both the way only the first wants, and the second is a configuration
+> fault worth six retries and one error-queue message.
+>
+> **There were three, and
+> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> closed the middle one.** It was a crash before the in-memory outbox flushed,
+> leaving the instance advanced and its commands unsent — permanent silent
+> loss, and the arrival that made the trade one-sided. The saga's endpoint has
+> no in-memory outbox to flush any more, so that arrival stops existing rather
+> than being answered better. **The enumeration stays**: a callback that
+> answers two cases the same way is still only as right as its worse one, and
+> the case that got cheaper is the one it was already right about. **What
+> makes the comment true is enumeration**: every event that
 > legitimately arrives in a state with no work for it gets its own
 > `Ignore`, and a structural test partitions the machine's declared
 > next-events so a new one cannot be forgotten.
@@ -3162,25 +3216,39 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > crash between the saga state committing and that write leaves the event
 > unrecorded and the next delivery finds the instance already moved on.
 >
-> **That window has two halves, and it is why no catch-all absorbs it.**
-> `UseInMemoryOutbox` sits *inside* the inbox filter and flushes its buffered
-> sends after the inner pipeline returns — which is after the repository has
-> committed. So a crash there is either after the flush, where the commands
-> went out and the redelivery really is a duplicate, or **before** it, where
-> the instance advanced and its commands were never sent. In the second the
-> redelivery is not a duplicate at all: it is the last thing that could
-> notice, and the scheduled timeout that would have rescued the order was
-> buffered in the same flush.
+> **That window used to have two halves, and the second is closed.** While the
+> saga's endpoint carried `UseInMemoryOutbox`, the outbox sat *inside* the
+> inbox filter and flushed its buffered sends after the inner pipeline
+> returned — which is after the repository had committed. So a crash there was
+> either after the flush, where the commands went out and the redelivery
+> really is a duplicate, or **before** it, where the instance advanced and its
+> commands were never sent. In the second the redelivery was not a duplicate
+> at all: it was the last thing that could notice, and the scheduled timeout
+> that would have rescued the order was buffered in the same flush.
 >
-> **This half is where the "permanent silent loss" above comes from**, and it
-> is the reason the trade is not close. A log line in front of an ignore does
-> not soften it either: [§13.6](13-observability.md) pages on the **error
-> queue**, which is precisely what ignoring keeps the event out of, so a
-> warning moves the case from silent to searchable and no further.
+> **What closed it is
+> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction),
+> and the mechanism is that the two writes became one.** The endpoint takes
+> `UseEntityFrameworkOutbox<OrderingDbContext>(context)` instead, and the
+> repository above it is configured with
+> `ExistingDbContext<OrderingDbContext>` — so the sends are written to
+> MassTransit's own outbox table on the same `DbContext`, in the same
+> transaction as the instance, and delivered after it commits. Either both are
+> durable or neither is. What is left of the first
+> half is the honest one: a crash after the commit and before the inbox row is
+> written, where the redelivery is a genuine duplicate and the delivery of the
+> messages resumes from the table rather than being re-derived by re-running
+> the transition.
+>
+> **The "permanent silent loss" the paragraph above names was the reason the
+> trade was not close**, and it is worth keeping rather than deleting: it is
+> why a log line in front of an ignore never softened it.
+> [§13.6](13-observability.md) pages on the **error queue**, which is
+> precisely what ignoring keeps the event out of, so a warning moves the case
+> from silent to searchable and no further. With
 > [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
-> removes it by persisting the sends with the instance (`UseBusOutbox`)
-> rather than beside it, at which point a catch-all becomes arguable again on
-> evidence.
+> closed, a catch-all is arguable again on evidence — and is still not taken,
+> for the reason the first paragraph gives.
 >
 > **The enumeration is therefore the mechanism rather than a courtesy.** With
 > the default kept, anything not written out reaches the error queue — which
@@ -3911,6 +3979,15 @@ service's own database and its migrations travel with the service's — which is
 what "in the service's own database" above buys, and what the in-memory
 repository in §12.5 deliberately trades away for test speed.
 
+**`ExistingDbContext` buys a second thing, and it took a defect to find it.**
+Sharing the context is what lets the messages a transition sends commit in the
+same transaction as the instance that sent them, which is
+[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+and the reason this endpoint takes `UseEntityFrameworkOutbox<OrderingDbContext>`
+where the other three take `UseInMemoryOutbox` (§9.8). Until it did, the
+instance committed and its `Send`s and `Schedule`s were still in a buffer — a
+dual write, and the only one left in the platform.
+
 ### The scheduler is a registration, and this chapter forgot it
 
 The `Schedule` declarations above need something to deliver a message at a
@@ -4331,7 +4408,11 @@ argues it where the transition it serves lives.
 
 **Idempotency is the same on all four**: every one applies `InboxFilter<>`. The
 saga's endpoint was the exception until PR-21 found what that exemption did not
-cover, and the callout under it is the argument. Retry is where they differ.
+cover, and the callout under it is the argument. **Retry differs, and so does
+the outbox** — three endpoints defer their sends with `UseInMemoryOutbox` and
+the saga's persists them, which is
+[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+and the callout under that block.
 The **projection** endpoint from §9.4, carrying Catalog's events into local read
 models:
 
@@ -4407,9 +4488,18 @@ cfg.ReceiveEndpoint(
 > stories you get, which is why the order is written out with a reason at every
 > endpoint rather than left to the order somebody typed the lines in.
 >
-> The same argument is why a consumer whose sends must survive its own commit
-> wants §9.4's transactional outbox rather than the in-memory one: the in-memory
-> outbox defers, it does not persist.
+> **This governs the three endpoints that still have an in-memory outbox**, and
+> the reason there are three rather than four is the sentence that used to end
+> this callout: a consumer whose sends must survive its own commit wants a
+> transactional outbox rather than the in-memory one, because the in-memory
+> outbox defers and does not persist. The saga is that consumer, and
+> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> gave it one. **The nesting rule survives the substitution unchanged**: on the
+> saga's endpoint the inbox filter is still added first and still outermost,
+> and MassTransit's outbox delivers after the inner pipeline returns exactly as
+> the in-memory one flushed after it. What changed is what a failure there
+> costs — the messages are already committed, so the delivery resumes instead
+> of being lost — not which filter wraps which.
 
 The **stock-events** endpoint is the fourth, and it takes the projection
 endpoint's policy unchanged — it is an ordinary consumer, and the only reason it
@@ -4444,9 +4534,14 @@ cfg.ReceiveEndpoint(
 > failures, which are domain rejections, out of a queue whose retry policy is
 > written for a state machine's.
 
-And the **saga** endpoint, which receives the fulfilment events (§9.6):
+And the **saga** endpoint, which receives the fulfilment events (§9.6) — the
+one whose outbox is not the in-memory one:
 
 ```csharp
+// Bus-level, beside AddSagaStateMachine (§9.6). Without it the endpoint call
+// below has no store to write to.
+x.AddEntityFrameworkOutbox<OrderingDbContext>(o => o.UseSqlServer());
+
 cfg.ReceiveEndpoint(
     "ordering-fulfilment-saga",
     e =>
@@ -4461,7 +4556,12 @@ cfg.ReceiveEndpoint(
         // The inbox is here too, and this endpoint used to be the one
         // exception. The callout below is why it stopped being one.
         e.UseConsumeFilter(typeof(InboxFilter<>), context);
-        e.UseInMemoryOutbox(context);
+
+        // And the one line that differs from the other three endpoints:
+        // MassTransit's transactional outbox rather than the in-memory one, on
+        // the DbContext the saga repository already holds, so the sends commit
+        // with the instance (ADR-032).
+        e.UseEntityFrameworkOutbox<OrderingDbContext>(context);
 
         e.ConfigureSaga<OrderFulfilmentState>(context);
     });
@@ -4471,6 +4571,36 @@ cfg.ReceiveEndpoint(
 > receive endpoint applies `InboxFilter<>`, and what the consumer dispatches to
 > is not the criterion: a redelivered command is as duplicable as a redelivered
 > event, and so is a redelivered event that *starts* a saga.
+
+> **The outbox is not the default, and this endpoint is the only one that
+> departs from it.**
+> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> carries the argument. The short version is that the other three endpoints
+> buffer nothing that matters — their consumers publish through §9.4's
+> application outbox, whose row commits with the aggregate, so the in-memory
+> outbox there defers sends that are already durable. The saga is the one
+> consumer that `Send`s and `Schedule`s on the bus directly, and the in-memory
+> buffer flushed *after* `EntityFrameworkRepository` had committed the
+> instance, which is a dual write.
+>
+> **Two calls, and neither works alone.**
+> `AddEntityFrameworkOutbox<OrderingDbContext>` registers the store and the
+> cleanup service; `UseEntityFrameworkOutbox<OrderingDbContext>(context)` is
+> what puts the filter on this endpoint's pipeline. It brings three tables into
+> the `ordering` schema — `InboxState`, `OutboxState` and `OutboxMessage`,
+> singular where §9.4's and §9.5's are plural, so the two sets do not collide
+> ([§7.4](07-persistence.md)).
+>
+> **`UseBusOutbox()` is a third thing and is deliberately not called.** It
+> intercepts `IPublishEndpoint` and `ISendEndpointProvider` *outside* a consume
+> context — the API request path, which §9.4's outbox already owns — so adding
+> it would stage a third time on a path that has no dual write.
+>
+> **Both inboxes stay.** `InboxFilter<>` is §9.5's long-window duplicate
+> suppressor on §9.9's retention; MassTransit's `InboxState` is a short-window
+> delivery record on its own, and it is how the outbox filter knows which of
+> the committed messages it has already sent. Retiring either costs a guarantee
+> the other never made.
 
 > **The saga's exemption was wrong in both halves, and PR-21 removed it.** It
 > read: no `InboxFilter` here, because a state machine's state is its
@@ -4601,9 +4731,12 @@ MassTransit's default way of saying "no transition applies" is to throw,
 which sends every such arrival through the retry policy above and into this
 queue — and §9.6 keeps that default. Each event that legitimately arrives in
 a state with no work for it is written out with its own `Ignore`, so what
-reaches this queue is an arrival nobody enumerated: a crash that lost the
-instance's commands, or a misroute. Both are worth a page. The callout in
-§9.6 states the trade and what a catch-all would have cost.
+reaches this queue is an arrival nobody enumerated: a misroute, which is worth
+a page. **It used to be a misroute *or* a crash that lost the instance's
+commands**, and
+[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+removed the second by committing those commands with the instance. The callout
+in §9.6 states the trade and what a catch-all would still cost.
 
 Rejections get their own instrument instead. `MessagingMetrics.Rejected`
 (§13.3) writes `command.domain_rejected`, tagged with the message type and the
