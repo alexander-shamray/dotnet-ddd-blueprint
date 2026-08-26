@@ -418,6 +418,81 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
             "one instance or none — never two for one CorrelationId");
     }
 
+    [Fact]
+    public async Task The_sagas_sends_are_committed_with_its_instance_rather_than_buffered()
+    {
+        // **#128 and ADR-032, and the only place in the solution where the
+        // mechanism is observable at all.** The saga used to send through
+        // UseInMemoryOutbox, which buffers in the process and flushes AFTER
+        // EntityFrameworkRepository has committed the instance. A crash in that
+        // window left the order advanced with its commands never sent — and for
+        // OrderPlaced that is the worst shape available, because the
+        // StockReservationExpired schedule that would have rescued the order
+        // was in the same buffer as the ReserveStock that failed to go.
+        //
+        // **What this asserts is not "a message arrived".** Every other test in
+        // this class already proves delivery, and every one of them passed
+        // before this change too — delivery is what the in-memory outbox also
+        // does, right up until the process dies. The observable difference is
+        // WHERE the messages were between the commit and the send, and
+        // MassTransit records exactly that: the endpoint's filter writes an
+        // ordering.InboxState row inside the saga's own transaction, stages the
+        // sends in ordering.OutboxMessage beside it, and stamps
+        // LastSequenceNumber on that row once it has delivered them.
+        //
+        // So LastSequenceNumber IS NOT NULL is the assertion with teeth. It is
+        // false in three distinguishable ways — the filter is not on the
+        // endpoint, the filter is there but the transition sent nothing, or the
+        // rows exist and delivery never ran — and the first of those is the
+        // regression #128 is about.
+        var orderId = Guid.CreateVersion7();
+        Guid placedId = Guid.CreateVersion7();
+
+        await PublishPlacedAsync(orderId, placedId);
+
+        await Eventually(
+            () => SagaRowsAsync(orderId),
+            expected: 1,
+            because: "the arrange half — nothing below can be true before the transition has run");
+
+        // Anti-vacuity, and it is not decoration: the two assertions differ by
+        // one predicate, so without this one a WHERE that matched nothing at
+        // all would read exactly like a delivery that had not happened yet, and
+        // this test would fail for the wrong reason for thirty seconds.
+        await Eventually(
+            () => TransactionalInboxRowsAsync(placedId, deliveredOnly: false),
+            expected: 1,
+            because: "UseEntityFrameworkOutbox writes this row inside the saga's transaction; with the " +
+                "in-memory outbox on the endpoint instead, ordering.InboxState is never written at all");
+
+        await Eventually(
+            () => TransactionalInboxRowsAsync(placedId, deliveredOnly: true),
+            expected: 1,
+            because: "LastSequenceNumber is stamped once the messages staged in ordering.OutboxMessage " +
+                "have been delivered — which is the proof they were staged there and not in a " +
+                "process-local buffer that a crash would have discarded (#128, ADR-032)");
+    }
+
+    /// <summary>
+    /// Rows in MassTransit's own inbox for one message —
+    /// <c>ordering.InboxState</c>, which is ADR-032's table and not §9.5's
+    /// <c>ordering.InboxMessages</c>. The two are different mechanisms with
+    /// different windows and both are on the saga endpoint; reading the wrong
+    /// one is the obvious way to write a test that proves nothing.
+    /// </summary>
+    /// <param name="deliveredOnly">
+    /// Narrows to rows whose staged messages have been sent. The saga's
+    /// endpoint is the only one that stages any, so on this endpoint the
+    /// narrowed count is the mechanism and the wide one is only its record.
+    /// </param>
+    private Task<int> TransactionalInboxRowsAsync(Guid messageId, bool deliveredOnly) =>
+        fixture.ScalarAsync<int>(
+            deliveredOnly
+                ? "SELECT Value = COUNT(*) FROM ordering.InboxState " +
+                    "WHERE MessageId = {0} AND Consumed IS NOT NULL AND LastSequenceNumber IS NOT NULL"
+                : "SELECT Value = COUNT(*) FROM ordering.InboxState WHERE MessageId = {0}",
+            messageId);
+
     /// <summary>
     /// One message's inbox rows on one endpoint — the inbox key is the pair,
     /// so a <c>StockReserved</c> leaves one row on the saga's queue and

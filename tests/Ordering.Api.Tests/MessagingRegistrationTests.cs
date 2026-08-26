@@ -7,7 +7,10 @@ using Ordering.Application.Orders.ConfirmOrder;
 using Ordering.Application.Orders.FlagOrderForReview;
 using Ordering.Application.Orders.MarkOrderShipped;
 using Ordering.Infrastructure.Messaging;
+using Ordering.Infrastructure.Persistence;
 using MassTransit;
+using MassTransit.EntityFrameworkCoreIntegration;
+using MassTransit.Middleware.Outbox;
 using MassTransit.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -292,6 +295,72 @@ public class MessagingRegistrationTests
         services.ShouldContain(
             d => (d.ImplementationType ?? d.ServiceType) == typeof(OrderFulfilmentSaga),
             "the state machine itself — AddSagaStateMachine registers the machine as well as its instance");
+    }
+
+    [Fact]
+    public void The_saga_has_a_transactional_outbox_rather_than_an_in_memory_one()
+    {
+        // **ADR-032, and the half of it a ServiceCollection can see.** The
+        // filter that matters is UseEntityFrameworkOutbox on the saga's receive
+        // endpoint, and a receive endpoint's filters cannot be read back from a
+        // ServiceCollection at all — so this asserts the container half, and
+        // OrderFulfilmentSagaEndpointTests asserts the filter itself against a
+        // real broker by observing the row it writes. **Neither half implies
+        // the other**, which is why both exist: AddEntityFrameworkOutbox with
+        // no endpoint using it registers everything below and buffers nothing
+        // durably, and an endpoint calling UseEntityFrameworkOutbox without it
+        // throws at bus start.
+        //
+        // **The subject is InboxCleanupService and the reason is access, not
+        // preference.** The registration this most wants to name is the scoped
+        // IOutboxContextFactory<OrderingDbContext> the filter resolves — and it
+        // is not public at the 8.5.3 pin, so it cannot be named from a test
+        // assembly. The cleanup service is registered by the same call, is
+        // public, and is closed over this service's own DbContext, so it cannot
+        // be satisfied by some other context's outbox.
+        //
+        // Without that call the saga is back on UseInMemoryOutbox, whose buffer
+        // flushes AFTER EntityFrameworkRepository commits — #128's window,
+        // where a crash leaves the order in AwaitingPayment with stock
+        // reserved, no AuthorisePayment sent, and the PaymentTimeout that would
+        // have rescued it lost in the same buffer.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        services.ShouldContain(
+            d => (d.ImplementationType ?? d.ServiceType) == typeof(InboxCleanupService<OrderingDbContext>),
+            "AddEntityFrameworkOutbox<OrderingDbContext> is what registers it, and nothing else here " +
+            "does — its absence puts §9.6's saga back on the in-memory outbox (#128, ADR-032)");
+    }
+
+    [Fact]
+    public void The_bus_side_outbox_is_deliberately_not_registered()
+    {
+        // **A decision pinned rather than a defect caught**, and it is the one
+        // ADR-032 is most likely to be "corrected" on: UseBusOutbox() reads
+        // like the obvious companion to the line above and is a different
+        // mechanism. It intercepts IPublishEndpoint and ISendEndpointProvider
+        // OUTSIDE a consume context — the API request path — which §9.4's
+        // application outbox already owns, and where there is no dual write to
+        // close. Adding it would put a third staging mechanism on that path.
+        //
+        // IBusOutboxNotification is registered by UseBusOutbox() and by nothing
+        // else at the 8.5.3 pin, measured over a real ServiceCollection with
+        // and without the call rather than read off the documentation.
+        //
+        // **A negative assertion passes when the name it looks for stops
+        // existing**, so this one is not left on its own: the test above is its
+        // positive control. If a MassTransit bump renamed either type, that one
+        // goes red where this one would quietly keep agreeing.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        services.ShouldNotContain(
+            d => d.ServiceType == typeof(IBusOutboxNotification),
+            "UseBusOutbox() would register this. §9.4's outbox owns the request path, and a second " +
+            "stage on a path with no dual write is cost without a guarantee (ADR-032)");
     }
 
     /// <summary>

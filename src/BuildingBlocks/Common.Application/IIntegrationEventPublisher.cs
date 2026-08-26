@@ -21,10 +21,15 @@ namespace Common.Application;
 /// </para>
 /// <para>
 /// One exemption, and it is Infrastructure's: a MassTransit state machine
-/// (§9.6) sends and publishes from its activities, because it already runs
-/// inside a consume transaction with <c>UseInMemoryOutbox</c> configured. The
-/// prohibition applies to Application code, which is where the dual-write risk
-/// actually lives.
+/// (§9.6) sends and publishes from its activities, on its own receive
+/// endpoint's transactional outbox rather than through this port. That
+/// exemption is recorded as ADR-032 and it does cost a second table set — the
+/// paragraph above is the price it was weighed against, not a rule it slipped
+/// past. What makes it unavoidable is that a saga's timeouts are scheduled
+/// messages, and a delay is a transport feature (ADR-021) that no dispatcher
+/// of ours can replay: staging them here is not the cheaper option, it is not
+/// an option. The prohibition applies to Application code, which is where the
+/// dual-write risk actually lives.
 /// </para>
 /// </remarks>
 public interface IIntegrationEventPublisher

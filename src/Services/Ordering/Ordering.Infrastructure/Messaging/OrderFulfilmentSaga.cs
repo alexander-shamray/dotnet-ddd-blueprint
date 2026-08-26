@@ -177,11 +177,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // leaves the event unrecorded and the next delivery finds the
         // instance moved on.
         //
-        // **That window contains the in-memory outbox's flush, and that is
-        // what settled it (#128).** UseInMemoryOutbox sits inside the inbox
-        // filter and releases its buffered sends after the inner pipeline
-        // returns — after the repository has committed. So three cases reach
-        // here and only one of them wants to be quiet:
+        // **That window used to contain the in-memory outbox's flush, and that
+        // is what settled it (#128).** UseInMemoryOutbox sat inside the inbox
+        // filter and released its buffered sends after the inner pipeline
+        // returned — after the repository had committed. So three cases reached
+        // here and only one of them wanted to be quiet:
         //
         //   * a crash AFTER the flush — the commands went out, the state
         //     advanced, and the redelivery really is a duplicate;
@@ -195,6 +195,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // all three the same way and answered two of them wrongly. A log
         // line was tried in its place and is not a signal: §13.6 pages on the
         // error queue, which is exactly what ignoring keeps the event out of.
+        //
+        // **ADR-032 has since deleted the second case, and the catch-all still
+        // does not come back.** This endpoint now takes MassTransit's Entity
+        // Framework outbox, so the sends commit in the saga's own transaction
+        // and a crash can no longer separate an advanced instance from its
+        // unsent commands. That leaves two arrivals here rather than three —
+        // and a callback answering two cases identically is still only ever as
+        // right as its worse one, which is the misroute. The enumeration below
+        // is what tells them apart; nothing about persisting the sends made
+        // that cheaper.
         //
         // **The cost is real and is the smaller half.** A post-flush
         // duplicate now spends six retries and files one message a human
@@ -211,11 +221,6 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // declared next-events partition into "reachable here" and "not".
         // An unenumerated arrival is now a fault by design, which is what
         // makes that enumeration load-bearing rather than documentation.
-        //
-        // #128 removes the question by persisting the sends with the
-        // instance (UseBusOutbox); the pre-flush case stops existing and a
-        // catch-all becomes arguable again on evidence rather than on this
-        // comment.
 
         // Correlated on the order in every case, which is also what §9.3's
         // mapper sets CorrelationId to — so one id follows the workflow across

@@ -101,6 +101,21 @@ public sealed class ServiceFixture : IAsyncLifetime
     private Respawner? _respawner;
 
     /// <summary>
+    /// SQL Server's "chosen as the deadlock victim" error, which is the only
+    /// fault <see cref="ResetAsync"/> retries — the argument is on that method.
+    /// Named rather than written as a literal in the filter, because a bare
+    /// <c>e.Number == 1205</c> reads as a magic number in the one place it most
+    /// needs to be obvious that a narrow fault is being caught and not a broad
+    /// one.
+    /// </summary>
+    private const int DeadlockVictim = 1205;
+
+    /// <summary>
+    /// Attempts, not retries — two attempts is one retry.
+    /// </summary>
+    private const int ResetAttempts = 3;
+
+    /// <summary>
     /// The connection each §7.1 identity would hold, pointed at Ordering's own
     /// database rather than the container's <c>master</c>.
     /// </summary>
@@ -237,6 +252,29 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// chasing it. Copilot raised it; the fix is a broker per saga class and
     /// was judged too expensive for the hazard.
     /// </para>
+    /// <para>
+    /// <b>It also races a background service, which is why it retries.</b>
+    /// ADR-032 put MassTransit's Entity Framework outbox on the saga endpoint,
+    /// and <c>AddEntityFrameworkOutbox</c> registers an
+    /// <c>InboxCleanupService&lt;OrderingDbContext&gt;</c> that prunes
+    /// <c>ordering.InboxState</c> on a timer for as long as the host is up.
+    /// Respawn deletes every row in the schema in its own dependency order, so
+    /// two multi-table deletes run concurrently over the same tables and SQL
+    /// Server picks a victim — measured here as an intermittent
+    /// <c>SqlException</c> 1205 out of <c>ResetAsync</c>, in whichever test
+    /// happened to reset next and therefore in tests that have nothing to do
+    /// with sagas.
+    /// <para>
+    /// <b>This cannot happen in production and the retry is not hiding
+    /// anything.</b> Nothing there deletes a schema; the cleanup service's only
+    /// concurrent writers are consume transactions touching one row each. What
+    /// is racing is a fixture, so the fixture is where it is answered — and it
+    /// is answered by rerunning, which is what SQL Server's own message asks
+    /// for, rather than by ignoring MassTransit's tables in the reset. Ignoring
+    /// them would leave rows standing between tests and make the next
+    /// whole-table assertion over them wrong for a reason nobody would find.
+    /// </para>
+    /// </para>
     /// </summary>
     public async Task ResetAsync()
     {
@@ -252,7 +290,25 @@ public sealed class ServiceFixture : IAsyncLifetime
                 SchemasToInclude = ["ordering"]
             });
 
-        await _respawner.ResetAsync(connection);
+        // Bounded, and small on purpose: the cleanup service's pass is short,
+        // so a reset that loses twice in a row is not the race this handles and
+        // should be seen. Rethrowing the last attempt keeps the original
+        // exception rather than a wrapper that names the retry instead of the
+        // deadlock.
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await _respawner.ResetAsync(connection);
+                return;
+            }
+            catch (SqlException e) when (e.Number == DeadlockVictim && attempt < ResetAttempts)
+            {
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(100 * attempt),
+                    TestContext.Current.CancellationToken);
+            }
+        }
     }
 
     /// <summary>

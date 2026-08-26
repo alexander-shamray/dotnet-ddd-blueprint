@@ -613,8 +613,8 @@ public class OrderFulfilmentSagaTests
         // **This test asserted the opposite until #128 was understood.** An
         // OnUnhandledEvent(x => x.Ignore()) catch-all made every such
         // arrival quiet, on the argument that it can only be a duplicate.
-        // The window it was justified by contains the in-memory outbox's
-        // flush, so it also contains the case where the instance advanced
+        // The window it was justified by contained the in-memory outbox's
+        // flush, so it also contained the case where the instance advanced
         // and its commands were never sent — there the redelivery is the
         // last thing that could notice, and quiet is permanent loss.
         //
@@ -622,10 +622,18 @@ public class OrderFulfilmentSagaTests
         // the first delivery completed, so the commands really did go out
         // and the second delivery is a genuine duplicate. That is the one
         // case the old behaviour got right, and it now costs six retries
-        // and one error-queue message — the price of the other two being
-        // loud. The pre-flush half is unreachable from this harness, which
-        // cannot interrupt between the repository commit and the flush, so
-        // nothing here covers it; #128 is where it stops existing.
+        // and one error-queue message — the price of a misroute being loud.
+        //
+        // **The pre-flush half no longer exists to be covered, and this
+        // harness still could not have covered it.** ADR-032 gave the saga
+        // endpoint MassTransit's Entity Framework outbox, so the sends commit
+        // with the instance and no crash can separate them. That is a property
+        // of the production endpoint's filters, and this suite registers none
+        // of them — `.InMemoryRepository()` and `UsingInMemory` with no inbox
+        // and no outbox at all — so the closing of the window is asserted
+        // where it is observable, in OrderFulfilmentSagaEndpointTests against
+        // real SQL Server and a real broker. What stays here is the state
+        // machine's own answer to a duplicate, which the change did not alter.
         (ServiceProvider provider, ITestHarness harness) = await StartHarnessAsync();
         await using (provider)
         {
