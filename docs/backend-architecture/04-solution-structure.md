@@ -689,11 +689,12 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddSingleton<IOutboxStats, OutboxStats>();
     services.AddSingleton<OutboxMetrics>();
 
-    // The two delivery lags and the rejection counter (§13.3). Injected by
-    // IntegrationEventConsumer<T> and CommandConsumer<,>, resolved from the
-    // provider by ProjectionInvoker — all three live here. Forced at startup
-    // for the same reason as OrderMetrics: a consumer is constructed when a
-    // message arrives, so on a quiet service these instruments do not exist.
+    // The two delivery lags, the rejection counter and the inbox suppression
+    // counter (§13.3). Injected by IntegrationEventConsumer<T>,
+    // CommandConsumer<,> and InboxFilter<T>, resolved from the provider by
+    // ProjectionInvoker — all four live here. Forced at startup for the same
+    // reason as OrderMetrics: a consumer is constructed when a message
+    // arrives, so on a quiet service these instruments do not exist.
     services.AddSingleton<MessagingMetrics>();
 
     // Forces construction of the metrics singletons in both layers. Resolving
@@ -1415,7 +1416,13 @@ will actually resolve. A package in one and not the other is how a licence
 boundary gets crossed by a restore, so PR-01 ships that check:
 `.github/licence-gate/` reads this file and [Appendix B](appendix-b-licences.md)
 as text, matches on the backticked package identities the register carries, and
-fails on a pin nobody cleared.
+fails on a pin nobody cleared. It reads every `.csproj`, `.props` and
+`.targets` besides, because central pinning is a convention this file cannot
+enforce on its own: a project naming a `Version` of its own, overriding one, or
+opting out of central management restores a package neither of these two
+documents ever mentions — and an imported `.props` does all three for every
+project at once, which is why the scan reaches past the projects rather than
+stopping at them.
 
 Appendix B is the wider list, though, and three kinds of row in it will never
 have a pin here. A check that does not know them reports false positives until
@@ -1440,8 +1447,9 @@ somebody stops reading its output:
   ignored.
 
 The versions are those current at the review date in the header. A blueprint
-cannot keep them accurate, and neither does the gate below — it reads package
-identities and never a `Version`. Currency and vulnerability scanning are a
+cannot keep them accurate, and neither does the gate below — the only thing it
+ever asks about a `Version` is *where one is written*, never whether the number
+is current. Currency and vulnerability scanning are a
 separate obligation, and the tooling for them is not yet in this repository.
 
 > **Trap — pinning floors instead of versions.** Writing `Version="8.*"`, or
@@ -1453,15 +1461,29 @@ separate obligation, and the tooling for them is not yet in this repository.
 
 What the gate does enforce is narrower, and the line matters. It fails the build
 on a pin [Appendix B](appendix-b-licences.md) does not register, on a registered
-licence outside `.github/licence-gate/allowed-licences.txt`, and on a registered
-identity that is pinned nowhere. All three are questions about **identity and
-licence**; none is a question about whether a version is current or safe.
+identity that is pinned nowhere, on a project that pins for itself rather than
+through this file, and on a registered licence any part of which is outside
+`.github/licence-gate/allowed-licences.txt` — or any part of which is not a
+spelling its map knows, which is a separate finding because it has a separate
+repair. **Not "not an SPDX identifier"**, which is what this sentence and the
+gate's own message used to say: the vocabulary is closed on purpose, so a real
+identifier the map has never been shown is refused too, and a message blaming
+SPDX sends the reader to fix a register row that is already correct. Every one of them is a question about **identity and licence**; none is
+a question about whether a version is current or safe.
 
 Licence drift is only caught reliably by tooling — a convention will not survive
 the twentieth dependency. The gate runs ahead of the build rather than after it
-([§15.1](15-cicd-deployment.md)), which is what this file's central pinning
-buys: every dependency the repository has is declared in one place, so nothing
-needs restoring before the list can be read.
+([§15.1](15-cicd-deployment.md)), and what buys that is not central pinning but
+the fact that **everything it reads is text**: this file, Appendix B, and every
+`.csproj`, `.props` and `.targets` besides. Nothing needs restoring before the
+list can be read.
+
+**This sentence used to say the gate could run early because "every dependency
+the repository has is declared in one place"**, which is the claim the
+paragraph above exists to refuse — a project may name a `Version` of its own,
+override one, or opt out of central management, and each restores a package
+this file never mentions (#50). The scan is early because it is a text scan;
+it would still be early if central pinning were abandoned tomorrow.
 
 > **Trap — the sample above is a copy.** The gate reads
 > `Directory.Packages.props`; the fenced block in this section is a second

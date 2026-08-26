@@ -68,6 +68,227 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The claims a gate never checked (#22, #50, #61, #64, #72, #119, #127)
+
+Seven issues, and the shape they share is narrower than the last batch's. Those
+were controls argued in a comment and enforced by nothing. These are controls
+that **exist, run, and go green over a subject narrower than the one they are
+read as covering** — a licence gate reading one file out of thirty-five, a
+scaffold suite that renders text and never compiles it, a suppression branch
+with no signal, a claim that could not say whose it was. Every one of them
+passes today and would pass tomorrow with the defect present, which is the
+property that makes a green result worth nothing.
+
+**The exception is the compose binding, and it is here because it is the same
+sentence read the other way.** `deploy/compose/README.md` addresses every
+service as `http://localhost:…` and the file published all thirteen mappings on
+`0.0.0.0`. Nothing was wrong with the documented workflow; what was wrong was
+that the document described a narrower exposure than the file delivered, and
+the deliberate development credentials underneath — `sa`, two passwordless
+Redis instances, `guest`/`guest`, Keycloak's `admin` — are exactly what makes
+the interface the control. The fix is one prefix per mapping and takes nothing
+away from `localhost`.
+
+### The scaffold was the file that broke, and that is the interesting half
+
+Prefixing the mappings broke `tools/new-service` in two places, in opposite
+directions. The substitution regex stopped matching and the scaffold
+hard-failed — loud, found by running it. The **collision check** stopped
+matching too, and that one is silent: a port already published read as free, so
+the next service would have been scaffolded onto a taken one. Only the first
+was ever going to be found by running the script, which is why the second is
+worth recording.
+
+The repair took a decision worth naming. The published-port pattern now
+**requires** the loopback prefix of the template rather than copying whatever
+Catalog happens to carry. Reading the prefix off Catalog would make the
+scaffold agree with Catalog by construction, so removing the bind there would
+publish every service scaffolded afterwards on every interface, silently — *a
+gate that follows its subject cannot catch its subject regressing*. Anchored,
+the same removal is a scaffold that refuses to run and says why.
+
+### A claim names the work; only a token names the attempt (#127)
+
+`RedisIdempotencyStore.CompleteAsync` and `ReleaseAsync` wrote and deleted
+unconditionally, and every claim wrote the same `InProgressMarker` — so neither
+write could tell *this* attempt's claim from a successor's, and an attempt that
+outlived its own retention overwrote or deleted a live one.
+`RedisDistributedLock` sits in the same folder, on the same connection, and
+releases through a token-checked Lua script whose comment states this hazard
+verbatim. **The asymmetry was the sharper half of the finding**: a reader who
+has read the lock assumes the store does the same, so the hole sat behind a
+pattern that read as applied.
+
+`TryClaimAsync` now returns a claim token and both writes take it, comparing
+and acting in one script for the reason the lock's comment already gave — a
+check and an act that are two operations are two operations the claim can
+expire between.
+
+**A smaller fix was available and is worse than none**, which is why it was
+refused: making the writes conditional on the value still being
+`InProgressMarker` closes the payload-overwrite half only, because both
+attempts write the *same* marker. It would read as a fix while leaving
+claim-versus-claim open.
+
+**What the token closes is corruption, not the overrun.** Nothing bounds the
+retention against a handler's runtime; the behaviour passes 24 hours, so no
+shipped path reaches this, and nothing in the port's contract stops a caller
+passing seconds. Past the expiry a successor may claim and both attempts run —
+the loser now fails to write rather than writing over the winner, and the store
+logs the refusal. **The test drives a one-second retention**, because the
+shipped 24 hours cannot be observed and a test that cannot reach the case is a
+test about something else.
+
+**The encoding chose itself against a hash.** The value is `{claim}:{state}`,
+one string, because the claim has to be a single atomic write against a key
+that may not exist: `SET NX` with a TTL is one operation, where `HSETNX` plus
+`EXPIRE` is two and a claim dying between them is a key with no expiry at all.
+The token is 32 hex characters and carries no separator, so the split is
+unambiguous from the left however many colons a JSON payload holds on the
+right.
+
+**An entry carrying no token is read by the test the store used before the
+token existed** — the marker means in progress, anything else is a recorded
+outcome — because a claim written by the previous release is still inside its
+retention when this one starts serving.
+
+**The first shape of that branch reported the whole untokened class as in
+progress, and the sentence defending it was where the defect lived.** It read
+*both answers decline the duplicate commit, and only this one declines to
+invent an owner*, which is true and beside the point: **a replay is not a
+commit**. A completed pre-token entry read as in-progress answers 409 to a
+retry of work that succeeded, for the rest of the retention — and then lets
+the command run a second time once the key expires. During a rolling deploy,
+which is the only window the branch exists for, that breaks both halves of
+what §8.5 promises at once. Found by the external review, on the second round,
+against prose that had already been through one.
+
+The half that survives is the marker test itself, and it survives for the
+reason it always held: the marker is deliberately not valid JSON, so no
+serialised payload can spell it. The write side needed no matching case —
+both scripts compare a token these values do not carry, so they no-op rather
+than clobber.
+
+**The double had to change with the port, and that is the load-bearing half of
+the test work.** `RecordingIdempotencyStore` compared nothing, so every
+behaviour test would have passed whether or not the behaviour carried its token
+through — the shipped defect wearing a test's clothes. Two new cases assert the
+write carries the token the claim returned, which is the claim no assertion
+about *which call happened* can make.
+
+**The grant that was explained by one caller now has two.** §8.1 grants
+`+eval` and gave the lock's token-checked release as the reason — `EVAL` is
+`@scripting`, which none of the data categories include, and under the shorter
+grant that line used to print, every release threw and the lock stood until its
+TTL. The store's move to Lua does not change the grant; it changes what a
+reader may conclude from the explanation, which is **this repository's own
+lesson that a premise about who calls a thing is falsified by the next caller**
+arriving inside the change that falsifies it. Both are named now, and the store
+has the lock's test: the §8.1 user provisioned live, the real type driven
+through it.
+
+That test needed the re-claim to say anything. `ReleaseAsync` swallows a
+`RedisException` by design, so a missing grant there does not throw — it leaves
+the claim standing for its whole retention and writes a log line. *It did not
+throw* is exactly the assertion that would have passed against the defect, so
+the claim is made from the other side: claim, release, claim again.
+
+### An invisible drop path is why the attack had no signal (#64)
+
+§9.5's inbox suppressed a duplicate with a bare `return;` — no log, no metric,
+no error queue — so the one path on which this platform loses a message on
+purpose was the only path with no signal anywhere in §13. The counter and the
+debug line do not make a suppression distinguishable from a redelivery *inside
+the filter*: both are an id already recorded, and nothing there can tell them
+apart. What they buy is that the class is measurable at all, and a suppression
+rate that does not match the redelivery rate is the thing worth looking at.
+
+**The `MessageId` is on the log line and never on the counter.** It is
+caller-chosen and unbounded, which is both the reason the finding exists and
+the reason it cannot be a series. The two tags are a type name and a queue
+name, closed sets fixed at registration (§9.8).
+
+**§9.5 gained the trust dependency rather than a mitigation.** The key this
+suppresses on is chosen by whoever published the message — §9.1 makes the
+envelope id and the transport header one GUID — so the inbox is only as
+trustworthy as the set of principals that may publish to the endpoint. #44's
+per-service broker credential is a prerequisite for reading this mechanism as a
+guarantee, not an improvement to it, and recording the publisher's identity
+alongside the id needs that credential to exist first.
+
+> **The test is over the instrument, not over the drop.** Every other test in
+> that file passes with the counter deleted — they assert the consumer ran
+> once and the row was written, which is true of a silent drop and of a
+> counted one alike. A `MeterListener` filtered to this suite's own endpoint
+> is what makes the signal load-bearing; the endpoint tag is doing real work
+> there, because a listener is process-wide where an xUnit collection is not.
+
+### Three spellings of a package the licence gate never read (#50)
+
+The gate read `PackageVersion` elements in `Directory.Packages.props` and no
+project file at all, so `GlobalPackageReference`, a `PackageReference` carrying
+`Version` or `VersionOverride`, and `ManagePackageVersionsCentrally` set to
+`false` each restored an uncleared package while the gate printed *"Every one
+registered, licence-cleared"*. All three are ordinary MSBuild rather than
+anything exotic, and none of them puts a `PackageVersion` element anywhere the
+pin reader looks.
+
+**The scan parses each file rather than grepping it**, because `Web.Bff.csproj`
+already carries multi-line `PackageReference` elements with child elements — a
+line pattern reads that shape as two unrelated lines and sees nothing. Element
+names are matched namespace-insensitively for the same class of reason: an
+`xmlns` on `<Project>` is an attribute that switches a tag-name match off in
+silence.
+
+**And it reads `.props` and `.targets`, not `.csproj` alone.** A
+`PackageReference` carrying a `Version` is legal in `Directory.Build.props`,
+where it reaches every project at once — so a scan that stopped at the projects
+would have closed the narrow spelling of this defect and left the wider
+spelling of the same thing standing. That is this repository's most-repeated
+failure arriving *inside the check written to close it*, which is why the
+suffix list is a constant with the argument beside it and a test whose subject
+is what the glob found.
+
+**The empty subject is a finding.** A glob matching nothing reports exactly
+what a repository with no fault reports, and from inside the gate those two
+results are the same.
+
+**The licence-part rule was reversed, and it reverses a documented decision.**
+`allowed-licences.txt` said a dual-licensed package passes if *either* half is
+allowed, "because a dual licence is a choice the consumer makes" — true of a
+disjunction, and the gate cannot tell a disjunctive `/` from a conjunctive one.
+Under *any*, the register clears a forbidden licence by pairing it with an
+allowed one. It now requires **every** part, and reports a part the spelling
+map cannot name with a message of its own, because the repairs differ: one is a
+decision about the allow-list and the other is a spelling nobody has named.
+Verified against the register before taking it — every multi-part cell today
+has all parts allowed, so the reversal breaks nothing and the argument is what
+changed.
+
+### A suite that renders text and never compiles it (#72)
+
+`tools/new-service`'s suite renders a service and inspects the resulting text,
+and the CI job that runs it installs no SDK. That is the property the job was
+designed for — §15.1's argument for putting the licence gate ahead of the build
+is the same one — so the fix is a **second job**, not a step added to the first.
+Anything the scaffold *removes* is invisible to a text check: PR-14 wrote a
+dispatcher test over `OutboxRows.Broker`, which leaves with the first contract,
+and rendered a service that did not compile with every test green.
+
+`Yankee` at 5199, never `Ordering`. The issue proposed `Ordering` on the
+grounds that it is the real next service and sorts after `Common`; PR-18 made
+Ordering real, so the create now refuses the taken name and port — and the
+cleanup that follows the render deletes the service. A probe cannot quietly
+become a service later.
+
+**Build, do not run.** The failure class is compile-time, and running the
+rendered tests needs SQL and RabbitMQ containers for very little extra signal.
+The *test* project rather than the service, because it references the whole
+rendered service transitively and the half a text check cannot see is in the
+tests.
+
+---
+
 ## The comments that were not mechanisms (#35, #36, #37, #38, #39, #41, #68)
 
 Seven issues, one shape. Each names a control the platform already had, and in

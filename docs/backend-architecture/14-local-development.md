@@ -16,7 +16,11 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}"
       MSSQL_PID: Developer
-    ports: [ "1433:1433" ]
+    # Every mapping in this file publishes on 127.0.0.1 rather than on every
+    # interface, argued once here rather than per service: the credentials
+    # are development defaults, so the interface is what stands in front of
+    # them. The callout below the endpoint table carries the argument.
+    ports: [ "127.0.0.1:1433:1433" ]
     volumes: [ sql-data:/var/opt/mssql ]
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1'"]
@@ -29,7 +33,7 @@ services:
   redis-cache:
     image: redis:7-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    ports: [ "6379:6379" ]
+    ports: [ "127.0.0.1:6379:6379" ]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
 
@@ -38,7 +42,7 @@ services:
     # noeviction: locks, idempotency keys and the denylist must never be
     # evicted. Appendonly so a restart does not silently release held locks.
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
-    ports: [ "6380:6379" ]
+    ports: [ "127.0.0.1:6380:6379" ]
     volumes: [ redis-coordination-data:/data ]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -52,7 +56,7 @@ services:
   rabbitmq:
     build:
       context: rabbitmq
-    ports: [ "5672:5672", "15672:15672" ]
+    ports: [ "127.0.0.1:5672:5672", "127.0.0.1:15672:15672" ]
     volumes: [ rabbit-data:/var/lib/rabbitmq ]
     healthcheck:
       # check_running answers "is the broker up", which was the whole question
@@ -82,7 +86,7 @@ services:
       KC_HOSTNAME: http://localhost:8080
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HEALTH_ENABLED: "true"
-    ports: [ "8080:8080" ]
+    ports: [ "127.0.0.1:8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
     # The image has a shell but no HTTP client, so this is a bash TCP
     # redirection against the management port — the form Keycloak's own
@@ -104,11 +108,11 @@ services:
     image: otel/opentelemetry-collector-contrib:latest
     command: [ "--config=/etc/otel/config.yaml" ]
     volumes: [ ./otel/config.yaml:/etc/otel/config.yaml:ro ]
-    ports: [ "4317:4317", "4318:4318" ]
+    ports: [ "127.0.0.1:4317:4317", "127.0.0.1:4318:4318" ]
 
   grafana:
     image: grafana/otel-lgtm:latest
-    ports: [ "3000:3000" ]
+    ports: [ "127.0.0.1:3000:3000" ]
 
   # ---- Application services ----
 
@@ -159,7 +163,7 @@ services:
       # container-side ports do not.
       ConnectionStrings__RedisCache: "redis-cache:6379"
       ConnectionStrings__RedisCoordination: "redis-coordination:6379"
-    ports: [ "5101:8080" ]
+    ports: [ "127.0.0.1:5101:8080" ]
     depends_on:
       ordering-migrator: { condition: service_completed_successfully }
       rabbitmq:          { condition: service_healthy }
@@ -202,7 +206,7 @@ services:
       Cors__Enabled: "true"
       Cors__Origins__0: "http://localhost:5173"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-    ports: [ "5000:8080" ]
+    ports: [ "127.0.0.1:5000:8080" ]
     depends_on:
       keycloak: { condition: service_healthy }
       # Every destination that exists, and only those — a Compose dependency
@@ -231,7 +235,7 @@ services:
       Identity__Client__ClientSecret: "${BFF_CLIENT_SECRET:-local-dev-secret}"
       Identity__Client__Scope: "commerce-api"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-    ports: [ "5200:8080" ]
+    ports: [ "127.0.0.1:5200:8080" ]
     depends_on:
       # Keycloak only. catalog-api is elided from this file (see the comment
       # above the gateway), and Compose rejects a dependency on a service it
@@ -272,6 +276,15 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 | Keycloak | http://localhost:8080 (admin/admin) |
 | RabbitMQ management | http://localhost:15672 (guest/guest) |
 | Grafana | http://localhost:3000 |
+
+> **Every published port binds `127.0.0.1`, not `0.0.0.0`.** The credentials
+> in the table above are development defaults on purpose, which makes the
+> interface the control standing in front of them — Compose's short syntax
+> with no host-IP prefix publishes on every interface, so `docker compose up`
+> on a café or office network offers `sa`, two passwordless Redis instances,
+> `guest`/`guest` and Keycloak's admin console to every peer on it. Every URL
+> in the table is already a `localhost` one, so the prefix takes nothing away
+> from the workflow this chapter documents.
 
 The realm's own logins are `demo/demo`, which holds every permission a shipped
 endpoint requires — `deploy/compose/README.md` carries the current list rather

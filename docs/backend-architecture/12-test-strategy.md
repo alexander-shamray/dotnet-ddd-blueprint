@@ -1101,12 +1101,15 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > whether the test gets a container.
 >
 > Measured rather than assumed, because that propagation is load-bearing: on
-> `Common.Infrastructure.Tests`, `Category=Integration` selects the twenty
-> tests of the three classes in the collection and `Category!=Integration`
-> selects the other seventy-one — 91 as the runner counts them, with no third
-> state and nothing counted twice. Those figures read ten, two and 81 until
-> the measurement was retaken: the suite grew and the callout did not, which
-> is a restated total going stale in the chapter that owns it.
+> `Common.Infrastructure.Tests`, `Category=Integration` selects the
+> twenty-six tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-one — 97 as the runner
+> counts them, with no third state and nothing counted twice. Those figures
+> read ten/81, then twenty/91, then twenty-three/94, then twenty-four/95, and
+> every retake was the suite growing while the callout did not. **The count
+> of retakes is not written here either**, for the reason the figures
+> themselves keep demonstrating: it has been wrong at each of them. What a
+> reader can check is whether this pair matches `docs/testing.md` and a run.
 >
 > **The fast half starts no container, and that is proved rather than
 > inferred**: `docker events --filter event=create` over a solution-wide

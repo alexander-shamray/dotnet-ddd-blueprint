@@ -1,6 +1,8 @@
+using System.Diagnostics.Metrics;
 using Ordering.Infrastructure.Persistence;
 using Ordering.TestSupport;
 using Common.Infrastructure.Inbox;
+using Common.Infrastructure.Messaging;
 using MassTransit;
 using MassTransit.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -131,6 +133,15 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         // expired the moment it is written.
         services.AddSingleton(TimeProvider.System);
 
+        // The filter's two observability dependencies (#64). A suppressed
+        // message is counted and logged rather than dropped in silence, so
+        // this host supplies the meter factory and the logger a real one does
+        // — and `validateScopes: true` below means a missing registration is a
+        // resolution failure at the first delivery rather than a wrong answer.
+        services.AddMetrics();
+        services.AddLogging();
+        services.AddSingleton<MessagingMetrics>();
+
         services.AddMassTransitTestHarness(x =>
         {
             x.SetTestTimeouts(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(30));
@@ -219,6 +230,93 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
 
         FirstConsumer.Consumed.ShouldBe([id], "the filter must drop the second delivery");
         (await fixture.InboxAsync()).ShouldHaveSingleItem().MessageId.ShouldBe(messageId);
+    }
+
+    [Fact]
+    public async Task A_suppressed_duplicate_is_counted_rather_than_dropped_in_silence()
+    {
+        // #64. The suppression branch was a bare `return;`, which made the one
+        // path where this platform drops a message on purpose the only path
+        // with no signal anywhere in §13 — so an inbox hit suppressing a
+        // message the service had never seen read exactly like a genuine
+        // redelivery, from every dashboard.
+        //
+        // Homed in this suite alone rather than in both services' copies:
+        // InboxFilter<T> is common code and this is a property of the filter,
+        // not of either service's wiring. The endpoint tag is what keeps the
+        // listener from reading a neighbouring suite's suppressions — a
+        // MeterListener is process-wide, where a collection is not.
+        await using ServiceProvider provider = BuildHost<FirstConsumer>();
+        ITestHarness harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        List<string> observed = [];
+        using MeterListener listener = new();
+
+        listener.InstrumentPublished = (instrument, active) =>
+        {
+            if (instrument.Meter.Name == "Commerce.Messaging" &&
+                instrument.Name == "messaging.inbox.suppressed")
+            {
+                active.EnableMeasurementEvents(instrument);
+            }
+        };
+
+        listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
+        {
+            string message = TagValue(tags, "message");
+            string endpoint = TagValue(tags, "endpoint");
+
+            if (endpoint != FirstEndpoint)
+                return;
+
+            lock (observed)
+                observed.Add($"{measurement} {message} {endpoint}");
+        });
+
+        listener.Start();
+
+        var id = Guid.CreateVersion7();
+        var messageId = Guid.CreateVersion7();
+
+        await harness.Bus.Publish(
+            new ProbeMessage(id),
+            c => c.MessageId = messageId,
+            TestContext.Current.CancellationToken);
+
+        await Eventually(() => fixture.InboxAsync(), expected: 1);
+
+        await harness.Bus.Publish(
+            new ProbeMessage(id),
+            c => c.MessageId = messageId,
+            TestContext.Current.CancellationToken);
+
+        // Both deliveries recorded before the assertion, for the reason the
+        // test above spells out at length: waiting on "a" delivery returns
+        // while the redelivery is still in the pipe, and the count would then
+        // be read before the drop had happened.
+        await Eventually(
+            () => Task.FromResult<IReadOnlyList<object>>(
+                [.. harness.Consumed.Select<ProbeMessage>()]),
+            expected: 2);
+
+        lock (observed)
+            observed.ShouldBe([$"1 {nameof(ProbeMessage)} {FirstEndpoint}"]);
+    }
+
+    /// <summary>
+    /// One tag off a measurement. A span cannot be captured, so the read
+    /// happens inside the callback and only the string escapes.
+    /// </summary>
+    private static string TagValue(ReadOnlySpan<KeyValuePair<string, object?>> tags, string name)
+    {
+        foreach (KeyValuePair<string, object?> tag in tags)
+        {
+            if (tag.Key == name)
+                return tag.Value?.ToString() ?? string.Empty;
+        }
+
+        return string.Empty;
     }
 
     [Fact]

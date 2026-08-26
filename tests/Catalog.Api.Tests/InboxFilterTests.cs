@@ -1,6 +1,7 @@
 using Catalog.Infrastructure.Persistence;
 using Catalog.TestSupport;
 using Common.Infrastructure.Inbox;
+using Common.Infrastructure.Messaging;
 using MassTransit;
 using MassTransit.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -130,6 +131,15 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         // the clock a seam, and two clocks for one window is a row that looks
         // expired the moment it is written.
         services.AddSingleton(TimeProvider.System);
+
+        // The filter's two observability dependencies (#64). A suppressed
+        // message is counted and logged rather than dropped in silence, so
+        // this host supplies the meter factory and the logger a real one does
+        // — and `validateScopes: true` below means a missing registration is a
+        // resolution failure at the first delivery rather than a wrong answer.
+        services.AddMetrics();
+        services.AddLogging();
+        services.AddSingleton<MessagingMetrics>();
 
         services.AddMassTransitTestHarness(x =>
         {

@@ -149,8 +149,10 @@ public static class DependencyInjection
         services.AddSingleton<JsonConverter, TrackingNumberJsonConverter>();
         services.AddSingleton<OutboxJson>();
 
-        // §13.3's projection lag, on the Commerce.Messaging meter
-        // AddObservability already collects.
+        // §13.3's messaging instruments, on the Commerce.Messaging meter
+        // AddObservability already collects. The class owns the list, and this
+        // comment does not restate it — naming a subset is how this line came
+        // to say "projection lag" long after there were four.
         services.AddSingleton<MessagingMetrics>();
 
         // §13.6's per-lane outbox gauges, and the stats type behind them. Both

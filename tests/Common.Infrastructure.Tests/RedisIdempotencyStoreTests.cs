@@ -1,6 +1,7 @@
 using Common.Application;
 using Common.Infrastructure.Redis;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Shouldly;
 using StackExchange.Redis;
 using Xunit;
@@ -21,6 +22,23 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
 {
     private static readonly TimeSpan Retention = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Short enough that a claim taken under it lapses inside a test, which is
+    /// the only way to reach #127's case: the shipped caller passes 24 hours,
+    /// so the window in which two attempts hold one key in turn cannot be
+    /// observed at the setting that ships. Every successor then claims under
+    /// <see cref="Retention"/>, so it outlives the assertions about it.
+    /// </summary>
+    private static readonly TimeSpan Brief = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// A token no claim ever minted, for the paths where the caller holds
+    /// none. Not a well-formed one on purpose: nothing about the scripts
+    /// depends on the shape, and a real-looking token here would read as a
+    /// claim this test had taken.
+    /// </summary>
+    private const string Foreign = "not-a-claim-this-test-holds";
+
     [Fact]
     public async Task A_claimed_key_cannot_be_claimed_again()
     {
@@ -30,11 +48,11 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         await using ServiceProvider provider = fixture.BuildProvider("idem");
         IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
 
-        bool first = await store.TryClaimAsync("contend", Retention, TestContext.Current.CancellationToken);
-        bool second = await store.TryClaimAsync("contend", Retention, TestContext.Current.CancellationToken);
+        string? first = await store.TryClaimAsync("contend", Retention, TestContext.Current.CancellationToken);
+        string? second = await store.TryClaimAsync("contend", Retention, TestContext.Current.CancellationToken);
 
-        first.ShouldBeTrue();
-        second.ShouldBeFalse();
+        first.ShouldNotBeNull();
+        second.ShouldBeNull();
     }
 
     [Fact]
@@ -57,8 +75,9 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         await using ServiceProvider provider = fixture.BuildProvider("idem");
         IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
 
-        await store.TryClaimAsync("done", Retention, TestContext.Current.CancellationToken);
-        await store.CompleteAsync("done", "\"0195e4b2\"", Retention, TestContext.Current.CancellationToken);
+        string claim = await ClaimedAsync(store, "done", Retention);
+        await store.CompleteAsync(
+            "done", claim, "\"0195e4b2\"", Retention, TestContext.Current.CancellationToken);
 
         IdempotencyEntry? entry = await store.GetAsync("done", TestContext.Current.CancellationToken);
 
@@ -78,8 +97,8 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         await using ServiceProvider provider = fixture.BuildProvider("idem");
         IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
 
-        await store.TryClaimAsync("void", Retention, TestContext.Current.CancellationToken);
-        await store.CompleteAsync("void", "null", Retention, TestContext.Current.CancellationToken);
+        string claim = await ClaimedAsync(store, "void", Retention);
+        await store.CompleteAsync("void", claim, "null", Retention, TestContext.Current.CancellationToken);
 
         IdempotencyEntry? entry = await store.GetAsync("void", TestContext.Current.CancellationToken);
 
@@ -94,11 +113,12 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         await using ServiceProvider provider = fixture.BuildProvider("idem");
         IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
 
-        await store.TryClaimAsync("released", Retention, TestContext.Current.CancellationToken);
-        await store.ReleaseAsync("released", TestContext.Current.CancellationToken);
+        string claim = await ClaimedAsync(store, "released", Retention);
+        await store.ReleaseAsync("released", claim, TestContext.Current.CancellationToken);
 
         (await store.GetAsync("released", TestContext.Current.CancellationToken)).ShouldBeNull();
-        (await store.TryClaimAsync("released", Retention, TestContext.Current.CancellationToken)).ShouldBeTrue();
+        (await store.TryClaimAsync("released", Retention, TestContext.Current.CancellationToken))
+            .ShouldNotBeNull();
     }
 
     [Fact]
@@ -124,11 +144,17 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
             .GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination)
             .GetDatabase();
 
-        await store.TryClaimAsync("claimed", Retention, TestContext.Current.CancellationToken);
+        string claim = await ClaimedAsync(store, "claimed", Retention);
         (await database.KeyExistsAsync("prefixed:idem:claimed")).ShouldBeTrue();
 
-        await store.CompleteAsync("claimed", "null", Retention, TestContext.Current.CancellationToken);
-        (await database.StringGetAsync("prefixed:idem:claimed")).ToString().ShouldBe("null");
+        await store.CompleteAsync("claimed", claim, "null", Retention, TestContext.Current.CancellationToken);
+
+        // The stored value carries the claim token AND the payload, which is
+        // the encoding the two scripts compare on. Asserted here rather than
+        // through the port, because the port is what hides it — and a change
+        // to the separator or the token width is a change to what a running
+        // release can still read.
+        (await database.StringGetAsync("prefixed:idem:claimed")).ToString().ShouldBe($"{claim}:null");
     }
 
     [Fact]
@@ -164,7 +190,7 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
             .GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination)
             .GetDatabase();
 
-        await store.TryClaimAsync("expiring", Retention, TestContext.Current.CancellationToken);
+        string claim = await ClaimedAsync(store, "expiring", Retention);
 
         TimeSpan? claimTtl = await database.KeyTimeToLiveAsync("ttl:idem:expiring");
         claimTtl.ShouldNotBeNull();
@@ -186,7 +212,8 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         TimeSpan? shortened = await database.KeyTimeToLiveAsync("ttl:idem:expiring");
         shortened!.Value.ShouldBeLessThan(TimeSpan.FromSeconds(10));
 
-        await store.CompleteAsync("expiring", "null", Retention, TestContext.Current.CancellationToken);
+        await store.CompleteAsync(
+            "expiring", claim, "null", Retention, TestContext.Current.CancellationToken);
 
         TimeSpan? completedTtl = await database.KeyTimeToLiveAsync("ttl:idem:expiring");
         completedTtl.ShouldNotBeNull();
@@ -208,6 +235,235 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
 
         await Should.NotThrowAsync(
-            () => store.ReleaseAsync("never-held", TestContext.Current.CancellationToken));
+            () => store.ReleaseAsync("never-held", Foreign, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_claim_that_outlived_its_retention_cannot_complete_over_its_successors()
+    {
+        // #127, and the reason it needs a SHORT retention: the shipped caller
+        // passes 24 hours, so the window in which two attempts hold one key in
+        // turn is real and unobservable at that setting. Nothing in the port's
+        // contract says a retention must outlast a handler, and the first
+        // caller that passes seconds gets this race with no diagnostic.
+        await using ServiceProvider provider = fixture.BuildProvider("stale");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        string stale = await ClaimedAsync(store, "outlived", Brief);
+        string successor = await WaitForClaimAsync(store, "outlived");
+
+        successor.ShouldNotBe(stale);
+
+        await store.CompleteAsync(
+            "outlived", stale, "\"clobbered\"", Retention, TestContext.Current.CancellationToken);
+
+        IdempotencyEntry? entry = await store.GetAsync("outlived", TestContext.Current.CancellationToken);
+
+        entry.ShouldNotBeNull();
+        entry.InProgress.ShouldBeTrue("the successor's claim is still in flight");
+        entry.Payload.ShouldBeNull("a lost claim must not record an outcome over a live one");
+    }
+
+    [Fact]
+    public async Task A_claim_that_outlived_its_retention_cannot_release_its_successors()
+    {
+        // The worse half of #127. An overwrite corrupts the record of one
+        // duplicate; a delete FREES a successor's claim while that successor
+        // is still running, which admits a concurrent duplicate — the thing
+        // the whole section exists to refuse.
+        await using ServiceProvider provider = fixture.BuildProvider("stale");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        string stale = await ClaimedAsync(store, "freed", Brief);
+        await WaitForClaimAsync(store, "freed");
+
+        await store.ReleaseAsync("freed", stale, TestContext.Current.CancellationToken);
+
+        (await store.GetAsync("freed", TestContext.Current.CancellationToken))
+            .ShouldNotBeNull("the successor still holds this key");
+        (await store.TryClaimAsync("freed", Retention, TestContext.Current.CancellationToken))
+            .ShouldBeNull("a freed key would let a third attempt in");
+    }
+
+    [Fact]
+    public async Task A_pre_token_claim_reads_back_as_in_progress()
+    {
+        // A claim written by the release before #127 landed is still inside
+        // its retention when this one starts serving, and it carries no
+        // token. The marker is read exactly as the store read it before the
+        // token existed, which is sound for the reason it always was: no
+        // serialised payload can spell a value that is not valid JSON.
+        await using ServiceProvider provider = fixture.BuildProvider("legacy");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+        IDatabase database = provider
+            .GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination)
+            .GetDatabase();
+
+        await database.StringSetAsync("legacy:idem:untokened", "in-progress", Retention);
+
+        IdempotencyEntry? entry = await store.GetAsync("untokened", TestContext.Current.CancellationToken);
+
+        entry.ShouldNotBeNull();
+        entry.InProgress.ShouldBeTrue();
+        entry.Payload.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("legacy-void", "null")]
+    [InlineData("legacy-value", "\"0195e4b2-0000-7000-8000-0000000000ff\"")]
+    public async Task A_pre_token_outcome_still_replays(string key, string payload)
+    {
+        // The other half of the same predicate, and the half that was
+        // unasserted while the store reported EVERY untokened value as in
+        // progress. Both of these are what the previous release's
+        // CompleteAsync actually wrote — the void case and a captured
+        // Result<Guid> — and both are 38 characters or fewer with no
+        // separator at index 32, so a shape test alone cannot tell them from
+        // an unfinished claim.
+        //
+        // Reading them as in progress answers 409 to a retry of work that
+        // committed, for the rest of the retention, and then lets the command
+        // run a second time once the key expires. A replay is not a commit,
+        // which is what "both answers decline the duplicate" concealed.
+        await using ServiceProvider provider = fixture.BuildProvider("legacy");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+        IDatabase database = provider
+            .GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination)
+            .GetDatabase();
+
+        await database.StringSetAsync($"legacy:idem:{key}", payload, Retention);
+
+        IdempotencyEntry? entry = await store.GetAsync(key, TestContext.Current.CancellationToken);
+
+        entry.ShouldNotBeNull();
+        entry.InProgress.ShouldBeFalse("a completed pre-token entry is replayable, not in flight");
+        entry.Payload.ShouldBe(payload);
+    }
+
+    [Fact]
+    public async Task The_stores_scripts_run_under_the_documented_ACL_grant()
+    {
+        // §8.1 grants `+eval` and explains it by the LOCK's token-checked
+        // release. Since #127 the store evaluates scripts too, so that
+        // explanation now has a second consumer — and a premise about who
+        // calls a thing is falsified by the next caller. The grant already
+        // covers this; nothing proved it, which is the half that matters,
+        // because EVAL is `@scripting` and none of the data categories
+        // include it. Under the shorter grant this line used to print, every
+        // complete and every release would throw.
+        ConfigurationOptions admin = ConfigurationOptions.Parse(fixture.CoordinationConnectionString);
+        admin.AllowAdmin = true;
+        await using ConnectionMultiplexer adminConnection = await ConnectionMultiplexer.ConnectAsync(admin);
+        object[] grant =
+        [
+            "SETUSER",
+            "aclidem-svc",
+            "reset",
+            "on",
+            ">s3cret",
+            "~aclidem:*",
+            "+@read",
+            "+@write",
+            "+@keyspace",
+            "+@connection",
+            "+eval",
+            "-@dangerous",
+            "+client|setname",
+            "+client|setinfo"
+        ];
+        await adminConnection.GetServer(adminConnection.GetEndPoints()[0]).ExecuteAsync("ACL", grant);
+
+        ConfigurationOptions restricted = ConfigurationOptions.Parse(fixture.CoordinationConnectionString);
+        restricted.User = "aclidem-svc";
+        restricted.Password = "s3cret";
+        await using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(restricted);
+
+        ServiceCollection services = new();
+        services.AddSingleton<IHostEnvironment>(new TestEnvironment("aclidem"));
+
+        // The store logs a lost claim and a failed release, so this bare
+        // collection needs a logger where the lock's equivalent test does not
+        // — the lock has none to fail over.
+        services.AddLogging();
+        services.AddRedisConnections(AddRedisConnectionsTests.Configuration());
+        services.AddKeyedSingleton<IConnectionMultiplexer>(RedisConnections.Coordination, connection);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        // CompleteAsync fails LOUDLY without the grant — it does not catch —
+        // so reading the payload back proves the script ran rather than that
+        // nothing threw.
+        string completed = await ClaimedAsync(store, "acl-done", Retention);
+        await store.CompleteAsync(
+            "acl-done", completed, "\"ok\"", Retention, TestContext.Current.CancellationToken);
+
+        IdempotencyEntry? entry = await store.GetAsync("acl-done", TestContext.Current.CancellationToken);
+        entry.ShouldNotBeNull();
+        entry.Payload.ShouldBe("\"ok\"");
+
+        // ReleaseAsync SWALLOWS a RedisException by design, so a missing grant
+        // would leave the claim standing and log rather than throw. The
+        // re-claim is what makes that visible — the lock suite's own argument,
+        // and the reason this half cannot be asserted by "it did not throw".
+        string released = await ClaimedAsync(store, "acl-freed", Retention);
+        await store.ReleaseAsync("acl-freed", released, TestContext.Current.CancellationToken);
+
+        (await store.TryClaimAsync("acl-freed", Retention, TestContext.Current.CancellationToken))
+            .ShouldNotBeNull("a release that never ran would hold the key for its whole retention");
+    }
+
+    /// <summary>
+    /// Claims <paramref name="key"/> as soon as the previous claim's retention
+    /// lapses, under the long retention so the successor survives the
+    /// assertions that follow.
+    /// </summary>
+    /// <remarks>
+    /// Polling rather than a fixed sleep, on <c>DistributedLockRedisTests</c>'
+    /// terms: a fixed wait is either slower than it needs to be or
+    /// intermittently short on a loaded runner, and this suite already has one
+    /// helper written for that reason.
+    /// </remarks>
+    private static async Task<string> WaitForClaimAsync(IIdempotencyStore store, string key)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            string? claim = await store.TryClaimAsync(key, Retention, TestContext.Current.CancellationToken);
+
+            if (claim is not null)
+                return claim;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
+        }
+
+        throw new TimeoutException($"The claim on '{key}' had not expired after 15 seconds.");
+    }
+
+    /// <summary>
+    /// A claim every caller below needs to have succeeded, with the failure
+    /// reported as the precondition it is.
+    /// </summary>
+    /// <remarks>
+    /// <b>This replaced a null-forgiving <c>!</c> at nine call sites.</b> A
+    /// refused claim written that way is a <c>null</c> travelling several lines
+    /// before something dereferences it, so what CI prints names the line that
+    /// tripped over the value rather than the line that produced it — and on a
+    /// suite whose failures are usually about the container rather than the
+    /// branch, the diagnosis is most of the cost. Failing at the claim says
+    /// which key, and says that the precondition is what went wrong.
+    /// </remarks>
+    private static async Task<string> ClaimedAsync(IIdempotencyStore store, string key, TimeSpan retention)
+    {
+        string? claim = await store.TryClaimAsync(key, retention, TestContext.Current.CancellationToken);
+
+        if (claim is null)
+        {
+            throw new InvalidOperationException(
+                $"'{key}' could not be claimed, so this test never reached its subject. " +
+                $"The key was already held — a leftover from an earlier run against a reused server.");
+        }
+
+        return claim;
     }
 }

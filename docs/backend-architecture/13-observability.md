@@ -432,18 +432,20 @@ ones a reader would otherwise go looking for in this section and fail to find:
 | ASP.NET Core instrumentation | the framework, enabled in §13.2 | `http.server.request.duration` — the availability row |
 
 `RequestMetrics` is Application because `LoggingBehavior` injects it and the
-pipeline is Application. `MessagingMetrics` is Infrastructure because all three
-of its call sites are — two consumers and the outbox dispatcher's invoker.
-`OutboxMetrics` is separate from both because it reads the database, which is
-also why it is observable rather than pushed (§13.6).
+pipeline is Application. `MessagingMetrics` is Infrastructure because all four
+of its call sites are — two consumers, §9.5's inbox filter and the outbox
+dispatcher's invoker. `OutboxMetrics` is separate from both because it reads
+the database, which is also why it is observable rather than pushed (§13.6).
 
 **The table's last column is what each source contributes to §13.7, not what it
-declares.** `MessagingMetrics` publishes a third instrument that appears nowhere
-in it: `command.domain_rejected` feeds no SLO row at all, being a business
-signal that happens to share the meter (§9.8). So the class below has three
-instruments and its row above lists two, and both are right — a reader counting
-one against the other will find a difference that is not a defect, which is why
-it is said here rather than left to be noticed.
+declares.** `MessagingMetrics` publishes two instruments that appear nowhere in
+it: `command.domain_rejected` feeds no SLO row at all, being a business signal
+that happens to share the meter (§9.8), and `messaging.inbox.suppressed` feeds
+none either — it exists so that §9.5's deliberate drop stops being the one path
+in this platform with no signal at all. So the class below has four instruments
+and its row above lists two, and both are right — a reader counting one against
+the other will find a difference that is not a defect, which is why it is said
+here rather than left to be noticed.
 
 ```csharp
 // Common.Application — registered by AddOrderingApplication (§4.2) and forced
@@ -474,18 +476,21 @@ public sealed class RequestMetrics
 
 ```csharp
 // Common.Infrastructure — registered by AddOrderingInfrastructure, because
-// all three call sites are Infrastructure types (§9.4).
+// all four call sites are Infrastructure types (§9.4, §9.5).
 //
-// The finished class. It grows in instalments, on PluggableInterfaces.All's
-// terms: Projected lands with the outbox, because ProjectionInvoker is its
-// only call site, and the other two with the consumers that record them. Two
-// instruments nothing writes to would be an empty series on a dashboard
-// rather than a signal — see Appendix D, which records where the code is.
+// It grows in instalments, on PluggableInterfaces.All's terms: Projected
+// lands with the outbox, because ProjectionInvoker is its only call site, the
+// next two with the consumers that record them, and Suppressed when §9.5's
+// silent drop was given a signal. An instrument nothing writes to would be an
+// empty series on a dashboard rather than a signal — which is the rule for
+// when one may be added, not a claim that four is the number. See Appendix D,
+// which records where the code is.
 public sealed class MessagingMetrics
 {
     private readonly Histogram<double> _deliveryLag;
     private readonly Histogram<double> _projectionLag;
     private readonly Counter<long> _rejected;
+    private readonly Counter<long> _suppressed;
 
     public MessagingMetrics(IMeterFactory factory)
     {
@@ -502,6 +507,9 @@ public sealed class MessagingMetrics
         _rejected = meter.CreateCounter<long>(
             "command.domain_rejected",
             description: "Message-borne commands the domain refused (§9.8).");
+        _suppressed = meter.CreateCounter<long>(
+            "messaging.inbox.suppressed",
+            description: "Messages the inbox dropped as already handled (§9.5).");
     }
 
     public void Delivered(string message, TimeSpan lag) =>
@@ -515,6 +523,16 @@ public sealed class MessagingMetrics
             1,
             new KeyValuePair<string, object?>("message", message),
             new KeyValuePair<string, object?>("error", error));
+
+    // Neither tag is the MessageId, and that is the constraint rather than an
+    // omission: a message id is unbounded, so it belongs in the log line the
+    // filter writes beside this and never on a series. Both of these are
+    // closed sets fixed at registration (§9.8).
+    public void Suppressed(string message, string endpoint) =>
+        _suppressed.Add(
+            1,
+            new KeyValuePair<string, object?>("message", message),
+            new KeyValuePair<string, object?>("endpoint", endpoint));
 }
 ```
 
@@ -533,18 +551,26 @@ today; it would also make the metric the reason the invoker cannot accept a
 plain record tomorrow. The row already has the timestamp, and reading it there
 costs a column the claim was going to pay for anyway.
 
-`IntegrationEventConsumer<T>` and `CommandConsumer<,>` take `MessagingMetrics`
-as a constructor parameter. `Projected` is recorded by `ProjectionInvoker`
-(§9.4), which is static and cached — it resolves `MessagingMetrics` from the
-`IServiceProvider` it is already handed rather than through a constructor it
-does not have.
+`IntegrationEventConsumer<T>`, `CommandConsumer<,>` and `InboxFilter<T>` take
+`MessagingMetrics` as a constructor parameter. `Projected` is recorded by
+`ProjectionInvoker` (§9.4), which is static and cached — it resolves
+`MessagingMetrics` from the `IServiceProvider` it is already handed rather than
+through a constructor it does not have.
 
 Both lags compare a timestamp made on another machine, so both carry the same
 caveat: they are useful at second granularity and meaningless below it, which is
-why §13.7's targets for them are in seconds and not milliseconds. The third
-instrument, `command.domain_rejected`, is a plain counter with no such
-caveat — it is recorded by `CommandConsumer` at the moment the dispatcher
-returns a failure, on the same machine (§9.8).
+why §13.7's targets for them are in seconds and not milliseconds. The two
+counters carry no such caveat, because neither reads a clock at all:
+`command.domain_rejected` is recorded by `CommandConsumer` at the moment the
+dispatcher returns a failure (§9.8), and `messaging.inbox.suppressed` by
+`InboxFilter<T>` at the moment it drops a delivery (§9.5) — both on the
+machine doing the work.
+
+**That sentence said *the third instrument* until there was a fourth**, and
+the ordinal is what made it wrong rather than merely incomplete: it read as
+closing a three-way partition, so the instrument that arrived next had nowhere
+to be. `MessagingMetrics` itself dropped the ordinal in the same change, for
+the same reason.
 
 > **These get a `MetricsInitialiser` entry too (§13.6), and the tempting reason
 > not to is the instrument kind.** An observable gauge is pull-based — the
@@ -1796,8 +1822,9 @@ container is happy without it (§6.2):
 
 ```csharp
 // In AddOrderingInfrastructure (§4.2). Both of Infrastructure's metrics types:
-// OutboxMetrics reads the database, MessagingMetrics is injected by the two
-// consumers and resolved by the outbox invoker (§13.3).
+// OutboxMetrics reads the database, MessagingMetrics is injected by
+// IntegrationEventConsumer<T>, CommandConsumer<,> and InboxFilter<T> and
+// resolved by the outbox invoker (§13.3).
 // ITS OWN connection factory, with the bounded ConnectTimeout the callbacks
 // need. Resolving the shared IDbConnectionFactory here would leave SqlClient's
 // fifteen-second default on the open, and the commandTimeout above never gets

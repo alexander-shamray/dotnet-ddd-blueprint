@@ -1,8 +1,17 @@
 # Licences a pinned package may carry, as SPDX identifiers, one per line.
 #
 # A package whose Appendix B row names a licence outside this list fails the
-# build. A dual-licensed package passes if either half is here, because a dual
-# licence is a choice the consumer makes.
+# build, and every part of a multi-part row has to be here. A row used to pass
+# when either half was, on the reasoning that a dual licence is a choice the
+# consumer makes — but the gate reads a `/` and cannot tell a disjunction from
+# a conjunction, so under that rule a forbidden licence clears itself by
+# arriving in the company of an allowed one. Where a package really is offered
+# under either, the row names the half this repository takes. That is the
+# decision the gate exists to force rather than absorb.
+#
+# A spelling the gate cannot map to an identifier fails differently and says
+# so. Adding a line here is the repair for a licence that was read and refused;
+# it is never the repair for one that was never read.
 #
 # Adding a line is a decision about every future dependency, not about the one
 # in front of you. It belongs in an ADR.

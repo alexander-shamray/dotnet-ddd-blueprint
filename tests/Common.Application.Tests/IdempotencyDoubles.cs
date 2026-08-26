@@ -14,46 +14,98 @@ namespace Common.Application.Tests;
 /// <see cref="ConcurrentDictionary{TKey,TValue}.TryAdd"/> is; nothing about
 /// this double proves the real store's <c>SET NX</c> is. That claim belongs to
 /// the Redis suite, against a container.
+/// <para>
+/// <b>It is token-checked, and that is not decoration.</b> A double that
+/// completed and released unconditionally would be the shipped defect of #127
+/// wearing a test's clothes: every behaviour test would pass whether or not
+/// the behaviour bothered to carry its claim token through. Comparing here is
+/// what makes those tests able to notice.
+/// </para>
 /// </remarks>
 internal sealed class RecordingIdempotencyStore : IIdempotencyStore
 {
-    private readonly ConcurrentDictionary<string, IdempotencyEntry> _entries = new();
+    private readonly ConcurrentDictionary<string, Held> _entries = new();
 
     /// <summary>Every call, in order, as <c>verb key</c>.</summary>
     public List<string> Calls { get; } = [];
 
+    /// <summary>
+    /// The <see cref="CancellationToken"/> each call was handed, by call name.
+    /// </summary>
+    /// <remarks>
+    /// <b>The call name rather than the position, because a positional pointer
+    /// goes stale.</b> §8.5 requires three of the store's calls to be made with
+    /// <see cref="CancellationToken.None"/> — the release after a thrown
+    /// handler, the release after a refusal, and the completion — and without
+    /// recording the argument, an implementation forwarding the caller's
+    /// <c>ct</c> to all three passes every other test in this suite. Measured,
+    /// not asserted: with the three sites changed to forward <c>ct</c>, all 84
+    /// tests here passed.
+    /// </remarks>
+    public Dictionary<string, CancellationToken> Tokens { get; } = [];
+
     /// <summary>Set to throw from <see cref="CompleteAsync"/>, for the hold case.</summary>
     public Exception? CompleteFault { get; set; }
 
-    public IReadOnlyDictionary<string, IdempotencyEntry> Entries => _entries;
+    /// <summary>The token the last successful claim handed back.</summary>
+    public string? MintedToken { get; private set; }
 
-    public Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct)
+    /// <summary>The token the last complete or release was called with.</summary>
+    public string? WrittenUnder { get; private set; }
+
+    public IReadOnlyDictionary<string, IdempotencyEntry> Entries =>
+        _entries.ToDictionary(pair => pair.Key, pair => pair.Value.Entry);
+
+    public Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct)
     {
         Calls.Add($"claim {key}");
-        return Task.FromResult(_entries.TryAdd(key, new IdempotencyEntry(true, null)));
+        Tokens["claim"] = ct;
+
+        string token = Guid.CreateVersion7().ToString("N");
+        bool claimed = _entries.TryAdd(key, new Held(token, new IdempotencyEntry(true, null)));
+
+        if (claimed)
+            MintedToken = token;
+
+        return Task.FromResult(claimed ? token : null);
     }
 
     public Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct)
     {
         Calls.Add($"get {key}");
-        return Task.FromResult(_entries.TryGetValue(key, out IdempotencyEntry? entry) ? entry : null);
+        Tokens["get"] = ct;
+        return Task.FromResult(_entries.TryGetValue(key, out Held? held) ? held.Entry : null);
     }
 
-    public Task CompleteAsync(string key, string payload, TimeSpan retention, CancellationToken ct)
+    public Task CompleteAsync(
+        string key,
+        string claim,
+        string payload,
+        TimeSpan retention,
+        CancellationToken ct)
     {
         Calls.Add($"complete {key}");
+        Tokens["complete"] = ct;
+        WrittenUnder = claim;
 
         if (CompleteFault is not null)
             return Task.FromException(CompleteFault);
 
-        _entries[key] = new IdempotencyEntry(false, payload);
+        if (Owns(key, claim))
+            _entries[key] = new Held(claim, new IdempotencyEntry(false, payload));
+
         return Task.CompletedTask;
     }
 
-    public Task ReleaseAsync(string key, CancellationToken ct)
+    public Task ReleaseAsync(string key, string claim, CancellationToken ct)
     {
         Calls.Add($"release {key}");
-        _entries.TryRemove(key, out _);
+        Tokens["release"] = ct;
+        WrittenUnder = claim;
+
+        if (Owns(key, claim))
+            _entries.TryRemove(key, out _);
+
         return Task.CompletedTask;
     }
 
@@ -62,11 +114,23 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
     /// committed. The behaviour's replay path is what reads it.
     /// </summary>
     public void Completed(string key, string payload) =>
-        _entries[key] = new IdempotencyEntry(false, payload);
+        _entries[key] = new Held(Planted, new IdempotencyEntry(false, payload));
 
     /// <summary>Plants a claim nobody finished — the in-flight case.</summary>
     public void InFlight(string key) =>
-        _entries[key] = new IdempotencyEntry(true, null);
+        _entries[key] = new Held(Planted, new IdempotencyEntry(true, null));
+
+    /// <summary>
+    /// The token a planted entry is held under. No test may pass this to the
+    /// store: a planted entry belongs to an attempt that is not the one under
+    /// test, which is the whole point of planting it.
+    /// </summary>
+    private const string Planted = "planted-by-another-attempt";
+
+    private bool Owns(string key, string claim) =>
+        _entries.TryGetValue(key, out Held? held) && held.Token == claim;
+
+    private sealed record Held(string Token, IdempotencyEntry Entry);
 }
 
 /// <summary>

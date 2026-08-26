@@ -20,8 +20,12 @@ disagree, §12 wins**, and the disagreement is a bug report against one of them.
 
 ## The suites
 
-Ten of them, three runners, and `dotnet test` says nothing about the other
-nine:
+Three runners, and `dotnet test` says nothing about any suite but its own.
+**No count opens this sentence**, and its removal is the fix rather than a
+recount: it said seven, then ten, and #61's secret scan made it eleven inside
+the pull request correcting the sentence around it. What a reader can check is
+whether this block matches the jobs in `ci.yml` and the enumeration in
+`CLAUDE.md`, which needs no numeral.
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -35,7 +39,9 @@ bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SD
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
 
-(cd .github/licence-gate && py -3.12 -m unittest)        # ADR-019's register gate
+(cd .github/licence-gate && py -3.12 -m unittest)        # §4.4's register gate
+(cd .github/secret-scan && py -3.12 -m unittest)         # §15.1's secret scan
+py -3.12 .github/secret-scan/secret_scan.py              # from the repo root
 
 py -3.12 -m unittest discover -s .github/pipeline-gate   # PR-25's quality gates
 py -3.12 -m unittest discover -s .github/coverage        # the coverage merge
@@ -44,13 +50,15 @@ py -3.12 -m unittest discover -s .github/closure-gate    # what a PR closes
 py -3.12 -m unittest discover -s .claude/scripts         # the review loop's helpers
 ```
 
-**The licence gate is in that list because CI runs it on the same terms**, and
-leaving it out is what made this count seven. `ci.yml` tests the gate and then
-runs it — the pattern every gate here follows — so a suite that ships with the
-repository, runs in CI, and is invisible to `dotnet test` is one of these
-whatever directory it lives in.
+**The licence gate and the secret scan are in that list because CI runs them
+on the same terms**, and leaving the first out is what once made this count
+seven. `ci.yml` tests each gate and then runs it — the pattern every gate here
+follows — so a suite that ships with the repository, runs in CI, and is
+invisible to `dotnet test` is one of these whatever directory it lives in. The
+two share a job, because §15.1 draws "SCA + secret scan" as one node and both
+are stdlib Python over text.
 
-**Only the first is a §12 suite, and the other nine are here anyway**, because
+**Only the first is a §12 suite, and the rest are here anyway**, because
 this file is written for someone with a checkout rather than for someone
 deciding what to test. The scaffold's tests exercise a developer tool; the
 chart gate renders `deploy/helm/` and asserts what comes out (§15.3); the
@@ -58,12 +66,15 @@ observability gate pairs §13.6's alerts with §13.9's runbooks both ways and
 checks that every metric a loaded rule reads is one something publishes;
 PR-25's three cover the pipeline's own inventories, the coverage merge, and
 §15.5's rollout arithmetic; the closure gate compares what a pull request
-says it closes against what GitHub will actually close; and the last covers
-the review loop's own helpers under `.claude/scripts/`. None
+says it closes against what GitHub will actually close; the secret scan reads
+the working tree for credential shapes and holds every accepted one as a
+fingerprinted line with a reason; and the last covers the review loop's own
+helpers under `.claude/scripts/`. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
 
-**The tenth needs `bash`, `grep`, `git` and `jq`, and no network** — the `gh` its
+**The review helpers' suite needs `bash`, `grep`, `git` and `jq`, and no
+network** — the `gh` its
 ledger cases call is a stub on `PATH`, and the `git` is real rather than
 incidental: one case detaches a worktree at `HEAD` and removes it again, because
 a helper's contract is its stdout and only a round trip tests what a caller
@@ -165,23 +176,24 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
-> twenty tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-one — 91 in total, with no
-> third state and nothing counted twice. Those figures read ten, two and 81
-> until this measurement was retaken; the suite had grown and the callout had
-> not, which is the drift the paragraph below is about arriving in the
-> paragraph above it.
+> twenty-six tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-one — 97 in total, with no
+> third state and nothing counted twice. Those figures read ten/81, then
+> twenty/91, then twenty-three/94, then twenty-four/95, and every retake was
+> the suite growing while the callout did not — the drift the paragraph below
+> is about, arriving in the paragraph above it. **How many retakes is not
+> written down**, for the reason the figures keep demonstrating.
 >
 > **Those are the runner's numbers, and `--list-tests` answers a different
 > question.** For this project the two now agree — discovery and execution both
-> report 91, measured rather than assumed — and they have not always: the gap
+> report 97, measured rather than assumed — and they have not always: the gap
 > was 82 against 81 when this callout was written, and mixing a partition
 > quoted from `--list-tests` with a total from `dotnet test` is how it first
-> came to claim 72 and 82. The 1,033 is summed from `dotnet test` output, so
+> came to claim 72 and 82. The 1,045 is summed from `dotnet test` output, so
 > quote what ran. **Agreement today is a measurement and not a guarantee** —
 > which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **837 and 196 of 1,033**, and the fast half
+> Across the solution the split is **842 and 203 of 1,045**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -217,7 +229,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **819** and **196**, summing to the 1,033
+on this repository they are **18**, **824** and **203**, summing to the 1,045
 the whole suite runs — which is the arithmetic the callout below asks for.
 
 ```bash
@@ -248,8 +260,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 837 and 196 summing to
-> 1,033 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 842 and 203 summing to
+> 1,045 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

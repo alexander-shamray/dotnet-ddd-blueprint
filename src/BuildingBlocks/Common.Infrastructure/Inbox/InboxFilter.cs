@@ -1,5 +1,7 @@
+using Common.Infrastructure.Messaging;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Common.Infrastructure.Inbox;
 
@@ -36,10 +38,33 @@ namespace Common.Infrastructure.Inbox;
 /// That is acceptable because handlers are idempotent anyway — this removes the
 /// common duplicate, not every duplicate (§9.5).
 /// </para>
+/// <para>
+/// <b>The key this suppresses on is chosen by whoever published the message,
+/// so this filter is only as trustworthy as the set of principals that may
+/// publish to the endpoint (#64).</b> §9.1 makes the envelope
+/// <c>MessageId</c> and the transport header one GUID, so a publisher controls
+/// both, and a junk message carrying the id a real one will use pre-claims the
+/// slot. That is why the drop is counted and logged rather than silent — and
+/// why #44's per-service broker credential is a prerequisite for reading this
+/// mechanism as a guarantee rather than an improvement.
+/// </para>
 /// </remarks>
-public sealed class InboxFilter<T>(DbContext db, TimeProvider clock) : IFilter<ConsumeContext<T>>
+public sealed class InboxFilter<T>(
+    DbContext db,
+    TimeProvider clock,
+    MessagingMetrics metrics,
+    ILogger<InboxFilter<T>> log)
+    : IFilter<ConsumeContext<T>>
     where T : class
 {
+    // The three type arguments bind to the template BY POSITION, not by name,
+    // so the order here is the order the placeholders appear in.
+    private static readonly Action<ILogger, string, Guid, string, Exception?> Suppressed =
+        LoggerMessage.Define<string, Guid, string>(
+            LogLevel.Debug,
+            new EventId(1, nameof(Suppressed)),
+            "Inbox dropped {MessageType} {MessageId} on {Endpoint}: already recorded as handled.");
+
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
     {
         // The transport's id, which for an integration event is also the
@@ -60,7 +85,20 @@ public sealed class InboxFilter<T>(DbContext db, TimeProvider clock) : IFilter<C
                 context.CancellationToken);
 
         if (alreadyHandled)
-            return;                     // Silently drop the duplicate.
+        {
+            // Drop the duplicate — but say so. A bare `return;` here made the
+            // one path on which this platform loses a message on purpose the
+            // only path with no signal at all (#64): an inbox hit suppressing
+            // a message the service has never seen read exactly like a genuine
+            // redelivery, from every dashboard in §13.
+            //
+            // The counter is the measurable half and the log line is the
+            // attributable one. The MessageId is on the log rather than on the
+            // counter because it is unbounded — see MessagingMetrics.Suppressed.
+            metrics.Suppressed(typeof(T).Name, endpoint);
+            Suppressed(log, typeof(T).Name, messageId, endpoint, null);
+            return;
+        }
 
         // Ordering matters, and it is the one thing in this file that must not
         // be rearranged: the handler runs FIRST, and the inbox row is only

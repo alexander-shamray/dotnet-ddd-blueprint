@@ -5,15 +5,20 @@ namespace Common.Infrastructure.Messaging;
 /// <summary>
 /// §13.3's messaging instruments, on the <c>Commerce.Messaging</c> meter that
 /// <c>AddObservability</c> already collects. Infrastructure rather than
-/// Application because every call site is — the outbox dispatcher's invoker and
-/// the two consumers beside this file.
+/// Application because every call site is — the outbox dispatcher's invoker,
+/// the two consumers beside this file, and §9.5's inbox filter one folder over.
 /// </summary>
 /// <remarks>
-/// <b>Complete since PR-15, and it arrived in instalments on
-/// <c>PluggableInterfaces.All</c>'s terms.</b> <c>Projected</c> landed with the
-/// outbox because <c>ProjectionInvoker</c> is its only call site, and the other
-/// two with the consumers that record them — two instruments nothing writes to
-/// would be an empty series on a dashboard rather than a signal.
+/// <b>It arrives in instalments on <c>PluggableInterfaces.All</c>'s terms, and
+/// it is not closed.</b> <c>Projected</c> landed with the outbox because
+/// <c>ProjectionInvoker</c> is its only call site, the next two with the
+/// consumers that record them, and <see cref="Suppressed"/> when §9.5's silent
+/// drop was given a signal (#64) — an instrument nothing writes to would be an
+/// empty series on a dashboard rather than a signal, which is the rule that
+/// decides when one may be added rather than a statement that four is the
+/// number. This doc-comment read <i>complete since PR-15</i> until the fourth
+/// arrived, which is what a closure claim is worth on a class whose members
+/// are added by whoever needs one.
 /// <para>
 /// <b>The two lags read <c>OccurredAt</c> from different places, because they
 /// measure different lanes.</b> <see cref="Delivered"/> reads it off the
@@ -38,6 +43,7 @@ public sealed class MessagingMetrics
     private readonly Histogram<double> _deliveryLag;
     private readonly Histogram<double> _projectionLag;
     private readonly Counter<long> _rejected;
+    private readonly Counter<long> _suppressed;
 
     public MessagingMetrics(IMeterFactory factory)
     {
@@ -54,6 +60,9 @@ public sealed class MessagingMetrics
         _rejected = meter.CreateCounter<long>(
             "command.domain_rejected",
             description: "Message-borne commands the domain refused (§9.8).");
+        _suppressed = meter.CreateCounter<long>(
+            "messaging.inbox.suppressed",
+            description: "Messages the inbox dropped as already handled (§9.5).");
     }
 
     public void Delivered(string message, TimeSpan lag) =>
@@ -82,4 +91,31 @@ public sealed class MessagingMetrics
             1,
             new KeyValuePair<string, object?>("message", message),
             new KeyValuePair<string, object?>("error", error));
+
+    /// <summary>
+    /// A message §9.5's inbox dropped because its id was already recorded for
+    /// this endpoint (#64).
+    /// </summary>
+    /// <remarks>
+    /// <b>The drop used to be a bare <c>return;</c>, and an invisible drop path
+    /// is why the suppression had no signal anywhere in §13.</b> A duplicate
+    /// the broker redelivered and a message suppressed by an id it has never
+    /// legitimately carried are the same event from inside the filter, so
+    /// neither is separable here — what this counter buys is that the class is
+    /// measurable at all, and a rate that does not match the redelivery rate is
+    /// the thing worth looking at.
+    /// <para>
+    /// <b>Neither tag is the <c>MessageId</c>, and that is the constraint
+    /// rather than an omission.</b> A message id is unbounded, so it belongs in
+    /// the log line the filter writes beside this and never on a series.
+    /// <paramref name="message"/> is a type name and
+    /// <paramref name="endpoint"/> a queue name; both are closed sets fixed at
+    /// registration (§9.8), which is what keeps this counter from exploding.
+    /// </para>
+    /// </remarks>
+    public void Suppressed(string message, string endpoint) =>
+        _suppressed.Add(
+            1,
+            new KeyValuePair<string, object?>("message", message),
+            new KeyValuePair<string, object?>("endpoint", endpoint));
 }

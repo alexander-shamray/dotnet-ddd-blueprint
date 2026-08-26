@@ -21,7 +21,11 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 The credentials are development defaults, documented deliberately (§14.1);
 every deployed environment takes its secrets from a vault
 ([§15.4](../../docs/backend-architecture/15-cicd-deployment.md)). Copy
-`.env.example` to `.env` to override one.
+`.env.example` to `.env` to override one. **Every port here and below is
+published on `127.0.0.1` rather than on every interface**, which is the
+control standing in front of those defaults — `localhost` is what each recipe
+in this file already types, so the bind costs them nothing and keeps the stack
+off the network the laptop is sitting on.
 
 ## Application services
 
