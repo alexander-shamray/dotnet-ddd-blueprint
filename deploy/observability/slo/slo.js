@@ -81,8 +81,11 @@ const queryDuration = new Trend('slo_query_duration', true);
 export const options = {
     scenarios: {
         // The anonymous product listing — §10.2's `catalog-public` route is
-        // GET-only and carries no policy, so this needs no token and is the
-        // cleanest read-path signal available.
+        // GET-only and names `anonymous`, YARP's reserved value for
+        // AllowAnonymous, so this needs no token and is the cleanest read-path
+        // signal available. The route used to name no policy and mean the same
+        // thing; ADR-030's fallback ended that, and a route that said nothing
+        // would now 401 every request this scenario makes.
         query: {
             executor: 'constant-arrival-rate',
             // 60/min against §10.3's `anonymous` budget of 100/min per IP,

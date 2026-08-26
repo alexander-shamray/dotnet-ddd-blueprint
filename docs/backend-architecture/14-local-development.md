@@ -608,7 +608,11 @@ WithPlatformIdentity(
         // /health/ready, like every other resource and like the chart in
         // §15.3 — an empty readiness set is still the right question here,
         // and probing liveness instead would make the gateway the one
-        // component whose local gate differs from its deployed one.
+        // component whose local gate differs from its deployed one. The
+        // emptiness is a declaration rather than a silence: the host passes
+        // ownsNoDependencies to MapCommonHealthEndpoints (§13.5), so a
+        // gateway that acquired a dependency and never registered a check
+        // would fail to start rather than answer ready here.
         .WithHttpHealthCheck("/health/ready")
         .WithExternalHttpEndpoints());
 

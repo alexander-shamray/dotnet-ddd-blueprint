@@ -237,8 +237,8 @@ src/BuildingBlocks/          all five, and complete since PR-15
                                referenced would travel into every service
   Common.Infrastructure/       §8's Redis helpers, §9's outbox, inbox,
                                consumers and retention purge
-  Common.Web/                  §10.4, §10.5, §11.3, §11.4, §13.2, §13.4 and
-                               §13.5, and nothing else — the only building
+  Common.Web/                  §10.4, §10.5, §10.6, §11.3, §11.4, §13.2, §13.4
+                               and §13.5, and nothing else — the only building
                                block with a FrameworkReference
 src/Gateway/Gateway.Api/     the edge, and the second host. One
                              ProjectReference (Common.Web), no Application and
@@ -489,8 +489,8 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 936 tests — so the build rules and the drift rules below
-are live and a green run means something.
+and `dotnet test` runs 1,008 tests — so the build rules and the drift rules
+below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
 as the compose timeout is: it is restated here, and nothing recomputes it. The
@@ -1053,6 +1053,53 @@ own line rather than sending a reader to a file that does not hold it.
   each other rather than trusting the half that is easy to look at. The same
   shape reaches past issue closure: a version in a tag and a version in a
   manifest, a threshold in prose and a threshold in a rule file.
+- **An in-tree comment calling a gap deliberate is not a control, and the
+  comment is usually the thing that is wrong.** §13.4's redactor documented
+  that it does not read log scopes and argued the two the platform opens are
+  safe, naming `CorrelationId` as "a trace ID or a GUID" — which is the
+  *fallback* branch, one file over from a middleware that adopted a
+  client-supplied header verbatim. The channel named as provably safe was the
+  one already carrying attacker-controlled data. **Read the code the comment
+  is vouching for, not the comment**, and where a gap is genuinely accepted,
+  file it rather than reasoning about it in place — this repository's own rule
+  that a TODO nothing re-checks is a decision, applied to prose.
+- **The API surface decides the layer, so read it before designing the fix.**
+  The obvious repair for that gap is to walk `record.ForEachScope(...)` in the
+  processor. Measured against OpenTelemetry 1.17: `LogRecord` exposes
+  `ForEachScope` and **no settable scope provider**, so a processor can read a
+  scope and can never rewrite or suppress one — the repair would have let the
+  type notice a secret it had no way to remove. The fix had to sit one layer
+  lower, at the `IExternalScopeProvider` the logger factory hands every
+  provider, which is also what makes it cover scopes opened by EF Core and
+  MassTransit. One probe settled it; a plausible design would have shipped.
+- **Match the shape the caller produces, not the one the framework's own type
+  happens to implement.** That scope wrapper first matched
+  `IReadOnlyList<KeyValuePair<string, object?>>` — which is what MEL's
+  `FormattedLogValues` is, and what a `Dictionary` is **not**. Every scope this
+  platform actually opens comes from `BeginScope(new Dictionary<,>)`, so all of
+  them fell through unredacted while the unit tests over the list shape stayed
+  green. The interface a sample implements is not the interface the call site
+  hands you.
+- **A negative assertion about an endpoint is also an assertion that the
+  endpoint exists, and only the positive half carries it.** Once authorization
+  is deny-by-default, "this path answers 401 to an anonymous caller" is
+  satisfied by a path that has stopped existing, by a host that no longer maps
+  it, and by a document that no longer generates. Pair every such assertion
+  with one from a caller who gets through — which is what cost this PR a second
+  test factory rather than a second assertion.
+- **A fallback in the building block and a test in one service's suite are not
+  alternatives, and the distance from the request is why.** §11.4 proposed an
+  `EndpointDataSource` test asserting every endpoint carries a policy; it
+  reaches the services §4.5's scaffold has already rendered and fails at test
+  time. A fallback policy reaches every host that will ever compose
+  `AddCommonWebDefaults` and fails at the request. Where a rule has to survive
+  code nobody has written yet, put it where that code cannot avoid it.
+- **A rule stated in four places is reversed in four places or in none.**
+  §10.2 said three times that naming no authorization policy was the only
+  correct way to declare a route public, and the claim had been copied into
+  Appendix C's rows, a compose README and a k6 script. Deny-by-default reverses
+  it. The reversal is cheap; finding the copies is not, and a copy left behind
+  is a rule that is now actively wrong rather than merely stale.
 
 ### The commands
 
@@ -1063,7 +1110,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 740 of 936, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 812 of 1,008, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1214,10 +1261,10 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 740 of
-the 936 and starts no container — measured with `docker events`, not inferred —
-and `Category=Integration` is the other 196, needing the daemon exactly as
-before.
+category runs a smaller suite and says which. `Category!=Integration` is 812 of
+the 1,008 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 196, needing the daemon
+exactly as before.
 
 **The integration half read 187 for two branches and the arithmetic never
 closed**, which is this file's own rule about restated numbers catching one:
@@ -1227,7 +1274,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (722) and integration (196), which is the 740 above split at the
+(18), unit (794) and integration (196), which is the 812 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1876,7 +1923,7 @@ file and a reviewer are the only things that do.
 | | |
 |---|---|
 | Namespaces | File-scoped (`namespace X;`), never block-scoped |
-| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: `Common.Web`'s **eight** extension classes still use the classic `this`-parameter form. **Five** extend a receiver nothing else does — `CorrelationIdExtensions` (`IApplicationBuilder`), `ProblemDetailsExtensions` (`IServiceCollection`), `HealthCheckExtensions` (`IEndpointRouteBuilder`), `AuthorizationPolicyExtensions` (`AuthorizationPolicyBuilder`) and `ResultExtensions` (`Result`) — while **three** share `IHostApplicationBuilder`: `ObservabilityExtensions`, `AuthenticationExtensions` and the `CommonWebDefaultsExtensions` that composes them. Whether to group those three is open and deliberately unsettled — they are separate files because one composes the other two, and merging would put a caller-facing entry point in the same block as the pieces it calls. The receivers are listed rather than counted because a bare count is what went stale here: this cell said six and four from before PR-16 added `AuthenticationExtensions`. Converting anything is a decision about the whole corpus |
+| Extension declarations | C# 14 `extension(T receiver)` blocks where a class groups several extensions on one receiver — `Common.Application.DependencyInjection` is the worked example. **The corpus is currently split**: every extension class in `Common.Web` still uses the classic `this`-parameter form. Four extend a receiver nothing else does — `ProblemDetailsExtensions` (`IServiceCollection`), `HealthCheckExtensions` (`IEndpointRouteBuilder`), `AuthorizationPolicyExtensions` (`AuthorizationPolicyBuilder`) and `ResultExtensions` (`Result`) — while two groups share one: `CorrelationIdExtensions` and `SecurityHeadersExtensions` on `IApplicationBuilder`, and `ObservabilityExtensions`, `AuthenticationExtensions` and the `CommonWebDefaultsExtensions` that composes them on `IHostApplicationBuilder`. Whether to group those three is open and deliberately unsettled — they are separate files because one composes the other two, and merging would put a caller-facing entry point in the same block as the pieces it calls. The receivers are listed rather than counted because a bare count is what went stale here — twice now: this cell said six and four from before PR-16 added `AuthenticationExtensions`, then eight and five until `SecurityHeadersExtensions` landed on a receiver `CorrelationIdExtensions` already had, which is the split that makes "extends a receiver nothing else does" the wrong shape for a tally. Converting anything is a decision about the whole corpus |
 | Expression-bodied members | Used for one-line members, not for constructors |
 | Braces | Optional for a single statement, required for two or more |
 | Target framework | .NET 10 (LTS), C# 14 |

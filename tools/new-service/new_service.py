@@ -2055,7 +2055,13 @@ def update_ports_readme(repo_root: Path, names: Names, port: int) -> str:
     end = text.index("\n\n", start) + 1
     row = (
         f"| {names.pascal} API | http://localhost:{port} | "
-        f"`/health/live`, `/health/ready`, `/openapi/v1.json` |\n"
+        # The token note is not decoration: ADR-030 fallback policy covers
+        # MapOpenApi, so a rendered service document answers 401 to an
+        # anonymous request exactly as Catalog and Ordering do. A row
+        # that omitted it would re-introduce the claim the README was
+        # corrected to remove, once per scaffolded service.
+        f"`/health/live`, `/health/ready`, "
+        f"`/openapi/v1.json` (needs a token — see below) |\n"
     )
     return restore(text[:end] + row + text[end:], newline)
 

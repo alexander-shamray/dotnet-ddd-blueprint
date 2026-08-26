@@ -26,20 +26,36 @@ public static IHostApplicationBuilder AddCommonWebDefaults(this IHostApplication
 
     builder.AddJwtAuthentication();                       // §11.3
 
-    // The scheme and the policy arrive together because neither works alone: a
-    // policy requiring an authenticated user, with no scheme registered to
-    // authenticate one, rejects every request that reaches it. This is the one
-    // policy every host shares and the only one Common.Web may know — "is
-    // there a valid token". Permission policies are per-service and are
-    // registered by the service (§11.4) or, for the gateway, by the gateway.
+    // The scheme and the policy arrive together because neither works
+    // alone: a policy requiring an authenticated user, with no scheme
+    // registered to authenticate one, rejects every request that reaches
+    // it. This is the one policy every host shares and the only one
+    // Common.Web may know — "is there a valid token". Permission policies
+    // are per-service and are registered by the service (§11.4) or, for
+    // the gateway, by the gateway.
     //
-    // This is deliberately identical to ASP.NET Core's default policy, which
-    // YARP would accept as the magic string "default" (§10.2). Naming it costs
-    // one line and buys a route file that says what it means — that file is
-    // read by people deciding whether a path is public.
+    // Deliberately identical to ASP.NET Core's default policy, which YARP
+    // would accept as the magic string "default" (§10.2). Naming it costs
+    // one line and buys a route file that says what it means — and that
+    // file is read by people deciding whether a path is public.
+    //
+    // SetFallbackPolicy is what makes authorization deny-by-default. Without
+    // it UseAuthorization evaluates NOTHING on an endpoint carrying no
+    // policy metadata, so a new *Endpoints class that omits the one
+    // RequireAuthorization line is reachable with no diagnostic — no
+    // compiler error, no ValidateOnBuild failure, no failing test. The
+    // fallback inverts that: the omission is a 401, and a public route has
+    // to say AllowAnonymous, which is a line a reviewer can see.
+    //
+    // It reaches the gateway's proxied routes too, which is why
+    // appsettings.json now names "anonymous" on catalog-public rather than
+    // leaving the key out — a public path by omission and a public path by
+    // decision read identically in a route file, and only one of them
+    // survives someone else's edit.
     builder.Services
         .AddAuthorizationBuilder()
-        .AddPolicy("authenticated", p => p.RequireAuthenticatedUser());
+        .AddPolicy("authenticated", p => p.RequireAuthenticatedUser())
+        .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
     // §11.4's port, paired with the accessor it depends on: ASP.NET Core
     // registers no IHttpContextAccessor by default, so omitting the first line
@@ -61,6 +77,22 @@ public static IHostApplicationBuilder AddCommonWebDefaults(this IHostApplication
 }
 ```
 
+**`SetFallbackPolicy` is what makes authorization deny-by-default, and the
+named policy beside it is not.** Without a fallback policy `UseAuthorization`
+evaluates nothing at all on an endpoint carrying no policy metadata, so an
+endpoint class that omits its one `RequireAuthorization` call is reachable
+anonymously with no compiler error, no `ValidateOnBuild` failure and no
+failing test. With one, the omission is a 401 and a genuinely public route has
+to spell `AllowAnonymous` — a line a reviewer can see. It reaches the
+gateway's proxied routes too, which is why §10.2's route file names
+`anonymous` on the public catalog route rather than leaving the key out: a
+public path by omission and a public path by decision read identically in a
+route file, and only one of them survives someone else's edit. The argument
+belongs to [§11.4](11-identity-authorization.md), which owns this platform's
+authorization rules, and is recorded in
+[ADR-030](appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block);
+it is restated here only because this is the block that registers it.
+
 Note what is **not** here. `AddCommonWebDefaults` covers what every host needs
 identically. Anything needing a connection string — the SQL, Redis, broker and
 outbox checks in §13.5 — belongs in `AddOrderingInfrastructure`, because
@@ -74,6 +106,20 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
     // OpenTelemetry becomes the ONLY logging provider, and that is a security
     // requirement rather than tidiness — see §13.4.
     builder.Logging.ClearProviders();
+
+    // The scope half of §13.4, and it has to be registered rather than
+    // configured: LoggerFactory takes an IExternalScopeProvider from the
+    // container and hands the same instance to every provider, so wrapping
+    // it here covers scopes opened by EF Core and MassTransit as well as
+    // the platform's own two. IncludeScopes below is what puts them on the
+    // record; without this line the redactor would be scrubbing attributes
+    // beside a scope carrying whatever the caller sent.
+    //
+    // TryAdd rather than Add: a host that has already chosen a scope
+    // provider keeps it, and a second registration would be the one silently
+    // ignored rather than the one that wins.
+    builder.Services.TryAddSingleton<IExternalScopeProvider>(
+        new RedactingScopeProvider(new LoggerExternalScopeProvider()));
 
     builder.Logging.AddOpenTelemetry(logging =>
     {
@@ -618,13 +664,137 @@ Levels, applied consistently:
 | `Error` | An operation failed. | Handler threw, message went to error queue |
 | `Critical` | The service cannot function. | Database unreachable at startup |
 
-**Never log:** passwords, tokens, full card numbers, national ID numbers, or
-full request bodies on endpoints that accept them.
+**Never log:** passwords, secrets, tokens, authorization headers, credentials,
+connection strings, cookies, API keys, account keys, private keys, full card
+numbers, national ID numbers, CVVs, one-time passcodes, session ids and
+signatures — or full request bodies on endpoints that accept them. That is the
+term list below in prose, and the two are reconciled together: a reader scans
+this sentence and the code reads the array, so a term in one and not the other
+is a rule nobody enforces. A connection string and a
+JWT are recognised by the shape of their **value** as well, whatever the key
+they arrived under is called, which is the half of the rule that survives a
+name nobody predicted.
 
 A rule of that shape needs a mechanism, or it is a request that every future
-developer remember it. The mechanism is a log processor on the pipeline
-§13.2 already builds, so a property named `Password` is redacted by default
-rather than by discipline:
+developer remember it. There are two mechanisms, in two layers, because a log
+record carries values through two channels and one piece of code cannot reach
+both: a `BaseProcessor<LogRecord>` rewrites the record's own **attributes**,
+so a property named `Password` is redacted by default rather than by
+discipline, and an `IExternalScopeProvider` wrapper rewrites the **scopes**
+those records inherit — which the processor can read and cannot change. Both
+read one vocabulary, declared once so that the copy nobody edits is not the
+one that stops matching:
+
+```csharp
+// Common.Web — the one never-log vocabulary, read by SensitiveDataRedactor
+// for a record's attributes and by RedactingScopeProvider for the scopes those
+// records inherit. Public so a test can pin it: the list is the control, so a
+// term removed in a refactor has to fail a test rather than silently widen
+// what is exported.
+public static class SensitiveKeys
+{
+    // Matching is by substring, ordinal and case-insensitive. The field that
+    // leaks is never named exactly "password" — it is "NewPassword",
+    // "card_number", "id_token". The cost is that a term which is a substring
+    // of an innocent word redacts that word too, which is why "pin" is
+    // deliberately absent: "Shipping" contains it.
+    //
+    // Both spellings of the snake_case entries are listed rather than
+    // normalised, because normalising a key would have to guess at the
+    // separator and a miss here is silent.
+    private static readonly string[] Terms =
+    [
+        "password",
+        "passwd",
+        "pwd",
+        "secret",
+        "token",
+        "authorization",
+        "credential",
+        "cookie",
+        "apikey",
+        "api_key",
+        "connectionstring",
+        "connection_string",
+        "privatekey",
+        "private_key",
+        "cardnumber",
+        "card_number",
+        "ssn",
+        "nationalid",
+        "cvv",
+        "otp",
+        "sessionid",
+        "session_id",
+        "accountkey",
+        "account_key",
+        "signature"
+    ];
+
+    // The never-log terms, in declaration order.
+    public static IReadOnlyList<string> All => Terms;
+
+    // A foreach rather than Terms.Any(t => key.Contains(t, ...)): the lambda
+    // would capture `key`, so the closure allocates once per attribute
+    // inspected — including on the no-match path the callers are written to
+    // keep allocation-free. This runs on every attribute of every log record.
+    public static bool Matches(string key)
+    {
+        foreach (string term in Terms)
+        {
+            if (key.Contains(term, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    // Whether a VALUE carries a secret whatever its key is called, and this is
+    // the half that survives a key nobody predicted: the list above can only
+    // catch a name someone thought of, and the failure is silent — no test can
+    // be written for the term that is missing. Two shapes are recognised
+    // because both are unmistakable and both are what this platform actually
+    // holds: a connection string, which every service builds from
+    // configuration and which carries Password= inline, and a JWT, which §11.3
+    // puts on every authenticated request.
+    //
+    // Deliberately not a general entropy test. A high-entropy string is an id
+    // as often as it is a credential, and redacting every id would empty the
+    // records an incident is triaged by — §13.1's whole argument.
+    public static bool LooksLikeSecret(object? value)
+    {
+        if (value is not string text || text.Length == 0)
+            return false;
+
+        if (text.Contains("password=", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("pwd=", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // A JWT's header is base64url of a JSON object opening `{"`, which is
+        // always the three characters below, and the compact serialisation has
+        // exactly two dots. Anchored on the prefix so the dot count — the
+        // expensive half — is reached by almost nothing.
+        if (!text.StartsWith("eyJ", StringComparison.Ordinal))
+            return false;
+
+        int dots = 0;
+
+        foreach (char c in text)
+        {
+            if (c == '.')
+                dots++;
+        }
+
+        return dots == 2;
+    }
+}
+```
+
+The processor reads that vocabulary and rewrites what a record carries of its
+own — the attributes first, then the two fields the exporter would otherwise
+ship the same secret through:
 
 ```csharp
 // Common.Web — added to the OpenTelemetry logging pipeline in §13.2, which is
@@ -639,11 +809,6 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
     // The key ILogger puts the message template under. Its presence is what
     // makes Body a template rather than a rendered line — see OnEnd.
     private const string OriginalFormat = "{OriginalFormat}";
-
-    // Substring match, not equality: the field that leaks is never named
-    // exactly "password" — it is "NewPassword", "card_number", "id_token".
-    private static readonly string[] Sensitive =
-        ["password", "secret", "token", "authorization", "cardnumber", "card_number", "ssn", "nationalid"];
 
     public override void OnEnd(LogRecord record)
     {
@@ -661,8 +826,16 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             if (attribute.Key == OriginalFormat)
                 hasTemplate = true;
 
-            if (!IsSensitive(attribute.Key))
+            // The value check is the half that survives a key nobody predicted,
+            // and {OriginalFormat} is exempt from it: the template is written
+            // by the author rather than bound from data, so a template reading
+            // "connecting with password={Pwd}" would otherwise redact the one
+            // attribute the fallback below depends on.
+            if (!SensitiveKeys.Matches(attribute.Key) &&
+                (attribute.Key == OriginalFormat || !SensitiveKeys.LooksLikeSecret(attribute.Value)))
+            {
                 continue;
+            }
 
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
@@ -729,21 +902,6 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
 
         return false;
     }
-
-    // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the
-    // lambda would capture `key`, so the closure allocates once per attribute
-    // inspected — including on the no-match path the copy above is written to
-    // keep allocation-free. This runs on every attribute of every log record.
-    private static bool IsSensitive(string key)
-    {
-        foreach (string term in Sensitive)
-        {
-            if (key.Contains(term, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
-    }
 }
 ```
 
@@ -760,26 +918,19 @@ and that is asserted as its own test rather than left implied. Without it a
 processor that rewrote unconditionally would pass every redaction test in the
 suite while quietly emptying every log line on the platform.
 
-Four limits worth stating rather than discovering.
+Three limits worth stating rather than discovering.
 
-Redaction is **by key**, so `logger.LogInformation("Token is {Value}", token)`
-is caught only if the placeholder is named sensitively — the argument for
-naming it `{Token}` and never interpolating. Interpolation is now doubly
-unsafe: `$"Token is {token}"` produces no attribute to match *and* puts the
-secret in the template, so the fallback carries it too.
+Redaction is **by key or by value shape**. The key is matched by substring, so
+`logger.LogInformation("Token is {Value}", token)` is caught that way only if
+the placeholder is named sensitively — the argument for naming it `{Token}`.
+The value check catches it whatever the placeholder is called, but only for
+the two shapes `LooksLikeSecret` recognises, which is a deliberate floor
+rather than a general test. Interpolation defeats both: `$"Token is {token}"`
+produces no attribute to match *and* puts the secret in the template, so the
+fallback carries it too.
 
 It cannot help with a **whole object logged as one attribute**; that is what
 the "never log full request bodies" half of the rule is for.
-
-And it does not read **scopes**. `IncludeScopes` is on, but the processor
-inspects `Attributes` only, so a sensitive key in a `BeginScope` dictionary is
-exported unredacted. Nothing leaks today, because the platform opens exactly
-two scopes and neither can carry one: `LoggingBehavior`'s `RequestType`
-(§13.3), which is a type name, and `UseCorrelationId`'s `CorrelationId`
-([§10.4](10-api-gateway.md)), which is a trace ID or a GUID. A third one
-carrying a secret would leak it silently, and no test here would notice.
-Widening the processor to walk `ScopeProvider` is a design change with its own
-cost, not a fix to fold into this one.
 
 And an **exception can still carry a secret the attributes never named**.
 Where a redacted value reappears in the exception text the exception is
@@ -789,6 +940,133 @@ is nothing to match it against and it survives. That is the interpolation case a
 wrote by hand, which no key-based mechanism can inspect. `throw new
 InvalidOperationException($"bad token {token}")` is the same mistake as
 `$"Token is {token}"` and is caught by neither.
+
+**Scopes are redacted as well, and by a second mechanism rather than by more
+of the processor.** `IncludeScopes` is on (§13.2), so every record inherits
+the scopes open around it. This section used to list that as a fourth limit
+and argue it was harmless: the platform opened two scopes and neither could
+carry a secret — `LoggingBehavior`'s `RequestType` (§13.3), which is a type
+name, and `UseCorrelationId`'s `CorrelationId`
+([§10.4](10-api-gateway.md)), which it called a trace ID or a GUID. The second
+half was false when it was written. A client-supplied `X-Correlation-Id` was
+adopted verbatim, so that scope carried whatever the caller sent, on every
+record written inside the request. It is true today only because §10.4's
+middleware now bounds what it will adopt — and a safety claim that rests on a
+neighbouring component's validation is one that expires the next time that
+component is edited, silently.
+
+> **A processor could never have fixed this, only noticed it.** `LogRecord`
+> exposes `ForEachScope` and no settable scope provider — measured against
+> OpenTelemetry 1.17 rather than assumed — so a `BaseProcessor<LogRecord>` that
+> walked the scopes could read a secret out of one and would have no way to
+> put anything else back. Redaction has to happen where the scope is *read*.
+
+That place is one layer lower than the pipeline: the `IExternalScopeProvider`
+`LoggerFactory` resolves from the container and hands to every provider it
+holds. §13.2 registers a wrapper there, which is why the fix covers the scopes
+EF Core and MassTransit open as well as the platform's own two. That breadth
+is the point rather than a bonus — the argument this replaces was an inventory
+of *this repository's* `BeginScope` calls, and a library's calls were never on
+it.
+
+```csharp
+// Common.Web — registered by AddObservability (§13.2) as a singleton
+// IExternalScopeProvider wrapping LoggerExternalScopeProvider.
+public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExternalScopeProvider
+{
+    private readonly IExternalScopeProvider _inner =
+        inner ?? throw new ArgumentNullException(nameof(inner));
+
+    // It redacts on the way out, not on the way in: Push stores the caller's
+    // object untouched, because a scope is also a live object the application
+    // may read back, and only the enumeration a logging provider performs is
+    // rewritten. That also keeps the cost on the path that logs rather than on
+    // the path that opens a scope.
+    public void ForEachScope<TState>(Action<object?, TState> callback, TState state)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+
+        _inner.ForEachScope((scope, s) => callback(Redact(scope), s), state);
+    }
+
+    public IDisposable Push(object? state) => _inner.Push(state);
+
+    private const string Redacted = "[redacted]";
+
+    private static object? Redact(object? scope)
+    {
+        // IEnumerable rather than IReadOnlyList, and the difference is the
+        // whole of the keyed case: BeginScope(new Dictionary<,>) — which is
+        // what §10.4 and §13.3 both open — produces a Dictionary, and a
+        // Dictionary is NOT an IReadOnlyList. Matching on the list interface
+        // alone left every scope this platform actually opens unredacted while
+        // the unit tests over MEL's own FormattedLogValues stayed green.
+        if (scope is IEnumerable<KeyValuePair<string, object?>> pairs)
+            return RedactPairs(scope, pairs);
+
+        // A scope with no keys at all reaches the exporter as a single unkeyed
+        // value, so only the value check can say anything about it. Narrow, and
+        // it is the shape BeginScope(someString) produces.
+        return SensitiveKeys.LooksLikeSecret(scope) ? Redacted : scope;
+    }
+
+    // Scanned before it is copied, so the common case — nothing sensitive —
+    // returns the caller's own object and allocates only the enumerator. The
+    // second pass is paid on the match path alone, which is the one that was
+    // about to export a secret.
+    private static object RedactPairs(object scope, IEnumerable<KeyValuePair<string, object?>> pairs)
+    {
+        if (!AnySensitive(pairs))
+            return scope;
+
+        List<KeyValuePair<string, object?>> scrubbed = [];
+
+        foreach (KeyValuePair<string, object?> pair in pairs)
+        {
+            scrubbed.Add(IsSensitive(pair)
+                ? new KeyValuePair<string, object?>(pair.Key, Redacted)
+                : pair);
+        }
+
+        return new RedactedScope(scrubbed);
+    }
+
+    private static bool AnySensitive(IEnumerable<KeyValuePair<string, object?>> pairs)
+    {
+        foreach (KeyValuePair<string, object?> pair in pairs)
+        {
+            if (IsSensitive(pair))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsSensitive(KeyValuePair<string, object?> pair) =>
+        SensitiveKeys.Matches(pair.Key) || SensitiveKeys.LooksLikeSecret(pair.Value);
+
+    // ToString is overridden, and that is the load-bearing half: MEL's own
+    // scope type renders its values from ToString, so a provider that formats
+    // a scope rather than enumerating it would otherwise print the secret
+    // straight back out of a list this class had just scrubbed — the same
+    // failure the FormattedMessage rewrite above exists to prevent, one layer
+    // over.
+    private sealed class RedactedScope(List<KeyValuePair<string, object?>> pairs)
+        : IReadOnlyList<KeyValuePair<string, object?>>
+    {
+        public int Count => pairs.Count;
+
+        public KeyValuePair<string, object?> this[int index] => pairs[index];
+
+        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() => pairs.GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            GetEnumerator();
+
+        public override string ToString() => string.Join(", ", pairs.Select(p => $"{p.Key}={p.Value}"));
+    }
+}
+```
 
 **The processor governs one pipeline, which is why §13.2 leaves only one.** A
 `BaseProcessor<LogRecord>` sees records inside OpenTelemetry and nowhere else.
@@ -820,6 +1098,15 @@ behaviour ([§12.1](12-test-strategy.md)). Every host calls `AddObservability`, 
 service's own suite would re-assert the same processor over the same pipeline
 and only add a place to forget — and a building block asserted in Ordering's
 suite is one that moves house if Ordering ever does.
+
+**The vocabulary itself is pinned as a list, by a test whose subject is the
+list.** Every other test in this area drives a record through the processor
+and asserts one key at a time, so a term deleted in a refactor takes its own
+test with it: the suite stays green while what reaches the collector quietly
+widens. `SensitiveKeys.All` is therefore asserted against the array this
+repository decided on, spelled out in the test rather than computed from the
+property under test — a test that reads the value it is checking cannot notice
+that value changing, which is the one thing it is there to notice.
 
 Assert it through `ILogger`, not through OpenTelemetry's logger provider
 directly. The Logs Bridge API (`Sdk.CreateLoggerProviderBuilder`) is shipped
@@ -885,6 +1172,13 @@ public void A_redacted_record_does_not_export_the_rendered_secret()
 }
 ```
 
+**That comment is true of the attribute half only.** The factory above
+registers no scope provider, so nothing on this path exercises the scope
+redaction argued above; that half is asserted separately, against the
+`IExternalScopeProvider` a `LoggerFactory` hands its providers — the seam the
+mechanism actually rests on, and the one that would go quiet if a release ever
+stopped resolving the registration.
+
 Going through `ILogger` also means the test exercises message templates, which
 is where the attribute keys come from — so the `{Token}` naming advice above is
 verified by this test rather than merely stated near it.
@@ -930,8 +1224,29 @@ after `builder.Build()` (§4.2):
 ```csharp
 namespace Common.Web;
 
-public static IEndpointRouteBuilder MapCommonHealthEndpoints(this IEndpointRouteBuilder app)
+// The tag §13.5 names, spelled once: the two predicates below and the startup
+// guard have to be asking about the same set, and a tag that matched in one
+// place and not the other would fail open in exactly the direction this guard
+// exists to close.
+private const string Ready = "ready";
+
+// ownsNoDependencies is true for a host with nothing to be ready for. Passing
+// it is a written decision; the default is a startup failure.
+public static IEndpointRouteBuilder MapCommonHealthEndpoints(
+    this IEndpointRouteBuilder app,
+    bool ownsNoDependencies = false)
 {
+    ArgumentNullException.ThrowIfNull(app);
+
+    if (!ownsNoDependencies && !AnyReadinessCheck(app))
+    {
+        throw new InvalidOperationException(
+            "No health check carries the \"ready\" tag, so /health/ready would answer 200 " +
+            "while this host can reach nothing (§13.5). Register the service's readiness " +
+            "checks in its own Infrastructure, or pass ownsNoDependencies: true if this host " +
+            "genuinely owns none.");
+    }
+
     // AllowAnonymous is required, not cosmetic: the kubelet sends no token,
     // so an authenticated probe fails and the pod is restarted in a loop.
     app
@@ -939,30 +1254,57 @@ public static IEndpointRouteBuilder MapCommonHealthEndpoints(this IEndpointRoute
         .AllowAnonymous();
 
     app
-        .MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
+        .MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains(Ready) })
         .AllowAnonymous();
 
     app
-        .MapHealthChecks("/health/startup", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") })
+        .MapHealthChecks("/health/startup", new HealthCheckOptions { Predicate = c => c.Tags.Contains(Ready) })
         .AllowAnonymous();
 
     return app;
 }
+
+// Read from the options rather than from HealthCheckService: the service
+// exposes no registration list, and the options are what the predicates above
+// are evaluated against — so this asks the same question the probe will ask,
+// rather than one that merely correlates with it.
+private static bool AnyReadinessCheck(IEndpointRouteBuilder app)
+{
+    HealthCheckServiceOptions options = app.ServiceProvider
+        .GetRequiredService<IOptions<HealthCheckServiceOptions>>()
+        .Value;
+
+    return options.Registrations.Any(r => r.Tags.Contains(Ready));
+}
 ```
 
-A host that registers no readiness checks therefore reports ready immediately.
-That is correct for exactly two hosts here — the **gateway** and the **BFF**,
-which own no database (§4.2) — and correct for neither of the six services.
-Every service owns a schema, including the two with no public API: Shipping and
-Notifications both ship a migrator and both register a SQL check (§4.1, [§3.2](03-bounded-contexts.md)).
+**An empty predicate set is a passing predicate set**, so a host that
+registers no readiness checks answers `/health/ready` with 200 while it can
+reach nothing — and [§15.1](15-cicd-deployment.md) removes the smoke stage by
+name, on the grounds that this probe already gates the rollout. "Forgot to
+wire it up" and "has no dependencies" therefore look identical from outside,
+and only one of them is a deploy that should proceed.
 
-The distinction matters because "reports ready immediately" is indistinguishable
-from "readiness was never wired up". A service whose Infrastructure forgot
-`AddHealthChecks().AddSqlServer(...)` takes traffic before its database is
-reachable and answers the first requests with connection errors — while its
-probe stays green, because an empty predicate set is a passing predicate set.
-The rule that separates the two cases: **a host with a connection string has a
-readiness check, and a host without one does not.**
+The rule that separates them — **a host with a connection string has a
+readiness check, and a host without one does not** — is mechanised by the
+guard above rather than left as prose. The **gateway** and the **BFF** own no
+database (§4.2), so they declare their empty set at the call site and an
+absence becomes a written decision. Every other host fails to start: each
+service owns a schema, including the two with no public API, since Shipping
+and Notifications both ship a migrator and both register a SQL check (§4.1,
+[§3.2](03-bounded-contexts.md)).
+
+**Failing to start is the right direction, and the restart-storm argument
+below is why.** That rule forbids gating *liveness* on a dependency because a
+running process should not be killed for something outside it, which a
+database outage is; a missing readiness registration is inside it, is true at
+every start, and never resolves by waiting. So the cases the two rules cover
+do not overlap, and the failure they each avoid is the same one: a pod that
+takes traffic it cannot serve. A host that refuses to boot is held out of the
+rollout by the deployment controller before any traffic is routed to it, which
+is the answer a readiness probe would have given had it been wired up — and
+with §15.1's smoke stage gone, this probe is the last thing standing between a
+wiring mistake and production traffic.
 
 | Endpoint | Question | On failure |
 |---|---|---|
