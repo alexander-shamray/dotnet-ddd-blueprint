@@ -1415,7 +1415,13 @@ will actually resolve. A package in one and not the other is how a licence
 boundary gets crossed by a restore, so PR-01 ships that check:
 `.github/licence-gate/` reads this file and [Appendix B](appendix-b-licences.md)
 as text, matches on the backticked package identities the register carries, and
-fails on a pin nobody cleared.
+fails on a pin nobody cleared. It reads every `.csproj`, `.props` and
+`.targets` besides, because central pinning is a convention this file cannot
+enforce on its own: a project naming a `Version` of its own, overriding one, or
+opting out of central management restores a package neither of these two
+documents ever mentions — and an imported `.props` does all three for every
+project at once, which is why the scan reaches past the projects rather than
+stopping at them.
 
 Appendix B is the wider list, though, and three kinds of row in it will never
 have a pin here. A check that does not know them reports false positives until
@@ -1440,8 +1446,9 @@ somebody stops reading its output:
   ignored.
 
 The versions are those current at the review date in the header. A blueprint
-cannot keep them accurate, and neither does the gate below — it reads package
-identities and never a `Version`. Currency and vulnerability scanning are a
+cannot keep them accurate, and neither does the gate below — the only thing it
+ever asks about a `Version` is *where one is written*, never whether the number
+is current. Currency and vulnerability scanning are a
 separate obligation, and the tooling for them is not yet in this repository.
 
 > **Trap — pinning floors instead of versions.** Writing `Version="8.*"`, or
@@ -1453,9 +1460,12 @@ separate obligation, and the tooling for them is not yet in this repository.
 
 What the gate does enforce is narrower, and the line matters. It fails the build
 on a pin [Appendix B](appendix-b-licences.md) does not register, on a registered
-licence outside `.github/licence-gate/allowed-licences.txt`, and on a registered
-identity that is pinned nowhere. All three are questions about **identity and
-licence**; none is a question about whether a version is current or safe.
+identity that is pinned nowhere, on a project that pins for itself rather than
+through this file, and on a registered licence any part of which is outside
+`.github/licence-gate/allowed-licences.txt` — or which it cannot name as an
+SPDX identifier at all, which is a separate finding because it has a separate
+repair. Every one of them is a question about **identity and licence**; none is
+a question about whether a version is current or safe.
 
 Licence drift is only caught reliably by tooling — a convention will not survive
 the twentieth dependency. The gate runs ahead of the build rather than after it
