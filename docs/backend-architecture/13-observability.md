@@ -1038,7 +1038,40 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
         services.AddSingleton<IExternalScopeProvider>(
             sp => new RedactingScopeProvider(Inner(sp, existing)));
 
+        // Wrapping what came BEFORE is only half of it. AddCommonWebDefaults
+        // runs ahead of a host's own registrations and the container resolves
+        // the LAST, so an AddSingleton<IExternalScopeProvider>(…) written
+        // afterwards replaces this wrapper and exports every scope raw.
+        // Nothing here can prevent that — the line that would beat it has not
+        // been written yet — so the guard refuses to start the host instead.
+        services.AddHostedService<ScopeRedactionGuard>();
+
         return services;
+    }
+
+    // Refuses to start a host whose IExternalScopeProvider is not the wrapper.
+    // A resolve-time check, because a registration-time one cannot see the
+    // future — and failing the host is the direction §13.5's readiness guard
+    // already takes: a control that is silently absent is worse than a host
+    // that will not boot, because only one of the two is noticed. It reports
+    // rather than repairs; re-registering here would leave a host running with
+    // a provider its own author did not choose.
+    private sealed class ScopeRedactionGuard(IExternalScopeProvider scopes) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            if (scopes is not RedactingScopeProvider)
+            {
+                throw new InvalidOperationException(
+                    $"IExternalScopeProvider resolves to {scopes.GetType().FullName}, not " +
+                    $"{nameof(RedactingScopeProvider)}, so §13.4's scope redaction is switched " +
+                    "off and every log scope exports raw. …");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     // The three shapes a descriptor can carry. A keyed one never reaches here

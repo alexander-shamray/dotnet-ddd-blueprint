@@ -183,11 +183,13 @@ and framing and script policies govern a document this platform does not serve.
 set is a passing predicate set, so a host with no `ready`-tagged check answered
 `/health/ready` with 200 while reaching nothing — and §15.1 removes the smoke
 stage *by name* on the grounds that this probe already gates the rollout. The
-gateway and the BFF genuinely own no dependency, so the guard cannot simply
+gateway and the BFF genuinely own no *readiness* dependency — the BFF calls
+Catalog and the gateway proxies four services, and neither hop gates
+readiness — so the guard cannot simply
 throw: `ownsNoReadinessDependencies: true` makes those two hosts state their
-case at the call site, and every other host fails to start. §13.5 already carried the rule
-in prose — a host with a connection string has a readiness check — and this is
-that sentence given a compiler.
+case at the call site, and every other host fails to start. §13.5 already
+carried the rule in prose — a host with a connection string has a readiness
+check — and this is that sentence given a compiler.
 
 **#38 is the small one and the only one outside `Common.Web`.** `ThumbnailUrl`
 was bounded for length and for nothing else, in a validator where every other

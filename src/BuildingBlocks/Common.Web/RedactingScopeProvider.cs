@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Common.Web;
@@ -74,6 +75,19 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
 
         services.AddSingleton<IExternalScopeProvider>(
             sp => new RedactingScopeProvider(Inner(sp, existing)));
+
+        // Wrapping what came BEFORE is only half of it, and the first version
+        // of this method stopped there. AddCommonWebDefaults runs ahead of a
+        // host's own registrations, and the container resolves the LAST — so
+        // an AddSingleton<IExternalScopeProvider>(…) written afterwards
+        // deterministically replaces this wrapper and exports every scope raw.
+        // The fail-open moved rather than closing.
+        //
+        // Nothing this method does can prevent that, because the registration
+        // it would have to beat has not happened yet. What it can do is refuse
+        // to run: the guard resolves the provider once the container is built
+        // and stops the host if it is not the wrapper.
+        services.AddHostedService<ScopeRedactionGuard>();
 
         return services;
     }
@@ -190,6 +204,45 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
     /// just scrubbed — the same failure <see cref="SensitiveDataRedactor"/>'s
     /// <c>FormattedMessage</c> rewrite exists to prevent, one layer over.
     /// </remarks>
+    /// <summary>
+    /// Refuses to start a host whose <see cref="IExternalScopeProvider"/> is
+    /// not a <see cref="RedactingScopeProvider"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>A resolve-time check, because a registration-time one cannot see the
+    /// future.</b> §13.4 is a platform guarantee, and the registration that
+    /// would defeat it is written after <c>AddCommonWebDefaults</c> has already
+    /// run. Failing the host is the direction §13.5's readiness guard already
+    /// takes for the same reason: a control that is silently absent is worse
+    /// than a host that will not boot, because only one of the two is
+    /// noticed.
+    /// <para>
+    /// It reports rather than repairs. Re-registering the wrapper here would
+    /// leave a host running with a provider its own author did not choose, and
+    /// the message names the type so the fix is the caller's to make.
+    /// </para>
+    /// </remarks>
+    private sealed class ScopeRedactionGuard(IExternalScopeProvider scopes) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            if (scopes is not RedactingScopeProvider)
+            {
+                throw new InvalidOperationException(
+                    $"IExternalScopeProvider resolves to {scopes.GetType().FullName}, not " +
+                    $"{nameof(RedactingScopeProvider)}, so §13.4's scope redaction is switched " +
+                    "off and every log scope exports raw. A registration made after " +
+                    "AddCommonWebDefaults wins, because the container resolves the last one — " +
+                    "remove it, or wrap it by calling RedactingScopeProvider" +
+                    ".WrapScopesForRedaction after it.");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private sealed class RedactedScope(List<KeyValuePair<string, object?>> pairs)
         : IReadOnlyList<KeyValuePair<string, object?>>
     {

@@ -666,6 +666,21 @@ class EditsTheSharedFiles(unittest.TestCase):
         readme = self.rendered.updated["deploy/compose/README.md"]
         self.assertIn(f"| Zulu API | http://localhost:{PORT} |", readme)
 
+    def test_the_ports_readme_row_says_the_document_needs_a_token(self):
+        # The whole row, not its prefix. ADR-030's fallback covers MapOpenApi,
+        # so a rendered service's document answers 401 to an anonymous request
+        # exactly as Catalog's and Ordering's do — and the row is the scaffold's
+        # reconciliation with that. A prefix assertion passes just as happily
+        # over a row that dropped the note, which would re-introduce the claim
+        # the compose README was corrected to remove, once per new service.
+        readme = self.rendered.updated["deploy/compose/README.md"]
+        self.assertIn(
+            f"| Zulu API | http://localhost:{PORT} | "
+            "`/health/live`, `/health/ready`, "
+            "`/openapi/v1.json` (needs a token — see below) |",
+            readme,
+        )
+
     def test_every_shared_file_keeps_the_line_endings_it_had(self):
         # Not "keeps CRLF": `.gitattributes` forces that on `*.cs` only, so
         # every file edited here is CRLF on Windows and LF on the runner. The

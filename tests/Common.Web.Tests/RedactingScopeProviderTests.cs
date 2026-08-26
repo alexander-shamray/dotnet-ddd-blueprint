@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
@@ -190,6 +191,49 @@ public class RedactingScopeProviderTests
             new Dictionary<string, object?> { ["Password"] = "hunter2" });
 
         Pairs(ScopesOf(resolved).Single()).Single().Value.ShouldBe("[redacted]");
+    }
+
+    [Fact]
+    public async Task A_provider_registered_afterwards_stops_the_host()
+    {
+        // Wrapping what came before is only half of it. AddCommonWebDefaults
+        // runs ahead of a host's own registrations and the container resolves
+        // the LAST, so a registration written afterwards deterministically
+        // replaces the wrapper and exports every scope raw — the fail-open
+        // moved rather than closing when TryAdd became a wrap.
+        //
+        // Nothing the registration can do prevents that, because the line that
+        // beats it has not been written yet. So the guard refuses to start.
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+
+        builder.AddObservability();
+        builder.Services.AddSingleton<IExternalScopeProvider>(new LoggerExternalScopeProvider());
+
+        using IHost host = builder.Build();
+
+        InvalidOperationException thrown = await Should.ThrowAsync<InvalidOperationException>(
+            () => host.StartAsync(TestContext.Current.CancellationToken));
+
+        thrown.Message.ShouldContain(nameof(RedactingScopeProvider));
+    }
+
+    [Fact]
+    public async Task A_host_whose_provider_is_the_wrapper_starts()
+    {
+        // The control. Without it the test above passes against a guard that
+        // refuses every host, which is the failure this repository files under
+        // "a gate only ever observed red".
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+
+        builder.AddObservability();
+
+        using IHost host = builder.Build();
+
+        await host.StartAsync(TestContext.Current.CancellationToken);
+        await host.StopAsync(TestContext.Current.CancellationToken);
+
+        host.Services.GetRequiredService<IExternalScopeProvider>()
+            .ShouldBeOfType<RedactingScopeProvider>();
     }
 
     [Fact]
