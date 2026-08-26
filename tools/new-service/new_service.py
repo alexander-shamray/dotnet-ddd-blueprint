@@ -1436,6 +1436,16 @@ ENV_MARKER = re.compile(r"^# ([A-Za-z0-9]+)'s two §7\.1 keys")
 # protocol's limit and the convention stays in the documentation.
 PORTS = range(1, 65536)
 
+# §14.1 publishes every mapping on loopback: the credentials in that file are
+# deliberate development defaults, so the interface is the control standing in
+# front of them, and a scaffolded service that bound 0.0.0.0 would reopen the
+# hole one service at a time. LOOPBACK is what the render emits and what the
+# template is required to carry; HOST_IP is deliberately wider, because the
+# collision check asks whether a port is taken and a port taken on some other
+# interface is taken all the same.
+LOOPBACK = "127.0.0.1"
+HOST_IP = r"\d+\.\d+\.\d+\.\d+"
+
 
 class ScaffoldError(Exception):
     """A precondition the script will not write over."""
@@ -1948,9 +1958,17 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
     slice swallows the previous service's pair and appends it a second time,
     and duplicate keys make the Compose file invalid. Found by a Copilot review
     asking what a *second* run does; every test until then scaffolded once.
+
+    **Both port regexes carry the host-IP prefix, and the collision check is
+    the one that fails quietly without it.** Every mapping in the file is
+    published on `127.0.0.1` (§14.1), so `"5102:` no longer follows a quote
+    and a pattern anchored on one matches nothing — which reads exactly like
+    a free port, and would have published a second service on one already
+    taken. The substitution fails loudly instead, so only the first was ever
+    going to be found by running the script.
     """
     text, newline = read(repo_root, "deploy/compose/docker-compose.yml")
-    if re.search(rf'"{port}:\d+"', text):
+    if re.search(rf'"(?:{HOST_IP}:)?{port}:\d+"', text):
         raise ScaffoldError(f"port {port} is already published in deploy/compose/docker-compose.yml")
 
     lines = text.split("\n")
@@ -1972,10 +1990,19 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
         stop -= 1
 
     block = names.rename("\n".join(lines[start:stop]))
-    published = re.search(r'ports: \[ "(\d+):8080" \]', block)
+    # The loopback prefix is REQUIRED of the template rather than copied from
+    # it. Reading the prefix off Catalog would make the scaffold agree with
+    # whatever Catalog does, so removing the bind there would silently publish
+    # every service scaffolded afterwards on every interface — a gate that
+    # follows its subject cannot catch its subject regressing. Anchored, the
+    # same removal is a scaffold that refuses to run and says why.
+    published = re.search(rf'ports: \[ "{re.escape(LOOPBACK)}:(\d+):8080" \]', block)
     if published is None:
-        raise ScaffoldError("the template's api block publishes no port to substitute")
-    block = block.replace(published.group(0), f'ports: [ "{port}:8080" ]')
+        raise ScaffoldError(
+            f"the template's api block publishes no {LOOPBACK}-bound port to substitute "
+            f"(§14.1 binds every mapping to loopback)"
+        )
+    block = block.replace(published.group(0), f'ports: [ "{LOOPBACK}:{port}:8080" ]')
 
     # After the last application block, so services accumulate in the order
     # they were created. `build:` is what marks one — a structural test rather

@@ -11,7 +11,18 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}"
       MSSQL_PID: Developer
-    ports: [ "1433:1433" ]
+    # Every mapping in this file is published on 127.0.0.1 rather than on
+    # 0.0.0.0, and the argument is made once here rather than per service.
+    # The credentials below are deliberate development defaults (§14.1), so
+    # the interface is the control standing in front of them: Compose's short
+    # syntax with no host-IP prefix binds every interface, which offers sa,
+    # two passwordless Redis instances, guest/guest and Keycloak's admin
+    # console to every peer on a shared network. Docker Desktop pre-authorises
+    # its own backend through the Windows firewall, so no prompt stands in the
+    # way of that either. deploy/compose/README.md addresses all of it as
+    # localhost already, so the prefix takes nothing from the documented
+    # workflow and closes the shared-Wi-Fi case.
+    ports: [ "127.0.0.1:1433:1433" ]
     volumes: [ sql-data:/var/opt/mssql ]
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1'"]
@@ -24,7 +35,7 @@ services:
   redis-cache:
     image: redis:7-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    ports: [ "6379:6379" ]
+    ports: [ "127.0.0.1:6379:6379" ]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
 
@@ -33,7 +44,7 @@ services:
     # noeviction: locks, idempotency keys and the denylist must never be
     # evicted. Appendonly so a restart does not silently release held locks.
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
-    ports: [ "6380:6379" ]
+    ports: [ "127.0.0.1:6380:6379" ]
     volumes: [ redis-coordination-data:/data ]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -47,7 +58,7 @@ services:
   rabbitmq:
     build:
       context: rabbitmq
-    ports: [ "5672:5672", "15672:15672" ]
+    ports: [ "127.0.0.1:5672:5672", "127.0.0.1:15672:15672" ]
     volumes: [ rabbit-data:/var/lib/rabbitmq ]
     healthcheck:
       # check_running answers "is the broker up", which was the whole question
@@ -91,7 +102,7 @@ services:
       # Turns on /health/ready, on the management port, which is what the
       # healthcheck below reads. Off by default.
       KC_HEALTH_ENABLED: "true"
-    ports: [ "8080:8080" ]
+    ports: [ "127.0.0.1:8080:8080" ]
     volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
     # The image has a shell — CMD-SHELL below needs one — but no HTTP client:
     # no curl, no wget. So the check is a bash TCP redirection against the
@@ -168,7 +179,7 @@ services:
       # naming 6380 here would reach nothing.
       ConnectionStrings__RedisCache: "redis-cache:6379"
       ConnectionStrings__RedisCoordination: "redis-coordination:6379"
-    ports: [ "5102:8080" ]
+    ports: [ "127.0.0.1:5102:8080" ]
     depends_on:
       catalog-migrator: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
@@ -216,7 +227,7 @@ services:
       Cors__Enabled: "true"
       Cors__Origins__0: "http://localhost:5173"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-    ports: [ "5000:8080" ]
+    ports: [ "127.0.0.1:5000:8080" ]
     depends_on:
       keycloak: { condition: service_healthy }
       # The destinations in §10.2's route file that exist today. The one
@@ -272,7 +283,7 @@ services:
       # on the coordination instance before the order exists.
       ConnectionStrings__RedisCache: "redis-cache:6379"
       ConnectionStrings__RedisCoordination: "redis-coordination:6379"
-    ports: [ "5101:8080" ]
+    ports: [ "127.0.0.1:5101:8080" ]
     depends_on:
       ordering-migrator: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
@@ -330,7 +341,7 @@ services:
       # MapCommonHealthEndpoints(ownsNoReadinessDependencies: true), which is
       # what stops "declared empty" and "was never wired up" reading
       # identically from out here.
-    ports: [ "5200:8080" ]
+    ports: [ "127.0.0.1:5200:8080" ]
     depends_on:
       # Keycloak, because this host mints its own token and would otherwise
       # discover that on the first request.
@@ -347,11 +358,11 @@ services:
     image: otel/opentelemetry-collector-contrib:latest
     command: [ "--config=/etc/otel/config.yaml" ]
     volumes: [ ./otel/config.yaml:/etc/otel/config.yaml:ro ]
-    ports: [ "4317:4317", "4318:4318" ]
+    ports: [ "127.0.0.1:4317:4317", "127.0.0.1:4318:4318" ]
 
   grafana:
     image: grafana/otel-lgtm:latest
-    ports: [ "3000:3000" ]
+    ports: [ "127.0.0.1:3000:3000" ]
 
 volumes:
   sql-data:

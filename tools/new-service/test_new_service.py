@@ -630,8 +630,35 @@ class EditsTheSharedFiles(unittest.TestCase):
         compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
         self.assertLess(compose.index("  zulu-migrator:"), compose.index("  otel-collector:"))
         self.assertLess(compose.index("  zulu-api:"), compose.index("  otel-collector:"))
-        self.assertIn(f'ports: [ "{PORT}:8080" ]', compose)
-        self.assertIn('ports: [ "5102:8080" ]', compose, "Catalog keeps its own port")
+        self.assertIn(f'ports: [ "127.0.0.1:{PORT}:8080" ]', compose)
+        self.assertIn(
+            'ports: [ "127.0.0.1:5102:8080" ]', compose, "Catalog keeps its own port"
+        )
+
+    def test_every_mapping_in_the_rendered_file_is_bound_to_loopback(self):
+        # §14.1 publishes on 127.0.0.1 because the credentials in that file are
+        # deliberate development defaults, which makes the interface the only
+        # control in front of them. A scaffolded service that dropped the
+        # prefix would reopen that one service at a time, and every other
+        # assertion in this class is satisfied just as happily by a 0.0.0.0
+        # bind — so the subject here is the mapping's *shape*, and it is every
+        # mapping in the file rather than the new one alone: an assertion
+        # scoped to the rendered pair cannot notice the template regressing.
+        compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
+        mappings = [
+            mapping
+            for published in re.findall(r"ports: \[ ([^\]]*)\]", compose)
+            for mapping in re.findall(r'"([^"]+)"', published)
+        ]
+        # The positive control: a pattern that matched nothing would pass the
+        # loop below in silence, which is this repository's most-repeated way
+        # for a check to stop checking.
+        self.assertGreater(len(mappings), 1, "found no published mapping to judge")
+        for mapping in mappings:
+            self.assertTrue(
+                mapping.startswith("127.0.0.1:"),
+                f"{mapping} publishes on every interface",
+            )
 
     def test_the_compose_pair_keeps_the_two_key_split_of_section_7_1(self):
         compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
@@ -974,6 +1001,25 @@ class RefusesToRun(unittest.TestCase):
     def test_a_port_another_service_already_publishes(self):
         with self.assertRaises(ScaffoldError):
             render(port=5102)
+
+    def test_a_template_whose_api_block_is_not_bound_to_loopback(self):
+        # The other half of the loopback rule, and the half a render-and-read
+        # assertion cannot reach: the prefix is REQUIRED of the template rather
+        # than copied off it, so removing §14.1's bind from Catalog stops the
+        # scaffold rather than propagating into every service scaffolded after.
+        # Bytes rather than text, because the copy's line endings are the
+        # platform's and this substitution has no business changing them.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+            compose = root / "deploy/compose/docker-compose.yml"
+            unbound = compose.read_bytes().replace(
+                b'ports: [ "127.0.0.1:5102:8080" ]', b'ports: [ "5102:8080" ]'
+            )
+            self.assertIn(b'ports: [ "5102:8080" ]', unbound, "the substitution missed")
+            compose.write_bytes(unbound)
+
+            with self.assertRaises(ScaffoldError):
+                render(repo_root=root)
 
     def test_a_port_docker_cannot_publish(self):
         # Collision was the only check once, so -1 and 70000 planned happily
