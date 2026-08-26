@@ -142,8 +142,9 @@ def read_pins(path: Path) -> set[str]:
             continue
 
         # `Include` is how central management names a package, and it is the
-        # only identity this gate reads. An element without one is refused by
-        # name rather than crashing on a KeyError or — worse — being skipped:
+        # only identity this gate reads. An element without one is refused with
+        # a message naming the file and the element, rather than a KeyError
+        # naming neither — and, worse than either, rather than being skipped:
         # `Update` sets a version on an item defined elsewhere, so silently
         # passing over it would restore a package no register row was asked
         # about, which is the whole defect #50 closed one spelling at a time.
@@ -154,7 +155,10 @@ def read_pins(path: Path) -> set[str]:
             raise ValueError(
                 f"{path}: <{local_name(element)}> has no Include attribute "
                 f"(it carries {attributes}). This gate reads Include and nothing "
-                f"else, so it cannot say which package this pins.")
+                f"else, so it can say neither whether this element pins a package "
+                f"nor which one — `Remove` pins nothing and a declaration inside "
+                f"an ItemDefinitionGroup carries no attributes at all, and this "
+                f"refusal cannot tell either of those from a pin it cannot read.")
 
         pins.add(identity)
 
@@ -338,9 +342,16 @@ def audit(pins: set[str], rows: list[tuple[list[str], str]], allowed: set[str]) 
     gate exists to force rather than absorb.
 
     A part the map cannot name fails on its own terms and with its own message.
-    "Outside the allow-list" is a licence read and refused; a spelling with no
-    identifier behind it was never read at all, and adding a line to the
-    allow-list would be the wrong repair for it.
+    "Outside the allow-list" is a licence read and refused; a part this gate
+    cannot name was never read at all, and adding a line to the allow-list
+    would be the wrong repair for it — that file is keyed on identifiers the
+    map emits, so a name it does not emit could not be matched there anyway.
+
+    Not "a spelling with no identifier behind it", which is how this read until
+    the message below was corrected, and which is the premise that correction
+    refutes: `ISC` and `BSD-2-Clause` are real identifiers falling through a
+    deliberately closed map. So the finding covers a misspelt register cell and
+    an untaught real name alike, and those are repaired in different files.
     """
     registered: dict[str, list[str]] = {}
     for identities, licence_cell in rows:
@@ -362,9 +373,12 @@ def audit(pins: set[str], rows: list[tuple[list[str], str]], allowed: set[str]) 
             forbidden.append(
                 f"{pin} is registered as {' / '.join(licences)}, and "
                 f"{' / '.join(unnamed)} is not a licence spelling this gate knows. "
-                f"Add it to SPDX in licence_gate.py — deliberately a closed "
-                f"vocabulary, so a real SPDX identifier it has never been shown "
-                f"is refused rather than guessed at")
+                f"Two faults reach this line and they are repaired in different "
+                f"files: a misspelt register cell is fixed in Appendix B, and a "
+                f"real spelling nobody has taught this gate is added to SPDX in "
+                f"licence_gate.py. Naming a licence is not clearing it — a newly "
+                f"nameable one still needs a line in allowed-licences.txt, which "
+                f"is a decision rather than a transcription")
             continue
         refused = [licence for licence in licences if licence not in allowed]
         if refused:

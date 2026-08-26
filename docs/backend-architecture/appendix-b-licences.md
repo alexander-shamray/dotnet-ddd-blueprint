@@ -120,10 +120,17 @@ way:
   is a row that clears a forbidden licence for arriving in good company. Where
   a package really is offered under either, the row names the half taken here —
   which is the decision the gate exists to force rather than absorb;
-- a registered licence it cannot map to an SPDX identifier at all. That is a
-  different failure with a different repair, and it says so: a line added to
-  the allow-list admits a licence that was read and refused, never one that was
-  never read;
+- a registered licence any part of which is not a spelling its map knows. That
+  is a different failure with a different repair, and it says so: a line added
+  to the allow-list admits a licence that was read and refused, never one that
+  was never read. **Not "cannot map to an SPDX identifier"**, which is how this
+  bullet and the gate's own message both used to read — the vocabulary is
+  closed on purpose, so a real identifier the map has never been shown is
+  refused too, and blaming SPDX sends the reader to correct a row that may
+  already be right. The two faults behind this finding are a misspelt cell,
+  repaired here, and a spelling nobody has taught the gate, repaired in
+  `licence_gate.py` — and teaching it is not clearing it, since a newly
+  nameable licence still needs an allow-list line;
 - a **registered identity that is pinned nowhere** — a dropped pin, or a row
   that outlived its dependency. The carve-outs of [§4.4](04-solution-structure.md)
   are encoded as exceptions to this one: the Aspire rows are deliberately

@@ -118,6 +118,11 @@ class ReadPins(unittest.TestCase):
         self.assertIn("no Include attribute", str(refusal.exception))
         self.assertIn("PackageVersion", str(refusal.exception))
         self.assertIn("Update", str(refusal.exception))
+        # The file too, and this half is asserted because it is the half that
+        # can be deleted without the rest noticing. The defect being repaired
+        # was a message naming NEITHER the file nor the element; a suite that
+        # pins only the element would stay green against half a repair.
+        self.assertIn("Directory.Packages.props", str(refusal.exception))
 
 
 class ScanProjects(unittest.TestCase):
