@@ -731,8 +731,14 @@ public static class SensitiveKeys
         "signature"
     ];
 
-    // The never-log terms, in declaration order.
-    public static IReadOnlyList<string> All => Terms;
+    // The never-log terms, in declaration order — wrapped, not handed out.
+    // IReadOnlyList<T> is a static view and not a guarantee, so returning
+    // Terms lets any caller write (string[])SensitiveKeys.All and rewrite the
+    // vocabulary at run time, which the pinning test below could never see:
+    // it would go on asserting about a list the process had stopped using.
+    // Array.AsReadOnly wraps once at type initialisation and cannot be cast
+    // back; the private array stays for the loop, the only hot path.
+    public static IReadOnlyList<string> All { get; } = Array.AsReadOnly(Terms);
 
     // A foreach rather than Terms.Any(t => key.Contains(t, ...)): the lambda
     // would capture `key`, so the closure allocates once per attribute
@@ -766,11 +772,8 @@ public static class SensitiveKeys
         if (value is not string text || text.Length == 0)
             return false;
 
-        if (text.Contains("password=", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("pwd=", StringComparison.OrdinalIgnoreCase))
-        {
+        if (Assigns(text, "password") || Assigns(text, "pwd"))
             return true;
-        }
 
         // A JWT's header is base64url of a JSON object opening `{"`, which is
         // always the three characters below, and the compact serialisation has
@@ -788,6 +791,41 @@ public static class SensitiveKeys
         }
 
         return dots == 2;
+    }
+
+    // Whether the text ASSIGNS to the key — the key, any whitespace, then `=`.
+    // The whitespace is the whole reason this is not a substring test: an
+    // ADO.NET connection string is a list of keyword=value pairs and the
+    // parser tolerates spaces around the separator, so `Password = hunter2` is
+    // as valid as `Password=hunter2` and a check for the literal "password="
+    // misses it — a value walking past a guarantee written as "whatever its
+    // key is called". Requiring the `=` is what keeps this off prose: "the
+    // password was rejected" assigns nothing. Scanning rather than parsing,
+    // because what reaches here is an arbitrary logged value and
+    // SqlConnectionStringBuilder would throw on most of it.
+    private static bool Assigns(string text, string key)
+    {
+        int from = 0;
+
+        while (from <= text.Length - key.Length)
+        {
+            int at = text.IndexOf(key, from, StringComparison.OrdinalIgnoreCase);
+
+            if (at < 0)
+                return false;
+
+            int after = at + key.Length;
+
+            while (after < text.Length && char.IsWhiteSpace(text[after]))
+                after++;
+
+            if (after < text.Length && text[after] == '=')
+                return true;
+
+            from = at + 1;
+        }
+
+        return false;
     }
 }
 ```
@@ -986,7 +1024,15 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
     {
         ArgumentNullException.ThrowIfNull(callback);
 
-        _inner.ForEachScope((scope, s) => callback(Redact(scope), s), state);
+        // A static lambda with the caller's callback carried in the state, so
+        // nothing is captured. The obvious spelling closes over `callback` and
+        // allocates a display class every time a provider enumerates scopes —
+        // which is every log record, since §10.4 opens a correlation scope on
+        // every request.
+        _inner.ForEachScope(
+            static (object? scope, (Action<object?, TState> Callback, TState State) s) =>
+                s.Callback(Redact(scope), s.State),
+            (Callback: callback, State: state));
     }
 
     public IDisposable Push(object? state) => _inner.Push(state);
