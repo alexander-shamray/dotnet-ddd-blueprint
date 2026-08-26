@@ -15,12 +15,26 @@ namespace Common.Infrastructure.Tests;
 /// <para>
 /// It sits on the <b>collection definition</b> rather than on each member
 /// class, and that is the whole design. xUnit v3 applies a collection's traits
-/// to every test in it — measured on this assembly, where
-/// <c>Category=Integration</c> selects all ten tests of the two member classes
-/// and <c>Category!=Integration</c> selects the other seventy-one, with no
-/// third state. So joining the collection <i>is</i> carrying the category, and
-/// there is no per-class attribute for a new test class to forget. See
-/// <c>docs/testing.md</c> for the filters this makes available.
+/// to every test in it — measured on this assembly, where the two filters
+/// <i>partition</i> it: every test of every member class is selected by
+/// <c>Category=Integration</c>, every other test by
+/// <c>Category!=Integration</c>, and none by both or neither. So joining the
+/// collection <i>is</i> carrying the category, and there is no per-class
+/// attribute for a new test class to forget — which is what the three members
+/// beside this file rely on: <c>DistributedLockRedisTests</c>,
+/// <c>HybridCacheRedisTests</c> and <c>RedisIdempotencyStoreTests</c>.
+/// </para>
+/// <para>
+/// <b>The split used to be written here as two numbers, and is not any
+/// more.</b> It said ten tests of two member classes; PR-28 added the third
+/// and made both halves false, and it stayed false through a branch whose own
+/// reconciliation pass corrected §12.4 and <c>docs/testing.md</c> — this file
+/// was not in that diff, so the site the measurement <i>came from</i> was the
+/// one still stating the old one. The partition above is what was actually
+/// measured and what the design turns on, and it survives a fourth member
+/// class; the counts belong to §12.4 and <c>docs/testing.md</c>, which is one
+/// place rather than three. See <c>docs/testing.md</c> for the filters this
+/// makes available.
 /// </para>
 /// </remarks>
 [CollectionDefinition(nameof(IntegrationCollection))]
