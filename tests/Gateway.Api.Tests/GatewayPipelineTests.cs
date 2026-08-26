@@ -30,11 +30,31 @@ public sealed class GatewayPipelineTests(GatewayFactory factory) : IClassFixture
         HttpResponseMessage response = await client.GetAsync(path, TestContext.Current.CancellationToken);
 
         // Ready and startup are healthy with an empty check set, which is
-        // correct for a host that owns no dependency (§13.5) — and the reason
-        // the probes must stay anonymous is that the kubelet carries no token,
-        // so the gateway would otherwise be the one component its own auth
+        // correct for a host whose dependencies do not gate readiness (§13.5):
+        // the gateway proxies four services and deliberately declines to report
+        // unready when one of them is down, which would take the edge out of
+        // rotation for a fault it is meant to pass through. And the reason the
+        // probes must stay anonymous is that the kubelet carries no token, so
+        // the gateway would otherwise be the one component its own auth
         // pipeline could kill.
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Every_response_carries_nosniff()
+    {
+        // §10.6's header, asserted against the host rather than against the
+        // extension. `SecurityHeadersTests` proves what UseSecurityHeaders
+        // does; only this says the gateway calls it — delete the line from
+        // Program.cs and every test in Common.Web.Tests stays green, which is
+        // the failure that commit named and then left uncovered on two of the
+        // four hosts.
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response =
+            await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
+
+        response.Headers.GetValues("X-Content-Type-Options").ShouldBe(["nosniff"]);
     }
 
     [Fact]

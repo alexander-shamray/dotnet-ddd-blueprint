@@ -15,31 +15,38 @@ namespace Common.Web;
 /// it (§13.2, §13.4) — a provider outside this pipeline formats the original
 /// state itself and would ship the secret the processor just scrubbed.
 /// <para>
-/// <b>What it does.</b> Matching is by attribute <em>key</em>, and a match
-/// rewrites two things: the attribute's value, and — because <c>§13.2</c> sets
+/// <b>What it does.</b> Matching is by attribute <em>key</em>, and — for the
+/// two shapes <see cref="SensitiveKeys.LooksLikeSecret"/> recognises — by
+/// value, so a connection string reaches the collector redacted whatever its
+/// key was called. A match rewrites two things: the attribute's value, and —
+/// because <c>§13.2</c> sets
 /// <c>IncludeFormattedMessage</c> and the exporter then ships
 /// <c>FormattedMessage</c> as the record's body — the rendered message, which
 /// falls back to the un-substituted template. A record with nothing sensitive
 /// on it is left exactly as it arrived.
 /// </para>
 /// <para>
-/// Four limits worth stating rather than discovering. An exception whose
+/// Three limits worth stating rather than discovering. An exception whose
 /// text repeats a redacted value causes the exception to be dropped, but one
 /// carrying a secret the attributes never named survives — there is nothing
 /// to match it against, which is the interpolation case in another costume. Redaction is by key
-/// alone, which is the argument for naming a placeholder <c>{Token}</c> and
-/// never interpolating: an interpolated secret produces no attribute to match
-/// and lands in the template itself, so the fallback carries it too. It cannot
-/// help with a whole object logged as one attribute — that is what the "never
-/// log full request bodies" half of the rule is for. And it does not read
-/// scopes: <c>IncludeScopes</c> is on, but the processor inspects
-/// <c>Attributes</c> only, so a sensitive key in a <c>BeginScope</c> dictionary
-/// is exported unredacted. Nothing leaks today, because the platform opens
-/// exactly two scopes and neither can carry a secret — <c>LoggingBehavior</c>'s
-/// <c>RequestType</c> (§13.3) is a type name, and <c>UseCorrelationId</c>'s
-/// <c>CorrelationId</c> (§10.4) is a trace ID or a GUID. A third one carrying a
-/// secret would leak it silently. Widening the processor to walk the scope
-/// provider is a design change, not a fix.
+/// or by value shape, which is the argument for naming a placeholder
+/// <c>{Token}</c> and never interpolating: an interpolated secret produces no
+/// attribute to match and lands in the template itself, so the fallback
+/// carries it too. It cannot help with a whole object logged as one attribute
+/// — that is what the "never log full request bodies" half of the rule is for.
+/// </para>
+/// <para>
+/// <b>Scopes are redacted somewhere else, and could not be redacted here.</b>
+/// <c>IncludeScopes</c> is on (§13.2), so every record inherits the scopes open
+/// around it — and a processor cannot rewrite them: <c>LogRecord</c> exposes
+/// <c>ForEachScope</c> and no settable scope provider, measured against 1.17
+/// rather than assumed. Reading a scope here would therefore let this type
+/// <em>notice</em> a secret it has no way to remove. <see
+/// cref="RedactingScopeProvider"/> is the fix, and it sits one layer lower —
+/// at the <c>IExternalScopeProvider</c> the logger factory hands every
+/// provider, so a scope opened by EF Core or MassTransit is covered as well as
+/// the platform's own two.
 /// </para>
 /// </remarks>
 public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
@@ -47,11 +54,6 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
     // The key ILogger puts the message template under. Its presence is what
     // makes Body a template rather than a rendered line — see OnEnd.
     private const string OriginalFormat = "{OriginalFormat}";
-
-    // Substring match, not equality: the field that leaks is never named
-    // exactly "password" — it is "NewPassword", "card_number", "id_token".
-    private static readonly string[] Sensitive =
-        ["password", "secret", "token", "authorization", "cardnumber", "card_number", "ssn", "nationalid"];
 
     /// <inheritdoc />
     public override void OnEnd(LogRecord record)
@@ -70,8 +72,16 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
             if (attribute.Key == OriginalFormat)
                 hasTemplate = true;
 
-            if (!IsSensitive(attribute.Key))
+            // The value check is the half that survives a key nobody predicted,
+            // and {OriginalFormat} is exempt from it: the template is written
+            // by the author rather than bound from data, so a template reading
+            // "connecting with password={Pwd}" would otherwise redact the one
+            // attribute the fallback below depends on.
+            if (!SensitiveKeys.Matches(attribute.Key) &&
+                (attribute.Key == OriginalFormat || !SensitiveKeys.LooksLikeSecret(attribute.Value)))
+            {
                 continue;
+            }
 
             // Copy only when something actually matches — the common case is
             // no match, and this runs on every log record on every request.
@@ -143,21 +153,6 @@ public sealed class SensitiveDataRedactor : BaseProcessor<LogRecord>
         foreach (string secret in secrets)
         {
             if (text.Contains(secret, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
-    }
-
-    // A foreach rather than Sensitive.Any(s => key.Contains(s, ...)): the
-    // lambda would capture `key`, so the closure allocates once per attribute
-    // inspected — including on the no-match path the copy above is written to
-    // keep allocation-free. This runs on every attribute of every log record.
-    private static bool IsSensitive(string key)
-    {
-        foreach (string term in Sensitive)
-        {
-            if (key.Contains(term, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 

@@ -32,6 +32,25 @@ public static class ObservabilityExtensions
         // container stdout is collected in most clusters. Verified by test.
         builder.Logging.ClearProviders();
 
+        // The scope half of §13.4, and it has to be registered rather than
+        // configured: LoggerFactory takes an IExternalScopeProvider from the
+        // container and hands the same instance to every provider, so wrapping
+        // it here covers scopes opened by EF Core and MassTransit as well as
+        // the platform's own two. IncludeScopes below is what puts them on the
+        // record; without this line the redactor would be scrubbing attributes
+        // beside a scope carrying whatever the caller sent.
+        //
+        // It WRAPS whatever is already registered rather than standing aside
+        // for it. TryAdd was the first spelling and it fails open: a host that
+        // had registered any provider first kept it, unwrapped, and every scope
+        // exported raw while IncludeScopes stayed on and the redactor went on
+        // scrubbing attributes beside it — a security control switched off by a
+        // registration nobody looked at. The comment beside it was wrong in the
+        // other direction too, claiming a later registration would be the one
+        // ignored; the built-in container resolves the LAST, measured rather
+        // than assumed.
+        RedactingScopeProvider.WrapScopesForRedaction(builder.Services);
+
         builder.Logging.AddOpenTelemetry(logging =>
         {
             logging.IncludeFormattedMessage = true;

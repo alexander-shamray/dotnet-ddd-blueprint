@@ -68,6 +68,178 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The comments that were not mechanisms (#35, #36, #37, #38, #39, #41, #68)
+
+Seven issues, one shape. Each names a control the platform already had, and in
+every case the control was **argued in a comment and not enforced by
+anything** — a redaction list whose exceptions were reasoned about in prose, a
+readiness predicate whose fail-open was documented in the file that fails open,
+an authorization posture that held because every endpoint group had
+remembered a line. Most of them were not live exposures on the day they were
+filed, and that is the property they share rather than a mitigation: a rule
+nothing mechanises survives exactly as long as the next person reads the
+comment. The exceptions are the two below that were one defect — and the
+exception is what the rest of this entry is about, because the comment that
+made them look safe is the same kind of comment as all the others.
+
+**The one that was a live exposure had been argued as safe in writing.** §13.4's
+redactor documented that it does not read log scopes, and justified it: the
+platform opens exactly two, and neither can carry a secret, because
+`UseCorrelationId`'s `CorrelationId` "is a trace ID or a GUID". It is not. That
+is the *fallback* branch; a client-supplied `X-Correlation-Id` was adopted
+verbatim, unbounded and unconstrained in charset, and pushed into the one
+channel the processor was documented as not inspecting. The comment named the
+channel correctly and was wrong about what travels down it — which is why #36
+and #37 are one fix and were filed as two.
+
+**A processor could not have closed it, and finding that out chose the layer.**
+The obvious repair is to walk `record.ForEachScope(...)` and apply the same key
+test — it is what the issue proposed first. Measured against OpenTelemetry 1.17
+rather than assumed: `LogRecord` exposes `ForEachScope` and **no settable scope
+provider**, so a `BaseProcessor<LogRecord>` can read a scope and has no way to
+rewrite or suppress one. That repair would have let the type *notice* a secret
+it could not remove. The fix sits one layer lower — `LoggerFactory` takes an
+`IExternalScopeProvider` from the container and hands the same instance to every
+provider, so a wrapper registered there redacts scopes on the way out and covers
+the ones EF Core and MassTransit open as well as the platform's own two. **The
+API surface decided the design, and reading it cost one probe.**
+
+> **A test over the mechanism, not over the fix.** `RedactingScopeProviderTests`
+> asserts that the logger factory actually hands providers the registered
+> instance. Every other test in that file passes against a wrapper nothing ever
+> calls — constructor selection is the assumption the whole fix rests on, and it
+> is the one thing no other test would notice losing.
+
+**The first implementation of that wrapper was silently wrong in the only case
+that matters, and its own tests were green.** `Redact` matched
+`IReadOnlyList<KeyValuePair<string, object?>>`, which is what MEL's
+`FormattedLogValues` is — and `BeginScope(new Dictionary<,>)`, which is what
+both of the platform's scopes actually use, produces a `Dictionary`, which is
+not an `IReadOnlyList`. So every scope this platform opens fell through
+unredacted while the unit tests over the list shape passed. It was caught
+because one test drove the real call rather than the interface the
+implementation had picked. **Match the shape the caller produces, not the one
+the framework's own type happens to implement.**
+
+**#35 is the other half, and the argument for a value check is that no test can
+be written for a term nobody thought of.** The list grew from eight terms to the
+vocabulary this codebase actually uses — `ConnectionString` most of all, which
+no term in the old list was a substring of, and which four call sites throw
+naming. A list is still only as good as the imagination behind it, so two
+**value** shapes are recognised whatever the key is called: a connection string
+carrying `Password=` inline, and a JWT. Deliberately not an entropy test — a
+high-entropy string is an id as often as a credential, and redacting every id
+empties the records §13.1 says an incident is triaged by. `{OriginalFormat}` is
+exempt from the value check, because a template is written by an author rather
+than bound from data, and it is the fallback the message rewrite depends on.
+
+> **`pin` is not on the list, and the omission is the price of substring
+> matching.** `Shipping` contains it. The list is pinned by a test naming the
+> innocent keys as well as the guilty ones, because a vocabulary that only ever
+> grows is one nobody has established is still selective.
+
+**#41 was filed as an exposure and was a missing mechanism, which is a different
+fix.** Every endpoint group in the solution already carried
+`RequireAuthorization()`; what was absent was anything that would notice the
+next one not carrying it. `SetFallbackPolicy` in `AddCommonWebDefaults` is the
+answer rather than §11.4's proposed `EndpointDataSource` test, and the reason is
+§4.5: a test lives in one service's project and reaches the services the
+scaffold has already rendered, where a fallback in the building block reaches
+every host that will ever compose it. Both are kept, and
+[ADR-030](backend-architecture/appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block)
+records why neither replaces the other.
+
+**It reaches three endpoints nobody wrote, and each had to be decided rather
+than discovered.** Routing's 405 short-circuit endpoint carries no authorization
+metadata, so an anonymous wrong-method request is now challenged before the
+method is considered — and an authenticated one still gets 405, which is what
+makes the pair assertable. `MapOpenApi()` carries none either, so the document
+enumerating every route and schema now requires a caller. That one cost a
+second factory in two test projects: a 401 assertion alone is satisfied by a
+host that has stopped serving the document at all, so the suite needed a caller
+who gets through. **A negative assertion about an endpoint is also an assertion
+that the endpoint exists, and only the positive half carries it.**
+
+**The third is the unmatched route, and it is the widest of them.** A path that
+matched nothing is evaluated against the fallback too, so an anonymous request
+for a URL this platform does not serve answers 401 where it answered 404 — every
+path, rather than one endpoint. Found by review rather than by design, then
+measured and accepted: `HostSmokeTests` pins both halves, an authenticated
+caller still gets the 404, and a 404 is exactly the disclosure §11.4's ownership
+rule already refuses one resource at a time. **The count in the paragraph above
+read two for as long as nobody asked what else carries no metadata**, which is
+this entry's own subject arriving in the entry — a rule reversed everywhere it
+is stated or nowhere, and an endpoint inventory is where the "everywhere" is
+easiest to stop one short.
+
+**#39 arrived asking for three things and two of them were already decided.**
+Rate limiting and the request-body ceiling are the gateway's, explicitly, in
+§10.1 and §4.2 — the issue was filed before PR-17 and PR-27 landed them, and
+re-deciding a recorded decision because an issue restates the question is how a
+platform acquires two answers. The third ask had no owner at all: the blueprint
+discussed response security headers as neither done, nor deferred, nor out of
+scope. `nosniff` is now the service's, in a building block every host composes,
+and
+[ADR-031](backend-architecture/appendix-a-adrs.md#adr-031--the-service-owns-nosniff-the-ingress-owns-hsts)
+argues the omissions — HSTS belongs to the only component that terminates TLS,
+and framing and script policies govern a document this platform does not serve.
+
+> **Where a response header is written from is the whole of its correctness.**
+> `UseExceptionHandler` clears the response before writing §10.5's problem body,
+> so a header assigned on the way in is absent from exactly the 500 on which a
+> caller-supplied value is most likely to be reflected. The middleware registers
+> an `OnStarting` callback instead. The 200 path passes either way, which is why
+> the test that matters drives the 500.
+
+**#68's fix is a parameter, and the parameter is the point.** An empty predicate
+set is a passing predicate set, so a host with no `ready`-tagged check answered
+`/health/ready` with 200 without having verified anything — and §15.1 removes
+the smoke
+stage *by name* on the grounds that this probe already gates the rollout. The
+gateway and the BFF genuinely own no *readiness* dependency — the BFF calls
+Catalog and the gateway proxies four services, and neither hop gates
+readiness — so the guard cannot simply
+throw: `ownsNoReadinessDependencies: true` makes those two hosts state their
+case at the call site, and every other host fails to start. §13.5 already
+carried the rule in prose — a host with a connection string has a readiness
+check — and this is that sentence given a compiler.
+
+**The guard tests the set and not any member of it, which is the honest bound
+and was found by review rather than stated up front.** `AnyReadinessCheck` asks
+whether *one* registration carries the tag, so Catalog and Ordering, which
+register three each, keep starting after any two are deleted. What it catches is
+the readiness set going missing whole: a host wired up with none, or one whose
+Infrastructure registration stopped being called. The narrower case needs a
+per-service count, and nothing generates one for a service §4.5's scaffold has
+rendered — the same reason the guard travels with the building block rather than
+living in a test. **An `Any` over a set proves the set is non-empty and says
+nothing about which member is in it**, and the sentence that shipped first — *a
+service that loses its `AddSqlServer(...)` therefore fails at startup* —
+promised the second while the code implemented the first. It is the
+gate-coverage lesson at one remove: not a gate that stopped covering a surface,
+but one whose subject was narrower than the sentence selling it.
+
+**#38 is the small one and the only one outside `Common.Web`.** `ThumbnailUrl`
+was bounded for length and for nothing else, in a validator where every other
+field is argued down to the regex anchor. It is now an absolute `http` or
+`https` URI. Not an allow-list of image hosts, which is the stronger form: §14.1
+has no image host and §4.1 plans no media service, so the list would be empty or
+invented.
+
+**What this cost elsewhere.** The gateway's `catalog-public` route gained
+`"AuthorizationPolicy": "anonymous"`, which reverses a rule §10.2 stated three
+times — that naming no policy was the only correct way to declare a route
+public. That reversal is reconciled in the chapter, in Appendix C's rows, in
+the compose README, in the k6 script, in the source comments that named the
+route, in the test that pinned it, and in this log's own PR-16 entry, because
+the claim had been copied to all of them. **A rule is reversed everywhere it is
+stated or nowhere** — and this sentence carried a count of four, then seven,
+each time corrected by somebody counting again. The number is gone rather than
+corrected a third time: the places are checkable and the tally never was, which
+is the argument `CLAUDE.md` makes about its own callout totals.
+
+---
+
 ## The cancellation the saga could not see (#123, #143, #141, #109)
 
 Three of these are one defect at three distances. A cancellation reaches
@@ -3553,7 +3725,9 @@ comes after:
   is §15.4's own test for what is not configuration.
 - **The GET stays anonymous, permanently, and says so.** PR-10's README named
   the whole slice as a temporary gap; only the write path was one. §10.2's
-  `catalog-public` route matches GET alone and carries no `AuthorizationPolicy`,
+  `catalog-public` route matches GET alone and names `anonymous`, YARP's
+  reserved value — it carried no `AuthorizationPolicy` at all until ADR-030
+  made a route saying nothing inherit the fallback,
   so a product listing is public at the edge and public here. The group fails
   closed with `RequireAuthorization()` and the GET adds `AllowAnonymous()`
   explicitly — absence and decision must not look the same.

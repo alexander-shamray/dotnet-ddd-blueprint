@@ -1,4 +1,5 @@
 using Common.Application;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -34,9 +35,24 @@ public static class CommonWebDefaultsExtensions
         // would accept as the magic string "default" (§10.2). Naming it costs
         // one line and buys a route file that says what it means — and that
         // file is read by people deciding whether a path is public.
+        //
+        // SetFallbackPolicy is what makes authorization deny-by-default. Without
+        // it UseAuthorization evaluates NOTHING on an endpoint carrying no
+        // policy metadata, so a new *Endpoints class that omits the one
+        // RequireAuthorization line is reachable with no diagnostic — no
+        // compiler error, no ValidateOnBuild failure, no failing test. The
+        // fallback inverts that: the omission is a 401, and a public route has
+        // to say AllowAnonymous, which is a line a reviewer can see.
+        //
+        // It reaches the gateway's proxied routes too, which is why
+        // appsettings.json now names "anonymous" on catalog-public rather than
+        // leaving the key out — a public path by omission and a public path by
+        // decision read identically in a route file, and only one of them
+        // survives someone else's edit.
         builder.Services
             .AddAuthorizationBuilder()
-            .AddPolicy("authenticated", p => p.RequireAuthenticatedUser());
+            .AddPolicy("authenticated", p => p.RequireAuthenticatedUser())
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
         // §11.4's port, paired with the accessor it depends on: ASP.NET Core
         // registers no IHttpContextAccessor by default, so omitting the first

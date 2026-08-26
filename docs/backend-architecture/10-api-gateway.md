@@ -107,6 +107,13 @@ to Catalog ([§2.2](02-architecture-at-a-glance.md), §9.7) — the diagram is t
       "catalog-public": {
         "ClusterId": "catalog",
         "Match": { "Path": "/api/v1/catalog/{**catch-all}", "Methods": [ "GET" ] },
+        // "anonymous" is YARP's own reserved value for AllowAnonymous, and it
+        // is here because Common.Web now sets a fallback authorization policy
+        // (§11.4): a route with no AuthorizationPolicy key would inherit the
+        // fallback and this public GET would start answering 401. Naming it
+        // also makes the one public path in this file a decision rather than
+        // an omission — the two read identically without it.
+        "AuthorizationPolicy": "anonymous",
         "RateLimiterPolicy": "anonymous",
         "Transforms": [
           { "PathRemovePrefix": "/api" },
@@ -175,8 +182,29 @@ are checked when YARP loads this configuration — `AuthorizationPolicy` through
 `IAuthorizationPolicyProvider`, `RateLimiterPolicy` through the limiter's
 options. `authenticated` comes from `AddCommonWebDefaults`
 ([§13.2](13-observability.md)) and `inventory:admin` from the gateway's own
-`Program.cs` (§4.2); `catalog-public` names none, which is the only correct way
-to declare a route public.
+`Program.cs` (§4.2).
+
+**`anonymous` is the exception, because YARP reserves it.** It is the proxy's
+own spelling of `AllowAnonymous`, intercepted before the provider is ever
+consulted, so it is registered nowhere — and registering a policy under that
+name would register one that never runs. `default` is the other reserved value,
+meaning the framework's default policy, and the same is true of it. A test
+asserting that every named policy resolves has to subtract both, or it fails on
+a route file that is correct.
+
+**`catalog-public` names `anonymous`, and that is now the only way to declare a
+route public.** Naming no policy at all was, until `AddCommonWebDefaults` set a
+fallback authorization policy
+([§11.4](11-identity-authorization.md), [ADR-030](appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block)): a route
+with no `AuthorizationPolicy` key inherits the fallback, and the platform's one
+public path would answer 401. The key is also what makes the decision
+legible — a public path by omission and a public path by decision read
+identically in a route file, and only one of them survives someone else's edit.
+
+Note that `anonymous` now appears twice on `catalog-public`, meaning two
+different things: YARP's reserved `AllowAnonymous` in one key and §10.3's
+per-IP window in the other. That is the two-registries point above arriving on
+one route rather than across two, and it is the same point — not a second one.
 
 > **A name it cannot resolve stops the gateway, and this passage said the
 > opposite for a long time.** It described a silent per-route drop — "the path
@@ -191,10 +219,16 @@ to declare a route public.
 > *better* than it does in a service, where §11.4's endpoint throws on the
 > first request that reaches it.
 >
-> Nothing about the rest of the passage changes. A route naming no policy is
-> still public, and naming none is still the only way to say so; what changes
-> is that the mistake is loud. `UnresolvablePolicyTests` in `Gateway.Api.Tests`
-> is where both registries were measured, one test each.
+> **One more sentence in this callout has since gone the same way, for an
+> unrelated reason.** It used to close "a route naming no policy is still
+> public, and naming none is still the only way to say so", and the fallback
+> policy above makes both halves false: an absent name is a 401 now, and the
+> way to say public is to name `anonymous`. The two corrections are
+> independent — an unresolvable name stops the gateway, an absent name fails
+> closed on the route — and they run the same way, which is that a
+> misconfigured route no longer serves anything by accident.
+> `UnresolvablePolicyTests` in `Gateway.Api.Tests` is where both registries
+> were measured, one test each.
 
 The `web-bff` route is what makes the BFF reachable, and it is easy to skip:
 the BFF has an image, a chart, a Keycloak client and a CI filter without one,
@@ -235,6 +269,18 @@ reaches an inventory database. Assert the invariant rather than reviewing for
 it — deserialise the `Routes` section in a test and require the property on
 every entry.
 
+**Every route carries an `AuthorizationPolicy` too**, and that mirror invariant
+is the newer one: it used to be false by design, because a public route said so
+by omission. The fallback policy inverted it (§11.4), and both halves are
+asserted the same way — `Every_route_names_a_rate_limiter_policy` and
+`Every_route_names_an_authorization_policy` in `Gateway.Api.Tests`, one
+`foreach` over the same deserialised section. The two are not the same kind of
+rule any more, though. The rate-limiter one is a security invariant, because an
+omission is an unmetered path; the authorization one is a readability rule,
+because an omission now fails closed. It is worth asserting for the thing the
+fallback cannot do: answer, in this file, the question the person reading it
+came with.
+
 `PowerOfTwoChoices` picks two destinations at random and routes to the less
 loaded of the pair. It avoids both the herd behaviour of least-requests and the
 blindness of round-robin, at negligible cost.
@@ -274,7 +320,7 @@ During a deprecation window the gateway routes **both** versions to the same
 cluster. A new version is a **new route entry**, which means it re-declares the
 policies rather than inheriting them — the route above it in the file is not a
 base class, and a version added by copying only the `Match` and the `Transforms`
-is a public, unlimited copy of an authenticated, limited endpoint:
+is an unlimited copy carrying no authorization decision of its own:
 
 ```json
 "ordering-v1": {
@@ -292,6 +338,14 @@ is a public, unlimited copy of an authenticated, limited endpoint:
   "Transforms": [ { "PathRemovePrefix": "/api" } ]
 }
 ```
+
+**That copy used to be a public one and is a 401 one now**, which is a smaller
+defect and still a defect. The fallback policy (§11.4) catches the missing
+`AuthorizationPolicy`, so a copy of an authenticated route is right by accident
+and a copy of `catalog-public` stops serving the anonymous callers it exists
+for — the same omission failing in whichever direction the original was
+declared. Nothing catches the missing `RateLimiterPolicy` at all, which is what
+the invariant above is asserted for.
 
 > **Trap — mismatched prefix strips on dual-version routes.** Both routes must
 > strip the *same* prefix, so the service receives `/v1/...` and `/v2/...` and
@@ -469,21 +523,27 @@ used.
 
 ## 10.4 Correlation
 
-The gateway assigns a correlation ID to every request that lacks one, and it
-propagates through every service, log line, message and trace. This is what
-makes a production incident diagnosable.
+The gateway assigns a correlation ID to every request that lacks one — and to
+every request carrying one it will not adopt, which is the same act for a
+different reason — and it propagates through every service, log line, message
+and trace. This is what makes a production incident diagnosable.
 
 It ships in `Common.Web` as one extension, called by both the gateway and every
 service (§4.2), above everything that logs — a log line written before it has no
 correlation ID.
 
-**One thing sits above it: `UseExceptionHandler`.** That is deliberate, and it
-is why the ID is written onto the *request* below rather than only into the log
-scope. An exception unwinding past this middleware disposes the
-`LogContext` scope before the handler catches it, so the scope is gone by the
-time §10.5 builds the response — but `Request.Headers` is not, which is exactly
-where `CustomizeProblemDetails` reads it from. The correlation ID reaches the
-client on the one response where the log scope cannot carry it:
+**Two things sit above it, and only one of them is about correlation.**
+`UseSecurityHeaders` is outermost (§10.6), and its position is a claim about
+the response rather than about the log scope — it decides nothing here and
+writes nothing this middleware reads.
+
+**`UseExceptionHandler` is the one that matters, and it sits immediately
+above.** That is deliberate, and it is why the ID is written onto the *request*
+below rather than only into the log scope. An exception unwinding past this
+middleware disposes the log scope before the handler catches it, so the scope
+is gone by the time §10.5 builds the response — but `Request.Headers` is not,
+which is exactly where `CustomizeProblemDetails` reads it from. The correlation
+ID reaches the client on the one response where the log scope cannot carry it:
 
 ```csharp
 namespace Common.Web;
@@ -493,6 +553,20 @@ namespace Common.Web;
 // local const in this sample while two of those spelled the literal instead,
 // which is three copies of one contract.
 public const string Header = "X-Correlation-Id";
+
+/// <summary>
+/// The longest supplied ID this middleware will adopt (§10.4).
+/// </summary>
+/// <remarks>
+/// Both values the fallback mints are far shorter — a 32-character trace ID
+/// or a 36-character GUID — so the bound is generous rather than tight, and
+/// exists to stop an unauthenticated caller choosing how much of every log
+/// record on the platform it writes. Kestrel's own header budget is tens of
+/// kilobytes, and this middleware runs above <c>UseAuthentication</c>
+/// (§4.2), so the input is unauthenticated on every request that reaches a
+/// host.
+/// </remarks>
+public const int MaxSuppliedLength = 128;
 
 public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
 {
@@ -508,12 +582,32 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
         // not, and would otherwise become a correlation ID of "".
         string? supplied = context.Request.Headers[Header].FirstOrDefault();
 
-        string correlationId = string.IsNullOrWhiteSpace(supplied)
-            ? Activity.Current?.TraceId.ToString() ?? Guid.CreateVersion7().ToString()
-            : supplied;
+        string correlationId = IsAdoptable(supplied)
+            ? supplied
+            : Activity.Current?.TraceId.ToString() ?? Guid.CreateVersion7().ToString();
 
         context.Request.Headers[Header] = correlationId;
-        context.Response.Headers[Header] = correlationId;
+
+        // The RESPONSE header is written from OnStarting rather than here, for
+        // §10.6's reason one middleware over: UseExceptionHandler CLEARS the
+        // response before writing §10.5's problem body, so a header assigned
+        // on the way in is gone from exactly the 500 an incident is triaged
+        // from. The request header stays an eager write — it is what
+        // CustomizeProblemDetails reads after the log scope has been disposed,
+        // and nothing clears it.
+        //
+        // A static callback with the value passed as state, so the closure
+        // captures nothing and this allocates once per request rather than
+        // twice.
+        context.Response.OnStarting(
+            static state =>
+            {
+                (HttpResponse response, string id) = ((HttpResponse, string))state;
+                response.Headers[Header] = id;
+
+                return Task.CompletedTask;
+            },
+            (context.Response, correlationId));
 
         // BeginScope, the Microsoft.Extensions.Logging primitive — not
         // Serilog's LogContext. OpenTelemetry is the whole logging stack here
@@ -523,7 +617,102 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
             await next();
     });
 }
+
+/// <summary>
+/// Whether a supplied header value is a plausible identifier this host is
+/// willing to adopt, rather than merely a non-blank string.
+/// </summary>
+/// <remarks>
+/// <b>Anything refused is replaced, never echoed.</b> The adopted value
+/// reaches four places — the response header, the forwarded request, the
+/// log scope every record for this request inherits, and §10.5's problem
+/// body — so a value that fails here would otherwise be reflected to an
+/// unauthenticated caller and multiplied into collector ingest by the
+/// record count.
+/// <para>
+/// The alphabet is the one both fallback branches already mint from: a
+/// 32-character hex trace ID and a dashed GUID. Underscore is admitted
+/// beside the hyphen because an upstream edge that mints its own IDs
+/// commonly uses it, and neither character can break a log line or a query.
+/// Deliberately <em>not</em> narrowed to exactly a trace ID or a GUID:
+/// §10.4's promise is that an ID chosen by the caller's own tracing
+/// survives the hop, and this platform is not the only thing that mints
+/// one.
+/// </para>
+/// <para>
+/// Kestrel already rejects CR and LF inside a request header value, so log
+/// splitting is not reachable through it — this is the bound on length and
+/// alphabet, not a rescue from that.
+/// </para>
+/// </remarks>
+private static bool IsAdoptable([NotNullWhen(true)] string? supplied)
+{
+    if (supplied is not { Length: > 0 and <= MaxSuppliedLength })
+        return false;
+
+    foreach (char c in supplied)
+    {
+        if (!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_'))
+            return false;
+    }
+
+    return true;
+}
 ```
+
+**The bound exists because this middleware runs above `UseAuthentication`.**
+[§4.2](04-solution-structure.md) puts it near the top of every pipeline, so the
+value it reads is unauthenticated on every request that reaches a host — and
+the value it *adopts* reaches four places: the response header, the forwarded
+request below, the log scope every record for that request inherits, and
+§10.5's problem body. [§13.1](13-observability.md) makes the correlation ID the
+field an incident is triaged by, which is what turns a free choice of that value
+into an attack rather than an untidiness: a caller that picks its own ID can
+stamp its traffic with one already in use, or with one that collides with
+nothing and matches everything the on-call greps for, and it poisons exactly the
+field this section exists to make trustworthy. The length half is cheaper to
+state — a kilobyte attached to a scope inherited by every record the request
+produces, EF Core's and MassTransit's included, is one request multiplied into
+collector ingest by the record count.
+
+**The response header is written from `OnStarting`, and that is the same rule
+[§10.6](#106-response-security-headers) states one middleware over.**
+`UseExceptionHandler` clears the response before it writes §10.5's problem
+body, so a header assigned on the way in is absent from exactly the 500 an
+incident is triaged from — the response on which this section's whole promise
+matters most. The *request* header stays an eager write: it is what
+`CustomizeProblemDetails` reads once the log scope has been disposed, and
+nothing clears it. Two channels, two lifetimes, and only one of them survives
+the unwind by being written late.
+
+> **This was the shape of a defect rather than a symmetry noticed in
+> passing.** `nosniff` was moved onto `OnStarting` with the argument spelled
+> out and a test that drives the 500; the correlation ID was left assigning
+> eagerly, so after that change an error response carried
+> `X-Content-Type-Options` and not `X-Correlation-Id`. **A rule established
+> for one header is owed to every header on the same response**, and the test
+> that catches it has to compose `UseExceptionHandler` — no test of a request
+> that succeeds can see this.
+
+**It is a bound on length and alphabet, and not a rescue from log splitting**,
+which was never reachable. Kestrel rejects CR and LF inside a request header
+value before any middleware sees it, so the injection this guard looks like a
+defence against was already closed one layer down. Saying so is the point: a
+guard credited with a property it does not supply is the one nobody re-checks
+when the layer below it changes.
+
+**The alphabet deliberately admits more than this platform's own two fallbacks
+mint.** Those are a 32-character hex trace ID and a dashed GUID; the guard
+accepts ASCII letters, digits, `-` and `_` up to `MaxSuppliedLength`. Underscore
+is in because an upstream edge that mints its own IDs commonly uses it, and
+neither it nor the hyphen can break a log line or a query. Narrowing to exactly
+a trace ID or a GUID would be tidier and would break this section's promise —
+that an ID chosen by the caller's own tracing survives the hop — for nothing,
+since this platform is not the only thing that mints one. In
+`Common.Web.Tests`, `An_over_long_id_is_replaced` is paired with
+`An_id_at_the_bound_is_kept` for the reason §12 gives about negative cases:
+"too long is replaced" passes just as well against a middleware that replaces
+everything.
 
 ### Leaving the process
 
@@ -581,8 +770,13 @@ public sealed class CorrelationIdHandler(IHttpContextAccessor context) : Delegat
 > **With no inbound ID it sends no header at all, which is deliberate.** The
 > callee's own middleware then mints one from the current trace — the right
 > answer for a call with no request behind it, such as a background job.
-> Sending an empty header instead would defeat the blank-counts-as-missing
-> guard above, the one this blueprint has already had to write twice.
+> Sending an empty header instead would spend a header and buy nothing: the
+> callee refuses it and mints anyway. That used to be an appeal to the
+> blank-counts-as-missing guard, the rule this blueprint has already had to
+> write twice ([§11.3](11-identity-authorization.md)); the guard above is now
+> the wider one — every value it will not adopt is treated as missing, and
+> `""` is merely the shortest of them — which leaves this argument intact and
+> resting on less.
 
 ## 10.5 Error responses
 
@@ -833,6 +1027,89 @@ The 412 half of that row is still unimplemented, deliberately: it needs a
 precondition filter reading `If-Match`, and nothing here sends or reads an
 ETag. What separates the two is whether the client sent a precondition, so
 until it can, every conflict is the no-precondition case the 409s answer.
+
+## 10.6 Response security headers
+
+`Common.Web` adds `X-Content-Type-Options: nosniff` to every response in all
+four hosts, through one extension each pipeline calls outermost
+([§4.2](04-solution-structure.md)). The header set and the ones deliberately
+absent are recorded in
+[ADR-031](appendix-a-adrs.md#adr-031--the-service-owns-nosniff-the-ingress-owns-hsts).
+
+**The service owns this, not the edge**, and that is the whole reason it lives
+in a building block rather than in `Gateway.Api`. The gateway is one of four
+hosts and is not in front of the other three from inside the cluster —
+[§11.2](11-identity-authorization.md) assumes the network is hostile and makes
+every service re-validate its own token for exactly that reason — so a header
+set only at the edge is absent on every path that does not traverse it. Setting
+it where every host composes it has no such gap, and needs no argument about
+which paths those are.
+
+**`nosniff` is the whole list, and the omissions are decisions rather than an
+unfinished set.** `Strict-Transport-Security` belongs to the Ingress, the only
+component in this platform that terminates TLS (§10.1,
+[§15.3](15-cicd-deployment.md)): a host behind it sees plain HTTP, so it would
+be asserting something it cannot observe, and a browser caches that assertion
+for as long as its `max-age` says. `X-Frame-Options` and
+`Content-Security-Policy` govern how a browser renders a *document*, and none
+of these four hosts serves one. Their API responses are `application/json` or
+`application/problem+json` and [§13.5](13-observability.md)'s probes are
+`text/plain` — measured, because an earlier draft of this paragraph said every
+response was JSON and `MapHealthChecks` uses the framework's default plain-text
+writer. A framing or a script policy on a body no browser renders as a document
+protects nothing, and both become live questions for whoever serves the
+storefront [§4.1](04-solution-structure.md) plans rather than for anything here.
+`nosniff` is the one that is not about rendering: it stops a browser
+reclassifying a JSON response — including one whose body carries a value the
+caller supplied (§10.4, §10.5) — as HTML and executing it.
+
+**It writes from `Response.OnStarting` rather than before `next`, and that is
+not a style choice.** `UseExceptionHandler` clears the response before it writes
+§10.5's problem body, so a header assigned on the way in is gone from exactly
+the 500 where a caller-supplied value is most likely to be reflected — the one
+response the header is most worth having on. A callback registered here fires
+when the response actually starts, which is after that clear. Position and
+timing are two claims, and being outermost settles only the first.
+
+```csharp
+namespace Common.Web;
+
+private const string ContentTypeOptions = "X-Content-Type-Options";
+private const string NoSniff = "nosniff";
+
+public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app)
+{
+    ArgumentNullException.ThrowIfNull(app);
+
+    // The RequestDelegate overload, not the Func<Task> one: the parameterless
+    // spelling reads better and allocates a closure and a wrapper per request,
+    // on a middleware every request traverses.
+    return app.Use((HttpContext context, RequestDelegate next) =>
+    {
+        // A static callback with the response passed as state: the closure
+        // would otherwise capture `context` and allocate once per request.
+        context.Response.OnStarting(
+            static state =>
+            {
+                HttpResponse response = (HttpResponse)state;
+
+                // Indexer rather than Append: a host or a proxy that has
+                // already set it must not end up with the header twice,
+                // which some browsers treat as no header at all.
+                response.Headers[ContentTypeOptions] = NoSniff;
+
+                return Task.CompletedTask;
+            },
+            context.Response);
+
+        return next(context);
+    });
+}
+```
+
+Where the line goes is stated with the rest of the pipeline in §4.2:
+outermost, above `UseExceptionHandler`, so nothing below it can answer without
+the header.
 
 ---
 

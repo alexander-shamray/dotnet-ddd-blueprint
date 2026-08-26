@@ -762,7 +762,12 @@ WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting. Each line below depends on
 // the ones above it, and getting it wrong fails silently rather than loudly.
-app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
+// §10.6's one header: nosniff on every response, including the ones
+// UseExceptionHandler writes below. Above everything, so nothing can answer
+// without it — and written from OnStarting, so the handler's clear does not
+// take it off the 500.
+app.UseSecurityHeaders();
+app.UseExceptionHandler();        // §10.5 — catches every fault below it
 app.UseCorrelationId();           // §10.4 — above everything else that logs
 // §10.5's promise applied to the statuses no handler produces: a challenge
 // and a forbid are written by the middleware below and carry NO BODY, so the
@@ -785,12 +790,13 @@ app.Run();
 public partial class Program;
 ```
 
-Five ordering constraints worth stating, because each one produces a defect
-that no test catches by accident:
+Every ordering constraint below is stated rather than left to the sample,
+because each one produces a defect that no test catches by accident:
 
 | Rule | What breaks otherwise |
 |---|---|
-| `UseCorrelationId` before everything that logs, `UseExceptionHandler` alone above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to be outermost to catch faults in the middleware below it, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)) |
+| `UseSecurityHeaders` outermost, above `UseExceptionHandler` | A response written by anything above it carries no `nosniff` ([§10.6](10-api-gateway.md), [ADR-031](appendix-a-adrs.md#adr-031--the-service-owns-nosniff-the-ingress-owns-hsts)). Outermost is only half the rule, though, and the other half is not an ordering at all: the extension writes from `Response.OnStarting` rather than before `next`, because `UseExceptionHandler` **clears** the response before writing §10.5's problem body. A header assigned on the way in is gone from exactly the 500 where a caller-supplied value is most likely to be reflected — so this line placed first and assigning eagerly would still lose the case it exists for |
+| `UseCorrelationId` before everything that logs, `UseExceptionHandler` immediately above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to wrap the middleware below it to catch their faults, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)). This row said the handler was **alone** above it until `UseSecurityHeaders` landed; that line sits above both and decides nothing about correlation, which is why "immediately" is the word doing the work |
 | `UseAuthentication` before `UseAuthorization` | **Every authenticated request 401s** — in a `WebApplication` too. Omitting a call is repaired by auto-insertion; writing both in the wrong order is not, because the markers they set suppress it. See the callout below |
 | `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket. **Silent is the measured half**: reversing the two leaves every test in `Gateway.Api.Tests` green, the authenticated-partition test included, so nothing in the repository is watching this line (see below) |
 | `UseForwardedHeaders` above the limiter, and **below** the handler and the correlation ID (gateway only) | Two rules meeting, and this sample had them the wrong way round until PR-17: putting it first means a fault parsing a forwarded header unwinds past no exception handler, and anything the middleware logs runs outside the correlation scope. Neither of those two reads the address, so nothing is lost by letting them wrap it — while the limiter, which does read it, stays below. `ForwardedHeadersTests` covers the lower half: below `UseRateLimiter`, two forwarded addresses collapse onto the one connection the gateway can see |
@@ -800,6 +806,24 @@ that no test catches by accident:
 Registration without middleware is the quiet failure mode here. `AddRateLimiter`
 succeeds and does nothing if `UseRateLimiter` is absent — no error, no warning,
 no failing test unless one specifically asserts on a limit.
+
+`MapCommonHealthEndpoints()` is the same line it has always been and now means
+something stronger. An empty predicate set is a passing predicate set, so a host
+that registered no readiness checks answers `/health/ready` with 200 without
+having verified anything — indistinguishable from a host that deliberately gates
+readiness on nothing. The parameterless call is now the claim that this service
+**does** gate readiness on something, and [§13.5](13-observability.md)'s helper
+refuses to start it when no `ready`-tagged check is registered. A service whose
+readiness set goes missing whole in a refactor therefore fails at startup rather
+than taking traffic it cannot serve; the two hosts entitled to an empty set say
+so at the call site instead, and the gateway below is one of them.
+
+**Whole, and not one member of it** — the guard asks whether *any* registration
+carries the tag, so a service that drops its `AddSqlServer(...)` while keeping
+its Redis and broker checks starts exactly as before. §13.5 states the bound and
+argues why the narrower case is not caught; it is named here because this table
+is where the line gets read, and a guard read as stronger than it is buys a
+confidence nobody checked.
 
 > **`AddAuthentication` is not in that class, and saying it was cost this table
 > a wrong row — twice, in opposite directions.** `WebApplication` adds the
@@ -987,8 +1011,13 @@ if (corsEnabled)
 
 WebApplication app = builder.Build();
 
+// §10.6's one header: nosniff on every response, including the ones
+// UseExceptionHandler writes below. Above everything, so nothing can answer
+// without it — and written from OnStarting, so the handler's clear does not
+// take it off the 500.
+app.UseSecurityHeaders();
 app.UseExceptionHandler();
-app.UseCorrelationId();           // assigns the ID if the client sent none
+app.UseCorrelationId();           // §10.4 — assigns or replaces the client's
 
 // High enough to wrap every writer below it, because this middleware acts by
 // replacing the response body feature. Nothing here is an ordering rule a test
@@ -1017,7 +1046,12 @@ app.UseRateLimiter();             // §10.3 — needs the user, precedes policy 
 app.UseAuthorization();
 
 app.MapReverseProxy();
-app.MapCommonHealthEndpoints();   // §13.5 — same anonymous probes as every service
+
+// The edge owns no database and no broker, so its readiness set is empty and
+// that is the whole of §10.1's design rather than a gap. Declared rather than
+// implied: an empty predicate set passes, so the two hosts entitled to one say
+// so at the call site and every other host fails to start without checks.
+app.MapCommonHealthEndpoints(ownsNoReadinessDependencies: true);   // §13.5 — anonymous; kubelet carries no token
 
 app.Run();
 ```
@@ -1061,9 +1095,25 @@ claims, and a request that is over its limit should never reach that.
 The gateway uses the same `MapCommonHealthEndpoints` as every service rather
 than mapping a probe inline. Its readiness set is empty — the gateway owns no
 database — so `/health/ready` returns healthy as soon as the process is up,
-which is correct. What matters is that the probes stay **anonymous**: mapped
-inline after `UseAuthorization`, the gateway would be the one component whose
-own health check could be rejected by its own auth pipeline.
+which is correct.
+
+**What changed is that the emptiness is now declared rather than left silent.**
+`ownsNoReadinessDependencies: true` is a claim made at the call site, and
+without it [§13.5](13-observability.md)'s helper refuses to start the host at
+all. The reason is that the probe cannot tell the two cases apart: "nothing of
+mine gates readiness" and "readiness was never wired up" both answer 200,
+because an empty predicate set is a passing predicate set. The parameter is the
+only thing that separates them, and the **default is the failure** — so the
+burden falls on the host with nothing to declare rather than on the one that
+quietly forgot.
+Two hosts pass it — this one and the BFF, which §13.5 names as the two whose
+dependencies do not gate readiness. Neither owns *none*: the gateway proxies
+four services and the BFF calls Catalog (§9.7). Every service fails to start
+without its own checks.
+
+What matters as much is that the probes stay **anonymous**: mapped inline after
+`UseAuthorization`, the gateway would be the one component whose own health
+check could be rejected by its own auth pipeline.
 
 ## 4.3 What may be shared between services
 
@@ -1444,7 +1494,10 @@ a test project — with everything the service template has accumulated: the
 ([§7.2](07-persistence.md)), `EfUnitOfWork` ([§6.3](06-cqrs.md)), the
 connection factory ([§6.5](06-cqrs.md)), the readiness checks
 ([§13.5](13-observability.md)) — SQL registered by the service, the bus's
-`masstransit-bus` by MassTransit itself — the bus registration of
+`masstransit-bus` by MassTransit itself, and a rendered service that lost them
+would now fail to start rather than report ready, because
+`MapCommonHealthEndpoints` refuses an empty readiness set unless the host
+declares it owns none (§4.2) — the bus registration of
 [§9](09-messaging.md), whose eager read means a scaffolded host refuses to
 start without `ConnectionStrings:RabbitMq`, the migration job host
 ([§7.4](07-persistence.md)), the `InitialCreate` migration that creates the

@@ -320,7 +320,16 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       # No connection strings of any kind, and therefore no readiness check
       # (§13.5): a host with a connection string has one and a host without
-      # one does not. /health/ready answers immediately here, correctly.
+      # one does not. /health/ready answers immediately here, correctly — not
+      # because the BFF depends on nothing, but because its one dependency is
+      # §9.7's synchronous hop to Catalog and that deliberately does not gate
+      # readiness: a BFF reporting unready whenever Catalog is down would take
+      # itself out of rotation for a fault it exists to degrade around. The
+      # host declares that at the call site rather than leaving an empty
+      # readiness set to pass on its own:
+      # MapCommonHealthEndpoints(ownsNoReadinessDependencies: true), which is
+      # what stops "declared empty" and "was never wired up" reading
+      # identically from out here.
     ports: [ "5200:8080" ]
     depends_on:
       # Keycloak, because this host mints its own token and would otherwise

@@ -62,9 +62,11 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     }
 
     /// <summary>
-    /// The public route carries no authorization policy, so a caller with no
-    /// token reaches the service. A 401 here would mean §10.2's one public
-    /// path had stopped being public.
+    /// The public route names YARP's reserved <c>anonymous</c> policy, so a
+    /// caller with no token reaches the service. A 401 here would mean §10.2's
+    /// one public path had stopped being public — which is the failure the
+    /// fallback policy of §11.4 makes reachable by an edit to the route file
+    /// alone.
     /// </summary>
     [Fact]
     public async Task The_public_route_forwards_a_caller_carrying_no_token()
@@ -112,9 +114,21 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     /// let it stand — <c>ShouldNotBe(NoContent)</c>, which passes for 401,
     /// 403, 429 and 500 alike.
     /// <para>
-    /// 405 leaks nothing here: the path is public by design, so confirming it
-    /// exists tells a caller only what §10.2 already publishes. The write path
-    /// stays unreachable at the edge either way.
+    /// <b>Who is asking now decides which of the two it is, and that is
+    /// §11.4's fallback policy reaching a route nobody wrote.</b> The 405 is
+    /// produced by routing's own short-circuit endpoint, which carries no
+    /// authorization metadata — so <c>AddCommonWebDefaults</c>'
+    /// <c>SetFallbackPolicy</c> applies to it and an anonymous caller is
+    /// challenged before the method is ever considered. An authenticated one
+    /// still gets 405. Both halves are asserted below, because the anonymous
+    /// half alone would go on passing if the route stopped existing.
+    /// </para>
+    /// <para>
+    /// This is a deliberate consequence rather than a side effect: 405 tells an
+    /// unauthenticated caller which methods a path accepts, and the platform's
+    /// posture (§11.2) is that such a caller learns nothing. The public GET is
+    /// unaffected — it names <c>anonymous</c> in the route file, so it carries
+    /// metadata and the fallback never reaches it.
     /// </para>
     /// </remarks>
     [Fact]
@@ -128,10 +142,12 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
         // path, so a ShouldNotContain here would pass or fail on test order.
         int before = stub.ReceivedPaths.Count;
 
-        HttpResponseMessage response = await client.PostAsync(
-            "/api/v1/catalog/products",
-            content: null,
-            TestContext.Current.CancellationToken);
+        using HttpRequestMessage request =
+            new(HttpMethod.Post, "/api/v1/catalog/products");
+        request.Headers.Add(TestAuthHandler.UserHeader, "018f4c2e");
+
+        HttpResponseMessage response =
+            await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         // The status, not merely "not the one the stub answers": the weaker
         // form went on passing whatever the reason, which is how it kept a
@@ -141,6 +157,33 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
         // And nothing reached a destination, which is the half a status code
         // cannot show — a 405 minted by the service would read identically
         // from here.
+        stub.ReceivedPaths.Count.ShouldBe(before);
+    }
+
+    /// <summary>
+    /// The same request without a caller, which the fallback policy answers
+    /// first (§11.4).
+    /// </summary>
+    /// <remarks>
+    /// Paired with the test above rather than replacing it. On its own a 401
+    /// here is satisfied by a gateway with no routes at all — every path would
+    /// answer 401 — so it says nothing about <c>catalog-public</c>; the 405
+    /// beside it is what establishes the route exists and is GET-only.
+    /// </remarks>
+    [Fact]
+    public async Task A_wrong_method_is_challenged_before_it_is_refused()
+    {
+        using StubbedGatewayFactory factory = new(stub.Address);
+        using HttpClient client = factory.CreateClient();
+
+        int before = stub.ReceivedPaths.Count;
+
+        HttpResponseMessage response = await client.PostAsync(
+            "/api/v1/catalog/products",
+            content: null,
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         stub.ReceivedPaths.Count.ShouldBe(before);
     }
 }

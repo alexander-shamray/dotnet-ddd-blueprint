@@ -340,8 +340,13 @@ if (corsEnabled)
 WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting (§4.2).
-app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
-app.UseCorrelationId();           // §10.4 — assigns the ID if the client sent none
+// §10.6's one header: nosniff on every response, including the ones
+// UseExceptionHandler writes below. Above everything, so nothing can answer
+// without it — and written from OnStarting, so the handler's clear does not
+// take it off the 500.
+app.UseSecurityHeaders();
+app.UseExceptionHandler();        // §10.5 — catches every fault below it
+app.UseCorrelationId();           // §10.4 — assigns or replaces the client's
 
 // High enough to wrap every writer below it — the proxy, the limiter's 429 and
 // the status code pages — because this middleware compresses by replacing the
@@ -396,7 +401,12 @@ app.UseRateLimiter();             // §10.3 — needs the user, precedes policy 
 app.UseAuthorization();           // §11.4
 
 app.MapReverseProxy();
-app.MapCommonHealthEndpoints();   // §13.5 — anonymous; kubelet carries no token
+
+// The edge owns no database and no broker, so its readiness set is empty and
+// that is the whole of §10.1's design rather than a gap. Declared rather than
+// implied: an empty predicate set passes, so the two hosts entitled to one say
+// so at the call site and every other host fails to start without checks.
+app.MapCommonHealthEndpoints(ownsNoReadinessDependencies: true);   // §13.5 — anonymous; kubelet carries no token
 
 app.Run();
 

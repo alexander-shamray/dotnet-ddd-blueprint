@@ -134,6 +134,57 @@ public class SensitiveDataRedactorTests
     }
 
     [Fact]
+    public void A_connection_string_is_redacted_whatever_its_key_is_called()
+    {
+        // The value half. No term in the vocabulary is a substring of "Dsn",
+        // so the key check says nothing here — and this is the shape of the
+        // diagnostic somebody writes next to one of the four call sites that
+        // throw naming their connection string.
+        KeyValuePair<string, object?>[] state =
+        [
+            // Spaced separator, which ADO.NET accepts and a literal
+            // "password=" check does not see.
+            new("Dsn", "Server=sql,1433;Database=Catalog;User Id=sa;Password = hunter2"),
+            new("Customer", "ada")
+        ];
+
+        IReadOnlyList<KeyValuePair<string, object?>> attributes = Emit(logger =>
+            logger.Log(LogLevel.Error, new EventId(4), state, null, (_, _) => "cannot reach it"));
+
+        attributes.Single(a => a.Key == "Dsn").Value.ShouldBe("[redacted]");
+        attributes.Single(a => a.Key == "Customer").Value.ShouldBe("ada");
+    }
+
+    [Fact]
+    public void The_template_is_not_redacted_by_its_own_text()
+    {
+        // {OriginalFormat} is exempt from the value check, and the exemption is
+        // load-bearing rather than tidy: the template is the fallback the
+        // rewrite below depends on, so a template whose own words match a value
+        // shape would take the record's whole message with it.
+        //
+        // The template here contains "password=" and no argument does. Nothing
+        // is sensitive, so the record must come through untouched.
+        KeyValuePair<string, object?>[] state =
+        [
+            new("Host", "sql"),
+            new("{OriginalFormat}", "connecting with password= from {Host}")
+        ];
+
+        LogRecord record = EmitRecord(logger =>
+            logger.Log(
+                LogLevel.Information,
+                new EventId(5),
+                state,
+                null,
+                (_, _) => "connecting with password= from sql"));
+
+        record.Attributes!.Single(a => a.Key == "{OriginalFormat}").Value
+            .ShouldBe("connecting with password= from {Host}");
+        record.FormattedMessage.ShouldBe("connecting with password= from sql");
+    }
+
+    [Fact]
     public void A_record_with_no_attributes_at_all_is_left_alone()
     {
         // The guard clause. Reachable through ILogger with a null state, and

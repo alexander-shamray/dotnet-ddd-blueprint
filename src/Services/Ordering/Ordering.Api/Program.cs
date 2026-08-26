@@ -39,7 +39,12 @@ builder.Services
 WebApplication app = builder.Build();
 
 // Middleware order is behaviour, not formatting (§4.2).
-app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
+// §10.6's one header: nosniff on every response, including the ones
+// UseExceptionHandler writes below. Above everything, so nothing can answer
+// without it — and written from OnStarting, so the handler's clear does not
+// take it off the 500.
+app.UseSecurityHeaders();
+app.UseExceptionHandler();        // §10.5 — catches every fault below it
 app.UseCorrelationId();           // §10.4 — above everything else that logs
 
 // §10.5's promise applied to the statuses no handler produces: a challenge and

@@ -32,10 +32,27 @@ and exits, then `catalog-api` starts (§14.1's pair rule).
 
 | Service | Host port(s) | Notes |
 |---|---|---|
-| Catalog API | http://localhost:5102 | `/health/live`, `/health/ready`, `/openapi/v1.json`, `/v1/catalog/products` |
+| Catalog API | http://localhost:5102 | `/health/live`, `/health/ready`, `/openapi/v1.json` (needs a token — see below), `/v1/catalog/products` |
 | Gateway | http://localhost:5000 | `/health/live`, `/health/ready`, and [§10.2](../../docs/backend-architecture/10-api-gateway.md)'s four routes |
-| Ordering API | http://localhost:5101 | `/health/live`, `/health/ready`, `/openapi/v1.json`, `/v1/orders` — every route needs a token, unlike Catalog's listing |
+| Ordering API | http://localhost:5101 | `/health/live`, `/health/ready`, `/openapi/v1.json` (needs a token — see below), `/v1/orders` — every route needs a token, unlike Catalog's listing |
 | Web BFF | http://localhost:5200 | `/health/live`, `/health/ready`, `/v1/checkout/quote?productId=…&currency=GBP` — a token needed, and the only host that mints one of its own ([§11.5](../../docs/backend-architecture/11-identity-authorization.md)) |
+
+**Both OpenAPI documents need a token**, and that is a decision rather than an
+oversight. `MapOpenApi()` carries no authorization metadata, so the
+deny-by-default fallback
+([ADR-030](../../docs/backend-architecture/appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block))
+answers 401 to an anonymous request for one: the document enumerates every
+route and every schema its service has, and
+[§11.2](../../docs/backend-architecture/11-identity-authorization.md) assumes
+the network is hostile. The path still exists and still generates — fetch it
+with the token *Getting a token* below shows how to obtain:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:5102/openapi/v1.json
+```
+
+The health probes stay anonymous, because the kubelet carries no token
+([§13.5](../../docs/backend-architecture/13-observability.md)).
 
 The gateway is the single entry point for external clients
 ([§10.1](../../docs/backend-architecture/10-api-gateway.md)), so the same
@@ -48,8 +65,13 @@ curl http://localhost:5000/api/v1/catalog/products # through the gateway
 
 The edge adds `/api`, which the gateway strips before forwarding, and applies
 what the service does not: the rate limit, the CORS policy, and a correlation
-ID on every request that arrives without one. **One of the four routes has no
-service behind it yet** — `/api/v1/inventory` answers 502 until Inventory
+ID. A supplied `X-Correlation-Id` is kept when it is a plausible identifier —
+up to 128 characters of letters, digits, `-` and `_` — and any other value is
+replaced with a fresh one rather than echoed, exactly as a missing one is
+(§10.4).
+
+**One of the four routes has no service behind it yet** —
+`/api/v1/inventory` answers 502 until Inventory
 lands — and it is in the file deliberately, because the two configuration
 tests over it are what PR-17 exists to deliver. `/api/v1/orders` was one of
 three until PR-18 and `/bff` until PR-19, which is what "stops answering
@@ -63,8 +85,12 @@ product is a call to port 5102 and not to port 5000.
 PR-16 closed the gap this file used to name: publishing a product now needs a
 bearer token carrying `catalog:write`. **Listing products does not, and that is
 permanent** — [§10.2](../../docs/backend-architecture/10-api-gateway.md)'s
-`catalog-public` route is GET-only and carries no authorization policy, so a
-product listing is public at the edge and public here.
+`catalog-public` route is GET-only and names `anonymous`, YARP's reserved value
+for `AllowAnonymous`, so a product listing is public at the edge and public
+here. It used to name no policy at all and mean the same thing; ADR-030's
+fallback is what ended that, because a route saying nothing now inherits the
+fallback and answers 401. The route says what it means instead — which is the
+same reason the OpenAPI documents above changed and this one did not.
 
 The realm ships two logins, both development defaults in the sense §14.1
 already uses for `admin/admin` and `guest/guest`:

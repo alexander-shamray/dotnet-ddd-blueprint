@@ -165,17 +165,23 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
-> ten tests of the two classes in the collection and `Category!=Integration`
-> selects the other seventy-one — 81 in total, with no third state and nothing
-> counted twice.
+> twenty tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-one — 91 in total, with no
+> third state and nothing counted twice. Those figures read ten, two and 81
+> until this measurement was retaken; the suite had grown and the callout had
+> not, which is the drift the paragraph below is about arriving in the
+> paragraph above it.
 >
-> **Those are the runner's numbers, and `--list-tests` gives different ones.**
-> Discovery reports 82 for that project where execution reports 81, so a
-> partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 936 is summed from `dotnet test` output, and mixing the two is how
-> this callout first came to claim 72 and 82. Quote what ran.
+> **Those are the runner's numbers, and `--list-tests` answers a different
+> question.** For this project the two now agree — discovery and execution both
+> report 91, measured rather than assumed — and they have not always: the gap
+> was 82 against 81 when this callout was written, and mixing a partition
+> quoted from `--list-tests` with a total from `dotnet test` is how it first
+> came to claim 72 and 82. The 1,033 is summed from `dotnet test` output, so
+> quote what ran. **Agreement today is a measurement and not a guarantee** —
+> which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **740 and 196 of 936**, and the fast half
+> Across the solution the split is **837 and 196 of 1,033**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -196,7 +202,7 @@ The five declarations are in `Catalog.Api.Tests`,
 `Catalog.Application.Tests`, `Common.Infrastructure.Tests`,
 `Ordering.Api.Tests` and — as `KeycloakCollection` — `Web.Bff.Tests`. That last
 is the clearest case for categorising a **collection** rather than a project:
-73 of its 77 tests never needed a container and 4 need an identity provider, so
+77 of its 81 tests never needed a container and 4 need an identity provider, so
 a project-level split would have had nothing to split. What it buys there is a
 container start rather than a fast suite — the BFF's fast half still takes
 about a minute, because §9.7's resilience tests wait on real timeouts.
@@ -211,8 +217,8 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **722** and **196**, summing to the 936 the
-whole suite runs — which is the arithmetic the callout below asks for.
+on this repository they are **18**, **819** and **196**, summing to the 1,033
+the whole suite runs — which is the arithmetic the callout below asks for.
 
 ```bash
 dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests" \
@@ -242,8 +248,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 740 and 196 summing to
-> 936 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 837 and 196 summing to
+> 1,033 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

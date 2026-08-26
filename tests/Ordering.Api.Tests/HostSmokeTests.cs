@@ -28,6 +28,31 @@ namespace Ordering.Api.Tests;
 public class HostSmokeTests(HostSmokeTests.UnreachableInfrastructureFactory factory)
     : IClassFixture<HostSmokeTests.UnreachableInfrastructureFactory>
 {
+    // The two literals both factories below take. Declared once because they
+    // are the same host under two authentication schemes, and a pair that
+    // drifted would make the two suites disagree about which deployment they
+    // are describing.
+    private const string UnreachableSql =
+        "Server=ordering-sql.invalid,1433;Database=Ordering;User Id=sa;" +
+        "Password=not-a-real-password;Encrypt=False;Connect Timeout=1";
+
+    private const string UnreachableRabbit = "amqp://guest:guest@ordering-rabbit.invalid:5672";
+
+    /// <summary>
+    /// The same unreachable host with the <c>TestAuthHandler</c> scheme the
+    /// base factory installs, so a caller can authenticate.
+    /// </summary>
+    /// <remarks>
+    /// It exists because <c>AddCommonWebDefaults</c> sets a fallback
+    /// authorization policy (§11.4): the OpenAPI document is behind it, so the
+    /// production-scheme factory can prove only that a caller is challenged.
+    /// Whether the document still generates needs a caller who gets through,
+    /// and this is the cheapest one — no container, since generating the
+    /// document reaches no dependency.
+    /// </remarks>
+    public sealed class AuthenticatedUnreachableFactory()
+        : OrderingApiFactory(UnreachableSql, UnreachableRabbit);
+
     /// <summary>
     /// A parameterless factory, because that is what <c>IClassFixture</c> can
     /// construct. <c>.invalid</c> is reserved and never resolves, so both
@@ -37,10 +62,8 @@ public class HostSmokeTests(HostSmokeTests.UnreachableInfrastructureFactory fact
     /// (the registration argues it), so the host never waits on the broker at
     /// all.
     /// </summary>
-    public sealed class UnreachableInfrastructureFactory() : OrderingApiFactory(
-        "Server=ordering-sql.invalid,1433;Database=Ordering;User Id=sa;" +
-        "Password=not-a-real-password;Encrypt=False;Connect Timeout=1",
-        "amqp://guest:guest@ordering-rabbit.invalid:5672")
+    public sealed class UnreachableInfrastructureFactory()
+        : OrderingApiFactory(UnreachableSql, UnreachableRabbit)
     {
         /// <summary>
         /// This service's one host that keeps the production JWT scheme. Every
@@ -137,12 +160,55 @@ public class HostSmokeTests(HostSmokeTests.UnreachableInfrastructureFactory fact
     }
 
     [Fact]
-    public async Task OpenApi_document_is_served()
+    public async Task Every_response_carries_nosniff()
     {
+        // The building block owns the header (§10.6); this asserts the host
+        // actually calls it. A middleware registered in Common.Web and composed
+        // by nobody sets no header on anything, and every test in
+        // Common.Web.Tests would still pass.
+        //
+        // Driven at the liveness probe because it needs no caller and no
+        // dependency — the header is on every response, so the cheapest one
+        // answers the question.
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response =
+            await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
+
+        response.Headers.GetValues("X-Content-Type-Options").ShouldBe(["nosniff"]);
+    }
+
+    [Fact]
+    public async Task OpenApi_document_is_not_anonymous()
+    {
+        // MapOpenApi carries no authorization metadata of its own, so it is
+        // reached by the fallback policy AddCommonWebDefaults sets (§11.4).
+        // That is the decision rather than an accident: the document
+        // enumerates every route and every schema this service has, and §11.2
+        // assumes the network inside the cluster is hostile.
         using HttpClient client = factory.CreateClient();
 
         HttpResponseMessage response =
             await client.GetAsync("/openapi/v1.json", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task OpenApi_document_is_served_to_a_caller()
+    {
+        // The half a 401 cannot show. Without this the test above would go on
+        // passing if the document stopped generating altogether — every path
+        // answers 401 to an anonymous caller, the ones that do not exist
+        // included.
+        using AuthenticatedUnreachableFactory authenticated = new();
+        using HttpClient client = authenticated.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/openapi/v1.json");
+        request.Headers.Add(TestAuthHandler.UserHeader, Guid.CreateVersion7().ToString());
+
+        HttpResponseMessage response =
+            await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/json");

@@ -155,8 +155,16 @@ from [§12.1](12-test-strategy.md): a gate nobody has defined is a gate that get
 The readiness probes ([§13.5](13-observability.md)) already gate the rollout — a pod that fails
 `/health/ready` never takes traffic — so a separate "smoke test" step would
 re-assert what Kubernetes has already enforced, or assert something nobody has
-written down. The first real gate after dev is the k6 SLO run against staging,
-which names its tool, its target and its assertions (§13.7): it is
+written down. **That argument leant on a probe that could not fail, and no
+longer does**: an empty predicate set is a passing predicate set, so a host
+whose readiness checks were never wired up — or that lost them in a refactor —
+answered `/health/ready` with 200 while it could reach nothing, and this
+paragraph is what spent the reassurance. `MapCommonHealthEndpoints` now refuses
+to start such a host unless it declares that it owns no *readiness*
+dependency (§13.5),
+which is what makes the probe a gate rather than a formality. The first real
+gate after dev is the k6 SLO run against staging, which names its tool, its
+target and its assertions (§13.7): it is
 `deploy/observability/slo/slo.js` since PR-24, and it fails on an **absent**
 series as well as on a breached one — a target with no data is the same silence
 §13.6 spends a callout on, and reading it as "nothing wrong" would turn this
@@ -832,7 +840,14 @@ probes:
   # any service: MapCommonHealthEndpoints exposes the endpoints, and a chart
   # that never references them means nothing asks. Readiness is honest here
   # even though the set is empty (§4.2) — "the process is up" is exactly the
-  # question, because the gateway owns no dependency to be un-ready for.
+  # question, because no dependency of the gateway's gates its readiness. It
+  # proxies four services and depends on all of them; what it does not do is
+  # report unready when one is down, which would take the edge out of rotation
+  # for a fault it is meant to pass through. The host declares that at the call
+  # site rather than leaving the empty set to pass on its own:
+  # MapCommonHealthEndpoints(ownsNoReadinessDependencies: true), which is what
+  # stops "declared empty" and "was never wired up" reading identically from
+  # out here.
   liveness:  { path: /health/live,  initialDelaySeconds: 10, periodSeconds: 10 }
   readiness: { path: /health/ready, initialDelaySeconds: 5,  periodSeconds: 5 }
   startup:   { path: /health/startup, failureThreshold: 30,  periodSeconds: 2 }

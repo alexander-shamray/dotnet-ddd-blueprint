@@ -284,6 +284,52 @@ check belongs to whichever suite owns the constant, and
 > that, and it needs its own guard against passing vacuously — over a service
 > with no endpoints, "every name resolves" is true and worthless.
 
+**The mirror case is the one with no diagnostic at all, and a fallback policy
+is what closes it.** The callout above is about a policy *named* and not
+registered. A policy neither named nor required is quieter still:
+`UseAuthorization` evaluates **nothing** on an endpoint carrying no
+authorization metadata, so authorization applies exactly where somebody wrote
+`RequireAuthorization()` and nowhere else — no compiler error, no
+`ValidateOnBuild` failure, no startup warning, and no test that would notice.
+The endpoint is then reachable from the internet rather than merely from
+inside the cluster, since [§10.2](10-api-gateway.md)'s public route is GET-only
+across a whole namespace.
+
+`AddCommonWebDefaults` therefore sets a fallback
+([§13.2](13-observability.md),
+[ADR-030](appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block)):
+
+```csharp
+builder.Services
+    .AddAuthorizationBuilder()
+    .AddPolicy("authenticated", p => p.RequireAuthenticatedUser())
+    .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+```
+
+Every host composing that call inherits it, so the omission is a 401 and a
+public path has to say `AllowAnonymous()` — a line a reviewer can see. Absence
+and decision stop looking the same, which is the rule §10.2 already applies to
+a route file and §13.5 to a readiness set.
+
+> **A fallback reaches endpoints nobody wrote, and the three it reaches here
+> are all deliberate.** Routing's 405 short-circuit endpoint carries no
+> metadata, so an anonymous caller using the wrong method on a real path is
+> challenged before the method is considered — an authenticated one still gets
+> 405. `MapOpenApi()` carries none either, so the document that enumerates
+> every route and schema now requires a caller. And the policy is evaluated
+> when routing matched *nothing*, so an anonymous request for a path that does
+> not exist is a 401 rather than a 404; an authenticated one still gets the
+> 404. All three follow from §11.2's posture rather than from this mechanism,
+> and each is pinned by a test asserting the admitted half as well as the
+> refused one — a 401 on its own passes against a host that has stopped
+> routing altogether.
+
+**It does not replace the enumeration test above, and neither replaces the
+other.** The fallback is at the request; the test is at build time and names
+the endpoint that has no policy. What the fallback adds is that the answer no
+longer depends on anyone having written the test — which matters most for the
+services §4.5's scaffold has not rendered yet.
+
 > **Decision — Minimal APIs, not MVC controllers.** See
 > [ADR-015](appendix-a-adrs.md#adr-015--minimal-apis-not-mvc-controllers). The endpoint layer in this
 > architecture is a thin translation from HTTP to a command or query. Controllers
