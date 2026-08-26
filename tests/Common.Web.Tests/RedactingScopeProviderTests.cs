@@ -54,7 +54,9 @@ public class RedactingScopeProviderTests
         using IDisposable _ = provider.Push(
             new Dictionary<string, object?>
             {
-                ["Dsn"] = "Server=sql,1433;Database=Catalog;User Id=sa;Password=hunter2"
+                // Spaced separator: valid ADO.NET, and invisible to a literal
+                // "password=" check.
+                ["Dsn"] = "Server=sql,1433;Database=Catalog;User Id=sa;Password = hunter2"
             });
 
         Pairs(ScopesOf(provider).Single()).Single().Value.ShouldBe("[redacted]");

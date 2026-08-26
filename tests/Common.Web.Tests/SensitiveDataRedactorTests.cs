@@ -142,7 +142,9 @@ public class SensitiveDataRedactorTests
         // throw naming their connection string.
         KeyValuePair<string, object?>[] state =
         [
-            new("Dsn", "Server=sql,1433;Database=Catalog;User Id=sa;Password=hunter2"),
+            // Spaced separator, which ADO.NET accepts and a literal
+            // "password=" check does not see.
+            new("Dsn", "Server=sql,1433;Database=Catalog;User Id=sa;Password = hunter2"),
             new("Customer", "ada")
         ];
 

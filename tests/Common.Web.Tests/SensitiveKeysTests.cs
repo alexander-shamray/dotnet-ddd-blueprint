@@ -99,6 +99,14 @@ public class SensitiveKeysTests
     [InlineData("Server=sql,1433;Database=Catalog;User Id=sa;Password=hunter2;Encrypt=False")]
     [InlineData("Server=sql,1433;Database=Catalog;User Id=sa;Pwd=hunter2")]
     [InlineData("server=sql;user id=sa;PASSWORD=hunter2")]
+    // ADO.NET tolerates whitespace around the separator, so these four are as
+    // valid as the three above and a check for the literal "password=" misses
+    // every one of them — a value walking past a guarantee written as
+    // "whatever its key is called".
+    [InlineData("Server=sql;Database=Catalog;User Id=sa;Password = hunter2")]
+    [InlineData("Server=sql;Password	=hunter2")]
+    [InlineData("Server=sql;Pwd = hunter2")]
+    [InlineData("Server=sql;Password  =  hunter2")]
     public void A_connection_string_is_matched_by_its_value(string value)
     {
         // The half that survives a key nobody predicted: a diagnostic written
@@ -114,6 +122,8 @@ public class SensitiveKeysTests
     }
 
     [Theory]
+    [InlineData("the password was rejected")]      // names it, assigns nothing
+    [InlineData("password")]
     [InlineData("Walnut desk")]
     [InlineData("018f4c2e-0000-7000-8000-000000000000")]
     [InlineData("eyJhbGciOiJIUzI1NiJ9")]                       // a prefix, but no dots

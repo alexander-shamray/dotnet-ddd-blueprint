@@ -161,8 +161,9 @@ whose readiness checks were never wired up — or that lost them in a refactor �
 answered `/health/ready` with 200 while it could reach nothing, and this
 paragraph is what spent the reassurance. `MapCommonHealthEndpoints` now refuses
 to start such a host unless it declares that it owns no dependency (§13.5),
-which is what makes the probe a gate rather than a formality. The first real gate after dev is the k6 SLO run against staging,
-which names its tool, its target and its assertions (§13.7): it is
+which is what makes the probe a gate rather than a formality. The first real
+gate after dev is the k6 SLO run against staging, which names its tool, its
+target and its assertions (§13.7): it is
 `deploy/observability/slo/slo.js` since PR-24, and it fails on an **absent**
 series as well as on a breached one — a target with no data is the same silence
 §13.6 spends a callout on, and reading it as "nothing wrong" would turn this

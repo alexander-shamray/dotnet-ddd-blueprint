@@ -95,11 +95,8 @@ public static class SensitiveKeys
         if (value is not string text || text.Length == 0)
             return false;
 
-        if (text.Contains("password=", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("pwd=", StringComparison.OrdinalIgnoreCase))
-        {
+        if (Assigns(text, "password") || Assigns(text, "pwd"))
             return true;
-        }
 
         // A JWT's header is base64url of a JSON object opening `{"`, which is
         // always the three characters below, and the compact serialisation has
@@ -117,5 +114,49 @@ public static class SensitiveKeys
         }
 
         return dots == 2;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> assigns to <paramref name="key"/> — the
+    /// key, then any whitespace, then <c>=</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>The whitespace is the whole reason this is not a substring test.</b>
+    /// An ADO.NET connection string is a list of `keyword=value` pairs and the
+    /// parser tolerates spaces around the separator, so
+    /// <c>Password = hunter2</c> is as valid as <c>Password=hunter2</c> and a
+    /// check for the literal <c>password=</c> misses it — which is a value
+    /// bypassing a guarantee written as "whatever its key is called".
+    /// <para>
+    /// Requiring the <c>=</c> is what keeps this from firing on prose: a
+    /// message reading "the password was rejected" assigns nothing. Scanning
+    /// rather than parsing, because the input is an arbitrary logged value and
+    /// may not be a connection string at all — <c>SqlConnectionStringBuilder</c>
+    /// would throw on most of what reaches here.
+    /// </para>
+    /// </remarks>
+    private static bool Assigns(string text, string key)
+    {
+        int from = 0;
+
+        while (from <= text.Length - key.Length)
+        {
+            int at = text.IndexOf(key, from, StringComparison.OrdinalIgnoreCase);
+
+            if (at < 0)
+                return false;
+
+            int after = at + key.Length;
+
+            while (after < text.Length && char.IsWhiteSpace(text[after]))
+                after++;
+
+            if (after < text.Length && text[after] == '=')
+                return true;
+
+            from = at + 1;
+        }
+
+        return false;
     }
 }

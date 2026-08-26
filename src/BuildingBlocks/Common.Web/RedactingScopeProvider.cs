@@ -47,7 +47,17 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
     {
         ArgumentNullException.ThrowIfNull(callback);
 
-        _inner.ForEachScope((scope, s) => callback(Redact(scope), s), state);
+        // A static lambda with the caller's callback carried in the state, so
+        // nothing is captured. The obvious spelling closes over `callback` and
+        // allocates a display class every time a provider enumerates scopes —
+        // which is every log record, since §10.4 opens a correlation scope on
+        // every request. The same argument the copy-on-match paths below are
+        // written for, and it was missed on the one method they all run
+        // through.
+        _inner.ForEachScope(
+            static (object? scope, (Action<object?, TState> Callback, TState State) s) =>
+                s.Callback(Redact(scope), s.State),
+            (Callback: callback, State: state));
     }
 
     /// <inheritdoc />

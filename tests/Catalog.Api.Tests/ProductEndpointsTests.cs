@@ -238,10 +238,11 @@ public sealed class ProductEndpointsTests(ServiceFixture fixture) : IAsyncLifeti
     public async Task The_listing_is_reachable_without_a_token()
     {
         // §10.2's catalog-public route is GET-only and names `anonymous`, so
-        // the group's RequireAuthorization must not reach this endpoint. Over the wire is the only place that is visible:
-        // AllowAnonymous is metadata, and metadata that fails to suppress the
-        // group's policy looks identical to metadata that succeeds until a
-        // request without a token arrives.
+        // the group's RequireAuthorization must not reach this endpoint. Over
+        // the wire is the only place that is visible: AllowAnonymous is
+        // metadata, and metadata that fails to suppress the group's policy
+        // looks identical to metadata that succeeds until a request without a
+        // token arrives.
         HttpResponseMessage response = await _client.GetAsync(
             "/v1/catalog/products",
             TestContext.Current.CancellationToken);
