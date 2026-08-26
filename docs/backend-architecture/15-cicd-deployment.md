@@ -749,6 +749,19 @@ chart supplying one renders cleanly and produces a pod that will not start.
 being present — one key copied onto both rows passes every count and points
 §8.5's claims at the `allkeys-lru` instance §8.1 exists to keep them off.
 
+**No chart carries a seed key, and that is a statement rather than an
+omission.** [§14.3](14-local-development.md) gates development seeding on an
+explicit `Seed:Enabled` flag *and* a Development environment name, and this
+chart supplies neither: the migration Job renders exactly one `env` entry —
+the migrator connection string of §7.1 — and no template here sets an
+environment name for any workload, so every deployed migrator runs as
+`Production`. Turning seeding on in a cluster would therefore take a new entry
+in the library chart's Job template as well as a `seed.enabled: true` in a
+values file, both of them lines somebody reviews. That is this section's rule
+that a key joins a chart when a host's code reads it, applied to the one
+workload running with DDL rights: neither line belongs here until a
+`*.Migrator` holds a seeder to switch on, and none does.
+
 **Shipping and Notifications get the same chart minus the Service and the
 Ingress.** They consume from the broker and expose no API, so their only
 listener is the health endpoint §13.5 requires — which is a reason to keep
