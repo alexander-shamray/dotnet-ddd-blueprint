@@ -19,8 +19,15 @@ jobs:
   # restore nor an SDK — which is exactly why it can run here. Scanning that
   # sits downstream of a build is scanning that a build failure skips.
   #
-  # This is the licence half of §15.1's "SCA + secret scan" node. The secret
-  # scan is not in PR-01's scope and joins this job when it lands.
+  # This is §15.1's "SCA + secret scan" node, and since #61 it is both halves
+  # rather than the licence one. They share a job because they share every
+  # property the job is arranged around: stdlib Python over text, no restore,
+  # no SDK, no network — and because §15.1 draws them as one node.
+  #
+  # NO PATH FILTER, and that is the design rather than an omission. A
+  # credential can arrive in any file in the repository, so a filter could
+  # only make this skippable — the argument `closure-gate.yml` makes about
+  # itself, one workflow over.
   licence-gate:
     runs-on: ubuntu-latest
     steps:
@@ -29,6 +36,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      # The secret scan runs FIRST, ahead of the licence steps. Both are cheap
+      # and neither gates the other, so the order is about what each failure
+      # costs: a credential in the tree is compromised from the moment the
+      # branch is pushed, and no later step tells you anything you would rather
+      # know first. A licence problem is a decision to take, not a rotation to
+      # perform.
+      #
+      # Its own tests before it, on the pattern every gate here follows: a
+      # green run against this repository says the tree is clean, which says
+      # nothing about what the scanner would catch.
+      - name: Test the secret scan
+        working-directory: .github/secret-scan
+        run: python -m unittest
+
+      # No working-directory. The scanner resolves the repository root from
+      # __file__, so the cwd decides nothing and the root is the honest place
+      # to invoke it from.
+      - name: Scan the working tree for credentials
+        run: python .github/secret-scan/secret_scan.py
 
       # The gate's own tests first. Run against this repository it passes, which
       # says nothing about what it would catch — the carve-outs of §4.4 are
@@ -148,6 +175,58 @@ jobs:
       - name: Test the scaffold against this repository
         working-directory: tools/new-service
         run: python -m unittest
+
+  # #72: the job above renders a service and reads the TEXT of it. It never
+  # compiles one, and a whole class of breakage is invisible to a text check —
+  # anything the scaffold REMOVES. A Catalog test using a helper the scaffold
+  # strips renders into a service that does not build, with every one of those
+  # tests green; PR-14 shipped exactly that (`OutboxRows.Broker`) and nothing
+  # said a word.
+  #
+  # A SEPARATE job, not a step added to `scaffold`, and that is the whole
+  # design. The scaffold job's value is that it needs no restore and no SDK —
+  # the same property §15.1 relies on to put the licence gate ahead of the
+  # build — and adding .NET to it would spend that on every run. This one runs
+  # in parallel with `build` and leaves the seven-second text suite alone.
+  #
+  # It gates nothing, for the reason the job above gives: a broken scaffold
+  # does not make the solution wrong.
+  scaffold-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # `Yankee` at 5199, which is the probe `CLAUDE.md` documents and the
+      # scaffold's own suite already uses — never a real service's name. It
+      # used to be `Ordering`, and PR-18 made Ordering real: the create then
+      # refuses the taken name and port, and the cleanup that follows deletes
+      # the service. A probe cannot quietly become a service later.
+      - name: Render a service
+        run: python tools/new-service/new_service.py Yankee --port 5199
+
+      # BUILD, do not run. The failure class is compile-time, and the rendered
+      # tests need SQL and RabbitMQ containers to execute — minutes for very
+      # little extra signal. If they are ever run in CI that belongs with
+      # PR-22's Testcontainers categories, not here.
+      #
+      # The test project rather than the service: it references the whole
+      # rendered service transitively, so building it compiles both halves,
+      # and the half a text check cannot see is in the tests.
+      - name: Compile what it rendered
+        run: dotnet build tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj
+
+      # No cleanup step. The scaffold edits five tracked files as well as
+      # creating its own, so a local run needs `git checkout` afterwards
+      # (CLAUDE.md documents it); here the checkout is discarded with the
+      # runner and cleaning it would only be tidying something nobody reads.
 
   # §15.1's fork: only services whose files changed are built and deployed.
   #
