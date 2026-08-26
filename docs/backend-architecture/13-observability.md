@@ -1276,20 +1276,20 @@ namespace Common.Web;
 // exists to close.
 private const string Ready = "ready";
 
-// ownsNoDependencies is true for a host with nothing to be ready for. Passing
+// ownsNoReadinessDependencies is true for a host with nothing to be ready for. Passing
 // it is a written decision; the default is a startup failure.
 public static IEndpointRouteBuilder MapCommonHealthEndpoints(
     this IEndpointRouteBuilder app,
-    bool ownsNoDependencies = false)
+    bool ownsNoReadinessDependencies = false)
 {
     ArgumentNullException.ThrowIfNull(app);
 
-    if (!ownsNoDependencies && !AnyReadinessCheck(app))
+    if (!ownsNoReadinessDependencies && !AnyReadinessCheck(app))
     {
         throw new InvalidOperationException(
             "No health check carries the \"ready\" tag, so /health/ready would answer 200 " +
             "while this host can reach nothing (§13.5). Register the service's readiness " +
-            "checks in its own Infrastructure, or pass ownsNoDependencies: true if this host " +
+            "checks in its own Infrastructure, or pass ownsNoReadinessDependencies: true if this host " +
             "genuinely owns none.");
     }
 

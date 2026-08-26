@@ -183,7 +183,7 @@ app.UseAuthorization();           // §11.4
 // deliberately NOT a readiness dependency — a BFF that reports unready when
 // Catalog is down takes itself out of rotation for a fault it is meant to
 // degrade around (§13.5).
-app.MapCommonHealthEndpoints(ownsNoDependencies: true);   // §13.5 — anonymous; kubelet carries no token
+app.MapCommonHealthEndpoints(ownsNoReadinessDependencies: true);   // §13.5 — anonymous; kubelet carries no token
 app.MapCheckoutEndpoints();
 
 app.Run();

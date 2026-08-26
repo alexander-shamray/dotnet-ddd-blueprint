@@ -35,7 +35,7 @@ public static class HealthCheckExtensions
     /// wire it up" and "has no dependencies" therefore look identical from
     /// outside, and only one of them is a deploy that should proceed.
     /// <para>
-    /// <paramref name="ownsNoDependencies"/> is what separates them. The rule
+    /// <paramref name="ownsNoReadinessDependencies"/> is what separates them. The rule
     /// §13.5 states — a host with a connection string has a readiness check,
     /// and a host without one does not — is mechanised here rather than left as
     /// prose: the default refuses to start a host whose readiness set is empty,
@@ -53,9 +53,20 @@ public static class HealthCheckExtensions
     /// </para>
     /// </remarks>
     /// <param name="app">The route builder to map the three probes on.</param>
-    /// <param name="ownsNoDependencies">
+    /// <param name="ownsNoReadinessDependencies">
     /// <see langword="true"/> for a host with nothing to be ready for. Passing
     /// it is a written decision; the default is a startup failure.
+    /// <para>
+    /// <b>Named for the readiness set rather than for dependencies at large,
+    /// because the BFF has one and still passes this.</b> §9.7's synchronous
+    /// hop to Catalog is a dependency by any ordinary reading, and it is
+    /// deliberately not a readiness one — a BFF that reported unready when
+    /// Catalog is down would take itself out of rotation for a fault it is
+    /// meant to degrade around. The first spelling was
+    /// <c>ownsNoDependencies</c>, which made a false claim at exactly that
+    /// call site, in a parameter whose whole purpose is to be a written
+    /// decision.
+    /// </para>
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// The host registered no <c>ready</c>-tagged health check and did not
@@ -63,16 +74,16 @@ public static class HealthCheckExtensions
     /// </exception>
     public static IEndpointRouteBuilder MapCommonHealthEndpoints(
         this IEndpointRouteBuilder app,
-        bool ownsNoDependencies = false)
+        bool ownsNoReadinessDependencies = false)
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        if (!ownsNoDependencies && !AnyReadinessCheck(app))
+        if (!ownsNoReadinessDependencies && !AnyReadinessCheck(app))
         {
             throw new InvalidOperationException(
                 "No health check carries the \"ready\" tag, so /health/ready would answer 200 " +
                 "while this host can reach nothing (§13.5). Register the service's readiness " +
-                "checks in its own Infrastructure, or pass ownsNoDependencies: true if this host " +
+                "checks in its own Infrastructure, or pass ownsNoReadinessDependencies: true if this host " +
                 "genuinely owns none.");
         }
 

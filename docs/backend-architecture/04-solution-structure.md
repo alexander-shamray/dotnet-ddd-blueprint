@@ -1044,7 +1044,7 @@ app.MapReverseProxy();
 // that is the whole of §10.1's design rather than a gap. Declared rather than
 // implied: an empty predicate set passes, so the two hosts entitled to one say
 // so at the call site and every other host fails to start without checks.
-app.MapCommonHealthEndpoints(ownsNoDependencies: true);   // §13.5 — anonymous; kubelet carries no token
+app.MapCommonHealthEndpoints(ownsNoReadinessDependencies: true);   // §13.5 — anonymous; kubelet carries no token
 
 app.Run();
 ```
@@ -1091,7 +1091,7 @@ database — so `/health/ready` returns healthy as soon as the process is up,
 which is correct.
 
 **What changed is that the emptiness is now declared rather than left silent.**
-`ownsNoDependencies: true` is a claim made at the call site, and without it
+`ownsNoReadinessDependencies: true` is a claim made at the call site, and without it
 [§13.5](13-observability.md)'s helper refuses to start the host at all. The
 reason is that the probe cannot tell the two cases apart: "owns nothing to be
 ready for" and "readiness was never wired up" both answer 200, because an empty

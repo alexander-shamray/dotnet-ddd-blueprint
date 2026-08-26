@@ -22,13 +22,13 @@ public class HealthEndpointTests
             Task.FromResult(new HealthCheckResult(status));
     }
 
-    // ownsNoDependencies defaults to FALSE here, matching the production
+    // ownsNoReadinessDependencies defaults to FALSE here, matching the production
     // default, so a test that registers no readiness check has to say so —
     // which is what makes the three that pass it evidence rather than
     // configuration.
     private static Task<IHost> StartAsync(
         Action<IHealthChecksBuilder> checks,
-        bool ownsNoDependencies = false) =>
+        bool ownsNoReadinessDependencies = false) =>
         new HostBuilder()
             .ConfigureWebHost(web =>
             {
@@ -41,7 +41,7 @@ public class HealthEndpointTests
                 web.Configure(app =>
                 {
                     app.UseRouting();
-                    app.UseEndpoints(endpoints => endpoints.MapCommonHealthEndpoints(ownsNoDependencies));
+                    app.UseEndpoints(endpoints => endpoints.MapCommonHealthEndpoints(ownsNoReadinessDependencies));
                 });
             })
             .ConfigureLogging(logging => logging.ClearProviders())
@@ -53,7 +53,7 @@ public class HealthEndpointTests
     [Fact]
     public async Task Liveness_passes_with_no_checks_registered()
     {
-        using IHost host = await StartAsync(_ => { }, ownsNoDependencies: true);
+        using IHost host = await StartAsync(_ => { }, ownsNoReadinessDependencies: true);
 
         HttpResponseMessage response = await GetAsync(host, "/health/live");
 
@@ -95,7 +95,7 @@ public class HealthEndpointTests
         // turns a delivery delay into a total outage.
         using IHost host = await StartAsync(
             checks => checks.AddCheck("outbox", new Always(HealthStatus.Unhealthy), tags: ["observe"]),
-            ownsNoDependencies: true);
+            ownsNoReadinessDependencies: true);
 
         HttpResponseMessage ready = await GetAsync(host, "/health/ready");
 
@@ -140,7 +140,7 @@ public class HealthEndpointTests
         // it would pass for a reason that has nothing to do with the claim.
         // §13.5's rule is about the metadata anyway: a probe that 401s is read
         // by the kubelet as unhealthy and the pod is killed in a loop.
-        using IHost host = await StartAsync(_ => { }, ownsNoDependencies: true);
+        using IHost host = await StartAsync(_ => { }, ownsNoReadinessDependencies: true);
 
         IReadOnlyList<Endpoint> endpoints = host.Services
             .GetRequiredService<EndpointDataSource>()
@@ -185,7 +185,7 @@ public class HealthEndpointTests
         // Paired with the two above so the guard is shown refusing and
         // admitting: a guard only ever observed one way is one nobody has
         // established is looking at anything.
-        using IHost host = await StartAsync(_ => { }, ownsNoDependencies: true);
+        using IHost host = await StartAsync(_ => { }, ownsNoReadinessDependencies: true);
 
         HttpResponseMessage ready = await GetAsync(host, "/health/ready");
 

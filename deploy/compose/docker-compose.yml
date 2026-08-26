@@ -323,7 +323,7 @@ services:
       # one does not. /health/ready answers immediately here, correctly — and
       # the host declares that at the call site rather than leaving an empty
       # readiness set to pass on its own:
-      # MapCommonHealthEndpoints(ownsNoDependencies: true), which is what stops
+      # MapCommonHealthEndpoints(ownsNoReadinessDependencies: true), which is what stops
       # "owns nothing" and "was never wired up" reading identically from out
       # here.
     ports: [ "5200:8080" ]

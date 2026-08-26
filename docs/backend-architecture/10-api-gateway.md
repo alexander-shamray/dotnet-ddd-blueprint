@@ -1051,9 +1051,12 @@ component in this platform that terminates TLS (§10.1,
 [§15.3](15-cicd-deployment.md)): a host behind it sees plain HTTP, so it would
 be asserting something it cannot observe, and a browser caches that assertion
 for as long as its `max-age` says. `X-Frame-Options` and
-`Content-Security-Policy` govern how a browser renders a *document*, and every
-response these four hosts write is `application/json` or
-`application/problem+json` — a framing or a script policy on a JSON body
+`Content-Security-Policy` govern how a browser renders a *document*, and none
+of these four hosts serves one. Their API responses are `application/json` or
+`application/problem+json` and [§13.5](13-observability.md)'s probes are
+`text/plain` — measured, because an earlier draft of this paragraph said every
+response was JSON and `MapHealthChecks` uses the framework's default plain-text
+writer. A framing or a script policy on a body no browser renders as a document
 protects nothing, and both become live questions for whoever serves the
 storefront [§4.1](04-solution-structure.md) plans rather than for anything here.
 `nosniff` is the one that is not about rendering: it stops a browser

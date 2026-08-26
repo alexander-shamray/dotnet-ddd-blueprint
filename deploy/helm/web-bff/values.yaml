@@ -88,7 +88,7 @@ identity:
 # a host with a connection string has one and a host without one does not.
 # /health/ready answers immediately here, correctly — and the host declares
 # that rather than inheriting it from an empty set that would pass either way:
-# MapCommonHealthEndpoints(ownsNoDependencies: true). Catalog's synchronous hop
+# MapCommonHealthEndpoints(ownsNoReadinessDependencies: true). Catalog's synchronous hop
 # (§9.7) is deliberately not a readiness dependency, since a BFF that reports
 # unready when Catalog is down takes itself out of rotation for a fault it is
 # meant to degrade around.

@@ -41,11 +41,16 @@ public static class ObservabilityExtensions
         // record; without this line the redactor would be scrubbing attributes
         // beside a scope carrying whatever the caller sent.
         //
-        // TryAdd rather than Add: a host that has already chosen a scope
-        // provider keeps it, and a second registration would be the one silently
-        // ignored rather than the one that wins.
-        builder.Services.TryAddSingleton<IExternalScopeProvider>(
-            new RedactingScopeProvider(new LoggerExternalScopeProvider()));
+        // It WRAPS whatever is already registered rather than standing aside
+        // for it. TryAdd was the first spelling and it fails open: a host that
+        // had registered any provider first kept it, unwrapped, and every scope
+        // exported raw while IncludeScopes stayed on and the redactor went on
+        // scrubbing attributes beside it — a security control switched off by a
+        // registration nobody looked at. The comment beside it was wrong in the
+        // other direction too, claiming a later registration would be the one
+        // ignored; the built-in container resolves the LAST, measured rather
+        // than assumed.
+        RedactingScopeProvider.WrapScopesForRedaction(builder.Services);
 
         builder.Logging.AddOpenTelemetry(logging =>
         {

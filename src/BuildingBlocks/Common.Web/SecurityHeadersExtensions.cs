@@ -21,10 +21,13 @@ namespace Common.Web;
 /// (§10.1, §15.3) — a host behind it sees plain HTTP and would be asserting
 /// something it cannot observe. <c>X-Frame-Options</c> and
 /// <c>Content-Security-Policy</c> govern how a browser renders a document, and
-/// every response here is <c>application/json</c> or
-/// <c>application/problem+json</c>; a framing or script policy on a JSON body
-/// protects nothing and would have to be revisited by whoever serves the
-/// storefront §4.1 plans. <c>nosniff</c> is the one that is not about
+/// <b>no host here serves one</b>: the API responses are
+/// <c>application/json</c> or <c>application/problem+json</c>, and §13.5's
+/// probes are <c>text/plain</c> — measured, because an earlier draft of this
+/// paragraph said every response was JSON and the health endpoints use the
+/// framework's default plain-text writer. A framing or script policy on a body
+/// no browser renders as a document protects nothing, and would have to be
+/// revisited by whoever serves the storefront §4.1 plans. <c>nosniff</c> is the one that is not about
 /// rendering: it stops a browser reclassifying a JSON response — including one
 /// whose body is a value a caller supplied — as HTML and executing it.
 /// </para>

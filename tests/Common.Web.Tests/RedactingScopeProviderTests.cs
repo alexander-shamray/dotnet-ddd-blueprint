@@ -147,6 +147,97 @@ public class RedactingScopeProviderTests
         }
     }
 
+    [Theory]
+    [InlineData("instance")]
+    [InlineData("factory")]
+    [InlineData("type")]
+    public void A_provider_registered_first_is_wrapped_rather_than_left_alone(string shape)
+    {
+        // §13.4 is a guarantee, not a default. TryAddSingleton was the first
+        // spelling and it failed open: a host that registered any provider
+        // first kept it, unwrapped, and every scope exported raw while
+        // IncludeScopes stayed on and the attribute half went on scrubbing
+        // beside it — a security control switched off by a registration
+        // nobody looked at.
+        //
+        // All three descriptor shapes, because the registration is rebuilt
+        // from the descriptor rather than resolved, and each shape is a
+        // different branch of that.
+        ServiceCollection services = new();
+
+        switch (shape)
+        {
+            case "instance":
+                services.AddSingleton<IExternalScopeProvider>(new LoggerExternalScopeProvider());
+                break;
+            case "factory":
+                services.AddSingleton<IExternalScopeProvider>(_ => new LoggerExternalScopeProvider());
+                break;
+            default:
+                services.AddSingleton<IExternalScopeProvider, LoggerExternalScopeProvider>();
+                break;
+        }
+
+        RedactingScopeProvider.WrapScopesForRedaction(services);
+
+        using ServiceProvider root = services.BuildServiceProvider();
+        IExternalScopeProvider resolved = root.GetRequiredService<IExternalScopeProvider>();
+
+        resolved.ShouldBeOfType<RedactingScopeProvider>(
+            $"a {shape} registration made first must be wrapped, not deferred to");
+
+        using IDisposable _ = resolved.Push(
+            new Dictionary<string, object?> { ["Password"] = "hunter2" });
+
+        Pairs(ScopesOf(resolved).Single()).Single().Value.ShouldBe("[redacted]");
+    }
+
+    [Fact]
+    public void The_wrapper_delegates_to_the_provider_it_replaced()
+    {
+        // The other half: wrapping must not discard what was there. A wrapper
+        // that quietly substituted a fresh provider would pass the test above
+        // and lose whatever the host's own provider was for.
+        ServiceCollection services = new();
+        RecordingScopeProvider inner = new();
+
+        services.AddSingleton<IExternalScopeProvider>(inner);
+        RedactingScopeProvider.WrapScopesForRedaction(services);
+
+        using ServiceProvider root = services.BuildServiceProvider();
+
+        using IDisposable _ = root.GetRequiredService<IExternalScopeProvider>()
+            .Push(new Dictionary<string, object?> { ["RequestType"] = "PlaceOrderCommand" });
+
+        inner.Pushed.ShouldHaveSingleItem();
+    }
+
+    /// <summary>Records what was pushed through it, and behaves otherwise.</summary>
+    /// <remarks>
+    /// Implements the interface rather than deriving from
+    /// <c>LoggerExternalScopeProvider</c> and hiding <c>Push</c> with
+    /// <c>new</c>: that method is not virtual, so the hidden one is invisible
+    /// to a call made through <see cref="IExternalScopeProvider"/> — which is
+    /// the only way this is ever called. The first version of this double did
+    /// exactly that and failed, correctly.
+    /// </remarks>
+    private sealed class RecordingScopeProvider : IExternalScopeProvider
+    {
+        private readonly LoggerExternalScopeProvider _inner = new();
+
+        public List<object?> Pushed { get; } = [];
+
+        public void ForEachScope<TState>(Action<object?, TState> callback, TState state) =>
+            _inner.ForEachScope(callback, state);
+
+        public IDisposable Push(object? state)
+        {
+            Pushed.Add(state);
+
+            return _inner.Push(state);
+        }
+    }
+
     [Fact]
     public void The_logger_factory_hands_providers_the_registered_scope_provider()
     {

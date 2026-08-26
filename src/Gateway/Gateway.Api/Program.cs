@@ -406,7 +406,7 @@ app.MapReverseProxy();
 // that is the whole of §10.1's design rather than a gap. Declared rather than
 // implied: an empty predicate set passes, so the two hosts entitled to one say
 // so at the call site and every other host fails to start without checks.
-app.MapCommonHealthEndpoints(ownsNoDependencies: true);   // §13.5 — anonymous; kubelet carries no token
+app.MapCommonHealthEndpoints(ownsNoReadinessDependencies: true);   // §13.5 — anonymous; kubelet carries no token
 
 app.Run();
 

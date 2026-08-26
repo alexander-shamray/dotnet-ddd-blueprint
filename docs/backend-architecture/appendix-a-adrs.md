@@ -1631,8 +1631,9 @@ into every service that follows.
 the only component in this platform that terminates TLS
 ([§10.1](10-api-gateway.md), [§15.3](15-cicd-deployment.md)); a host behind it
 sees plain HTTP and would be asserting something it cannot observe. Framing and
-script policies govern how a browser renders a *document*, and every response
-here is `application/json` or `application/problem+json` — a policy that
+script policies govern how a browser renders a *document*, and no host here
+serves one: the API responses are `application/json` or
+`application/problem+json`, and §13.5's probes are `text/plain`. A policy that
 protects nothing is a policy somebody later has to reason about. `nosniff` is
 the one that is not about rendering: it stops a browser reclassifying a JSON
 response, including one whose body carries a value a caller supplied, as

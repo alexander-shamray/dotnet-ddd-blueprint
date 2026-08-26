@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Common.Web;
@@ -39,6 +40,63 @@ namespace Common.Web;
 /// </param>
 public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExternalScopeProvider
 {
+    /// <summary>
+    /// Registers this wrapper as the container's <see cref="IExternalScopeProvider"/>,
+    /// around whatever was registered before it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Wrapping rather than deferring, because §13.4 is a guarantee and not
+    /// a default.</b> <c>TryAddSingleton</c> was the first spelling: a host
+    /// that had registered any provider first kept it, unwrapped, and every
+    /// scope exported raw — the control switched off by a registration nobody
+    /// looked at, with <c>IncludeScopes</c> still on and the attribute half
+    /// still scrubbing beside it. There is no host here that wants its own
+    /// provider, and if one arrives it wants a redacted one.
+    /// <para>
+    /// The prior descriptor is removed and rebuilt inside the factory rather
+    /// than resolved, because resolving <see cref="IExternalScopeProvider"/>
+    /// from within its own factory is unbounded recursion. Only the last
+    /// non-keyed registration is wrapped, for the reason the container itself
+    /// gives: single-service resolution returns the last, so the earlier ones
+    /// were already unreachable.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The host's service collection.</param>
+    public static IServiceCollection WrapScopesForRedaction(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        ServiceDescriptor? existing = services.LastOrDefault(
+            d => d.ServiceType == typeof(IExternalScopeProvider) && !d.IsKeyedService);
+
+        if (existing is not null)
+            services.Remove(existing);
+
+        services.AddSingleton<IExternalScopeProvider>(
+            sp => new RedactingScopeProvider(Inner(sp, existing)));
+
+        return services;
+    }
+
+    // The three shapes a descriptor can carry. A keyed one never reaches here
+    // — the query above excludes them, because a keyed registration is not
+    // what LoggerFactory resolves.
+    private static IExternalScopeProvider Inner(IServiceProvider sp, ServiceDescriptor? existing)
+    {
+        if (existing is null)
+            return new LoggerExternalScopeProvider();
+
+        if (existing.ImplementationInstance is IExternalScopeProvider instance)
+            return instance;
+
+        if (existing.ImplementationFactory is not null)
+            return (IExternalScopeProvider)existing.ImplementationFactory(sp);
+
+        return (IExternalScopeProvider)ActivatorUtilities.CreateInstance(
+            sp,
+            existing.ImplementationType!);
+    }
+
     private readonly IExternalScopeProvider _inner =
         inner ?? throw new ArgumentNullException(nameof(inner));
 

@@ -62,7 +62,7 @@ probes:
   # even though the set is empty (§4.2) — "the process is up" is exactly the
   # question, because the gateway owns no dependency to be un-ready for. The
   # host declares that at the call site rather than leaving the empty set to
-  # pass on its own: MapCommonHealthEndpoints(ownsNoDependencies: true), which
+  # pass on its own: MapCommonHealthEndpoints(ownsNoReadinessDependencies: true), which
   # is what stops "owns nothing" and "was never wired up" reading identically
   # from out here.
   probePort: http
