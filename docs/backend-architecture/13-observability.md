@@ -115,11 +115,16 @@ public static IHostApplicationBuilder AddObservability(this IHostApplicationBuil
     // record; without this line the redactor would be scrubbing attributes
     // beside a scope carrying whatever the caller sent.
     //
-    // TryAdd rather than Add: a host that has already chosen a scope
-    // provider keeps it, and a second registration would be the one silently
-    // ignored rather than the one that wins.
-    builder.Services.TryAddSingleton<IExternalScopeProvider>(
-        new RedactingScopeProvider(new LoggerExternalScopeProvider()));
+    // It WRAPS whatever is already registered rather than standing aside for
+    // it. TryAdd was the first spelling and it fails open: a host that had
+    // registered any provider first kept it, unwrapped, and every scope
+    // exported raw while IncludeScopes stayed on and the redactor went on
+    // scrubbing attributes beside it — a security control switched off by a
+    // registration nobody looked at. The comment beside it was wrong in the
+    // other direction too, claiming a later registration would be the one
+    // ignored; the built-in container resolves the LAST, measured rather than
+    // assumed.
+    RedactingScopeProvider.WrapScopesForRedaction(builder.Services);
 
     builder.Logging.AddOpenTelemetry(logging =>
     {
@@ -1012,6 +1017,49 @@ it.
 // IExternalScopeProvider wrapping LoggerExternalScopeProvider.
 public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExternalScopeProvider
 {
+    // Registers this wrapper as the container's IExternalScopeProvider, around
+    // whatever was registered before it — wrapping rather than deferring,
+    // because §13.4 is a guarantee and not a default. The prior descriptor is
+    // removed and rebuilt inside the factory rather than resolved, because
+    // resolving IExternalScopeProvider from within its own factory is
+    // unbounded recursion. Only the last non-keyed registration is wrapped,
+    // for the reason the container itself gives: single-service resolution
+    // returns the last, so the earlier ones were already unreachable.
+    public static IServiceCollection WrapScopesForRedaction(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        ServiceDescriptor? existing = services.LastOrDefault(
+            d => d.ServiceType == typeof(IExternalScopeProvider) && !d.IsKeyedService);
+
+        if (existing is not null)
+            services.Remove(existing);
+
+        services.AddSingleton<IExternalScopeProvider>(
+            sp => new RedactingScopeProvider(Inner(sp, existing)));
+
+        return services;
+    }
+
+    // The three shapes a descriptor can carry. A keyed one never reaches here
+    // — the query above excludes them, because a keyed registration is not
+    // what LoggerFactory resolves.
+    private static IExternalScopeProvider Inner(IServiceProvider sp, ServiceDescriptor? existing)
+    {
+        if (existing is null)
+            return new LoggerExternalScopeProvider();
+
+        if (existing.ImplementationInstance is IExternalScopeProvider instance)
+            return instance;
+
+        if (existing.ImplementationFactory is not null)
+            return (IExternalScopeProvider)existing.ImplementationFactory(sp);
+
+        return (IExternalScopeProvider)ActivatorUtilities.CreateInstance(
+            sp,
+            existing.ImplementationType!);
+    }
+
     private readonly IExternalScopeProvider _inner =
         inner ?? throw new ArgumentNullException(nameof(inner));
 
