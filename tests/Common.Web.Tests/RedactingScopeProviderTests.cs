@@ -236,6 +236,63 @@ public class RedactingScopeProviderTests
             .ShouldBeOfType<RedactingScopeProvider>();
     }
 
+    /// <summary>A provider that records whether it was disposed.</summary>
+    private sealed class DisposableScopeProvider : IExternalScopeProvider, IDisposable
+    {
+        private readonly LoggerExternalScopeProvider _inner = new();
+
+        public bool Disposed { get; private set; }
+
+        public void ForEachScope<TState>(Action<object?, TState> callback, TState state) =>
+            _inner.ForEachScope(callback, state);
+
+        public IDisposable Push(object? state) => _inner.Push(state);
+
+        public void Dispose() => Disposed = true;
+    }
+
+    [Fact]
+    public void A_provider_this_wrapper_built_is_disposed_with_the_container()
+    {
+        // Wrapping removes the prior descriptor, so an inner provider built
+        // from a factory or an implementation type leaves the container's
+        // disposal tracking — this wrapper is what stands between it and a
+        // shutdown that never disposes it.
+        DisposableScopeProvider built = new();
+        ServiceCollection services = new();
+
+        services.AddSingleton<IExternalScopeProvider>(_ => built);
+        RedactingScopeProvider.WrapScopesForRedaction(services);
+
+        ServiceProvider root = services.BuildServiceProvider();
+        root.GetRequiredService<IExternalScopeProvider>().ShouldBeOfType<RedactingScopeProvider>();
+
+        root.Dispose();
+
+        built.Disposed.ShouldBeTrue("a provider this wrapper constructed is this wrapper's to dispose");
+    }
+
+    [Fact]
+    public void A_provider_the_caller_supplied_is_left_alone()
+    {
+        // The other half, and the one that would be a defect in the opposite
+        // direction: the container never disposes an instance it did not
+        // create, so neither may a wrapper that only happened to be registered
+        // around it. Disposing somebody else's object is not tidying up.
+        DisposableScopeProvider supplied = new();
+        ServiceCollection services = new();
+
+        services.AddSingleton<IExternalScopeProvider>(supplied);
+        RedactingScopeProvider.WrapScopesForRedaction(services);
+
+        ServiceProvider root = services.BuildServiceProvider();
+        root.GetRequiredService<IExternalScopeProvider>().ShouldBeOfType<RedactingScopeProvider>();
+
+        root.Dispose();
+
+        supplied.Disposed.ShouldBeFalse("an instance the container never created is not the wrapper's to dispose");
+    }
+
     [Fact]
     public void The_wrapper_delegates_to_the_provider_it_replaced()
     {

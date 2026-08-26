@@ -179,9 +179,12 @@ public class HealthEndpointTests
     }
 
     [Fact]
-    public async Task A_host_that_declares_it_owns_nothing_starts_and_reports_ready()
+    public async Task A_host_that_declares_an_empty_readiness_set_starts_and_reports_ready()
     {
-        // The gateway and the BFF, which is the case the parameter exists for.
+        // The gateway and the BFF, which is the case the parameter exists for
+        // — and neither owns *nothing*: the BFF calls Catalog (§9.7) and the
+        // gateway proxies four services. What they declare is that no hop of
+        // theirs gates readiness.
         // Paired with the two above so the guard is shown refusing and
         // admitting: a guard only ever observed one way is one nobody has
         // established is looking at anything.

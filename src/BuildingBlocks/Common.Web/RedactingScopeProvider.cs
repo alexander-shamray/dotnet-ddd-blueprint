@@ -39,7 +39,8 @@ namespace Common.Web;
 /// The provider whose scopes are being wrapped — <c>LoggerExternalScopeProvider</c>
 /// in every host, but taken as a parameter so the wrapping is testable.
 /// </param>
-public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExternalScopeProvider
+public sealed class RedactingScopeProvider(IExternalScopeProvider inner, bool ownsInner = false)
+    : IExternalScopeProvider, IDisposable
 {
     /// <summary>
     /// Registers this wrapper as the container's <see cref="IExternalScopeProvider"/>,
@@ -73,8 +74,16 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
         if (existing is not null)
             services.Remove(existing);
 
+        // ownsInner follows who CREATED the inner provider, because that is who
+        // the container would have disposed. Removing the descriptor takes the
+        // inner service out of the container's disposal tracking — a factory or
+        // an implementation type is built here now, so this wrapper owns it and
+        // forwards Dispose. An ImplementationInstance is not: the container
+        // never disposes an instance it did not create, so neither does this.
         services.AddSingleton<IExternalScopeProvider>(
-            sp => new RedactingScopeProvider(Inner(sp, existing)));
+            sp => new RedactingScopeProvider(
+                Inner(sp, existing),
+                ownsInner: existing is not null && existing.ImplementationInstance is null));
 
         // Wrapping what came BEFORE is only half of it, and the first version
         // of this method stopped there. AddCommonWebDefaults runs ahead of a
@@ -135,6 +144,25 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
     /// <inheritdoc />
     public IDisposable Push(object? state) => _inner.Push(state);
 
+    /// <summary>
+    /// Disposes the wrapped provider when this wrapper created it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Ownership follows creation, which is the rule the container itself
+    /// uses.</b> Wrapping removes the prior descriptor, so an inner provider
+    /// built from a factory or an implementation type is no longer tracked for
+    /// disposal by the container — this type is what stands between it and a
+    /// shutdown that never disposes it. An <c>ImplementationInstance</c> is the
+    /// opposite case and is deliberately left alone: the container never
+    /// disposes an instance it did not create, and neither may a wrapper that
+    /// only happened to be registered around it.
+    /// </remarks>
+    public void Dispose()
+    {
+        if (ownsInner && _inner is IDisposable disposable)
+            disposable.Dispose();
+    }
+
     private const string Redacted = "[redacted]";
 
     /// <summary>
@@ -194,17 +222,6 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
         SensitiveKeys.Matches(pair.Key) || SensitiveKeys.LooksLikeSecret(pair.Value);
 
     /// <summary>
-    /// A scrubbed scope, in the shape every reader of a scope expects.
-    /// </summary>
-    /// <remarks>
-    /// <b><c>ToString</c> is overridden, and that is the load-bearing half.</b>
-    /// MEL's own scope type renders its values from <c>ToString</c>, and a
-    /// provider that formats a scope rather than enumerating it would
-    /// otherwise print the secret straight back out of a list this class had
-    /// just scrubbed — the same failure <see cref="SensitiveDataRedactor"/>'s
-    /// <c>FormattedMessage</c> rewrite exists to prevent, one layer over.
-    /// </remarks>
-    /// <summary>
     /// Refuses to start a host whose <see cref="IExternalScopeProvider"/> is
     /// not a <see cref="RedactingScopeProvider"/>.
     /// </summary>
@@ -243,6 +260,17 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
+    /// <summary>
+    /// A scrubbed scope, in the shape every reader of a scope expects.
+    /// </summary>
+    /// <remarks>
+    /// <b><c>ToString</c> is overridden, and that is the load-bearing half.</b>
+    /// MEL's own scope type renders its values from <c>ToString</c>, and a
+    /// provider that formats a scope rather than enumerating it would
+    /// otherwise print the secret straight back out of a list this class had
+    /// just scrubbed — the same failure <see cref="SensitiveDataRedactor"/>'s
+    /// <c>FormattedMessage</c> rewrite exists to prevent, one layer over.
+    /// </remarks>
     private sealed class RedactedScope(List<KeyValuePair<string, object?>> pairs)
         : IReadOnlyList<KeyValuePair<string, object?>>
     {

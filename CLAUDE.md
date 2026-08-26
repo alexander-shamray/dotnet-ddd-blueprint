@@ -489,7 +489,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,027 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,029 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -506,7 +506,7 @@ there are several more now — see *The commands* below, which is where the
 current set lives, and which is the only place a count of them belongs. This
 sentence used to give the figure itself, two sections above the one that
 owns it, and the two disagreed the moment a ninth suite landed. That first
-one: `py -3.12 -m unittest` in `tools/new-service` runs 81, and CI has a
+one: `py -3.12 -m unittest` in `tools/new-service` runs 82, and CI has a
 `scaffold` job for them beside `licence-gate`.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
@@ -1116,7 +1116,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 831 of 1,027, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 833 of 1,029, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1132,7 +1132,7 @@ runs it, which is the pattern every gate here follows — and leaving it out is
 what made this seven:
 
 ```bash
-(cd tools/new-service && py -3.12 -m unittest)  # 81 tests, no Docker, no SDK
+(cd tools/new-service && py -3.12 -m unittest)  # 82 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
@@ -1267,8 +1267,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 831 of
-the 1,027 and starts no container — measured with `docker events`, not
+category runs a smaller suite and says which. `Category!=Integration` is 833 of
+the 1,029 and starts no container — measured with `docker events`, not
 inferred — and `Category=Integration` is the other 196, needing the daemon
 exactly as before.
 
@@ -1280,7 +1280,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (813) and integration (196), which is the 831 above split at the
+(18), unit (815) and integration (196), which is the 833 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
