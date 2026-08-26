@@ -1015,7 +1015,8 @@ it.
 ```csharp
 // Common.Web — registered by AddObservability (§13.2) as a singleton
 // IExternalScopeProvider wrapping LoggerExternalScopeProvider.
-public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExternalScopeProvider
+public sealed class RedactingScopeProvider(IExternalScopeProvider inner, bool ownsInner = false)
+    : IExternalScopeProvider, IDisposable
 {
     // Registers this wrapper as the container's IExternalScopeProvider, around
     // whatever was registered before it — wrapping rather than deferring,
@@ -1035,8 +1036,16 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
         if (existing is not null)
             services.Remove(existing);
 
+        // ownsInner follows who CREATED the inner provider, because that is
+        // who the container would have disposed. Removing the descriptor takes
+        // the inner service out of the container's disposal tracking, so a
+        // factory or an implementation type is this wrapper's to dispose. An
+        // ImplementationInstance is not: the container never disposes an
+        // instance it did not create, and neither does this.
         services.AddSingleton<IExternalScopeProvider>(
-            sp => new RedactingScopeProvider(Inner(sp, existing)));
+            sp => new RedactingScopeProvider(
+                Inner(sp, existing),
+                ownsInner: existing is not null && existing.ImplementationInstance is null));
 
         // Wrapping what came BEFORE is only half of it. AddCommonWebDefaults
         // runs ahead of a host's own registrations and the container resolves
@@ -1117,6 +1126,13 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner) : IExte
     }
 
     public IDisposable Push(object? state) => _inner.Push(state);
+
+    // Ownership follows creation, which is the rule the container itself uses.
+    public void Dispose()
+    {
+        if (ownsInner && _inner is IDisposable disposable)
+            disposable.Dispose();
+    }
 
     private const string Redacted = "[redacted]";
 
