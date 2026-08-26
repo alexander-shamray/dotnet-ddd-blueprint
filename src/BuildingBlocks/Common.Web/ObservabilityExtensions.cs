@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
@@ -31,6 +32,20 @@ public static class ObservabilityExtensions
         // OTLP path still shipped in clear text on the console one, and
         // container stdout is collected in most clusters. Verified by test.
         builder.Logging.ClearProviders();
+
+        // The scope half of §13.4, and it has to be registered rather than
+        // configured: LoggerFactory takes an IExternalScopeProvider from the
+        // container and hands the same instance to every provider, so wrapping
+        // it here covers scopes opened by EF Core and MassTransit as well as
+        // the platform's own two. IncludeScopes below is what puts them on the
+        // record; without this line the redactor would be scrubbing attributes
+        // beside a scope carrying whatever the caller sent.
+        //
+        // TryAdd rather than Add: a host that has already chosen a scope
+        // provider keeps it, and a second registration would be the one silently
+        // ignored rather than the one that wins.
+        builder.Services.TryAddSingleton<IExternalScopeProvider>(
+            new RedactingScopeProvider(new LoggerExternalScopeProvider()));
 
         builder.Logging.AddOpenTelemetry(logging =>
         {
