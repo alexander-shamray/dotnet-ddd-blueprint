@@ -135,10 +135,30 @@ def read_pins(path: Path) -> set[str]:
     injects its package into all of them.
     """
     root = parse_msbuild(path)
-    return {
-        element.attrib["Include"] for element in root.iter()
-        if local_name(element) in PIN_ELEMENTS
-    }
+    pins = set()
+
+    for element in root.iter():
+        if local_name(element) not in PIN_ELEMENTS:
+            continue
+
+        # `Include` is how central management names a package, and it is the
+        # only identity this gate reads. An element without one is refused by
+        # name rather than crashing on a KeyError or — worse — being skipped:
+        # `Update` sets a version on an item defined elsewhere, so silently
+        # passing over it would restore a package no register row was asked
+        # about, which is the whole defect #50 closed one spelling at a time.
+        identity = element.attrib.get("Include")
+
+        if identity is None:
+            attributes = ", ".join(sorted(element.attrib)) or "none"
+            raise ValueError(
+                f"{path}: <{local_name(element)}> has no Include attribute "
+                f"(it carries {attributes}). This gate reads Include and nothing "
+                f"else, so it cannot say which package this pins.")
+
+        pins.add(identity)
+
+    return pins
 
 
 def find_projects(root: Path) -> list[Path]:
@@ -340,8 +360,11 @@ def audit(pins: set[str], rows: list[tuple[list[str], str]], allowed: set[str]) 
         unnamed = [licence for licence in licences if licence not in NAMEABLE]
         if unnamed:
             forbidden.append(
-                f"{pin} is registered as {' / '.join(licences)}, and this gate cannot name "
-                f"{' / '.join(unnamed)} as an SPDX identifier")
+                f"{pin} is registered as {' / '.join(licences)}, and "
+                f"{' / '.join(unnamed)} is not a licence spelling this gate knows. "
+                f"Add it to SPDX in licence_gate.py — deliberately a closed "
+                f"vocabulary, so a real SPDX identifier it has never been shown "
+                f"is refused rather than guessed at")
             continue
         refused = [licence for licence in licences if licence not in allowed]
         if refused:

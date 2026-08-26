@@ -102,6 +102,23 @@ class ReadPins(unittest.TestCase):
         with self.assertRaises(ValueError):
             read_pins(bomb)
 
+    def test_refuses_a_pin_element_carrying_no_include(self):
+        # `Update` sets a version on an item declared elsewhere, so this is a
+        # legal MSBuild spelling that names a package this gate cannot read.
+        # It used to raise KeyError from deep inside a set comprehension,
+        # naming neither the file nor the element — and skipping it instead
+        # would be the fail-open direction, restoring a package no register row
+        # was ever asked about.
+        document = pins_doc(
+            '    <PackageVersion Update="Dapper" Version="2.1.66" />\n')
+
+        with self.assertRaises(ValueError) as refusal:
+            read_pins(document)
+
+        self.assertIn("no Include attribute", str(refusal.exception))
+        self.assertIn("PackageVersion", str(refusal.exception))
+        self.assertIn("Update", str(refusal.exception))
+
 
 class ScanProjects(unittest.TestCase):
     """The three project-level spellings that restore an unpinned package.
@@ -275,7 +292,7 @@ class Audit(unittest.TestCase):
         findings = licence_gate.audit({"Something"}, rows, ALLOWED)
         self.assertEqual(len(findings), 1)
         self.assertIn("GPL-3.0-only", findings[0])
-        self.assertIn("cannot name", findings[0])
+        self.assertIn("not a licence spelling this gate knows", findings[0])
 
     def test_fails_a_licence_spelling_the_gate_cannot_map(self):
         # Fail closed, and say which failure it is. A licence read and refused
@@ -285,7 +302,7 @@ class Audit(unittest.TestCase):
         rows = register("| `Something` | Business Source Licence | Whatever |")
         findings = licence_gate.audit({"Something"}, rows, ALLOWED)
         self.assertEqual(len(findings), 1)
-        self.assertIn("cannot name", findings[0])
+        self.assertIn("not a licence spelling this gate knows", findings[0])
         self.assertNotIn("outside the allow-list", findings[0])
 
     def test_reports_a_registered_identity_that_is_pinned_nowhere(self):

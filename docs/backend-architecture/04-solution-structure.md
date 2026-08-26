@@ -1463,9 +1463,12 @@ What the gate does enforce is narrower, and the line matters. It fails the build
 on a pin [Appendix B](appendix-b-licences.md) does not register, on a registered
 identity that is pinned nowhere, on a project that pins for itself rather than
 through this file, and on a registered licence any part of which is outside
-`.github/licence-gate/allowed-licences.txt` — or which it cannot name as an
-SPDX identifier at all, which is a separate finding because it has a separate
-repair. Every one of them is a question about **identity and licence**; none is
+`.github/licence-gate/allowed-licences.txt` — or any part of which is not a
+spelling its map knows, which is a separate finding because it has a separate
+repair. **Not "not an SPDX identifier"**, which is what this sentence and the
+gate's own message used to say: the vocabulary is closed on purpose, so a real
+identifier the map has never been shown is refused too, and a message blaming
+SPDX sends the reader to fix a register row that is already correct. Every one of them is a question about **identity and licence**; none is
 a question about whether a version is current or safe.
 
 Licence drift is only caught reliably by tooling — a convention will not survive
