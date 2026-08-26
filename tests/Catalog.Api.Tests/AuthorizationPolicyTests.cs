@@ -92,7 +92,7 @@ public class AuthorizationPolicyTests(HostSmokeTests.UnreachableInfrastructureFa
     [Fact]
     public void The_listing_is_anonymous_and_the_write_path_is_not()
     {
-        // §10.2's catalog-public route is GET-only with no AuthorizationPolicy,
+        // §10.2's catalog-public route is GET-only and names `anonymous`,
         // so the listing is public by design rather than by omission — and the
         // pairing is what makes that readable. One endpoint carrying
         // IAllowAnonymous and the other carrying a policy is the whole of

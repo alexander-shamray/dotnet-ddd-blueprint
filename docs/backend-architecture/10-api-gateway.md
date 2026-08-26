@@ -540,9 +540,8 @@ writes nothing this middleware reads.
 **`UseExceptionHandler` is the one that matters, and it sits immediately
 above.** That is deliberate, and it is why the ID is written onto the *request*
 below rather than only into the log scope. An exception unwinding past this
-middleware disposes the
-`LogContext` scope before the handler catches it, so the scope is gone by the
-time §10.5 builds the response — but `Request.Headers` is not, which is exactly
+middleware disposes the log scope before the handler catches it, so the scope
+is gone by the time §10.5 builds the response — but `Request.Headers` is not, which is exactly
 where `CustomizeProblemDetails` reads it from. The correlation ID reaches the
 client on the one response where the log scope cannot carry it:
 

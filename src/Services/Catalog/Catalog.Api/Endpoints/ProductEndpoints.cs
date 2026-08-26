@@ -59,10 +59,11 @@ public static class ProductEndpoints
                 })
             // Anonymous, deliberately and permanently — this is not the gap
             // PR-16 closed but the shape §10.2 already specifies. The gateway's
-            // `catalog-public` route matches GET alone, carries no
-            // AuthorizationPolicy and rate-limits as `anonymous`; a product
-            // listing is public, and requiring a token here would make the
-            // route unusable at the edge that publishes it.
+            // `catalog-public` route matches GET alone, names `anonymous` as
+            // its AuthorizationPolicy — YARP's reserved value — and rate-limits
+            // under a policy of the same name; a product listing is public, and
+            // requiring a token here would make the route unusable at the edge
+            // that publishes it.
             //
             // Stated rather than inherited by omission. The group above fails
             // closed, so an anonymous endpoint has to say so out loud, and the

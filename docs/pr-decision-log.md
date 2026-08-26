@@ -200,11 +200,13 @@ invented.
 `"AuthorizationPolicy": "anonymous"`, which reverses a rule §10.2 stated three
 times — that naming no policy was the only correct way to declare a route
 public. That reversal is reconciled in the chapter, in Appendix C's rows, in
-the compose README, in the k6 script, in two source comments and in this log's
-own PR-16 entry, because the claim had been copied to all of them. **A rule
-stated in seven places is reversed in seven places or in none** — and this
-paragraph said four until an audit counted, which is the failure it is about
-happening inside the sentence describing it.
+the compose README, in the k6 script, in the source comments that named the
+route, in the test that pinned it, and in this log's own PR-16 entry, because
+the claim had been copied to all of them. **A rule is reversed everywhere it is
+stated or nowhere** — and this sentence carried a count of four, then seven,
+each time corrected by somebody counting again. The number is gone rather than
+corrected a third time: the places are checkable and the tally never was, which
+is the argument `CLAUDE.md` makes about its own callout totals.
 
 ---
 
