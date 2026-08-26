@@ -291,14 +291,13 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
     }
 
     [Fact]
-    public async Task An_entry_written_before_the_token_reads_back_as_in_progress()
+    public async Task A_pre_token_claim_reads_back_as_in_progress()
     {
         // A claim written by the release before #127 landed is still inside
-        // its retention when this one starts serving, and it carries no token.
-        // The store declines to guess: reporting it in progress refuses the
-        // caller until it expires, where reading it as a payload would replay
-        // something nothing can attribute. Both answers decline the duplicate
-        // commit; only this one declines to invent an owner.
+        // its retention when this one starts serving, and it carries no
+        // token. The marker is read exactly as the store read it before the
+        // token existed, which is sound for the reason it always was: no
+        // serialised payload can spell a value that is not valid JSON.
         await using ServiceProvider provider = fixture.BuildProvider("legacy");
         IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
         IDatabase database = provider
@@ -312,6 +311,38 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         entry.ShouldNotBeNull();
         entry.InProgress.ShouldBeTrue();
         entry.Payload.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("legacy-void", "null")]
+    [InlineData("legacy-value", "\"0195e4b2-0000-7000-8000-0000000000ff\"")]
+    public async Task A_pre_token_outcome_still_replays(string key, string payload)
+    {
+        // The other half of the same predicate, and the half that was
+        // unasserted while the store reported EVERY untokened value as in
+        // progress. Both of these are what the previous release's
+        // CompleteAsync actually wrote — the void case and a captured
+        // Result<Guid> — and both are 38 characters or fewer with no
+        // separator at index 32, so a shape test alone cannot tell them from
+        // an unfinished claim.
+        //
+        // Reading them as in progress answers 409 to a retry of work that
+        // committed, for the rest of the retention, and then lets the command
+        // run a second time once the key expires. A replay is not a commit,
+        // which is what "both answers decline the duplicate" concealed.
+        await using ServiceProvider provider = fixture.BuildProvider("legacy");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+        IDatabase database = provider
+            .GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination)
+            .GetDatabase();
+
+        await database.StringSetAsync($"legacy:idem:{key}", payload, Retention);
+
+        IdempotencyEntry? entry = await store.GetAsync(key, TestContext.Current.CancellationToken);
+
+        entry.ShouldNotBeNull();
+        entry.InProgress.ShouldBeFalse("a completed pre-token entry is replayable, not in flight");
+        entry.Payload.ShouldBe(payload);
     }
 
     [Fact]

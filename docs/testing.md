@@ -176,23 +176,24 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
-> twenty-four tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-one — 95 in total, with no
-> third state and nothing counted twice. Those figures read ten, two and 81,
-> then twenty/91, then twenty-three/94, and each retake was the suite growing while
-> the callout did not — which is the drift the paragraph below is about
-> arriving in the paragraph above it, twice.
+> twenty-six tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-one — 97 in total, with no
+> third state and nothing counted twice. Those figures read ten/81, then
+> twenty/91, then twenty-three/94, then twenty-four/95, and every retake was
+> the suite growing while the callout did not — the drift the paragraph below
+> is about, arriving in the paragraph above it. **How many retakes is not
+> written down**, for the reason the figures keep demonstrating.
 >
 > **Those are the runner's numbers, and `--list-tests` answers a different
 > question.** For this project the two now agree — discovery and execution both
-> report 95, measured rather than assumed — and they have not always: the gap
+> report 97, measured rather than assumed — and they have not always: the gap
 > was 82 against 81 when this callout was written, and mixing a partition
 > quoted from `--list-tests` with a total from `dotnet test` is how it first
-> came to claim 72 and 82. The 1,040 is summed from `dotnet test` output, so
+> came to claim 72 and 82. The 1,042 is summed from `dotnet test` output, so
 > quote what ran. **Agreement today is a measurement and not a guarantee** —
 > which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **839 and 201 of 1,040**, and the fast half
+> Across the solution the split is **839 and 203 of 1,042**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -228,7 +229,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **821** and **201**, summing to the 1,040
+on this repository they are **18**, **821** and **203**, summing to the 1,042
 the whole suite runs — which is the arithmetic the callout below asks for.
 
 ```bash
@@ -259,8 +260,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 839 and 201 summing to
-> 1,040 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 839 and 203 summing to
+> 1,042 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

@@ -147,10 +147,27 @@ The token is 32 hex characters and carries no separator, so the split is
 unambiguous from the left however many colons a JSON payload holds on the
 right.
 
-**An entry this release cannot parse is reported in progress**, not as a
-payload. A claim written before the token landed is still inside its retention
-when this release starts serving; both answers decline the duplicate commit,
-and only this one declines to invent an owner.
+**An entry carrying no token is read by the test the store used before the
+token existed** — the marker means in progress, anything else is a recorded
+outcome — because a claim written by the previous release is still inside its
+retention when this one starts serving.
+
+**The first shape of that branch reported the whole untokened class as in
+progress, and the sentence defending it was where the defect lived.** It read
+*both answers decline the duplicate commit, and only this one declines to
+invent an owner*, which is true and beside the point: **a replay is not a
+commit**. A completed pre-token entry read as in-progress answers 409 to a
+retry of work that succeeded, for the rest of the retention — and then lets
+the command run a second time once the key expires. During a rolling deploy,
+which is the only window the branch exists for, that breaks both halves of
+what §8.5 promises at once. Found by the external review, on the second round,
+against prose that had already been through one.
+
+The half that survives is the marker test itself, and it survives for the
+reason it always held: the marker is deliberately not valid JSON, so no
+serialised payload can spell it. The write side needed no matching case —
+both scripts compare a token these values do not carry, so they no-op rather
+than clobber.
 
 **The double had to change with the port, and that is the load-bearing half of
 the test work.** `RecordingIdempotencyStore` compared nothing, so every

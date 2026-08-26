@@ -137,13 +137,30 @@ internal sealed class RedisIdempotencyStore(
 
         string stored = value.ToString();
 
-        // An entry whose shape this release cannot read is reported as in
-        // progress, so the caller is refused rather than handed a payload
-        // nothing can attribute. The case is a claim written by a release
-        // before the token landed, still inside its retention — both answers
-        // decline the duplicate commit, and this one declines to guess.
+        // An entry carrying no token was written by a release before #127, is
+        // still inside its retention, and is read by the SAME test the store
+        // used before the token existed: the marker means in progress and
+        // anything else is a recorded outcome. That test is exactly as sound
+        // as it was, because the marker is deliberately not valid JSON.
+        //
+        // **Reporting the whole unparseable class as in progress was the first
+        // shape of this and it was wrong**, in a way "both answers decline the
+        // duplicate commit" concealed: a replay is not a commit. A completed
+        // pre-token entry read as in-progress answers 409 to a retry of work
+        // that succeeded, for the rest of the retention — and then lets the
+        // command run a second time once the key expires. During a rolling
+        // deploy, which is the only window this branch exists for, that is
+        // both halves of what §8.5 promises, broken at once.
+        //
+        // The write side needs no matching case: both scripts compare a token
+        // this value does not carry, so they no-op and log rather than
+        // clobbering it.
         if (stored.Length <= TokenLength || stored[TokenLength] != ClaimSeparator)
-            return new IdempotencyEntry(true, null);
+        {
+            return stored == InProgressMarker
+                ? new IdempotencyEntry(true, null)
+                : new IdempotencyEntry(false, stored);
+        }
 
         string state = stored[(TokenLength + 1)..];
 
