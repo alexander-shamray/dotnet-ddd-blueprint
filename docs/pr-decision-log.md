@@ -181,7 +181,8 @@ and framing and script policies govern a document this platform does not serve.
 
 **#68's fix is a parameter, and the parameter is the point.** An empty predicate
 set is a passing predicate set, so a host with no `ready`-tagged check answered
-`/health/ready` with 200 while reaching nothing — and §15.1 removes the smoke
+`/health/ready` with 200 without having verified anything — and §15.1 removes
+the smoke
 stage *by name* on the grounds that this probe already gates the rollout. The
 gateway and the BFF genuinely own no *readiness* dependency — the BFF calls
 Catalog and the gateway proxies four services, and neither hop gates
@@ -190,6 +191,21 @@ throw: `ownsNoReadinessDependencies: true` makes those two hosts state their
 case at the call site, and every other host fails to start. §13.5 already
 carried the rule in prose — a host with a connection string has a readiness
 check — and this is that sentence given a compiler.
+
+**The guard tests the set and not any member of it, which is the honest bound
+and was found by review rather than stated up front.** `AnyReadinessCheck` asks
+whether *one* registration carries the tag, so Catalog and Ordering, which
+register three each, keep starting after any two are deleted. What it catches is
+the readiness set going missing whole: a host wired up with none, or one whose
+Infrastructure registration stopped being called. The narrower case needs a
+per-service count, and nothing generates one for a service §4.5's scaffold has
+rendered — the same reason the guard travels with the building block rather than
+living in a test. **An `Any` over a set proves the set is non-empty and says
+nothing about which member is in it**, and the sentence that shipped first — *a
+service that loses its `AddSqlServer(...)` therefore fails at startup* —
+promised the second while the code implemented the first. It is the
+gate-coverage lesson at one remove: not a gate that stopped covering a surface,
+but one whose subject was narrower than the sentence selling it.
 
 **#38 is the small one and the only one outside `Common.Web`.** `ThumbnailUrl`
 was bounded for length and for nothing else, in a validator where every other

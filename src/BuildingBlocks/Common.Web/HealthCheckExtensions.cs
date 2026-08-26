@@ -30,19 +30,30 @@ public static class HealthCheckExtensions
     /// <remarks>
     /// <b>An empty predicate set is a passing predicate set</b>, so a host that
     /// registers no readiness checks answers <c>/health/ready</c> with 200
-    /// while it can reach nothing — and §15.1 removes the smoke stage by name
+    /// having verified anything — and §15.1 removes the smoke stage by name
     /// on the grounds that this probe already gates the rollout. "Forgot to
-    /// wire it up" and "has no dependencies" therefore look identical from
-    /// outside, and only one of them is a deploy that should proceed.
+    /// wire it up" and "gates readiness on nothing" therefore look identical
+    /// from outside, and only one of them is a deploy that should proceed.
     /// <para>
     /// <paramref name="ownsNoReadinessDependencies"/> is what separates them. The rule
     /// §13.5 states — a host with a connection string has a readiness check,
     /// and a host without one does not — is mechanised here rather than left as
     /// prose: the default refuses to start a host whose readiness set is empty,
     /// and the gateway and the BFF, which own no database, say so at the call
-    /// site. A service that loses its checks in a refactor then fails at
-    /// startup instead of reporting ready, which is the direction §13.5's own
-    /// restart-storm argument already accepts.
+    /// site. A service whose readiness set goes missing entirely in a
+    /// refactor then fails at startup instead of reporting ready, which is the
+    /// direction §13.5's own restart-storm argument already accepts.
+    /// </para>
+    /// <para>
+    /// <b>The guard tests the set, not any member of it.</b>
+    /// <c>AnyReadinessCheck</c> asks whether <i>one</i> registration carries
+    /// the tag, so a service that loses its <c>AddSqlServer(...)</c> while
+    /// keeping its Redis and broker checks starts exactly as before. Catching
+    /// that would take a per-service count, which is the assertion the
+    /// paragraph below says nothing generates for a scaffolded service — so
+    /// the bound is deliberate rather than an oversight, and it is stated
+    /// here because a guard read as stronger than it is buys a confidence
+    /// nobody checked.
     /// </para>
     /// <para>
     /// This is deliberately a claim made at the call site rather than a count
@@ -54,8 +65,9 @@ public static class HealthCheckExtensions
     /// </remarks>
     /// <param name="app">The route builder to map the three probes on.</param>
     /// <param name="ownsNoReadinessDependencies">
-    /// <see langword="true"/> for a host with nothing to be ready for. Passing
-    /// it is a written decision; the default is a startup failure.
+    /// <see langword="true"/> for a host that deliberately gates readiness on
+    /// nothing. Passing it is a written decision; the default is a startup
+    /// failure.
     /// <para>
     /// <b>Named for the readiness set rather than for dependencies at large,
     /// because the BFF has one and still passes this.</b> §9.7's synchronous
@@ -70,7 +82,7 @@ public static class HealthCheckExtensions
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// The host registered no <c>ready</c>-tagged health check and did not
-    /// declare that it has none.
+    /// declare that it gates readiness on nothing.
     /// </exception>
     public static IEndpointRouteBuilder MapCommonHealthEndpoints(
         this IEndpointRouteBuilder app,
@@ -82,9 +94,9 @@ public static class HealthCheckExtensions
         {
             throw new InvalidOperationException(
                 "No health check carries the \"ready\" tag, so /health/ready would answer 200 " +
-                "while this host can reach nothing (§13.5). Register the service's readiness " +
+                "without having verified anything (§13.5). Register the service's readiness " +
                 "checks in its own Infrastructure, or pass ownsNoReadinessDependencies: true if this host " +
-                "genuinely owns none.");
+                "gates readiness on nothing.");
         }
 
         // AllowAnonymous is required, not cosmetic: the kubelet sends no token,

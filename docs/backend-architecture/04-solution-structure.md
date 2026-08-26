@@ -809,14 +809,21 @@ no failing test unless one specifically asserts on a limit.
 
 `MapCommonHealthEndpoints()` is the same line it has always been and now means
 something stronger. An empty predicate set is a passing predicate set, so a host
-that registered no readiness checks answers `/health/ready` with 200 while it
-can reach nothing — indistinguishable from a host that genuinely owns nothing
-to be ready for. The parameterless call is now the claim that this service
-**does** own dependencies, and [§13.5](13-observability.md)'s helper refuses to
-start it when no `ready`-tagged check is registered. A service that loses its
-`AddSqlServer(...)` in a refactor therefore fails at startup rather than taking
-traffic it cannot serve; the two hosts entitled to an empty set say so at the
-call site instead, and the gateway below is one of them.
+that registered no readiness checks answers `/health/ready` with 200 without
+having verified anything — indistinguishable from a host that deliberately gates
+readiness on nothing. The parameterless call is now the claim that this service
+**does** gate readiness on something, and [§13.5](13-observability.md)'s helper
+refuses to start it when no `ready`-tagged check is registered. A service whose
+readiness set goes missing whole in a refactor therefore fails at startup rather
+than taking traffic it cannot serve; the two hosts entitled to an empty set say
+so at the call site instead, and the gateway below is one of them.
+
+**Whole, and not one member of it** — the guard asks whether *any* registration
+carries the tag, so a service that drops its `AddSqlServer(...)` while keeping
+its Redis and broker checks starts exactly as before. §13.5 states the bound and
+argues why the narrower case is not caught; it is named here because this table
+is where the line gets read, and a guard read as stronger than it is buys a
+confidence nobody checked.
 
 > **`AddAuthentication` is not in that class, and saying it was cost this table
 > a wrong row — twice, in opposite directions.** `WebApplication` adds the

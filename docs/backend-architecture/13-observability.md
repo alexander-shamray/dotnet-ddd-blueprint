@@ -1402,8 +1402,9 @@ namespace Common.Web;
 // exists to close.
 private const string Ready = "ready";
 
-// ownsNoReadinessDependencies is true for a host with nothing to be ready for. Passing
-// it is a written decision; the default is a startup failure.
+// ownsNoReadinessDependencies is true for a host that deliberately gates
+// readiness on nothing. Passing it is a written decision; the default is a
+// startup failure.
 public static IEndpointRouteBuilder MapCommonHealthEndpoints(
     this IEndpointRouteBuilder app,
     bool ownsNoReadinessDependencies = false)
@@ -1414,9 +1415,9 @@ public static IEndpointRouteBuilder MapCommonHealthEndpoints(
     {
         throw new InvalidOperationException(
             "No health check carries the \"ready\" tag, so /health/ready would answer 200 " +
-            "while this host can reach nothing (§13.5). Register the service's readiness " +
+            "without having verified anything (§13.5). Register the service's readiness " +
             "checks in its own Infrastructure, or pass ownsNoReadinessDependencies: true if this host " +
-            "genuinely owns none.");
+            "gates readiness on nothing.");
     }
 
     // AllowAnonymous is required, not cosmetic: the kubelet sends no token,
@@ -1451,11 +1452,11 @@ private static bool AnyReadinessCheck(IEndpointRouteBuilder app)
 ```
 
 **An empty predicate set is a passing predicate set**, so a host that
-registers no readiness checks answers `/health/ready` with 200 while it can
-reach nothing — and [§15.1](15-cicd-deployment.md) removes the smoke stage by
-name, on the grounds that this probe already gates the rollout. "Forgot to
-wire it up" and "has no dependencies" therefore look identical from outside,
-and only one of them is a deploy that should proceed.
+registers no readiness checks answers `/health/ready` with 200 without having
+verified anything — and [§15.1](15-cicd-deployment.md) removes the smoke stage
+by name, on the grounds that this probe already gates the rollout. "Forgot to
+wire it up" and "gates readiness on nothing" therefore look identical from
+outside, and only one of them is a deploy that should proceed.
 
 The rule that separates them — **a host with a connection string has a
 readiness check, and a host without one does not** — is mechanised by the
@@ -1465,6 +1466,16 @@ absence becomes a written decision. Every other host fails to start: each
 service owns a schema, including the two with no public API, since Shipping
 and Notifications both ship a migrator and both register a SQL check (§4.1,
 [§3.2](03-bounded-contexts.md)).
+
+**The guard tests the set, not any member of it**, and the bound is stated
+rather than left to be discovered, because a guard read as stronger than it is
+buys a confidence nobody checked. `AnyReadinessCheck` asks whether *one*
+registration carries the tag, so a service that loses its `AddSqlServer(...)`
+while keeping its Redis and broker checks starts exactly as before. What it
+catches is the readiness set going missing whole — a host wired up with none at
+all, or one whose Infrastructure registration stopped being called. The
+narrower case would take a per-service count, and nothing generates one for a
+service [§4.5](04-solution-structure.md)'s scaffold has rendered.
 
 **Failing to start is the right direction, and the restart-storm argument
 below is why.** That rule forbids gating *liveness* on a dependency because a
