@@ -159,6 +159,23 @@ through — the shipped defect wearing a test's clothes. Two new cases assert th
 write carries the token the claim returned, which is the claim no assertion
 about *which call happened* can make.
 
+**The grant that was explained by one caller now has two.** §8.1 grants
+`+eval` and gave the lock's token-checked release as the reason — `EVAL` is
+`@scripting`, which none of the data categories include, and under the shorter
+grant that line used to print, every release threw and the lock stood until its
+TTL. The store's move to Lua does not change the grant; it changes what a
+reader may conclude from the explanation, which is **this repository's own
+lesson that a premise about who calls a thing is falsified by the next caller**
+arriving inside the change that falsifies it. Both are named now, and the store
+has the lock's test: the §8.1 user provisioned live, the real type driven
+through it.
+
+That test needed the re-claim to say anything. `ReleaseAsync` swallows a
+`RedisException` by design, so a missing grant there does not throw — it leaves
+the claim standing for its whole retention and writes a log line. *It did not
+throw* is exactly the assertion that would have passed against the defect, so
+the claim is made from the other side: claim, release, claim again.
+
 ### An invisible drop path is why the attack had no signal (#64)
 
 §9.5's inbox suppressed a duplicate with a bare `return;` — no log, no metric,

@@ -1822,8 +1822,9 @@ container is happy without it (§6.2):
 
 ```csharp
 // In AddOrderingInfrastructure (§4.2). Both of Infrastructure's metrics types:
-// OutboxMetrics reads the database, MessagingMetrics is injected by the two
-// consumers and resolved by the outbox invoker (§13.3).
+// OutboxMetrics reads the database, MessagingMetrics is injected by
+// IntegrationEventConsumer<T>, CommandConsumer<,> and InboxFilter<T> and
+// resolved by the outbox invoker (§13.3).
 // ITS OWN connection factory, with the bounded ConnectTimeout the callbacks
 // need. Resolving the shared IDbConnectionFactory here would leave SqlClient's
 // fifteen-second default on the open, and the commandTimeout above never gets

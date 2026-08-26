@@ -1,6 +1,7 @@
 using Common.Application;
 using Common.Infrastructure.Redis;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Shouldly;
 using StackExchange.Redis;
 using Xunit;
@@ -311,6 +312,80 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         entry.ShouldNotBeNull();
         entry.InProgress.ShouldBeTrue();
         entry.Payload.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task The_stores_scripts_run_under_the_documented_ACL_grant()
+    {
+        // §8.1 grants `+eval` and explains it by the LOCK's token-checked
+        // release. Since #127 the store evaluates scripts too, so that
+        // explanation now has a second consumer — and a premise about who
+        // calls a thing is falsified by the next caller. The grant already
+        // covers this; nothing proved it, which is the half that matters,
+        // because EVAL is `@scripting` and none of the data categories
+        // include it. Under the shorter grant this line used to print, every
+        // complete and every release would throw.
+        ConfigurationOptions admin = ConfigurationOptions.Parse(fixture.CoordinationConnectionString);
+        admin.AllowAdmin = true;
+        await using ConnectionMultiplexer adminConnection = await ConnectionMultiplexer.ConnectAsync(admin);
+        object[] grant =
+        [
+            "SETUSER",
+            "aclidem-svc",
+            "reset",
+            "on",
+            ">s3cret",
+            "~aclidem:*",
+            "+@read",
+            "+@write",
+            "+@keyspace",
+            "+@connection",
+            "+eval",
+            "-@dangerous",
+            "+client|setname",
+            "+client|setinfo"
+        ];
+        await adminConnection.GetServer(adminConnection.GetEndPoints()[0]).ExecuteAsync("ACL", grant);
+
+        ConfigurationOptions restricted = ConfigurationOptions.Parse(fixture.CoordinationConnectionString);
+        restricted.User = "aclidem-svc";
+        restricted.Password = "s3cret";
+        await using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(restricted);
+
+        ServiceCollection services = new();
+        services.AddSingleton<IHostEnvironment>(new TestEnvironment("aclidem"));
+
+        // The store logs a lost claim and a failed release, so this bare
+        // collection needs a logger where the lock's equivalent test does not
+        // — the lock has none to fail over.
+        services.AddLogging();
+        services.AddRedisConnections(AddRedisConnectionsTests.Configuration());
+        services.AddKeyedSingleton<IConnectionMultiplexer>(RedisConnections.Coordination, connection);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        // CompleteAsync fails LOUDLY without the grant — it does not catch —
+        // so reading the payload back proves the script ran rather than that
+        // nothing threw.
+        string completed =
+            (await store.TryClaimAsync("acl-done", Retention, TestContext.Current.CancellationToken))!;
+        await store.CompleteAsync(
+            "acl-done", completed, "\"ok\"", Retention, TestContext.Current.CancellationToken);
+
+        IdempotencyEntry? entry = await store.GetAsync("acl-done", TestContext.Current.CancellationToken);
+        entry.ShouldNotBeNull();
+        entry.Payload.ShouldBe("\"ok\"");
+
+        // ReleaseAsync SWALLOWS a RedisException by design, so a missing grant
+        // would leave the claim standing and log rather than throw. The
+        // re-claim is what makes that visible — the lock suite's own argument,
+        // and the reason this half cannot be asserted by "it did not throw".
+        string released =
+            (await store.TryClaimAsync("acl-freed", Retention, TestContext.Current.CancellationToken))!;
+        await store.ReleaseAsync("acl-freed", released, TestContext.Current.CancellationToken);
+
+        (await store.TryClaimAsync("acl-freed", Retention, TestContext.Current.CancellationToken))
+            .ShouldNotBeNull("a release that never ran would hold the key for its whole retention");
     }
 
     /// <summary>

@@ -5,8 +5,8 @@ namespace Common.Infrastructure.Messaging;
 /// <summary>
 /// §13.3's messaging instruments, on the <c>Commerce.Messaging</c> meter that
 /// <c>AddObservability</c> already collects. Infrastructure rather than
-/// Application because every call site is — the outbox dispatcher's invoker and
-/// the two consumers beside this file.
+/// Application because every call site is — the outbox dispatcher's invoker,
+/// the two consumers beside this file, and §9.5's inbox filter one folder over.
 /// </summary>
 /// <remarks>
 /// <b>It arrives in instalments on <c>PluggableInterfaces.All</c>'s terms, and

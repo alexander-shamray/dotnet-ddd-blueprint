@@ -71,10 +71,19 @@ user ordering-svc on >REDACTED ~ordering:* +@read +@write +@keyspace +@connectio
 ```
 
 Three of those grants are easy to leave off, and the line above is the one a
-Testcontainers test proves rather than a first guess. `+eval` because the
-lock's token-checked release is a Lua script and `EVAL` sits in `@scripting`,
-which none of the data categories include — under the shorter grant this line
-used to print, every release threw and the lock stood until its TTL.
+Testcontainers test proves rather than a first guess. `+eval` because two
+things here are Lua scripts and `EVAL` sits in `@scripting`, which none of the
+data categories include — under the shorter grant this line used to print,
+every release threw and the lock stood until its TTL.
+
+**That reason named only the lock until §8.5's store grew scripts of its own,
+and the grant is the same grant either way.** What changed is what a reader
+may conclude from it: an explanation resting on one caller is a premise the
+next caller falsifies, so both are named here and both have a test that
+provisions this exact user and drives the real type through it. The store's
+half needs the re-claim to say anything, because its release swallows a
+`RedisException` by design — a missing grant there does not throw, it leaves
+the claim standing for its whole retention.
 `+@connection` because the client library's handshake needs `PING` and its
 kin before it carries a single command. And the two `+client|` subcommands
 because `StackExchange.Redis` names its connection on connect and
