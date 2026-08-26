@@ -541,9 +541,9 @@ writes nothing this middleware reads.
 above.** That is deliberate, and it is why the ID is written onto the *request*
 below rather than only into the log scope. An exception unwinding past this
 middleware disposes the log scope before the handler catches it, so the scope
-is gone by the time §10.5 builds the response — but `Request.Headers` is not, which is exactly
-where `CustomizeProblemDetails` reads it from. The correlation ID reaches the
-client on the one response where the log scope cannot carry it:
+is gone by the time §10.5 builds the response — but `Request.Headers` is not,
+which is exactly where `CustomizeProblemDetails` reads it from. The correlation
+ID reaches the client on the one response where the log scope cannot carry it:
 
 ```csharp
 namespace Common.Web;
@@ -587,7 +587,27 @@ public static IApplicationBuilder UseCorrelationId(this IApplicationBuilder app)
             : Activity.Current?.TraceId.ToString() ?? Guid.CreateVersion7().ToString();
 
         context.Request.Headers[Header] = correlationId;
-        context.Response.Headers[Header] = correlationId;
+
+        // The RESPONSE header is written from OnStarting rather than here, for
+        // §10.6's reason one middleware over: UseExceptionHandler CLEARS the
+        // response before writing §10.5's problem body, so a header assigned
+        // on the way in is gone from exactly the 500 an incident is triaged
+        // from. The request header stays an eager write — it is what
+        // CustomizeProblemDetails reads after the log scope has been disposed,
+        // and nothing clears it.
+        //
+        // A static callback with the value passed as state, so the closure
+        // captures nothing and this allocates once per request rather than
+        // twice.
+        context.Response.OnStarting(
+            static state =>
+            {
+                (HttpResponse response, string id) = ((HttpResponse, string))state;
+                response.Headers[Header] = id;
+
+                return Task.CompletedTask;
+            },
+            (context.Response, correlationId));
 
         // BeginScope, the Microsoft.Extensions.Logging primitive — not
         // Serilog's LogContext. OpenTelemetry is the whole logging stack here
@@ -654,6 +674,25 @@ field this section exists to make trustworthy. The length half is cheaper to
 state — a kilobyte attached to a scope inherited by every record the request
 produces, EF Core's and MassTransit's included, is one request multiplied into
 collector ingest by the record count.
+
+**The response header is written from `OnStarting`, and that is the same rule
+[§10.6](#106-response-security-headers) states one middleware over.**
+`UseExceptionHandler` clears the response before it writes §10.5's problem
+body, so a header assigned on the way in is absent from exactly the 500 an
+incident is triaged from — the response on which this section's whole promise
+matters most. The *request* header stays an eager write: it is what
+`CustomizeProblemDetails` reads once the log scope has been disposed, and
+nothing clears it. Two channels, two lifetimes, and only one of them survives
+the unwind by being written late.
+
+> **This was the shape of a defect rather than a symmetry noticed in
+> passing.** `nosniff` was moved onto `OnStarting` with the argument spelled
+> out and a test that drives the 500; the correlation ID was left assigning
+> eagerly, so after that change an error response carried
+> `X-Content-Type-Options` and not `X-Correlation-Id`. **A rule established
+> for one header is owed to every header on the same response**, and the test
+> that catches it has to compose `UseExceptionHandler` — no test of a request
+> that succeeds can see this.
 
 **It is a bound on length and alphabet, and not a rescue from log splitting**,
 which was never reachable. Kestrel rejects CR and LF inside a request header

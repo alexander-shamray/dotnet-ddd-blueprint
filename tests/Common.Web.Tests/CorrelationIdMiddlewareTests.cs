@@ -1,7 +1,12 @@
 using System.Diagnostics;
+using System.Net;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
@@ -167,6 +172,44 @@ public class CorrelationIdMiddlewareTests
         // upstream edge commonly uses. Narrowing to exactly this platform's two
         // fallbacks would break the promise to keep the guard tidy.
         (await EchoedFor(supplied)).ShouldBe(supplied);
+    }
+
+    [Fact]
+    public async Task The_id_is_on_the_response_that_UseExceptionHandler_writes()
+    {
+        // §10.4's promise is about the response an incident is triaged from,
+        // and a 500 is the one that matters most. UseExceptionHandler CLEARS
+        // the response before writing §10.5's problem body, so a header
+        // assigned on the way in is gone from exactly that response — the
+        // argument ADR-031 calls "the whole of its correctness" for nosniff,
+        // which applies here for the same reason and was not applied.
+        //
+        // The pipeline is built here rather than in TestPipeline because the
+        // exception handler is what this asserts against, and every other test
+        // in this file is about a request that succeeds.
+        using IHost host = await new HostBuilder()
+            .ConfigureWebHost(web =>
+            {
+                web.UseTestServer();
+                web.ConfigureServices(services => services.AddCommonProblemDetails());
+                web.Configure(app =>
+                {
+                    app.UseExceptionHandler();
+                    app.UseCorrelationId();
+                    app.Run(_ => throw new InvalidOperationException("boom"));
+                });
+            })
+            .ConfigureLogging(logging => logging.ClearProviders())
+            .StartAsync(TestContext.Current.CancellationToken);
+
+        using HttpClient client = host.GetTestClient();
+        client.DefaultRequestHeaders.TryAddWithoutValidation(Header, "from-the-gateway");
+
+        HttpResponseMessage response =
+            await client.GetAsync("/", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        CorrelationIdOf(response).ShouldBe("from-the-gateway");
     }
 
     // Drives the real pipeline with one supplied header and returns what came

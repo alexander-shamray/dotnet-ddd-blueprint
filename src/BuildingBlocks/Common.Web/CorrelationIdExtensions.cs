@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -74,7 +75,27 @@ public static class CorrelationIdExtensions
                 : Activity.Current?.TraceId.ToString() ?? Guid.CreateVersion7().ToString();
 
             context.Request.Headers[Header] = correlationId;
-            context.Response.Headers[Header] = correlationId;
+
+            // The RESPONSE header is written from OnStarting rather than here,
+            // for §10.6's reason one middleware over: UseExceptionHandler
+            // CLEARS the response before writing §10.5's problem body, so a
+            // header assigned on the way in is gone from exactly the 500 an
+            // incident is triaged from. The request header stays an eager
+            // write — it is what CustomizeProblemDetails reads after the log
+            // scope has been disposed, and nothing clears it.
+            //
+            // A static callback with the value passed as state, so the closure
+            // captures nothing and this allocates once per request rather than
+            // twice.
+            context.Response.OnStarting(
+                static state =>
+                {
+                    (HttpResponse response, string id) = ((HttpResponse, string))state;
+                    response.Headers[Header] = id;
+
+                    return Task.CompletedTask;
+                },
+                (context.Response, correlationId));
 
             // BeginScope, the Microsoft.Extensions.Logging primitive — not
             // Serilog's LogContext. OpenTelemetry is the whole logging stack here
