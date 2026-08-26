@@ -176,16 +176,16 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
-> twenty tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-one — 91 in total, with no
-> third state and nothing counted twice. Those figures read ten, two and 81
-> until this measurement was retaken; the suite had grown and the callout had
-> not, which is the drift the paragraph below is about arriving in the
-> paragraph above it.
+> twenty-three tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-one — 94 in total, with no
+> third state and nothing counted twice. Those figures read ten, two and 81,
+> then twenty, seventy-one and 91, and each retake was the suite growing while
+> the callout did not — which is the drift the paragraph below is about
+> arriving in the paragraph above it, twice.
 >
 > **Those are the runner's numbers, and `--list-tests` answers a different
 > question.** For this project the two now agree — discovery and execution both
-> report 91, measured rather than assumed — and they have not always: the gap
+> report 94, measured rather than assumed — and they have not always: the gap
 > was 82 against 81 when this callout was written, and mixing a partition
 > quoted from `--list-tests` with a total from `dotnet test` is how it first
 > came to claim 72 and 82. The 1,039 is summed from `dotnet test` output, so

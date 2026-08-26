@@ -432,10 +432,10 @@ ones a reader would otherwise go looking for in this section and fail to find:
 | ASP.NET Core instrumentation | the framework, enabled in §13.2 | `http.server.request.duration` — the availability row |
 
 `RequestMetrics` is Application because `LoggingBehavior` injects it and the
-pipeline is Application. `MessagingMetrics` is Infrastructure because all three
-of its call sites are — two consumers and the outbox dispatcher's invoker.
-`OutboxMetrics` is separate from both because it reads the database, which is
-also why it is observable rather than pushed (§13.6).
+pipeline is Application. `MessagingMetrics` is Infrastructure because all four
+of its call sites are — two consumers, §9.5's inbox filter and the outbox
+dispatcher's invoker. `OutboxMetrics` is separate from both because it reads
+the database, which is also why it is observable rather than pushed (§13.6).
 
 **The table's last column is what each source contributes to §13.7, not what it
 declares.** `MessagingMetrics` publishes two instruments that appear nowhere in
@@ -476,7 +476,7 @@ public sealed class RequestMetrics
 
 ```csharp
 // Common.Infrastructure — registered by AddOrderingInfrastructure, because
-// all three call sites are Infrastructure types (§9.4).
+// all four call sites are Infrastructure types (§9.4, §9.5).
 //
 // It grows in instalments, on PluggableInterfaces.All's terms: Projected
 // lands with the outbox, because ProjectionInvoker is its only call site, the
@@ -551,18 +551,26 @@ today; it would also make the metric the reason the invoker cannot accept a
 plain record tomorrow. The row already has the timestamp, and reading it there
 costs a column the claim was going to pay for anyway.
 
-`IntegrationEventConsumer<T>` and `CommandConsumer<,>` take `MessagingMetrics`
-as a constructor parameter. `Projected` is recorded by `ProjectionInvoker`
-(§9.4), which is static and cached — it resolves `MessagingMetrics` from the
-`IServiceProvider` it is already handed rather than through a constructor it
-does not have.
+`IntegrationEventConsumer<T>`, `CommandConsumer<,>` and `InboxFilter<T>` take
+`MessagingMetrics` as a constructor parameter. `Projected` is recorded by
+`ProjectionInvoker` (§9.4), which is static and cached — it resolves
+`MessagingMetrics` from the `IServiceProvider` it is already handed rather than
+through a constructor it does not have.
 
 Both lags compare a timestamp made on another machine, so both carry the same
 caveat: they are useful at second granularity and meaningless below it, which is
-why §13.7's targets for them are in seconds and not milliseconds. The third
-instrument, `command.domain_rejected`, is a plain counter with no such
-caveat — it is recorded by `CommandConsumer` at the moment the dispatcher
-returns a failure, on the same machine (§9.8).
+why §13.7's targets for them are in seconds and not milliseconds. The two
+counters carry no such caveat, because neither reads a clock at all:
+`command.domain_rejected` is recorded by `CommandConsumer` at the moment the
+dispatcher returns a failure (§9.8), and `messaging.inbox.suppressed` by
+`InboxFilter<T>` at the moment it drops a delivery (§9.5) — both on the
+machine doing the work.
+
+**That sentence said *the third instrument* until there was a fourth**, and
+the ordinal is what made it wrong rather than merely incomplete: it read as
+closing a three-way partition, so the instrument that arrived next had nowhere
+to be. `MessagingMetrics` itself dropped the ordinal in the same change, for
+the same reason.
 
 > **These get a `MetricsInitialiser` entry too (§13.6), and the tempting reason
 > not to is the instrument kind.** An observable gauge is pull-based — the

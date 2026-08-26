@@ -689,11 +689,12 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddSingleton<IOutboxStats, OutboxStats>();
     services.AddSingleton<OutboxMetrics>();
 
-    // The two delivery lags and the rejection counter (§13.3). Injected by
-    // IntegrationEventConsumer<T> and CommandConsumer<,>, resolved from the
-    // provider by ProjectionInvoker — all three live here. Forced at startup
-    // for the same reason as OrderMetrics: a consumer is constructed when a
-    // message arrives, so on a quiet service these instruments do not exist.
+    // The two delivery lags, the rejection counter and the inbox suppression
+    // counter (§13.3). Injected by IntegrationEventConsumer<T>,
+    // CommandConsumer<,> and InboxFilter<T>, resolved from the provider by
+    // ProjectionInvoker — all four live here. Forced at startup for the same
+    // reason as OrderMetrics: a consumer is constructed when a message
+    // arrives, so on a quiet service these instruments do not exist.
     services.AddSingleton<MessagingMetrics>();
 
     // Forces construction of the metrics singletons in both layers. Resolving
