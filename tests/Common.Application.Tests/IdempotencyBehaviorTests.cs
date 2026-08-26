@@ -330,6 +330,68 @@ public class IdempotencyBehaviorTests
         store.Calls.ShouldBeEmpty("the behaviour was never selected, and nothing said so");
     }
 
+    [Fact]
+    public async Task The_completion_is_made_with_None_rather_than_the_callers_token()
+    {
+        // §8.5's rule, and the one the suite could not see. The handler has
+        // committed by this line, so a completion that honoured a cancelled
+        // caller would leave the key claimed with the work durable — a retry
+        // then meets ConcurrentRequestException until the retention expires,
+        // and runs a second time after it.
+        RecordingIdempotencyStore store = new();
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        await Behaviour(store).HandleAsync(
+            new ProtectedCommand(Command),
+            () => Task.FromResult(Result.Success(Guid.CreateVersion7())),
+            cancelled.Token);
+
+        // The claim is the positive control: it proves the map records the
+        // argument, so the assertion below is not passing on an absent entry
+        // reading back as default — which is what CancellationToken.None is.
+        store.Tokens["claim"].ShouldBe(cancelled.Token);
+        store.Tokens["complete"].ShouldBe(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task The_release_after_a_refusal_is_made_with_None_rather_than_the_callers_token()
+    {
+        RecordingIdempotencyStore store = new();
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        await Behaviour(store).HandleAsync(
+            new ProtectedCommand(Command),
+            () => Task.FromResult(Result.Failure<Guid>(Error.Rule("test.refused", "No."))),
+            cancelled.Token);
+
+        store.Tokens["claim"].ShouldBe(cancelled.Token);
+        store.Tokens["release"].ShouldBe(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task The_release_after_a_thrown_handler_is_made_with_None_rather_than_the_callers_token()
+    {
+        // The sharpest of the three: the commonest reason to be releasing at
+        // all is the caller's own cancellation, so honouring the token here
+        // would abandon the release exactly when it is most needed and leak
+        // the claim for a day.
+        RecordingIdempotencyStore store = new();
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => Behaviour(store).HandleAsync(
+                new ProtectedCommand(Command),
+                () => throw new InvalidOperationException("handler exploded"),
+                cancelled.Token));
+
+        store.Tokens["claim"].ShouldBe(cancelled.Token);
+        store.Tokens["release"].ShouldBe(CancellationToken.None);
+        store.Entries.ShouldNotContainKey(ExpectedKey);
+    }
+
     private static string ExpectedKey => $"{Caller}:{ProtectedCommand.OperationName}:{Command}";
 
     private static string VoidKey => $"{Caller}:{VoidProtectedCommand.OperationName}:{Command}";

@@ -15,9 +15,12 @@ concurrency:
 
 jobs:
   # Ahead of the build, not after it (§15.1). The gate reads
-  # Directory.Packages.props and Appendix B as text, so it needs neither a
-  # restore nor an SDK — which is exactly why it can run here. Scanning that
-  # sits downstream of a build is scanning that a build failure skips.
+  # Directory.Packages.props, Appendix B and every .csproj, .props and .targets
+  # as text, so it needs neither a restore nor an SDK — which is exactly why it
+  # can run here. The project files are in the subject since #50: central
+  # pinning is a convention, and three legal spellings restore a package
+  # Directory.Packages.props never mentions. Scanning that sits downstream of a
+  # build is scanning that a build failure skips.
   #
   # This is §15.1's "SCA + secret scan" node, and since #61 it is both halves
   # rather than the licence one. They share a job because they share every

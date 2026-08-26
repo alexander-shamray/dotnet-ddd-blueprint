@@ -29,6 +29,21 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
     /// <summary>Every call, in order, as <c>verb key</c>.</summary>
     public List<string> Calls { get; } = [];
 
+    /// <summary>
+    /// The <see cref="CancellationToken"/> each call was handed, by call name.
+    /// </summary>
+    /// <remarks>
+    /// <b>The call name rather than the position, because a positional pointer
+    /// goes stale.</b> §8.5 requires three of the store's calls to be made with
+    /// <see cref="CancellationToken.None"/> — the release after a thrown
+    /// handler, the release after a refusal, and the completion — and without
+    /// recording the argument, an implementation forwarding the caller's
+    /// <c>ct</c> to all three passes every other test in this suite. Measured,
+    /// not asserted: with the three sites changed to forward <c>ct</c>, all 84
+    /// tests here passed.
+    /// </remarks>
+    public Dictionary<string, CancellationToken> Tokens { get; } = [];
+
     /// <summary>Set to throw from <see cref="CompleteAsync"/>, for the hold case.</summary>
     public Exception? CompleteFault { get; set; }
 
@@ -44,6 +59,7 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
     public Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct)
     {
         Calls.Add($"claim {key}");
+        Tokens["claim"] = ct;
 
         string token = Guid.CreateVersion7().ToString("N");
         bool claimed = _entries.TryAdd(key, new Held(token, new IdempotencyEntry(true, null)));
@@ -57,6 +73,7 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
     public Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct)
     {
         Calls.Add($"get {key}");
+        Tokens["get"] = ct;
         return Task.FromResult(_entries.TryGetValue(key, out Held? held) ? held.Entry : null);
     }
 
@@ -68,6 +85,7 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
         CancellationToken ct)
     {
         Calls.Add($"complete {key}");
+        Tokens["complete"] = ct;
         WrittenUnder = claim;
 
         if (CompleteFault is not null)
@@ -82,6 +100,7 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
     public Task ReleaseAsync(string key, string claim, CancellationToken ct)
     {
         Calls.Add($"release {key}");
+        Tokens["release"] = ct;
         WrittenUnder = claim;
 
         if (Owns(key, claim))

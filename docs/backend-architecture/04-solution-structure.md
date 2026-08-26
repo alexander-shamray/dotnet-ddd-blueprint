@@ -1470,9 +1470,17 @@ a question about whether a version is current or safe.
 
 Licence drift is only caught reliably by tooling — a convention will not survive
 the twentieth dependency. The gate runs ahead of the build rather than after it
-([§15.1](15-cicd-deployment.md)), which is what this file's central pinning
-buys: every dependency the repository has is declared in one place, so nothing
-needs restoring before the list can be read.
+([§15.1](15-cicd-deployment.md)), and what buys that is not central pinning but
+the fact that **everything it reads is text**: this file, Appendix B, and every
+`.csproj`, `.props` and `.targets` besides. Nothing needs restoring before the
+list can be read.
+
+**This sentence used to say the gate could run early because "every dependency
+the repository has is declared in one place"**, which is the claim the
+paragraph above exists to refuse — a project may name a `Version` of its own,
+override one, or opt out of central management, and each restores a package
+this file never mentions (#50). The scan is early because it is a text scan;
+it would still be early if central pinning were abandoned tomorrow.
 
 > **Trap — the sample above is a copy.** The gate reads
 > `Directory.Packages.props`; the fenced block in this section is a second

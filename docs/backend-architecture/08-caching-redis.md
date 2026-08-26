@@ -845,6 +845,27 @@ internal sealed class RedisIdempotencyStore(
 }
 ```
 
+> **A value carrying no token is a previous release's entry, and it must read
+> as a replay rather than as an unfinished claim.** The encoding above arrived
+> after §8.5 had already shipped a store that wrote the marker or the payload
+> as the *whole* value, so during a rolling deploy `GetAsync` meets entries
+> with no `{claim}:` prefix and still inside their retention. An
+> implementation that reported the whole unparseable class as in progress —
+> which is the tidier-looking branch, and the one that shipped first — answers
+> `ConcurrentRequestException` to a retry of work that **already committed**,
+> for the rest of the retention, and then lets the command run a second time
+> once the key expires. Both halves of the guarantee this section opens with,
+> broken in the one window the encoding change creates.
+>
+> Read an untokened value by exactly the test the store used before the token
+> existed: the marker means in progress, anything else is a recorded outcome.
+> That test is as sound as it ever was, because the marker is deliberately not
+> valid JSON. **The write side needs no matching case** — both scripts compare
+> a token these values do not carry, so they no-op and log rather than
+> clobbering. Plant both shapes the previous release actually wrote (`null`
+> for a void success, a quoted GUID for `Result<Guid>`) and expect a replay;
+> asserting only the marker leaves the half that matters unobserved.
+
 A behaviour constrained on a marker fails open: the command still executes, just
 unprotected. That is the same silent shape as an unregistered handler (§6.2), so
 it gets the same kind of test — one that reads intent from the shape of the
