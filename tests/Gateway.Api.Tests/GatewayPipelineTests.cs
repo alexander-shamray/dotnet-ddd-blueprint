@@ -30,9 +30,12 @@ public sealed class GatewayPipelineTests(GatewayFactory factory) : IClassFixture
         HttpResponseMessage response = await client.GetAsync(path, TestContext.Current.CancellationToken);
 
         // Ready and startup are healthy with an empty check set, which is
-        // correct for a host that owns no dependency (§13.5) — and the reason
-        // the probes must stay anonymous is that the kubelet carries no token,
-        // so the gateway would otherwise be the one component its own auth
+        // correct for a host whose dependencies do not gate readiness (§13.5):
+        // the gateway proxies four services and deliberately declines to report
+        // unready when one of them is down, which would take the edge out of
+        // rotation for a fault it is meant to pass through. And the reason the
+        // probes must stay anonymous is that the kubelet carries no token, so
+        // the gateway would otherwise be the one component its own auth
         // pipeline could kill.
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
