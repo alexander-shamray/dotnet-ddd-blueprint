@@ -347,9 +347,12 @@ public class IdempotencyBehaviorTests
             () => Task.FromResult(Result.Success(Guid.CreateVersion7())),
             cancelled.Token);
 
-        // The claim is the positive control: it proves the map records the
-        // argument, so the assertion below is not passing on an absent entry
-        // reading back as default — which is what CancellationToken.None is.
+        // The claim is the positive control, and NOT against an absent entry:
+        // Dictionary's indexer throws on a missing key, so a call that was
+        // never recorded fails here rather than reading back as default. What
+        // it guards is the double recording the same token everywhere — write
+        // None into every slot and all three of these assertions pass while
+        // observing nothing.
         store.Tokens["claim"].ShouldBe(cancelled.Token);
         store.Tokens["complete"].ShouldBe(CancellationToken.None);
     }
