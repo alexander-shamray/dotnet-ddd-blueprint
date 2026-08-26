@@ -1671,4 +1671,106 @@ something it will execute.
 
 ---
 
+## ADR-032 — The saga's outbox is MassTransit's, in the saga's own transaction
+
+**Decision.** [§9.6](09-messaging.md)'s `ordering-fulfilment-saga` endpoint
+takes MassTransit's Entity Framework outbox —
+`AddEntityFrameworkOutbox<OrderingDbContext>` with
+`UseEntityFrameworkOutbox<OrderingDbContext>(context)` on the endpoint — in
+place of `UseInMemoryOutbox`. It brings three tables into the `ordering` schema
+(`InboxState`, `OutboxState`, `OutboxMessage`), which is a **second outbox
+table set** and therefore an exception to §9.3's prohibition on one. The
+exception is this endpoint and no other; the platform's other three receive
+endpoints keep the in-memory outbox, and every application-level integration
+event still goes through §9.4's `ordering.OutboxMessages` and its dispatcher.
+
+**Why.** [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
+is a dual write. `EntityFrameworkRepository` persists the saga instance and
+`UseInMemoryOutbox` buffers the messages that transition sends, and the buffer
+flushes **after** the repository has committed. A crash in that window leaves
+the instance advanced and its commands never sent. Concretely, for a
+`StockReserved` arriving in `AwaitingStock`: the instance moves to
+`AwaitingPayment` and commits, `AuthorisePayment` and the `PaymentTimeout`
+schedule are both still in the buffer, the process dies — and the order sits
+in `AwaitingPayment` with stock reserved, no authorisation requested and **no
+timeout to rescue it**, because the schedule was in the same buffer.
+
+**The redelivery does not rescue it either, and that is what made this worth an
+ADR rather than a fix.** §9.5's `InboxFilter` writes its row after the consumer
+returns, so the same crash leaves no row and the message is redelivered — but
+the instance has already moved on, so no transition accepts the event. It
+reaches `OnUnhandledEvent`, which since [#117](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/117)
+enumerates the legitimate arrivals and ignores them. The window's only signal
+was a log line nothing alerts on.
+
+**§9.3's prohibition does not reach this case, and the sentence that said it
+did rested on a premise now known to be false.** §9.3 forbids a second outbox
+because "two dispatchers means two retention policies, two sets of ordering
+guarantees, and one of them will be the one nobody monitors" — an argument
+about a second **application** outbox competing with the first for the same
+job. It then exempted sagas on the grounds that routing their output through
+§9.4's outbox "would add a second staging hop with no additional guarantee".
+That was true only while the in-memory outbox was believed to be durable. It is
+not, and the alternative it dismissed is not merely more expensive — it is
+**unavailable**: the saga's timeouts are scheduled messages, the delay is a
+transport feature ([ADR-021](#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
+and no dispatcher of ours can replay a delay it never held. An application
+outbox carrying `AuthorisePayment` but not `PaymentTimeout` would close half
+the window and leave the half with no bound at all.
+
+> **The two mechanisms are not competing for one job, which is the whole of the
+> exemption.** §9.4's outbox stages what a *handler* publishes, inside §6.3's
+> transaction, and every one of Ordering's other three endpoints is durable
+> that way already — their consumers publish through it, so the in-memory
+> outbox there defers sends that have already committed. The saga is the one
+> consumer that sends on the bus directly, and this is the outbox for that.
+> Nothing is staged twice and no message can take either path.
+
+**Both inboxes stay, and they answer different questions.** `InboxFilter` is
+§9.5's long-window duplicate suppressor, pruned on §9.9's seven-day retention
+— it is what stops a redelivered `OrderPlaced` starting a **second** workflow
+hours after the first finalised, which is the defect PR-21 filed when §9.8's
+saga exemption was removed. MassTransit's `InboxState` is a short-window
+delivery record on its own duplicate-detection window, and it exists so the
+outbox filter knows which of the committed messages it has already sent.
+Retiring either one costs a guarantee the other never made.
+
+**Consequences.**
+
+- **The `ordering` schema now holds five messaging tables where the chapters
+  describe two.** MassTransit's are singular (`ordering.OutboxMessage`,
+  `ordering.InboxState`, `ordering.OutboxState`) and this platform's are plural
+  (`ordering.OutboxMessages`, `ordering.InboxMessages`). They do not collide,
+  and that is a property of MassTransit's naming rather than a decision anybody
+  took — a reader of the database sees five and should not have to work out
+  which chapter owns which.
+- **There are two retention policies, which is exactly what §9.3 warns about.**
+  `AddEntityFrameworkOutbox` registers an
+  `InboxCleanupService<OrderingDbContext>` that prunes MassTransit's tables;
+  §9.9's `RetentionPurgeService` prunes ours
+  and does not read MassTransit's at all. Folding the two together was
+  considered and refused: deleting an `InboxState` row whose outbox messages
+  have not been delivered turns a retention job into the message loss this
+  decision exists to close. The cost is a second unmonitored thing, and it is
+  taken rather than dodged.
+- **`UseBusOutbox()` is deliberately not called.** It intercepts
+  `IPublishEndpoint` and `ISendEndpointProvider` *outside* a consume context —
+  the API request path, which §9.4's application outbox already owns. Calling
+  it would put a third staging mechanism on a path that has no dual write.
+- **This is the first artefact in `Ordering.Infrastructure` whose EF model is
+  not described by an `IEntityTypeConfiguration<T>` in this repository.** The
+  three entities are MassTransit's, mapped by
+  `modelBuilder.AddTransactionalOutboxEntities()`, so §7.2's "mapping lives in
+  configuration classes" rule has one stated exception rather than a quiet one.
+- **The scaffold is unaffected and that is not luck.** §4.5's scaffold reads
+  Catalog as its template, and Catalog has no saga. A second service with one
+  inherits this decision by citing it, not by copying a file.
+- **The pre-flush window stops existing; the catch-all does not come back.**
+  #117's `OnUnhandledEvent` enumeration was justified on three arrivals it
+  could not tell apart, one of which was the pre-flush crash. That one is gone,
+  which leaves two — and a callback that answers two cases the same way is
+  still only as right as its worse one. The enumeration stays.
+
+---
+
 [← §15 CI/CD](15-cicd-deployment.md) · [Index](README.md) · [Appendix B →](appendix-b-licences.md)

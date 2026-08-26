@@ -1,5 +1,6 @@
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Outbox;
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Ordering.Domain.Orders;
 
@@ -56,6 +57,27 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
         // it. §7.2 puts mapping in these classes and never in attributes on
         // domain types, which would put EF Core in Ordering.Domain.
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrderingDbContext).Assembly);
+
+        // §9.6's transactional outbox (ADR-032), and the one part of this
+        // model that no IEntityTypeConfiguration<T> above can carry: the three
+        // entities are MassTransit's, so the line that maps them is
+        // MassTransit's too and the assembly scan never sees them. InboxState,
+        // OutboxState and OutboxMessage — singular, where this repository's own
+        // tables are plural, so the two sets share the ordering schema without
+        // colliding.
+        //
+        // The callback overloads are deliberately not used. The entity type is
+        // MassTransit.EntityFrameworkCoreIntegration.OutboxMessage and this
+        // file already imports Common.Infrastructure.Outbox.OutboxMessage, so
+        // naming it would be CS0104; the parameterless form needs only the
+        // MassTransit namespace the extension methods live in.
+        //
+        // ConfigureConventions' 400-character string default does not reach
+        // these: MassTransit sets every length explicitly — nvarchar(max) for
+        // the body, headers and message type, 256 for the addresses — so the
+        // convention loses to an explicit call rather than silently truncating
+        // a serialised message. Measured against the built model, not assumed.
+        modelBuilder.AddTransactionalOutboxEntities();
     }
 
     /// <summary>
