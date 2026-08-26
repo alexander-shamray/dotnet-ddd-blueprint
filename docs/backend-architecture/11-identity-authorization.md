@@ -1018,8 +1018,19 @@ the client id — the same rule that put `GrantablePermissionTests` in
 | CI | Pipeline secret store, masked in logs |
 | Kubernetes | External Secrets Operator syncing from Vault / Azure Key Vault |
 
-Enable secret scanning in CI. A secret committed to git is compromised even
-after the commit is reverted, and the rotation must happen regardless.
+**The secret scan is live**, and this line used to say *enable secret scanning
+in CI*. It runs ahead of the build as the second half of
+[§15.1](15-cicd-deployment.md)'s first node, out of `.github/secret-scan/`,
+so what this section owes a reader is the scanner's reach rather than an
+instruction to acquire one.
+
+**It reads the working tree, not the history.** A secret committed to git is
+compromised even after the commit is reverted, and this gate cannot see it
+there — so the rotation must happen regardless, and rotating before rewriting
+history is the procedure rather than a formality.
+[`docs/secrets.md`](../secrets.md) carries that procedure and the scanner's
+other stated limit, which is that a pattern scanner finds what its rules
+describe and nothing else.
 
 ## 11.7 Extension points — multi-tenancy, personal data, compliance
 

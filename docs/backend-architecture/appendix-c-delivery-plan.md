@@ -134,7 +134,10 @@ the thing it defers to is complete.
 **The second row is the same failure in a different direction, and it is worth
 naming as such.** §8.5 was a mechanism no row delivered; §15.1's secret scan was
 a *stage* no row delivered — drawn as the first node of the pipeline, argued for
-that position in the chapter's own prose, and named as a requirement by §11.6.
+that position in the chapter's own prose, and named as a requirement by §11.6 —
+which said *enable secret scanning in CI* until this PR made that imperative
+describe a scanner that already runs, and now states the scanner's reach
+instead.
 PR-01 delivered the CI skeleton and the licence half of that node and stopped
 there, on the reading that the scan was out of its scope; `ci.yml` said so at
 the job, and the sentence "joins this job when it lands" named no PR. So the
@@ -220,10 +223,22 @@ flowchart TD
 
 **The graph stops at 27 and the two *After the plan* rows are not in it**,
 which is an omission rather than a claim about their dependencies. It is
-already filed as #137 — the roadmap and this graph both lag PR-28 — and the
-rows above carry their `Depends` column, which is the part a reader acts on. Saying so
-here is cheaper than a graph that is right for one row and silently short of
-the next.
+already filed as #137, and that issue is now **two** rows behind rather than
+one: PR-29 joined this appendix in the branch that landed the scan, so a lag
+still written as PR-28's would have been made false by the table above it.
+`/validate-blueprint` check 10 reports both, which is that check working — a
+PR added to this appendix and not carried across is the failure it names as
+the commonest.
+
+**The roadmap half is left to #137 deliberately.** That file prices a *plan* in
+ideal engineer-days and derives a calendar from the total, so a row for work
+already delivered is either an invented estimate or a restated actual, and it
+holds neither. Appendix C wins over the roadmap by the stated rule, which is
+what makes naming the lag here sufficient rather than a deferral.
+
+The rows above carry their `Depends` column, which is the part a reader acts
+on. Saying so here is cheaper than a graph that is right for one row and
+silently short of the next.
 
 The graph carries every edge in the tables above and no others. It is a
 transcription, so it can drift silently — a missing edge suggests two PRs are
