@@ -196,7 +196,7 @@ The five declarations are in `Catalog.Api.Tests`,
 `Catalog.Application.Tests`, `Common.Infrastructure.Tests`,
 `Ordering.Api.Tests` and — as `KeycloakCollection` — `Web.Bff.Tests`. That last
 is the clearest case for categorising a **collection** rather than a project:
-73 of its 77 tests never needed a container and 4 need an identity provider, so
+77 of its 81 tests never needed a container and 4 need an identity provider, so
 a project-level split would have had nothing to split. What it buys there is a
 container start rather than a fast suite — the BFF's fast half still takes
 about a minute, because §9.7's resilience tests wait on real timeouts.

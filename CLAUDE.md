@@ -1094,12 +1094,18 @@ own line rather than sending a reader to a file that does not hold it.
   time. A fallback policy reaches every host that will ever compose
   `AddCommonWebDefaults` and fails at the request. Where a rule has to survive
   code nobody has written yet, put it where that code cannot avoid it.
-- **A rule stated in four places is reversed in four places or in none.**
-  §10.2 said three times that naming no authorization policy was the only
-  correct way to declare a route public, and the claim had been copied into
-  Appendix C's rows, a compose README and a k6 script. Deny-by-default reverses
-  it. The reversal is cheap; finding the copies is not, and a copy left behind
-  is a rule that is now actively wrong rather than merely stale.
+- **A rule is reversed everywhere it is stated, or nowhere — and do not
+  write down how many places that is.** §10.2 said three times that naming no
+  authorization policy was the only correct way to declare a route public, and
+  the claim had been copied into chapters, appendix rows, a compose README, a
+  k6 comment, source comments and the tests that gave it as their reason.
+  Deny-by-default reverses it. The reversal is cheap; finding the copies is
+  not, and a copy left behind is a rule that is now actively wrong rather than
+  merely stale. This bullet carried a count of four while the decision-log
+  entry beside it was retiring that very number for being wrong twice — the
+  restated-total failure appearing inside the lesson about it.
+  [`docs/pr-decision-log.md`](docs/pr-decision-log.md) keeps the inventory;
+  this bullet keeps the rule.
 
 ### The commands
 
@@ -1292,10 +1298,13 @@ propagation was measured before the design was trusted.
 with its own collection and therefore its own container set (§12.4's stated
 price). The last is the odd one: most of its tests need no container, one class
 needs a Keycloak, so the suite is fast and then pays for an identity provider
-once — 73 tests of 77 on the fast side, which is the clearest case in the repo
-for categorising a collection rather than a project. (Measured from the stage
-TRX, not counted by eye: `docs/testing.md` had it right and this line was three
-short on both halves of the same split.)
+once — 77 tests of 81 on the fast side, which is the clearest case in the repo
+for categorising a collection rather than a project. (Measured, not counted by
+eye, and wrong twice for two different reasons: first three short on both
+halves of the same split, then left on the previous measurement while the
+solution totals beside it were updated in the same change. The four that need
+the identity provider are the constant; the fast half moves whenever the suite
+grows.)
 `Ordering.Application.Tests` is deliberately not among them — its handler
 tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
 `HttpContextCurrentUser` and a handler resolved in a bare scope has no
