@@ -65,9 +65,13 @@ curl http://localhost:5000/api/v1/catalog/products # through the gateway
 
 The edge adds `/api`, which the gateway strips before forwarding, and applies
 what the service does not: the rate limit, the CORS policy, and a correlation
-ID on every request that arrives without one — and on every request carrying
-one the edge will not adopt (§10.4). **One of the four routes has no
-service behind it yet** — `/api/v1/inventory` answers 502 until Inventory
+ID. A supplied `X-Correlation-Id` is kept when it is a plausible identifier —
+up to 128 characters of letters, digits, `-` and `_` — and any other value is
+replaced with a fresh one rather than echoed, exactly as a missing one is
+(§10.4).
+
+**One of the four routes has no service behind it yet** —
+`/api/v1/inventory` answers 502 until Inventory
 lands — and it is in the file deliberately, because the two configuration
 tests over it are what PR-17 exists to deliver. `/api/v1/orders` was one of
 three until PR-18 and `/bff` until PR-19, which is what "stops answering

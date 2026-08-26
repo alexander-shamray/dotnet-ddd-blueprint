@@ -55,7 +55,17 @@ public static class SensitiveKeys
     ];
 
     /// <summary>The never-log terms, in declaration order.</summary>
-    public static IReadOnlyList<string> All => Terms;
+    /// <remarks>
+    /// <b>A wrapper rather than the array, because <c>IReadOnlyList&lt;T&gt;</c>
+    /// is a view and not a guarantee.</b> Returning <c>Terms</c> directly lets
+    /// any caller write <c>(string[])SensitiveKeys.All</c> and rewrite the
+    /// platform's never-log vocabulary at run time — which would make the
+    /// list's whole argument false, since it is pinned by a test precisely so
+    /// that a change to it has to be deliberate. <c>Array.AsReadOnly</c> wraps
+    /// once at type initialisation and cannot be cast back; the private array
+    /// stays for the loop below, which is the only hot path.
+    /// </remarks>
+    public static IReadOnlyList<string> All { get; } = Array.AsReadOnly(Terms);
 
     /// <summary>Whether a key names something the platform must not export.</summary>
     // A foreach rather than Terms.Any(t => key.Contains(t, ...)): the lambda

@@ -56,6 +56,23 @@ public class SensitiveKeysTests
         SensitiveKeys.All.ShouldBe(Expected);
     }
 
+    [Fact]
+    public void The_vocabulary_cannot_be_rewritten_through_the_view()
+    {
+        // `IReadOnlyList<T>` is a static view, not a guarantee: a property
+        // returning the backing `string[]` can be cast straight back and
+        // mutated, which would rewrite the platform's never-log list at run
+        // time and make the pinning test above assert about something the
+        // process is no longer using.
+        //
+        // Asserted as the cast failing rather than as the type being some
+        // particular wrapper — the property's contract is that no caller can
+        // reach the array, and naming ReadOnlyCollection here would fail the
+        // day it becomes an ImmutableArray for a reason that is not a defect.
+        (SensitiveKeys.All as string[]).ShouldBeNull(
+            "a caller that can cast this back can silently widen what the platform exports");
+    }
+
     [Theory]
     [InlineData("ConnectionString")]
     [InlineData("Catalog__ConnectionString")]
