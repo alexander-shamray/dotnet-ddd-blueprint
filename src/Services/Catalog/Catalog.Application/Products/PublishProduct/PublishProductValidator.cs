@@ -18,7 +18,29 @@ public sealed class PublishProductValidator : AbstractValidator<PublishProductCo
         // 400 is raised before any key is claimed.
         RuleFor(x => x.CommandId).NotEmpty();
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.ThumbnailUrl).MaximumLength(400);
+
+        // The scheme is the point, not the length. This value is persisted and
+        // served to every reader of the catalogue (§6.5), and a renderer
+        // binding it into an href acts on whatever scheme it carries —
+        // javascript: is stored XSS and data:text/html is the same by another
+        // route. The consuming renderer cannot know the value was
+        // caller-supplied, which is why the check belongs at the boundary that
+        // does (§5.7's division: input, not a bug).
+        //
+        // Absolute, because a relative URI has no scheme to refuse and this
+        // platform serves no origin the catalogue's images would be relative
+        // to. The length rule stays: it is the column's bound (§7.2's 400-char
+        // string convention) and a 400-character https URL is legal.
+        //
+        // Not an allow-list of image hosts. That is the stronger form and it
+        // needs a list nothing in this repository has: §14.1 has no image host
+        // and §4.1 plans no media service, so the list would be empty or
+        // invented.
+        RuleFor(x => x.ThumbnailUrl)
+            .MaximumLength(400)
+            .Must(BeAnHttpUrl)
+            .WithMessage("'{PropertyName}' must be an absolute http or https URL.")
+            .When(x => x.ThumbnailUrl is not null);
 
         // The upper bound is storage's: PriceAmount is decimal(19,4), fifteen
         // integer digits, and an amount past it would reach the transaction
@@ -36,4 +58,11 @@ public sealed class PublishProductValidator : AbstractValidator<PublishProductCo
         // trailing newline, and "EUR\n" must fail here, not in the domain.
         RuleFor(x => x.Currency).NotEmpty().Matches(@"^[A-Za-z]{3}\z");
     }
+
+    // A named method rather than an inline lambda: TryCreate's out parameter
+    // does not fit the chain without wrapping it past the 120-column budget,
+    // and the rule above already carries the argument for what it refuses.
+    private static bool BeAnHttpUrl(string? candidate) =>
+        Uri.TryCreate(candidate, UriKind.Absolute, out Uri? uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 }
