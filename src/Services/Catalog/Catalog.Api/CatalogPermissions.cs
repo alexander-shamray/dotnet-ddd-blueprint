@@ -15,7 +15,8 @@ namespace Catalog.Api;
 /// which is a reason to have both and not a reason to skip either.
 ///
 /// One entry, for one endpoint. Reading is anonymous — §10.2's
-/// <c>catalog-public</c> route carries no authorization policy — so there is
+/// <c>catalog-public</c> route names YARP's reserved <c>anonymous</c> and the
+/// listing itself says <c>AllowAnonymous</c> (§11.4) — so there is
 /// no <c>catalog:read</c> here: a permission nothing requires is a name in a
 /// realm nobody can act on.
 /// </remarks>

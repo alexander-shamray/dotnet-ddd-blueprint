@@ -29,7 +29,15 @@ namespace Gateway.Api;
 /// </remarks>
 public static class GatewayRateLimiterPolicies
 {
-    /// <summary>Per-IP fixed window, for routes carrying no authorization policy.</summary>
+    /// <summary>Per-IP fixed window, for routes that admit an anonymous caller.</summary>
+    /// <remarks>
+    /// Named for the caller rather than for the route's authorization key, which
+    /// is what it used to be named for. Since ADR-030 every route names an
+    /// authorization policy, so "carrying none" no longer describes anything —
+    /// and the two registries §10.2 keeps apart both spell one of their values
+    /// <c>anonymous</c>, which is exactly the collision a definition by absence
+    /// would have hidden.
+    /// </remarks>
     public const string Anonymous = "anonymous";
 
     /// <summary>Per-subject token bucket, falling back to the address (§10.3).</summary>

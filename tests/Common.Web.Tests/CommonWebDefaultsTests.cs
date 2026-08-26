@@ -2,6 +2,7 @@ using Common.Application;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -42,6 +43,37 @@ public class CommonWebDefaultsTests
         // registers no readiness check — those come from each service's own
         // Infrastructure.
         host.Services.GetService<HealthCheckService>().ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Authorization_is_deny_by_default()
+    {
+        // §11.4's deny-by-default, and the reason it is a fallback rather than
+        // a review rule: without one, UseAuthorization evaluates NOTHING on an
+        // endpoint carrying no policy metadata, so a new *Endpoints class that
+        // omits its RequireAuthorization line is reachable with no compiler
+        // error, no ValidateOnBuild failure and no failing test.
+        //
+        // Asserted through the provider rather than off AuthorizationOptions,
+        // because the provider is what AuthorizationMiddleware asks — reading
+        // the options would pass on a fallback the middleware never consults.
+        HostApplicationBuilder builder = TelemetryHost.Builder();
+
+        builder.AddCommonWebDefaults();
+
+        using IHost host = builder.Build();
+
+        AuthorizationPolicy? fallback = await host.Services
+            .GetRequiredService<IAuthorizationPolicyProvider>()
+            .GetFallbackPolicyAsync();
+
+        fallback.ShouldNotBeNull(
+            "an endpoint with no policy metadata is otherwise reachable by anyone (§11.4)");
+
+        // And it is the authenticated-user requirement rather than an empty
+        // policy: a fallback that requires nothing is registered, resolves,
+        // and admits everybody — which passes the assertion above.
+        fallback.Requirements.OfType<DenyAnonymousAuthorizationRequirement>().ShouldHaveSingleItem();
     }
 
     [Fact]

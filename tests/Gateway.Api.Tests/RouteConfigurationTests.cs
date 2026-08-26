@@ -35,6 +35,20 @@ namespace Gateway.Api.Tests;
 public sealed class RouteConfigurationTests(GatewayFactory factory) : IClassFixture<GatewayFactory>
 {
     /// <summary>
+    /// The two policy names YARP resolves itself rather than through
+    /// <c>IAuthorizationPolicyProvider</c> (§10.2).
+    /// </summary>
+    /// <remarks>
+    /// <c>anonymous</c> is <c>AllowAnonymous</c> and <c>default</c> is the
+    /// framework's default policy. Neither is registered anywhere, so a
+    /// resolution test that did not subtract them would fail on a route file
+    /// that is correct — and registering a policy called "anonymous" to make it
+    /// pass would register one that never runs, since YARP intercepts the name
+    /// before the provider sees it.
+    /// </remarks>
+    private static readonly string[] YarpReserved = ["anonymous", "default"];
+
+    /// <summary>
     /// What each service serves, as the group its endpoints map (§4.2's
     /// composition root). Hand-written, one entry per cluster, on the same
     /// terms as <c>ContractSamples</c> in <c>Platform.IntegrationTests</c>:
@@ -100,10 +114,19 @@ public sealed class RouteConfigurationTests(GatewayFactory factory) : IClassFixt
         IAuthorizationPolicyProvider policies =
             factory.Services.GetRequiredService<IAuthorizationPolicyProvider>();
 
-        string[] named = [.. ReadRoutes().Select(r => r.AuthorizationPolicy).Where(p => p is not null).Select(p => p!)];
+        string[] named =
+        [
+            .. ReadRoutes()
+                .Select(r => r.AuthorizationPolicy)
+                .Where(p => p is not null && !YarpReserved.Contains(p, StringComparer.OrdinalIgnoreCase))
+                .Select(p => p!)
+        ];
 
         // §11.4's guard against a vacuous pass: over a route file naming no
-        // policy at all, "every name resolves" is true and worthless.
+        // policy at all, "every name resolves" is true and worthless. Sharper
+        // than it was, too — the reserved names are subtracted above, so this
+        // would now also catch a file in which every route had been switched
+        // to "anonymous".
         named.ShouldNotBeEmpty();
 
         foreach (string policy in named.Distinct(StringComparer.Ordinal))
@@ -113,6 +136,30 @@ public sealed class RouteConfigurationTests(GatewayFactory factory) : IClassFixt
             resolved.ShouldNotBeNull(
                 $"'{policy}' is named by a route and registered nowhere — AddCommonWebDefaults holds 'authenticated' " +
                 "and Program.cs holds the gateway's own (§10.2)");
+        }
+    }
+
+    /// <summary>
+    /// The authorization counterpart of the rate-limiter invariant below, and
+    /// the edge half of §11.4's deny-by-default.
+    /// </summary>
+    /// <remarks>
+    /// <c>AddCommonWebDefaults</c> sets a fallback policy, so a route naming no
+    /// policy is no longer public — it inherits "authenticated" and fails
+    /// closed rather than open. That makes this test a readability rule rather
+    /// than a security one, and it is worth having anyway: a public path by
+    /// omission and a public path by decision read identically in a route file,
+    /// and the person deciding whether a path should be public is reading this
+    /// file rather than <c>Common.Web</c>.
+    /// </remarks>
+    [Fact]
+    public void Every_route_names_an_authorization_policy()
+    {
+        foreach (RouteConfiguration route in ReadRoutes())
+        {
+            route.AuthorizationPolicy.ShouldNotBeNullOrWhiteSpace(
+                $"route '{route.Id}' names no AuthorizationPolicy, so whether it is public is a question about " +
+                "Common.Web's fallback rather than about this file (§10.2, §11.4)");
         }
     }
 

@@ -156,7 +156,12 @@ WebApplication app = builder.Build();
 // Middleware order is behaviour, not formatting (§4.2). No forwarded headers,
 // no CORS and no rate limiter: all three are the edge's, and §15.4 marks their
 // keys gateway-only. The BFF is behind that edge.
-app.UseExceptionHandler();        // §10.5 — outermost, catching middleware faults
+// §10.6's one header: nosniff on every response, including the ones
+// UseExceptionHandler writes below. Above everything, so nothing can answer
+// without it — and written from OnStarting, so the handler's clear does not
+// take it off the 500.
+app.UseSecurityHeaders();
+app.UseExceptionHandler();        // §10.5 — catches every fault below it
 app.UseCorrelationId();           // §10.4 — above everything else that logs
 
 // §10.5's promise applied to the statuses no handler produces: a challenge and
@@ -170,7 +175,15 @@ app.UseAuthorization();           // §11.4
 // hosts, the gateway and this one, because neither owns a database. The rule
 // that separates that from "readiness was never wired up" is whether the host
 // has a connection string, and this one has none.
-app.MapCommonHealthEndpoints();   // §13.5 — anonymous; kubelet carries no token
+//
+// The argument used to live only in this comment, and a comment is not a
+// mechanism: MapCommonHealthEndpoints now refuses to start a host with an
+// empty readiness set unless the host says the set is empty on purpose, which
+// is what the argument above amounts to. Catalog's synchronous hop (§9.7) is
+// deliberately NOT a readiness dependency — a BFF that reports unready when
+// Catalog is down takes itself out of rotation for a fault it is meant to
+// degrade around (§13.5).
+app.MapCommonHealthEndpoints(ownsNoDependencies: true);   // §13.5 — anonymous; kubelet carries no token
 app.MapCheckoutEndpoints();
 
 app.Run();
