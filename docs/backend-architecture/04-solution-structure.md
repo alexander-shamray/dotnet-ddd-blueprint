@@ -1091,15 +1091,17 @@ database — so `/health/ready` returns healthy as soon as the process is up,
 which is correct.
 
 **What changed is that the emptiness is now declared rather than left silent.**
-`ownsNoReadinessDependencies: true` is a claim made at the call site, and without it
-[§13.5](13-observability.md)'s helper refuses to start the host at all. The
-reason is that the probe cannot tell the two cases apart: "owns nothing to be
-ready for" and "readiness was never wired up" both answer 200, because an empty
-predicate set is a passing predicate set. The parameter is the only thing that
+`ownsNoReadinessDependencies: true` is a claim made at the call site, and
+without it [§13.5](13-observability.md)'s helper refuses to start the host at
+all. The reason is that the probe cannot tell the two cases apart: "nothing of
+mine gates readiness" and "readiness was never wired up" both answer 200,
+because an empty predicate set is a passing predicate set. The parameter is the only thing that
 separates them, and the **default is the failure** — so the burden falls on
 the host with nothing to declare rather than on the one that quietly forgot.
-Two hosts pass it — this one and the BFF, which §13.5 names as the two that
-own no database — and every service fails to start without its own checks.
+Two hosts pass it — this one and the BFF, which §13.5 names as the two whose
+dependencies do not gate readiness. Neither owns *none*: the gateway proxies
+four services and the BFF calls Catalog (§9.7). Every service fails to start
+without its own checks.
 
 What matters as much is that the probes stay **anonymous**: mapped inline after
 `UseAuthorization`, the gateway would be the one component whose own health
