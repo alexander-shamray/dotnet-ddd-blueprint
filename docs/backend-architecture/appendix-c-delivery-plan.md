@@ -131,6 +131,27 @@ the thing it defers to is complete.
 |---|---|---|---|
 | **28** | `feat(common): §8.5's idempotency behaviour and Redis store` | 12, 18, 10 | The six types §8.5 specifies — `IIdempotencyStore`, `IdempotencyEntry`, `IIdempotentCommand`, `IdempotencyBehavior<,>`, `ConcurrentRequestException`, `RedisIdempotencyStore` — the fourth pipeline seat in both services, and the two commands that opt in. **Four things were found by building it.** `AddRedisConnections` had **no caller anywhere in `src/`**: PR-12 built §8's whole Redis stack and wired it into no host, so the behaviour could not have resolved its store and this PR carries §8's deployment wiring too — Compose, both charts, both API fixtures. `IIdempotentCommand` gained the `static abstract OperationName` §8.5 had argued for and declined, because the argument for declining — that a member on the opted-in interface is a change to the contract every command implements — is true only once the interface *has* implementors, and this is the PR that declares it; deferring it would have meant paying the migration against live keys. The store went to `Common.Infrastructure.Redis` rather than the service's own Infrastructure that §8.5 printed, because `RedisDistributedLockFactory` sits one file over on the same connection with the same keying and two per-service copies of one Redis interaction drift. And the opt-in gate this PR adds **found a defect in this PR**: `PublishProductCommand` had been given the `CommandId` field and not the interface, so it compiled, passed every other test, and was dispatched unprotected — the exact silent state the gate exists for. **Two things are named as owed rather than built.** The SQL-side marker that closes the lost commit acknowledgement is still §8.5's debt, and the stored payload still carries an implicit schema for the retention, so changing an idempotent command's result shape remains a migration |
 
+**The second row is the same failure in a different direction, and it is worth
+naming as such.** §8.5 was a mechanism no row delivered; §15.1's secret scan was
+a *stage* no row delivered — drawn as the first node of the pipeline, argued for
+that position in the chapter's own prose, and named as a requirement by §11.6.
+PR-01 delivered the CI skeleton and the licence half of that node and stopped
+there, on the reading that the scan was out of its scope; `ci.yml` said so at
+the job, and the sentence "joins this job when it lands" named no PR. So the
+gap here was not a chapter the plan forgot but a **half of a node** the plan
+split without saying who owned the other half.
+
+**It had already produced the failure the callout guards against.** §15.1's own
+"the diagram is the target pipeline" callout — written to stop a reader
+inferring capability from a green pipeline — listed *the scan* among the live
+stages while `docs/secrets.md` stated in as many words that no scanner existed
+(#119). Two documents, opposite claims, and the one that reads as authoritative
+was the wrong one.
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **29** | `feat(ci): §15.1's secret scan, the other half of the first node` | 01 | `.github/secret-scan/` — twelve named rules over key blocks, provider-token shapes and credential-shaped assignments, each with its own positive case and its own near miss; an allow-list keyed on `path \| rule \| fingerprint \| reason` with **no globs and no inline pragma**; and a stale entry failing the build, on `awaiting-signal.yaml`'s argument that a list of known exceptions needs a gate asserting they are still exceptions. It joins the `licence-gate` job rather than taking one of its own, because it shares every property that job is arranged around and because §15.1 draws the two as one node. **Two limits are stated rather than closed**: it reads the working tree and not the history, so a credential committed and removed is still compromised and still invisible to it; and it is a pattern scanner, so the list of rules is the list of things it can find. **What building it cost was the allow-list**, not the rules: this repository deliberately commits local-development credentials (§14.1), and the narrow suppression — one entry per site rather than one per file — is what turns rotating one of them into a reconciliation the file lists |
+
 ## C.3 Dependency graph
 
 ```mermaid
@@ -196,6 +217,13 @@ flowchart TD
     P17 --> P27[27 Gateway compression + size limits]
     P25 --> P26[26 Optional: Consumer-driven contract]
 ```
+
+**The graph stops at 27 and the two *After the plan* rows are not in it**,
+which is an omission rather than a claim about their dependencies. It is
+already filed as #137 — the roadmap and this graph both lag PR-28 — and the
+rows above carry their `Depends` column, which is the part a reader acts on. Saying so
+here is cheaper than a graph that is right for one row and silently short of
+the next.
 
 The graph carries every edge in the tables above and no others. It is a
 transcription, so it can drift silently — a missing edge suggests two PRs are

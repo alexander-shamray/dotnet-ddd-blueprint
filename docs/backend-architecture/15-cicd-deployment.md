@@ -22,16 +22,30 @@ graph LR
 **Scanning runs before the fork, not after the build.** It sat downstream of
 the image build, which put `deploy/**` — the directory most likely to receive a
 pasted credential — on the only path that skipped it. Neither half needs a
-build to run: the secret scan reads the diff, and the licence gate reads
-`Directory.Packages.props` against [Appendix B](appendix-b-licences.md) as
-text — which is the practical argument for central pinning that
-[§4.4](04-solution-structure.md) makes on other grounds. Cheapest and least
-dependent goes first.
+build to run: the secret scan reads the working tree, and the licence gate
+reads `Directory.Packages.props` and every `.csproj`, `.props` and `.targets`
+against [Appendix B](appendix-b-licences.md) as text — which is the practical
+argument for central pinning that [§4.4](04-solution-structure.md) makes on
+other grounds. Cheapest and least dependent goes first.
+
+**The scan reads the tree and not the diff**, and the difference is one this
+node's own position argues for. A diff scan is cheaper and answers a narrower
+question — *did this change add a credential* — where the tree answers *does
+this branch carry one*, which is the question a merge is about. A credential
+added on one branch and merged on another is invisible to every diff scan
+downstream of it and visible to this one on the next pull request that touches
+anything.
 
 > **The diagram is the target pipeline, and this repository runs the left half
-> of it.** Everything up to and including the image build is live since PR-25:
-> the scan, the fork, the build, the three test stages and one `docker build`
-> per changed service — two, where the service has a migrator (§15.2).
+> of it.** Everything up to and including the image build is live: the fork,
+> the build, the three test stages and one `docker build` per changed service
+> — two, where the service has a migrator (§15.2) — since PR-25, and both
+> halves of the first node since #61 closed the secret scan. **That sentence
+> named the scan among the live stages while no scanner existed** (#119): the
+> word was doing the work of *the licence gate*, in the one callout written
+> specifically to stop a reader inferring capability from a green pipeline.
+> It is true now, which is a worse reason to leave it unexamined than a
+> better one.
 > **Signing is not** — it needs a registry and a key this
 > repository has neither of, so what runs is the half that can run rather than
 > a step that would have to be faked. Nor is any `Deploy:` node: there is no

@@ -36,6 +36,21 @@
 # files arrive CRLF unless something says otherwise.
 deploy/helm/** text eol=lf
 
+# The secret scan's allow-list joins on the canary tree's argument and on
+# nothing stronger, which is worth saying because the stronger one looks
+# available and is false. Its entries are keyed on a SHA-256 of the matched
+# text, so a CRLF checkout reads like a fingerprint hazard — and it is not:
+# the scanner decodes bytes and calls `str.splitlines()`, which treats `\r\n`
+# as a boundary and keeps neither half of it, so the same line fingerprints
+# identically either way. Measured, not assumed.
+#
+# What is left is the canary tree's actual reason: this is a gate read on a
+# Linux runner and edited on Windows, and a tree that arrives CRLF on one
+# machine and LF on another is a gate whose result depends on who checked it
+# out. The .py pair is already covered above; this is for the .txt beside
+# them, so the directory is one thing.
+.github/secret-scan/** text eol=lf
+
 # deploy/canary/ joins on the same argument as deploy/observability/ below, and
 # for once ahead of paying for it. `deploy/helm/smoke.sh` greps canary.json,
 # `canary.py` matches the alert thresholds out of a rules file, and the whole
