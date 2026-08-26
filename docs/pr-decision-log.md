@@ -149,16 +149,28 @@ every host that will ever compose it. Both are kept, and
 [ADR-030](backend-architecture/appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block)
 records why neither replaces the other.
 
-**It reaches two endpoints nobody wrote, and both had to be decided rather than
-discovered.** Routing's 405 short-circuit endpoint carries no authorization
+**It reaches three endpoints nobody wrote, and each had to be decided rather
+than discovered.** Routing's 405 short-circuit endpoint carries no authorization
 metadata, so an anonymous wrong-method request is now challenged before the
 method is considered — and an authenticated one still gets 405, which is what
 makes the pair assertable. `MapOpenApi()` carries none either, so the document
-enumerating every route and schema now requires a caller. The second cost a
+enumerating every route and schema now requires a caller. That one cost a
 second factory in two test projects: a 401 assertion alone is satisfied by a
 host that has stopped serving the document at all, so the suite needed a caller
 who gets through. **A negative assertion about an endpoint is also an assertion
 that the endpoint exists, and only the positive half carries it.**
+
+**The third is the unmatched route, and it is the widest of them.** A path that
+matched nothing is evaluated against the fallback too, so an anonymous request
+for a URL this platform does not serve answers 401 where it answered 404 — every
+path, rather than one endpoint. Found by review rather than by design, then
+measured and accepted: `HostSmokeTests` pins both halves, an authenticated
+caller still gets the 404, and a 404 is exactly the disclosure §11.4's ownership
+rule already refuses one resource at a time. **The count in the paragraph above
+read two for as long as nobody asked what else carries no metadata**, which is
+this entry's own subject arriving in the entry — a rule reversed everywhere it
+is stated or nowhere, and an endpoint inventory is where the "everywhere" is
+easiest to stop one short.
 
 **#39 arrived asking for three things and two of them were already decided.**
 Rate limiting and the request-body ceiling are the gateway's, explicitly, in

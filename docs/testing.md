@@ -172,11 +172,14 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > not, which is the drift the paragraph below is about arriving in the
 > paragraph above it.
 >
-> **Those are the runner's numbers, and `--list-tests` gives different ones.**
-> Discovery reports 82 for that project where execution reports 81, so a
-> partition quoted from `--list-tests` does not reconcile against anything else
-> here — the 1,033 is summed from `dotnet test` output, and mixing the two is
-> how this callout first came to claim 72 and 82. Quote what ran.
+> **Those are the runner's numbers, and `--list-tests` answers a different
+> question.** For this project the two now agree — discovery and execution both
+> report 91, measured rather than assumed — and they have not always: the gap
+> was 82 against 81 when this callout was written, and mixing a partition
+> quoted from `--list-tests` with a total from `dotnet test` is how it first
+> came to claim 72 and 82. The 1,033 is summed from `dotnet test` output, so
+> quote what ran. **Agreement today is a measurement and not a guarantee** —
+> which is why the rule outlives the discrepancy that produced it.
 >
 > Across the solution the split is **837 and 196 of 1,033**, and the fast half
 > runs in about 76 seconds.

@@ -1101,10 +1101,12 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > whether the test gets a container.
 >
 > Measured rather than assumed, because that propagation is load-bearing: on
-> `Common.Infrastructure.Tests`, `Category=Integration` selects the ten tests
-> of the two classes in the collection and `Category!=Integration` selects the
-> other seventy-one — 81 as the runner counts them, with no third state and
-> nothing counted twice.
+> `Common.Infrastructure.Tests`, `Category=Integration` selects the twenty
+> tests of the three classes in the collection and `Category!=Integration`
+> selects the other seventy-one — 91 as the runner counts them, with no third
+> state and nothing counted twice. Those figures read ten, two and 81 until
+> the measurement was retaken: the suite grew and the callout did not, which
+> is a restated total going stale in the chapter that owns it.
 >
 > **The fast half starts no container, and that is proved rather than
 > inferred**: `docker events --filter event=create` over a solution-wide

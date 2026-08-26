@@ -1102,9 +1102,10 @@ which is correct.
 without it [§13.5](13-observability.md)'s helper refuses to start the host at
 all. The reason is that the probe cannot tell the two cases apart: "nothing of
 mine gates readiness" and "readiness was never wired up" both answer 200,
-because an empty predicate set is a passing predicate set. The parameter is the only thing that
-separates them, and the **default is the failure** — so the burden falls on
-the host with nothing to declare rather than on the one that quietly forgot.
+because an empty predicate set is a passing predicate set. The parameter is the
+only thing that separates them, and the **default is the failure** — so the
+burden falls on the host with nothing to declare rather than on the one that
+quietly forgot.
 Two hosts pass it — this one and the BFF, which §13.5 names as the two whose
 dependencies do not gate readiness. Neither owns *none*: the gateway proxies
 four services and the BFF calls Catalog (§9.7). Every service fails to start
