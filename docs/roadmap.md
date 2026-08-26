@@ -3,9 +3,23 @@
 **How long the blueprint takes to build, and what the schedule rests on.**
 
 [Appendix C](backend-architecture/appendix-c-delivery-plan.md) sequences the
-work into 27 pull requests and fixes their dependencies. It says what to build
-and in what order; it does not say how long. This roadmap attaches a number to
-each of those pull requests and derives a calendar from them.
+work into independently reviewable pull requests and fixes their dependencies.
+It says what to build and in what order; it does not say how long. This roadmap
+attaches a number to each pull request in the plan that appendix sequences, and
+derives a calendar from them.
+
+**The plan is not the whole of Appendix C, and the difference is the one thing
+this file does not price.** The appendix has since grown an *After the plan*
+section — rows for work no numbered row covered, written after the plan was
+already complete — and those rows carry no estimate here. *After the plan*
+below says why, and says it as a decision rather than leaving a hole.
+
+**The count that used to open this paragraph is gone rather than corrected.**
+It said 27, which is the number of rows Appendix C's own prose counts above
+that section, and it was read here as a total for the appendix. A figure that
+is true of one part of a document and false of the document is worse than
+none. What a reader can check is that the rows below are those rows, title for
+title and phase for phase, and that check needs no numeral in front of it.
 
 It restates nothing. Every title below is Appendix C's title verbatim, every
 dependency is Appendix C's dependency, and where the two disagree Appendix C is
@@ -13,7 +27,7 @@ right — this file is an estimate laid over a plan, not a second plan.
 
 | | |
 |---|---|
-| **Scope** | PR-01 … PR-25 and PR-27. PR-26 is optional and conditional, and is priced separately below rather than counted |
+| **Scope** | PR-01 … PR-25 and PR-27. PR-26 is optional and conditional, and is priced separately below rather than counted. Appendix C's *After the plan* rows are outside this scope entirely and carry no estimate at all |
 | **Total** | **99 ideal engineer-days** |
 | **Calendar** | **29 weeks** — roughly six and a half months |
 | **Critical path** | 54 ideal days, so no amount of staffing beats about 1.8× |
@@ -164,9 +178,10 @@ capabilities are four lines together, and the day priced the decisions in
 front of them: a body-size limit needed a number nobody had chosen — one
 mebibyte — and turning compression on at the edge needed the `EnableForHttps`
 argument made where an ADR could hold it, which is
-[ADR-020](backend-architecture/appendix-a-adrs.md). **A day is what an argument
-costs when the code is already obvious**, and pricing it at zero because the
-diff is small is how design decisions end up taken by whoever types first.
+[ADR-020](backend-architecture/appendix-a-adrs.md#adr-020--the-edge-compresses-over-tls-and-says-so).
+**A day is what an argument costs when the code is already obvious**, and
+pricing it at zero because the diff is small is how design decisions end up
+taken by whoever types first.
 
 What the day did not price, and what a later small-diff PR should, is the
 **tests**: the four lines needed thirteen, a whole suite of which cannot run on
@@ -247,6 +262,44 @@ records why, and Appendix C's row carries what was found. That is worth a line
 here only because it moved the estimate's shape: no broker to stand up and no
 package to adopt, against a stub that had to be corrected in four places before
 anything could be verified against it.
+
+### After the plan
+
+Appendix C's plan is complete, and it has since grown rows for work no numbered
+row covered. They are listed here so that a reader comparing the two documents
+finds nothing missing — **and they carry no estimate, which is a stated
+decision rather than a gap.**
+
+| PR | Title | Est. | Cum. | Week |
+|---|---|---|---|---|
+| **28** | `feat(common): §8.5's idempotency behaviour and Redis store` | — | — | — |
+| **29** | `feat(ci): §15.1's secret scan, the other half of the first node` | — | — | — |
+| **30** | `fix(ordering): the saga's transactional outbox` | — | — | — |
+
+**Nothing in this file would produce a number for them.** Every estimate above
+was quoted before any code existed, against a specification that was already
+finished, and *What these numbers are* says outright that none has since been
+re-priced against a pull request that has actually landed. **Not one of these
+three was priced before it was built** — PR-28 and PR-29 were rowed after they
+landed, and PR-30 is rowed by the pull request doing the work — so a figure
+here would be either invented, which the *Basis* section's own terms forbid
+because an invented day is not an argument about relative size, or an actual
+restated as a forecast, which makes the column mean two different things
+depending on which row is being read. There is no rule in this file that
+converts one into the other, and writing one for the occasion would be the
+invention wearing a procedure.
+
+**PR-26 is the near case and does not supply that rule.** Its four days are a
+real estimate that stayed out of the total, and they are legitimate for the one
+reason these rows cannot borrow: it was priced before it was taken, like every
+other row on this page. An estimate quoted after delivery is a different kind
+of claim, whatever column it is written in.
+
+**They still cost days, and the days were real.** What is claimed here is that
+this file cannot say how many — not that the work was free, and not that the
+total is right in spite of them. Whoever re-prices this roadmap against
+delivered work is the person who can fill this table in, and *What these
+numbers are* already names that as the one thing that should move the total.
 
 ## Milestones
 
@@ -368,10 +421,24 @@ PR-11 and PR-12 are the delivered pull requests that do **not** move if the
 domain changes, and both were built that way deliberately: the scaffold
 copies the service template and excludes Catalog's slice, so it names no
 aggregate, no command and no endpoint (§4.5) — and the Redis helpers are
-shared mechanism in `Common.Infrastructure`, wired to no service at all
-(§8). That is seven of the 99 days taken off this risk rather than added to
-it — small, and worth stating, because these are the only places where a
-landed PR has narrowed the largest item on this page.
+shared mechanism in `Common.Infrastructure`, naming no aggregate, no key and
+no cache entry that belongs to any one service
+([§8](backend-architecture/08-caching-redis.md)). That is seven of the 99 days
+taken off this risk rather than added to it — small, and worth stating,
+because these are the only places where a landed PR has narrowed the largest
+item on this page.
+
+**That parenthetical used to read "wired to no service at all", and PR-28
+falsified it.** Both `Catalog.Infrastructure` and `Ordering.Infrastructure`
+now call `AddRedisConnections(configuration)`; Appendix C's PR-28 row names
+that wiring as a deliverable, because PR-12 had built the whole stack and left
+it with no caller anywhere in `src/`. **The seven days do not move, which is
+why the sentence is reworded rather than deleted.** What makes PR-12
+domain-proof is that its helpers name nothing a domain owns — the namespaces
+are parameterised by service and the TTL rule is arithmetic — not that nothing
+had called them. Being wired into two services it knows nothing about
+demonstrates the property rather than costing it, and the state claim was
+never the argument.
 
 **Testcontainers and Docker on the build agent.** Priced into PR-08 as one day
 of first-time cost, which assumes the agent can run containers at all. If it
@@ -410,9 +477,19 @@ still the only suite in the solution that starts an identity provider.
 [ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)
 takes `TreatWarningsAsErrors` and `EnforceCodeStyleInBuild` from PR-01 and
 declines StyleCop. The half day it adds to PR-01 is inside that estimate. What
-is **not** priced anywhere below is the per-pull-request cost — small each time,
-24 pull requests wide — which lands as slippage spread thin rather than as a
-line item. The alternative was a sweep, which at least would have had a number.
+is **not** priced anywhere below is the per-pull-request cost — small each
+time, and paid by every pull request after PR-01 that touches C# at all —
+which lands as slippage spread thin rather than as a line item. The
+alternative was a sweep, which at least would have had a number.
+
+**The width used to be written as a count and is not any more.** It said 24,
+which works out only as PR-02 … PR-25 and was already false against the Scope
+row's own PR-27; PR-26 was taken, and Appendix C has since added the *After
+the plan* rows, none of which the sweep alternative would have skipped either.
+The predicate is checkable against the tables above and the count was
+checkable against nothing that stays still — which is the fix this file
+reaches for elsewhere, and the reason the opening paragraph no longer counts
+pull requests either.
 
 **Aspire.** Not adopted; Compose is the baseline
 ([§14.1](backend-architecture/14-local-development.md)) and no `Aspire.*`
