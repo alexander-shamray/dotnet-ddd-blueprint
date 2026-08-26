@@ -1889,9 +1889,23 @@ namespace Common.Infrastructure.Inbox;
 // history, and EF-based handlers can share its transaction. `DbContext` rather
 // than `OrderingDbContext`, because this filter is common code: it reaches the
 // entity through Set<T>() so one implementation serves every service.
-public sealed class InboxFilter<T>(DbContext db, TimeProvider clock) : IFilter<ConsumeContext<T>>
+public sealed class InboxFilter<T>(
+    DbContext db,
+    TimeProvider clock,
+    MessagingMetrics metrics,
+    ILogger<InboxFilter<T>> log)
+    : IFilter<ConsumeContext<T>>
     where T : class
 {
+    // LoggerMessage.Define rather than log.LogDebug, because ADR-019 makes
+    // CA1848 an error and this sits on the consume path. The type arguments
+    // bind to the template BY POSITION, not by name.
+    private static readonly Action<ILogger, string, Guid, string, Exception?> Suppressed =
+        LoggerMessage.Define<string, Guid, string>(
+            LogLevel.Debug,
+            new EventId(1, nameof(Suppressed)),
+            "Inbox dropped {MessageType} {MessageId} on {Endpoint}: already recorded as handled.");
+
     public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
     {
         Guid messageId = context.MessageId ??
@@ -1908,7 +1922,19 @@ public sealed class InboxFilter<T>(DbContext db, TimeProvider clock) : IFilter<C
                 context.CancellationToken);
 
         if (alreadyHandled)
-            return;   // Silently drop the duplicate.
+        {
+            // Drop the duplicate — but say so. A bare `return;` here made the
+            // one path on which this platform loses a message on purpose the
+            // only path with no signal at all: an inbox hit suppressing a
+            // message the service has never seen read exactly like a genuine
+            // redelivery, from every dashboard in §13.
+            //
+            // The MessageId is on the log line and never on the counter,
+            // because it is unbounded (§13.3).
+            metrics.Suppressed(typeof(T).Name, endpoint);
+            Suppressed(log, typeof(T).Name, messageId, endpoint, null);
+            return;
+        }
 
         // Ordering matters: the handler runs FIRST, and the inbox row is only
         // written if it succeeded. Recording before would mark a message
@@ -1984,6 +2010,28 @@ services.AddScoped<DbContext>(sp => sp.GetRequiredService<OrderingDbContext>());
 > inbox removes the *common* duplicate, not every duplicate. Treating it as a
 > universal correctness guarantee rather than a partial optimisation is how
 > at-least-once delivery quietly becomes at-most-once thinking.
+
+> **The key this suppresses on is chosen by whoever published the message.**
+> §9.1 makes the envelope `MessageId` and the transport header one GUID, so a
+> publisher controls both — and the inbox is therefore only as trustworthy as
+> the set of principals that may publish to the endpoint. A junk message
+> carrying the id a legitimate one will use pre-claims the slot, and the real
+> message is dropped when it arrives: a `CancelOrder`, a `PriceChanged`, or any
+> of the seven events Notifications consumes, gone for good on §9.4's own terms.
+>
+> **This is why the drop is counted and logged rather than silent.** A
+> suppression cannot be told from a redelivery *inside* the filter — both are
+> an id already recorded — so what the signal buys is that the class is
+> measurable at all, and a suppression rate that does not match the redelivery
+> rate is the thing worth looking at. The counter is
+> `messaging.inbox.suppressed` (§13.3); the `MessageId` is on the log line
+> rather than on the series, because it is unbounded.
+>
+> **A per-service broker credential is the prerequisite, not the improvement.**
+> Until the broker has one, every publisher is the same principal to this
+> filter, so a collision between two publishers cannot be distinguished from a
+> redelivery by one. Recording the publisher's identity alongside the id is the
+> shape of the fix and it needs that credential to exist first.
 
 Idempotency is easier still when the operation is naturally idempotent —
 `MERGE`, `SET status = 'Confirmed'`, or an aggregate method that returns early

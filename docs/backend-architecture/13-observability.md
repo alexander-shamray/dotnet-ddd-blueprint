@@ -438,12 +438,14 @@ of its call sites are — two consumers and the outbox dispatcher's invoker.
 also why it is observable rather than pushed (§13.6).
 
 **The table's last column is what each source contributes to §13.7, not what it
-declares.** `MessagingMetrics` publishes a third instrument that appears nowhere
-in it: `command.domain_rejected` feeds no SLO row at all, being a business
-signal that happens to share the meter (§9.8). So the class below has three
-instruments and its row above lists two, and both are right — a reader counting
-one against the other will find a difference that is not a defect, which is why
-it is said here rather than left to be noticed.
+declares.** `MessagingMetrics` publishes two instruments that appear nowhere in
+it: `command.domain_rejected` feeds no SLO row at all, being a business signal
+that happens to share the meter (§9.8), and `messaging.inbox.suppressed` feeds
+none either — it exists so that §9.5's deliberate drop stops being the one path
+in this platform with no signal at all. So the class below has four instruments
+and its row above lists two, and both are right — a reader counting one against
+the other will find a difference that is not a defect, which is why it is said
+here rather than left to be noticed.
 
 ```csharp
 // Common.Application — registered by AddOrderingApplication (§4.2) and forced
@@ -476,16 +478,19 @@ public sealed class RequestMetrics
 // Common.Infrastructure — registered by AddOrderingInfrastructure, because
 // all three call sites are Infrastructure types (§9.4).
 //
-// The finished class. It grows in instalments, on PluggableInterfaces.All's
-// terms: Projected lands with the outbox, because ProjectionInvoker is its
-// only call site, and the other two with the consumers that record them. Two
-// instruments nothing writes to would be an empty series on a dashboard
-// rather than a signal — see Appendix D, which records where the code is.
+// It grows in instalments, on PluggableInterfaces.All's terms: Projected
+// lands with the outbox, because ProjectionInvoker is its only call site, the
+// next two with the consumers that record them, and Suppressed when §9.5's
+// silent drop was given a signal. An instrument nothing writes to would be an
+// empty series on a dashboard rather than a signal — which is the rule for
+// when one may be added, not a claim that four is the number. See Appendix D,
+// which records where the code is.
 public sealed class MessagingMetrics
 {
     private readonly Histogram<double> _deliveryLag;
     private readonly Histogram<double> _projectionLag;
     private readonly Counter<long> _rejected;
+    private readonly Counter<long> _suppressed;
 
     public MessagingMetrics(IMeterFactory factory)
     {
@@ -502,6 +507,9 @@ public sealed class MessagingMetrics
         _rejected = meter.CreateCounter<long>(
             "command.domain_rejected",
             description: "Message-borne commands the domain refused (§9.8).");
+        _suppressed = meter.CreateCounter<long>(
+            "messaging.inbox.suppressed",
+            description: "Messages the inbox dropped as already handled (§9.5).");
     }
 
     public void Delivered(string message, TimeSpan lag) =>
@@ -515,6 +523,16 @@ public sealed class MessagingMetrics
             1,
             new KeyValuePair<string, object?>("message", message),
             new KeyValuePair<string, object?>("error", error));
+
+    // Neither tag is the MessageId, and that is the constraint rather than an
+    // omission: a message id is unbounded, so it belongs in the log line the
+    // filter writes beside this and never on a series. Both of these are
+    // closed sets fixed at registration (§9.8).
+    public void Suppressed(string message, string endpoint) =>
+        _suppressed.Add(
+            1,
+            new KeyValuePair<string, object?>("message", message),
+            new KeyValuePair<string, object?>("endpoint", endpoint));
 }
 ```
 
