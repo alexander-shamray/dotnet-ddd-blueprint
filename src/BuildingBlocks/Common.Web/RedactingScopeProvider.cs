@@ -40,7 +40,7 @@ namespace Common.Web;
 /// in every host, but taken as a parameter so the wrapping is testable.
 /// </param>
 public sealed class RedactingScopeProvider(IExternalScopeProvider inner, bool ownsInner = false)
-    : IExternalScopeProvider, IDisposable
+    : IExternalScopeProvider, IDisposable, IAsyncDisposable
 {
     /// <summary>
     /// Registers this wrapper as the container's <see cref="IExternalScopeProvider"/>,
@@ -159,8 +159,43 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner, bool ow
     /// </remarks>
     public void Dispose()
     {
-        if (ownsInner && _inner is IDisposable disposable)
-            disposable.Dispose();
+        if (!ownsInner)
+            return;
+
+        // A provider implementing only IAsyncDisposable is disposed
+        // synchronously here rather than skipped. The container prefers
+        // DisposeAsync and falls back to this one, so a wrapper that handled
+        // only IDisposable would leave an async-only inner provider undisposed
+        // on the synchronous path and never notice.
+        switch (_inner)
+        {
+            case IDisposable disposable:
+                disposable.Dispose();
+                break;
+            case IAsyncDisposable asyncDisposable:
+                asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Disposes the wrapped provider asynchronously when this wrapper created
+    /// it, preferring <see cref="IAsyncDisposable"/> as the container does.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (!ownsInner)
+            return;
+
+        switch (_inner)
+        {
+            case IAsyncDisposable asyncDisposable:
+                await asyncDisposable.DisposeAsync();
+                break;
+            case IDisposable disposable:
+                disposable.Dispose();
+                break;
+        }
     }
 
     private const string Redacted = "[redacted]";

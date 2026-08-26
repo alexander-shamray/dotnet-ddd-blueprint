@@ -311,14 +311,18 @@ public path has to say `AllowAnonymous()` — a line a reviewer can see. Absence
 and decision stop looking the same, which is the rule §10.2 already applies to
 a route file and §13.5 to a readiness set.
 
-> **A fallback reaches endpoints nobody wrote, and both of the ones it reaches
-> here are deliberate.** Routing's 405 short-circuit endpoint carries no
+> **A fallback reaches endpoints nobody wrote, and the three it reaches here
+> are all deliberate.** Routing's 405 short-circuit endpoint carries no
 > metadata, so an anonymous caller using the wrong method on a real path is
 > challenged before the method is considered — an authenticated one still gets
 > 405. `MapOpenApi()` carries none either, so the document that enumerates
-> every route and schema now requires a caller. Both follow from §11.2's
-> posture rather than from this mechanism, and both are pinned by tests that
-> assert the admitted half as well as the refused one.
+> every route and schema now requires a caller. And the policy is evaluated
+> when routing matched *nothing*, so an anonymous request for a path that does
+> not exist is a 401 rather than a 404; an authenticated one still gets the
+> 404. All three follow from §11.2's posture rather than from this mechanism,
+> and each is pinned by a test asserting the admitted half as well as the
+> refused one — a 401 on its own passes against a host that has stopped
+> routing altogether.
 
 **It does not replace the enumeration test above, and neither replaces the
 other.** The fallback is at the request; the test is at build time and names

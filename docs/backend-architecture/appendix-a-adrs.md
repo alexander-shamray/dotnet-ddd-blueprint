@@ -1580,6 +1580,15 @@ fallback is the one the request itself passes through.
 > that such a caller learns nothing. `ProxiedRouteTests` pins both halves,
 > because the 401 alone would go on passing if the route stopped existing.
 
+**The third is no endpoint at all.** A fallback policy is evaluated when
+routing matched *nothing*, so an anonymous request for a path this service does
+not have is a 401 rather than a 404 — measured, not deduced. Taken on the same
+terms: a caller with no credentials learns nothing about which paths exist, and
+a 404 is exactly the disclosure §11.4's ownership rule already refuses one
+resource at a time. An authenticated caller still gets the 404, and both halves
+are asserted, because the 401 alone would pass against a host that had stopped
+routing.
+
 **The second endpoint nobody wrote is the OpenAPI document.** `MapOpenApi()`
 carries no metadata either, so `/openapi/v1.json` now requires a caller. Taken
 on the same terms: the document enumerates every route and every schema the

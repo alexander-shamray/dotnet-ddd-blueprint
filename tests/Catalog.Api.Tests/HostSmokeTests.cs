@@ -177,6 +177,42 @@ public class HostSmokeTests(HostSmokeTests.UnreachableInfrastructureFactory fact
     }
 
     [Fact]
+    public async Task An_unknown_path_is_challenged_rather_than_missing()
+    {
+        // The third endpoint nobody wrote. A fallback policy is evaluated even
+        // when routing matched NOTHING, so an anonymous request for a path
+        // that does not exist is a 401 rather than a 404 — measured, and
+        // accepted on §11.2's terms: a caller with no credentials learns
+        // nothing about which paths this service has, which is the same
+        // argument the 405 pair and the OpenAPI document already carry.
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response =
+            await client.GetAsync("/v1/no-such-path", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task An_unknown_path_is_a_404_to_a_caller()
+    {
+        // The half that makes the one above an assertion about authorization
+        // rather than about routing: with a caller, the same request is the
+        // 404 it always was. Without this, "401" would pass just as happily
+        // against a host that had stopped routing altogether.
+        using AuthenticatedUnreachableFactory authenticated = new();
+        using HttpClient client = authenticated.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/v1/no-such-path");
+        request.Headers.Add(TestAuthHandler.UserHeader, Guid.CreateVersion7().ToString());
+
+        HttpResponseMessage response =
+            await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task OpenApi_document_is_not_anonymous()
     {
         // MapOpenApi carries no authorization metadata of its own, so it is

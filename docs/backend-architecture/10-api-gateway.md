@@ -1081,7 +1081,10 @@ public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder ap
 {
     ArgumentNullException.ThrowIfNull(app);
 
-    return app.Use((context, next) =>
+    // The RequestDelegate overload, not the Func<Task> one: the parameterless
+    // spelling reads better and allocates a closure and a wrapper per request,
+    // on a middleware every request traverses.
+    return app.Use((HttpContext context, RequestDelegate next) =>
     {
         // A static callback with the response passed as state: the closure
         // would otherwise capture `context` and allocate once per request.
@@ -1099,7 +1102,7 @@ public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder ap
             },
             context.Response);
 
-        return next();
+        return next(context);
     });
 }
 ```

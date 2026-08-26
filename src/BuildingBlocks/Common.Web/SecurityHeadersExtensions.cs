@@ -53,7 +53,12 @@ public static class SecurityHeadersExtensions
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        return app.Use((context, next) =>
+        // The RequestDelegate overload, not the Func<Task> one. The
+        // parameterless spelling reads better and allocates a closure and a
+        // wrapper per request, which contradicts ADR-031's own claim that this
+        // middleware adds nothing per request — on a middleware every request
+        // traverses, outermost.
+        return app.Use((HttpContext context, RequestDelegate next) =>
         {
             // A static callback with the response passed as state: the closure
             // would otherwise capture `context` and allocate once per request.
@@ -71,7 +76,7 @@ public static class SecurityHeadersExtensions
                 },
                 context.Response);
 
-            return next();
+            return next(context);
         });
     }
 }

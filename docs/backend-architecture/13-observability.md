@@ -1016,7 +1016,7 @@ it.
 // Common.Web — registered by AddObservability (§13.2) as a singleton
 // IExternalScopeProvider wrapping LoggerExternalScopeProvider.
 public sealed class RedactingScopeProvider(IExternalScopeProvider inner, bool ownsInner = false)
-    : IExternalScopeProvider, IDisposable
+    : IExternalScopeProvider, IDisposable, IAsyncDisposable
 {
     // Registers this wrapper as the container's IExternalScopeProvider, around
     // whatever was registered before it — wrapping rather than deferring,
@@ -1128,10 +1128,39 @@ public sealed class RedactingScopeProvider(IExternalScopeProvider inner, bool ow
     public IDisposable Push(object? state) => _inner.Push(state);
 
     // Ownership follows creation, which is the rule the container itself uses.
+    // Both interfaces, because a provider implementing only IAsyncDisposable
+    // leaves DI tracking with its descriptor like any other and the container
+    // may take either path.
     public void Dispose()
     {
-        if (ownsInner && _inner is IDisposable disposable)
-            disposable.Dispose();
+        if (!ownsInner)
+            return;
+
+        switch (_inner)
+        {
+            case IDisposable disposable:
+                disposable.Dispose();
+                break;
+            case IAsyncDisposable asyncDisposable:
+                asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                break;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!ownsInner)
+            return;
+
+        switch (_inner)
+        {
+            case IAsyncDisposable asyncDisposable:
+                await asyncDisposable.DisposeAsync();
+                break;
+            case IDisposable disposable:
+                disposable.Dispose();
+                break;
+        }
     }
 
     private const string Redacted = "[redacted]";

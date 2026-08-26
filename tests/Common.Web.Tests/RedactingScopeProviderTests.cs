@@ -272,6 +272,67 @@ public class RedactingScopeProviderTests
         built.Disposed.ShouldBeTrue("a provider this wrapper constructed is this wrapper's to dispose");
     }
 
+    /// <summary>A provider that can only be disposed asynchronously.</summary>
+    private sealed class AsyncOnlyScopeProvider : IExternalScopeProvider, IAsyncDisposable
+    {
+        private readonly LoggerExternalScopeProvider _inner = new();
+
+        public bool Disposed { get; private set; }
+
+        public void ForEachScope<TState>(Action<object?, TState> callback, TState state) =>
+            _inner.ForEachScope(callback, state);
+
+        public IDisposable Push(object? state) => _inner.Push(state);
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task An_async_only_provider_this_wrapper_built_is_disposed()
+    {
+        // `IDisposable` alone is not the contract: a provider implementing only
+        // `IAsyncDisposable` leaves DI tracking with the descriptor like any
+        // other, and a wrapper that handled only the synchronous interface
+        // would skip it in silence.
+        AsyncOnlyScopeProvider built = new();
+        ServiceCollection services = new();
+
+        services.AddSingleton<IExternalScopeProvider>(_ => built);
+        RedactingScopeProvider.WrapScopesForRedaction(services);
+
+        ServiceProvider root = services.BuildServiceProvider();
+        root.GetRequiredService<IExternalScopeProvider>().ShouldBeOfType<RedactingScopeProvider>();
+
+        await root.DisposeAsync();
+
+        built.Disposed.ShouldBeTrue("an async-only provider is still this wrapper's to dispose");
+    }
+
+    [Fact]
+    public void An_async_only_provider_is_disposed_on_the_synchronous_path_too()
+    {
+        // The container prefers DisposeAsync and falls back to Dispose, so the
+        // synchronous path has to reach an async-only inner provider as well —
+        // otherwise the leak is simply moved to whichever path the host takes.
+        AsyncOnlyScopeProvider built = new();
+        ServiceCollection services = new();
+
+        services.AddSingleton<IExternalScopeProvider>(_ => built);
+        RedactingScopeProvider.WrapScopesForRedaction(services);
+
+        ServiceProvider root = services.BuildServiceProvider();
+        root.GetRequiredService<IExternalScopeProvider>().ShouldBeOfType<RedactingScopeProvider>();
+
+        root.Dispose();
+
+        built.Disposed.ShouldBeTrue();
+    }
+
     [Fact]
     public void A_provider_the_caller_supplied_is_left_alone()
     {
