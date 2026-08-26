@@ -96,8 +96,11 @@ Directory.Packages.props     central package management, exact pins
 Platform.slnx                thirty-three projects
 coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
 .editorconfig                house style; a build input, not a hint
-.github/workflows/ci.yml     licence gate and scaffold tests, then
-                             restore/build/test/report-coverage
+.github/workflows/ci.yml     secret scan, licence gate and scaffold tests,
+                             then restore/build/test/report-coverage — plus
+                             `scaffold-build`, which renders a service and
+                             COMPILES it, because the scaffold suite reads text
+                             and an SDK in that job would cost every run
 .github/workflows/compose.yml  path-filtered smoke on deploy/compose/** —
                              config -q, up --wait, down -v, and an image build
 .github/workflows/helm.yml   path-filtered smoke on deploy/helm/** — and on
@@ -151,6 +154,8 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              that needs a required status check, and `main` is
                              not protected today
 .github/licence-gate/        the gate, its allow-list and its tests
+.github/secret-scan/         §15.1's other half since #61 — twelve rules, an
+                             allow-list of fingerprints, and its tests
 .github/closure-gate/        what a pull request SAYS it closes, against what
                              merging it WILL close. Three statements — the
                              `| Closes |` row, GitHub's own
@@ -344,10 +349,24 @@ reason.
 
 - **The licence gate** lives under `.github/` rather than a `build/` directory
   because it is CI-only and §4.1 draws no such tree. Stdlib Python, reads
-  `Directory.Packages.props` and Appendix B as text, needs no restore — which
-  is why §15.1 can put it ahead of the build. **Adding a package means adding
-  its backticked identity to Appendix B in the same change**, or the gate fails
-  the build before anything compiles.
+  `Directory.Packages.props`, every `.csproj`, `.props` and `.targets`, and
+  Appendix B, all as text, needs no restore — which is why §15.1 can put it
+  ahead of the build. **Adding a package means adding its backticked identity
+  to Appendix B in the same change**, or the gate fails the build before
+  anything compiles. It reads the project files because central pinning is a
+  convention rather than a constraint: a `PackageReference` naming its own
+  `Version`, a `VersionOverride`, a `GlobalPackageReference` or
+  `ManagePackageVersionsCentrally` set to `false` each restore a package no
+  register row was asked about (#50).
+- **The secret scan** sits beside it under `.github/` on the same argument and
+  runs in the same job, first — §15.1 draws "SCA + secret scan" as one node.
+  Twelve named rules, each with a positive case and a near miss; every
+  exception is a `path | rule | fingerprint | reason` line in
+  `allowed-secrets.txt`, never a glob and never an inline pragma, and **an
+  entry matching nothing fails the build**. It reads the working tree and not
+  the history, and it is a pattern scanner: the list of rules is the list of
+  things it can find. Both limits are stated in `docs/secrets.md` rather than
+  left to be discovered.
 - **`docs/roadmap.md`** is a schedule, not a specification, and goes stale on a
   different clock. Nothing in it states a requirement. **Where it and Appendix C
   disagree, Appendix C wins**, always. Being outside the tree, no nav footer or
@@ -412,6 +431,12 @@ green: PR-14 wrote a dispatcher test over `OutboxRows.Broker`, which leaves
 with the first contract, and nothing said a word. **A change touching
 `tests/Catalog.*` is not verified until a scaffolded service has been built**,
 which is four commands and a cleanup:
+
+**CI does this too since #72, in a `scaffold-build` job of its own**, so the
+class is caught on the pull request rather than in six months. That does not
+retire the block below: the job renders `Yankee` and builds it after the fact,
+where running these four locally is how you find out before pushing — and the
+cleanup half exists only here, because the runner discards its checkout.
 
 ```bash
 python tools/new-service/new_service.py Yankee --port 5199
@@ -489,7 +514,7 @@ the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,033 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,039 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -503,11 +528,12 @@ arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
 there are several more now — see *The commands* below, which is where the
-current set lives, and which is the only place a count of them belongs. This
-sentence used to give the figure itself, two sections above the one that
-owns it, and the two disagreed the moment a ninth suite landed. That first
-one: `py -3.12 -m unittest` in `tools/new-service` runs 82, and CI has a
-`scaffold` job for them beside `licence-gate`.
+current set lives, and which no longer states a count either — this sentence
+used to give the figure two sections above the one that owned it, and the two
+disagreed the moment a ninth suite landed; the owner has since dropped its own
+figure for the same reason. That first one: `py -3.12 -m unittest` in
+`tools/new-service` runs 84, and CI has a `scaffold` job for them beside
+`licence-gate` — plus `scaffold-build`, which compiles what they only read.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
 gate was observed red against a deliberately added forbidden reference before
@@ -1116,23 +1142,30 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 837 of 1,033, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 839 of 1,039, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
 Docker, the coverage run. This block is the short form.
 
-**Ten suites, three runners, and only one of them is `dotnet test`.** The
-scaffold's tests are Python, the chart gate is bash over `helm template`, and
-the licence gate, the observability gate, the pipeline gate, the coverage
+**Three runners, and only one of them is `dotnet test`.** The scaffold's tests
+are Python, the chart gate is bash over `helm template`, and the licence gate,
+the secret scan, the observability gate, the pipeline gate, the coverage
 reporter's suite, the canary's, the closure gate's and the review helpers' are
 Python again; none is in `Platform.slnx`, so a green solution says nothing about
-any of them. **The licence gate belongs in that count** — CI tests it and then
-runs it, which is the pattern every gate here follows — and leaving it out is
-what made this seven:
+any of them. **Each of them is tested and then run**, which is the pattern every
+gate here follows — the licence gate was once left out of this list on the
+reasoning that a gate is not a suite, and it is both.
+
+**The count that used to open this paragraph is gone.** It said seven, then ten,
+and #61's secret scan made it eleven inside the pull request that was correcting
+the sentence around it — the fourth restated total in this file to rot, after
+the callout counts, the residual grants and this file's own line count. What a
+reader can check is whether the enumeration above matches the block below and
+the jobs in `ci.yml`; that check needs no numeral in front of it.
 
 ```bash
-(cd tools/new-service && py -3.12 -m unittest)  # 82 tests, no Docker, no SDK
+(cd tools/new-service && py -3.12 -m unittest)  # 84 tests, no Docker, no SDK
 python tools/new-service/new_service.py <Name> --port <51xx>
 
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
@@ -1141,6 +1174,9 @@ HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
 
 (cd .github/licence-gate && py -3.12 -m unittest)  # then licence_gate.py
+
+(cd .github/secret-scan && py -3.12 -m unittest)
+py -3.12 .github/secret-scan/secret_scan.py       # from the repo root
 
 py -3.12 -m unittest discover -s .github/pipeline-gate
 py -3.12 .github/pipeline-gate/pipeline_gate.py filters
@@ -1156,8 +1192,7 @@ gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid
 py -3.12 -m unittest discover -s .claude/scripts   # needs bash, grep, git, jq; no network
 ```
 
-**The tenth is the review loop's own helpers, and it is the only suite whose
-subject is `.claude/`.** `test_grok_helpers.py` covers the judgements `/ship`
+**The review helpers' suite is the only one whose subject is `.claude/`.** `test_grok_helpers.py` covers the judgements `/ship`
 and the two sweeps rest on: what the usage-limit preflight calls a limit, what
 counts as a review that finished, that the ledger publishes no answer on its
 trust check's error path, that every usage-limit skip happens before a slot is
@@ -1213,7 +1248,7 @@ pinned alongside. **It shells out to the same `grep -E` the scripts call**
 rather than restating the patterns in Python's `re` — a re-implementation is a
 second specification, and a double cannot disagree with itself.
 
-**The closure gate is the only one of the ten whose *runner* needs the
+**The closure gate is the only one whose *runner* needs the
 network**, and the suite is deliberately not: the deciding takes JSON on stdin
 and the fetching is one `gh` call, which is `deploy/canary/canary.py`'s split
 one artefact over. So `unittest` runs anywhere, and the second line is the only
@@ -1267,9 +1302,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 837 of
-the 1,033 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 196, needing the daemon
+category runs a smaller suite and says which. `Category!=Integration` is 839 of
+the 1,039 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 200, needing the daemon
 exactly as before.
 
 **The integration half read 187 for two branches and the arithmetic never
@@ -1280,7 +1315,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (819) and integration (196), which is the 837 above split at the
+(18), unit (821) and integration (200), which is the 839 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
