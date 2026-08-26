@@ -326,12 +326,15 @@ namespace Common.Application;
 
 public interface IIdempotencyStore
 {
-    /// <summary>Atomically claims the key. False if it is already held.</summary>
-    Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct);
+    /// <summary>
+    /// Atomically claims the key and returns the claim token. Null if it is
+    /// already held.
+    /// </summary>
+    Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct);
 
     Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct);
-    Task CompleteAsync(string key, string payload, TimeSpan retention, CancellationToken ct);
-    Task ReleaseAsync(string key, CancellationToken ct);
+    Task CompleteAsync(string key, string claim, string payload, TimeSpan retention, CancellationToken ct);
+    Task ReleaseAsync(string key, string claim, CancellationToken ct);
 }
 
 public sealed record IdempotencyEntry(bool InProgress, string? Payload);
@@ -407,7 +410,12 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
         // for the reason "Renaming a command changes its keys" gives.
         string key = $"{Subject()}:{TCommand.OperationName}:{command.CommandId}";
 
-        if (!await store.TryClaimAsync(key, Retention, ct))
+        // The token names THIS attempt, and every write below carries it.
+        // A claim that expired under a long handler cannot then be completed
+        // or released over its successor's.
+        string? claim = await store.TryClaimAsync(key, Retention, ct);
+
+        if (claim is null)
         {
             IdempotencyEntry? existing = await store.GetAsync(key, ct);
 
@@ -431,7 +439,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             // tell apart. The one it cannot is the lost commit acknowledgement
             // below: there the work IS durable and this line permits the
             // duplicate. Releasing is the right default and not a proof.
-            await store.ReleaseAsync(key, CancellationToken.None);
+            await store.ReleaseAsync(key, claim, CancellationToken.None);
             throw;
         }
 
@@ -440,11 +448,11 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             // A refusal is rolled back by the same mechanism rather than by
             // §6.3 declining to save — see "A failed Result releases the claim"
             // below, which is where that distinction is argued.
-            await store.ReleaseAsync(key, CancellationToken.None);
+            await store.ReleaseAsync(key, claim, CancellationToken.None);
             return result;
         }
 
-        await store.CompleteAsync(key, Capture(result), Retention, CancellationToken.None);
+        await store.CompleteAsync(key, claim, Capture(result), Retention, CancellationToken.None);
         return result;
     }
 
@@ -661,6 +669,25 @@ not the transaction committed, which the next callout is about.
 > the shape of an idempotent command's result is a migration**, and this
 > paragraph is the only thing saying so.
 
+> **A claim carries a token, because a key names the work and only a token
+> names the attempt.** `TryClaimAsync` returns one and both writes take it, and
+> the store compares before it acts — one Lua script, exactly as
+> `IDistributedLock`'s release does it and for the same reason: a check and an
+> act that are two operations are two operations the claim can expire between.
+> Without it every claim wrote the same marker, so neither write could tell
+> *this* attempt's claim from a successor's, and an attempt outliving its own
+> retention overwrote or deleted a live one. The delete is the worse half:
+> overwriting corrupts the record of a duplicate, where deleting frees a
+> successor's claim while that successor is still running and admits one.
+>
+> **What the token closes is corruption, not the overrun itself.** Nothing here
+> bounds the retention against a handler's runtime — the behaviour passes 24
+> hours, so no shipped path reaches it, and nothing in the port's contract
+> stops a caller passing seconds. Past the claim's expiry a successor may claim
+> and both attempts run; the loser now fails to write rather than writing over
+> the winner. The store logs that refusal, because a write that silently did
+> nothing is the shape this whole section is about.
+
 > **The lost commit acknowledgement is the one fault the `catch` gets wrong,
 > and it is this section's debt rather than a new finding.** If `CommitAsync`
 > succeeds on the server and the connection drops before the acknowledgement,
@@ -777,10 +804,35 @@ internal sealed class RedisIdempotencyStore(
     // and no other is argued at RedisKeys (§8.3): it is also what §13.2
     // stamps on every trace, and a second source would let the Redis prefix
     // and the telemetry label disagree.
-    public async Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct) =>
-        await redis.GetDatabase().StringSetAsync(keys.Idempotency(key), InProgressMarker, retention, When.NotExists);
+    // The stored value is "{claim}:{state}", where state is the marker above
+    // or the recorded payload. The claim token is what CompleteAsync and
+    // ReleaseAsync compare on, so neither can write over an entry this
+    // attempt no longer owns.
+    public async Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct)
+    {
+        string token = Guid.CreateVersion7().ToString("N");
 
-    // GetAsync / CompleteAsync / ReleaseAsync follow the same key shaping.
+        bool claimed = await redis
+            .GetDatabase()
+            .StringSetAsync(keys.Idempotency(key), $"{token}:{InProgressMarker}", retention, When.NotExists);
+
+        return claimed ? token : null;
+    }
+
+    // Compare and act in ONE script, exactly as RedisDistributedLock's release
+    // does and for the same reason: a check and an act that are two operations
+    // are two operations the claim can expire between.
+    private const string ReleaseScript =
+        """
+        local current = redis.call('get', KEYS[1])
+        if current ~= false and string.sub(current, 1, string.len(ARGV[1])) == ARGV[1] then
+            return redis.call('del', KEYS[1])
+        end
+        return 0
+        """;
+
+    // GetAsync / CompleteAsync / ReleaseAsync follow the same key shaping,
+    // and the last two evaluate a script rather than writing directly.
 }
 ```
 

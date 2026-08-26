@@ -25,7 +25,7 @@ internal sealed class RedisIdempotencyStore(
     : IIdempotencyStore
 {
     /// <summary>
-    /// The value written on a claim, and what tells an unfinished attempt from
+    /// The state written on a claim, and what tells an unfinished attempt from
     /// a recorded outcome.
     /// </summary>
     /// <remarks>
@@ -40,24 +40,89 @@ internal sealed class RedisIdempotencyStore(
     /// </remarks>
     private const string InProgressMarker = "in-progress";
 
+    /// <summary>
+    /// What separates the claim token from the state it owns, inside one
+    /// string value.
+    /// </summary>
+    /// <remarks>
+    /// <b>A hash would have kept the two apart without a separator, and was
+    /// not taken.</b> The claim has to be a single atomic write against a key
+    /// that may not exist — <c>SET NX</c> with a TTL is one operation, where
+    /// the hash spelling is <c>HSETNX</c> plus <c>EXPIRE</c> and a claim that
+    /// dies between them is a key with no expiry at all. Keeping one string
+    /// value keeps the claim one round trip and keeps the marker argument
+    /// above intact.
+    /// <para>
+    /// The token is 32 hex characters and can therefore contain no separator,
+    /// so the split is unambiguous from the left even though a JSON payload on
+    /// the right may hold as many colons as it likes.
+    /// </para>
+    /// </remarks>
+    private const char ClaimSeparator = ':';
+
+    /// <summary>
+    /// <c>Guid.CreateVersion7().ToString("N")</c>, the spelling
+    /// <c>RedisDistributedLockFactory</c> already uses.
+    /// </summary>
+    private const int TokenLength = 32;
+
+    // Write only over what this claim still owns. GET-compare-SET as one
+    // script, for the reason RedisDistributedLock states one file over: a
+    // check and an act that are two operations are two operations the claim
+    // can expire between, and the loser then overwrites the winner's entry
+    // with no error and no log line (#127).
+    private const string CompleteScript =
+        """
+        local current = redis.call('get', KEYS[1])
+        if current == false or string.sub(current, 1, string.len(ARGV[1])) ~= ARGV[1] then
+            return 0
+        end
+        redis.call('set', KEYS[1], ARGV[2], 'PX', ARGV[3])
+        return 1
+        """;
+
+    // Delete only what this claim still owns, and this is the half of #127
+    // that is worse in kind than the overwrite: an unconditional delete frees
+    // a SUCCESSOR's claim while that successor is still running, which admits
+    // a concurrent duplicate rather than corrupting the record of one.
+    private const string ReleaseScript =
+        """
+        local current = redis.call('get', KEYS[1])
+        if current ~= false and string.sub(current, 1, string.len(ARGV[1])) == ARGV[1] then
+            return redis.call('del', KEYS[1])
+        end
+        return 0
+        """;
+
     private static readonly Action<ILogger, string, Exception?> ReleaseFailed =
         LoggerMessage.Define<string>(
             LogLevel.Error,
             new EventId(1, nameof(ReleaseFailed)),
             "Idempotency claim {Key} could not be released; it will expire with its retention.");
 
-    public async Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct)
+    private static readonly Action<ILogger, string, Exception?> ClaimLost =
+        LoggerMessage.Define<string>(
+            LogLevel.Warning,
+            new EventId(2, nameof(ClaimLost)),
+            "Idempotency claim {Key} was no longer held by this attempt; the write was refused. " +
+            "The handler outran its claim's retention (§8.5).");
+
+    public async Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(retention, TimeSpan.Zero);
         ct.ThrowIfCancellationRequested();
 
+        string token = Guid.CreateVersion7().ToString("N");
+
         // SET NX — one round trip, and the atomicity the port's contract names.
         // A read-then-write here would admit both callers of the race this
         // exists to let exactly one caller win.
-        return await redis
+        bool claimed = await redis
             .GetDatabase()
-            .StringSetAsync(keys.Idempotency(key), InProgressMarker, retention, When.NotExists);
+            .StringSetAsync(keys.Idempotency(key), Value(token, InProgressMarker), retention, When.NotExists);
+
+        return claimed ? token : null;
     }
 
     public async Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct)
@@ -72,59 +137,73 @@ internal sealed class RedisIdempotencyStore(
 
         string stored = value.ToString();
 
-        return stored == InProgressMarker
+        // An entry whose shape this release cannot read is reported as in
+        // progress, so the caller is refused rather than handed a payload
+        // nothing can attribute. The case is a claim written by a release
+        // before the token landed, still inside its retention — both answers
+        // decline the duplicate commit, and this one declines to guess.
+        if (stored.Length <= TokenLength || stored[TokenLength] != ClaimSeparator)
+            return new IdempotencyEntry(true, null);
+
+        string state = stored[(TokenLength + 1)..];
+
+        return state == InProgressMarker
             ? new IdempotencyEntry(true, null)
-            : new IdempotencyEntry(false, stored);
+            : new IdempotencyEntry(false, state);
     }
 
-    public async Task CompleteAsync(string key, string payload, TimeSpan retention, CancellationToken ct)
+    public async Task CompleteAsync(
+        string key,
+        string claim,
+        string payload,
+        TimeSpan retention,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(claim);
         ArgumentNullException.ThrowIfNull(payload);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(retention, TimeSpan.Zero);
         ct.ThrowIfCancellationRequested();
 
-        // Unconditional, and re-arming the retention rather than preserving
-        // what the claim had left. The claim's window measures how long an
-        // attempt may run; this one measures how long the answer stays
-        // replayable, and starting it at the commit is what makes the stated
-        // 24 hours the retention a caller actually gets.
-        //
-        // **Unconditional also means UNOWNED, and that is #127.** Every claim
-        // writes the same InProgressMarker, so this write cannot prove the
-        // key it overwrites is still the one this attempt claimed. An attempt
-        // that outlived its own claim clobbers whatever its successor put
-        // there. Not reachable as shipped — the only caller passes a 24-hour
-        // TTL and SET NX blocks a second claim while any value is present, so
-        // it needs a handler running longer than a day — but nothing in the
-        // port's contract says the retention must outlast a handler, and a
-        // caller passing seconds gets the race with no diagnostic.
-        //
-        // RedisDistributedLock, one file over on this same connection, is
-        // token-checked for exactly this reason. The asymmetry is the part
-        // worth naming: a reader who has read that script will assume this
-        // class does the same.
-        await redis
+        // Re-arming the retention rather than preserving what the claim had
+        // left. The claim's window measures how long an attempt may run; this
+        // one measures how long the answer stays replayable, and starting it
+        // at the commit is what makes the stated 24 hours the retention a
+        // caller actually gets.
+        RedisResult written = await redis
             .GetDatabase()
-            .StringSetAsync(keys.Idempotency(key), payload, retention);
+            .ScriptEvaluateAsync(
+                CompleteScript,
+                [keys.Idempotency(key)],
+                [Owner(claim), Value(claim, payload), (long)retention.TotalMilliseconds]);
+
+        if ((long)written == 0)
+            ClaimLost(log, key, null);
     }
 
-    public async Task ReleaseAsync(string key, CancellationToken ct)
+    public async Task ReleaseAsync(string key, string claim, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(claim);
 
         // No ThrowIfCancellationRequested, and that is the one asymmetry in
         // this class. The behaviour already passes CancellationToken.None here
         // — the commonest reason to be releasing at all is the caller's own
         // cancellation, and honouring the token would abandon the release and
         // leak the claim for a day.
-        // Unowned in the same way CompleteAsync is, and worse in kind: this
-        // one DELETES. See #127 and the comment above — same reachability,
-        // same remedy, which is a compare-and-delete on a per-claim token
-        // exactly as RedisDistributedLock.ReleaseScript does it.
         try
         {
-            await redis.GetDatabase().KeyDeleteAsync(keys.Idempotency(key));
+            RedisResult deleted = await redis
+                .GetDatabase()
+                .ScriptEvaluateAsync(ReleaseScript, [keys.Idempotency(key)], [Owner(claim)]);
+
+            // Not an error and not silent either. Nothing here can recreate
+            // the claim, and the caller is already reporting a fault of its
+            // own on the path that reaches this — so the honest report is a
+            // log line naming the key, on the same terms as ReleaseFailed
+            // below.
+            if ((long)deleted == 0)
+                ClaimLost(log, key, null);
         }
         catch (RedisException e)
         {
@@ -141,4 +220,12 @@ internal sealed class RedisIdempotencyStore(
             ReleaseFailed(log, key, e);
         }
     }
+
+    // What the scripts compare against: the token AND its separator, so a
+    // token cannot match by being a prefix of a longer one. The tokens are
+    // fixed-width, so that cannot happen today — the separator is what keeps
+    // the comparison structural rather than dependent on that.
+    private static RedisValue Owner(string claim) => $"{claim}{ClaimSeparator}";
+
+    private static RedisValue Value(string claim, string state) => $"{claim}{ClaimSeparator}{state}";
 }

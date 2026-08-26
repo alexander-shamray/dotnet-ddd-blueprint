@@ -87,7 +87,13 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
         // derived from the type name, so a rename cannot silently change it.
         string key = $"{Subject()}:{TCommand.OperationName}:{command.CommandId}";
 
-        if (!await store.TryClaimAsync(key, Retention, ct))
+        // The token names THIS attempt, and every write below carries it. A
+        // claim that has expired under a long handler cannot be completed or
+        // released over its successor's — the store compares before it acts,
+        // and a lost claim is a no-op rather than a clobber (#127).
+        string? claim = await store.TryClaimAsync(key, Retention, ct);
+
+        if (claim is null)
         {
             IdempotencyEntry? existing = await store.GetAsync(key, ct);
 
@@ -111,7 +117,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             // tell apart. The one it cannot is the lost commit acknowledgement:
             // there the work IS durable and this line permits the duplicate.
             // Releasing is the right default and not a proof.
-            await store.ReleaseAsync(key, CancellationToken.None);
+            await store.ReleaseAsync(key, claim, CancellationToken.None);
             throw;
         }
 
@@ -123,11 +129,11 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             // holding the key would replay a REFUSAL — to the caller who fixed
             // their request and retried under the same key, after the condition
             // that caused it had cleared.
-            await store.ReleaseAsync(key, CancellationToken.None);
+            await store.ReleaseAsync(key, claim, CancellationToken.None);
             return result;
         }
 
-        await store.CompleteAsync(key, Capture(result), Retention, CancellationToken.None);
+        await store.CompleteAsync(key, claim, Capture(result), Retention, CancellationToken.None);
         return result;
     }
 

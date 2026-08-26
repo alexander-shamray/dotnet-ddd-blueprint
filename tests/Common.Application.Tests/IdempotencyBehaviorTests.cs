@@ -41,6 +41,47 @@ public class IdempotencyBehaviorTests
         result.Value.ShouldBe(placed);
         handlerRuns.ShouldBe(1);
         store.Calls.ShouldBe([$"claim {ExpectedKey}", $"complete {ExpectedKey}"]);
+        store.Entries[ExpectedKey].ShouldBe(new IdempotencyEntry(false, $"\"{placed}\""));
+    }
+
+    [Fact]
+    public async Task The_outcome_is_recorded_under_the_token_the_claim_returned()
+    {
+        // #127: the store can only refuse a write from an attempt that has
+        // lost its claim if the behaviour carries the token that claim minted.
+        // Nothing else in this suite would notice the behaviour inventing one
+        // — the double would refuse the write, the entry would be left in
+        // progress, and every assertion above is about the CALL rather than
+        // about what it wrote.
+        RecordingIdempotencyStore store = new();
+
+        await Behaviour(store).HandleAsync(
+            new ProtectedCommand(Command),
+            () => Task.FromResult(Result.Success(Guid.CreateVersion7())),
+            TestContext.Current.CancellationToken);
+
+        store.MintedToken.ShouldNotBeNull();
+        store.WrittenUnder.ShouldBe(store.MintedToken);
+    }
+
+    [Fact]
+    public async Task The_release_after_a_fault_carries_the_token_the_claim_returned()
+    {
+        // The other write path, and the one where a wrong token would be
+        // worse: a release that cannot prove ownership either deletes a
+        // successor's live claim or leaves this one held for a day, and which
+        // of those it is depends on the store rather than on the behaviour.
+        RecordingIdempotencyStore store = new();
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            Behaviour(store).HandleAsync(
+                new ProtectedCommand(Command),
+                () => throw new InvalidOperationException("boom"),
+                TestContext.Current.CancellationToken));
+
+        store.MintedToken.ShouldNotBeNull();
+        store.WrittenUnder.ShouldBe(store.MintedToken);
+        store.Entries.ShouldNotContainKey(ExpectedKey);
     }
 
     [Fact]
@@ -299,16 +340,22 @@ public class IdempotencyBehaviorTests
     /// </summary>
     private sealed class VanishingStore(IIdempotencyStore inner) : IIdempotencyStore
     {
-        public Task<bool> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct) =>
-            Task.FromResult(false);
+        public Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct) =>
+            Task.FromResult<string?>(null);
 
         public Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct) =>
             Task.FromResult<IdempotencyEntry?>(null);
 
-        public Task CompleteAsync(string key, string payload, TimeSpan retention, CancellationToken ct) =>
-            inner.CompleteAsync(key, payload, retention, ct);
+        public Task CompleteAsync(
+            string key,
+            string claim,
+            string payload,
+            TimeSpan retention,
+            CancellationToken ct) =>
+            inner.CompleteAsync(key, claim, payload, retention, ct);
 
-        public Task ReleaseAsync(string key, CancellationToken ct) => inner.ReleaseAsync(key, ct);
+        public Task ReleaseAsync(string key, string claim, CancellationToken ct) =>
+            inner.ReleaseAsync(key, claim, ct);
     }
 }
 
