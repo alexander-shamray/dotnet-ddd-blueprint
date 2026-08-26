@@ -513,8 +513,19 @@ PR" is no longer the right sentence: the plan being finished is not the same as
 the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
+**That section now holds more than one kind of row, and the third kind is the
+one to read before adding a fourth.** PR-28 was a mechanism the plan never
+rowed and PR-29 was half a node it split without saying who owned the other
+half — both gaps in coverage. PR-30 is neither: §9.8 printed
+`e.UseInMemoryOutbox(context)` on the saga endpoint, PR-21 built exactly that,
+and the plan delivered what it specified. **The specification was wrong.** So a
+row can now record a correction to a landed row, and what earns it one is not
+the size of the diff but whether a rule moved — ADR-032 took an exception to
+§9.3's prohibition on a second outbox table set, which is a rule four chapters
+rest on. A fix that moves no rule is a commit body, not a row.
+
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,045 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,048 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -678,7 +689,20 @@ own line rather than sending a reader to a file that does not hold it.
   authority.** No project ships a `launchSettings.json`, so `dotnet run`
   selects Production, where `RequireHttpsMetadata` is on and a plain-HTTP local
   authority is never reached. Containers set it, which is why the Compose path
-  never shows it.
+  never shows it. **And it is the wrong variable for half the hosts here**: a
+  `*.Migrator` is a generic host — `Host.CreateApplicationBuilder` — which
+  binds its environment from `DOTNET_ENVIRONMENT` and ignores the
+  `ASPNETCORE_` one entirely. Measured, because the failure is silent in the safe-looking
+  direction: a guard written on `IsDevelopment()` there is not merely
+  fail-closed, it is permanently closed, and the person debugging it goes
+  looking at the feature rather than the variable. Two more measurements sit
+  beside it. `GetValue<bool>` **throws** on an environment variable set to the
+  empty string rather than returning false, so a blank value blocks a
+  pre-upgrade hook instead of disabling a flag — `bool.TryParse` on the raw
+  string is what refuses `""`, `null`, `"1"` and `"yes"` alike. And a blank
+  environment name leaves `IsProduction()` false as well as `IsDevelopment()`,
+  so `!IsProduction()` fails **open** on exactly the value a templating mistake
+  produces. Name the environment you want, never the one you do not.
 - **A registration nothing resolves at startup fails at the first message, and
   the suite that catches it reports the symptom.** `ValidateOnBuild` never
   constructs an open generic and no host resolves a scheduler while it boots, so
@@ -1132,6 +1156,28 @@ own line rather than sending a reader to a file that does not hold it.
   restated-total failure appearing inside the lesson about it.
   [`docs/pr-decision-log.md`](docs/pr-decision-log.md) keeps the inventory;
   this bullet keeps the rule.
+- **A registration can add a background writer, and a background writer is a
+  new participant in every lock the test fixture already takes.** ADR-032's one
+  added line brought a hosted `InboxCleanupService` with it, which prunes its
+  own tables on a timer for as long as the host is up. Respawn's `ResetAsync`
+  deletes every row in the schema in its own dependency order, so two
+  concurrent multi-table deletes met and SQL Server picked a victim —
+  surfacing as an intermittent error 1205 in a command-endpoint test *with
+  nothing to do
+  with sagas*, which passed on re-run and therefore read as a flake. The
+  container half of a change reaches tests that never name it, and the only
+  thing that found this was capturing the exception rather than re-running
+  until it went green.
+- **An API name nobody has run travels further than a number nobody has
+  recomputed.** #128's fix was recorded as `AddEntityFrameworkOutbox` with
+  `UseBusOutbox` in the issue, in three decision-log entries and in a chapter
+  callout. `UseBusOutbox()` is a bus-side option that never touches a receive
+  endpoint; the call that closes the defect is
+  `UseEntityFrameworkOutbox<T>(context)`. Four sites agreed with each other for
+  months because agreeing is free and compiling is not. **A restated
+  identifier is a claim to reconcile exactly as a restated total is** — and it
+  is worse in one way, because a wrong number looks wrong eventually and a
+  plausible method name never does.
 
 ### The commands
 
@@ -1142,7 +1188,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 842 of 1,045, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 844 of 1,048, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1302,9 +1348,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 842 of
-the 1,045 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 203, needing the daemon
+category runs a smaller suite and says which. `Category!=Integration` is 844 of
+the 1,048 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 204, needing the daemon
 exactly as before.
 
 **The integration half read 187 for two branches and the arithmetic never
@@ -1315,7 +1361,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (824) and integration (203), which is the 842 above split at the
+(18), unit (826) and integration (204), which is the 844 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1465,7 +1511,7 @@ Run `/validate-blueprint` after any substantive edit.
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
   admonition syntax. Two forms are named and recurring — `**Trap — …**`
-  (19) for a mistake worth naming, and `**Decision — …**` (10), which always
+  (20) for a mistake worth naming, and `**Decision — …**` (10), which always
   points at the ADR that records it:
 
   ```markdown
@@ -2109,7 +2155,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-032) and keep the
+  (currently ADR-033) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to
