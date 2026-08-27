@@ -1,7 +1,7 @@
 ---
 description: Loop a defect audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed critical-or-high logic or execution bug, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the outbox' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent(bug-auditor), Bash(gh issue list:*), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(gh issue create:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
+allowed-tools: Read, Grep, Glob, Agent(bug-auditor), Bash(bash .claude/scripts/gh-issue-list.sh), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(gh issue create:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
 disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor)
 ---
 
@@ -480,9 +480,10 @@ or high.** Three gates, and each drops candidates the round must not file:
   exercise.
 - **Critical or high.** Everything below the bar is recorded in the round
   summary, not filed, per the calibration above.
-- **Not already tracked.** Before filing, enumerate the **whole** issue set —
-  `gh issue list --state all --limit 1000`, because the default 30 hides older
-  issues and lets a duplicate straight through — and match each finding against
+- **Not already tracked.** Before filing, enumerate the **whole** issue set
+  through `gh-issue-list.sh`, which spells `--state all --limit 1000` itself
+  because the default 30 hides older issues and lets a duplicate straight
+  through — and match each finding against
   it, **regardless of label**, since a `security` issue and a `bug` issue can
   name the same lines. An open issue **opened by the repository owner**
   blocks a re-file — as does a `wontfix` or an accepted-risk record meeting
@@ -518,7 +519,7 @@ So enumerate the candidates here, and put the suppression **decision** behind a
 helper rather than taking it in passing (#150):
 
 ```bash
-gh issue list --state all --limit 1000 --json number,title,state,labels
+bash .claude/scripts/gh-issue-list.sh
 bash .claude/scripts/gh-issue-suppresses.sh <number>
 ```
 

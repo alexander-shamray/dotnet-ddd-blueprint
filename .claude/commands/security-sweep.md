@@ -1,7 +1,7 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent(security-auditor), Bash(gh issue list:*), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(gh issue create:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
+allowed-tools: Read, Grep, Glob, Agent(security-auditor), Bash(bash .claude/scripts/gh-issue-list.sh), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(gh issue create:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
 disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(bug-auditor)
 ---
 
@@ -259,10 +259,10 @@ or above.** Three gates, and each drops candidates the round must not file:
 - **Medium or above.** Low and info findings are recorded in the round summary
   for the user to weigh, not filed. The threshold is the user's to move, not
   this command's.
-- **Not already tracked.** Before filing, enumerate the **whole** issue set —
-  `gh issue list --state all --limit 1000`, because the default 30 hides older
-  issues and lets a duplicate straight through — and match each finding against
-  it. An open issue **opened by the repository owner**
+- **Not already tracked.** Before filing, enumerate the **whole** issue set
+  through `gh-issue-list.sh`, which spells `--state all --limit 1000` itself
+  because the default 30 hides older issues and lets a duplicate straight
+  through — and match each finding against it. An open issue **opened by the repository owner**
   blocks a re-file — as does a `wontfix` or an accepted-risk record meeting
   the same test. **An issue meeting neither
   condition is not tracking and blocks nothing**; the paragraph below says why.
@@ -296,7 +296,7 @@ So enumerate the candidates here, and put the suppression **decision** behind a
 helper rather than taking it in passing (#150):
 
 ```bash
-gh issue list --state all --limit 1000 --json number,title,state,labels
+bash .claude/scripts/gh-issue-list.sh
 bash .claude/scripts/gh-issue-suppresses.sh <number>
 ```
 

@@ -128,6 +128,7 @@ DROP = SCRIPTS / "git-worktree-drop.sh"
 HOOK = SCRIPTS.parent / "hooks" / "guard-git-argv.py"
 SUPPRESSES = SCRIPTS / "gh-issue-suppresses.sh"
 ISSUE_TEXT = SCRIPTS / "gh-issue-text.sh"
+ISSUE_LIST = SCRIPTS / "gh-issue-list.sh"
 
 BASH = shutil.which("bash")
 GREP = shutil.which("grep")
@@ -1979,15 +1980,23 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
     # reaches the same fields. A deny-list passes every spelling nobody
     # thought of, which is the lesson this file already carries about the Grok
     # verdict check, arriving one gate over.
+    # **Three entries left this set in one branch, each one grant along from
+    # the one before**, and the pattern is worth naming because it took three
+    # review rounds to finish: `gh repo view` went when the suppression helper
+    # resolved the owner itself, `gh issue view` when a reviewer pointed out it
+    # returns `author` to the same session, and `gh issue list` when the next
+    # round pointed out that IT returns `author` and `body` too. Each fix cited
+    # #56 — a helper that fixes its field set does not bind a caller who still
+    # holds the raw grant — and each left the next grant standing.
+    #
+    # Measured rather than assumed: `gh issue list --json author` returns
+    # `{"author":{"login":...}}` for every issue in the repository.
     GH_GRANTS_THAT_CANNOT_REACH_A_FEED = {
         "gh pr create",
         "gh pr diff",
         "gh pr checks",
         "gh pr merge --merge",
-        "gh issue list",
-        "gh issue view",
         "gh issue create",
-        "gh repo view",
     }
 
     def granted_bash(self, path):
@@ -2929,6 +2938,20 @@ class WhatSuppressesIsDecidedByCodeNow(unittest.TestCase):
         self.addCleanup(stub.cleanup)
         return stub
 
+    @staticmethod
+    def granted_bash(path):
+        """The `Bash(...)` grants on one command's allowed-tools line.
+
+        The same reader `CopilotFeedHelpersAreTheOnlyIntake` uses, because the
+        subject here is the same: what a command may run, not what its prose
+        tells a reader to run.
+        """
+        frontmatter = path.read_text(encoding="utf-8").split("---")[1]
+        line = next(
+            (ln for ln in frontmatter.splitlines()
+             if ln.startswith("allowed-tools:")), "")
+        return re.findall(r"Bash\(([^)]*)\)", line)
+
     def test_an_issue_the_owner_opened_is_tracking(self):
         result = self.stub(owner="ada", authors={"42": "ada"}).run("42")
         self.assertEqual(0, result.returncode, result.stderr)
@@ -3000,6 +3023,52 @@ class WhatSuppressesIsDecidedByCodeNow(unittest.TestCase):
                     "Bash(bash .claude/scripts/gh-issue-suppresses.sh:*)", text
                 )
 
+    def test_no_sweep_grant_can_choose_an_issue_field(self):
+        # **The third round of the same defect, and the one that makes it a
+        # pattern rather than an oversight.** `gh repo view` went when the
+        # suppression helper resolved the owner itself; `gh issue view` went
+        # when a reviewer showed it returns `author` to the same session;
+        # `gh issue list` survived both rounds and returns `author` AND `body`
+        # for every issue at once. Each fix cited #56 and each left the next
+        # grant standing.
+        #
+        # So this asserts on the GRANT rather than on the instruction line. The
+        # case it replaces read the listing line for the substring `author`,
+        # which is a rule a reader follows — and could not see a grant one
+        # command over that made the rule irrelevant.
+        for name in ("security-sweep.md", "bug-sweep.md"):
+            for forbidden in ("gh issue list", "gh issue view", "gh repo view",
+                              "gh api"):
+                with self.subTest(command=name, grant=forbidden):
+                    self.assertNotIn(
+                        forbidden,
+                        " ".join(self.granted_bash(COMMANDS / name)),
+                        f"{forbidden} lets a caller choose fields the helpers withhold",
+                    )
+
+    def test_the_listing_helper_fixes_its_field_set(self):
+        code = "\n".join(code_lines(ISSUE_LIST.read_text(encoding="utf-8")))
+        self.assertIn("--json number,title,state,labels", code)
+        self.assertNotIn("author", code)
+        self.assertNotIn("body", code)
+        # No free parameter at all: the sweeps need one listing, always the same
+        # one, so the helper takes nothing rather than taking something narrow.
+        self.assertIn('[ "$#" -eq 0 ]', code)
+
+    def test_the_listing_helper_takes_no_arguments(self):
+        for args in (("--json", "author"), ("--state", "open"), ("1",)):
+            with self.subTest(args=args):
+                result = subprocess.run(
+                    [BASH, str(ISSUE_LIST), *args], capture_output=True, text=True
+                )
+                self.assertEqual(2, result.returncode)
+
+    def test_both_sweeps_reach_the_issue_set_only_through_the_helper(self):
+        for name in ("security-sweep.md", "bug-sweep.md"):
+            with self.subTest(command=name):
+                grants = " ".join(self.granted_bash(COMMANDS / name))
+                self.assertIn("bash .claude/scripts/gh-issue-list.sh", grants)
+
     def test_neither_sweep_can_read_an_issues_author_at_all(self):
         # **Dropping `author` from the listing was only half a control**, and
         # the other half was one command over: both sweeps kept an unrestricted
@@ -3051,26 +3120,33 @@ class WhatSuppressesIsDecidedByCodeNow(unittest.TestCase):
                 ).split("---")[1]
                 self.assertNotIn("Bash(gh repo view:*)", frontmatter)
 
-    def test_neither_sweep_lists_the_author_field_any_more(self):
-        # The enforcement half. With `author` in the listing the decision stays
-        # takeable in passing, which is the state the helper exists to end — so
-        # the field's ABSENCE is the control, and this is its gate.
+    def test_no_sweep_spells_a_raw_issue_listing(self):
+        # The instruction half, kept for what it is: a rule a reader follows.
+        # **It used to be the whole gate**, asserting only that the listing LINE
+        # did not contain `author` — which a grant one command over made
+        # irrelevant, and which the grant case above now covers. Both halves are
+        # here because they fail differently: this one catches a command that
+        # goes back to spelling its own listing, the other catches the grant
+        # that would let it choose fields.
         for name in ("security-sweep.md", "bug-sweep.md"):
             with self.subTest(command=name):
                 text = (COMMANDS / name).read_text(encoding="utf-8")
                 for line in text.splitlines():
-                    if line.startswith("gh issue list"):
-                        self.assertNotIn("author", line)
+                    self.assertFalse(
+                        line.startswith("gh issue list"),
+                        "the issue set is enumerated through gh-issue-list.sh",
+                    )
 
-    def test_both_sweeps_actually_carry_an_issue_list_line(self):
-        # The positive control for the case above, which would otherwise pass
-        # against a file that had stopped listing issues at all.
+    def test_both_sweeps_actually_enumerate_the_issue_set(self):
+        # The positive control, which would otherwise pass against a file that
+        # had stopped listing issues at all.
         for name in ("security-sweep.md", "bug-sweep.md"):
             with self.subTest(command=name):
                 text = (COMMANDS / name).read_text(encoding="utf-8")
                 self.assertTrue(
-                    any(l.startswith("gh issue list") for l in text.splitlines()),
-                    "no issue-list command found to check the field set of",
+                    any(l.startswith("bash .claude/scripts/gh-issue-list.sh")
+                        for l in text.splitlines()),
+                    "no issue-set enumeration found in this command",
                 )
 
 

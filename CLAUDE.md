@@ -1361,8 +1361,21 @@ tracked tree, and that each command's own subject stays editable. **#30** and
 **#23** — the argv guard: the `--output` write primitive in every spelling
 including the quoted one, `ext::`, command substitution, and — since the push
 check became an ALLOW-list — every push that is not one remote, one refspec
-naming a destination, and options from a fixed set. **#150** — that what suppresses a sweep finding is decided
-by a helper, and that neither sweep still holds the field it would decide with.
+naming a destination, and options from a fixed set. **#150** — that what
+suppresses a sweep finding is decided by a helper, and that **no sweep GRANT**
+can choose the field it would decide with.
+
+**That last clause moved three times in one branch, each time one grant along
+from the one just closed, and it is the clearest instance of #56 this
+repository has.** `gh repo view` went when the suppression helper resolved the
+owner itself. `gh issue view` went when a reviewer observed it returns `author`
+to the same session. `gh issue list` survived both rounds and returns `author`
+**and every issue body** at once. Each fix cited the same rule — a helper that
+fixes its field set does not bind a caller who still holds the raw grant — and
+each left the next grant standing. **The gate now asserts on the grant rather
+than on the instruction line**, because a listing line naming four fields is a
+rule a reader follows and a prefix grant beside it is what the session can
+actually run.
 
 **Two of the five are worth knowing for how their counterfactual had to be
 taken**, because "observed red" meant something different in each. #140's
