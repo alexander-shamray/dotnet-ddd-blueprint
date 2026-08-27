@@ -2206,11 +2206,23 @@ draws for the realm: verified where the platform provisions its own
 infrastructure, stated as an obligation where it does not.
 
 What is verified is local, and **which half `dotnet test` verifies is worth
-stating exactly, because it is not all of it.** The Compose broker and both
-Testcontainers fixtures build the same image, so the suites run against real
-permissions rather than a broker with none: a grant too narrow to declare a
-receive endpoint or bind a peer queue fails on the branch that narrowed it. That
-is the half that rots as endpoints are added.
+stating exactly, because it is not all of it.** Both Testcontainers fixtures
+run a broker holding the same imported permissions the Compose one does, so
+the suites run against real permissions rather than against a broker with
+none: a grant too narrow to declare a receive endpoint or bind a peer queue
+fails on the branch that narrowed it. That is the half that rots as endpoints
+are added.
+
+**They get there by two different routes, and saying they both build the
+image was wrong.** Ordering's fixture builds it, because ADR-021's
+delayed-exchange plugin leaves it no choice. Catalog's maps
+`definitions.json` and `20-commerce.conf` onto the stock image instead: it
+runs no saga, so the plugin buys it nothing, and building put its two test
+hosts — `Catalog.Api.Tests` and `Catalog.Application.Tests` — in a race for
+one Testcontainers build-context tar. The mapped paths are a second copy of
+the Dockerfile's `COPY` targets and `check_permissions.py` holds the two to
+each other, because a drifted mapping boots a broker with no definitions,
+seeds `guest`, and passes.
 
 **The negative half is not exercised by that suite, and cannot be.** §9.6's saga
 is driven by events Inventory, Payments, Shipping and Catalog publish, and none

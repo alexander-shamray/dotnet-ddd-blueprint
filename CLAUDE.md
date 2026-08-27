@@ -467,6 +467,24 @@ rm -rf src/Services/Yankee tests/Yankee.*
 git checkout -- Platform.slnx deploy/compose/
 ```
 
+**That `git checkout` reverts uncommitted work in `deploy/compose/`, including
+work you did *during* the dogfood**, and the warning below about committing
+first does not cover it. A fix made because the render exposed something — the
+case that actually happens — is in that tree and is reverted by the cleanup,
+leaving a commit whose message describes it and whose diff does not. Copy those
+files aside first, restore them after, and read `git show --stat` rather than
+your intent. Measured twice in one session, the second time while writing this
+sentence: the restore also brings the render's OWN edits back, so the
+`| Yankee API |` row returns with them.
+
+**A rendered service also cannot be committed as it stands
+([#161](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/161)).**
+It carries seven credential-shaped literals and no
+`.github/secret-scan/allowed-secrets.txt` entries, so the mandatory secret scan
+refuses it. Five of the seven predate ADR-036 — measured by rendering `Yankee`
+at both commits — so this is the scaffold's gap rather than the broker's, and
+the dogfood above is unaffected because it deletes what it rendered.
+
 The scaffold edits six tracked files as well as creating its own, so the
 `git checkout` is part of the procedure rather than tidying after it. **Commit
 before dogfooding**, though, if the PR itself changes `deploy/compose/` — that
@@ -2104,9 +2122,19 @@ file and a reviewer are the only things that do.
   tidied away: §14.1's Compose file carries
   `${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}` and
   `${BFF_CLIENT_SECRET:-local-dev-secret}`, and documents Keycloak as
-  `admin/admin` and RabbitMQ as `guest/guest`. Those defaults are what make
-  `docker compose up` work with no prior setup; the environment variable in
-  front of each is the seam that keeps them out of anything deployed.
+  `admin/admin`. Those defaults are what make `docker compose up` work with
+  no prior setup; the environment variable in front of each is the seam that
+  keeps them out of anything deployed.
+
+  **The broker is the one that is NOT fronted by a variable, and since
+  ADR-036 it is not `guest/guest` either.** Each service carries a literal
+  `{service}-svc` / `local-dev-{service}`, because those credentials are
+  imported into the image from `definitions.json` and a `${...}` in front of
+  the connection string would front only one half of a pair — the broker
+  would still expect the compiled-in password. Rotating them locally is an
+  edit to that file and a `docker compose down -v`, which is stated in
+  `deploy/compose/README.md` rather than implied by a seam that is not
+  there.
 
 ### Settled choices — do not "fix" them
 
