@@ -1905,7 +1905,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<CancelOrder>(m =>
         m.Context.Message.OrderId == orderId &&
         m.Context.Message.Reason == CancelReasons.PaymentDeclined))
-            .ShouldBeTrue();
+        .ShouldBeTrue();
 }
 
 [Fact]

@@ -421,7 +421,7 @@ public class OrderFulfilmentSagaTests
                 m.Lines.Count == 1 &&
                 m.Lines[0].ProductId == SagaContracts.Product &&
                 m.Lines[0].Quantity == 2))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
@@ -484,7 +484,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.PaymentDeclined))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
@@ -515,7 +515,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.PaymentTimeout))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
@@ -533,7 +533,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.OutOfStock))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // No compensation: nothing was reserved, so nothing is released.
             (await NotYetSent<ReleaseStock>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
@@ -554,7 +554,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.StockTimeout))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
@@ -701,14 +701,14 @@ public class OrderFulfilmentSagaTests
                 m.OrderId == orderId &&
                 m.Amount == SagaContracts.Total &&
                 m.Currency == SagaContracts.Currency))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             await Publish(harness, SagaContracts.PaymentAuthorised(orderId, "psp-ref-1"));
 
             (await Sent<ConfirmOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.PaymentReference == "psp-ref-1"))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -814,7 +814,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.CancelledAfterConfirmation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // The absence of the exception, not the absence of the effect:
             // harness.Consumed records a delivery whether the pipeline returned
@@ -864,7 +864,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.NotConfirmed))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // No CancelOrder: §3.2 gives Ordering no refund command, so there
             // is nothing to compensate WITH and pretending otherwise would
@@ -918,7 +918,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<MarkOrderShipped>(harness, m =>
                 m.OrderId == orderId &&
                 m.TrackingNumber == "TRACK-9"))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // SetCompletedWhenFinalized deletes the instance, which is why
             // §9.6's diagram has no Shipped state: it would be one no saga is
@@ -968,7 +968,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.NotDespatched))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // Not cancelled, and this is what separates an escalation from a
             // compensation: the customer has paid and the parcel may yet leave.
@@ -996,12 +996,12 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.PaymentDeclined))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.StockNotReleased))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
@@ -1065,7 +1065,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.CustomerRequest))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -1109,7 +1109,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.CustomerRequest))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             harness.Sent
                 .Select<AuthorisePayment>(Spent())
@@ -1150,7 +1150,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.PaymentDeclined))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
@@ -1183,7 +1183,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.OutOfStock))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
@@ -1227,7 +1227,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.PaymentAuthorisedDuringCompensation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // And it did not reach the error queue: the point is that this is
             // handled, not merely that it is loud.
@@ -1286,7 +1286,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.CustomerRequest))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -1300,7 +1300,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.PaymentAuthorisedDuringCompensation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // And now both halves are settled, so the saga ends. Holding the
             // instance open is the mechanism, not the outcome — a saga that
@@ -1426,7 +1426,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.PaymentTimeout))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -1510,7 +1510,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.StockNotReleased))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -1522,7 +1522,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.PaymentAuthorisedDuringCompensation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             (await saga.NotExists(orderId)).ShouldBeNull();
         }
@@ -1575,7 +1575,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.CancelledAfterConfirmation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // Not a compensation: the reservation is being picked, and telling
             // Inventory to drop it is not this machine's call to make.
@@ -1621,7 +1621,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.OutOfStock))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             OrderCancelled echo = SagaContracts.OrderCancelled(
                 orderId,
@@ -1742,7 +1742,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.PaymentDeclined))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             harness.Sent
                 .Select<ReleaseStock>(Spent())
@@ -1819,7 +1819,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.CustomerRequest))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             // Nothing escalated. The whole point of the ADR is that this
             // ordinary interleaving does not reach a human.
@@ -1993,7 +1993,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<MarkOrderShipped>(harness, m =>
                 m.OrderId == orderId &&
                 m.TrackingNumber == "TRACK-EARLY"))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ConsumeFaults<ShipmentDispatched>(harness).ShouldAllBe(e => e == null);
 
@@ -2596,7 +2596,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<CancelOrder>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == CancelReasons.CustomerRequest))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -2626,7 +2626,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.PaymentAuthorisedDuringCompensation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             (await NotYetSent<ConfirmOrder>(harness, m => m.OrderId == orderId)).ShouldBeFalse();
         }
@@ -2664,7 +2664,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.CancelledAfterConfirmation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -2707,12 +2707,12 @@ public class OrderFulfilmentSagaTests
             (await Sent<MarkOrderShipped>(harness, m =>
                 m.OrderId == orderId &&
                 m.TrackingNumber == "TRK-9"))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.CancelledAfterConfirmation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
 
             ISagaStateMachineTestHarness<OrderFulfilmentSaga, OrderFulfilmentState> saga =
                 harness.GetSagaStateMachineHarness<OrderFulfilmentSaga, OrderFulfilmentState>();
@@ -2746,7 +2746,7 @@ public class OrderFulfilmentSagaTests
             (await Sent<FlagOrderForReview>(harness, m =>
                 m.OrderId == orderId &&
                 m.Reason == ReviewReasons.CancelledAfterConfirmation))
-                    .ShouldBeTrue();
+                .ShouldBeTrue();
         }
     }
 
