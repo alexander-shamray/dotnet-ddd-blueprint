@@ -39,8 +39,9 @@ services:
 
   redis-coordination:
     image: redis:7-alpine
-    # noeviction: locks, idempotency keys and the denylist must never be
-    # evicted. Appendonly so a restart does not silently release held locks.
+    # noeviction: locks and idempotency keys must never be evicted. The
+    # {service}:denylist: namespace §8.1 reserves beside them has no writer
+    # (ADR-033). Appendonly so a restart does not silently release held locks.
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
     ports: [ "127.0.0.1:6380:6379" ]
     volumes: [ redis-coordination-data:/data ]

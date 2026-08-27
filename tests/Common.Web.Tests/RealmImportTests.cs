@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Shouldly;
 using Xunit;
@@ -10,6 +11,16 @@ namespace Common.Web.Tests;
 /// configuration, not code, which is exactly why it earns a test rather than a
 /// paragraph — nothing in the solution compiles differently when the audience
 /// mapper is missing."
+/// <para>
+/// <b>The realm this reads is §14.1's Compose realm, and there is no other in
+/// this repository.</b> Every chart points at an externally provisioned
+/// authority, so the security properties asserted below — the access-token
+/// lifetime, the absence of a client override, the absence of a refresh token
+/// — are verified for the realm the platform provisions itself and stated as
+/// obligations for one it does not. ADR-033 and ADR-034 carry that division;
+/// it is the same one §15.4 draws for every Secret. Read a green run here as
+/// "the local realm holds the shape", never as "the platform does".
+/// </para>
 /// </summary>
 /// <remarks>
 /// Here rather than in a service's suite because both halves of the agreement
@@ -189,6 +200,112 @@ public class RealmImportTests
             .ShouldBeTrue($"the README obtains a token by password grant against '{TokenClient}'");
         tokenClient.GetProperty("publicClient").GetBoolean()
             .ShouldBeTrue($"the README's grant sends no secret, and none is committed for '{TokenClient}'");
+    }
+
+    [Fact]
+    public void The_access_token_lifetime_is_the_one_the_chapter_states()
+    {
+        // §11.3 states the lifetime normatively, and this file is what makes
+        // it a fact rather than a preference: Common.Web sets no lifetime at
+        // all — its AddJwtBearer validates the `exp` Keycloak wrote — so the
+        // chapter's number and the realm's are two statements with nothing
+        // between them. Hence a literal here and no constant in Common.Web: a
+        // constant nothing reads would be a registration standing in for a
+        // control, which is the shape ADR-033 was written to withdraw.
+        //
+        // This is most of the exposure and not a tuning knob. There is no
+        // denylist consumer and no introspection call (ADR-033), so a token
+        // stolen, or a user disabled at Keycloak, keeps working for up to its
+        // remaining lifetime — anywhere from nearly zero to the whole of it,
+        // which is a bound rather than a duration. Lengthen it here and
+        // §11.3's stated window is silently wrong everywhere it is quoted.
+        //
+        // Most, not all: a lifetime check accepts a token until `exp` PLUS
+        // AuthenticationExtensions' 30-second ClockSkew, so ADR-033's
+        // revocation bound is 330 seconds and this value is the larger of the
+        // two terms rather than the whole sum. The skew is pinned where it is
+        // set — JwtAuthenticationTests asserts ClockSkew is thirty seconds —
+        // so asserting it here as well would put one number in two suites and
+        // give it two places to drift from.
+        const int statedLifetimeSeconds = 300;
+
+        Root.GetProperty("accessTokenLifespan").GetInt32().ShouldBe(
+            statedLifetimeSeconds,
+            "§11.3 states the access-token lifetime and this realm is what sets it");
+
+        // The realm carries a SECOND lifetime — accessTokenLifespanForImplicitFlow,
+        // 900 — and the assertion above says nothing about it. It is unreachable
+        // only because no client enables the implicit flow, which is a premise
+        // §11.3's stated window rests on and which nothing else here checks.
+        // Enabling implicit flow on one client would triple the exposure with
+        // every number in this file still reading 300, so the premise is
+        // asserted rather than assumed.
+        foreach (JsonElement client in Root.GetProperty("clients").EnumerateArray())
+        {
+            string id = client.GetProperty("clientId").GetString()!;
+
+            client.GetProperty("implicitFlowEnabled").GetBoolean().ShouldBeFalse(
+                $"'{id}' enables the implicit flow, whose tokens live for " +
+                "accessTokenLifespanForImplicitFlow and not for the lifetime §11.3 states");
+
+            // A client attribute beats the realm setting, so the realm value
+            // alone does not pin the window. Measured against Keycloak 26.0
+            // with this realm: adding access.token.lifespan "900" to web-app
+            // returns expires_in 900 while the realm still reads 300 — and
+            // every other assertion in this file stays green, which is what
+            // makes it worth a check rather than a sentence.
+            if (client.TryGetProperty("attributes", out JsonElement attributes) &&
+                attributes.TryGetProperty("access.token.lifespan", out JsonElement over))
+            {
+                over.GetString().ShouldBe(
+                    statedLifetimeSeconds.ToString(CultureInfo.InvariantCulture),
+                    $"'{id}' overrides the access-token lifetime, and an override that " +
+                    "disagrees with §11.3 moves the window without moving the realm value " +
+                    "this test otherwise reads");
+            }
+        }
+    }
+
+    [Fact]
+    public void The_browser_is_issued_no_refresh_token()
+    {
+        // §11.2's flow ends at the browser, so anything web-app is issued is
+        // reachable by any script on the origin. A refresh token there turns
+        // one XSS into account takeover that outlives the session and survives
+        // a password change; with none issued, the exposure is bounded by the
+        // access-token lifetime pinned above.
+        //
+        // Measured both ways against Keycloak 26.0 — the version §14.1 pins —
+        // with this realm and the `demo` login: without this attribute the
+        // token response carries a `refresh_token` and `refresh_expires_in`
+        // 1800, with it there is no `refresh_token` key at all and
+        // `refresh_expires_in` is 0. Nothing in the solution compiles
+        // differently either way, which is what earns it a test rather than a
+        // paragraph.
+        JsonElement tokenClient = Root
+            .GetProperty("clients")
+            .EnumerateArray()
+            .Single(c => c.GetProperty("clientId").GetString() == TokenClient);
+
+        // The positive half, and it is what stops the assertion below being
+        // satisfied by a client that issues the browser nothing at all. With
+        // standardFlowEnabled off there is no authorization-code flow, so
+        // there is no refresh token and no access token either — §11.2's flow
+        // would not exist, and "no refresh token reaches the browser" would be
+        // true for the wrong reason. A negative assertion about a flow is also
+        // an assertion that the flow is there.
+        tokenClient.GetProperty("standardFlowEnabled").GetBoolean().ShouldBeTrue(
+            $"'{TokenClient}' is §11.2's authorization-code client, and the refresh-token " +
+            "assertion below says nothing about a client that runs no such flow");
+
+        tokenClient
+            .GetProperty("attributes")
+            .GetProperty("use.refresh.tokens")
+            .GetString()
+            .ShouldBe(
+                "false",
+                $"'{TokenClient}' is the browser's client, and Keycloak's default is to issue it " +
+                "a refresh token");
     }
 
     [Fact]

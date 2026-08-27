@@ -29,7 +29,7 @@ namespace Ordering.Infrastructure.Persistence.Migrations;
 /// fails at the constraint rather than at the table.
 /// </para>
 /// <para>
-/// No retention index is added here and none is owed. §9.9's
+/// No retention index is added here and none is owed. §9.4's
 /// <c>RetentionPurgeService</c> does not read these tables at all, and the
 /// generated set above already carries the indexes the library's own removers
 /// read: <c>IX_InboxState_Delivered</c> for the hosted

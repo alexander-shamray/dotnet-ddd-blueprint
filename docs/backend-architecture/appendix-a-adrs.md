@@ -82,6 +82,23 @@ a load spike on the databases, which capacity planning must allow for; a lost
 coordination instance is more serious and is why it runs with persistence
 enabled.
 
+> **The token denylist named twice above is withdrawn by
+> [ADR-033](#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists),
+> and nothing here has been edited.** An ADR is superseded and never rewritten:
+> the decision this record actually took — Redis is cache and coordination and
+> never a store of record, split across two instances by eviction policy — is
+> untouched and still binding, and so is every argument for it. What moved is
+> one item in a list of what the coordination instance *holds*.
+>
+> **The Why paragraph is the part worth reading with that in mind.** It
+> justifies `noeviction` partly by "a revoked-token entry" being evicted
+> silently, and there has never been such an entry to evict: nothing has ever
+> written the `{service}:denylist:` keyspace, and §11.3's `AddJwtBearer` reads
+> no revocation list. The conclusion survives its example — a held lock and an
+> idempotency claim are both real and both must not be evicted — but the
+> example was doing more work than it could carry, which is how a keyspace with
+> no reader kept reading as a control for four PRs.
+
 ## ADR-007 — Migrations as a pre-deploy job
 
 **Decision.** Never call `Database.Migrate()` at application startup.
@@ -1750,7 +1767,7 @@ the window and leave the half with no bound at all.
 > Nothing is staged twice and no message can take either path.
 
 **Both inboxes stay, and they answer different questions.** `InboxFilter` is
-§9.5's long-window duplicate suppressor, pruned on §9.9's seven-day retention
+§9.5's long-window duplicate suppressor, pruned on §9.4's seven-day retention
 — it is what stops a redelivered `OrderPlaced` starting a **second** workflow
 hours after the first finalised, which is the defect PR-21 filed when §9.8's
 saga exemption was removed. MassTransit's `InboxState` is a short-window
@@ -1777,7 +1794,7 @@ Retiring either one costs a guarantee the other never made.
   has reached the transport, so that table drains as a consequence of delivery.
   `ordering.OutboxState` is emptier still: it belongs to the bus-side outbox
   and, with `UseBusOutbox()` not called, **nothing writes, reads or prunes it**
-  in this configuration. §9.9's `RetentionPurgeService` prunes ours and does
+  in this configuration. §9.4's `RetentionPurgeService` prunes ours and does
   not read any of the three. Folding the two together was
   considered and refused: deleting an `InboxState` row whose outbox messages
   have not been delivered turns a retention job into the message loss this
@@ -1817,7 +1834,7 @@ Retiring either one costs a guarantee the other never made.
   set. A transition that commits and then fails delivery past the endpoint's
   five retries leaves `Delivered` null for ever, so that row and the
   `OutboxMessage` rows beside it stay until somebody removes them by hand.
-  §9.9's purge does not read those tables. The volume is bounded by how often a
+  §9.4's purge does not read those tables. The volume is bounded by how often a
   message exhausts its retries and reaches the error queue — which §13.6
   pages on, so the leak has an alarm in front of it though nothing measures the
   leak itself. Stated rather than closed: a cleanup that removed undelivered
@@ -1863,6 +1880,258 @@ Retiring either one costs a guarantee the other never made.
   answers two cases the same way is still only as right as its worse one. The
   enumeration stays, and so does the default that faults everything it does
   not name.
+
+## ADR-033 — Revocation is bounded by the token lifetime, and no denylist exists
+
+**Decision.** This platform accepts a **bounded revocation window** of **330
+seconds** — the access-token lifetime of 300, stated normatively in
+[§11.3](11-identity-authorization.md), plus the 30-second `ClockSkew` a
+lifetime check adds to `exp`. Both settings are part of the bound, and only
+one of them is the realm's. There is no token denylist and no
+introspection call: a service validates signature, issuer, audience and
+lifetime locally and consults nothing else. [ADR-006](#adr-006--redis-for-cache-and-coordination-never-as-a-store-of-record)'s
+listing of "the token denylist" among Redis's contents is withdrawn. The
+`{service}:denylist:` keyspace keeps its row in [§8.1](08-caching-redis.md)'s
+table as a **reservation**, on the terms `{service}:ratelimit:` already has, and
+`RedisKeys` spells no member for it.
+
+**Why.** The claim had no consumer and read as a control. `RedisKeys.Denylist`
+existed, §8.1 gave the keyspace the strictest eviction policy in the platform,
+and ADR-006 recorded the decision — while §11.3's own prose already admitted
+that observing revocation "needs introspection or a deny list, neither of which
+this platform has". Three sites implied a mechanism the fourth denied, and a
+reviewer asking "is revocation handled" met a yes.
+
+Building the consumer instead was considered and refused on four measurements,
+not on preference. **Two of the four hosts have no Redis at all** — the gateway
+and the BFF each carry one project reference and neither calls
+`AddRedisConnections` — and the gateway is the edge every external request
+enters. A `JwtBearerEvents` handler resolves per request, so `ValidateOnBuild`
+cannot see the gap and the gateway would throw on its first authenticated
+request; making the lookup optional instead would mean the edge silently never
+checks, which is the fail-open shape §12's gate-coverage rule refuses.
+**The keyspace is per-service and the ACL enforces it**: `RedisKeys` prefixes
+with `ApplicationName` verbatim and §8.1 provisions `~{ApplicationName}:*` from
+the same value, so one revocation is N writes against a host inventory nothing
+enumerates. **There is no producer**, and no chapter specifies one — the realm's
+`web-bff` client sets `backchannel.logout.session.required` with no
+`backchannelLogoutUrl`, so a consumer shipped alone is a check that always
+misses. And a mechanism no ADR decided is a design change to raise rather than
+take.
+
+**Consequences.** Logging a user out, disabling an account, or responding to a
+stolen token at Keycloak has no effect on an already-issued access token for up
+to 330 seconds. That is now a recorded number rather than a realm default
+nobody chose, and `RealmImportTests` pins the lifetime half of it — the
+chapter's figure and the realm's are two statements about one fact, and the
+test is what keeps them from drifting apart. **Shortening the window is a realm
+edit, a chapter edit and possibly a `ClockSkew` edit**, because the bound is a
+sum: 300 from the realm and 30 from `TokenValidationParameters`, and cutting
+the lifetime alone leaves the skew where it is.
+
+> **The two halves of that number are enforced in different places, and only
+> one of them travels.** `ClockSkew` is `Common.Web`'s, set in code and pinned
+> by `JwtAuthenticationTests`, so every host that composes
+> `AddCommonWebDefaults` carries the 30 wherever it is deployed. The lifetime
+> is the realm's, and the realm this repository owns is
+> `deploy/compose/keycloak/realm-export.json` — [§14.1](14-local-development.md)'s
+> Compose realm, which is what `RealmImportTests` reads. Every chart points at
+> `https://id.example.com/realms/commerce`, an externally provisioned realm
+> this repository holds no configuration for and runs no deploy-time check
+> against, so a deployed realm can issue five-hour access tokens while every
+> sentence here still reads 300 seconds.
+>
+> **So the bound is half-guaranteed rather than local**, and saying "both
+> halves are local" — as an earlier draft of this callout did — contradicts
+> the Decision above, which is careful to say only one of the two settings is
+> the realm's.
+>
+> **That division is the one §15.4 already draws for every Secret**, and the
+> realm half is stated rather than closed for the same reason: the charts
+> create no Secrets and provision no realm, so the platform's identity provider
+> is somebody's operational input and not this repository's artefact. What this
+> repository can honestly claim is the *shape* — the settings that must hold,
+> the number they must hold at, and a test proving the one realm it owns holds
+> them. **A deployed realm owes `accessTokenLifespan` 300 and no client-level
+> `access.token.lifespan` override**; it owes no `ClockSkew`, which is not a
+> realm setting at all and is why telling an operator to configure one would
+> send them looking for something that does not exist.
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> carries that gap and the three shapes a fix could take, because a gap this
+> record merely described would be the TODO nothing re-checks.
+
+**This is the whole of the revocation story**, so a future denylist
+is a decision that supersedes this record rather than a gap someone may quietly
+fill: it would owe a producer, a consumer reachable from every host including
+the two with no Redis today, and a fan-out rule across per-service keyspaces.
+
+## ADR-034 — The browser holds an access token and no refresh token
+
+**Decision.** [§11.2](11-identity-authorization.md)'s browser client obtains a
+short-lived access token through authorization code with PKCE and is issued
+**no refresh token**. Continuity comes from silent renewal against the
+authorization endpoint, bounded by the SSO session, rather than from a refresh
+token held on the origin. The realm enforces it: the `web-app` client carries
+`use.refresh.tokens: "false"`, and `RealmImportTests` pins that it does.
+
+**Why.** A refresh token delivered to the browser must live somewhere script on
+the origin can read. One XSS, or one malicious transitive dependency in the
+bundle, then yields persistent account takeover that outlives the session and
+survives a password change — and with no revocation path
+([ADR-033](#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists))
+it survives until the refresh token's own expiry. The realm's settings made
+that concrete rather than theoretical: `revokeRefreshToken: false` and
+`refreshTokenMaxReuse: 0` against an `ssoSessionMaxLifespan` of 36,000 seconds
+meant a browser-held refresh token was reusable, never rotated, for up to ten
+hours. Removing it collapses the exposure to ADR-033's 330 seconds.
+
+**Terminating the flow in `Web.Bff` is the stronger answer and is not this
+one.** Holding the tokens server-side behind a `HttpOnly; Secure; SameSite`
+cookie is what the BFF pattern exists for, and the component is already in the
+solution. It is not taken here because it is not one decision: it needs an OIDC
+handler and a cookie stack in `Web.Bff`, antiforgery on every state-changing
+route because cookie auth reintroduces CSRF, a realm change turning `web-bff`
+from a service account into a standard-flow relying party, and a change to the
+gateway's `web-bff` route, which today requires a bearer the browser would no
+longer carry. That is an Appendix C row, and this decision is deliberately the
+smaller one that can land now. §11.5's statement that the BFF's only credential
+is its own client secret stays correct under this decision and would not survive
+that one.
+
+> **`use.refresh.tokens` is set in the local realm and in no other**, on
+> exactly ADR-033's terms: `RealmImportTests` pins the Compose realm, every
+> chart points at an externally provisioned authority, and nothing in this
+> repository validates that one. A deployed realm that leaves the attribute at
+> its default issues the browser a refresh token while this record says it does
+> not. What is decided here is that the browser must not hold one; enforcing it
+> where the realm is actually provisioned is an operational obligation this
+> repository states and cannot check.
+
+**Consequences.** The browser re-authenticates against the authorization
+endpoint every 300 seconds — the token's own lifetime, which is the renewal
+clock rather than ADR-033's 330-second acceptance bound; where the SSO session
+has ended, the user sees a login. The residual is stated rather than closed: an
+XSS still yields an access token a service will accept for up to 330 seconds,
+and §11 says so instead of implying otherwise. Local development is
+unaffected — the realm keeps
+`directAccessGrantsEnabled` on `web-app` so a developer can obtain a token with
+`curl`, which §14.1 documents as a local affordance and §11.2 now names rather
+than leaving to a realm-file description.
+
+## ADR-035 — An integration event carries identifiers, not personal data
+
+**Decision.** An integration event published to every interested consumer
+carries identifiers, not personal data — [§11.7](11-identity-authorization.md)'s
+rule, applied without exception to the contracts in `Common.Contracts`.
+`OrderConfirmed`'s `ShippingAddress` is removed and `ShippingAddressV1` is
+deleted. How Shipping obtains a delivery address is left open and belongs to
+Shipping's own PR.
+
+> **This is not a claim that the events are anonymous, and an earlier draft of
+> this record read as one.** `OrderConfirmed` still carries `CustomerId`, and a
+> resolvable pseudonymous identifier is personal data under GDPR Art. 4 — as
+> are order details linked to it. §11.7 says so itself one rule further on,
+> where erasure at the owning service means "customer identifiers replaced".
+> So the decision is narrower than "no personal data on the wire": what a
+> broadcast contract may not carry is **directly identifying or free-text**
+> personal data — a name, an email address, a postal address — the fields whose
+> only remedy is to reach every copy and delete them.
+>
+> **What makes the identifier tractable is where its resolution lives.**
+> `CustomerId` means nothing without the service that can turn it into a
+> person, so severing that link once, in the one store that owns it,
+> de-identifies every copy downstream without the erasure choreography ever
+> having to reach the broker, an outbox row or a consumer's own store. That is
+> the
+> whole of why §11.7 tells a contract to carry the identifier rather than the
+> value, and this ADR is that rule applied rather than a stronger guarantee
+> laid over it.
+>
+> **The residual is real and is not closed here.** An event stream still
+> carries linkable identifiers, so a consumer that independently resolves
+> `CustomerId` re-creates the problem in its own store, and §11.7's rules for
+> consumers are what bind it — unbuilt, like the rest of that section.
+
+> **This removal may not ride a rolling deployment, and that is
+> [ADR-026](#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)'s
+> rule rather than a new one.** `ShippingAddress` was `required`, and
+> `System.Text.Json` refuses a payload missing a required member — the same
+> mechanism §9.2 records in the *adding* direction, where a new build faults
+> every message an old build staged. Retirement is its mirror. Ordering is
+> itself a consumer here: §9.6's saga binds `Event<OrderConfirmed>`, so it
+> deserialises the whole contract even though its transition reads only
+> `OrderId`. During an overlapping rollout a new replica's `OrderConfirmed`
+> reaches an old replica that still declares the member, the message faults
+> through §9.8's retries into the error queue, and §13.6 pages.
+>
+> **So the change takes one of the two shapes ADR-026 already allows**: a
+> cutover with no overlap — which that record is careful to say is not a canary
+> and must not be called one — or a two-release retirement, the first making
+> the member optional everywhere and the second removing it. Either is a
+> deployment decision rather than a code one, which is why it is recorded here
+> and not solved above.
+>
+> **It is taken in place now because there is nothing deployed to break.** No
+> cluster has ever run this platform — the charts, the alert rules and the
+> canary are all artefacts no cluster has seen — so there is no old replica to
+> hand a reduced payload to, and the cheapest moment to change a contract's
+> shape is before anything runs it. **That is a fact with an expiry date**: the
+> first deployment ends it, and after that a comparable removal owes one of the
+> two shapes above. Recorded rather than left implicit, because "no consumer"
+> was true of *other services* and was never true of Ordering.
+
+**Why.** §9.1 argued the address onto the contract on "fat enough" grounds —
+Shipping cannot act without one and should not call back to get it — while
+§11.7 named an `OrderConfirmed` carrying personal data as *the* counter-example
+of what must never happen. Two chapters stated opposite things about one
+contract, so a reviewer reading either alone concluded the rule held.
+
+The rule is the one that wins, because the address is unreachable once
+published. It is serialised into `ordering.OutboxMessages`, whose retention
+purge deletes only rows with `ProcessedAt IS NOT NULL` — deliberately, so that
+abandoned rows survive for §13.6's alert — so an abandoned row keeps the
+payload indefinitely, and a test pins that it does. It sits in the broker, for
+which no chapter specifies a retention bound. And it reaches whatever each
+consuming service persists from it — not the inbox, which stores a message id,
+an endpoint and a time and no payload, but any projection, read model or log
+that keeps what arrived — with §3.2 giving `OrderConfirmed` to Notifications,
+which has no use for an address at all. §11.7's erasure choreography reaches
+none of those surfaces, and §13.4's redactor matches on key names, none of
+which cover an address.
+
+**Removed rather than versioned**, on §9.2's own carve-out: where the point of
+a change is that a value must not be on the wire, publishing V1 alongside V2
+keeps the offending shape consumable for the length of the window, so the
+standard remedy would re-arm the defect. §9.2's second condition is met by this
+record existing, so that a later reader can check rather than take it on trust.
+
+**Its first condition — that no service consumes the version — was not met,
+and an earlier draft of this paragraph said it was.** Shipping and
+Notifications are unbuilt, so no service on an independent release schedule
+could be stranded; but §9.6's saga binds `Event<OrderConfirmed>`, which makes
+Ordering a registered consumer, and a bound consumer deserialises the whole
+payload however little its transition reads. "The saga reads only the
+`OrderId`" is true and answers a different question.
+
+**So the justification is not the condition; it is that nothing is deployed.**
+No cluster has ever run this platform, so there is no old replica to hand a
+reduced payload to — and the rollout callout above records what that costs
+later, in full, because the exemption expires at the first deployment while the
+rule does not. Stating the condition as met would have hidden a live-rollout
+fault behind a rule about version bumps, which is exactly what that callout
+exists to prevent. [ADR-028](#adr-028--a-money-movement-command-carries-no-subject)
+remains the worked precedent for the removal itself, on the same reasoning:
+removing the field removes the possibility rather than guarding against it.
+
+**Consequences.** Shipping's PR inherits an open question and the context to
+answer it: an explicit, auditable read back to Ordering, recorded as the
+ADR-017 exception a second synchronous hop has to be, or a despatch-time lookup
+against whatever store owns the address by then. Choosing now, before a
+consumer exists to state what it needs, is the guessing §9.1's "ask the
+consumers" rule refuses. `OrderConfirmedDomainEvent` keeps its `Address` and is
+untouched: it never crosses a service boundary, and `ordering.Orders`
+legitimately stores the address of the order it belongs to — §11.7 governs what
+travels, not what a service holds about its own data.
 
 ---
 

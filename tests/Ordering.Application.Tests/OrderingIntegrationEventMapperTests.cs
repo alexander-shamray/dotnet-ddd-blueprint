@@ -7,6 +7,7 @@ using Ordering.Domain.Common;
 using Ordering.Domain.Orders;
 using Ordering.Domain.Orders.Events;
 using Shouldly;
+using System.Text.Json;
 using Xunit;
 
 namespace Ordering.Application.Tests;
@@ -22,9 +23,17 @@ namespace Ordering.Application.Tests;
 /// <b>Nothing else asserts a single field of these three payloads.</b> The
 /// real-broker tests construct <c>V1.OrderPlaced</c> themselves rather than
 /// going through the mapper, and the outbox tests assert that a row completes
-/// and carries the right ids — so dropping <c>Lines</c>, or
-/// <c>ShippingAddress.Line2</c>, or mapping a cancellation reason to the wrong
-/// code, would have left the suite green. Copilot found the gap.
+/// and carries the right ids — so dropping <c>Lines</c>, or mapping a
+/// cancellation reason to the wrong code, would have left the suite green.
+/// Copilot found the gap.
+/// <para>
+/// That list used to name <c>ShippingAddress.Line2</c> as its third example,
+/// and it is removed rather than reworded because the field is gone
+/// (ADR-035) — an example naming a member no contract has sends the next
+/// reader looking for it. What replaces the coverage is the assertion below
+/// that no part of the address reaches the serialised payload, which is a
+/// stronger claim than the one the old example stood for.
+/// </para>
 /// </remarks>
 public class OrderingIntegrationEventMapperTests
 {
@@ -80,11 +89,15 @@ public class OrderingIntegrationEventMapperTests
     }
 
     [Fact]
-    public void A_confirmed_order_carries_the_whole_address()
+    public void A_confirmed_order_carries_identifiers_and_no_address()
     {
-        // Line2 is the field PR-21 added to the contract, and this is the only
-        // assertion that it survives the mapping — the gap that made adding it
-        // worth doing was that nothing populated the type at all.
+        // The domain event still carries an address — it must, because §7.2's
+        // Orders table stores one and the Local lane never leaves the process —
+        // so the mapper is handed one on every call and the contract is what
+        // has to drop it. Constructing the event with a fully populated address
+        // is therefore the subject of this test rather than setup for it: a
+        // test driven by an empty address could not tell a mapper that omits
+        // the field from one that never had it to omit.
         Address address = Address.Of("12 Rue de la Paix", "Appartement 4", "Paris", "75002", "FR");
 
         IReadOnlyList<object> mapped = Mapper().Map(
@@ -101,11 +114,49 @@ public class OrderingIntegrationEventMapperTests
 
         OrderConfirmed confirmed = mapped.ShouldHaveSingleItem().ShouldBeOfType<OrderConfirmed>();
 
-        confirmed.ShippingAddress.Line1.ShouldBe("12 Rue de la Paix");
-        confirmed.ShippingAddress.Line2.ShouldBe("Appartement 4");
-        confirmed.ShippingAddress.City.ShouldBe("Paris");
-        confirmed.ShippingAddress.PostCode.ShouldBe("75002");
-        confirmed.ShippingAddress.Country.ShouldBe("FR");
+        // Asserted over the SERIALISED payload rather than over the type,
+        // because the wire is what §11.7's rule is about and a property check
+        // could only restate the compiler. This fails the moment any member —
+        // a field, a nested record, a stringified value object — puts one of
+        // those five values back on the contract, which a check naming
+        // ShippingAddress by hand would miss.
+        string payload = JsonSerializer.Serialize(confirmed);
+
+        // Four components are matched as BARE substrings and only the country
+        // as a quoted token, and the split is the point rather than an
+        // inconsistency.
+        //
+        // Bare is what catches a shape nobody has written yet. A quoted-token
+        // search asserts only that a component is its own JSON string, so an
+        // address concatenated into one value —
+        // "12 Rue de la Paix|Appartement 4|Paris|75002|FR" — contains none of
+        // the quoted patterns and would pass with the whole address on the
+        // wire. An earlier version of this test quoted all five and its comment
+        // claimed to cover exactly that case; it did not.
+        //
+        // The country is the one that cannot go bare: Currency serialises as
+        // EUR, so a bare FR matches inside it and the check fails over an
+        // address that is not there. Quoting is what separates them, since
+        // "EUR" does not contain "FR" once the delimiters are part of the
+        // pattern — and dropping the country instead, which this test also did
+        // once, leaves the one component a reintroduced field could carry
+        // unnoticed.
+        //
+        // Case-sensitive throughout: these are compared against the serialiser's
+        // own output, and loosening only widens what can collide.
+        foreach (string component in (string[])
+            ["12 Rue de la Paix", "Appartement 4", "Paris", "75002"])
+        {
+            payload.ShouldNotContain(
+                component,
+                Case.Sensitive,
+                $"§11.7: no part of the delivery address may reach the wire, and '{component}' did");
+        }
+
+        payload.ShouldNotContain(
+            "\"FR\"",
+            Case.Sensitive,
+            "§11.7: no part of the delivery address may reach the wire, and the country did");
 
         ConfirmedLine line = confirmed.Lines.ShouldHaveSingleItem();
         line.ProductId.ShouldBe(Product.Value);

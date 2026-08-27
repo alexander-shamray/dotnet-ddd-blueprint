@@ -1103,13 +1103,21 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > Measured rather than assumed, because that propagation is load-bearing: on
 > `Common.Infrastructure.Tests`, `Category=Integration` selects the
 > twenty-six tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-one — 97 as the runner
+> `Category!=Integration` selects the other seventy — 96 as the runner
 > counts them, with no third state and nothing counted twice. Those figures
-> read ten/81, then twenty/91, then twenty-three/94, then twenty-four/95, and
-> every retake was the suite growing while the callout did not. **The count
-> of retakes is not written here either**, for the reason the figures
-> themselves keep demonstrating: it has been wrong at each of them. What a
-> reader can check is whether this pair matches `docs/testing.md` and a run.
+> read ten/81, then twenty/91, then twenty-three/94, then twenty-four/95, then
+> twenty-six/97, and every retake up to that one was the suite growing while
+> the callout did not. **The count of retakes is not written here either**,
+> for the reason the figures themselves keep demonstrating: it has been wrong
+> at each of them. What a reader can check is whether this pair matches
+> `docs/testing.md` and a run.
+>
+> **The latest retake is the first that goes *down*, and the direction is
+> worth naming.** ADR-033 withdrew the token-denylist claim, so
+> `RedisKeys.Denylist` and the case pinning its shape went with it and the
+> fast half is seventy where it was seventy-one. A figure that has only ever
+> grown teaches the next reader to check whether it is *behind*; one that
+> moves both ways has to be re-measured instead.
 >
 > **The fast half starts no container, and that is proved rather than
 > inferred**: `docker events --filter event=create` over a solution-wide
@@ -1905,7 +1913,7 @@ public async Task Payment_declined_releases_stock_before_cancelling()
     (await harness.Sent.Any<CancelOrder>(m =>
         m.Context.Message.OrderId == orderId &&
         m.Context.Message.Reason == CancelReasons.PaymentDeclined))
-            .ShouldBeTrue();
+        .ShouldBeTrue();
 }
 
 [Fact]

@@ -30,20 +30,43 @@ naming convention between them.
 
 A cache instance is normally configured `maxmemory-policy allkeys-lru`, so that
 memory pressure silently evicts cold entries. That policy applies to the
-**entire keyspace** — including your distributed locks and your token denylist.
-Under load, Redis will happily evict a held lock, and two workers will then both
-believe they own it. A revoked token will quietly become valid again.
+**entire keyspace** — including your distributed locks and your idempotency
+keys. Under load, Redis will happily evict a held lock, and two workers will
+then both believe they own it; evict an idempotency claim and the request that
+wrote it is accepted a second time.
 
 The failure has no error, no log line, and appears only under the memory
 pressure that makes it hardest to reproduce.
+
+> **A revoked token was one of the two examples here, and
+> [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+> withdrew it.** There has never been a revoked-token entry to evict: nothing
+> writes the `{service}:denylist:` keyspace, and
+> [§11.3](11-identity-authorization.md) validates a token locally and consults
+> no revocation list. An idempotency claim takes its place because it is a
+> real occupant of the same instance with the same intolerance for eviction,
+> so the rule is untouched and only the example moved. The withdrawn one was
+> the more vivid of the two, which is how a keyspace with no reader read as a
+> control for four PRs.
 
 | Keyspace | Eviction policy | Placement |
 |---|---|---|
 | `{service}:cache:` | `allkeys-lru` — eviction is the point | Shared cache instance |
 | `{service}:lock:` | **`noeviction`** | Separate instance |
 | `{service}:idem:` | **`noeviction`** | With the locks |
-| `{service}:denylist:` | **`noeviction`** | With the locks |
+| `{service}:denylist:` | **`noeviction`** | With the locks — **reserved, not built** ([ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)) |
 | `{service}:ratelimit:` | `volatile-ttl` acceptable | Either |
+
+**Two of those rows are reservations rather than descriptions of running
+code**, and both are listed for the same reason: a key that appears later
+should land where its own eviction policy already is, rather than on whichever
+instance its first caller happened to be holding. `{service}:ratelimit:` is
+the shared counter §10.3 does not build in v1. `{service}:denylist:` is a
+token denylist this platform has decided **not to have** — ADR-033 bounds
+revocation by the 300-second access-token lifetime and records that nothing
+consults a list — so its row claims a *placement* and not a mechanism: if a
+denylist is ever built, it must land somewhere a value cannot be evicted from
+under it.
 
 A separate DB index on the shared instance is **not** an isolation option,
 though it looks like one: `maxmemory-policy` is a server-level setting, every
@@ -229,13 +252,26 @@ skips the prefix entirely and is denied by the §8.1 ACL — which fails as a ca
 that never populates rather than as an error naming the key.
 
 The coordination namespaces get the same rule from `RedisKeys`, registered by
-§8.2's helper: `Lock(name)`, `Idempotency(suffix)` and `Denylist(suffix)` each
-return the full key with the `ApplicationName` prefix, so a call site cannot
-write the wrong half because it never writes that half at all. The type has
-deliberately **no `Cache(string)` method**: cache keys are prefixed by
-`InstanceName` above, and a full-key builder would double-prefix the moment
-somebody passed its result to `HybridCache` — it exposes the instance-name
-string instead, so `:cache:` is spelled in exactly one place.
+§8.2's helper: `Lock(name)` and `Idempotency(suffix)` each return the full key
+with the `ApplicationName` prefix, so a call site cannot write the wrong half
+because it never writes that half at all. The type has deliberately **no
+`Cache(string)` method**: cache keys are prefixed by `InstanceName` above, and
+a full-key builder would double-prefix the moment somebody passed its result to
+`HybridCache` — it exposes the instance-name string instead, so `:cache:` is
+spelled in exactly one place.
+
+**There are two key builders and not three, and the missing one is the point.**
+`Denylist(suffix)` existed until
+[ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+and was removed with it: §8.1's `{service}:denylist:` row is a reservation, no
+code writes that keyspace, and revocation is bounded by the token's own
+lifetime instead. A key builder is the strongest signal this chapter has that a
+keyspace has an occupant — it is what a reader greps for when asking whether a
+namespace is live — so a builder with no caller is a claim that a mechanism
+exists, made by the one type whose whole job is to be authoritative about keys.
+The two absences are therefore different in kind: `Cache(string)` is withheld
+because the prefix comes from somewhere else, and `Denylist(suffix)` is absent
+because there is nothing to prefix.
 
 The trailing schema version is the important part of the half you do write: when
 a DTO's shape changes, bump the version and old entries become unreachable and
@@ -1186,10 +1222,11 @@ one did not happen *twice*.
 
 > **Two connections, not one.** The cache multiplexer points at the instance
 > running `allkeys-lru`; the coordination multiplexer points at the
-> `noeviction` instance holding locks, idempotency keys and the denylist.
-> Registering them as keyed services makes picking the wrong one a visible
-> choice rather than an invisible default. This is the §8.1 rule expressed in
-> wiring instead of prose.
+> `noeviction` instance holding locks and idempotency keys — the two things
+> that are actually written there, §8.1's `{service}:denylist:` row being a
+> reservation with no occupant (ADR-033). Registering them as keyed services
+> makes picking the wrong one a visible choice rather than an invisible
+> default. This is the §8.1 rule expressed in wiring instead of prose.
 
 ## 8.6 Rules and traps
 

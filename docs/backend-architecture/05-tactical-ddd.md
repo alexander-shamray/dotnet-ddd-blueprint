@@ -419,7 +419,10 @@ Two rules these illustrate:
 **Carry everything the contract needs.** `OrderConfirmedDomainEvent` holds
 `Total` and `Lines` it makes no domain use of, because `V1.OrderConfirmed`
 requires them and the mapper ([§9.3](09-messaging.md)) sees only the event. An event missing a
-field its contract declares is a mapper that cannot be written.
+field its contract declares is a mapper that cannot be written. **The rule
+reaches those two fields and stops there** — `ShippingAddress` on the same
+record is carried for a reason no contract supplies, argued in the callout
+below.
 
 **Snapshot, never alias.** `OrderLineSnapshot` exists because `Order.Lines` is a
 read-only *view* over a live list of mutable entities. An event holding that
@@ -428,6 +431,28 @@ when it was raised.
 
 `Money`, `OrderId` and `ProductId` here would be forbidden in an integration
 event (§9.1) — the mapper is where they are flattened to primitives.
+
+> **`ShippingAddress` is on this record and on no contract, and the asymmetry
+> is the point rather than an omission.** `V1.OrderConfirmed` carries no
+> address at all
+> ([ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)),
+> so §9.3's mapper no longer reads this field — and the mapper was its only
+> reader outside the aggregate, which is exactly why the rule above stopped
+> covering it. What covers it instead is the aggregate's own record:
+> confirmation is the point at which an order commits to a destination, `Order`
+> holds the `Address` it was placed with, and [§7.2](07-persistence.md) maps
+> that address into `ordering.Orders` as a complex property. An event naming
+> only the payment reference would state less than the transition decided.
+>
+> **A domain event may hold it because it never leaves the service.**
+> [§11.7](11-identity-authorization.md) governs what travels between services,
+> not what one service keeps about its own data — so the same value is
+> unremarkable here and forbidden one mapper later, and nothing about the field
+> changed between the two. **A field is not dead because no contract wants
+> one**: the domain event and the contract are separate artefacts by design,
+> and this record is where that separation is visible in both directions at
+> once — `Total` and `Lines` carried for the contract, `ShippingAddress`
+> carried for the domain alone.
 
 Events accumulate on the aggregate. Raising one does not publish it, and the
 two halves of what happens next are worth keeping apart, because [§7.5](07-persistence.md) is
