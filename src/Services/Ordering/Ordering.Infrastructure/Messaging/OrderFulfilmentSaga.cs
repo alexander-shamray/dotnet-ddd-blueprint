@@ -177,11 +177,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // leaves the event unrecorded and the next delivery finds the
         // instance moved on.
         //
-        // **That window contains the in-memory outbox's flush, and that is
-        // what settled it (#128).** UseInMemoryOutbox sits inside the inbox
-        // filter and releases its buffered sends after the inner pipeline
-        // returns — after the repository has committed. So three cases reach
-        // here and only one of them wants to be quiet:
+        // **That window used to contain the in-memory outbox's flush, and that
+        // is what settled it (#128).** UseInMemoryOutbox sat inside the inbox
+        // filter and released its buffered sends after the inner pipeline
+        // returned — after the repository had committed. So three cases reached
+        // here and only one of them wanted to be quiet:
         //
         //   * a crash AFTER the flush — the commands went out, the state
         //     advanced, and the redelivery really is a duplicate;
@@ -195,6 +195,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // all three the same way and answered two of them wrongly. A log
         // line was tried in its place and is not a signal: §13.6 pages on the
         // error queue, which is exactly what ignoring keeps the event out of.
+        //
+        // **ADR-032 has since deleted the second case, and the catch-all still
+        // does not come back.** This endpoint now takes MassTransit's Entity
+        // Framework outbox, so the sends commit in the saga's own transaction
+        // and a crash can no longer separate an advanced instance from its
+        // unsent commands. That leaves two arrivals here rather than three —
+        // and a callback answering two cases identically is still only ever as
+        // right as its worse one, which is the misroute. The enumeration below
+        // is what tells them apart; nothing about persisting the sends made
+        // that cheaper.
         //
         // **The cost is real and is the smaller half.** A post-flush
         // duplicate now spends six retries and files one message a human
@@ -211,11 +221,6 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // declared next-events partition into "reachable here" and "not".
         // An unenumerated arrival is now a fault by design, which is what
         // makes that enumeration load-bearing rather than documentation.
-        //
-        // #128 removes the question by persisting the sends with the
-        // instance (UseBusOutbox); the pre-flush case stops existing and a
-        // catch-all becomes arguable again on evidence rather than on this
-        // comment.
 
         // Correlated on the order in every case, which is also what §9.3's
         // mapper sets CorrelationId to — so one id follows the workflow across
@@ -1095,18 +1100,40 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // §13.6 pages on the error queue, so shipping this without the
             // line is shipping a pager for every order in flight at cutover.
             //
-            // **What it costs is the #128 signal on THIS transition, and the
-            // reason that is acceptable here is what the transition sends.**
-            // The catch-all this machine removed was wrong because it answered
-            // a pre-flush crash — which loses commands — the same way as a
-            // duplicate. Entering Confirmed sends no command: it arms
-            // DespatchTimeout and nothing else. So a crash between the commit
-            // and the flush loses a three-day BACKSTOP, not an action, and the
-            // order is left in a state §13.6's own saga-age alert exists to
-            // find — unfinalised in Confirmed past four days. Losing a
-            // backstop that is itself backstopped is a different trade from
-            // losing an AuthorisePayment, which is why StockReserved still has
-            // no Ignore one state back and this one does.
+            // **What it costs is NOT the #128 signal any more, because
+            // ADR-032 deleted the case that signal was about.** The catch-all
+            // this machine removed was wrong because it answered a pre-flush
+            // crash — an instance advanced with its commands never sent — the
+            // same way as a duplicate, and the redelivery was the last thing
+            // that could notice. This endpoint now takes MassTransit's Entity
+            // Framework outbox, so everything the transition into Confirmed
+            // emits is written in the instance's own transaction: the
+            // DespatchTimeout it arms, and the conditional FlagOrderForReview
+            // #143 added beside it. An advanced instance can no longer have
+            // unsent commands, so a second OrderConfirmed arriving here is a
+            // genuine duplicate or a misroute, and never evidence of a loss.
+            //
+            // **The misroute is what the line still silences, and that is now
+            // the whole of the cost.** It is the one arrival the enumeration
+            // keeps loud on purpose, and here it is absorbed — in THIS state
+            // only, since the same misroute reaching any other state still
+            // faults. It is accepted because both legitimate arrivals are
+            // ordinary traffic and one of them is every order in flight at a
+            // cutover, where not writing the line buys a pager rather than a
+            // diagnosis.
+            //
+            // **The asymmetry with StockReserved one state back now rests on
+            // #131 alone, which is narrower than what this comment used to
+            // say.** "Losing a backstop is not losing an AuthorisePayment"
+            // priced a loss that ADR-032 has made impossible on either event.
+            // What survives is that an Ignore is written for an arrival
+            // somebody can name: the rollout echo comes from the OLD machine
+            // entering Confirmed on the SEND, which is specific to
+            // OrderConfirmed and has no counterpart one state back. The
+            // unrecorded redelivery is specific to neither — so what separates
+            // the two is how often the absorbed case actually arrives, and the
+            // machine keeps its faulting default wherever no arrival has been
+            // named.
             Ignore(OrderConfirmed),
 
             // **#129's fourth door, and the one no issue enumerated —

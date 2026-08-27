@@ -66,6 +66,14 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         // expand/contract — the DROP is a later release's, because §15.5 will
         // not let a migration break the build still serving beside it.
         //
+        // The last one is the odd entry and stays odd deliberately: its three
+        // tables are MassTransit's rather than this service's, so no
+        // IEntityTypeConfiguration<T> in this assembly describes them and the
+        // only reader of their shape is ADR-032's saga endpoint. They are named
+        // here anyway, because a migrator that stopped applying them would
+        // leave the saga's sends buffered in memory again (#128) and every
+        // other assertion in this suite would still pass.
+        //
         // **The length is asserted from the list rather than as a literal, and
         // #126 is why.** It was written out as `ShouldBe(8)` beside eight named
         // rows, so a ninth migration failed here on a number while the names
@@ -86,7 +94,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
             "_AddSagaConfirmationTimeout",
             "_AddSagaPaymentVerdictJoin",
             "_DefaultSagaCustomerIdForRemoval",
-            "_AddSagaCancellationObserved"
+            "_AddSagaCancellationObserved",
+            "_AddTransactionalOutbox"
         ];
 
         string[] applied = await fixture.AppliedMigrationsAsync();

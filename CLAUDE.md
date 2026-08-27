@@ -32,8 +32,14 @@ blueprint specifies — thirty-three projects, and counting. **The phase section
 below carries what has landed**; this sentence only names the shape.
 
 **The blueprint is the specification for the solution.** Appendix C sequences
-that code into 27 pull requests. Treat every chapter as a commitment the
-implementation will have to honour.
+that code into a numbered plan, and then into the *After the plan* rows that
+follow it. Treat every chapter as a commitment the implementation will have to
+honour.
+
+**No count here, and `docs/roadmap.md` dropped its own for the same reason.**
+This sentence said 27 — the plan's numbered rows — and read as a total for a
+document that had grown a section past them. The predicate a reader can check
+is the table; a numeral in front of it only says how stale this file is.
 
 Both READMEs read **"Reference blueprint — adapt, don't copy wholesale. The C#
 solution it specifies will be built in this repository"** — the blueprint serves
@@ -69,7 +75,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..028),
+                             15-cicd-deployment, appendix A (ADR-001..032),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -513,8 +519,19 @@ PR" is no longer the right sentence: the plan being finished is not the same as
 the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
+**That section now holds more than one kind of row, and the third kind is the
+one to read before adding a fourth.** PR-28 was a mechanism the plan never
+rowed and PR-29 was half a node it split without saying who owned the other
+half — both gaps in coverage. PR-30 is neither: §9.8 printed
+`e.UseInMemoryOutbox(context)` on the saga endpoint, PR-21 built exactly that,
+and the plan delivered what it specified. **The specification was wrong.** So a
+row can now record a correction to a landed row, and what earns it one is not
+the size of the diff but whether a rule moved — ADR-032 took an exception to
+§9.3's prohibition on a second outbox table set, which is a rule four chapters
+rest on. A fix that moves no rule is a commit body, not a row.
+
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,045 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,051 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -678,7 +695,21 @@ own line rather than sending a reader to a file that does not hold it.
   authority.** No project ships a `launchSettings.json`, so `dotnet run`
   selects Production, where `RequireHttpsMetadata` is on and a plain-HTTP local
   authority is never reached. Containers set it, which is why the Compose path
-  never shows it.
+  never shows it. **And it is the wrong variable for half the hosts here**: a
+  `*.Migrator` is a generic host — `Host.CreateApplicationBuilder` — which
+  binds its environment from `DOTNET_ENVIRONMENT` and ignores the
+  `ASPNETCORE_` one entirely. Measured, because the failure is silent in the
+  safe-looking direction: a guard written on `IsDevelopment()` there is not
+  merely
+  fail-closed, it is permanently closed, and the person debugging it goes
+  looking at the feature rather than the variable. Two more measurements sit
+  beside it. `GetValue<bool>` **throws** on an environment variable set to the
+  empty string rather than returning false, so a blank value blocks a
+  pre-upgrade hook instead of disabling a flag — `bool.TryParse` on the raw
+  string is what refuses `""`, `null`, `"1"` and `"yes"` alike. And a blank
+  environment name leaves `IsProduction()` false as well as `IsDevelopment()`,
+  so `!IsProduction()` fails **open** on exactly the value a templating mistake
+  produces. Name the environment you want, never the one you do not.
 - **A registration nothing resolves at startup fails at the first message, and
   the suite that catches it reports the symptom.** `ValidateOnBuild` never
   constructs an open generic and no host resolves a scheduler while it boots, so
@@ -1132,6 +1163,49 @@ own line rather than sending a reader to a file that does not hold it.
   restated-total failure appearing inside the lesson about it.
   [`docs/pr-decision-log.md`](docs/pr-decision-log.md) keeps the inventory;
   this bullet keeps the rule.
+- **A change that makes a transaction longer, wider or stricter is a change to
+  every lock ordering it participates in**, and the test fixture is where that
+  surfaces first. ADR-032 turned one endpoint's consume into a three-table
+  `Serializable` transaction; Respawn's `ResetAsync` deletes every row in the
+  schema in its own dependency order while a consumer from the previous test may
+  still be committing, and two multi-table transactions taking locks in opposing
+  order deadlock. It surfaced as an intermittent error 1205 in a
+  command-endpoint test *with nothing to do with sagas*, and passed on re-run,
+  so it read as a flake. **Capturing the exception is what named it; re-running
+  until green would never have.**
+- **Removing one participant from a race is not removing the race, and the
+  tidier story is the one to distrust.** The same change also registered a
+  background writer, and taking that out of the test host was right on its own
+  merits — a writer nothing drives makes "the pass never happened" and "the
+  pass spared the row" the same green. It was then written up as the fix, and the
+  bounded retry was deleted on the sentence *there is no second deleter to
+  race*. **A deadlock needs two transactions with opposing lock order, not two
+  deleters.** It reproduced with the writer gone, on the second of six runs.
+  Both changes are right and only one of them was the fix — and the sentence
+  that got it wrong was written while deleting the code that contradicted it,
+  which is the most expensive moment to reason instead of run. Six runs cost
+  twelve minutes.
+- **An API name nobody has run travels further than a number nobody has
+  recomputed.** #128's fix was recorded as `AddEntityFrameworkOutbox` with
+  `UseBusOutbox`, and that name reached §9.6's callout, two entries in
+  `docs/pr-decision-log.md`, and — the one that matters —
+  `OrderFulfilmentSaga.cs`'s own comment. `UseBusOutbox()` is a bus-side option
+  that never touches a receive endpoint; the call that closes the defect is
+  `UseEntityFrameworkOutbox<T>(context)`. They agreed with each other for
+  months because agreeing is free and compiling is not. **A restated
+  identifier is a claim to reconcile exactly as a restated total is** — and it
+  is worse in one way, because a wrong number looks wrong to somebody
+  eventually and a plausible method name never does.
+  **A name sitting in a source comment is not thereby checked**, which is the
+  half a reader is most likely to assume: the compiler reads the code beside it
+  and nothing reads the comment, so the site that looks most authoritative is
+  the one with the least behind it.
+  **The sites are named here and not counted, because the first draft of this
+  bullet counted them and got it wrong twice in one sentence** — it said three
+  decision-log entries where two carry it, then said four after listing five
+  things, and omitted the source comment entirely. The restated-total failure,
+  inside the lesson about restated identifiers, in the pull request that added
+  it. A reviewer caught it.
 
 ### The commands
 
@@ -1142,7 +1216,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 842 of 1,045, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 846 of 1,051, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1302,9 +1376,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 842 of
-the 1,045 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 203, needing the daemon
+category runs a smaller suite and says which. `Category!=Integration` is 846 of
+the 1,051 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 205, needing the daemon
 exactly as before.
 
 **The integration half read 187 for two branches and the arithmetic never
@@ -1315,7 +1389,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (824) and integration (203), which is the 842 above split at the
+(18), unit (828) and integration (205), which is the 846 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.
@@ -1465,7 +1539,7 @@ Run `/validate-blueprint` after any substantive edit.
   section that only mentions the topic is a defect.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji, no
   admonition syntax. Two forms are named and recurring — `**Trap — …**`
-  (19) for a mistake worth naming, and `**Decision — …**` (10), which always
+  (21) for a mistake worth naming, and `**Decision — …**` (10), which always
   points at the ADR that records it:
 
   ```markdown
@@ -2109,7 +2183,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-032) and keep the
+  (currently ADR-033) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to
@@ -2147,7 +2221,8 @@ every argument at column 7). If you find one, it is a leftover — convert it.
 - **TDD is the stated method** (§12), not a preference. Tests ship in the same
   PR as the code they cover — the convention starts at PR-02 and there is no
   PR in the plan that adds tests afterwards.
-- **Follow the delivery plan's order.** Appendix C sequences 27 PRs with
+- **Follow the delivery plan's order.** Appendix C sequences its numbered PRs
+  with
   explicit dependencies, and the service order is deliberate. Building out of
   order is a design decision, not a shortcut — raise it rather than taking it.
 - **The architecture tests are the enforcement mechanism**, not review. If a

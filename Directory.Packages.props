@@ -80,12 +80,23 @@
          release. -->
     <PackageVersion Include="MassTransit" Version="8.5.3" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
-    <!-- §9.6's saga repository: EntityFrameworkRepository and
-         ConcurrencyMode.Pessimistic. Same version and same release as the two
+    <!-- §9.6's saga repository — EntityFrameworkRepository and
+         ConcurrencyMode.Pessimistic — and ADR-032's transactional outbox:
+         AddEntityFrameworkOutbox, UseEntityFrameworkOutbox and
+         AddTransactionalOutboxEntities, on the same DbContext the repository
+         already holds, which is what makes the saga's sends commit with its
+         instance. Same version and same release as the two
          rows above — the transport, the core and the persistence integration
          ship together, and a saga repository a minor behind the state machine
-         it stores is not a combination anyone tests. Referenced only by
-         Ordering.Infrastructure, which is the only project with a saga. -->
+         it stores is not a combination anyone tests. Referenced by
+         Ordering.Infrastructure, the only project with a saga; by
+         Ordering.Api.Tests, for EntityFrameworkOutboxOptions<OrderingDbContext>
+         and that type alone, which the Serializable assertion resolves; and by
+         Ordering.TestSupport, for the InboxCleanupService<OrderingDbContext>
+         OrderingApiFactory removes from the test host. Enumerated rather than
+         counted, on Appendix B's terms. Both test projects are carried
+         transitively by their project references and name the reference anyway,
+         which is the honesty rule rather than a restore requirement. -->
     <PackageVersion Include="MassTransit.EntityFrameworkCore" Version="8.5.3" />
     <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
     <PackageVersion Include="FluentValidation" Version="12.0.0" />

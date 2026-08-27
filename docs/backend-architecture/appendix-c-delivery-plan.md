@@ -5,8 +5,10 @@ not a plan. This appendix sequences the work into independently reviewable pull
 requests. Every PR leaves `main` building and green.
 
 It says nothing about how long. That lives outside the blueprint, in the
-[delivery roadmap](../roadmap.md) — one estimate per PR below, the calendar
-they imply, and the assumptions holding it up.
+[delivery roadmap](../roadmap.md) — one estimate per PR in the plan below, the
+calendar they imply, and the assumptions holding it up. The *After the plan*
+rows are the exception and carry no estimate anywhere: that file prices work
+before it is built, and no row in that section was ever priced that way.
 
 ## C.1 Service build order
 
@@ -155,6 +157,28 @@ was the wrong one.
 |---|---|---|---|
 | **29** | `feat(ci): §15.1's secret scan, the other half of the first node` | 01 | `.github/secret-scan/` — twelve named rules over key blocks, provider-token shapes and credential-shaped assignments, each with its own positive case and its own near miss; an allow-list keyed on `path \| rule \| fingerprint \| reason` with **no globs and no inline pragma**; and a stale entry failing the build, on `awaiting-signal.yaml`'s argument that a list of known exceptions needs a gate asserting they are still exceptions. It joins the `licence-gate` job rather than taking one of its own, because it shares every property that job is arranged around and because §15.1 draws the two as one node. **Two limits are stated rather than closed**: it reads the working tree and not the history, so a credential committed and removed is still compromised and still invisible to it; and it is a pattern scanner, so the list of rules is the list of things it can find. **What building it cost was the allow-list**, not the rules: this repository deliberately commits local-development credentials (§14.1), and the narrow suppression — one entry per site rather than one per file — is what turns rotating one of them into a reconciliation the file lists |
 
+**The third row is neither of those, and the difference is the point of
+naming it.** PR-28 was a mechanism the plan never rowed; PR-29 was half a node
+the plan split without saying who owned the other half. Both were gaps in
+coverage. Nothing was missing here: [§9.8](09-messaging.md) printed
+`e.UseInMemoryOutbox(context)` on every receive endpoint, PR-20 and PR-21 built
+exactly that, and the plan delivered what it specified. **The specification was
+wrong.** So this row records a *correction to a landed row* rather than a gap —
+and it earns a row for a reason a commit body could not carry, because closing
+the defect takes an exception to [§9.3](09-messaging.md)'s prohibition on a
+second outbox table set, which is a rule four chapters rest on.
+
+**A plan is where a reader finds out that a rule moved.**
+[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+carries the argument and the consequences, as an ADR should. What this row
+carries is the fact that the platform's messaging shape changed *after* the
+plan was complete — which a reader of the twenty-seven rows above, and of
+every chapter they cite, would otherwise have no reason to look for.
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **30** | `fix(ordering): the saga's transactional outbox` | 21 | `AddEntityFrameworkOutbox<OrderingDbContext>` and, on the `ordering-fulfilment-saga` endpoint alone, `UseEntityFrameworkOutbox<OrderingDbContext>(context)` in place of `UseInMemoryOutbox` — plus the three MassTransit tables it needs in the `ordering` schema and the migration that creates them — so the saga's sends and its scheduled timeout commit in the same transaction as the instance ([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)). **What it closes is a dual write §9.8 printed.** `EntityFrameworkRepository` commits the instance and the in-memory buffer flushes *after* it, so a crash in that window left an order in `AwaitingPayment` with stock reserved, no `AuthorisePayment` sent and — because the schedule sat in the same buffer — no `PaymentTimeout` to rescue it. [§9.5](09-messaging.md)'s inbox does not rescue it either: `InboxFilter` writes its row after the consumer returns, so the redelivery finds an instance that has already moved on and no transition accepts it. **It faults rather than being absorbed** — the machine's `Ignore(StockReserved)` sits `During(Compensating)` alone, so a `StockReserved` arriving in `AwaitingPayment` is genuinely unhandled: MassTransit's default raises, §9.8's five retries are spent, and the message lands in the error queue [§13.6](13-observability.md) pages on. **So the window was observable and still not repairable**, which is the distinction ADR-032 turns on: a page is not a repair, and nothing in the error queue recreates the `AuthorisePayment` that was never sent or the `PaymentTimeout` that would have rescued the order. **Three things were found by building it.** The alternative §9.3 dismissed — routing the saga's output through [§9.4](09-messaging.md)'s application outbox — is not merely more expensive but **unavailable**: the timeout is a delayed message and the delay is a transport feature ([ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)), so no dispatcher of ours can replay one it never held, and an application outbox would have closed half the window and left the half with no bound at all. `UseBusOutbox()` is deliberately **not** called: it intercepts publishes *outside* a consume context, which is the API request path §9.4 already owns, so calling it would put a third staging mechanism on a path that has no dual write. And the three entities are MassTransit's, mapped by `modelBuilder.AddTransactionalOutboxEntities()` because the library owns those mappings and its own queries read the tables through them — **not because the assembly scan could not reach a configuration of ours**, which it would, since `ApplyConfigurationsFromAssembly` selects on where the configuration is declared and never on where the entity type is. So this is the first artefact in `Ordering.Infrastructure` whose EF model no `IEntityTypeConfiguration<T>` describes and [§7.2](07-persistence.md)'s mapping rule gains a stated exception rather than a quiet one. **Two costs are taken rather than dodged.** The `ordering` schema now holds five messaging tables where the chapters describe two — MassTransit's singular against this platform's plural, which is a property of MassTransit's naming rather than a decision anybody took. And there are two retention policies, which is exactly what §9.3 warns about — though the second is one table rather than three: `InboxCleanupService<OrderingDbContext>` prunes `ordering.InboxState` alone, on the duplicate-detection window, where `ordering.OutboxMessage` is drained by the outbox middleware as each message reaches the transport and `ordering.OutboxState` is touched by nothing at all, since it belongs to the bus-side outbox and exists only to carry `OutboxMessage.OutboxId`'s foreign key. [§9.9](09-messaging.md)'s `RetentionPurgeService` prunes ours and reads none of the three, and folding them together was refused because deleting an `InboxState` row whose outbox messages have not been delivered turns a retention job into the message loss this row exists to close |
+
 ## C.3 Dependency graph
 
 ```mermaid
@@ -221,29 +245,36 @@ flowchart TD
     P25 --> P26[26 Optional: Consumer-driven contract]
 ```
 
-**The graph stops at 27 and the two *After the plan* rows are not in it**,
-which is an omission rather than a claim about their dependencies. It is
-already filed as #137, and that issue is now **two** rows behind rather than
-one: PR-29 joined this appendix in the branch that landed the scan, so a lag
-still written as PR-28's would have been made false by the table above it.
-`/validate-blueprint` check 10 reports both, which is that check working — a
-PR added to this appendix and not carried across is the failure it names as
-the commonest.
+**The graph is the plan and stops at PR-27. The *After the plan* rows are
+excluded by rule, not left out.** A row lands in that section only because the
+plan was already complete, so every pull request it depends on has already
+been delivered — PR-28's three, PR-29's one, PR-30's one — and that is
+structural rather than a coincidence of the three rows there today. A node
+whose predecessors are all landed cannot tell a reader anything they can act
+on: it can neither free a branch to start nor warn that one is blocked.
+Drawing them would buy a fourth transcription to keep in step, and a fifth
+next time, in exchange for no scheduling information at all. **This was filed
+as #137 and closed this way**, rather than by adding the edges the issue
+proposed.
 
-**The roadmap half is left to #137 deliberately.** That file prices a *plan* in
-ideal engineer-days and derives a calendar from the total, so a row for work
-already delivered is either an invented estimate or a restated actual, and it
-holds neither. Appendix C wins over the roadmap by the stated rule, which is
-what makes naming the lag here sufficient rather than a deferral.
+**The roadmap half of #137 was closed on the same terms.** That file prices a
+*plan* in ideal engineer-days and derives a calendar from the total, so a row
+for work already delivered is either an invented estimate or a restated
+actual, and it holds neither. It now carries an *After the plan* section that
+names these rows and prices none of them, which is coverage without a number
+nobody could check — and `/validate-blueprint` check 10 compares the two
+documents row for row, so a row added here and not carried across is still
+caught.
 
 The rows above carry their `Depends` column, which is the part a reader acts
 on. Saying so here is cheaper than a graph that is right for one row and
 silently short of the next.
 
-The graph carries every edge in the tables above and no others. It is a
-transcription, so it can drift silently — a missing edge suggests two PRs are
-independent when the table says one blocks the other, which is the direction
-that costs a wasted branch rather than a wrong build.
+The graph carries every edge in the plan's tables above — PR-01 through
+PR-27, the Optional row included — and no others. It is a transcription, so it
+can drift silently — a missing edge suggests two PRs are independent when the
+table says one blocks the other, which is the direction that costs a wasted
+branch rather than a wrong build.
 
 ## C.4 Sequencing rules worth preserving
 

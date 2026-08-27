@@ -231,9 +231,20 @@ than pulled. Three ways that breaks, all of which look like a hung saga:
    node-local store; a node that was rebuilt loses whatever was pending. Nothing
    reports this — the messages simply never arrive.
 
-If the plugin and registration are fine, check the broker lane is moving at all:
-a stalled outbox means the saga's own `Send` never left the service, which is
+If the plugin and registration are fine, check the broker lane is moving at
+all: a stalled outbox means messages are not leaving the service, which is
 [`outbox-broker.md`](outbox-broker.md) rather than this.
+
+> **The saga's own `Send`s are not in the lane that runbook drains, and this
+> page said they were.** §9.4's `ordering.OutboxMessages` holds what a
+> **handler** stages; a saga sends on the bus, so its `CancelOrder`,
+> `ConfirmOrder`, `FlagOrderForReview` and scheduled expiries never appear
+> there. Since
+> [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> they are written to `ordering.OutboxMessage` — MassTransit's table, singular
+> — in the transaction that commits the instance, and delivered after it. Two
+> tables, two mechanisms, and the one to look in is decided by *who sent the
+> message* rather than by which order it concerns.
 
 ## Or the peer never answered
 
@@ -256,8 +267,50 @@ WHERE CorrelationId = @OrderId
 ORDER BY OccurredAt;
 ```
 
-A `CancelOrder` or `FlagOrderForReview` that never left is the answer, and the
-outbox runbooks take it from there.
+**That table is the wrong one for a command the saga sent, and the query is
+kept because the row it *does* find is still worth having.** What
+`ordering.OutboxMessages` holds is what a handler staged — an `OrderCancelled`
+that the `CancelOrder` produced, for instance — so a row here proves the
+command was consumed and the aggregate moved. Its **absence** proves nothing
+about the command, only that nothing downstream of it has committed yet.
+
+**For the command itself, look in `ordering.OutboxMessage`** — MassTransit's
+table, singular, where
+[ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+puts every `Send` and `Schedule` a transition makes, in the instance's own
+transaction. Rows there are delivered after that transaction commits, and each
+is joined to its triggering delivery through `InboxMessageId`/`InboxConsumerId`
+into `ordering.InboxState`, whose `LastSequenceNumber` is how far that
+delivery's sends have got. **These are MassTransit's tables and no SQL this
+repository owns touches them** — which is not the same as their being
+inert, and the difference matters at 3am. The running service writes them
+through the library's own outbox filter, in the transaction that commits the
+instance, and then clears them by two different mechanisms neither of which is
+ours:
+
+- A row in `ordering.OutboxMessage` is **removed by the outbox middleware once
+  the message reaches the transport.** So a row here going away means the
+  command was *sent*, and finding none is the normal steady state rather than
+  evidence of a purge.
+- A row in `ordering.InboxState` is removed by the hosted
+  `InboxCleanupService<OrderingDbContext>` that `AddEntityFrameworkOutbox`
+  registers alongside the filter, on a timer, once the duplicate-detection
+  window has elapsed. That service reads **this table only.**
+
+`ordering.OutboxState` is the third table and is not part of either story:
+it belongs to the bus-side outbox, `UseBusOutbox()` is deliberately not called,
+and so **nothing writes, reads or prunes it in this deployment.** It exists
+because `OutboxMessage.OutboxId` carries a foreign key to it. An empty
+`ordering.OutboxState` is the design; do not spend an incident on it.
+
+§9.9's `RetentionPurgeService` — which prunes *our* tables — reads none of
+the three. What this repository has no query for, it also has no opinion
+about: read the library's schema before drawing a conclusion from a column.
+What is settled here is *which* table to open. **Before ADR-032 there
+was no table to look in at all**, which is what made a lost command
+indistinguishable from a command nobody sent — the defect
+[#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)
+closed.
 
 **For a saga in `AwaitingConfirmation` this is the first query rather than the
 last**, and what it is looking for is a `ConfirmOrder`. There is no peer to have

@@ -316,11 +316,13 @@ the boundary is checkable:
 [Fact]
 public void Application_and_domain_do_not_reference_masstransit()
 {
-    // §9.3's must-not list. The saga may Send and Publish because MassTransit's
-    // in-memory outbox holds those until the consume transaction commits — a
-    // guarantee that exists on the consume pipeline and nowhere else. A handler
-    // that copies the saga's style gets a dual write with no outbox behind it,
-    // and it works in every test where the broker is up.
+    // §9.3's must-not list. The saga may Send and Publish because its receive
+    // endpoint carries MassTransit's transactional outbox (ADR-032), which
+    // writes those sends to the same DbContext and the same transaction as the
+    // saga instance — a guarantee that exists on the consume pipeline and
+    // nowhere else. A handler that copies the saga's style gets a dual write
+    // with no outbox behind it, and it works in every test where the broker is
+    // up.
     Assembly[] assemblies = [typeof(PlaceOrderHandler).Assembly, typeof(Order).Assembly];
     foreach (Assembly assembly in assemblies)
     {
@@ -1273,11 +1275,16 @@ EF Core minor versions and behave differently under identical code.
          release. -->
     <PackageVersion Include="MassTransit" Version="8.5.3" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.3" />
-    <!-- §9.6's saga repository: EntityFrameworkRepository and
-         ConcurrencyMode.Pessimistic. Same version and same release as the two
-         rows above — a saga repository a minor behind the state machine it
-         stores is not a combination anyone tests. Referenced once, by
-         Ordering.Infrastructure, which holds the only saga. -->
+    <!-- §9.6's saga repository — EntityFrameworkRepository and
+         ConcurrencyMode.Pessimistic — and ADR-032's transactional outbox,
+         which is the same package and the same DbContext. Same version and
+         same release as the two rows above: a saga repository a minor behind
+         the state machine it stores is not a combination anyone tests.
+         Referenced by Ordering.Infrastructure, which holds the only saga;
+         by Ordering.Api.Tests, for the EntityFrameworkOutboxOptions<T> its
+         Serializable assertion resolves; and by Ordering.TestSupport, for the
+         InboxCleanupService<T> OrderingApiFactory removes from the test host.
+         Enumerated rather than counted, on Appendix B's terms. -->
     <PackageVersion Include="MassTransit.EntityFrameworkCore" Version="8.5.3" />
     <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
     <PackageVersion Include="FluentValidation" Version="12.0.0" />

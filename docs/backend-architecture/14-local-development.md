@@ -703,9 +703,123 @@ For a platform this size, roughly one to three days of mechanical work.
 ## 14.3 Seed data
 
 Seeding runs from the migrator container, is idempotent, and is
-development-only. It should produce enough data to exercise pagination and
-caching — a catalogue of three products hides every performance problem you
-have.
+development-only — and the last of those is a gate rather than an
+instruction, so the rest of this section is that gate. It should produce
+enough data to exercise pagination and caching: a catalogue of three products
+hides every performance problem you have.
+
+**Nothing seeds today, and this section is a specification rather than a
+description.** No `*.Migrator` project holds a seeder, and no chart or Compose
+file carries a flag for one. That is why the mechanism is written down now
+rather than after: the container the sentence above names is the one artefact
+guaranteed to run in production — [§15.2](15-cicd-deployment.md) builds a
+migrator image beside every API, and [§7.4](07-persistence.md)'s Job runs it as
+Helm's `pre-install,pre-upgrade` hook on every release, holding the DDL
+identity §7.1 gives it and nothing else in the platform holds. A seeder
+written where the paragraph above tells an implementer to put it, with no
+gate, writes demo rows into a production database on the first
+`helm upgrade` — idempotently, so nothing fails, no hook goes red, and the
+deploy log says only that a migration ran.
+
+**The gate is two conditions at the job host's composition root, and both fail
+closed.** `MigratorHost.Build` is where they go, because that is where this
+solution already decides on an environment: `Common.Web`'s
+`AuthenticationExtensions` reads `builder.Environment.IsDevelopment()` twice,
+once to refuse a plain-HTTP authority at startup and once to set
+`RequireHttpsMetadata` ([§11.3](11-identity-authorization.md)). Registration is
+the effect rather than a branch inside the runner — a migrator that must not
+seed has no seeder in its container to resolve, so there is exactly one place
+configuration is read.
+
+```csharp
+// src/Services/Ordering/Ordering.Migrator/MigratorHost.cs, beside the
+// DbContext registration.
+//
+// Read as a string and parsed, never Configuration.GetValue<bool>. A variable
+// set to the empty string arrives as "" rather than null, and GetValue<bool>
+// throws InvalidOperationException on it — which turns a stray key into a
+// failed pre-upgrade hook and a blocked release. TryParse answers the same way
+// for "", for null, for "1" and for "yes": do not seed.
+bool requested = bool.TryParse(builder.Configuration["Seed:Enabled"], out bool enabled) && enabled;
+
+if (requested && builder.Environment.IsDevelopment())
+    builder.Services.AddScoped<OrderingSeeder>();
+
+// src/Services/Ordering/Ordering.Migrator/MigrationRunner.cs. The seeder joins
+// the primary constructor with a DEFAULT VALUE, and the `= null` is the whole
+// of what makes it optional — see the trap below. The runner is otherwise §7.4's:
+// MigrateAsync, a log line and an exit code.
+public sealed class MigrationRunner(
+    OrderingDbContext db,
+    ILogger<MigrationRunner> logger,
+    OrderingSeeder? seeder = null)
+
+// RunAsync, after MigrateAsync returns. The log line is not decoration: a gate
+// that fails closed in silence is indistinguishable from a seeder that is
+// broken, and it is the seeder a developer debugs.
+if (seeder is null)
+    NotSeeding(logger, null);
+else
+    await seeder.SeedAsync(ct);
+```
+
+> **Trap — a nullable reference type is not an optional dependency.**
+> `OrderingSeeder?` is an annotation the compiler reads and
+> `Microsoft.Extensions.DependencyInjection` never does. A constructor parameter
+> whose service is unregistered and which carries **no default value** makes
+> resolving `MigrationRunner` throw `InvalidOperationException` — *unable to
+> resolve service for type `OrderingSeeder` while attempting to activate
+> `MigrationRunner`* — so the migrator that must not seed becomes the migrator
+> that cannot start, and the gate fails the pre-upgrade hook *before* the
+> migration it was guarding. That is the opposite of failing closed: the
+> conditional registration above is only safe because the container falls back
+> to a parameter's default value when it cannot resolve one, which is what
+> `= null` supplies. Resolving it explicitly with
+> `IServiceProvider.GetService<OrderingSeeder>()` is the other correct spelling
+> and is not the one taken here, because it puts a service locator inside the
+> one type §7.4 keeps to `Database.Migrate()` and an exit code.
+
+**Both conditions are load-bearing, and they close different doors.** The flag
+is the half somebody writes down, and [§15.3](15-cicd-deployment.md) says what
+a chart would have to grow before one could reach a Job container at all. The
+environment name is the half no values file in this repository can supply: no
+chart sets an environment name for any workload, so every deployed migrator
+runs as `Production` and `IsDevelopment()` is false there whatever flag an
+overlay carries. `!IsProduction()` is not the same test, and the difference is
+measured rather than stylistic — with the variable set to the empty string
+`EnvironmentName` is `""`, `IsDevelopment()` is false and `IsProduction()` is
+false too, so the negation admits precisely the blank value a templating
+mistake produces.
+
+> **Trap — `ASPNETCORE_ENVIRONMENT` does not reach the migrator.** The job host
+> is `Host.CreateApplicationBuilder` (§7.4) rather than
+> `WebApplication.CreateBuilder`, and the generic host binds its environment
+> from `DOTNET_ENVIRONMENT`. Measured on .NET 10: with
+> `ASPNETCORE_ENVIRONMENT=Development` set and `DOTNET_ENVIRONMENT` unset,
+> `EnvironmentName` is `Production` and `IsDevelopment()` returns false. So the
+> obvious guard is one that never opens, and what a developer then debugs is
+> the seeder — the gate is silent and the seeder is the visible half. §14.1's
+> two migrator services set no environment name at all today, so the PR that
+> writes the seeder gives them `DOTNET_ENVIRONMENT: Development` beside their
+> connection strings. That line is the local half of the same switch and
+> belongs in the same change as the guard, rather than being discovered by
+> whoever runs `docker compose up` next.
+
+**Turning seeding on has to be a diff, and today there is no diff that would do
+it.** The shared migration-Job template renders exactly one `env` entry — the
+migrator connection string of §7.1 — so `Seed__Enabled` has no route into that
+container. Enabling it in a cluster would mean editing the library chart's
+template *and* a values file — two lines in a reviewed pull request, rather
+than a variable somebody exports onto a namespace. §15.3 carries the chart
+half of that rule.
+
+**A seeder creates rows and not principals.** §14.1's realm is imported by
+Keycloak itself, from `deploy/compose/keycloak/realm-export.json` under
+`start-dev --import-realm` — a container and a mode that exist in Compose and
+nowhere else. Nothing in a migrator has ever created a subject, and a demo
+principal in a production identity store is an account with a published
+password. Seed the databases the gate above protects, and leave identity to an
+import no deployed artefact reaches.
 
 ---
 

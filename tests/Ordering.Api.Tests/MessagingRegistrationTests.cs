@@ -7,7 +7,13 @@ using Ordering.Application.Orders.ConfirmOrder;
 using Ordering.Application.Orders.FlagOrderForReview;
 using Ordering.Application.Orders.MarkOrderShipped;
 using Ordering.Infrastructure.Messaging;
+using Ordering.Infrastructure.Persistence;
+using System.Data;
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using MassTransit.Middleware;
+using MassTransit.Middleware.Outbox;
 using MassTransit.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -292,6 +298,169 @@ public class MessagingRegistrationTests
         services.ShouldContain(
             d => (d.ImplementationType ?? d.ServiceType) == typeof(OrderFulfilmentSaga),
             "the state machine itself — AddSagaStateMachine registers the machine as well as its instance");
+    }
+
+    [Fact]
+    public void The_saga_has_a_transactional_outbox_rather_than_an_in_memory_one()
+    {
+        // **ADR-032, and the half of it a ServiceCollection can see.** The
+        // filter that matters is UseEntityFrameworkOutbox on the saga's receive
+        // endpoint, and a receive endpoint's filters cannot be read back from a
+        // ServiceCollection at all — so this asserts the container half, and
+        // OrderFulfilmentSagaEndpointTests asserts the filter itself against a
+        // real broker by observing the row it writes. **Neither half implies
+        // the other**, which is why both exist: AddEntityFrameworkOutbox with
+        // no endpoint using it registers everything below and buffers nothing
+        // durably, and an endpoint calling UseEntityFrameworkOutbox without it
+        // throws at bus start.
+        //
+        // **The subject is the factory the filter resolves, and an earlier
+        // revision of this test said it could not be.** That revision asserted
+        // on InboxCleanupService<OrderingDbContext> and claimed
+        // IOutboxContextFactory<OrderingDbContext> "is not public at the 8.5.3
+        // pin" — false. It is public, in MassTransit.Middleware rather than the
+        // MassTransit.Middleware.Outbox this file first guessed at, and the
+        // claim was a failed using directive written up as a property of the
+        // library. Compiling it is what settled it, which is this branch's own
+        // lesson arriving a third time.
+        //
+        // The correction is not cosmetic. AddEntityFrameworkOutbox registers
+        // the cleanup service behind a flag that o.DisableInboxCleanupService()
+        // clears, so the old subject went red on a change that leaves the
+        // outbox entirely intact — a gate keyed on the wrong thing. The factory
+        // is what the endpoint filter actually resolves, and it is closed over
+        // this service's own DbContext, so it cannot be satisfied by some other
+        // context's outbox.
+        //
+        // Without that call the saga is back on UseInMemoryOutbox, whose buffer
+        // flushes AFTER EntityFrameworkRepository commits — #128's window,
+        // where a crash leaves the order in AwaitingPayment with stock
+        // reserved, no AuthorisePayment sent, and the PaymentTimeout that would
+        // have rescued it lost in the same buffer.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        services.ShouldContain(
+            d => d.ServiceType == typeof(IOutboxContextFactory<OrderingDbContext>),
+            "AddEntityFrameworkOutbox<OrderingDbContext> is what registers it, and nothing else here " +
+            "does — its absence puts §9.6's saga back on the in-memory outbox (#128, ADR-032)");
+    }
+
+    [Fact]
+    public void The_outbox_transaction_is_serializable_because_the_saga_repository_stopped_owning_it()
+    {
+        // **A regression ADR-032 created and this line is what caught it.**
+        // ConcurrencyMode.Pessimistic exists so that two events arriving
+        // concurrently for one CorrelationId serialise — the comment beside it
+        // says exactly that — and it delivered it through the saga
+        // repository's OWN transaction, opened at Serializable.
+        //
+        // Under ADR-032 that transaction is no longer the repository's. The
+        // outbox filter opens one first and the repository joins it, so the
+        // isolation level is now the OUTBOX's — and MassTransit defaults that
+        // to RepeatableRead. Measured: without the line this pins, this
+        // assertion reads RepeatableRead.
+        //
+        // The row-lock hint does not compensate. A pessimistic read takes
+        // UPDLOCK on a row that EXISTS; the case Pessimistic is written for is
+        // two deliveries that both take the Initially branch for a
+        // CorrelationId with no row yet, where what is needed is a key-range
+        // lock and only SERIALIZABLE takes one. Without it both find nothing,
+        // both insert, and one loses on the primary key — recoverable, since
+        // the outbox rolls back and the endpoint retries, but it is a fault
+        // where there was none, on the exact property the mode was chosen for.
+        //
+        // Pinned rather than commented because nothing else can see it: the
+        // value lives in an options object no test resolved before this one,
+        // and the failure it prevents is a race that a green suite on an idle
+        // machine says nothing about.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        EntityFrameworkOutboxOptions<OrderingDbContext> options = provider
+            .GetRequiredService<IOptions<EntityFrameworkOutboxOptions<OrderingDbContext>>>()
+            .Value;
+
+        options.IsolationLevel.ShouldBe(
+            IsolationLevel.Serializable,
+            "the outbox filter opens the consume transaction and the saga repository joins it, so " +
+            "this value — not ConcurrencyMode.Pessimistic — is what serialises two deliveries " +
+            "racing to create one instance (ADR-032)");
+    }
+
+    [Fact]
+    public void The_outbox_columns_survive_this_contexts_string_convention()
+    {
+        // **A guarantee that rests on an internal helper of somebody else's
+        // library, so it is asserted rather than believed.** OrderingDbContext
+        // caps every string at 400 characters (§7.2), and MassTransit's three
+        // entities are mapped by the library. What keeps a serialised message
+        // out of an nvarchar(400) is that MassTransit's configurator CLEARS the
+        // convention on its own properties before setting the two lengths it
+        // wants — an internal call, not an explicit HasMaxLength on each
+        // column. Nothing about a version bump has to announce that it stopped
+        // doing so, and the failure would be silent until a message longer than
+        // 400 characters was staged, which is every real one.
+        //
+        // The model rather than the database, deliberately: this is what EF
+        // would emit, so it fails in the fast half rather than waiting for a
+        // container — and a migration generated from a truncating model would
+        // already be wrong before anything applied it.
+        ServiceCollection services = new();
+
+        services.AddDbContext<OrderingDbContext>(o => o.UseSqlServer("Server=.;Database=probe"));
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        using IServiceScope scope = provider.CreateScope();
+        IModel model = scope.ServiceProvider.GetRequiredService<OrderingDbContext>().Model;
+
+        IEntityType message = model.GetEntityTypes()
+            .Single(t => t.ClrType.FullName == "MassTransit.EntityFrameworkCoreIntegration.OutboxMessage");
+
+        foreach (string column in (string[])["Body", "Headers", "Properties", "MessageType"])
+        {
+            message.FindProperty(column)!.GetMaxLength().ShouldBeNull(
+                $"{column} carries a serialised message and must stay nvarchar(max); this context's " +
+                "400-character convention would truncate it, and MassTransit clears that convention " +
+                "through an internal helper rather than by setting a length here (ADR-032)");
+        }
+
+        message.FindProperty("DestinationAddress")!.GetMaxLength().ShouldBe(
+            256,
+            "the addresses are the columns MassTransit does bound, and a 400 here would mean the " +
+            "convention won after all");
+    }
+
+    [Fact]
+    public void The_bus_side_outbox_is_deliberately_not_registered()
+    {
+        // **A decision pinned rather than a defect caught**, and it is the one
+        // ADR-032 is most likely to be "corrected" on: UseBusOutbox() reads
+        // like the obvious companion to the line above and is a different
+        // mechanism. It intercepts IPublishEndpoint and ISendEndpointProvider
+        // OUTSIDE a consume context — the API request path — which §9.4's
+        // application outbox already owns, and where there is no dual write to
+        // close. Adding it would put a third staging mechanism on that path.
+        //
+        // IBusOutboxNotification is registered by UseBusOutbox() and by nothing
+        // else at the 8.5.3 pin, measured over a real ServiceCollection with
+        // and without the call rather than read off the documentation.
+        //
+        // **A negative assertion passes when the name it looks for stops
+        // existing**, so this one is not left on its own: the test above is its
+        // positive control. If a MassTransit bump renamed either type, that one
+        // goes red where this one would quietly keep agreeing.
+        ServiceCollection services = new();
+
+        services.AddMassTransitMessaging(Configuration());
+
+        services.ShouldNotContain(
+            d => d.ServiceType == typeof(IBusOutboxNotification),
+            "UseBusOutbox() would register this. §9.4's outbox owns the request path, and a second " +
+            "stage on a path with no dual write is cost without a guarantee (ADR-032)");
     }
 
     /// <summary>

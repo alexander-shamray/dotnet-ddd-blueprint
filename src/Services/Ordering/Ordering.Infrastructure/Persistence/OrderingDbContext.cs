@@ -1,5 +1,6 @@
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Outbox;
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Ordering.Domain.Orders;
 
@@ -56,6 +57,44 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
         // it. §7.2 puts mapping in these classes and never in attributes on
         // domain types, which would put EF Core in Ordering.Domain.
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrderingDbContext).Assembly);
+
+        // §9.6's transactional outbox (ADR-032), and the one part of this
+        // model no IEntityTypeConfiguration<T> above describes.
+        //
+        // NOT because the scan cannot reach one. ApplyConfigurationsFromAssembly
+        // looks for types IMPLEMENTING IEntityTypeConfiguration<> in this
+        // assembly and says nothing about where the entity type T is declared,
+        // so an IEntityTypeConfiguration<InboxState> written here WOULD be
+        // discovered and applied. The reason is ownership: MassTransit's own
+        // queries read these three tables, so a configuration of ours would be
+        // a second definition of a schema the library has to agree with — and
+        // the next version bump moves the library's half with nothing to catch
+        // the drift. InboxState, OutboxState and OutboxMessage — singular,
+        // where this repository's own tables are plural, so the two sets share
+        // the ordering schema without colliding.
+        //
+        // The callback overloads are deliberately not used. The entity type is
+        // MassTransit.EntityFrameworkCoreIntegration.OutboxMessage and this
+        // file already imports Common.Infrastructure.Outbox.OutboxMessage, so
+        // naming it would be CS0104; the parameterless form needs only the
+        // MassTransit namespace the extension methods live in.
+        //
+        // ConfigureConventions' 400-character string default does not truncate
+        // any of these, and the mechanism is worth naming because it is not the
+        // one it looks like. MassTransit does not override the convention with
+        // an explicit length on every column; its configurator CLEARS the
+        // convention first — an internal OptOutOfEntityFrameworkConventions
+        // that walks the entity's properties setting max length back to null —
+        // and only then sets 256 on the addresses and the content type. The
+        // body, headers, properties and message type end up nvarchar(max)
+        // because nothing constrains them, not because something chose it.
+        //
+        // The outcome is right and the guarantee is thinner than "explicit
+        // lengths" implies: it rests on an internal helper of the library
+        // continuing to run. A test asserts the resulting column types against
+        // the built model, because this is precisely the kind of thing that
+        // stops being true on a version bump with nothing going red.
+        modelBuilder.AddTransactionalOutboxEntities();
     }
 
     /// <summary>

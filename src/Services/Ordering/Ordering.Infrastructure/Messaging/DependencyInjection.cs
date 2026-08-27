@@ -1,3 +1,4 @@
+using System.Data;
 using Common.Application;
 using Common.Contracts.Catalog.V1;
 using Common.Contracts.Inventory.V1;
@@ -144,6 +145,78 @@ public static class DependencyInjection
                     // that already ran.
                     r.ConcurrencyMode = ConcurrencyMode.Pessimistic;
                 });
+
+            // ADR-032's transactional outbox, and the second outbox table set
+            // §9.3 forbids — admitted once, for one endpoint, because the
+            // prohibition's own argument does not reach the case. §9.3 bans a
+            // second APPLICATION outbox because two dispatchers means two
+            // retention policies and one of them being unmonitored. The saga
+            // does not publish through the application outbox at all: it Sends
+            // and Schedules on the bus, and a scheduled message cannot be
+            // staged in ordering.OutboxMessages because the delay is a
+            // transport feature (ADR-021) that no dispatcher of ours could
+            // replay. So routing the saga's output through §9.4's outbox is not
+            // the cheaper alternative to this — it is not an alternative at
+            // all, and the sentence in §9.3 saying it would add "a second
+            // staging hop with no additional guarantee" was true only while the
+            // in-memory outbox was believed to be durable.
+            //
+            // What this registers, measured over a real ServiceCollection
+            // rather than read off the documentation: a scoped
+            // IOutboxContextFactory<OrderingDbContext> and a hosted
+            // InboxCleanupService<OrderingDbContext>. UseBusOutbox() is
+            // deliberately NOT called — it intercepts IPublishEndpoint and
+            // ISendEndpointProvider outside a consume context, which is the
+            // API request path §9.4's application outbox already owns, and
+            // adding it would put a third staging mechanism on a path that has
+            // no dual write.
+            //
+            // The honest cost is a second retention policy, and it is one table
+            // rather than three. InboxCleanupService prunes ordering.InboxState
+            // and nothing else — the package documents it as "responsible for
+            // removing InboxState entries after the expiration window timeout
+            // has elapsed" — while ordering.OutboxMessage is drained by the
+            // outbox middleware itself as each message reaches the transport,
+            // on delivery rather than on a timer. ordering.OutboxState is
+            // touched by NOTHING here: it is the bus-side outbox's table, and
+            // UseBusOutbox() is not called, so the migration creates it purely
+            // because OutboxMessage.OutboxId carries a foreign key to it and
+            // the model would not build otherwise. An operator finding it
+            // permanently empty is looking at the design, not at a fault.
+            //
+            // So the shape §9.3 warns about is still here — that cleanup timer
+            // beside §9.9's RetentionPurgeService, which prunes ours and reads
+            // none of the three. It is taken rather than dodged, because
+            // folding InboxState into our purge would mean deleting a row whose
+            // outbox messages have not been delivered — turning a retention job
+            // into the message loss this whole change exists to close.
+            x.AddEntityFrameworkOutbox<OrderingDbContext>(o =>
+            {
+                o.UseSqlServer();
+
+                // **Serializable, because this transaction stopped being the
+                // saga repository's and took its isolation level with it.**
+                // ConcurrencyMode.Pessimistic above exists so that two events
+                // arriving concurrently for one CorrelationId serialise, and it
+                // delivered that through a transaction the repository opened
+                // itself, at Serializable. Under this filter the outbox opens
+                // the transaction first and the repository joins it — which is
+                // the whole mechanism — so the level in force is the one set
+                // here, and MassTransit's default for it is RepeatableRead.
+                // Measured over a real ServiceCollection, and pinned by a test:
+                // without this line the option reads RepeatableRead.
+                //
+                // The row-lock hint does not cover the gap. A pessimistic read
+                // takes UPDLOCK on a row that EXISTS, and the case Pessimistic
+                // is written for is two deliveries both taking the Initially
+                // branch for a CorrelationId with no row yet — where what is
+                // needed is a key-range lock, and only SERIALIZABLE takes one.
+                // Without it both find nothing, both insert, and one loses on
+                // the primary key. Recoverable, since the outbox rolls back and
+                // the endpoint retries; a fault where there was none, on the
+                // exact property the concurrency mode was chosen for.
+                o.IsolationLevel = IsolationLevel.Serializable;
+            });
 
             // The scheduler §9.6's four Schedule declarations need, and the
             // thing no chapter specified until ADR-021. This half registers
@@ -328,7 +401,46 @@ public static class DependencyInjection
                         // mid-transition leaves no row, and the redelivery
                         // does the work again.
                         e.UseConsumeFilter(typeof(InboxFilter<>), context);
-                        e.UseInMemoryOutbox(context);
+
+                        // **The one endpoint whose outbox is not the in-memory
+                        // one, and the whole of #128** (ADR-032). The other
+                        // three endpoints buffer nothing that matters: their
+                        // consumers publish through §9.4's application outbox,
+                        // whose row commits with the aggregate, so the
+                        // in-memory outbox there defers sends that are already
+                        // durable. The saga is the exception — it Sends and
+                        // Schedules on the bus directly — and the in-memory
+                        // buffer flushes AFTER EntityFrameworkRepository has
+                        // committed the instance. A crash in that window left
+                        // the order in AwaitingPayment with stock reserved, no
+                        // AuthorisePayment sent, and no PaymentTimeout to
+                        // rescue it, because the schedule was in the same
+                        // buffer.
+                        //
+                        // This filter writes those sends into
+                        // ordering.OutboxMessage on the SAME DbContext and in
+                        // the same transaction as the instance — the repository
+                        // above takes ExistingDbContext<OrderingDbContext>,
+                        // which is what makes the two one commit rather than
+                        // two — and delivers them after it commits. The crash
+                        // window stops existing: either both the instance and
+                        // its messages are durable, or neither is, and a
+                        // redelivery resumes the delivery instead of re-running
+                        // the transition.
+                        //
+                        // BOTH inboxes stay, and they answer different
+                        // questions rather than duplicating one. InboxFilter<>
+                        // is §9.5's long-window duplicate suppressor, pruned on
+                        // §9.9's retention — it is what stops a redelivered
+                        // OrderPlaced starting a SECOND workflow hours after
+                        // the first finalised, which is the defect PR-21 filed
+                        // when §9.8's saga exemption was removed. MassTransit's
+                        // InboxState is a short-window delivery record, pruned
+                        // on its own duplicate-detection window, and it exists
+                        // so this filter knows which of the committed messages
+                        // it has already sent. Retiring either one costs a
+                        // guarantee the other never made.
+                        e.UseEntityFrameworkOutbox<OrderingDbContext>(context);
 
                         e.ConfigureSaga<OrderFulfilmentState>(context);
                     });

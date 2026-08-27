@@ -4,6 +4,8 @@ using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
 using Common.Infrastructure.Redis;
 using Common.Web;
+using MassTransit.EntityFrameworkCoreIntegration;
+using Ordering.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -134,6 +136,45 @@ public class OrderingApiFactory(
                 services.Remove(purge);
 
                 services.AddSingleton<RetentionPurgeService>();
+
+                // ADR-032's third background writer, removed on the two
+                // arguments above rather than on a new one.
+                // AddEntityFrameworkOutbox registers a hosted
+                // InboxCleanupService<OrderingDbContext> that polls
+                // ordering.InboxState and deletes delivered rows past the
+                // duplicate-detection window. Left running it is a fourth
+                // writer to a table this suite asserts over, on a timer no test
+                // drives — the same shape as the two above.
+                //
+                // **This removal is right and it is NOT what closed the
+                // deadlock, which is the half worth recording.** The branch
+                // that added the outbox left this service in and met an
+                // intermittent SqlException 1205 out of Respawn's ResetAsync.
+                // Removing it here looked like the fix — this file's own
+                // precedent, applied to a third service — and a revision of the
+                // fixture deleted its retry on the strength of that, saying
+                // "there is no second deleter to race". **The deadlock
+                // reproduced with this service gone**, on the second of six
+                // runs. A deadlock needs two transactions taking locks in
+                // opposing order, not two deleters, and what Respawn actually
+                // races is whatever consume transaction is still committing —
+                // longer and multi-table since ADR-032. The retry is back and
+                // ServiceFixture.ResetAsync carries the corrected argument.
+                //
+                // So this line stands on the precedent alone, which is enough:
+                // a background writer nothing drives is a writer that makes
+                // "the pass never happened" and "the pass spared the row" the
+                // same green, whether or not it is also deadlocking.
+                //
+                // No coverage is lost. Nothing asserts on a cleanup pass, and
+                // the window it prunes past is thirty minutes against a
+                // collection that runs in about eighty seconds — so in a test
+                // run this service has never had a row it was allowed to
+                // delete.
+                ServiceDescriptor inboxCleanup = services.Single(d =>
+                    d.ServiceType == typeof(IHostedService) &&
+                    d.ImplementationType == typeof(InboxCleanupService<OrderingDbContext>));
+                services.Remove(inboxCleanup);
 
                 // §9.4. Adding, not replacing: the production assemblies stay,
                 // so a test cannot stage a type the real host would refuse.

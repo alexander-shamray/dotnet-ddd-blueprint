@@ -68,6 +68,351 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The mechanism a word stood in for (#128, #137, #62)
+
+Three issues, and each is a word that had been read as a mechanism for long
+enough that nobody re-read it. **Outbox** on §9.6's receive endpoint meant a
+process-local buffer that flushed *after* the commit it was supposed to
+survive. **27 pull requests** was a total for a document that had grown a
+section past it. **Development-only** in §14.3 was an instruction to whoever
+writes the seeder, on the one container this platform runs in production
+holding §7.1's DDL identity. None of the three was wrong when it was written;
+what makes them one shape is that each kept reading correctly after the thing
+behind it had stopped being true, so the only way to find any of them was to
+run something.
+
+### The buffer that was called an outbox (#128)
+
+`OrderFulfilmentSaga` persisted its instance through
+`EntityFrameworkRepository` and sent its commands through `UseInMemoryOutbox`,
+which releases its buffer after the inner pipeline returns — after the
+repository has committed. A crash in that window left the order in
+`AwaitingPayment` with stock reserved, no `AuthorisePayment` sent and **no
+`PaymentTimeout` to rescue it**, because the schedule sat in the same buffer.
+[ADR-032](backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+carries the decision, the exception it takes to §9.3 and the two costs it
+accepts, and none of that is restated here. What follows is what building it
+found.
+
+**The issue named the wrong API, and the misreading had travelled by
+citation.** `UseBusOutbox()` is a **bus-side** option on
+`IEntityFrameworkOutboxConfigurator`: it intercepts `IPublishEndpoint` and
+`ISendEndpointProvider` *outside* a consume context, which is the API request
+path §9.4's application outbox already owns, and it does nothing whatever for a
+receive endpoint. The endpoint-side call is
+`UseEntityFrameworkOutbox<OrderingDbContext>(context)`, and it needs
+`AddEntityFrameworkOutbox<OrderingDbContext>` at the bus for a store to write
+to. This log had carried the wrong name forward three times — twice as the API
+and once as the assumption that §9.3's dismissed alternative was merely dearer
+— and all three are reconciled in place rather than rewritten, on the rule the
+header states: an argument is left alone, a claim about the system is not.
+**Nobody had run it.** A name that is plausible, cited and never executed is
+indistinguishable from a name that works, which is the same property the rest
+of this entry keeps meeting.
+
+**The alternative §9.3 dismissed is unavailable, not merely dearer, and that is
+the finding rather than the fix.** §9.3 said routing saga output through §9.4's
+outbox "would add a second staging hop with no additional guarantee" — a claim
+about cost, and true only while the in-memory outbox was believed to persist
+anything. A saga timeout is a **scheduled** message and the delay is a
+transport feature
+([ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
+so no dispatcher of ours can replay a delay it never held. An application
+outbox would have carried `AuthorisePayment` and not `PaymentTimeout`: it
+closes half the window and leaves the half with **no bound at all**, which is
+worse than the shape it replaces because a stuck order with a timeout on it
+eventually announces itself. A sentence ranking an option by price is a
+sentence nobody re-checks for whether the option exists.
+
+**Both counterfactuals were measured, and they fail in different halves.**
+Reverting the endpoint line alone leaves both new registration tests green and
+turns the integration test red; removing `AddEntityFrameworkOutbox` alone turns
+the registration test red. Neither half implies the other, which is the whole
+argument for there being two tests rather than one:
+`The_saga_has_a_transactional_outbox_rather_than_an_in_memory_one` in
+`tests/Ordering.Api.Tests/MessagingRegistrationTests.cs` reads the container,
+and `The_sagas_sends_are_committed_with_its_instance_rather_than_buffered` in
+`tests/Ordering.Api.Tests/OrderFulfilmentSagaEndpointTests.cs` reads
+`ordering.InboxState` against a real broker and a real SQL Server, because a
+receive endpoint's filters cannot be read back out of a `ServiceCollection` at
+all.
+
+**What that integration test asserts is not that a message arrived.** Every
+other test in that class already proves delivery, and every one of them passed
+before this change — delivery is what the in-memory outbox also does, right up
+until the process dies. The observable difference is *where the messages were*
+between the commit and the send, and MassTransit records exactly that:
+`LastSequenceNumber IS NOT NULL` on the inbox row is stamped once the messages
+staged beside it have gone. It is paired with the same query minus that
+predicate, as an anti-vacuity control — without it, a `WHERE` matching nothing
+reads exactly like a delivery that has not happened yet, and the test fails for
+the wrong reason after thirty seconds of waiting.
+
+**A registration added a background writer, and a background writer is a new
+participant in every lock the fixture takes.** `AddEntityFrameworkOutbox` also
+registers a hosted `InboxCleanupService<OrderingDbContext>` that prunes
+`ordering.InboxState` on a timer for as long as the host is up. Respawn's
+`ResetAsync` deletes every row in the `ordering` schema in its own dependency
+order, so two multi-table deletes run concurrently over the same tables and SQL
+Server picks a victim — error **1205**, surfacing out of
+`OrderingCommandEndpointTests.InitializeAsync`, *a test with nothing to do with
+sagas*. It presented as a flake and passed on re-run, which is how it would
+have gone on presenting; capturing the exception is what named it.
+**The first answer was a bounded retry on 1205 in `ResetAsync`. Review found a
+better argument, the branch acted on it, and the better argument was wrong
+about the mechanism.** `OrderingApiFactory` already takes the outbox dispatcher
+and the retention purge out of the test host, on the ground that a background
+writer racing an assertion makes "the pass never happened" and "the pass spared
+the row" the same green — so the cleanup service belonged on that list, and
+the file's own precedent was an argument nobody had reached for. The branch
+removed the writer **and deleted the retry**, on a sentence that read well:
+*there is no second deleter to race*.
+
+**It reproduced with the cleanup service gone, on the second of six runs.** A
+deadlock needs two transactions taking locks in opposing order, not two
+deleters. What Respawn races is whatever consume transaction is still
+committing when the next test resets — and ADR-032 made the saga's longer,
+multi-table and `Serializable`, so this decision widened a hazard the fixture
+already documented as one it cannot close. The removal stands on the precedent,
+which is enough on its own; the retry is back, and both comments now say which
+of the two does which job.
+
+**That is the third time on this branch that a claim was reasoned rather than
+run, and the only one whose reasoning was the branch's own rather than
+inherited.** The API name came from an issue and so did the signal; this came
+from a sentence written while deleting the code that contradicted it. Six runs
+cost twelve minutes. Ignoring MassTransit's tables in the reset was the third option
+and stays refused — it leaves rows standing between tests and makes the next
+whole-table assertion over them wrong for a reason nobody would find.
+
+**The registration this most wanted to assert was said not to be public, and
+that was a failed `using` directive written up as a property of the library.**
+`IOutboxContextFactory<OrderingDbContext>` is what the filter resolves, it is
+public, and it lives in `MassTransit.Middleware` rather than the
+`MassTransit.Middleware.Outbox` the first attempt guessed at. Compiling it is
+what settled it. **The correction is not cosmetic**: the subject that claim
+settled for, `InboxCleanupService<OrderingDbContext>`, is registered behind a
+flag `o.DisableInboxCleanupService()` clears, so the gate would have gone red on
+a change leaving the outbox entirely intact — a gate keyed on the wrong thing,
+which is this repository's most-repeated failure wearing its opposite face. The
+negative test beside it, that
+`IBusOutboxNotification` is **not** registered, pins a decision rather than
+catching a defect, and it is not left on its own: a negative assertion passes
+when the name it looks for stops existing, so the positive test is its control
+against a MassTransit bump renaming either type.
+
+**The window was observable, and a draft of this branch's ADR said it was
+silent.**
+[#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)'s
+own body describes
+[#117](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/117) as
+having replaced the fault with an `Ignore()` and a log line. #117 tried that and
+then **removed** it: what shipped keeps MassTransit's default and enumerates the
+legitimate arrivals one at a time, and `Ignore(StockReserved)` is declared
+`During(Compensating)` alone — so the redelivery this window produces, a
+`StockReserved` landing in `AwaitingPayment`, is genuinely unhandled. It faults,
+spends §9.8's five retries and reaches the error queue
+[§13.6](backend-architecture/13-observability.md) pages on, which
+`A_redelivered_event_faults_rather_than_being_absorbed_silently` in
+`tests/Ordering.Application.Tests/OrderFulfilmentSagaTests.cs` has asserted
+since #117 landed. **Reading the issue instead of the state machine is how it
+got in** — the same failure as the wrong API name above, arriving through a
+second door: a claim that was plausible, that had travelled by quotation, and
+that nobody had run anything to check. ADR-032 carries the correction and it is
+not restated here. What matters for what comes after is that the finding
+**relocates the case rather than weakening it**: a page is not a repair, and
+nothing in the error queue recreates the `AuthorisePayment` that was never sent
+or the `PaymentTimeout` that would have rescued the order, so what the decision
+buys is that there is nothing left to reconstruct by hand.
+
+**`OnUnhandledEvent`'s enumeration did not come back to being a catch-all, and
+the reason is arithmetic rather than caution.** #117 removed a catch-all
+because three arrivals reached it and one answer could not be right for all
+three. ADR-032 deletes the middle one — the pre-flush crash that left an
+instance advanced and its commands unsent — which leaves two. A callback
+answering two cases identically is still only ever as right as its worse one,
+and the worse one here is the misroute, which is a configuration fault worth
+six retries and an error-queue message. **The case that got cheaper is the one
+the catch-all was already right about**, so nothing about closing the window
+made the enumeration less load-bearing.
+
+### The rows the plan had grown past (#137)
+
+`docs/roadmap.md` opened by saying Appendix C "sequences the work into 27 pull
+requests", and the appendix's *After the plan* section already held two rows
+past that number before this branch added a third. Further down, the ADR-019
+paragraph priced the analyser policy's per-pull-request cost as "24 pull
+requests wide", which works out only as PR-02 … PR-25 and was already false
+against the Scope row's own PR-27. **Both counts are gone rather than
+corrected**, which is the fix this repository reaches for every time a restated
+total rots: what a reader can check is that the rows below are Appendix C's
+rows, title for title and phase for phase, and that check needs no numeral in
+front of it. A figure true of one part of a document and false of the document
+is worse than none.
+
+**C.3 called its own graph an omission, and it is a rule.** The prose under the
+mermaid block said the missing *After the plan* nodes were "an omission rather
+than a claim about their dependencies" and filed itself as this issue. Drawing
+them buys nothing that can be acted on: a row lands in that section only
+because the plan was already complete, so every pull request it depends on has
+already been delivered — PR-28's three, PR-29's one, PR-30's one — and a node
+whose predecessors are all landed can neither free a branch to start nor warn
+that one is blocked. That is structural rather than a coincidence of today's
+three rows. The graph now says it is the plan and stops at PR-27 **by rule**,
+and #137 is closed by stating the rule rather than by adding the edges the
+issue proposed.
+
+**The roadmap's *After the plan* section carries no estimate, and the omission
+is the decision.** Every number in that file was quoted before any code
+existed, against a specification that was already finished; not one of the
+three rows was priced that way, since two were rowed after they landed and the
+third is rowed by the pull request doing the work. A figure there would be
+either invented — which the *Basis* section's own terms forbid, an invented day
+being no argument about relative size — or an actual restated as a forecast,
+which makes the column mean two things depending on which row is read. PR-26 is
+the near case and does not supply the missing rule: its four days stayed out of
+the total, and they are legitimate for the one reason these rows cannot borrow,
+which is that it was priced before it was taken. **The days were real and this
+file cannot say how many**, which is a different claim from the work having
+been free.
+
+**One claim in that file had been falsified and nothing had looked.** The
+domain-risk section credited PR-12 with narrowing the largest item on the page
+because §8's Redis helpers were "shared mechanism in `Common.Infrastructure`,
+wired to no service at all" — PR-28 wired them into both Catalog and Ordering,
+and Appendix C's own PR-28 row names that wiring as a deliverable. **The seven
+days do not move**, which is why the sentence is reworded rather than deleted:
+what makes PR-12 domain-proof is that its helpers name nothing a domain owns,
+not that nothing had called them. Being wired into two services it knows
+nothing about demonstrates the property rather than costing it, and the state
+claim was never the argument — it was a convenient way of gesturing at one,
+which is precisely the kind of sentence that goes stale without anybody
+noticing the argument survived.
+
+### The gate that was a sentence, and the guard that never opens (#62)
+
+§14.3 said seeding "runs from the migrator container, is idempotent, and is
+development-only", specified no mechanism for the last of those, and told an
+implementer where to put the seeder. §15.3 runs that same migrator image as
+Helm's `pre-install,pre-upgrade` hook on every release, holding the DDL
+identity §7.1 gives it and nothing else in the platform holds. A seeder written
+where the paragraph pointed, with no gate, writes demo rows into a production
+database on the first `helm upgrade` — **idempotently**, so nothing fails, no
+hook goes red, and the deploy log says only that a migration ran. §14.3 is now
+that gate, and §7.4 and §15.3 carry the lines that make it one.
+
+**The guard the issue asked for would have been fail-closed and permanently
+closed, and that is measured rather than reasoned.** `Ordering.Migrator` builds
+its host with `Host.CreateApplicationBuilder`
+(`src/Services/Ordering/Ordering.Migrator/MigratorHost.cs`), and a generic host
+binds its environment from **`DOTNET_ENVIRONMENT`**, not
+`ASPNETCORE_ENVIRONMENT`. With `ASPNETCORE_ENVIRONMENT=Development` set and
+`DOTNET_ENVIRONMENT` unset, `EnvironmentName` is `Production` and
+`IsDevelopment()` is false — so the obvious guard never opens **anywhere**, and
+what a developer then debugs is the seeder, because the gate is the silent half
+and the seeder is the visible one. §14.1's two migrator services set no
+environment name at all today, which is why the chapter puts
+`DOTNET_ENVIRONMENT: Development` beside their connection strings in the same
+change as the guard rather than leaving it for whoever next runs
+`docker compose up`.
+
+**Two further measurements shaped the guard, and both are about the blank
+value.** `Configuration.GetValue<bool>` **throws** on an empty string rather
+than answering false — a variable set to `""` reaches configuration as `""` and
+not null — so a stray key would fail the pre-upgrade hook and block a release;
+the guard reads the raw string and `bool.TryParse`s it, which answers the same
+way for `""`, for null, for `1` and for `yes`. And `!IsProduction()` is **not**
+the same test as `IsDevelopment()`: with the variable set to the empty string
+`EnvironmentName` is `""`, and `IsDevelopment()` and `IsProduction()` are both
+false, so the negation admits exactly the value a templating mistake produces.
+Of the two spellings of one condition, the one that reads as more permissive is
+the one that fails open on the input nobody types deliberately.
+
+**The chart half is what makes turning it on a diff rather than a variable.**
+`deploy/helm/common/templates/_migration-job.tpl` renders exactly one `env`
+entry — §7.1's migrator connection string — so `Seed__Enabled` has no route
+into that container at all. Enabling seeding in a cluster would take a new
+entry in the library chart's template *and* a values file, both lines somebody
+reviews, rather than an export onto a namespace. §15.3 states that no chart
+carries a seed key **as a statement rather than an omission**, on that
+section's own rule that a key joins a chart when a host's code reads one — and
+no `*.Migrator` holds a seeder to switch on, which is the last thing worth
+recording here: nothing seeds today, so §14.3 is a specification and not a
+description. A mechanism written after the seeder exists is a mechanism argued
+against code somebody has already shipped.
+
+### What review found, and why all of it was the same defect
+
+Three reviews ran over this branch after it was opened — Copilot's, and two
+read-only passes of my own, one on the code and one on the claims. Between them
+they found eleven things, and it is worth recording that **not one was a
+disagreement about design**. Every one was a sentence that had never been
+executed.
+
+**The API name.** Covered above, and it is the cheapest instance: four sites,
+months, no compiler.
+
+**The signal**, argued in full under #128 above and not repeated here. The
+short form: the window was observable, a draft said it was silent, and the
+draft had read the issue rather than the state machine.
+
+**The reason for a mapping.** Four documents said
+`AddTransactionalOutboxEntities()` was used because
+`ApplyConfigurationsFromAssembly` cannot reach an entity type declared in
+another assembly. It can — the scan selects on where the *configuration* lives,
+not the entity — so a local `IEntityTypeConfiguration<InboxState>` would be
+found and applied. The conclusion survived and the reason did not: MassTransit
+owns those mappings and its own queries read them, so a configuration of ours
+would be a second definition of a schema the library has to agree with.
+
+**The visibility of a type.** A test comment asserted that
+`IOutboxContextFactory<OrderingDbContext>` "is not public at the 8.5.3 pin, so
+it cannot be named from a test assembly". It is public, in
+`MassTransit.Middleware`, and the claim was a failed `using` directive written
+up as a property of the library. **That one had teeth**: the subject it settled
+for instead, `InboxCleanupService<T>`, is registered behind a flag that
+`o.DisableInboxCleanupService()` clears — so the gate would have gone red on a
+change leaving the outbox entirely intact, which is this repository's own
+gate-coverage failure wearing the opposite face.
+
+**The isolation level, and this is the one that was a defect rather than a
+sentence.** `ConcurrencyMode.Pessimistic` bought serialisation of two events
+racing for one `CorrelationId`, and it bought it through a transaction the saga
+repository opened itself at `Serializable`. Under this decision the repository
+no longer opens it — joining the outbox's is the whole mechanism — so the level
+in force became the outbox's, and MassTransit defaults that to
+`RepeatableRead`. Measured: the option read `RepeatableRead`. The row-lock hint
+does not cover it, because the case the mode exists for is two deliveries both
+finding *no row*, where only a key-range lock helps. Recoverable — one loses on
+the primary key and the endpoint retries — but a fault where there was none, on
+the exact property the mode was chosen for. One line fixes it and a test pins
+it.
+
+**The retention claim, and the leak under it.** Five sites said an
+`InboxCleanupService` prunes "MassTransit's tables". The package's own
+documentation scopes it to `InboxState`; `OutboxMessage` drains on delivery and
+`OutboxState` is touched by nothing at all here. Reading further gave the
+sharper finding: the cleanup deletes rows whose `Delivered` is set, so a
+transition that commits and then exhausts its retries leaves that row and its
+staged messages permanently — **the one path this decision exists to make
+survivable is also the one that leaks**. It is stated in ADR-032 rather than
+closed, with the error-queue alarm named as what stands in front of it.
+
+**The fixture**, argued under #128 above. The short form: the branch answered a
+race with a retry, review pointed at a better-looking answer, the branch took
+it and deleted the retry — and the race was not the one either of them had
+named. Both changes are in; only one of them was the fix.
+
+**What the reviews did not find is worth as much.** Both central mechanical
+claims held under a decompiler: the outbox filter really does enlist the saga
+repository's writes in one transaction, and `ScheduleSend` really is captured —
+the scheduler's payload is replaced with one built over the outbox context, so
+the delay is staged as a message property and restored on delivery. Those were
+the two claims that, had either been false, would have made this decision
+worthless rather than merely mis-argued. **Neither was checkable by reading the
+code in this repository**, which is the argument for a review pass that goes
+into the package rather than around it.
+
 ## The claims a gate never checked (#22, #50, #61, #64, #72, #119, #127)
 
 Seven issues, and the shape they share is narrower than the last batch's. Those
@@ -607,6 +952,15 @@ transactional outbox alongside §9.4's hand-rolled one. §9.3 forbids a second
 outbox table set in as many words. That is a §9 decision about owning two
 outboxes, it wants an ADR, and PR-21's entry said so before this branch
 existed. Nothing here makes it less true.
+
+**It has since been taken, and the API named twice above is the wrong one** —
+reconciled here rather than rewritten, because what the entry got right is the
+part worth keeping: it wanted an ADR, and
+[ADR-032](backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+is it. `UseBusOutbox()` is a bus-side option and does not touch a receive
+endpoint at all; what closes #128 is `UseEntityFrameworkOutbox<T>(context)` on
+the saga's endpoint, with `AddEntityFrameworkOutbox<T>` behind it. The
+misreading survived three sites in two entries because nobody had run it.
 
 **Every guard was observed red before it was trusted.** Six of the seven new
 saga tests were run against a machine patched back to its previous behaviour
@@ -3133,8 +3487,12 @@ after.
     **So the machine keeps MassTransit's default and the enumeration does the
     work**: every legitimate arrival has its own `Ignore`, and a structural
     test partitions the declared next-events so a new one cannot be missed.
-    #128 carries the durable fix (`UseBusOutbox`), which makes the pre-flush
-    case stop existing and a catch-all arguable again on evidence.
+    #128 carried the durable fix, which makes the pre-flush case stop
+    existing and a catch-all arguable again on evidence. It has since landed
+    (ADR-032) — as `UseEntityFrameworkOutbox` on the endpoint, not the
+    `UseBusOutbox` this line named — **and the catch-all did not come back**:
+    two arrivals rather than three still cannot be told apart by a callback
+    that answers both the same way.
     Reproduced first: a redelivered `StockReserved`
     in `AwaitingPayment` came back as `NotAcceptedStateMachineException`. A
     stale **timeout** never did — a scheduled message whose token id no longer
@@ -3238,7 +3596,11 @@ next reader wondering whether it was ever there.
   so this is the chapter disagreeing with itself rather than a new discovery.
   Closing it means running MassTransit's transactional outbox alongside this
   platform's hand-rolled §9.4 one, which is a §9 decision about owning two
-  outboxes and not something a saga PR settles.
+  outboxes and not something a saga PR settles. **It was settled by ADR-032**,
+  which found the alternative this entry assumed existed — routing the saga's
+  output through §9.4's outbox — to be unavailable rather than merely dearer,
+  because a scheduled timeout's delay is a transport feature no dispatcher of
+  ours can replay.
 
 ### What nine rounds of review moved, and the shape of the last one
 

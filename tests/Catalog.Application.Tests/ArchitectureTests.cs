@@ -119,11 +119,17 @@ public class ArchitectureTests
     [Fact]
     public void Application_and_domain_do_not_reference_masstransit()
     {
-        // §9.3's must-not list. The saga may Send and Publish because MassTransit's
-        // in-memory outbox holds those until the consume transaction commits — a
-        // guarantee that exists on the consume pipeline and nowhere else. A handler
-        // that copies the saga's style gets a dual write with no outbox behind it,
-        // and it works in every test where the broker is up.
+        // §9.3's must-not list. The saga may Send and Publish because its receive
+        // endpoint carries a transactional outbox (ADR-032), which writes those
+        // sends to the same DbContext and the same transaction as the instance —
+        // a guarantee that exists on that one consume pipeline and nowhere else.
+        // A handler that copies the saga's style gets a dual write with no outbox
+        // behind it, and it works in every test where the broker is up.
+        //
+        // The sentence this replaced said "MassTransit's in-memory outbox holds
+        // those until the consume transaction commits". It did not: the in-memory
+        // buffer flushes AFTER the consumer returns, which is after the repository
+        // has committed, and that gap was #128.
         Assembly[] assemblies = [typeof(DependencyInjection).Assembly, typeof(Product).Assembly];
         foreach (Assembly assembly in assemblies)
         {
