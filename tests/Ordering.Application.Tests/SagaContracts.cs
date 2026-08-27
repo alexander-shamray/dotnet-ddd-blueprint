@@ -148,7 +148,13 @@ internal static class SagaContracts
     /// is no partial construction to elide — but the more useful reason is
     /// that a double which fills only the fields today's consumer happens to
     /// read teaches the next reader that the others are optional. §3.2 gives
-    /// this event to Shipping, which needs the address and the lines.
+    /// this event to Shipping, which acts on the lines and the total.
+    /// <para>
+    /// It does not carry a delivery address, and that is §11.7's rule rather
+    /// than an omission in this double: a broadcast integration event carries
+    /// identifiers, not personal data (ADR-035). How Shipping obtains an
+    /// address is Shipping's PR to decide.
+    /// </para>
     /// </remarks>
     internal static OrderConfirmed OrderConfirmed(Guid orderId, Guid customerId) => new()
     {
@@ -159,13 +165,7 @@ internal static class SagaContracts
         CustomerId = customerId,
         TotalAmount = Total,
         Currency = Currency,
-        Lines = [new ConfirmedLine(Product, 2, 64.99m)],
-        ShippingAddress = new ShippingAddressV1(
-            "1 Test Street",
-            null,
-            "Springfield",
-            "12345",
-            "GB")
+        Lines = [new ConfirmedLine(Product, 2, 64.99m)]
     };
 
     internal static ShipmentDispatched ShipmentDispatched(Guid orderId, string tracking) => new()

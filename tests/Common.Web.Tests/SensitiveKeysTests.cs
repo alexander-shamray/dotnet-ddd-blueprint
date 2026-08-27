@@ -109,6 +109,17 @@ public class SensitiveKeysTests
         // term that happens to sit inside an ordinary word redacts that word
         // everywhere — "Shipping" contains "pin", which is why "pin" is
         // deliberately absent from the list above and why this case names it.
+        //
+        // ShippingAddress staying here is a claim about §13.4's vocabulary and
+        // NOT a claim that an address is uninteresting. The two rules divide
+        // the ground between them: this list governs credentials — the things
+        // that must never be logged because logging them grants access — while
+        // §11.7 governs personal data, and answers it by keeping the value off
+        // the wire in the first place. That is why the key survives the
+        // removal of ShippingAddressV1 from OrderConfirmed (ADR-035): after it,
+        // no integration event carries an address for a log to leak, and the
+        // one place the spelling still appears is PlaceOrder's request body,
+        // inbound to the service that owns the data.
         SensitiveKeys.Matches(key).ShouldBeFalse(key);
     }
 

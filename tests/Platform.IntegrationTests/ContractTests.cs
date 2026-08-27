@@ -558,8 +558,7 @@ public class ContractTests
     [
         typeof(StockLine),          // ReserveStock — judged, a command reaches it
         typeof(PlacedLine),         // OrderPlaced — exempt, only an event reaches it
-        typeof(ConfirmedLine),      // OrderConfirmed — the same
-        typeof(ShippingAddressV1)   // OrderConfirmed — the same
+        typeof(ConfirmedLine)       // OrderConfirmed — the same
     ];
 
     private static readonly Type[] Commands = JudgedTypesOf(Contracts, DeclaredCommandRoots);

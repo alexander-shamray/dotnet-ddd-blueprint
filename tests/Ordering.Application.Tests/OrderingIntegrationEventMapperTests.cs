@@ -7,6 +7,7 @@ using Ordering.Domain.Common;
 using Ordering.Domain.Orders;
 using Ordering.Domain.Orders.Events;
 using Shouldly;
+using System.Text.Json;
 using Xunit;
 
 namespace Ordering.Application.Tests;
@@ -80,11 +81,15 @@ public class OrderingIntegrationEventMapperTests
     }
 
     [Fact]
-    public void A_confirmed_order_carries_the_whole_address()
+    public void A_confirmed_order_carries_identifiers_and_no_address()
     {
-        // Line2 is the field PR-21 added to the contract, and this is the only
-        // assertion that it survives the mapping — the gap that made adding it
-        // worth doing was that nothing populated the type at all.
+        // The domain event still carries an address — it must, because §7.2's
+        // Orders table stores one and the Local lane never leaves the process —
+        // so the mapper is handed one on every call and the contract is what
+        // has to drop it. Constructing the event with a fully populated address
+        // is therefore the subject of this test rather than setup for it: a
+        // test driven by an empty address could not tell a mapper that omits
+        // the field from one that never had it to omit.
         Address address = Address.Of("12 Rue de la Paix", "Appartement 4", "Paris", "75002", "FR");
 
         IReadOnlyList<object> mapped = Mapper().Map(
@@ -101,12 +106,28 @@ public class OrderingIntegrationEventMapperTests
 
         OrderConfirmed confirmed = mapped.ShouldHaveSingleItem().ShouldBeOfType<OrderConfirmed>();
 
-        confirmed.ShippingAddress.Line1.ShouldBe("12 Rue de la Paix");
-        confirmed.ShippingAddress.Line2.ShouldBe("Appartement 4");
-        confirmed.ShippingAddress.City.ShouldBe("Paris");
-        confirmed.ShippingAddress.PostCode.ShouldBe("75002");
-        confirmed.ShippingAddress.Country.ShouldBe("FR");
+        // Asserted over the SERIALISED payload rather than over the type,
+        // because the wire is what §11.7's rule is about and a property check
+        // could only restate the compiler. This fails the moment any member —
+        // a field, a nested record, a stringified value object — puts one of
+        // those five values back on the contract, which a check naming
+        // ShippingAddress by hand would miss.
+        string payload = JsonSerializer.Serialize(confirmed);
 
+        foreach (string component in (string[])
+            ["12 Rue de la Paix", "Appartement 4", "Paris", "75002"])
+        {
+            payload.ShouldNotContain(
+                component,
+                Case.Insensitive,
+                $"§11.7: no part of the delivery address may reach the wire, and '{component}' did");
+        }
+
+        // "FR" is deliberately not in that list, and the omission is the point
+        // rather than an oversight: Currency is "EUR" and a two-letter country
+        // code is short enough to collide with an ordinary substring, so
+        // asserting on it would be a check that fails for reasons unrelated to
+        // an address. The four above are unambiguous.
         ConfirmedLine line = confirmed.Lines.ShouldHaveSingleItem();
         line.ProductId.ShouldBe(Product.Value);
         line.UnitPrice.ShouldBe(64.99m);

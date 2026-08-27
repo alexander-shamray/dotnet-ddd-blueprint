@@ -2,7 +2,6 @@ using Common.Application;
 using Common.Contracts.Ordering.V1;
 using Common.Domain;
 using Ordering.Application.Orders;
-using Ordering.Domain.Common;
 using Ordering.Domain.Orders.Events;
 
 namespace Ordering.Application.Integration;
@@ -81,8 +80,14 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
         CustomerId = e.CustomerId.Value,
         TotalAmount = e.Total.Amount,
         Currency = e.Total.Currency,
-        Lines = [.. e.Lines.Select(l => new ConfirmedLine(l.ProductId.Value, l.Quantity, l.UnitPrice.Amount))],
-        ShippingAddress = ToContract(e.ShippingAddress)
+        // The domain event carries the shipping address and this contract does
+        // not, and the asymmetry is the point rather than an omission: §11.7
+        // governs what crosses a service boundary, and OrderConfirmedDomainEvent
+        // never crosses one. It is the aggregate's own record of what it
+        // decided, over an address ordering.Orders stores anyway; this mapper
+        // is the only thing that ever read the field, and dropping the read is
+        // what keeps the address inside the service that owns it.
+        Lines = [.. e.Lines.Select(l => new ConfirmedLine(l.ProductId.Value, l.Quantity, l.UnitPrice.Amount))]
     };
 
     private static OrderCancelled ToContract(OrderCancelledDomainEvent e) => new()
@@ -108,12 +113,4 @@ internal sealed class OrderingIntegrationEventMapper : IIntegrationEventMapper
         // justifies it.
         Origin = CancellationOrigins.ToCode(e.Origin)
     };
-
-    // A value object decomposed into primitives, which is the whole of what
-    // §9.1 asks of a contract. ShippingAddressV1 is Common.Contracts' own type
-    // and unrelated to Ordering.Domain's Address beyond the resemblance the
-    // two happen to have today — which this PR made closer by adding Line2,
-    // and which is allowed to end at the next version of either.
-    private static ShippingAddressV1 ToContract(Address address) =>
-        new(address.Line1, address.Line2, address.City, address.PostalCode, address.Country);
 }

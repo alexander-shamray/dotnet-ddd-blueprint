@@ -57,7 +57,6 @@ public sealed record OrderConfirmed : IIntegrationEvent
     public required decimal TotalAmount { get; init; }
     public required string Currency { get; init; }
     public required IReadOnlyList<ConfirmedLine> Lines { get; init; }
-    public required ShippingAddressV1 ShippingAddress { get; init; }
 }
 
 public sealed record ConfirmedLine(Guid ProductId, int Quantity, decimal UnitPrice);
@@ -134,8 +133,31 @@ duplicate data and grow over time.
 
 This blueprint uses **fat-enough events**: carry the data consumers actually
 need to act, established by asking them, not by guessing. `OrderConfirmed`
-includes the shipping address because Shipping cannot function without it and
-should not call back to Ordering to get it.
+carries its `Lines` and `TotalAmount` because a consumer that has to act on the
+order cannot do so from an identifier alone, and calling back for them would
+reintroduce exactly the synchronous coupling the fat side of the trade-off is
+bought to avoid.
+
+> **"Fat enough" is bounded by [§11.7](11-identity-authorization.md), and the
+> bound is not a matter of degree.** That section's rule — integration events
+> carry identifiers, not personal data — is not one more consideration to weigh
+> against a consumer's convenience; it decides the question before the
+> trade-off above is reached. A broadcast event is copied into every consumer's
+> store, sits in the broker, and survives in outbox rows that §9.4's retention
+> purge deliberately does not delete — its `ProcessedAt IS NOT NULL` predicate
+> is load-bearing, so an abandoned row keeps its payload indefinitely and a
+> test pins that it does. A field placed on a broadcast event is a field
+> erasure cannot reach.
+>
+> **`OrderConfirmed` used to carry a `ShippingAddressV1`, and this section used
+> to argue for it** on the grounds that Shipping cannot function without the
+> address and should not call back to get it. The first half is true and the
+> second was the wrong remedy:
+> [ADR-035](appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)
+> records the removal and leaves the delivery mechanism to Shipping's own PR,
+> where the code that needs the address will be in front of whoever chooses it.
+> A postal address is personal data under GDPR Art. 4 and §11.7's erasure
+> choreography had no way to reach it on any of those three surfaces.
 
 ## 9.2 Versioning
 
@@ -237,9 +259,17 @@ architecture exists to avoid.
 > precisely what a deprecation window exists to make unnecessary. What the
 > window protects is a deployable that ships on its own schedule. The moment a
 > consumer exists the rule above binds with no exception, and the window for
-> the cheap edit has closed — which is the same observation §9.1 makes about
-> `ShippingAddressV1` from the other direction: the PR that becomes a
-> contract's first producer is the last one that can fix its shape for free.
+> the cheap edit has closed — which is the same observation §9.1 makes from the
+> other direction: the PR that becomes a contract's first producer is the last
+> one that can fix its shape for free.
+>
+> **Both conditions were met once, and naming the case is what the second one
+> is for.** `OrderConfirmed` dropped its shipping address under exactly this
+> rule: no service consumed the version — Shipping and Notifications are
+> unbuilt, and Ordering's own saga reads only the `OrderId` — and
+> [ADR-035](appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)
+> records it. It is also an instance of the harmful-window class below rather
+> than merely a cheap edit, which is why it did not take a V2.
 >
 > **For one class of change the deprecation window is not merely useless but
 > harmful**, and it is worth naming because it inverts the rule's intent. When
@@ -4633,7 +4663,7 @@ cfg.ReceiveEndpoint(
 > it would stage a third time on a path that has no dual write.
 >
 > **Both inboxes stay.** `InboxFilter<>` is §9.5's long-window duplicate
-> suppressor on §9.9's retention; MassTransit's `InboxState` is a short-window
+> suppressor on §9.4's retention; MassTransit's `InboxState` is a short-window
 > delivery record on its own, and it is how the outbox filter knows which of
 > the committed messages it has already sent. Retiring either costs a guarantee
 > the other never made.
