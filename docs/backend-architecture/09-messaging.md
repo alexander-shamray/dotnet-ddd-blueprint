@@ -142,12 +142,20 @@ bought to avoid.
 > bound is not a matter of degree.** That section's rule — integration events
 > carry identifiers, not personal data — is not one more consideration to weigh
 > against a consumer's convenience; it decides the question before the
-> trade-off above is reached. A broadcast event is copied into every consumer's
-> store, sits in the broker, and survives in outbox rows that §9.4's retention
-> purge deliberately does not delete — its `ProcessedAt IS NOT NULL` predicate
-> is load-bearing, so an abandoned row keeps its payload indefinitely and a
-> test pins that it does. A field placed on a broadcast event is a field
-> erasure cannot reach.
+> trade-off above is reached. A broadcast event sits in the broker, survives in
+> outbox rows that §9.4's retention purge deliberately does not delete — its
+> `ProcessedAt IS NOT NULL` predicate is load-bearing, so an abandoned row keeps
+> its payload indefinitely and a test pins that it does — and is copied into
+> whatever each consumer persists from what it received. A field placed on a
+> broadcast event is a field erasure cannot reach.
+>
+> **The inbox is not one of those copies, and the distinction is worth keeping
+> exact.** §9.5's `InboxMessage` records a message id, an endpoint and a
+> handling time; it stores no payload, so a consumer holds an address only
+> where its own projection, read model or log put one. Saying "every consumer's
+> store" overstates a case that does not need overstating — the broker and the
+> abandoned outbox row are enough on their own, and a storage path nobody wrote
+> is the one part of the argument a reader could check and dismiss.
 >
 > **`OrderConfirmed` used to carry a `ShippingAddressV1`, and this section used
 > to argue for it** on the grounds that Shipping cannot function without the

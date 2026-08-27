@@ -166,7 +166,9 @@ serialised into `ordering.OutboxMessages`, whose purge deletes only rows with
 `ProcessedAt IS NOT NULL` — deliberately, so §13.6's alert can see abandoned
 rows — so an abandoned row keeps the address indefinitely and a test guarantees
 it. It sits in the broker, for which no chapter sets a retention bound. It is
-copied into every consuming store, and §3.2 gives the event to Notifications,
+copied into whatever each consumer persists from it — not the inbox, which
+holds a message id, an endpoint and a time and no payload — and §3.2 gives the
+event to Notifications,
 which has no use for an address. §13.4's redactor matches key names and none
 covers an address — and `SensitiveKeysTests` held a **green test asserting
 `ShippingAddress` must not be redacted**, so the platform did not merely fail to

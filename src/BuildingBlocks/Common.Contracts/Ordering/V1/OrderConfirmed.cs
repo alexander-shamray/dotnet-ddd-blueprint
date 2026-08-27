@@ -4,18 +4,35 @@ namespace Common.Contracts.Ordering.V1;
 /// An order was confirmed — payment authorised, stock held (§3.2). Shipping
 /// consumes it, and what it consumes is order facts and identifiers: the
 /// lines, the total and the currency, keyed by <c>OrderId</c> and
-/// <c>CustomerId</c>. No delivery address, and no other personal data.
+/// <c>CustomerId</c>. No delivery address, and no directly identifying or
+/// free-text personal data.
 /// </summary>
 /// <remarks>
 /// <b>Identifiers, not personal data (§11.7).</b> This contract used to carry
 /// the delivery address, on §9.1's "fat enough" argument that Shipping cannot
 /// act without one and must not call back to Ordering to get it. That argument
-/// was settled by the wrong chapter. An address on the wire is copied into the
-/// broker, into every consumer's inbox and into any log or trace that recorded
-/// a payload, so an erasure request would have to reach all three and §11.7's
-/// choreography reaches none of them — which is why that section names an
-/// <c>OrderConfirmed</c> carrying personal data as its counter-example, and
-/// why this one no longer is it.
+/// was settled by the wrong chapter. An address on the wire reaches the broker,
+/// survives in outbox rows §9.4's purge deliberately spares, and is copied into
+/// whatever a consumer persists from what it received — a projection, a read
+/// model, a log or a trace. An erasure request would have to reach all of
+/// those, and §11.7's choreography reaches none of them, which is why that
+/// section names an <c>OrderConfirmed</c> carrying personal data as its
+/// counter-example and why this one no longer is it.
+/// <para>
+/// <b>The inbox is not one of those paths, and saying so is the point.</b>
+/// <c>InboxMessage</c> records a message id, an endpoint and a handling time
+/// and no payload at all, so a consumer stores an address only where its own
+/// code chose to. The distinction matters because it is where the remedy
+/// lives: a storage path nobody wrote is not a leak, and naming one that does
+/// not exist would make the argument easier to dismiss than it deserves.
+/// </para>
+/// <para>
+/// <b><c>CustomerId</c> is still personal data, and this contract does not
+/// claim otherwise.</b> A resolvable pseudonymous identifier is personal data
+/// under GDPR Art. 4; what makes it tractable is that only one service can
+/// resolve it, so severing that link there de-identifies every copy downstream.
+/// <c>ADR-035</c> states the rule and its residual in full.
+/// </para>
 /// <para>
 /// <b>Removed rather than guarded, and removed in one change.</b>
 /// <c>ADR-028</c> took <c>CustomerId</c> off <c>AuthorisePayment</c> on the

@@ -111,14 +111,22 @@ public class SensitiveKeysTests
         // deliberately absent from the list above and why this case names it.
         //
         // ShippingAddress staying here is a claim about §13.4's vocabulary and
-        // NOT a claim that an address is uninteresting. The two rules divide
-        // the ground between them: this list governs credentials — the things
-        // that must never be logged because logging them grants access — while
-        // §11.7 governs personal data, and answers it by keeping the value off
-        // the wire in the first place. That is why the key survives the
-        // removal of ShippingAddressV1 from OrderConfirmed (ADR-035): after it,
-        // no integration event carries an address for a log to leak, and the
-        // one place the spelling still appears is PlaceOrder's request body,
+        // NOT a claim that an address is uninteresting. This list is selective
+        // rather than categorical: it is mostly credentials — the things that
+        // must never be logged because logging them grants access — and it
+        // deliberately reaches a few personal-data shapes too, card_number, ssn
+        // and nationalid among them, because those are catastrophic in a log
+        // whoever holds them. Drawing a clean line between credentials and
+        // personal data would be tidier and would misdescribe the list.
+        //
+        // What keeps an address off it is the substring cost above, not a
+        // category: the terms are matched inside keys, so a term earns its
+        // place by what it would redact everywhere else. §11.7 answers the
+        // address instead, and answers it earlier — by keeping the value off
+        // the wire rather than out of the log. That is why this key survives
+        // the removal of ShippingAddressV1 from OrderConfirmed (ADR-035): no
+        // integration event carries an address for a log to leak, and the one
+        // place the spelling still appears is PlaceOrder's request body,
         // inbound to the service that owns the data.
         SensitiveKeys.Matches(key).ShouldBeFalse(key);
     }

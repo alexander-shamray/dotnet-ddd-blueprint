@@ -2001,7 +2001,8 @@ Shipping's own PR.
 > `CustomerId` means nothing without the service that can turn it into a
 > person, so severing that link once, in the one store that owns it,
 > de-identifies every copy downstream without the erasure choreography ever
-> having to reach the broker, an outbox row or a consumer's inbox. That is the
+> having to reach the broker, an outbox row or a consumer's own store. That is
+> the
 > whole of why §11.7 tells a contract to carry the identifier rather than the
 > value, and this ADR is that rule applied rather than a stronger guarantee
 > laid over it.
@@ -2050,11 +2051,13 @@ published. It is serialised into `ordering.OutboxMessages`, whose retention
 purge deletes only rows with `ProcessedAt IS NOT NULL` — deliberately, so that
 abandoned rows survive for §13.6's alert — so an abandoned row keeps the
 payload indefinitely, and a test pins that it does. It sits in the broker, for
-which no chapter specifies a retention bound. It is copied into every consuming
-service's store, and §3.2 gives `OrderConfirmed` to Notifications, which has no
-use for an address at all. §11.7's erasure choreography reaches none of those
-three surfaces, and §13.4's redactor matches on key names, none of which cover
-an address.
+which no chapter specifies a retention bound. And it reaches whatever each
+consuming service persists from it — not the inbox, which stores a message id,
+an endpoint and a time and no payload, but any projection, read model or log
+that keeps what arrived — with §3.2 giving `OrderConfirmed` to Notifications,
+which has no use for an address at all. §11.7's erasure choreography reaches
+none of those surfaces, and §13.4's redactor matches on key names, none of
+which cover an address.
 
 **Removed rather than versioned**, on §9.2's own carve-out: where the point of
 a change is that a value must not be on the wire, publishing V1 alongside V2

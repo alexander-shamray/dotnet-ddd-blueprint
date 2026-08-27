@@ -1203,10 +1203,20 @@ Rules for each service's consumer:
 
 The one thing that must be designed for from the start: **integration events
 carry identifiers, not personal data**. An `OrderConfirmed` carrying a customer's
-name and email means erasure must also purge the broker, every consumer's inbox,
-and any log that recorded the payload — which is not practically possible.
+name and email means erasure must also purge the broker, every abandoned outbox
+row, whatever each consumer persisted from the payload, and any log that
+recorded it — which is not practically possible.
 Carrying `CustomerId` keeps the personal data inside the service that owns it,
 which is the only place it can be reliably erased.
+
+> **That sentence used to say "every consumer's inbox", and the inbox is the
+> one place on that list which holds nothing.** [§9.5](09-messaging.md)'s
+> `InboxMessage` records a message id, an endpoint and a handling time — no
+> payload — so a consumer retains personal data only where its own projection,
+> read model or log put it. The correction makes the list shorter and the rule
+> no weaker: the broker and the abandoned outbox row are each sufficient on
+> their own, and a named storage path that does not exist is the part of an
+> argument a reader can check and dismiss.
 
 > **`OrderConfirmed` was that counter-example in fact and not only in
 > illustration, and [§9.1](09-messaging.md) argued for it.** The contract
@@ -1221,10 +1231,11 @@ which is the only place it can be reliably erased.
 > What settled it was that the escape routes are all one-way: the payload is
 > serialised into `ordering.OutboxMessages`, whose purge deliberately spares
 > abandoned rows so §13.6's alert can see them; it sits in the broker, for
-> which no chapter sets a retention bound; it is copied into every consuming
-> store, and §3.2 gives the event to Notifications, which has no use for an
-> address at all. The erasure choreography above reaches none of those three,
-> and §13.4's redactor matches key names, none of which cover an address.
+> which no chapter sets a retention bound; and it reaches whatever each
+> consumer persists from it, with §3.2 giving the event to Notifications, which
+> has no use for an address at all. The erasure choreography above reaches none
+> of those, and §13.4's redactor matches key names, none of which cover an
+> address.
 >
 > **Where personal data legitimately travels, this section still owes a
 > procedure.** Amending it to define one — erasure-triggered outbox purge, a

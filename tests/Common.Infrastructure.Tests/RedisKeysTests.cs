@@ -31,10 +31,12 @@ public sealed class RedisKeysTests
     [InlineData("   ")]
     public void A_blank_suffix_is_rejected(string suffix)
     {
-        // Two members, because two is what this type has. It asserted a third
-        // until ADR-033 withdrew the denylist claim and RedisKeys stopped
-        // spelling a keyspace nothing reads — the guard is per member, so the
-        // remaining two carry exactly what they did before.
+        // Two, because two is what this type's suffix-taking key builders come
+        // to — not its whole surface, which also has CacheInstanceName, and
+        // that takes no argument to guard. It asserted a third until ADR-033
+        // withdrew the denylist claim and RedisKeys stopped spelling a keyspace
+        // nothing reads; the guard is per member, so the remaining two carry
+        // exactly what they did before.
         Should.Throw<ArgumentException>(() => Keys.Lock(suffix));
         Should.Throw<ArgumentException>(() => Keys.Idempotency(suffix));
     }
