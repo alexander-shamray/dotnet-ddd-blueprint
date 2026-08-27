@@ -185,7 +185,7 @@ public static class DependencyInjection
             // permanently empty is looking at the design, not at a fault.
             //
             // So the shape §9.3 warns about is still here — that cleanup timer
-            // beside §9.9's RetentionPurgeService, which prunes ours and reads
+            // beside §9.4's RetentionPurgeService, which prunes ours and reads
             // none of the three. It is taken rather than dodged, because
             // folding InboxState into our purge would mean deleting a row whose
             // outbox messages have not been delivered — turning a retention job
@@ -431,7 +431,7 @@ public static class DependencyInjection
                         // BOTH inboxes stay, and they answer different
                         // questions rather than duplicating one. InboxFilter<>
                         // is §9.5's long-window duplicate suppressor, pruned on
-                        // §9.9's retention — it is what stops a redelivered
+                        // §9.4's retention — it is what stops a redelivered
                         // OrderPlaced starting a SECOND workflow hours after
                         // the first finalised, which is the defect PR-21 filed
                         // when §9.8's saga exemption was removed. MassTransit's

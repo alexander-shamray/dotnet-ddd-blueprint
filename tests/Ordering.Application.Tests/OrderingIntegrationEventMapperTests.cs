@@ -122,20 +122,26 @@ public class OrderingIntegrationEventMapperTests
         // ShippingAddress by hand would miss.
         string payload = JsonSerializer.Serialize(confirmed);
 
+        // Matched as QUOTED JSON tokens, which is what lets all five
+        // components be checked. The bare forms cannot be: Country is "FR" and
+        // Currency serialises as EUR, so a substring search for FR reports an
+        // address that is not there. Quoting settles it — "EUR" does not
+        // contain "FR" once the delimiters are part of the pattern — and the
+        // earlier version of this test dropped Country instead, which left the
+        // one component a reintroduced field could carry unnoticed while the
+        // test still promised that no part of the address reaches the wire.
+        //
+        // Case-sensitive for the same reason: a JSON string token is compared
+        // to itself, and loosening it only widens what can collide.
         foreach (string component in (string[])
-            ["12 Rue de la Paix", "Appartement 4", "Paris", "75002"])
+            ["12 Rue de la Paix", "Appartement 4", "Paris", "75002", "FR"])
         {
             payload.ShouldNotContain(
-                component,
-                Case.Insensitive,
+                $"\"{component}\"",
+                Case.Sensitive,
                 $"§11.7: no part of the delivery address may reach the wire, and '{component}' did");
         }
 
-        // "FR" is deliberately not in that list, and the omission is the point
-        // rather than an oversight: Currency is "EUR" and a two-letter country
-        // code is short enough to collide with an ordinary substring, so
-        // asserting on it would be a check that fails for reasons unrelated to
-        // an address. The four above are unambiguous.
         ConfirmedLine line = confirmed.Lines.ShouldHaveSingleItem();
         line.ProductId.ShouldBe(Product.Value);
         line.UnitPrice.ShouldBe(64.99m);
