@@ -142,7 +142,11 @@ This is the case that does not resolve itself.
   raised, changes the working-set size.
 - Check the key namespaces. §8.1 partitions by
   `{service}:cache|lock|idem|denylist:`, and a service writing outside its
-  prefix is both a bug and a capacity surprise.
+  prefix is both a bug and a capacity surprise. The list is the reserved set
+  and not an inventory of what is live: **nothing writes `denylist:`**, which
+  [ADR-033](../backend-architecture/appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+  records as a decision rather than a gap, so an empty `denylist:` namespace is
+  the healthy reading and a key found under it is the anomaly worth chasing.
 - Raising `maxmemory` is a real fix if the working set genuinely grew. Raising
   it repeatedly is a cache being used as a database.
 

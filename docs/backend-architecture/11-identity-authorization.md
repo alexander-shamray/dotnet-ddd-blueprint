@@ -10,6 +10,16 @@ introspection, brute-force protection, breach detection. Implementing it is a
 large amount of work that produces no business differentiation and a great deal
 of liability.
 
+> **Two of those are reasons to buy an identity provider, not claims that this
+> platform consumes them.** Keycloak revokes a session and offers an
+> introspection endpoint; **no service here calls either**. §11.3 configures
+> local validation only, so revocation is observed at the next token request
+> and not before —
+> [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+> records the bounded window that leaves. The list above is the reason the
+> problem was not built in-house and remains correct as such; it is not an
+> inventory of what is wired up, and it was read as one for four PRs.
+
 Keycloak is used here because it is Apache 2.0, self-hostable, runs as a
 container, and speaks standard OIDC. The realistic alternatives:
 
@@ -36,7 +46,7 @@ sequenceDiagram
 
     U->>W: Sign in
     W->>K: Authorization code + PKCE
-    K-->>W: Access token (JWT) + refresh token
+    K-->>W: Access token (JWT) — no refresh token
     W->>G: GET /api/v1/orders  (Bearer)
     G->>K: JWKS (cached)
     G->>G: Validate signature, issuer, audience, expiry
@@ -50,6 +60,46 @@ sequenceDiagram
 anything that reaches a service by another path — a misconfigured network
 policy, another service, a port-forward — would otherwise be unauthenticated.
 Validation is cheap; assume the network is hostile.
+
+> **No refresh token reaches the browser, and the diagram used to say it did.**
+> Everything `W` is issued is readable by any script on the origin, so a
+> refresh token there converts a single XSS — or one malicious transitive
+> dependency in the bundle — into persistent account takeover that outlives the
+> session and survives a password change. The realm made that concrete rather
+> than theoretical: `revokeRefreshToken` is off and `refreshTokenMaxReuse` is
+> zero against a ten-hour SSO session, so the token was reusable and never
+> rotated for as long as the session lived.
+> [ADR-034](appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)
+> records the removal, and `web-app`'s `use.refresh.tokens: "false"` is what
+> enforces it — pinned by `RealmImportTests`, because a realm attribute is
+> exactly the kind of setting that gets changed back by someone debugging a
+> logout.
+>
+> **Continuity is a silent renewal against the authorization endpoint**, bounded
+> by the SSO session, so the user sees a login when that session has ended
+> rather than when the access token expires. **The residual is an access token,
+> and it is stated rather than closed:** an XSS still yields one, valid for the
+> §11.3 lifetime below. What bounds it is that number and nothing else — there
+> is no revocation path
+> ([ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)),
+> which is the same fact §11.3 states from the other side.
+>
+> **Terminating the flow in `Web.Bff` is the stronger answer and is deliberately
+> not taken here.** ADR-034 argues why: it is an OIDC handler, a cookie stack,
+> antiforgery on every state-changing route, a realm change and a gateway route
+> change — an Appendix C row rather than an edit, and §11.5's account of the
+> BFF's one credential would not survive it.
+
+> **The realm also enables `directAccessGrantsEnabled` on `web-app`, and that
+> belongs in this chapter rather than only in a realm-file description.** It is
+> the password grant, on a public client with no secret, and it exists so a
+> developer can obtain a token with `curl` — [§14.1](14-local-development.md)'s
+> local affordance, documented in `deploy/compose/README.md`. It is a local
+> convenience with a real cost if it ever travelled: anything holding a
+> username and password could mint tokens directly, bypassing PKCE and the
+> browser flow entirely. A deployed realm turns it off, and stating it here is
+> what makes that a decision somebody can check rather than a default nobody
+> read.
 
 ## 11.3 Service configuration
 
@@ -143,7 +193,44 @@ mistake worth naming.** A lifetime check reads `nbf` and `exp` and nothing
 else, so a token the provider revoked a second ago is accepted here until it
 expires on its own — at any skew. Observing revocation needs introspection or a
 deny list, neither of which this platform has; what bounds the exposure is
-token lifetime, which is the realm's setting rather than this one.
+token lifetime.
+
+**That lifetime is 300 seconds, and this sentence is where the platform states
+it.** Five minutes, normative — not a realm default nobody chose, and not
+`ClockSkew`'s coincidentally equal default two paragraphs up, which is a
+different quantity that happens to share a number. Everything about revocation
+here follows from it: logging a user out, disabling a compromised account, or
+responding to a stolen token at Keycloak has **no effect** on an access token
+already issued, for up to five minutes.
+[ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+records that this bounded window is the accepted posture and withdraws
+[ADR-006](appendix-a-adrs.md#adr-006--redis-for-cache-and-coordination-never-as-a-store-of-record)'s
+listing of a token denylist among Redis's contents.
+
+> **The claim used to read as closed from three directions, which is what made
+> it worth an ADR rather than a correction.** §11.1 above lists "session
+> revocation, token introspection" among the reasons not to build
+> authentication in-house; ADR-006 recorded the denylist as a decided use of
+> Redis; and [§8.1](08-caching-redis.md) gave `{service}:denylist:` the
+> strictest eviction policy in the platform, on the argument that a revoked
+> token entry must never be evicted. `RedisKeys.Denylist` existed in code with
+> tests pinning its shape. **Nothing ever wrote or read the keyspace**, and
+> only this section said so. A reviewer asking whether revocation was handled
+> met three yeses and one no, and the three were louder.
+>
+> **The number is the whole of the control, so treat it as one.** Lengthening
+> `accessTokenLifespan` in the realm silently lengthens the window this
+> paragraph quotes, which is why `RealmImportTests` pins the realm's value
+> against the figure stated here: two statements about one fact, gated against
+> each other rather than left to agree by habit.
+>
+> **It is also not the realm's only token lifetime, and the other one is
+> reachable by a checkbox.** `accessTokenLifespanForImplicitFlow` is 900, and
+> the five minutes above is true only because no client enables the implicit
+> flow. Turning it on for one client would triple the exposure while every
+> number in this chapter still read 300 — the value would not have changed,
+> the *path* would — so the suite asserts that no client enables it, alongside
+> the lifetime itself. A premise a number depends on is part of the number.
 
 **The authority is read eagerly and the throw names the key**, which is the
 posture `AddSqlServer` and `AddMassTransitMessaging` already take: a host that
@@ -1106,6 +1193,33 @@ name and email means erasure must also purge the broker, every consumer's inbox,
 and any log that recorded the payload — which is not practically possible.
 Carrying `CustomerId` keeps the personal data inside the service that owns it,
 which is the only place it can be reliably erased.
+
+> **`OrderConfirmed` was that counter-example in fact and not only in
+> illustration, and [§9.1](09-messaging.md) argued for it.** The contract
+> carried a `ShippingAddressV1` — a postal address, personal data under GDPR
+> Art. 4 — on the "fat enough" reasoning that Shipping cannot act without one
+> and should not call back to Ordering to get it. So this section named the
+> forbidden shape while §9.1 shipped it, and a reviewer reading either alone
+> concluded the rule held.
+>
+> **The rule won, and the field is gone**
+> ([ADR-035](appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)).
+> What settled it was that the escape routes are all one-way: the payload is
+> serialised into `ordering.OutboxMessages`, whose purge deliberately spares
+> abandoned rows so §13.6's alert can see them; it sits in the broker, for
+> which no chapter sets a retention bound; it is copied into every consuming
+> store, and §3.2 gives the event to Notifications, which has no use for an
+> address at all. The erasure choreography above reaches none of those three,
+> and §13.4's redactor matches key names, none of which cover an address.
+>
+> **Where personal data legitimately travels, this section still owes a
+> procedure.** Amending it to define one — erasure-triggered outbox purge, a
+> consumer-side purge obligation, a bounded broker retention — was the other
+> way to resolve the contradiction and was refused: all three are unbuilt, the
+> first cannot reuse the retention purge whose `ProcessedAt IS NOT NULL`
+> predicate is load-bearing, and writing a procedure nobody can run would have
+> converted an honest contradiction into a dishonest resolution. The rule as
+> stated is absolute because nothing here can yet make an exception safe.
 
 ---
 

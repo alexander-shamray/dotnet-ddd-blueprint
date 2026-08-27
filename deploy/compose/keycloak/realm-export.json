@@ -900,7 +900,8 @@
       "protocol": "openid-connect",
       "attributes": {
         "realm_client": "false",
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "use.refresh.tokens": "false"
       },
       "authenticationFlowBindingOverrides": {},
       "fullScopeAllowed": true,

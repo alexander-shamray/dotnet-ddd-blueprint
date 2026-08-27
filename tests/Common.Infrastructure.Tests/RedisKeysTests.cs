@@ -19,10 +19,6 @@ public sealed class RedisKeysTests
         Keys.Idempotency("PlaceOrderCommand:0195e4b2").ShouldBe("catalog:idem:PlaceOrderCommand:0195e4b2");
 
     [Fact]
-    public void Denylist_key_uses_the_denylist_namespace() =>
-        Keys.Denylist("jti:abc").ShouldBe("catalog:denylist:jti:abc");
-
-    [Fact]
     public void Cache_prefix_is_exposed_as_an_instance_name_not_a_key_builder() =>
         Keys.CacheInstanceName.ShouldBe("catalog:cache:");
 
@@ -35,9 +31,12 @@ public sealed class RedisKeysTests
     [InlineData("   ")]
     public void A_blank_suffix_is_rejected(string suffix)
     {
+        // Two members, because two is what this type has. It asserted a third
+        // until ADR-033 withdrew the denylist claim and RedisKeys stopped
+        // spelling a keyspace nothing reads — the guard is per member, so the
+        // remaining two carry exactly what they did before.
         Should.Throw<ArgumentException>(() => Keys.Lock(suffix));
         Should.Throw<ArgumentException>(() => Keys.Idempotency(suffix));
-        Should.Throw<ArgumentException>(() => Keys.Denylist(suffix));
     }
 }
 
