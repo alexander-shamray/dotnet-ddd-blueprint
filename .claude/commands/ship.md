@@ -832,9 +832,27 @@ same argument as never calling a branch clean because asking failed.
 
       Residual, stated in the script and in `CLAUDE.md`: **egress is not
       restricted**. The container reaches the network, and confining it to
-      `api.x.ai` needs an allow-list proxy Docker cannot supply alone. The
-      credential half — no `gh` token, no SSH keys, no host filesystem — is
-      closed. The reviewer also has **no .NET SDK**, so `dotnet test` is the
+      `api.x.ai` needs an allow-list proxy Docker cannot supply alone.
+
+      **One credential does cross, and this paragraph used to say none did
+      (#58).** No `gh` token, no SSH keys and no host filesystem beyond the
+      clone — all three genuinely absent — but when `XAI_API_KEY` is unset or
+      unusable the script copies `~/.grok/auth.json`, `agent_id` and
+      `config.toml` in, and `auth.json` carries a **refresh-token-bearing OAuth
+      session for the x.ai account**. Anything running in the container can read
+      it. **So the two halves of the residual are not independent**: the open
+      half is exactly what makes the credential that crosses exploitable, and a
+      reader who stopped at "the credential half is closed" stopped one file
+      short of the mount.
+
+      **Prefer `XAI_API_KEY`** — scoped and revocable — and treat the OAuth
+      mount as the fallback it is rather than an equivalent path. The script
+      already tries the key first; that ordering is the posture, not an
+      implementation detail. On this host the key authenticates against a team
+      with no credits, so the OAuth path is the one that actually runs, which
+      is the case worth knowing rather than the case worth assuming.
+
+      The reviewer also has **no .NET SDK**, so `dotnet test` is the
       host's gate, not the review's; the licence gate is stdlib Python and
       runs inside.
 
@@ -1013,35 +1031,36 @@ same argument as never calling a branch clean because asking failed.
      before the budget is gone. Report which of the two ended the loop, and
      never round a ceiling up into convergence.
 
-     **The enforcement half still says twelve, and this is a prose bound until
-     it does not.** `grok-ledger.sh` accepts slots `1..12`, writes `n/12` into
-     every ledger comment and trusts only that shape; `grok-review.sh` refuses
-     a slot outside `1..12`. Both are under `.claude/scripts/**`, which
-     `.claude/settings.json` denies this session, so six binds because this
-     file says so and not because anything refuses a seventh. **A bound whose
-     two halves disagree is the shape this repo has already paid for** — it is
-     safe only in this direction, six being narrower than twelve. **The reach is
-     worth stating exactly**: a run that follows this file stops at six, and a
-     resumed or hand-typed `grok-review.sh 7 full` is accepted by both helpers
-     and reserves a seventh paid check with the ledger's validation still green.
-     Nothing refuses it. So the cap is a rule an agent obeys, not a limit a
-     machine imposes.
+     **The enforcement half says six too now (#140), and this file is no
+     longer the thing that binds it.** `grok-ledger.sh` declares `CEILING=6`
+     once and refuses a reservation above it; `grok-review.sh` **reads that
+     declaration** rather than restating it, so there is no second literal to
+     drift. A hand-typed `grok-review.sh 7 full` is refused by both, before
+     anything is asked of GitHub. This paragraph used to say the opposite and
+     is the record of the gap closing, not of it standing.
 
-     Closing it is a human's edit with the deny lifted, and it carries a
-     migration hazard worth naming first: the `/12` is part of the ledger's
-     *comment format*, so changing it to `/6` orphans every row already
-     posted — `count` would match none of them, read zero, and re-arm the cap
-     on a PR that had spent it. A migration has to keep **reading** the old
-     shape while **writing** the new one, and its test has to cover a PR whose
-     ledger holds both.
+     **Do not restate the number here.** The one thing this file must not
+     become again is a second copy of the bound — that *was* #140, six here
+     against twelve there, and the fix was to give the value one home. Six is
+     named in the prose above because the argument is about its size; the
+     enforcement is `CEILING` and nothing else.
 
-     **Reverting this file to twelve is the other way to make the two halves
-     agree, and it is not taken.** The caller asked for six; a reviewer's
+     **The migration is why reading and writing are not symmetric, and a later
+     change to the ceiling has to keep it that way.** `/12` is part of the
+     ledger's *comment format*, not merely a bound, so narrowing the read to
+     the new value orphans every row already posted — `count` matches none of
+     them, reads zero, and re-arms the cap on a pull request that has spent it,
+     which is the fail-open the ledger exists to refuse arriving through its own
+     fix. So `LEDGER_DENOMINATORS` keeps **every** denominator this ledger has
+     ever written and only the write moves. `test_grok_helpers.py`'s
+     `TheCeilingBindsAndTheReadStaysWider` covers a ledger holding both shapes,
+     and it was observed red against a deliberately narrowed filter — four of
+     its cases, not the one that a pattern assertion alone would have caught.
+
+     **Reverting this file to twelve was the other way to make the two halves
+     agree, and it was not taken.** The caller asked for six; a reviewer's
      preference for a consistent pair does not outrank that, and the direction
-     of the disagreement is the safe one. What the gap costs is stated here
-     rather than closed, which is the honest half of a bound only one side of
-     which is enforceable from inside a session that may not edit its own
-     helpers.
+     of the disagreement was the safe one while it stood.
 
    A grok invocation that fails outright — not installed, not authenticated,
    the command not found — is reported as the loop not having run, never
