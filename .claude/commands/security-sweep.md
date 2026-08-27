@@ -1,7 +1,7 @@
 ---
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent(security-auditor), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(gh repo view:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
+allowed-tools: Read, Grep, Glob, Agent(security-auditor), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
 disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(bug-auditor)
 ---
 
@@ -292,16 +292,30 @@ round clean. That is worse than a missed filing, because a clean round is what
 *stops the loop*: one suppressed candidate ends the sweep and reports
 convergence.
 
-So enumerate with the author and the labels, which the existing
-`Bash(gh issue list:*)` grant already covers:
+So enumerate the candidates here, and put the suppression **decision** behind a
+helper rather than taking it in passing (#150):
 
 ```bash
-gh issue list --state all --limit 1000 --json number,title,state,labels,author
-gh repo view --json owner --jq .owner.login      # already granted
+gh issue list --state all --limit 1000 --json number,title,state,labels
+bash .claude/scripts/gh-issue-suppresses.sh <number>
 ```
 
+`gh-issue-suppresses.sh` exits **0 for tracking**, **1 for not tracking** and
+**3 when it could not find out** — and 3 is not 1. Treat 3 as untracked, so the
+finding files, and say in the summary that the lookup failed rather than that
+the issue was somebody else's. It resolves the owner from the checkout, takes an
+issue number and nothing else, and prints which condition matched, so a
+suppression is auditable rather than asserted.
+
+**`author` is deliberately absent from that field set, and the absence is the
+control.** This rule was prose in two files until #150 — a rule a reader
+follows, not one anything applies — and leaving the field in the listing leaves
+the decision takeable here, which is the state the helper exists to end. The
+helper prints the near-miss login on its exit-1 path, so the round summary can
+still name `#NN by <login>` without this step ever holding the field.
+
 An issue may suppress a candidate only if its `author.login` is the
-repository owner's login, resolved from the checkout by the second command —
+repository owner's login, resolved from the checkout by the helper —
 never typed from memory, for `gh-label-ensure.sh`'s reason: a login taken as a
 parameter is a login a finding gets to choose.
 
