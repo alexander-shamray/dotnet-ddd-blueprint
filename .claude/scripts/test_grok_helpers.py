@@ -3070,10 +3070,37 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn("ext::", self.assertRefused(command))
 
-    def test_unparseable_quoting_is_refused_rather_than_guessed_at(self):
-        # Fails closed. A guard that cannot resolve the argv has established
-        # nothing about it, and the shell would fail on this input anyway.
+    def test_a_heredoc_is_not_hostile_just_because_shlex_cannot_read_it(self):
+        # **The third false positive, and the one that says most about the
+        # design.** The first version refused anything `shlex` could not
+        # tokenise, on the reasoning that bash would fail on it too. Bash would
+        # not: `shlex` is a word splitter, not a shell, and it knows nothing
+        # about heredocs — so an ordinary `git commit -F - <<'EOF'` whose body
+        # contains an apostrophe is unbalanced to one and valid to the other.
+        #
+        # It refused a real commit. Twice in one branch this guard fired on
+        # innocent traffic, and its own docstring says a guard that does that is
+        # one somebody turns off.
+        body = "the guard's own body, with apostrophes and a don't"
+        self.assertAdmitted(f"git commit -F - <<'EOF'{NEWLINE}{body}{NEWLINE}EOF")
+
+    def test_an_unparseable_command_still_gets_the_weaker_check(self):
+        # What a parse failure degrades TO, which is the half that keeps this
+        # from being a fail-open. It falls back to the substring scan the
+        # settings deny already performs — never weaker than the status quo the
+        # hook was added to improve on, and never a silent pass.
         self.assertRefused('git log --output="/tmp/unbalanced')
+        self.assertRefused(
+            f"git commit -F - <<'EOF'{NEWLINE}don't --output=/tmp/x{NEWLINE}EOF"
+        )
+
+    def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
+        # And it is honest about being weaker: the quoted spelling that motivated
+        # this whole file is exactly what a raw-string scan cannot see, so an
+        # unparseable command carrying it is admitted. Stated here rather than
+        # left for someone to discover, because a guard whose fallback is
+        # silently weaker than its main path is one nobody knows the reach of.
+        self.assertAdmitted('git log --out""put=/tmp/x "unbalanced')
 
     def test_a_non_bash_tool_is_not_judged(self):
         self.assertIsNone(self.judge("git push origin +HEAD:main", tool="Read"))
