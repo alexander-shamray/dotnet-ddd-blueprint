@@ -130,7 +130,7 @@ mode="${4:-}"
 # jq string spends one level on its own escaping: \\( reaches the regex
 # engine as \(, where a bare \( would be jq's interpolation syntax.
 ledger_rows() {
-  local id login body verdict perm out
+  local id login body verdict perm out row_slot row_den
   declare -A seen=()
   gh api "repos/{owner}/{repo}/issues/$pr/comments" --paginate \
     --jq '.[]
@@ -154,6 +154,19 @@ ledger_rows() {
       seen[$login]=$verdict
     fi
     [ "$verdict" = trusted ] || continue
+    # **The pairing check lives HERE, in the shared reader, and it did not at
+    # first.** The slot and denominator alternations are independent, so the jq
+    # filter admits their cross-product — `9/6` matches and no writer of this
+    # file can emit it. That was closed in `count` and in the election, and
+    # `status` was missed: a trusted `Grok check 9/6 — converged: loop clean`
+    # still reported `converged`, so a resumed run skipped review entirely.
+    # Raised in review. Three consumers meant three places to remember; one
+    # reader means none.
+    row_slot="${body#Grok check }"
+    row_den="${row_slot#*/}"
+    row_slot="${row_slot%%/*}"
+    row_den="${row_den%% *}"
+    [ "$row_slot" -le "$row_den" ] || continue
     printf '%s\t%s\n' "$id" "$body"
   done
 }
@@ -192,15 +205,6 @@ if [ "$op" = "count" ]; then
     {
       split($2, a, "/")
       sub(/^Grok check /, "", a[1])
-      den = a[2]
-      sub(/[^0-9].*$/, "", den)
-      # **The slot and denominator alternations are independent, so the shape
-      # filter admits their CROSS-PRODUCT** — `9/6` matches, and no writer of
-      # this file has ever been able to emit it. Raised in review. A row this
-      # file did not write is not this file'"'"'s state, so the pairing is checked
-      # here in arithmetic rather than spelled as paired regex ranges, which
-      # would need one alternation per retired ceiling.
-      if (a[1] + 0 > den + 0) next
       state[a[1] + 0] = ($2 ~ /released/) ? "released" : "reserved"
     }
     END {
@@ -288,14 +292,7 @@ if [ "$op" = "reserve" ]; then
         slot = $2
         sub(/^Grok check /, "", slot)
         sub(/\/.*$/, "", slot)
-        den = $2
-        sub(/^Grok check [0-9]*\//, "", den)
-        sub(/[^0-9].*$/, "", den)
       }
-      # The same cross-product guard `count` applies: a row pairing a slot with
-      # a denominator below it was never written by this file, so it must not
-      # win an election either.
-      slot + 0 > den + 0 { next }
       slot + 0 != n + 0 { next }
       index($2, " — released") { cand = "" }
       index($2, " — reserved") && cand == "" { cand = $1 }

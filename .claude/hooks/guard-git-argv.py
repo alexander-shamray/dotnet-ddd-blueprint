@@ -148,29 +148,89 @@ PROTECTED_BRANCHES = {"main"}
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
+def shell_positions(command):
+    """Walk `command`, yielding `(index, in_quotes, in_comment)` per character.
+
+    **One scanner, because both callers were defeated by the same thing.** A
+    regex search for `<<` found a heredoc opener inside a COMMENT, so
+    `git status # <<EOF` swallowed the real command on the next line before it
+    could be judged; and a paren counter that did not know about quotes let
+    `git log "$(printf ')'; git push origin +HEAD:main)"` close early, hiding
+    the push in the outer token. Both raised in review, both verified allowed.
+
+    `in_quotes` is true inside `'…'` and `"…"` alike. Comments start at an
+    unquoted `#` that begins a word and end at the newline — which is bash's
+    rule, and the reason `git log --grep=#x` is not a comment.
+    """
+    single = double = comment = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if comment:
+            if char == "\n":
+                comment = False
+            else:
+                yield index, False, True
+                index += 1
+                continue
+        if not comment:
+            if single:
+                if char == "'":
+                    single = False
+            elif double:
+                if char == "\\" and index + 1 < len(command):
+                    yield index, True, False
+                    index += 2
+                    continue
+                if char == '"':
+                    double = False
+            elif char == "'":
+                single = True
+            elif char == '"':
+                double = True
+            elif char == "#" and (index == 0 or command[index - 1] in " \t\n;&|("):
+                comment = True
+                yield index, False, True
+                index += 1
+                continue
+        yield index, single or double, comment
+        index += 1
+
+
 def strip_heredocs(command):
     """`command` with every heredoc BODY removed, delimiters included.
 
     A heredoc body is an argument, and parsing it as a command line is how the
     guard came to refuse an honest commit that quoted a push. The introducer is
     left in place so the rest of the line still tokenises.
+
+    **An opener is only an opener in executable position.** A `<<EOF` inside a
+    comment or inside quotes is text, and treating it as an operator let
+    `git status # <<EOF` delete the command on the following line — the guard
+    removing the very thing it exists to read.
     """
-    out = []
-    rest = command
-    while True:
-        match = HEREDOC.search(rest)
-        if match is None:
-            out.append(rest)
-            break
-        out.append(rest[:match.end()])
-        after = rest[match.end():]
-        delimiter = match.group(2)
+    openers = []
+    for index, in_quotes, in_comment in shell_positions(command):
+        if in_quotes or in_comment:
+            continue
+        if command.startswith("<<", index) and (not openers or index >= openers[-1][1]):
+            match = HEREDOC.match(command, index)
+            if match:
+                openers.append((match.start(), match.end(), match.group(2)))
+
+    out, cursor = [], 0
+    for start, end, delimiter in openers:
+        if start < cursor:
+            continue
+        out.append(command[cursor:end])
+        after = command[end:]
         closing = re.search(rf"^\s*{re.escape(delimiter)}\s*$", after, re.MULTILINE)
         if closing is None:
             # Unterminated: the whole tail is body. Dropping it is right — an
             # unterminated heredoc is not a command line either.
-            break
-        rest = after[closing.end():]
+            return "".join(out)
+        cursor = end + closing.end()
+    out.append(command[cursor:])
     return "".join(out)
 
 
@@ -184,24 +244,28 @@ def substitutions(command):
     """
     found = []
     index = 0
+    # Single-quote state only: `$(` is live inside DOUBLE quotes, which is the
+    # whole shape of the bypass — `git log "$(git push …)"`.
+    in_single = False
     while index < len(command):
-        if command.startswith("$(", index):
-            depth, cursor = 1, index + 2
-            while cursor < len(command) and depth:
-                if command.startswith("$(", cursor):
-                    depth += 1
-                    cursor += 2
-                    continue
-                if command[cursor] == ")":
-                    depth -= 1
-                elif command[cursor] == "(":
-                    depth += 1
-                cursor += 1
-            if not depth:
-                found.append(command[index + 2:cursor - 1])
-            index = cursor
+        char = command[index]
+        if in_single:
+            if char == "'":
+                in_single = False
+            index += 1
             continue
-        if command[index] == "`":
+        if char == "'":
+            in_single = True
+            index += 1
+            continue
+        if command.startswith("$(", index):
+            end = _closing_paren(command, index + 2)
+            if end is None:
+                break
+            found.append(command[index + 2:end])
+            index = end + 1
+            continue
+        if char == "`":
             end = command.find("`", index + 1)
             if end == -1:
                 break
@@ -210,6 +274,46 @@ def substitutions(command):
             continue
         index += 1
     return found
+
+
+def _closing_paren(command, start):
+    """Index of the `)` closing a substitution opened before `start`, or None.
+
+    **Quotes are tracked while balancing**, because a paren counter that reads
+    raw characters closes early on a quoted one:
+    `git log "$(printf ')'; git push origin +HEAD:main)"` ended extraction at
+    the `)` inside `'…'`, leaving the push hidden in the outer token. Raised in
+    review; verified allowed.
+    """
+    depth, index = 1, start
+    single = double = False
+    while index < len(command):
+        char = command[index]
+        if single:
+            if char == "'":
+                single = False
+        elif double:
+            if char == "\\" and index + 1 < len(command):
+                index += 2
+                continue
+            if char == '"':
+                double = False
+        elif char == "'":
+            single = True
+        elif char == '"':
+            double = True
+        elif command.startswith("$(", index):
+            depth += 1
+            index += 2
+            continue
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if not depth:
+                return index
+        index += 1
+    return None
 
 
 def git_segments(tokens):
@@ -331,9 +435,14 @@ def offence(command):
         if refusal is not None:
             return f"inside a command substitution: {refusal}"
 
+    # Stripped once, and used by BOTH paths below. The fallback used to scan the
+    # raw `command`, which put the heredoc false positive straight back: a body
+    # that mentions `--output` would be refused on the raw string the moment
+    # anything else in the line failed to tokenise. A body is data on every
+    # path, not only on the one that parses.
+    stripped = strip_heredocs(command)
     try:
-        lexer = shlex.shlex(strip_heredocs(command), posix=True,
-                            punctuation_chars=True)
+        lexer = shlex.shlex(stripped, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
@@ -343,7 +452,7 @@ def offence(command):
         # DEGRADES to the substring scan the settings deny already performs:
         # never weaker than the status quo, never a silent pass.
         for needle in FORBIDDEN_FLAGS + FORBIDDEN_SUBSTRINGS:
-            if needle in command:
+            if needle in stripped:
                 return (
                     f"`{needle}` appears in a command this guard could not "
                     "tokenise; refusing on the raw string, which is the weaker "
