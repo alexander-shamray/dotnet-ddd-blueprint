@@ -83,6 +83,34 @@ PROTECTED_BRANCHES = {"main"}
 # precedes it, not to whatever ran before the `&&`.
 SEPARATORS = {"&&", "||", ";", "|", "&", "(", ")", "{", "}", "\n"}
 
+# **Flags whose next element is a VALUE, and a value is data rather than a flag.**
+#
+# This list exists because the guard refused its own commit. A commit body
+# arguing about the run-a-command transport is one argv element after `-m`, and
+# a substring check that does not know `-m` takes a value cannot tell prose
+# *about* the transport from a command that *uses* it. The same shape reaches
+# the flag checks: `git commit -m "--output is bad"` matches a check keyed on
+# the element's prefix, because the element IS the message.
+#
+# One tool's "valid" is not the next tool's, and the gap is where a value
+# crosses between them — git reads this element as a message, and a guard
+# written for flags read it as a flag. Skip the value; judge the flags.
+VALUE_FLAGS = {
+    "-m", "--message", "-F", "--file", "-c", "--reedit-message",
+    "-C", "--reuse-message", "--author", "--date", "--body", "--body-file",
+    "--pathspec-from-file", "--grep", "--fixup", "--squash",
+}
+
+# The transport is only meaningful where git expects a REPOSITORY, so the check
+# is scoped to the subcommands that take one. Judging it everywhere is the other
+# half of what made an argument about it indistinguishable from a use of it —
+# and scoping matters beyond commit messages, since any command may carry a path
+# or a branch name that happens to contain the sequence.
+REPOSITORY_SUBCOMMANDS = {
+    "fetch", "clone", "pull", "push", "remote", "submodule", "ls-remote",
+    "archive", "bundle",
+}
+
 
 def git_segments(tokens):
     """Yield the argv slice of every `git` invocation in a compound command."""
@@ -151,7 +179,31 @@ def offence(command):
         refusal = push_offence(segment)
         if refusal is not None:
             return refusal
+        # The subcommand is the first element that is not a global option, and
+        # a global option may itself take a value.
+        subcommand = ""
+        skip = False
         for element in segment:
+            if skip:
+                skip = False
+                continue
+            if element in VALUE_FLAGS:
+                skip = True
+                continue
+            if not element.startswith("-"):
+                subcommand = element
+                break
+        skip = False
+        for element in segment:
+            # A value belongs to the flag before it and is judged as data. This
+            # has to run before every check below, or the guard reads a commit
+            # message as an argument list.
+            if skip:
+                skip = False
+                continue
+            if element in VALUE_FLAGS:
+                skip = True
+                continue
             for flag in FORBIDDEN_FLAGS:
                 # A PREFIX match, not an exact one plus its `=` form, and the
                 # difference is `--exec-path=<dir>` — which points git at
@@ -166,6 +218,8 @@ def offence(command):
                         "than inspects, and the settings deny it matches only the "
                         "unquoted spelling. This hook compares the resolved argv."
                     )
+            if subcommand not in REPOSITORY_SUBCOMMANDS:
+                continue
             for substring in FORBIDDEN_SUBSTRINGS:
                 if substring in element:
                     return (
