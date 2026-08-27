@@ -1206,6 +1206,30 @@ own line rather than sending a reader to a file that does not hold it.
   things, and omitted the source comment entirely. The restated-total failure,
   inside the lesson about restated identifiers, in the pull request that added
   it. A reviewer caught it.
+- **An exemption stated with a condition expires silently, because nothing
+  re-reads the condition when the fact changes.** `.claude/hooks/**` was off the
+  deny list on the written grounds that "no hook is configured here" — true when
+  written, and false the moment #30's argv guard landed, with no signal in
+  between. The dangerous half is that the sentence still *reads* as reasoned:
+  it gives its condition, so a reviewer checks the logic rather than the fact.
+  Where an exemption has a condition, the condition needs a test, exactly as a
+  list of things known to be missing needs a gate asserting they are still
+  missing.
+- **A replacement narrower than the thing it replaces is a regression wearing a
+  fix's clothes.** The argv guard was written to close what
+  `Bash(git *--output*)` could not, and its first form matched a flag exactly or
+  with `=` — which admitted `--exec-path=<dir>`, a directory of binaries for git
+  to run, that the crude substring deny had been catching all along. A precise
+  mechanism replacing a blunt one has to be checked against the blunt one's
+  catches, not only against the case that motivated it.
+- **A stub that hands back post-filter data cannot test the filter.** The
+  ledger's `gh` stub supplied rows *after* the jq shape filter, so four
+  behavioural cases written to guard a migration of that very filter passed
+  against a deliberately narrowed one; a single pattern assertion caught it.
+  The tell is that the fixture's shape matches the code's *output* rather than
+  its *input*. Feed the stage its real input, or state in the test that the
+  stage is not under test — the stub said so, and four cases were written past
+  the sentence anyway.
 
 ### The commands
 
@@ -1276,8 +1300,11 @@ parameter a finding could steer. **Five of those six shipped wrong, so each is
 reproduced as a case that fails against the old behaviour** — the sixth is a
 grant closed by moving it into a helper, and the suite is what keeps it closed.
 
-**Four issues added subjects since, and they are of the first kind rather than
+**Issues have added subjects since, and they are of the first kind rather than
 the sixth — regression cases, each failing against behaviour that shipped.**
+**No count opens this paragraph**, for the reason the list above gives about
+itself: it said four in the pull request that made it nine, which is the fourth
+restated total in this file to rot.
 An earlier revision of this paragraph classified them the other way, as a
 closed hole kept closed like the label helper's, and that was wrong on the
 evidence: #56's stranger case fails against the unfiltered helper, #33's deny
@@ -1294,6 +1321,27 @@ not among them. **#52** — that the reviewer's transcript reaches no stream, an
 that the one bounded read of it cannot be widened. **#57** — that both sweeps
 still state who may suppress a finding, and that neither has drifted back to
 the unconditional rule.
+
+**Five more arrived together, and they are the first entries whose subject is a
+BOUND rather than a feed.** **#140** — that the Grok ceiling is one declared
+number, that a slot above it is refused by both helpers, that `grok-review.sh`
+*derives* it rather than restating it, and — the load-bearing half — that a row
+posted under the old ceiling is still read as spent. **#60** — that the two
+commands stating editing boundaries now path-scope `Edit` away from every
+tracked tree, and that each command's own subject stays editable. **#30** and
+**#23** — the argv guard: the `--output` write primitive in every spelling
+including the quoted one, `ext::`, and every push refspec that reaches `main`,
+forces or deletes. **#150** — that what suppresses a sweep finding is decided
+by a helper, and that neither sweep still holds the field it would decide with.
+
+**Two of the five are worth knowing for how their counterfactual had to be
+taken**, because "observed red" meant something different in each. #140's
+read-side cases are green against `main` and *must* be — `main` reads the old
+shape natively — so their counterfactual is the **naive migration**, a
+deliberately narrowed filter, and against that four of them fail. #60's is a
+tree removed from the deny list. Neither is the ordinary "revert the file and
+watch it go red", and a case whose counterfactual is not the previous commit
+needs saying so or the next reader assumes it was never taken.
 
 **`.github/workflows/ci.yml` and `docs/testing.md` enumerate the same subjects
 and are reconciled in the same change** — all three used to open the
@@ -2310,6 +2358,26 @@ and it goes **last** in any PR that also touches `commands/` or `scripts/`;
 split across two edits, the second is refused and whatever the first omitted
 ships missing.
 
+**The lock is not instantaneous, and the gap is a trap rather than a
+convenience.** Measured on Claude Code 2.1.247, in the session that restored
+these denies for the harness-bounds PR: immediately after writing
+`Edit(.claude/scripts/**)` back, a `Write` creating a file under
+`.claude/scripts/` **still succeeded**; minutes later an `Edit` under
+`.claude/hooks/` and an `Edit` of `settings.json` were both refused. The file
+is re-read, but not at the instant it is written.
+
+So **a probe taken right after the restore reports the deny as inert and is
+simply early** — and an agent that treats that reading as the answer will
+conclude it still has access it is about to lose. Verify a restore by reading
+the file, never by trying the thing it forbids.
+
+**The practical consequence is an ordering rule for the human doing the
+lifting**: restore the lines only when the work is genuinely finished, because
+the window closes on its own schedule and a defect found afterwards needs the
+lift granted again. That happened on the PR that added the argv guard — the
+guard shipped refusing its own commit message, and the fix needed a second
+lift.
+
 **`.claude/settings.local.json` was the gap a review found**, and it is the
 enumeration lesson in miniature: an exact-file rule cannot cover a sibling, and
 Claude Code loads both files. Denying `.claude/**` wholesale was considered and
@@ -2319,21 +2387,44 @@ live. A test pins both halves: every loaded settings file denied, and the
 worktree root never denied.
 
 Changing any of them is a human's edit, made with the deny lifted. Like the
-push denies it is defence in depth — `Bash` redirection can still write a file,
-and `.claude/hooks/**` is **not** on the list because no hook is configured
-here — but it removes the quiet path.
+push denies it is defence in depth — `Bash` redirection can still write a file
+— but it removes the quiet path.
+
+**`.claude/hooks/**` joined the list when the first hook landed, and the way it
+joined is the lesson.** It had been excluded on a stated condition — "no hook is
+configured here" — which was true, and which is the kind of exemption that
+expires without anyone noticing, because nothing re-reads the condition when
+the fact changes. #30's argv guard made it false. A hook is the sharpest case
+on the list: it grants nothing, but it **runs on every Bash call**, so a session
+able to rewrite one could delete its own guard and then act. `settings.json`
+denies it, and a case in `test_grok_helpers.py` asserts the deny, so the next
+hook arrives behind a control rather than behind a sentence that used to be
+true.
 
 **The external review runs in a container over a disposable clone — not a
-worktree — and its one residual is egress.** The boundary is
-`.claude/sandbox/Dockerfile`; a worktree could not be the thing mounted,
+worktree — and it has TWO residuals, which are not independent.** The boundary
+is `.claude/sandbox/Dockerfile`; a worktree could not be the thing mounted,
 because a worktree's `.git` is a file pointing back into this checkout, which
-is the one path the container must not reach. So the credential half is closed:
-no `gh` token, no SSH keys, no host filesystem beyond the clone, non-root
-inside, and `bypassPermissions` is no longer the risk it was because the blast
-radius is the box. **Egress is not restricted** — the container reaches the
-network, and confining it to `api.x.ai` needs an allow-list proxy Docker cannot
-supply alone. Stated here as well as in the script because `/ship` and both
-sweeps cite this file as where the boundary and its residual are recorded. The
+is the one path the container must not reach. No `gh` token, no SSH keys, no
+host filesystem beyond the clone, non-root inside, and `bypassPermissions` is
+no longer the risk it was because the blast radius is the box.
+
+**Egress is not restricted** — the container reaches the network, and confining
+it to `api.x.ai` needs an allow-list proxy Docker cannot supply alone. **And
+the credential half is narrowed rather than closed**, which this paragraph
+asserted as settled until #58: where `XAI_API_KEY` is unset or unusable,
+`grok-review.sh` copies `~/.grok/auth.json` in, and that file carries a
+refresh-token-bearing OAuth session for the x.ai account. The three things
+enumerated as absent genuinely are; a fourth was never enumerated. **The open
+residual is what makes the crossing one exploitable** — anything inside can
+read the session and post it anywhere — so listing them as two independent
+bullets is precisely what let the second read as finished. Prefer
+`XAI_API_KEY`, which is scoped, revocable and crosses no file; on this host it
+authenticates against a team with no credits, so the fallback is the path that
+actually runs.
+
+Stated here as well as in the script because `/ship` and both
+sweeps cite this file as where the boundary and its residuals are recorded. The
 reviewer also has **no .NET SDK**, so `dotnet test` is this host's gate and
 never the review's.
 
@@ -2408,17 +2499,35 @@ permission rule matches the command *string*; the shell reassembles adjacent
 quoted fragments before `exec`, so `--out''put=<path>` reaches `git` as
 `--output=<path>` while never presenting contiguous `--output` to the matcher.
 Copilot raised this against the rule as shipped and it is accepted. **The
-concatenation itself was not verified here** — the probe was refused by the
-classifier layer, which is a second net worth noting and not evidence — so
-this rests on documented quote-removal semantics rather than on a measurement,
-and it is written down that way.
+concatenation is now MEASURED**, where this paragraph used to say it was not:
+`printf '%s' --out''put=/tmp/x` prints `--output=/tmp/x`, and so does
+`--"out"'put'=`. It had rested on documented quote-removal semantics because
+the earlier probe was refused by the classifier layer — a second net worth
+noting and not evidence. It is evidence now, and it says the deny was genuinely
+defeatable rather than theoretically so.
 
-**What would close it is what closed every comparable case: a helper that
-spells its own flags**, or a rule over the executed argv rather than the typed
-string. Neither exists, `.claude/scripts/**` is edit-denied to the session, and
-so the deny stays as a speed bump with its limit stated. **A substring deny
-over a shell command string can never be more than that**, which is the
-generalisation worth carrying past this one flag.
+**What closed it is the second of the two things named here as owed: a rule
+over the executed argv rather than the typed string.** `.claude/hooks/guard-git-argv.py`
+is a `PreToolUse` hook on `Bash` that `shlex.split`s the command — the same
+quote removal the shell performs — and judges the resolved argv, so the
+fragments are rejoined before anything is compared and the dodge stops working.
+**It reaches further than any rule could**, and that is the part worth carrying:
+hooks run on every tool call in the loop, including the read-only `git` forms
+the harness waves through as promptless built-ins, where no allow or deny rule
+is consulted at all. Measured, not read — the docs do not say so, and a
+`git log --out''put=` probe was refused by the hook with no file written.
+
+The deny stays beside it as defence in depth. **A substring deny over a shell
+command string can never be more than a speed bump**, which is still the
+generalisation worth carrying past this one flag — what changed is that the
+speed bump is no longer the only thing there.
+
+**The hook's own residual, stated rather than left to be found:** `shlex`
+resolves quoting and not expansion, so a flag assembled at run time —
+`F=--output=x; git log $F` — arrives as the token `$F` and is not seen. Closing
+that needs the argv after expansion, which no hook is given. The bound is: it
+refuses every spelling a caller can type literally, quoted however they like,
+and not one the shell computes.
 
 **The `::` in a value collides with the `:*` suffix syntax, and the collision
 fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
@@ -2430,6 +2539,14 @@ the end."* So **`ext::` cannot be expressed in a Bash rule at all**, and the
 transport is closed on the allow side instead — **and the two grants do it by
 two different mechanisms, which an earlier revision of this paragraph ran
 together.**
+
+**Since #30 it is also closed on a third mechanism, and that one is not a rule.**
+`.claude/hooks/guard-git-argv.py` refuses any argv element containing `ext::`
+inside a `git` invocation. A hook is not bound by the pattern grammar at all,
+which is why it can express what `Bash(...)` provably cannot — and the whole
+argument below about which grant pins what remains worth reading, because a
+hook is one file and defence in depth is the reason the allow side was narrowed
+in the first place.
 
 `Bash(git fetch origin:*)` **pins the remote**: a literal remote name occupies
 the repository position, so a URL never reaches it. That is the control the
@@ -2607,12 +2724,16 @@ not prompt at all; only force-pushes and pushes to `main` are denied. Naming
 separate a rejected pattern from a command that failed to load. Both files now
 state the residual instead of claiming the control.
 
-The sixth is the **`--output` deny itself**, which is the inventory's one
-entry that is a *deny* rather than an allow — and it is here because a deny
-over a command string is defeated by shell quoting, as the paragraph above
-records. It closes the naive spelling and nothing more. The three read grants
-it guards stay, because removing them buys nothing against a promptless
-built-in.
+The sixth **was** the `--output` deny itself — the inventory's one entry that
+is a *deny* rather than an allow, listed because a deny over a command string
+is defeated by shell quoting. **#30 closed it, and not by improving the rule.**
+`.claude/hooks/guard-git-argv.py` judges the resolved argv, so the quoted
+spelling is refused too, and it fires on the promptless read-only `git` forms
+no rule is consulted for. The deny stays as defence in depth and the three read
+grants stay with it, because removing them still buys nothing against a
+built-in. What survives as residual is one line rather than a grant: a flag the
+shell *computes* — `F=--output=x; git log $F` — is not visible to a hook that
+resolves quoting but not expansion.
 
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
@@ -2622,6 +2743,21 @@ or the network, and **a newly added agent under `.claude/agents/` is admitted
 by default** until someone adds it to both lists. That is the shape this
 repository already knows rots; it is taken here because the alternative on
 offer is prose.
+
+**The eighth was the push deny-list (#23), and it closed the way the sixth
+did.** Two broad allows — `Bash(git push origin:*)` and the `-u` form — paired
+with a list of exact spellings, so `git push origin +HEAD:main` was a force push
+to `main` carrying neither `--force` nor the literal `origin main`, and five
+more slipped alongside it: `origin :branch` deletes where the `--delete` deny
+does not look, `origin HEAD:refs/heads/main` is the fully-qualified spelling,
+`origin feature --force` puts the flag where a leading-flag deny cannot reach.
+**Adding four more denies was refused.** Deny-list enumeration trails git's
+refspec grammar forever, and the grammar keeps growing — which is the issue's
+own conclusion. The hook parses the refspec and judges three *properties*
+instead: a destination of `main`, a force in any spelling, a delete in any
+spelling. Its suite carries the six the issue listed and six it did not, plus
+the three pushes `/ship` actually makes, because over-reach here breaks the
+delivery chain and would be found at the worst moment.
 
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an

@@ -90,15 +90,30 @@ before a slot is reserved, whether the sweeps' worktree guard is the
 direct-child check it claims, and whether the label helper leaves a free
 parameter a finding could steer. That last is the one that never shipped
 wrong — it is a grant closed by moving it into a helper, and the suite is what
-keeps it closed. Four issues added subjects since, and those are regression
+keeps it closed. Issues have added subjects since, and those are regression
 cases of the first kind — each fails against behaviour that shipped:
 **#56**, what a Copilot feed helper admits, what it reports about what it
 dropped, and that no command can reach those feeds outside the fixed helpers;
 **#33**, which paths the harness denies itself and that the worktree root is
 not among them; **#52**, that the reviewer's transcript reaches no stream and
-that the one bounded read of it cannot be widened; and **#57**, that both
+that the one bounded read of it cannot be widened; **#57**, that both
 sweeps still state who may suppress a finding and that neither has drifted back
-to the unconditional rule.
+to the unconditional rule; **#140**, that the Grok ceiling is one declared
+number both helpers enforce and that a row posted under the old ceiling is
+still read as spent; **#60**, that the two commands stating editing boundaries
+path-scope `Edit` away from every tracked tree while each keeps its own subject
+editable; **#30** and **#23**, the argv guard — the `--output` write primitive
+in every spelling including the quoted one, `ext::`, and every push refspec
+that reaches `main`, forces or deletes; and **#150**, that what suppresses a
+sweep finding is decided by a helper rather than by a reader.
+
+**Two of those took their counterfactual somewhere other than the previous
+commit, and that is worth knowing before trusting them.** #140's read-side
+cases are green against `main` and have to be, since `main` reads the old
+comment shape natively — their counterfactual is the *naive migration*, a
+deliberately narrowed filter, and four of them fail against it. #60's is a tree
+removed from the deny list. A case whose counterfactual is not the previous
+commit needs saying so, or the next reader assumes none was taken.
 
 **No count opens that list any more**, here or in `.github/workflows/ci.yml` or
 `CLAUDE.md`, and the three enumerations are what a reader compares instead. The
