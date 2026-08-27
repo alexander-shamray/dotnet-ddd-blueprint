@@ -24,7 +24,13 @@ name: Observability
 #     whether an alert's signal exists. A new metrics type changes that answer,
 #     and the awaiting-signal file is meant to go red when it does;
 #   - docs/runbooks/** because a deleted or renamed runbook is an alert with no
-#     procedure behind it, and nothing else would catch it.
+#     procedure behind it, and nothing else would catch it;
+#   - docs/backend-architecture/13-observability.md because §13.6's and §13.9's
+#     tables are a THIRD copy of the runbook inventory, in prose, and check 9
+#     is what makes them disagree loudly. The one chapter and not its
+#     directory: `docs/backend-architecture` would trigger this workflow on all
+#     twenty blueprint files, which is the same "too wide" check.py's own
+#     SOURCE_INPUTS comment rejects for `docs`.
 on:
   pull_request:
     paths:
@@ -32,6 +38,7 @@ on:
       - '.github/workflows/observability.yml'
       - 'docs/runbooks/**'
       - 'src/**'
+      - 'docs/backend-architecture/13-observability.md'
   push:
     branches: [main]
     paths:
@@ -39,6 +46,7 @@ on:
       - '.github/workflows/observability.yml'
       - 'docs/runbooks/**'
       - 'src/**'
+      - 'docs/backend-architecture/13-observability.md'
 
 permissions:
   contents: read

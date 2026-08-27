@@ -44,6 +44,26 @@ a signal and a procedure"* — and the last is the gate watching its own inputs.
 | 6 | Every dashboard panel's metric is published |
 | 7 | The workflow's triggers cover every path outside this tree that the gate reads |
 | 8 | Every service hosting §9.4's dispatcher publishes outbox gauges, or is on a declared exemption |
+| 9 | §13.6's and §13.9's tables name exactly the runbooks on disk, both ways |
+
+**Check 9 is checks 1 and 2 aimed at the chapter instead of the rule files.**
+Those two pair `alerts/*.yaml` with `docs/runbooks` and never open
+`13-observability.md`, so the prose the rule files were written *from* was the
+one inventory here nothing read — and it drifted: a thirteenth condition landed
+and five prose sites went on saying twelve, with this gate green throughout
+because it has never counted anything ([#155](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/155)).
+
+**Counting is still not the fix, and the numerals were dropped rather than
+corrected.** A total in front of a table only records how stale the sentence
+is. What check 9 pins is the table, which is the claim a reader can check —
+§13.9 names each runbook with its `docs/runbooks/` prefix, §13.6's alert rows
+name it bare in the Runbook column, and both sets must equal the directory.
+
+**The pairing is not one-to-one and this check does not require it to be.**
+Fourteen rules name thirteen runbooks: §13.8's ownership split makes error rate
+two rules over one procedure, declared with its reason in `SHARED_RUNBOOKS`.
+That is why the chapter's *conditions* and the rule files' *alerts* are counted
+by nobody here — only paired.
 
 **Check 8 exists because checks 4 and 5 are about metric *names* and cannot see
 a service missing from a series.** The four loaded outbox alerts group `by

@@ -36,6 +36,23 @@
 # files arrive CRLF unless something says otherwise.
 deploy/helm/** text eol=lf
 
+# deploy/compose/rabbitmq/ is the sharpest instance of the deploy/helm/ rule
+# above, because here the CRLF does not merely fail a grep -- it is COPIED INTO
+# AN IMAGE and read by a Linux daemon.
+#
+# `20-commerce.conf` is the one that bites. Cuttlefish parses it line by line,
+# so a CRLF checkout makes the value of `load_definitions` end in a carriage
+# return: the broker then looks for `/etc/rabbitmq/definitions.json`, finds
+# nothing, and boots with NO users and NO permissions imported -- which on an
+# empty database means it seeds `guest` instead, silently restoring the single
+# shared administrator ADR-036 exists to remove. The container is healthy
+# throughout.
+#
+# The .py beside them is already covered above; this is for the conf, the JSON
+# and the Dockerfile, so the directory is one thing and the image cannot depend
+# on who checked it out.
+deploy/compose/rabbitmq/** text eol=lf
+
 # The secret scan's allow-list joins on the canary tree's argument and on
 # nothing stronger, which is worth saying because the stronger one looks
 # available and is false. Its entries are keyed on a SHA-256 of the matched

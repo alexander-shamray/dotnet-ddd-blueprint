@@ -82,7 +82,7 @@ def render(name: str = PROBE, port: int = PORT, repo_root: Path = REPO_ROOT) -> 
 
 
 def template_copy(destination: Path) -> Path:
-    """The template and the five shared files, and nothing else.
+    """The template and the six shared files, and nothing else.
 
     Only the tests that need to *break* the template copy it; everything else
     reads the checkout directly.
@@ -99,6 +99,7 @@ def template_copy(destination: Path) -> Path:
         "deploy/compose/docker-compose.infra-only.yml",
         "deploy/compose/.env.example",
         "deploy/compose/README.md",
+        "deploy/compose/rabbitmq/definitions.json",
     ):
         (destination / shared).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO_ROOT / shared, destination / shared)
@@ -674,11 +675,57 @@ class EditsTheSharedFiles(unittest.TestCase):
         compose = self.rendered.updated["deploy/compose/docker-compose.yml"].replace("\r\n", "\n")
         api = compose[compose.index("  zulu-api:"):]
         api = api[: api.index("\n  otel-collector:")] if "\n  otel-collector:" in api else api
-        self.assertIn('ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"', api)
+        # The service's OWN broker account, not `guest` (#44). The rename
+        # carries both halves — the login and the password — so a scaffolded
+        # service arrives with an identity rather than the shared administrator
+        # every service used to hold.
+        self.assertIn('ConnectionStrings__RabbitMq: "amqp://zulu-svc:local-dev-zulu@rabbitmq:5672"', api)
+        self.assertNotIn("guest:guest", api)
         self.assertIn("rabbitmq: { condition: service_healthy }", api)
 
         migrator = compose[compose.index("  zulu-migrator:"): compose.index("  zulu-api:")]
         self.assertNotIn("RabbitMq", migrator)
+
+    def test_the_service_gets_a_broker_account_it_can_actually_authenticate_with(self):
+        # Since #44 the broker has no shared account, so a service the scaffold
+        # renders and nobody grants cannot connect AT ALL — it starts, fails
+        # authentication and reports nothing a reader would connect to a
+        # missing definitions entry. The compose block above names
+        # `zulu-svc`; this is the other half of that name existing.
+        import base64
+        import hashlib
+        import json
+
+        definitions = json.loads(
+            self.rendered.updated["deploy/compose/rabbitmq/definitions.json"])
+
+        account = next(
+            (user for user in definitions["users"] if user["name"] == "zulu-svc"), None)
+        self.assertIsNotNone(account, "no zulu-svc user in definitions.json")
+        self.assertEqual([], account["tags"], "a service account needs no tags")
+
+        # THE HASH IS COMPUTED, NOT COPIED. RabbitMQ stores
+        # base64(salt || sha256(salt || utf8(password))), so an entry that
+        # copied Catalog's hash would authenticate Catalog's password under
+        # Zulu's name — one credential, two services, and the compose block
+        # says `local-dev-zulu` while the broker expects `local-dev-catalog`.
+        raw = base64.b64decode(account["password_hash"])
+        salt, stored = raw[:4], raw[4:]
+        self.assertEqual(
+            hashlib.sha256(salt + b"local-dev-zulu").digest(),
+            stored,
+            "the hash does not verify against the password the compose block carries")
+
+        permission = next(
+            (entry for entry in definitions["permissions"] if entry["user"] == "zulu-svc"), None)
+        self.assertIsNotNone(permission, "no zulu-svc permissions in definitions.json")
+
+        # Its own contracts, and nobody else's. The template is a publisher, so
+        # what it inherits is a publisher's grant — the negative half is what
+        # #44 is about and what check_permissions.py holds every service to.
+        self.assertIn("Zulu", permission["write"])
+        self.assertNotIn("Catalog", permission["write"])
+        self.assertNotIn("ordering-", permission["write"])
 
     def test_both_halves_of_the_pair_join_the_excluded_profile(self):
         # §14.1's own rule: every application block added to docker-compose.yml
@@ -1195,7 +1242,7 @@ class TheCommandLine(unittest.TestCase):
             # first, while the assertion beside it had already been raised to
             # 55. A number a test pins and a number a comment states are two
             # copies, and only one of them fails when they disagree.
-            self.assertIn("55 files created, 5 updated", out)
+            self.assertIn("55 files created, 6 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

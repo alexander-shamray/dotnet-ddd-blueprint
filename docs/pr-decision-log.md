@@ -1863,6 +1863,22 @@ from an exporter"; CLAUDE.md said twelve runbooks. The first is now named
 rather than counted, on this file's usual terms; the second is a tree listing
 where the number is the point, so it moved to thirteen.
 
+**The second half of that sentence was true of one site and read as true of
+the file, and [#155](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/155)
+is what it cost.** CLAUDE.md said twelve runbooks in *three* places; the edit
+reached the tree listing and left the PR-24 narrative saying twelve twice
+over, so this entry recorded a reconciliation that had covered a third of its
+subject. That is the multi-target lesson this repository already carries —
+**a multi-target edit that aborts has applied a prefix of its changes** — with
+no abort to make it visible: nothing failed, the count that was checked was
+correct, and the two that were not went unread for as long as nobody counted
+them. **Resume from the list, not from the site you happened to fix**, and
+where the list is prose in five files, the honest fix is to stop restating the
+number at all. #155 dropped it everywhere but here and the tree listing, and
+gave the predicate a gate — check 9 reads §13.6's and §13.9's tables against
+`docs/runbooks` — so the one number that survives is now one a build
+recomputes.
+
 ---
 
 ## The state that waits on two services (#124)
@@ -3127,14 +3143,14 @@ ADR-022 records it as owed.
 ## PR-24 — the runbooks, and the four alerts that could not fire
 
 PR-24 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s
-ops row: [§13.9](backend-architecture/13-observability.md)'s twelve runbooks,
+ops row: [§13.9](backend-architecture/13-observability.md)'s runbooks,
 §13.6's per-lane outbox alerts, `docs/secrets.md`, §13.8's dashboards as code,
 and §13.7's k6 SLO run. It also built the code those alerts read —
 `OutboxMetrics`, `IOutboxStats`/`OutboxStats` and `MetricsInitialiser` — which
 §13.6 had specified since PR-14 deferred it by name and nobody had written.
 
 **Decision — the alerts split into two files, and only one of them is
-loaded.** Writing §13.6's twelve conditions out as Prometheus rules established
+loaded.** Writing §13.6's conditions out as Prometheus rules established
 that **four of them read an instrument nothing publishes**: the saga age and the
 review queue have no gauge over their tables, `orders.placed` waits on
 `OrderMetrics` and §6.6's `OrderSummaries` projection, and the cache ratio waits
@@ -3154,14 +3170,14 @@ removed once the package was actually read. See the fourth finding below.
 **Why.** §13.6 spends a callout on exactly this: *"Two of the alerts in this
 document were written against signals that did not exist, and both looked
 correct: the dashboard is empty either way, whether the system is healthy or the
-metric was never published."* Shipping all twelve as loaded rules would have
+metric was never published."* Shipping every rule as loaded would have
 made that sentence true again, in files, at the moment it was being quoted.
 A rule that cannot fire is not a weak alert — it is a silent one, and silence
 reads as health.
 
-**Consequences.** `platform-alerts.yaml` holds the eight that can fire;
-`awaiting-signal.yaml` holds the four that cannot and is not loaded. All twelve
-runbooks exist either way, because §13.9 asks for the procedure to be written
+**Consequences.** `platform-alerts.yaml` holds the rules whose signal exists;
+`awaiting-signal.yaml` holds the four that cannot fire and is not loaded. Every
+runbook exists either way, because §13.9 asks for the procedure to be written
 when the alert is created and every query in those four reads a table that
 exists today. The cost is a second file to notice, paid down by the gate below.
 
@@ -5037,3 +5053,138 @@ after:
   its commands section — it has grown twice since PR-08, and this entry records
   the decision rather than the tally.
 
+---
+
+## The boundary that was only ever a sentence (#44)
+
+**Decision.** The broker is an authorisation boundary. Each service
+authenticates as its own account and its `write` is scoped to what its own
+source addresses, declared in `deploy/compose/rabbitmq/definitions.json`,
+imported at broker start and held to the code by a gate
+([ADR-036](backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)).
+`guest` is not created.
+
+**Why.** [§9.4](backend-architecture/09-messaging.md) stamps a broker-borne
+command `CommandOrigin.System` because it arrived on the service's own command
+queue, and §11.4 skips the ownership check for one. The chapter's own callout
+said the quiet part — arrival "is only as restrictive as the broker's
+authorisation", and "this chapter does not specify one" — so the platform had a
+control whose strength was documented as zero and left there.
+
+**Measuring it made it worse than the issue claimed.** #44 said "one shared
+principal". Read off the image rather than assumed: `guest` is tagged
+`administrator`, and `rabbitmq:4.1-management-alpine` ships
+`loopback_users.guest = false` under the comment *"allow access to the guest
+user from anywhere on the network"*. `rabbitmqctl environment` reported
+`{loopback_users,[]}` and both services connected from container addresses. One
+principal, administrator, reachable from anywhere on the network.
+
+### What building it cost, and every bit of it was a measurement
+
+**The permissions were wrong three times, and each correction came from running
+it rather than reading it.**
+
+The first was one token too strict. `Common\.Contracts\.` misses
+`Common.Contracts:IIntegrationEvent` — MassTransit's polymorphic exchange,
+which every publisher declares — because that name has a colon where the
+pattern wanted a dot. **It was in the topology capture the whole time and got
+read past.** The lesson this repository already carries about a pattern one
+token too strict, arriving through a permission instead of a metric name.
+
+The second is the sharper one. `MassTransit:ReceiveFault` never appears on a
+healthy stack, so no capture of a working system could show it — it surfaced
+only because a deliberately forged message faulted a consumer. **A runtime
+capture shows what RAN, not what CAN run.** That is also why
+`payments-commands` is derived from `Endpoints.cs` and not from a broker: the
+saga never reached the payment step, because there is no Inventory service to
+answer the stock reservation that precedes it. **The code is the inventory; the
+broker is a sample of it.**
+
+The third was a verb. `queue.bind` takes `read` on the destination exchange, so
+sending to a peer's queue needs more than `write` — found as a refusal with
+`write` already granted.
+
+**The exploit was attempted rather than argued, and the first attempt lied.**
+As `catalog-svc`: `ConfirmOrder` onto `ordering-commands`, a forged
+`OrderPlaced`, a `ReserveStock`, a forged `PaymentAuthorised`. The probe
+reported all four ACCEPTED. They were not — the broker log showed four
+refusals. `basic_publish` on AMQP 0-9-1 is fire-and-forget, so a refusal
+arrives as a channel exception *after* the publish returns, and a probe that
+publishes and closes cannot see it. `confirm_delivery()` is what makes the
+measurement a measurement. **A negative test that cannot observe the negative
+reports the property as absent** — and it fails in the direction that reads as
+a security hole, which is at least the loud direction.
+
+A positive control ships with it, because a probe that is refused everything
+because the credential is broken proves nothing.
+
+### The suite found the thing the design had not
+
+Running `Ordering.Api.Tests` produced exactly the failure mode ADR-036's own
+Dockerfile comment describes: a refused publish, retried for ever, with the
+suite healthy and silent until it timed out forty minutes later naming a
+message rather than a permission. The cause is that **the harness impersonates
+services that do not exist** — §9.6's saga is driven by Inventory, Payments,
+Shipping and Catalog events, and the tests publish them through the host's own
+bus, as `ordering-svc`.
+
+**The widening went into the harness and not into `definitions.json`**, and the
+reason is one this repository already paid for elsewhere: loosening the
+deployed artefact so a test can pass leaves the gate agreeing with a permission
+set nothing deploys, which is a double that cannot disagree with itself. So the
+production shape stays honest and the exception is visible in the fixture.
+
+**What that costs is a claim, and the claim was narrowed rather than kept.** An
+earlier draft of ADR-036 said `dotnet test` "exercises the real permission set".
+It exercises `configure` and `read` — the half that rots as endpoints are added
+— and not `write`. The negative property rests on the direct measurement and on
+`check_permissions.py`, and the ADR now says so in those words.
+
+### The fixture race the second suite paid for
+
+Making Catalog's fixture build the broker image — it had used the stock tag,
+which carries no definitions — gave both suites the same image name, on the
+reasoning that sharing one image per machine beat dragging a second onto every
+runner. Docker would have been fine with that. **Testcontainers writes the
+build context to a tar named after the image**, so the two raced on
+`ashamray-test-broker-4-1-delayed.tar` and the loser threw *the process cannot
+access the file*.
+
+**The symptom named neither the file nor the fixture.** Whichever suite started
+second failed EVERY test in under 100 ms while passing alone, and it was not
+always the same suite — a fixture fault wearing a suite-wide failure. The tell
+is arithmetic rather than a message: a failure count equal to the suite's size,
+at a duration too short to have run anything. **One image name per fixture was the first fix, and it was the wrong axis.**
+It was measured green locally and failed on CI, because the unit is the
+PROCESS: `Catalog.Api.Tests` and `Catalog.Application.Tests` both instantiate
+that one fixture class and `dotnet test` runs them as separate hosts, so they
+raced each other under the new name exactly as they had under the old one — 60
+failures in 128 ms and 11 in 51 ms, with `Cannot locate specified Dockerfile`
+where Windows had said the file was in use. A per-class name is per-process
+only while the class has one caller, which is a premise about callers rather
+than a property of anything.
+
+**What ended it was declining to build.** Catalog needs the broker's
+*configuration* — the accounts of #44 — and not ADR-021's delayed-exchange
+plugin: it runs no saga and schedules nothing. So its fixture maps
+`definitions.json` and `20-commerce.conf` onto the stock image and no build
+context tar exists to be raced for. Ordering still builds, because the plugin
+leaves it no choice, and it has one consumer today — written down where the
+next caller will read it rather than assumed.
+
+**The mapping is a second copy of the Dockerfile's COPY targets, so it is
+gated.** A drifted path fails in the silent direction: the broker boots without
+the definitions, seeds `guest` on an empty database, and Catalog's suite passes
+green against the single shared administrator #44 exists to remove.
+
+### What is owed
+
+Three residuals, stated in ADR-036 rather than implied. `configure` cannot be
+exclusive, because a consumer declares the exchange it binds. `read` on a
+peer's command endpoint grants the consume along with the bind, because a
+RabbitMQ permission pattern cannot tell a queue from an exchange of the same
+name — so Ordering can consume Inventory's commands, and only Inventory
+existing makes that observable. And provisioning the accounts on a deployed
+broker is an obligation this repository states and does not check, on
+[§15.4](backend-architecture/15-cicd-deployment.md)'s own terms and
+ADR-033's.

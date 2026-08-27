@@ -50,6 +50,7 @@ WORKFLOW = ROOT / WORKFLOW_PATH
 
 LOADED_RULES = OBSERVABILITY / "alerts" / "platform-alerts.yaml"
 AWAITING_RULES = OBSERVABILITY / "alerts" / "awaiting-signal.yaml"
+CHAPTER = ROOT / "docs" / "backend-architecture" / "13-observability.md"
 
 # EVERY PATH OUTSIDE deploy/observability THAT THIS SCRIPT READS, declared once.
 #
@@ -60,6 +61,7 @@ AWAITING_RULES = OBSERVABILITY / "alerts" / "awaiting-signal.yaml"
 SOURCE_INPUTS = [
     "src",
     "docs/runbooks",
+    "docs/backend-architecture/13-observability.md",
 ]
 
 # The one file under docs/runbooks that is not a runbook. Declared rather than
@@ -436,7 +438,7 @@ def is_published(metric: str, instruments: set[str]) -> bool:
 
 
 def main() -> int:
-    for path in (LOADED_RULES, AWAITING_RULES, RUNBOOKS, WORKFLOW):
+    for path in (LOADED_RULES, AWAITING_RULES, RUNBOOKS, WORKFLOW, CHAPTER):
         if not path.exists():
             fail(f"missing: {path.relative_to(ROOT).as_posix()}")
 
@@ -558,6 +560,12 @@ def main() -> int:
     #    or is on a declared exemption with a reason. Checks 4 and 5 are about
     #    metric NAMES and cannot see a service missing from a series.
     check_outbox_metrics_per_service()
+
+    # 9. §13.6's and §13.9's tables restate the runbook set in prose, and until
+    #    now nothing read them — so the chapter could disagree with the files
+    #    written from it and this gate would stay green, which is exactly what
+    #    happened (#155).
+    check_chapter_inventories(runbooks)
 
     # 7. The workflow's triggers cover every path this script reads outside its
     #    own tree — asserted on BOTH triggers, because a merged change that
@@ -723,6 +731,65 @@ def covers(path: str, entry: str) -> bool:
     return entry == path
 
 
+def check_chapter_inventories(runbooks: set[str]) -> None:
+    """§13.6's Runbook columns and §13.9's table, against the runbooks on disk.
+
+    Checks 1 and 2 pair the RULE FILES with `docs/runbooks`, both ways, and
+    nothing reads the chapter those files were written from. So the chapter is
+    the one inventory here that could go stale silently — and it did: a
+    thirteenth condition landed and five prose sites went on saying twelve,
+    while this gate stayed green because it has never counted anything.
+
+    Counting is still not what closes it. A total in front of a table only
+    says how stale the sentence is, which is why the fix that shipped with
+    this check DROPPED the numerals rather than incrementing them: the table
+    is the claim a reader can check, and this makes it one a build checks too.
+
+    Two spellings, because the chapter uses two. §13.9 names each runbook with
+    its `docs/runbooks/` prefix; §13.6's alert tables name it bare in the
+    Runbook column. **A bare `*.md` in this chapter is a runbook reference by
+    construction** — that is a convention this check imposes rather than one it
+    infers, and a chapter that ever needs to name some other document bare will
+    fail here and say so.
+    """
+    text = read(CHAPTER)
+
+    prefixed = set(re.findall(r"`docs/runbooks/([A-Za-z0-9._-]+\.md)`", text))
+    bare = set(re.findall(r"`([A-Za-z0-9._-]+\.md)`", text))
+
+    # Subject first, as everywhere else in this file. A pattern that matched
+    # nothing would agree with any runbook set at all, which is this gate's own
+    # most-repeated failure pointed at its newest surface.
+    if not prefixed:
+        fail("13-observability.md: found no `docs/runbooks/…` references — "
+             "the pattern, not the chapter (§13.9's table is the subject)")
+        return
+    if not bare:
+        fail("13-observability.md: found no bare `….md` references — "
+             "the pattern, not the chapter (§13.6's Runbook column is the subject)")
+        return
+
+    # README.md is reachable in the prose because the gate's own paragraph
+    # names it; it is not a runbook, on check 1 and 2's terms.
+    prefixed -= NOT_A_RUNBOOK
+
+    for name in sorted(prefixed - runbooks):
+        fail(f"13-observability.md: §13.9's table names docs/runbooks/{name}, "
+             f"which is not in docs/runbooks")
+    for name in sorted(runbooks - prefixed):
+        fail(f"docs/runbooks/{name}: §13.9's table does not name it. The table is "
+             f"the chapter's inventory of procedures, and a runbook missing from "
+             f"it is one no reader of §13.9 knows exists")
+
+    for name in sorted(bare - runbooks):
+        fail(f"13-observability.md: names `{name}` where a runbook is expected, "
+             f"and docs/runbooks has no such file")
+    for name in sorted(runbooks - bare):
+        fail(f"docs/runbooks/{name}: no alert row in §13.6 names it. Checks 1 and 2 "
+             f"pair the RULE FILES with the runbooks; this is the chapter those "
+             f"files were written from, and it disagrees")
+
+
 def check_source_inputs_covers_reads() -> None:
     """SOURCE_INPUTS against the reads it claims to enumerate, not the workflow.
 
@@ -741,14 +808,25 @@ def check_source_inputs_covers_reads() -> None:
     source = read(Path(__file__))
 
     reads = set()
-    for first, second in re.findall(r'ROOT\s*/\s*"([a-z]+)"(?:\s*/\s*"([a-z-]+)")?', source):
-        # Two segments where there are two, because the declarable unit is not
+    for segments in re.findall(
+            r'ROOT\s*/\s*"([a-z]+)"(?:\s*/\s*"([a-z-]+)")?(?:\s*/\s*"([a-z0-9.-]+)")?',
+            source):
+        # As many segments as there are, because the declarable unit is not
         # always the top level: `docs` is too wide to declare (this gate does
         # not want every chapter) and `deploy` is too wide to be correct
         # (deploy/compose must not trigger it). The coverage test below accepts
         # a declared entry that is a prefix, so a one-segment declaration still
-        # covers a two-segment read where that is what somebody meant.
-        reads.add(f"{first}/{second}" if second else first)
+        # covers a deeper read where that is what somebody meant.
+        #
+        # THE THIRD SEGMENT IS A FILE AND ITS CHARACTER CLASS SAYS SO — digits
+        # and a dot, which the first two do not admit. It exists because
+        # `docs/backend-architecture` is the same "too wide" this comment
+        # already rejects one directory up: check 9 reads ONE chapter, and
+        # declaring its parent would trigger this workflow on all twenty
+        # blueprint files. A read this regex truncated would resolve to that
+        # parent and be declared there, which is the quiet direction — the list
+        # would look covered while watching nineteen files too many.
+        reads.add("/".join(part for part in segments if part))
 
     # Subject first. A regex that matched nothing would pass the loop below
     # against any list at all, which is this gate's own most-repeated failure

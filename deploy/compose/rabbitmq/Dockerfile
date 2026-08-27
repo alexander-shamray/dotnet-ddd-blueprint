@@ -63,3 +63,52 @@ RUN cd /opt/rabbitmq/plugins \
 # this needs no download and no checksum — only enabling. `_management` is the
 # half that exposes /api/parameters/shovel, which is what the runbook drives.
 RUN rabbitmq-plugins enable --offline rabbitmq_shovel rabbitmq_shovel_management
+
+# §9.4's per-service identity (#44). Two files, and both are plain COPY for the
+# reason the checksum above is a RUN: this image is built by BuildKit under
+# Compose and by the classic /build API under §12.4's Testcontainers fixture,
+# and anything BuildKit-only makes the fixture fall back to a stock broker.
+#
+# THE PERMISSIONS ARE A MEASUREMENT, NOT A GUESS, and definitions.json is JSON
+# so it cannot say so itself. They were read off a running broker with both
+# services connected — `rabbitmqctl list_exchanges/list_queues/list_bindings`
+# after an order had been placed, so the saga's scheduled timeout had declared
+# its exchange too. What that found:
+#
+#   * a receive endpoint is a queue `X` plus a fanout exchange `X`, bound;
+#   * a consumed message type is a fanout exchange named
+#     `Common.Contracts.<Context>.V1:<Type>`, bound to the endpoint exchange;
+#   * MassTransit's delayed scheduler (ADR-021) declares
+#     `ordering-fulfilment-saga_delay`, type `x-delayed-message` — named after
+#     the RECEIVE ENDPOINT, which is the fact that makes an `ordering-` prefix
+#     sufficient. A pattern that missed it would not fail loudly: the Dockerfile
+#     comment above records that a broken delayed exchange retries the topology
+#     for ever while the service stays healthy and silent.
+#
+# The permissions follow RabbitMQ's own verbs rather than an intuition about
+# ownership: `configure` is declare/delete, `write` is publish AND being a
+# binding's DESTINATION, `read` is consume AND being a binding's SOURCE. That
+# split is why Ordering needs `read` on Catalog's contract exchanges — it binds
+# them to its own queues — and why it does not need `write` on them. A consumer
+# that could write its producers' exchanges could forge their events.
+#
+# So the property this buys is exactly #44's: `catalog-svc` has no `write`
+# matching `ordering-commands` or `Common.Contracts.Ordering.V1:*`, so a
+# compromised Catalog cannot send `ConfirmOrder` and cannot publish an
+# `OrderPlaced`. §9.4's `CommandOrigin.System` stamp — "arriving on this
+# service's command queue is what earns it" — is enforced by the broker from
+# here rather than merely asserted by the mapper.
+#
+# WHAT IT DOES NOT BUY IS `configure` EXCLUSIVITY, and that is structural. A
+# consumer declares the exchange it binds, so Ordering's `configure` has to
+# reach `Common.Contracts.*` — including Catalog's. Ordering can therefore
+# delete an exchange it does not own. Closing that needs a topology where
+# producers pre-declare and consumers only bind, which MassTransit does not
+# offer; it is stated in §9.4 rather than left to be discovered.
+#
+# ONE VHOST, DELIBERATELY. A vhost per service is the obvious next step and is
+# wrong here: a vhost is a full namespace, so two services in different vhosts
+# share no exchange and cannot exchange messages at all. Vhosts separate
+# tenants; these users separate services inside one.
+COPY definitions.json /etc/rabbitmq/definitions.json
+COPY 20-commerce.conf /etc/rabbitmq/conf.d/20-commerce.conf

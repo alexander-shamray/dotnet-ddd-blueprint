@@ -53,10 +53,9 @@ the only thing that should move it.
 
 > **Estimate the specification, not the aspiration.** Each figure prices what
 > Appendix C's *Delivers* column actually lists, including its tests. Where a
-> pull request delivers documentation rather than code — PR-24's twelve
-> runbooks — it is priced as the writing job it is, because writing twelve
-> runbooks that are each checked in both directions is not faster than writing
-> code.
+> pull request delivers documentation rather than code — PR-24's runbooks — it
+> is priced as the writing job it is, because writing a runbook per §13.6
+> condition, each checked in both directions, is not faster than writing code.
 
 ## Basis
 
@@ -227,13 +226,13 @@ scaffold.
 This phase is a third of the total, which surprises people who read a plan as a
 list of features. PR-21's saga carries a timeout on every wait state and a
 compensation path per failure, and each of those is a harness test. PR-24 is
-six days of writing: twelve runbooks, one per alert, each checked from the
+six days of writing: a runbook per §13.6 condition, each checked from the
 alert to the procedure and from the procedure back to the alert.
 
 **PR-24 has landed, and the estimate was right about the size for the wrong
 reason.** Six days of writing was the guess; what it actually cost was the
 writing *plus* the code the alerts turned out to need — §13.6's `OutboxMetrics`
-had never been built, so four of the twelve alerts had no signal and four more
+had never been built, so four of §13.6's alerts had no signal and four more
 were found to have none either. **An estimate that prices a documentation PR as
 documentation is an estimate that has not asked what the documents point at.**
 The same reading applies to PR-25 below, which is priced as pipeline work and
@@ -275,13 +274,15 @@ decision rather than a gap.**
 | **28** | `feat(common): §8.5's idempotency behaviour and Redis store` | — | — | — |
 | **29** | `feat(ci): §15.1's secret scan, the other half of the first node` | — | — | — |
 | **30** | `fix(ordering): the saga's transactional outbox` | — | — | — |
+| **31** | `fix(messaging): the broker has a per-service identity` | — | — | — |
 
 **Nothing in this file would produce a number for them.** Every estimate above
 was quoted before any code existed, against a specification that was already
 finished, and *What these numbers are* says outright that none has since been
-re-priced against a pull request that has actually landed. **Not one of these
-three was priced before it was built** — PR-28 and PR-29 were rowed after they
-landed, and PR-30 is rowed by the pull request doing the work — so a figure
+re-priced against a pull request that has actually landed. **Not one of them
+was priced before it was built** — PR-28 and PR-29 were rowed after they
+landed, and PR-30 and PR-31 are each rowed by the pull request doing the
+work — so a figure
 here would be either invented, which the *Basis* section's own terms forbid
 because an invented day is not an argument about relative size, or an actual
 restated as a forecast, which makes the column mean two different things
@@ -342,7 +343,7 @@ milestone row.
 did not say it needed — a naming rule the platform's own routing already
 depended on, a grace period whose number had to be measured, and a render-time
 gate to keep any of it from drifting. PR-24 has since done the same thing
-again — twelve runbooks, and beside them the metrics type §13.6 had specified
+again — the runbooks, and beside them the metrics type §13.6 had specified
 and nobody had built, plus a second render-time gate.
 
 **PR-25 has landed and M6 with it, and the prediction above was right about

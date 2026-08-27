@@ -876,14 +876,17 @@ vocabulary either way.
 > weaker: the field that is absent cannot be the one a later code path reads
 > instead of the record.
 >
-> **This narrows the exposure rather than closing it, and the residual is
-> named.** The broker still has one shared principal
+> **This narrowed the exposure, and the residual it named has since been
+> closed.** The broker had one shared principal
 > ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44),
-> §9.4's callout), so anyone able to publish can still send an
+> §9.4's callout), so anyone able to publish could send an
 > `AuthorisePayment`. What that command **alone** no longer does is carry the
 > payer: a forged one naming a real order re-triggers that order's own
 > authorisation rather than redirecting one at a customer of the sender's
-> choosing.
+> choosing. Since
+> [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+> the ability to publish it is itself scoped — `payments-commands` is writable
+> by the services whose own source addresses it, and by nobody else.
 >
 > **Payer selection is not gone, and saying it was is the overclaim this
 > callout has to avoid.** The same principal can forge the `OrderPlaced` that
@@ -892,8 +895,11 @@ vocabulary either way.
 > than capability — the added message is an event Ordering's own saga and
 > Notifications both consume, so it starts a fulfilment saga for an order the
 > write model has no row for and tells a customer about an order they never
-> placed. Per-service broker identity or verifiable event provenance is what
-> closes it; this rule does not.
+> placed. **Per-service broker identity is what closes it, and
+> [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+> is that**: forging the seeding `OrderPlaced` needs `write` on
+> `Common.Contracts.Ordering.V1:OrderPlaced`, which only Ordering's account
+> holds. This rule still does not close it, and no longer has to.
 
 This is one rule with three consequences, and the worked slices show all three:
 `PlaceOrderCommand` ([§6.4](06-cqrs.md)) carries no `CustomerId` and its handler

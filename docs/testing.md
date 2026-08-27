@@ -38,6 +38,8 @@ dotnet test  Platform.slnx         # needs a running Docker daemon
 bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
+py -3.12 -m unittest discover -s deploy/compose/rabbitmq   # then check_permissions.py
+py -3.12 deploy/compose/rabbitmq/check_permissions.py   # ADR-036's broker ACL
 
 (cd .github/licence-gate && py -3.12 -m unittest)        # §4.4's register gate
 (cd .github/secret-scan && py -3.12 -m unittest)         # §15.1's secret scan
