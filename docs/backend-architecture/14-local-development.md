@@ -745,15 +745,39 @@ bool requested = bool.TryParse(builder.Configuration["Seed:Enabled"], out bool e
 if (requested && builder.Environment.IsDevelopment())
     builder.Services.AddScoped<OrderingSeeder>();
 
-// MigrationRunner.RunAsync, after MigrateAsync returns. The dependency is
-// nullable because the registration above is conditional, and the log line is
-// not decoration: a gate that fails closed in silence is indistinguishable
-// from a seeder that is broken, and it is the seeder a developer debugs.
+// src/Services/Ordering/Ordering.Migrator/MigrationRunner.cs. The seeder joins
+// the primary constructor with a DEFAULT VALUE, and the `= null` is the whole
+// of what makes it optional — see the trap below. The runner is otherwise §7.4's:
+// MigrateAsync, a log line and an exit code.
+public sealed class MigrationRunner(
+    OrderingDbContext db,
+    ILogger<MigrationRunner> logger,
+    OrderingSeeder? seeder = null)
+
+// RunAsync, after MigrateAsync returns. The log line is not decoration: a gate
+// that fails closed in silence is indistinguishable from a seeder that is
+// broken, and it is the seeder a developer debugs.
 if (seeder is null)
     NotSeeding(logger, null);
 else
     await seeder.SeedAsync(ct);
 ```
+
+> **Trap — a nullable reference type is not an optional dependency.**
+> `OrderingSeeder?` is an annotation the compiler reads and
+> `Microsoft.Extensions.DependencyInjection` never does. A constructor parameter
+> whose service is unregistered and which carries **no default value** makes
+> resolving `MigrationRunner` throw `InvalidOperationException` — *unable to
+> resolve service for type `OrderingSeeder` while attempting to activate
+> `MigrationRunner`* — so the migrator that must not seed becomes the migrator
+> that cannot start, and the gate fails the pre-upgrade hook *before* the
+> migration it was guarding. That is the opposite of failing closed: the
+> conditional registration above is only safe because the container falls back
+> to a parameter's default value when it cannot resolve one, which is what
+> `= null` supplies. Resolving it explicitly with
+> `IServiceProvider.GetService<OrderingSeeder>()` is the other correct spelling
+> and is not the one taken here, because it puts a service locator inside the
+> one type §7.4 keeps to `Database.Migrate()` and an exit code.
 
 **Both conditions are load-bearing, and they close different doors.** The flag
 is the half somebody writes down, and [§15.3](15-cicd-deployment.md) says what

@@ -88,8 +88,11 @@
          instance. Same version and same release as the two
          rows above — the transport, the core and the persistence integration
          ship together, and a saga repository a minor behind the state machine
-         it stores is not a combination anyone tests. Referenced only by
-         Ordering.Infrastructure, which is the only project with a saga. -->
+         it stores is not a combination anyone tests. Referenced by
+         Ordering.Infrastructure, the only project with a saga, and by
+         Ordering.Api.Tests, which names InboxCleanupService<T> and
+         IBusOutboxNotification directly rather than riding in on the
+         production graph. -->
     <PackageVersion Include="MassTransit.EntityFrameworkCore" Version="8.5.3" />
     <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
     <PackageVersion Include="FluentValidation" Version="12.0.0" />

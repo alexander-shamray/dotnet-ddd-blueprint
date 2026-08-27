@@ -95,11 +95,18 @@ stated here rather than left to be discovered.** `OrderingDbContext` calls
 `modelBuilder.AddTransactionalOutboxEntities()` after the assembly scan, for
 the three tables
 [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
-puts behind §9.6's saga. The entity types are MassTransit's, so no
-`IEntityTypeConfiguration<T>` of ours can carry them — the scan finds
-configurations in this assembly and those types are not in it. The rule is
-unchanged for everything the scan can reach, which is every type this
-repository defines; §7.4 lists the tables.
+puts behind §9.6's saga. **The scan is not what stops it**, and the reason
+matters because the wrong one is easy to state:
+`ApplyConfigurationsFromAssembly` looks for types *implementing*
+`IEntityTypeConfiguration<T>` in the assembly it is given and says nothing
+about where `T` is declared, so an `IEntityTypeConfiguration<InboxState>`
+written in `Ordering.Infrastructure` would be found and applied like any other.
+What forbids it is **ownership**: MassTransit maps those three entities itself
+and its own queries depend on the mapping, so a configuration of ours would be a
+second definition of a schema the library has to agree with — and the next
+version bump moves the library's half while ours sits there looking correct.
+The rule is unchanged for every type this repository defines; §7.4 lists the
+tables.
 
 ```csharp
 internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
@@ -276,7 +283,7 @@ differently:
 |---|---|---|
 | **Write model** | `Orders`, `OrderLines` | The EF model. `IEntityTypeConfiguration<T>` (§7.2) is the source of truth; `dotnet ef migrations add` produces the DDL |
 | **Read models and technical tables** | `OrderSummaries`, `ordering.Products`, `ProductPrices`, `OutboxMessages`, `InboxMessages`, `OrderReviews` | Hand-written DDL, because they are shaped for queries and index plans rather than for objects. **`ProductPrices` is the exception and states the terms**: PR-18 maps it through an `IEntityTypeConfiguration` so `migrations add` emits it beside the aggregate's tables, and the configuration is then written to produce §6.6's printed types — `char(3)`, `DEFAULT 1` — rather than EF's defaults for the CLR ones. The rule is that the shape is the chapter's; which tool writes it is negotiable, and a generated table that drifts from the DDL a later PR copies is not |
-| **A library's own technical tables** | `ordering.InboxState`, `ordering.OutboxState`, `ordering.OutboxMessage` | The EF model, from `modelBuilder.AddTransactionalOutboxEntities()` — **the one stated exception to §7.2's rule that mapping lives in `IEntityTypeConfiguration<T>` classes**, because the three entity types are MassTransit's and this repository's assembly scan never sees them ([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)). Their shape is not this blueprint's to specify either, which is the difference from the row above: the rule there is that the shape is the chapter's, and here it is the library's. **Singular, where §9.4's and §9.5's tables are plural** — `OutboxMessage` against `OutboxMessages`, so the two sets share the `ordering` schema without colliding, and a reader of the database sees five messaging tables where the chapters describe two. Ordering is the only service with any of them, because it holds the only saga |
+| **A library's own technical tables** | `ordering.InboxState`, `ordering.OutboxState`, `ordering.OutboxMessage` | The EF model, from `modelBuilder.AddTransactionalOutboxEntities()` — **the one stated exception to §7.2's rule that mapping lives in `IEntityTypeConfiguration<T>` classes**, and the exception is about ownership rather than about reach ([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)). The assembly scan would find a configuration for these entities perfectly well — it selects on the *configuration* type's assembly, not the entity's — but MassTransit maps them itself and queries them on that mapping, so writing one here would be a second definition of a schema the library has to agree with, drifting on its next bump. Their shape is not this blueprint's to specify either, which is the difference from the row above: the rule there is that the shape is the chapter's, and here it is the library's. **Singular, where §9.4's and §9.5's tables are plural** — `OutboxMessage` against `OutboxMessages`, so the two sets share the `ordering` schema without colliding, and a reader of the database sees five messaging tables where the chapters describe two. Ordering is the only service with any of them, because it holds the only saga |
 
 That is why [§6.6](06-cqrs.md) and [§9.4](09-messaging.md) show `CREATE TABLE` and §7.2 does not — the write
 model's schema is a projection of the aggregate, and duplicating it as SQL would

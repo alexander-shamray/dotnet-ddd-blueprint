@@ -1695,13 +1695,31 @@ schedule are both still in the buffer, the process dies — and the order sits
 in `AwaitingPayment` with stock reserved, no authorisation requested and **no
 timeout to rescue it**, because the schedule was in the same buffer.
 
-**The redelivery does not rescue it either, and that is what made this worth an
-ADR rather than a fix.** §9.5's `InboxFilter` writes its row after the consumer
-returns, so the same crash leaves no row and the message is redelivered — but
-the instance has already moved on, so no transition accepts the event. It
-reaches `OnUnhandledEvent`, which since [#117](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/117)
-enumerates the legitimate arrivals and ignores them. The window's only signal
-was a log line nothing alerts on.
+**The redelivery notices and cannot repair, which is the distinction this ADR
+turns on.** §9.5's `InboxFilter` writes its row after the consumer returns, so
+the same crash leaves no row and the message is redelivered — but the instance
+has already moved on, so no transition accepts the event. `StockReserved` in
+`AwaitingPayment` is not one of the machine's declared `Ignore`s (those sit
+`During(Compensating)`), so it is genuinely unhandled: MassTransit's default
+raises, §9.8's five retries are spent, and the message lands in the error queue
+§13.6 pages on.
+
+> **So the window was observable, and an earlier draft of this ADR said it was
+> silent.** That draft followed [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)'s
+> own text, which describes [#117](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/117)
+> as having replaced the fault with an `Ignore()` and a log line. #117 did try
+> that and then **removed** it; what shipped keeps MassTransit's default and
+> enumerates the legitimate arrivals individually. Reading the issue instead of
+> the state machine is how a claim about a signal survived into a decision
+> record about durability — the same failure as the API name two paragraphs
+> on, and Copilot caught this one.
+>
+> **It does not weaken the case, it relocates it.** A page is not a repair.
+> The error queue says an order is stranded; nothing in it recreates the
+> `AuthorisePayment` that was never sent or the `PaymentTimeout` that would
+> have rescued the order, so the outcome is an operator reading
+> `docs/runbooks/error-queue.md` and reconstructing by hand what the process
+> lost. What this decision buys is that there is nothing to reconstruct.
 
 **§9.3's prohibition does not reach this case, and the sentence that said it
 did rested on a premise now known to be false.** §9.3 forbids a second outbox
@@ -1744,19 +1762,32 @@ Retiring either one costs a guarantee the other never made.
   and that is a property of MassTransit's naming rather than a decision anybody
   took — a reader of the database sees five and should not have to work out
   which chapter owns which.
-- **There are two retention policies, which is exactly what §9.3 warns about.**
+- **There are two retention policies, which is exactly what §9.3 warns
+  about — and the second is narrower than "MassTransit's tables".**
   `AddEntityFrameworkOutbox` registers an
-  `InboxCleanupService<OrderingDbContext>` that prunes MassTransit's tables;
-  §9.9's `RetentionPurgeService` prunes ours
-  and does not read MassTransit's at all. Folding the two together was
+  `InboxCleanupService<OrderingDbContext>`, and the package's own documentation
+  scopes it to one table: it "is responsible for removing `InboxState` entries
+  after the expiration window timeout has elapsed". `ordering.OutboxMessage` is
+  not on a timer at all — the outbox middleware removes a row once the message
+  has reached the transport, so that table drains as a consequence of delivery.
+  `ordering.OutboxState` is emptier still: it belongs to the bus-side outbox
+  and, with `UseBusOutbox()` not called, **nothing writes, reads or prunes it**
+  in this configuration. §9.9's `RetentionPurgeService` prunes ours and does
+  not read any of the three. Folding the two together was
   considered and refused: deleting an `InboxState` row whose outbox messages
   have not been delivered turns a retention job into the message loss this
-  decision exists to close. The cost is a second unmonitored thing, and it is
+  decision exists to close. The cost is one more unmonitored timer, and it is
   taken rather than dodged.
 - **`UseBusOutbox()` is deliberately not called.** It intercepts
   `IPublishEndpoint` and `ISendEndpointProvider` *outside* a consume context —
   the API request path, which §9.4's application outbox already owns. Calling
   it would put a third staging mechanism on a path that has no dual write.
+  **The visible consequence is that `ordering.OutboxState` stays empty for
+  ever**: it is the bus-side outbox's own table, so with that call absent
+  nothing writes it, nothing reads it and nothing prunes it. It exists because
+  `OutboxMessage.OutboxId` carries a foreign key to it and the model would not
+  build without it — say so where an operator can read it, rather than leaving
+  a permanently empty table to be diagnosed.
 - **This is the first artefact in `Ordering.Infrastructure` whose EF model is
   not described by an `IEntityTypeConfiguration<T>` in this repository.** The
   three entities are MassTransit's, mapped by
@@ -1765,11 +1796,54 @@ Retiring either one costs a guarantee the other never made.
 - **The scaffold is unaffected and that is not luck.** §4.5's scaffold reads
   Catalog as its template, and Catalog has no saga. A second service with one
   inherits this decision by citing it, not by copying a file.
+- **The consume transaction is now open across a broker publish, which it was
+  not before.** The outbox delivers inside the same transaction it committed
+  in: begin, lock the `InboxState` row, save, **publish to RabbitMQ**, save,
+  commit. Under `UseInMemoryOutbox` no database transaction was open while a
+  send was in flight. So a degraded broker now holds a SQL transaction and a
+  row lock for up to MassTransit's `MessageDeliveryTimeout` — 30 seconds at
+  this pin — per staged message, per in-flight delivery. That is inherent to
+  the mechanism rather than a defect in the wiring, and it is the price of the
+  guarantee: the alternative to holding the transaction is not holding the
+  guarantee. It belongs in the capacity argument for the connection pool, and
+  in any runbook reading lock waits during a broker incident.
+- **The path this decision exists to make survivable is also the one that
+  leaks.** `InboxCleanupService` deletes `InboxState` rows whose `Delivered` is
+  set. A transition that commits and then fails delivery past the endpoint's
+  five retries leaves `Delivered` null for ever, so that row and the
+  `OutboxMessage` rows beside it stay until somebody removes them by hand.
+  §9.9's purge does not read those tables. The volume is bounded by how often a
+  message exhausts its retries and reaches the error queue — which §13.6
+  pages on, so the leak has an alarm in front of it though nothing measures the
+  leak itself. Stated rather than closed: a cleanup that removed undelivered
+  rows would be the message loss this decision is about, so the right owner is
+  whoever drains the error queue.
+- **A schedule survives the crash; its deadline does not survive it exactly.**
+  The delay is carried as a *relative* value and re-applied when the outbox
+  delivers, so a message staged and then delivered ten minutes later fires ten
+  minutes late. On the ordinary path the drift is milliseconds. On the path
+  this ADR is about — commit, crash, redelivery — a `PaymentTimeout` fires
+  at 15 minutes plus the outage and a `DespatchTimeout` at three days plus it.
+  Later is the safe direction for both, and "the schedule commits with the
+  instance" should not be read as "the deadline is preserved".
+- **`MessageDeliveryLimit` and `DuplicateDetectionWindow` are left at
+  MassTransit's defaults, and both are worth knowing rather than tuning
+  blind.** One message is delivered per transaction, so a transition staging
+  two of them costs several sequential begin/commit cycles and inflates that
+  row's `ReceiveCount` — which is therefore **not** a redelivery count, and a
+  runbook reading it as one would be wrong. The duplicate-detection window is
+  thirty minutes, which is what "short-window" means where this decision
+  contrasts MassTransit's inbox with §9.5's seven-day retention. Neither is
+  tuned here because nothing has measured what they should be; naming them is
+  what stops the next reader assuming they were chosen.
 - **The pre-flush window stops existing; the catch-all does not come back.**
-  #117's `OnUnhandledEvent` enumeration was justified on three arrivals it
-  could not tell apart, one of which was the pre-flush crash. That one is gone,
-  which leaves two — and a callback that answers two cases the same way is
-  still only as right as its worse one. The enumeration stays.
+  #117 removed an `OnUnhandledEvent(x => x.Ignore())` because three arrivals
+  reached it and it could not tell them apart — a post-flush duplicate, a
+  pre-flush crash that had lost the instance's commands, and a misroute. This
+  decision deletes the middle one, which leaves two, and a callback that
+  answers two cases the same way is still only as right as its worse one. The
+  enumeration stays, and so does the default that faults everything it does
+  not name.
 
 ---
 

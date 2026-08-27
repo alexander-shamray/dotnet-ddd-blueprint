@@ -176,6 +176,30 @@ catching a defect, and it is not left on its own: a negative assertion passes
 when the name it looks for stops existing, so the positive test is its control
 against a MassTransit bump renaming either type.
 
+**The window was observable, and a draft of this branch's ADR said it was
+silent.**
+[#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)'s
+own body describes
+[#117](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/117) as
+having replaced the fault with an `Ignore()` and a log line. #117 tried that and
+then **removed** it: what shipped keeps MassTransit's default and enumerates the
+legitimate arrivals one at a time, and `Ignore(StockReserved)` is declared
+`During(Compensating)` alone — so the redelivery this window produces, a
+`StockReserved` landing in `AwaitingPayment`, is genuinely unhandled. It faults,
+spends §9.8's five retries and reaches the error queue
+[§13.6](backend-architecture/13-observability.md) pages on, which
+`A_redelivered_event_faults_rather_than_being_absorbed_silently` in
+`tests/Ordering.Application.Tests/OrderFulfilmentSagaTests.cs` has asserted
+since #117 landed. **Reading the issue instead of the state machine is how it
+got in** — the same failure as the wrong API name above, arriving through a
+second door: a claim that was plausible, that had travelled by quotation, and
+that nobody had run anything to check. ADR-032 carries the correction and it is
+not restated here. What matters for what comes after is that the finding
+**relocates the case rather than weakening it**: a page is not a repair, and
+nothing in the error queue recreates the `AuthorisePayment` that was never sent
+or the `PaymentTimeout` that would have rescued the order, so what the decision
+buys is that there is nothing left to reconstruct by hand.
+
 **`OnUnhandledEvent`'s enumeration did not come back to being a catch-all, and
 the reason is arithmetic rather than caution.** #117 removed a catch-all
 because three arrivals reached it and one answer could not be right for all
@@ -291,6 +315,90 @@ no `*.Migrator` holds a seeder to switch on, which is the last thing worth
 recording here: nothing seeds today, so §14.3 is a specification and not a
 description. A mechanism written after the seeder exists is a mechanism argued
 against code somebody has already shipped.
+
+### What review found, and why all of it was the same defect
+
+Three reviews ran over this branch after it was opened — Copilot's, and two
+read-only passes of my own, one on the code and one on the claims. Between them
+they found eleven things, and it is worth recording that **not one was a
+disagreement about design**. Every one was a sentence that had never been
+executed.
+
+**The API name.** Covered above, and it is the cheapest instance: four sites,
+months, no compiler.
+
+**The signal.** This entry's first draft said the crash window left "a log line
+nothing alerts on". It came from #128's own body, which describes #117 as
+having replaced the fault with an `Ignore()` and a log line. #117 tried that and
+**removed** it. `Ignore(StockReserved)` is declared `During(Compensating)` and
+nowhere else, so the redelivery is genuinely unhandled: the default raises, five
+retries are spent, and the message reaches the error queue §13.6 pages on. The
+window was **observable and not repairable**, which is a materially better story
+than the one the issue told — a page is not a repair, and nothing in the error
+queue recreates the `AuthorisePayment` that was never sent. Reading the issue
+instead of the state machine is how it got in.
+
+**The reason for a mapping.** Four documents said
+`AddTransactionalOutboxEntities()` was used because
+`ApplyConfigurationsFromAssembly` cannot reach an entity type declared in
+another assembly. It can — the scan selects on where the *configuration* lives,
+not the entity — so a local `IEntityTypeConfiguration<InboxState>` would be
+found and applied. The conclusion survived and the reason did not: MassTransit
+owns those mappings and its own queries read them, so a configuration of ours
+would be a second definition of a schema the library has to agree with.
+
+**The visibility of a type.** A test comment asserted that
+`IOutboxContextFactory<OrderingDbContext>` "is not public at the 8.5.3 pin, so
+it cannot be named from a test assembly". It is public, in
+`MassTransit.Middleware`, and the claim was a failed `using` directive written
+up as a property of the library. **That one had teeth**: the subject it settled
+for instead, `InboxCleanupService<T>`, is registered behind a flag that
+`o.DisableInboxCleanupService()` clears — so the gate would have gone red on a
+change leaving the outbox entirely intact, which is this repository's own
+gate-coverage failure wearing the opposite face.
+
+**The isolation level, and this is the one that was a defect rather than a
+sentence.** `ConcurrencyMode.Pessimistic` bought serialisation of two events
+racing for one `CorrelationId`, and it bought it through a transaction the saga
+repository opened itself at `Serializable`. Under this decision the repository
+no longer opens it — joining the outbox's is the whole mechanism — so the level
+in force became the outbox's, and MassTransit defaults that to
+`RepeatableRead`. Measured: the option read `RepeatableRead`. The row-lock hint
+does not cover it, because the case the mode exists for is two deliveries both
+finding *no row*, where only a key-range lock helps. Recoverable — one loses on
+the primary key and the endpoint retries — but a fault where there was none, on
+the exact property the mode was chosen for. One line fixes it and a test pins
+it.
+
+**The retention claim, and the leak under it.** Five sites said an
+`InboxCleanupService` prunes "MassTransit's tables". The package's own
+documentation scopes it to `InboxState`; `OutboxMessage` drains on delivery and
+`OutboxState` is touched by nothing at all here. Reading further gave the
+sharper finding: the cleanup deletes rows whose `Delivered` is set, so a
+transition that commits and then exhausts its retries leaves that row and its
+staged messages permanently — **the one path this decision exists to make
+survivable is also the one that leaks**. It is stated in ADR-032 rather than
+closed, with the error-queue alarm named as what stands in front of it.
+
+**The fixture, which is the entry's own lesson arriving late.** The branch's
+first answer to the deadlock its new background writer caused was a bounded
+retry. `OrderingApiFactory` already removes two hosted services for the stated
+reason that a background writer racing an assertion makes "the pass never
+happened" and "the pass spared the row" the same green. The third one belonged
+on that list, and removing the writer is what the file's own precedent asked
+for. The retry survived the collision; this removes it. **A retry left in front
+of a race that can no longer happen is a comment that will be wrong before
+anybody reads it.**
+
+**What the reviews did not find is worth as much.** Both central mechanical
+claims held under a decompiler: the outbox filter really does enlist the saga
+repository's writes in one transaction, and `ScheduleSend` really is captured —
+the scheduler's payload is replaced with one built over the outbox context, so
+the delay is staged as a message property and restored on delivery. Those were
+the two claims that, had either been false, would have made this decision
+worthless rather than merely mis-argued. **Neither was checkable by reading the
+code in this repository**, which is the argument for a review pass that goes
+into the package rather than around it.
 
 ## The claims a gate never checked (#22, #50, #61, #64, #72, #119, #127)
 

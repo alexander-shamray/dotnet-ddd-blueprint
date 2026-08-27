@@ -1870,12 +1870,32 @@ against RabbitMQ's configured limits, not a default to accept.
 they are not every messaging table in the database.** Ordering's saga endpoint
 takes MassTransit's own outbox
 ([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)),
-whose three tables are pruned by an `InboxCleanupService` that
-`AddEntityFrameworkOutbox` registers and that this service never reads. That is
-a second retention policy, which is the cost §9.3's prohibition names; the ADR
-takes it rather than folding the two together, because deleting an `InboxState`
-row whose outbox messages have not been delivered turns housekeeping into the
-message loss the decision exists to close.
+whose three tables are kept in three different ways and not one of them is
+this service's.
+
+- **`ordering.OutboxMessage`** is written in the consume transaction and its
+  rows are removed by MassTransit's outbox middleware once the message has
+  reached the transport. The table drains as a consequence of *delivery*, not
+  of housekeeping, and nothing is on a timer.
+- **`ordering.InboxState`** is written in the same transaction, and its rows
+  are removed by the hosted `InboxCleanupService<OrderingDbContext>` that
+  `AddEntityFrameworkOutbox` registers, once the duplicate-detection window has
+  elapsed. That service is scoped to this one table — the package's own
+  documentation says it "is responsible for removing `InboxState` entries after
+  the expiration window timeout has elapsed", and nothing else.
+- **`ordering.OutboxState`** belongs to the *bus-side* outbox, which is
+  `UseBusOutbox()`, and this platform deliberately does not call it. **In this
+  configuration nothing writes, reads or prunes that table.** The migration
+  creates it because `OutboxMessage.OutboxId` carries a foreign key to it and
+  the model would not build otherwise — an operator reading the schema should
+  be told that outright rather than left to work it out.
+
+So the second retention policy is one library-owned cleanup timer beside this
+service's, not a second sweep of three tables. That is still the cost §9.3's
+prohibition names; the ADR takes it rather than folding the two together,
+because deleting an `InboxState` row whose outbox messages have not been
+delivered turns housekeeping into the message loss the decision exists to
+close.
 
 Both run on a
 slow schedule, batched so neither holds a long lock. `RetentionPurgeService` in
@@ -2963,12 +2983,16 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             // and #131 at its sharpest — the OLD machine entered Confirmed on
             // the SEND, so during a rollout a new replica is handed
             // acknowledgements for instances an old replica already advanced.
-            // What it costs is the #128 signal on this transition, and that is
-            // affordable HERE because entering Confirmed sends no command: it
-            // arms a three-day backstop, which §13.6's saga-age alert backstops
-            // in turn. StockReserved one state back has no Ignore for exactly
-            // that reason — losing an AuthorisePayment is not losing a
-            // backstop.
+            // What it costs is NOT the #128 signal: ADR-032 writes everything
+            // this transition emits — the DespatchTimeout it arms and the
+            // conditional FlagOrderForReview beside it — in the instance's own
+            // transaction, so an arrival here is a duplicate or a misroute and
+            // never evidence of a lost send. The misroute is the whole cost,
+            // and only in this state. StockReserved one state back still has
+            // no Ignore, and the reason is now #131 rather than a lost
+            // AuthorisePayment: the rollout echo is specific to OrderConfirmed,
+            // and the machine keeps its faulting default wherever no arrival
+            // has been named.
             Ignore(OrderConfirmed),
 
             // The fourth door, and the one whose reason differs. The three

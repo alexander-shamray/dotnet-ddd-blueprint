@@ -393,9 +393,15 @@ what to *do*, and the row says it.
    way waiting waits for ever — and refunding races an automatic void that
    arrives the moment the saga is unstuck, so the fix is the saga.
 
-   **And a gone one still has to be checked**, because #128's crash window
-   can delete the instance with its `CancelOrder` never sent: look for the
-   cancellation itself, not for the missing saga row. Step 2's `Gone`
+   **And a gone one still has to be checked**, though no longer for the
+   reason this line used to give. #128's crash window could delete the
+   instance with its `CancelOrder` never sent;
+   [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+   closed it, so a finalised instance now proves the command was *staged*
+   in the transaction that finalised it. What it still does not prove is
+   that the command was delivered and handled — so the instruction is
+   unchanged: look for the cancellation itself, not for the missing saga
+   row. Step 2's `Gone`
    branch is the procedure. Three earlier revisions of this step were
    wrong in three different directions — one said "wait for one"
    unconditionally, the next said refund by hand and treat the saga
@@ -629,9 +635,17 @@ instruction, and `CurrentState` is half of it**:
      instance and no `CancelOrder` ever sent.
      [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
      put those sends in that same transaction. The two now commit
-     together, so no instance means the `CancelOrder` is durably in
-     `ordering.OutboxMessage` — MassTransit's table, singular, not §9.4's
-     `ordering.OutboxMessages`.
+     together, so no instance means the `CancelOrder` was durably
+     *staged* — written to `ordering.OutboxMessage`, MassTransit's table,
+     singular, not §9.4's `ordering.OutboxMessages`.
+
+     **Do not expect to find the row, though.** MassTransit's outbox
+     middleware deletes an `ordering.OutboxMessage` row once the message
+     has reached the transport, so on the ordinary path the command was
+     staged, sent and the row removed long before anyone looked. **An
+     empty result there is the normal case and settles nothing.** A row
+     still sitting there is the informative find: it says the delivery has
+     not happened yet.
 
      **What is left between staged and handled is delivery**, the same gap
      as the stock row above. **So still check for the cancellation itself,
@@ -649,14 +663,21 @@ instruction, and `CurrentState` is half of it**:
      only if the authorisation cannot wait for that, record it, and own the
      reconciliation — the same terms as every other manual refund here.
 
-     **Not cancelled** — the crash window above. The order is still open,
-     the money is still authorised, and nothing further is coming, because
-     the only thing that was going to send `CancelOrder` no longer exists.
-     **Recover the cancellation rather than the money**: send `CancelOrder`
-     (§11.4's endpoint), which publishes `OrderCancelled` and gives
-     Payments the void it consumes. Refunding by hand here is the same
-     duplicate the live-instance branch warns about, arriving by a
-     different route.
+     **Not cancelled** — the order is still open and the money is still
+     authorised. **What this no longer means is that nothing further is
+     coming**, which is what the branch said while #128's window was open
+     and the sender really had stopped existing. ADR-032 staged the
+     `CancelOrder` with the finalisation, so what is outstanding is its
+     delivery or its handling: a row still in `ordering.OutboxMessage`, or
+     a fault on `ordering-commands`
+     ([`error-queue.md`](error-queue.md)). **Recover the cancellation
+     rather than the money**: work whichever of those two it is, and if
+     neither shows anything, send `CancelOrder` (§11.4's endpoint), which
+     publishes `OrderCancelled` and gives Payments the void it consumes.
+     `Order.Cancel` returns without raising on an order already cancelled,
+     so a hand-sent one that races the staged copy costs nothing. Refunding
+     by hand here is the same duplicate the live-instance branch warns
+     about, arriving by a different route.
 
      **`PaymentRefunded` already there** — the workflow finished. Nothing
      to do.

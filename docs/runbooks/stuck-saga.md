@@ -281,10 +281,32 @@ puts every `Send` and `Schedule` a transition makes, in the instance's own
 transaction. Rows there are delivered after that transaction commits, and each
 is joined to its triggering delivery through `InboxMessageId`/`InboxConsumerId`
 into `ordering.InboxState`, whose `LastSequenceNumber` is how far that
-delivery's sends have got. **These are MassTransit's tables and this
-repository neither writes nor prunes them**, so read the library's schema
-before drawing a conclusion from a column; what is settled here is *which*
-table to open. **Before ADR-032 there
+delivery's sends have got. **These are MassTransit's tables and no SQL this
+repository owns touches them** — which is not the same as their being
+inert, and the difference matters at 3am. The running service writes them
+through the library's own outbox filter, in the transaction that commits the
+instance, and then clears them by two different mechanisms neither of which is
+ours:
+
+- A row in `ordering.OutboxMessage` is **removed by the outbox middleware once
+  the message reaches the transport.** So a row here going away means the
+  command was *sent*, and finding none is the normal steady state rather than
+  evidence of a purge.
+- A row in `ordering.InboxState` is removed by the hosted
+  `InboxCleanupService<OrderingDbContext>` that `AddEntityFrameworkOutbox`
+  registers alongside the filter, on a timer, once the duplicate-detection
+  window has elapsed. That service reads **this table only.**
+
+`ordering.OutboxState` is the third table and is not part of either story:
+it belongs to the bus-side outbox, `UseBusOutbox()` is deliberately not called,
+and so **nothing writes, reads or prunes it in this deployment.** It exists
+because `OutboxMessage.OutboxId` carries a foreign key to it. An empty
+`ordering.OutboxState` is the design; do not spend an incident on it.
+
+§9.9's `RetentionPurgeService` — which prunes *our* tables — reads none of
+the three. What this repository has no query for, it also has no opinion
+about: read the library's schema before drawing a conclusion from a column.
+What is settled here is *which* table to open. **Before ADR-032 there
 was no table to look in at all**, which is what made a lost command
 indistinguishable from a command nobody sent — the defect
 [#128](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/128)

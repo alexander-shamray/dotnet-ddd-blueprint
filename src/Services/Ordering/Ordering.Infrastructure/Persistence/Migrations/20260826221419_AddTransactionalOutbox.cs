@@ -30,11 +30,25 @@ namespace Ordering.Infrastructure.Persistence.Migrations;
 /// </para>
 /// <para>
 /// No retention index is added here and none is owed. §9.9's
-/// <c>RetentionPurgeService</c> does not read these tables at all — MassTransit
-/// prunes its own through the <c>InboxCleanupService</c> that
-/// <c>AddEntityFrameworkOutbox</c> registers — and the two indexes that purge
-/// reads (<c>IX_InboxState_Delivered</c>, <c>IX_OutboxState_Created</c>) are in
-/// the generated set above.
+/// <c>RetentionPurgeService</c> does not read these tables at all, and the
+/// generated set above already carries the indexes the library's own removers
+/// read: <c>IX_InboxState_Delivered</c> for the hosted
+/// <c>InboxCleanupService</c> that <c>AddEntityFrameworkOutbox</c> registers,
+/// which removes <c>InboxState</c> rows once the duplicate-detection window has
+/// elapsed and reads no other table; and
+/// <c>IX_OutboxMessage_InboxMessageId_InboxConsumerId_SequenceNumber</c> for
+/// the outbox middleware, which delivers a consume transaction's staged
+/// messages and removes them once they reach the transport.
+/// </para>
+/// <para>
+/// <b><c>IX_OutboxState_Created</c> serves neither, and the table under it is
+/// unused here.</b> It is read by <c>BusOutboxDeliveryService</c> — the sweeper
+/// behind <c>UseBusOutbox()</c>, which this platform deliberately does not
+/// call (see <c>Messaging/DependencyInjection.cs</c>). Nothing writes, reads or
+/// prunes <c>ordering.OutboxState</c> in this configuration; it is created
+/// because <c>OutboxMessage.OutboxId</c> carries a foreign key to it and the
+/// model would not build otherwise. A permanently empty
+/// <c>ordering.OutboxState</c> is the design rather than a symptom.
 /// </para>
 /// </remarks>
 public partial class AddTransactionalOutbox : Migration
