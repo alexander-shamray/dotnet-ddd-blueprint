@@ -784,6 +784,27 @@ own line rather than sending a reader to a file that does not hold it.
   from, and then handed to a system with a narrower one, fails at the far end —
   after the deploy has started. Validate against the **intersection**, and say
   in the guard which system each rejection is for.
+  **The argv guard is the same shape with the systems one step apart**, and it
+  is worth carrying because the value was not exotic: `git commit -m '<body>'`
+  hands git one element that git reads as a *message*, and a guard written for
+  *flags* read it as an argument list — so a commit body arguing about a
+  forbidden transport was indistinguishable from a command using it, and a
+  message reading `--output is bad` matched a prefix check. **A guard that
+  inspects argv has to know which flags take a value**, because everything
+  after one of those is data and no amount of care about the flag list fixes
+  it. It refused its own commit, which is the loud version; the quiet version
+  is a guard that has been silently reading somebody's prose as commands.
+  **Then it refused a second one, on the other end of the same mistake**:
+  `shlex` is a word splitter and not a shell, so it knows nothing about
+  heredocs, and `git commit -F - <<'EOF'` with an apostrophe in the body is
+  unbalanced to it and perfectly valid to bash. The guard had been written to
+  refuse anything it could not tokenise — fail-closed, and wrong, because
+  *unparseable* is not *hostile* and the reasoning behind it ("bash would fail
+  on this too") was simply false about the parser actually in use. **When a
+  guard cannot read its input, ask what the real consumer would do with it
+  before deciding the failure direction**; here the answer was to degrade to
+  the weaker check the settings deny already performs, which is never worse
+  than the status quo and never a silent pass.
 - **A validator must check the value it emits.** A CORS origin was trimmed,
   validated, and then written out untrimmed, so a trailing space passed every
   check and failed the host's own comparison. A check on one string and a write

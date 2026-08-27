@@ -169,11 +169,31 @@ def offence(command):
     """The reason to refuse `command`, or None to allow it."""
     try:
         tokens = shlex.split(command, posix=True)
-    except ValueError as error:
-        # Unbalanced quoting. The shell would fail on this too, so refusing
-        # costs nothing — and guessing at what it "meant" is how a guard that
-        # cannot parse its input ends up admitting what it cannot see.
-        return f"could not parse the command as argv ({error}); refusing to guess"
+    except ValueError:
+        # **Unparseable is not the same as hostile, and refusing it outright was
+        # wrong.** The first version returned a refusal here on the reasoning
+        # that the shell would fail on unbalanced quotes anyway. It does not:
+        # `shlex` is a word splitter, not a shell, and it knows nothing about
+        # HEREDOCS — so `git commit -F - <<'EOF'` with an apostrophe anywhere in
+        # the body is unbalanced to `shlex` and perfectly valid to bash. That
+        # refused an ordinary commit, which is the second time this guard fired
+        # on innocent traffic, and a guard that does that is one somebody turns
+        # off.
+        #
+        # So a parse failure DEGRADES to the check the settings file already
+        # performs — a substring scan of the raw string — rather than to a
+        # refusal or to nothing. That is never weaker than the status quo this
+        # hook was added to improve on, and it keeps the fail-closed instinct
+        # where it belongs: on what the guard can see, not on its own inability
+        # to tokenise.
+        for needle in FORBIDDEN_FLAGS + FORBIDDEN_SUBSTRINGS:
+            if needle in command:
+                return (
+                    f"`{needle}` appears in a command this guard could not "
+                    "tokenise; refusing on the raw string, which is the weaker "
+                    "check the settings deny already performs."
+                )
+        return None
 
     for segment in git_segments(tokens):
         refusal = push_offence(segment)
