@@ -1180,17 +1180,26 @@ own line rather than sending a reader to a file that does not hold it.
   time. A fallback policy reaches every host that will ever compose
   `AddCommonWebDefaults` and fails at the request. Where a rule has to survive
   code nobody has written yet, put it where that code cannot avoid it.
-- **Two suites that derive a filename from the same value race on the FILE, not
-  on the thing the value names.** Both Testcontainers fixtures build §14.1's
-  broker image, and giving them one image name looked like sharing rather than
-  contention — Docker handles concurrent builds of a tag. Testcontainers does
-  not: it writes the build context to a tar named after the image, so the two
-  collided on `…-4-1-delayed.tar` and the loser died with "the process cannot
-  access the file". **The symptom named neither the file nor the fixture**: the
-  second suite to start failed *every* test in under 100 ms, and each passed
-  alone, which reads as a broken suite rather than a shared temp path.
-  A count of failures equal to the suite's size, at a duration too short to
-  have run anything, is a fixture fault — read the duration before the message.
+- **Two processes that derive a filename from the same value race on the FILE,
+  not on the thing the value names.** Testcontainers writes a Dockerfile build
+  context to a tar named after the image, so two test hosts building one image
+  name collide on that tar — not on Docker, which handles concurrent builds of
+  a tag perfectly well. The loser dies with "the process cannot access the
+  file" on Windows and `Cannot locate specified Dockerfile` on Linux, reading a
+  tar the winner has not finished writing.
+  **The unit is the PROCESS, and getting that wrong cost a second round.** The
+  first fix gave each *fixture class* its own image name, was measured green
+  locally, and failed on CI — because one fixture class had two consumers,
+  `Catalog.Api.Tests` and `Catalog.Application.Tests`, which `dotnet test` runs
+  as separate hosts. A per-class name is per-process only while the class has
+  one caller, which is a premise about callers rather than a property.
+  What ended it was not building at all where the build was not needed:
+  Catalog needs the broker's *configuration*, not ADR-021's plugin, so it maps
+  the two files onto the stock image and no tar exists to race for.
+  **The symptom named neither the file nor the fixture**: the second host to
+  start failed *every* test in tens of milliseconds while each passed alone. A
+  failure count equal to the suite's size, at a duration too short to have run
+  anything, is a fixture fault — read the duration before the message.
 - **A runtime capture shows what RAN, not what CAN run.** The broker topology
   behind ADR-036's permissions was read off a live stack with both services
   connected and an order placed — and still missed two resources, in opposite

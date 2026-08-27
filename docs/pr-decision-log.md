@@ -5154,9 +5154,28 @@ access the file*.
 second failed EVERY test in under 100 ms while passing alone, and it was not
 always the same suite — a fixture fault wearing a suite-wide failure. The tell
 is arithmetic rather than a message: a failure count equal to the suite's size,
-at a duration too short to have run anything. One image name per fixture fixes
-it, and costs a tag rather than a download, since the two share every layer
-below it.
+at a duration too short to have run anything. **One image name per fixture was the first fix, and it was the wrong axis.**
+It was measured green locally and failed on CI, because the unit is the
+PROCESS: `Catalog.Api.Tests` and `Catalog.Application.Tests` both instantiate
+that one fixture class and `dotnet test` runs them as separate hosts, so they
+raced each other under the new name exactly as they had under the old one — 60
+failures in 128 ms and 11 in 51 ms, with `Cannot locate specified Dockerfile`
+where Windows had said the file was in use. A per-class name is per-process
+only while the class has one caller, which is a premise about callers rather
+than a property of anything.
+
+**What ended it was declining to build.** Catalog needs the broker's
+*configuration* — the accounts of #44 — and not ADR-021's delayed-exchange
+plugin: it runs no saga and schedules nothing. So its fixture maps
+`definitions.json` and `20-commerce.conf` onto the stock image and no build
+context tar exists to be raced for. Ordering still builds, because the plugin
+leaves it no choice, and it has one consumer today — written down where the
+next caller will read it rather than assumed.
+
+**The mapping is a second copy of the Dockerfile's COPY targets, so it is
+gated.** A drifted path fails in the silent direction: the broker boots without
+the definitions, seeds `guest` on an empty database, and Catalog's suite passes
+green against the single shared administrator #44 exists to remove.
 
 ### What is owed
 

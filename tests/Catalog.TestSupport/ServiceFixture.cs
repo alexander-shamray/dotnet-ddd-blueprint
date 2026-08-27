@@ -11,8 +11,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Respawn;
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Images;
 using Testcontainers.MsSql;
 using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
@@ -132,43 +130,42 @@ public sealed class ServiceFixture : IAsyncLifetime
     // ValueTask, not Task: xUnit v3 redefined IAsyncLifetime (§12.4).
     public async ValueTask InitializeAsync()
     {
-        // §14.1's broker image, built from the repository's own Dockerfile so
-        // this container carries definitions.json — the per-service accounts
-        // and their permissions. WithCleanUp(false) keeps Ryuk from removing
-        // it, so the plugin is downloaded once per machine.
-        IFutureDockerImage broker = new ImageFromDockerfileBuilder()
-            .WithDockerfileDirectory(BrokerContextPath())
-            .WithDockerfile("Dockerfile")
-            // ONE NAME PER FIXTURE, and the reason is a FILE rather than a
-            // tag. Testcontainers writes the build context to a tar named after
-            // the image — `ashamray-test-broker-4-1-delayed.tar` under the temp
-            // root — so two suites building the same name concurrently do not
-            // race on Docker at all: they race on that file, and the loser dies
-            // with "The process cannot access the file … because it is being
-            // used by another process".
-            //
-            // Measured, and both ways round: under `dotnet test Platform.slnx`
-            // whichever fixture started second failed EVERY one of its tests in
-            // under 100 ms, while each passed alone — a fixture fault wearing a
-            // suite-wide failure, which is why the count is the tell and the
-            // duration is the proof.
-            //
-            // The two images share every layer but the tag, so the second build
-            // is a cache hit and not a second plugin download.
-            .WithName("ashamray-test-broker-catalog:4.1-delayed")
-            .WithCleanUp(false)
-            .Build();
-
-        // Catalog's OWN account (#44). Its permissions cover its own contracts
-        // and nothing else, so a Catalog change that starts publishing another
-        // context's events fails in this suite rather than in a cluster.
+        // §14.1's broker CONFIGURATION on the stock image, rather than
+        // §14.1's built image. Catalog needs the per-service accounts (#44) and
+        // does not need ADR-021's delayed-exchange plugin: it runs no saga and
+        // schedules nothing, so the only thing the build would buy it is the
+        // one thing it cannot use.
+        //
+        // **NOT BUILDING IS THE FIX, AND RENAMING THE IMAGE WAS NOT.**
+        // Testcontainers writes the build context to a tar named after the
+        // image, so two processes building one name race on that file. Naming
+        // the image per FIXTURE looked like enough and was measured green
+        // locally — but the axis is the PROCESS, and this fixture has two
+        // consumers: `Catalog.Api.Tests` and `Catalog.Application.Tests` run as
+        // separate test hosts and both instantiate it. CI failed all 60 and all
+        // 11 of them, in 128 ms and 51 ms, with "Cannot locate specified
+        // Dockerfile" — the loser reading a tar the winner had not finished
+        // writing. A fixture fault wearing a suite-wide failure, again.
+        //
+        // Ordering's fixture still builds, because the plugin leaves it no
+        // choice, and it has exactly one consumer today. That is a premise
+        // about who calls it, so it is written down where the next caller will
+        // read it rather than assumed.
+        //
+        // The two mapped paths must match the Dockerfile's COPY targets. They
+        // are the second copy of those paths, and `check_permissions.py`
+        // asserts the two agree rather than leaving it to a reader.
         _rabbit = new RabbitMqBuilder()
-            .WithImage(broker)
+            .WithImage("rabbitmq:4.1-management-alpine")
             .WithUsername("catalog-svc")
             .WithPassword("local-dev-catalog")
+            .WithResourceMapping(
+                new FileInfo(Path.Combine(BrokerContextPath(), "definitions.json")),
+                "/etc/rabbitmq/")
+            .WithResourceMapping(
+                new FileInfo(Path.Combine(BrokerContextPath(), "20-commerce.conf")),
+                "/etc/rabbitmq/conf.d/")
             .Build();
-
-        await broker.CreateAsync(TestContext.Current.CancellationToken);
 
         // Together, §12.4's printed shape — the broker's start hides inside
         // SQL Server's, which is the slower of the two by some margin.

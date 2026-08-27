@@ -48,6 +48,8 @@ WORKFLOW = ROOT / WORKFLOW_PATH
 
 SERVICES = ROOT / "src" / "Services"
 CONTRACTS = ROOT / "src" / "BuildingBlocks" / "Common.Contracts"
+DOCKERFILE = HERE / "Dockerfile"
+CATALOG_FIXTURE = ROOT / "tests" / "Catalog.TestSupport" / "ServiceFixture.cs"
 
 # EVERY PATH OUTSIDE deploy/compose/rabbitmq THAT THIS SCRIPT READS, declared
 # once, on deploy/helm/smoke.sh's terms and check.py's. The workflow's filters
@@ -59,6 +61,7 @@ CONTRACTS = ROOT / "src" / "BuildingBlocks" / "Common.Contracts"
 SOURCE_INPUTS = [
     "src/Services",
     "src/BuildingBlocks/Common.Contracts",
+    "tests/Catalog.TestSupport",
 ]
 
 # A service's broker account is its name plus this suffix, and the contract
@@ -158,7 +161,7 @@ def contract_prefixes() -> set[str]:
 
 
 def main() -> int:
-    for path in (DEFINITIONS, WORKFLOW, SERVICES, CONTRACTS):
+    for path in (DEFINITIONS, WORKFLOW, SERVICES, CONTRACTS, DOCKERFILE, CATALOG_FIXTURE):
         if not path.exists():
             fail(f"missing: {path.relative_to(ROOT).as_posix()}")
     if failures:
@@ -264,16 +267,31 @@ def main() -> int:
                 if not matches(entry[verb], resource):
                     fail(f"{user}: {verb} does not cover `{resource}`")
 
-        # 4. It may publish its OWN context's contracts.
+        # 4. It may publish its OWN context's contracts — WHERE IT HAS ANY.
+        #
+        # A service §4.5's scaffold renders has a broker account and no
+        # contracts: `Common.Contracts` gains a record in the PR whose code
+        # publishes or consumes it, never in the one that renders the service.
+        # So a missing namespace is the ordinary early state rather than a
+        # defect, and the grant it makes unusable is a write on an exchange
+        # nothing declares.
+        #
+        # The vacuity this skip could hide is caught once, globally, below.
         owned = owned_contract(user)
-        if owned not in prefixes:
-            fail(f"{user}: derives owned contracts `{owned}`, which is not a namespace "
-                 f"under Common.Contracts. The account is misnamed, or the context "
-                 f"does not exist — either way the check below would pass vacuously")
-        else:
+        if owned in prefixes:
             for verb in ("configure", "write"):
                 if not matches(entry[verb], f"{owned}Anything"):
                     fail(f"{user}: {verb} does not cover its own contracts `{owned}`")
+
+    # The derivation's own subject, asserted once rather than per service. If
+    # check 4 skipped EVERY service the `*-svc` -> `Common.Contracts.<Name>.V1:`
+    # rule would be broken and nobody would hear about it; a single service
+    # legitimately skipping it cannot hide that.
+    if not any(owned_contract(user) in prefixes for user in services):
+        fail(f"no service's account resolves to a namespace under Common.Contracts. "
+             f"The `*{USER_SUFFIX}` naming convention this gate derives ownership "
+             f"from is broken, and check 4 has been passing vacuously for all of "
+             f"{services}")
 
     if failures:
         return report()
@@ -308,9 +326,62 @@ def main() -> int:
                 fail(f"{user}: write COVERS `{prefix}`, another context's contracts. "
                      f"A service that can publish a peer's events can forge them")
 
+    # 6. The two ways the broker's configuration reaches a container agree.
+    check_fixture_matches_dockerfile()
+
     check_source_inputs_covers_reads()
     check_workflow_covers_inputs()
     return report()
+
+
+def check_fixture_matches_dockerfile() -> None:
+    """The configuration files reach the broker two ways; they must agree.
+
+    §14.1's image COPYs `definitions.json` and `20-commerce.conf` into place.
+    Catalog's fixture does NOT build that image — it maps the same two files
+    onto the stock one, because it needs the accounts and not ADR-021's plugin,
+    and because building put two test processes in a race for one build-context
+    tar.
+
+    **That makes the container paths a second copy**, and a second copy is what
+    this repository keeps having to gate. A mapping that drifted would not fail
+    loudly: RabbitMQ boots without the definitions, seeds `guest` on an empty
+    database, and Catalog's suite passes against the single shared
+    administrator #44 exists to remove — green, and testing nothing.
+    """
+    dockerfile = read(DOCKERFILE)
+    fixture = read(CATALOG_FIXTURE)
+
+    copies = dict(re.findall(r"^COPY\s+(\S+)\s+(\S+)\s*$", dockerfile, re.M))
+    if not copies:
+        fail("Dockerfile: no COPY lines found — the pattern, not the file")
+        return
+
+    mapped = dict(re.findall(
+        r'WithResourceMapping\(\s*new FileInfo\(Path\.Combine\(BrokerContextPath\(\),\s*"([^"]+)"\)\),\s*"([^"]+)"',
+        fixture))
+    if not mapped:
+        fail("Catalog.TestSupport/ServiceFixture.cs: no WithResourceMapping calls found. "
+             "Either the fixture stopped mapping the broker's configuration — in which "
+             "case it runs a broker with no accounts — or this pattern went stale")
+        return
+
+    for source, target in sorted(copies.items()):
+        if source not in mapped:
+            fail(f"Dockerfile COPYs `{source}` into the broker image and Catalog's "
+                 f"fixture does not map it. That fixture runs the STOCK image, so a "
+                 f"file only the Dockerfile carries is a file its broker does not have")
+            continue
+        # The Dockerfile names the file; WithResourceMapping names the directory.
+        want = target.rsplit("/", 1)[0] + "/"
+        if mapped[source] != want:
+            fail(f"`{source}`: the Dockerfile puts it at `{target}` and Catalog's "
+                 f"fixture maps it into `{mapped[source]}`. One of the two brokers is "
+                 f"not reading it")
+
+    for source in sorted(set(mapped) - set(copies)):
+        fail(f"Catalog's fixture maps `{source}` and the Dockerfile does not COPY it, "
+             f"so the Compose broker and the test broker disagree about what they hold")
 
 
 def check_source_inputs_covers_reads() -> None:
