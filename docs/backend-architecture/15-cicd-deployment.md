@@ -668,7 +668,7 @@ database:
 
 broker:
   enabled: true
-  secretRef: { name: commerce-rabbitmq, key: connection-string }
+  secretRef: { name: ordering-rabbitmq, key: connection-string }
 
 observability:
   otlpEndpoint: http://otel-collector.observability:4317
@@ -1093,7 +1093,7 @@ namespace read access.
 | `ConnectionStrings__OrderingMigrator` | Secret | External Secrets → migrator Job only | ✓ (Job) |
 | `ConnectionStrings__RedisCache` | **Secret** | External Secrets — carries the §8.1 ACL user and password | ✓ **when the host calls `AddRedisConnections`** — see below |
 | `ConnectionStrings__RedisCoordination` | **Secret** | External Secrets — separate ACL user, `noeviction` instance | ✓ **when the host calls `AddRedisConnections`** — both or neither |
-| `ConnectionStrings__RabbitMq` | Secret | External Secrets | ✓ | — carries the per-service broker account of [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity), so the Secret is named per service (`catalog-rabbitmq`, `ordering-rabbitmq`) and never shared |
+| `ConnectionStrings__RabbitMq` | Secret | External Secrets — carries the per-service broker account of [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity) | ✓ — the Secret is named per service (`catalog-rabbitmq`, `ordering-rabbitmq`) and never shared |
 | `Identity__Authority` | Config | Helm `identity.authority` → ConfigMap | ✓ — **every host**, including the gateway |
 | `Identity__Client__ClientId` | Config | Helm `identity.clientId` | ✓ **BFF only** — the one host that calls a peer ([§9.7](09-messaging.md), [§11.5](11-identity-authorization.md)) |
 | `Identity__Client__Scope` | Config | Helm `identity.scope` | ✓ **BFF only** |

@@ -70,5 +70,12 @@ jobs:
         with:
           python-version: '3.12'
 
+      # The gate's own suite, BEFORE the gate — `CLAUDE.md`'s "each of them is
+      # tested and then run". Every case is a mutation that must go red: a gate
+      # observed only green is one nobody has established is looking at
+      # anything, and this one guards an authorisation boundary.
+      - name: The gate's negatives
+        run: python -m unittest discover -s deploy/compose/rabbitmq
+
       - name: Broker permissions agree with the code
         run: python deploy/compose/rabbitmq/check_permissions.py

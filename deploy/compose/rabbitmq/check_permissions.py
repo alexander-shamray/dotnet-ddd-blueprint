@@ -150,6 +150,25 @@ def sends_and_consumes(directory: Path) -> tuple[set[str], set[str]]:
     return sends, consumes
 
 
+def private_namespace(directory: Path) -> str | None:
+    """The exchange prefix for a service's own internal messages.
+
+    §9.6's scheduled timeouts are declared in the service's `Messaging`
+    namespace rather than in `Common.Contracts`, so they carry a prefix like
+    `Ordering.Infrastructure.Messaging:` — the five `*Expired` messages the
+    saga sends itself. They are the service's PRIVATE vocabulary: nothing else
+    publishes them and nothing else may, or a peer could forge a saga timeout.
+
+    Read from the namespace the source declares rather than assembled from the
+    directory name, so a moved or renamed namespace changes this with it.
+    """
+    for path in sorted(directory.glob("*.cs")):
+        found = re.findall(r"^namespace\s+([A-Za-z0-9_.]+);", read(path), re.M)
+        if found:
+            return f"{found[0]}:"
+    return None
+
+
 def contract_prefixes() -> set[str]:
     """Every `Common.Contracts.<Context>.V1:` exchange prefix, from namespaces."""
     prefixes = set()
@@ -175,6 +194,7 @@ def main() -> int:
     directories = messaging_dirs()
     prefixes = contract_prefixes()
     code = {name: sends_and_consumes(path) for name, path in directories.items()}
+    private = {name: private_namespace(path) for name, path in directories.items()}
 
     # THE GATE'S OWN SUBJECT, before anything relies on it. A scan that found
     # nothing would agree with any permission set at all, which is this
@@ -189,6 +209,9 @@ def main() -> int:
         fail("no service declares a `queue:` address — the pattern, not the source")
     if not any(consumes for _, consumes in code.values()):
         fail("no service declares a receive endpoint — the pattern, not the source")
+    if not any(private.values()):
+        fail("no service's Messaging namespace could be read — the pattern, not the "
+             "source. Every private-vocabulary check below would pass vacuously")
     if failures:
         return report()
 
@@ -325,6 +348,24 @@ def main() -> int:
             if matches(entry["write"], f"{prefix}Anything"):
                 fail(f"{user}: write COVERS `{prefix}`, another context's contracts. "
                      f"A service that can publish a peer's events can forge them")
+
+        # AND NOBODY ELSE'S PRIVATE VOCABULARY. `Common.Contracts` is the
+        # published half; a service also owns messages nothing outside it ever
+        # sends — §9.6's `*Expired` saga timeouts live in Ordering's own
+        # Messaging namespace. Without this, granting Catalog
+        # `Ordering.Infrastructure.Messaging:` passed every check above while
+        # letting it forge a saga timeout, which is #44's own class of defect
+        # one namespace over. Found by Copilot on PR #160 and reproduced before
+        # it was believed.
+        mine = private.get(next(k for k in directories if k.lower() == name))
+        for owner, prefix in sorted(private.items()):
+            if not prefix or prefix == mine:
+                continue
+            if matches(entry["write"], f"{prefix}Anything"):
+                fail(f"{user}: write COVERS `{prefix}`, which is {owner}'s private "
+                     f"messaging vocabulary. Nothing outside that service publishes "
+                     f"those messages, and a peer that can is a peer that can forge "
+                     f"a scheduled timeout (§9.6)")
 
     # 6. The two ways the broker's configuration reaches a container agree.
     check_fixture_matches_dockerfile()

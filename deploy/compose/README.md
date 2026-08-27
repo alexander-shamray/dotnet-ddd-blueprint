@@ -227,7 +227,7 @@ reads eagerly (§11.3). Same values, host names in place of service names:
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
-export ConnectionStrings__RabbitMq='amqp://ordering-svc:local-dev-ordering@localhost:5672'
+export ConnectionStrings__RabbitMq='amqp://catalog-svc:local-dev-catalog@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
 # Catalog is the ONE service that pins its own ports, and on the host they
 # have to move. Its appsettings.json declares two Kestrel endpoints — 8080 for

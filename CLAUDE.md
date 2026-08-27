@@ -1316,6 +1316,7 @@ bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SD
 HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
+py -3.12 -m unittest discover -s deploy/compose/rabbitmq   # then check_permissions.py
 py -3.12 deploy/compose/rabbitmq/check_permissions.py   # ADR-036's broker ACL
 
 (cd .github/licence-gate && py -3.12 -m unittest)  # then licence_gate.py

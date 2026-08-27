@@ -142,7 +142,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       # Runtime identity (DML only) — never the migrator connection.
       ConnectionStrings__Ordering: "${ORDERING_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
-      ConnectionStrings__RabbitMq: "amqp://catalog-svc:local-dev-catalog@rabbitmq:5672"
+      ConnectionStrings__RabbitMq: "amqp://ordering-svc:local-dev-ordering@rabbitmq:5672"
       # The authority, to validate inbound tokens (§11.2). No Identity__Client__*:
       # Ordering calls no peer synchronously — prices come from a local
       # projection (§6.4) and the rest goes over the broker. Only the BFF holds
