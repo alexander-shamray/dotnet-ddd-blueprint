@@ -1970,7 +1970,7 @@ otherwise. Local development is unaffected — the realm keeps
 `curl`, which §14.1 documents as a local affordance and §11.2 now names rather
 than leaving to a realm-file description.
 
-## ADR-035 — A broadcast integration event carries no personal data
+## ADR-035 — An integration event carries identifiers, not personal data
 
 **Decision.** An integration event published to every interested consumer
 carries identifiers, not personal data — [§11.7](11-identity-authorization.md)'s
@@ -1978,6 +1978,30 @@ rule, applied without exception to the contracts in `Common.Contracts`.
 `OrderConfirmed`'s `ShippingAddress` is removed and `ShippingAddressV1` is
 deleted. How Shipping obtains a delivery address is left open and belongs to
 Shipping's own PR.
+
+> **This is not a claim that the events are anonymous, and an earlier draft of
+> this record read as one.** `OrderConfirmed` still carries `CustomerId`, and a
+> resolvable pseudonymous identifier is personal data under GDPR Art. 4 — as
+> are order details linked to it. §11.7 says so itself one rule further on,
+> where erasure at the owning service means "customer identifiers replaced".
+> So the decision is narrower than "no personal data on the wire": what a
+> broadcast contract may not carry is **directly identifying or free-text**
+> personal data — a name, an email address, a postal address — the fields whose
+> only remedy is to reach every copy and delete them.
+>
+> **What makes the identifier tractable is where its resolution lives.**
+> `CustomerId` means nothing without the service that can turn it into a
+> person, so severing that link once, in the one store that owns it,
+> de-identifies every copy downstream without the erasure choreography ever
+> having to reach the broker, an outbox row or a consumer's inbox. That is the
+> whole of why §11.7 tells a contract to carry the identifier rather than the
+> value, and this ADR is that rule applied rather than a stronger guarantee
+> laid over it.
+>
+> **The residual is real and is not closed here.** An event stream still
+> carries linkable identifiers, so a consumer that independently resolves
+> `CustomerId` re-creates the problem in its own store, and §11.7's rules for
+> consumers are what bind it — unbuilt, like the rest of that section.
 
 **Why.** §9.1 argued the address onto the contract on "fat enough" grounds —
 Shipping cannot act without one and should not call back to get it — while

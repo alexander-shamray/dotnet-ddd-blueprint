@@ -1376,8 +1376,8 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 846 of
-the 1,051 and starts no container — measured with `docker events`, not
+category runs a smaller suite and says which. `Category!=Integration` is 847 of
+the 1,052 and starts no container — measured with `docker events`, not
 inferred — and `Category=Integration` is the other 205, needing the daemon
 exactly as before.
 
@@ -1389,7 +1389,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (828) and integration (205), which is the 846 above split at the
+(18), unit (829) and integration (205), which is the 847 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.

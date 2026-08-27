@@ -23,9 +23,17 @@ namespace Ordering.Application.Tests;
 /// <b>Nothing else asserts a single field of these three payloads.</b> The
 /// real-broker tests construct <c>V1.OrderPlaced</c> themselves rather than
 /// going through the mapper, and the outbox tests assert that a row completes
-/// and carries the right ids — so dropping <c>Lines</c>, or
-/// <c>ShippingAddress.Line2</c>, or mapping a cancellation reason to the wrong
-/// code, would have left the suite green. Copilot found the gap.
+/// and carries the right ids — so dropping <c>Lines</c>, or mapping a
+/// cancellation reason to the wrong code, would have left the suite green.
+/// Copilot found the gap.
+/// <para>
+/// That list used to name <c>ShippingAddress.Line2</c> as its third example,
+/// and it is removed rather than reworded because the field is gone
+/// (ADR-035) — an example naming a member no contract has sends the next
+/// reader looking for it. What replaces the coverage is the assertion below
+/// that no part of the address reaches the serialised payload, which is a
+/// stronger claim than the one the old example stood for.
+/// </para>
 /// </remarks>
 public class OrderingIntegrationEventMapperTests
 {

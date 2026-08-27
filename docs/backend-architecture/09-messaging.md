@@ -153,7 +153,7 @@ bought to avoid.
 > to argue for it** on the grounds that Shipping cannot function without the
 > address and should not call back to get it. The first half is true and the
 > second was the wrong remedy:
-> [ADR-035](appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)
+> [ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
 > records the removal and leaves the delivery mechanism to Shipping's own PR,
 > where the code that needs the address will be in front of whoever chooses it.
 > A postal address is personal data under GDPR Art. 4 and §11.7's erasure
@@ -267,7 +267,7 @@ architecture exists to avoid.
 > is for.** `OrderConfirmed` dropped its shipping address under exactly this
 > rule: no service consumed the version — Shipping and Notifications are
 > unbuilt, and Ordering's own saga reads only the `OrderId` — and
-> [ADR-035](appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)
+> [ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
 > records it. It is also an instance of the harmful-window class below rather
 > than merely a cheap edit, which is why it did not take a V2.
 >

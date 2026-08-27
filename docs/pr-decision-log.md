@@ -186,7 +186,7 @@ both chapters.
 **The field had no consumer, which is the only reason this was cheap.**
 Shipping and Notifications are unbuilt and §9.6's saga reads only the `OrderId`,
 so §9.2's two conditions for an in-place change were both met and
-[ADR-035](backend-architecture/appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)
+[ADR-035](backend-architecture/appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
 is the record the second condition demands. Every hour Shipping does not exist
 is an hour this removal stays free; the same edit after Shipping ships is a
 version bump with a consumer on the other side.

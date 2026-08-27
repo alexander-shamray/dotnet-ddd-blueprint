@@ -179,11 +179,18 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > twenty-six tests of the three classes in the collection and
 > `Category!=Integration` selects the other seventy — 96 in total, with no
 > third state and nothing counted twice. Those figures read ten/81, then
-> twenty/91, then twenty-three/94, then twenty-four/95, then twenty-six/71, and
+> twenty/91, then twenty-three/94, then twenty-four/95, then twenty-six/97, and
 > every retake up to that one was the suite growing while the callout did not —
 > the drift the paragraph below is about, arriving in the paragraph above it.
 > **How many retakes is not written down**, for the reason the figures keep
 > demonstrating.
+>
+> **The second number in that series is the total, not the fast half**, which
+> is worth stating because this very sentence got it wrong once: a retake was
+> appended as `twenty-six/71`, pairing the integration count with the fast one
+> and silently changing what the series measures halfway along. A series is a
+> claim about a quantity, so an entry in different units is not a smaller
+> error than a wrong figure — it is a wrong figure that reads as consistent.
 >
 > **This retake is the first that goes down, and the direction matters more
 > than the number.** ADR-033 withdrew the token-denylist claim, so

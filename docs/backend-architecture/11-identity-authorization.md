@@ -1203,7 +1203,7 @@ which is the only place it can be reliably erased.
 > concluded the rule held.
 >
 > **The rule won, and the field is gone**
-> ([ADR-035](appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)).
+> ([ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)).
 > What settled it was that the escape routes are all one-way: the payload is
 > serialised into `ordering.OutboxMessages`, whose purge deliberately spares
 > abandoned rows so §13.6's alert can see them; it sits in the broker, for

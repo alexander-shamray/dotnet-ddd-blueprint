@@ -204,9 +204,11 @@ public class RealmImportTests
         //
         // The number is the whole of the exposure, not a tuning knob. There is
         // no denylist consumer and no introspection call (ADR-033), so a token
-        // stolen, or a user disabled at Keycloak, keeps working for exactly
-        // this long — lengthen it here and §11.3's stated window is silently
-        // wrong everywhere it is quoted.
+        // stolen, or a user disabled at Keycloak, keeps working for up to this
+        // long — its remaining lifetime, which is anywhere from nearly zero to
+        // the whole of it, and this is the bound rather than the duration.
+        // Lengthen it here and §11.3's stated window is silently wrong
+        // everywhere it is quoted.
         const int statedLifetimeSeconds = 300;
 
         Root.GetProperty("accessTokenLifespan").GetInt32().ShouldBe(

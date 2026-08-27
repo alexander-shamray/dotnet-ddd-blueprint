@@ -435,7 +435,7 @@ event (§9.1) — the mapper is where they are flattened to primitives.
 > **`ShippingAddress` is on this record and on no contract, and the asymmetry
 > is the point rather than an omission.** `V1.OrderConfirmed` carries no
 > address at all
-> ([ADR-035](appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)),
+> ([ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)),
 > so §9.3's mapper no longer reads this field — and the mapper was its only
 > reader outside the aggregate, which is exactly why the rule above stopped
 > covering it. What covers it instead is the aggregate's own record:
