@@ -202,13 +202,20 @@ public class RealmImportTests
         // constant nothing reads would be a registration standing in for a
         // control, which is the shape ADR-033 was written to withdraw.
         //
-        // The number is the whole of the exposure, not a tuning knob. There is
-        // no denylist consumer and no introspection call (ADR-033), so a token
-        // stolen, or a user disabled at Keycloak, keeps working for up to this
-        // long — its remaining lifetime, which is anywhere from nearly zero to
-        // the whole of it, and this is the bound rather than the duration.
-        // Lengthen it here and §11.3's stated window is silently wrong
-        // everywhere it is quoted.
+        // This is most of the exposure and not a tuning knob. There is no
+        // denylist consumer and no introspection call (ADR-033), so a token
+        // stolen, or a user disabled at Keycloak, keeps working for up to its
+        // remaining lifetime — anywhere from nearly zero to the whole of it,
+        // which is a bound rather than a duration. Lengthen it here and
+        // §11.3's stated window is silently wrong everywhere it is quoted.
+        //
+        // Most, not all: a lifetime check accepts a token until `exp` PLUS
+        // AuthenticationExtensions' 30-second ClockSkew, so ADR-033's
+        // revocation bound is 330 seconds and this value is the larger of the
+        // two terms rather than the whole sum. The skew is pinned where it is
+        // set — JwtAuthenticationTests asserts ClockSkew is thirty seconds —
+        // so asserting it here as well would put one number in two suites and
+        // give it two places to drift from.
         const int statedLifetimeSeconds = 300;
 
         Root.GetProperty("accessTokenLifespan").GetInt32().ShouldBe(
@@ -247,10 +254,15 @@ public class RealmImportTests
         // `refresh_expires_in` is 0. Nothing in the solution compiles
         // differently either way, which is what earns it a test rather than a
         // paragraph.
-        JsonElement tokenClient = Root.GetProperty("clients").EnumerateArray()
+        JsonElement tokenClient = Root
+            .GetProperty("clients")
+            .EnumerateArray()
             .Single(c => c.GetProperty("clientId").GetString() == TokenClient);
 
-        tokenClient.GetProperty("attributes").GetProperty("use.refresh.tokens").GetString()
+        tokenClient
+            .GetProperty("attributes")
+            .GetProperty("use.refresh.tokens")
+            .GetString()
             .ShouldBe(
                 "false",
                 $"'{TokenClient}' is the browser's client, and Keycloak's default is to issue it " +

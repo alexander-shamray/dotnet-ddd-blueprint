@@ -78,9 +78,10 @@ Validation is cheap; assume the network is hostile.
 > **Continuity is a silent renewal against the authorization endpoint**, bounded
 > by the SSO session, so the user sees a login when that session has ended
 > rather than when the access token expires. **The residual is an access token,
-> and it is stated rather than closed:** an XSS still yields one, valid for the
-> §11.3 lifetime below. What bounds it is that number and nothing else — there
-> is no revocation path
+> and it is stated rather than closed:** an XSS still yields one, which a
+> service will accept for up to the 330 seconds §11.3 derives below — the
+> lifetime plus the skew, not the lifetime alone. What bounds it is that
+> number and nothing else — there is no revocation path
 > ([ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)),
 > which is the same fact §11.3 states from the other side.
 >
@@ -197,11 +198,24 @@ token lifetime.
 
 **That lifetime is 300 seconds, and this sentence is where the platform states
 it.** Five minutes, normative — not a realm default nobody chose, and not
-`ClockSkew`'s coincidentally equal default two paragraphs up, which is a
-different quantity that happens to share a number. Everything about revocation
-here follows from it: logging a user out, disabling a compromised account, or
-responding to a stolen token at Keycloak has **no effect** on an access token
-already issued, for up to five minutes.
+`ClockSkew`'s coincidentally equal *default* two paragraphs up, which is a
+different quantity that happens to share a number.
+
+**The revocation window is 330 seconds, and it is the lifetime plus the skew
+rather than the lifetime.** `ClockSkew` is 30 seconds here, and a lifetime
+check accepts a token until `exp` **plus** the skew — so logging a user out,
+disabling a compromised account, or responding to a stolen token at Keycloak
+has **no effect** on an access token already issued for up to five and a half
+minutes. Two settings decide that number and only one of them is the realm's,
+which is why shortening the exposure means reading both.
+
+> **This section separated the two quantities and then failed to add them.**
+> The paragraph above was written to stop a reader mistaking `ClockSkew`'s
+> five-minute default for the token lifetime — a real hazard, since the two
+> shared a number — and in drawing the distinction it stated the bound as the
+> lifetime alone. The distinction is right and the arithmetic was not: they
+> are different quantities *that compose*, and a validation window is the sum.
+> Naming a confusion is not the same as being immune to it.
 [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
 records that this bounded window is the accepted posture and withdraws
 [ADR-006](appendix-a-adrs.md#adr-006--redis-for-cache-and-coordination-never-as-a-store-of-record)'s

@@ -1883,9 +1883,11 @@ Retiring either one costs a guarantee the other never made.
 
 ## ADR-033 — Revocation is bounded by the token lifetime, and no denylist exists
 
-**Decision.** This platform accepts a **bounded revocation window** equal to the
-access-token lifetime, which is **300 seconds** and is stated normatively in
-[§11.3](11-identity-authorization.md). There is no token denylist and no
+**Decision.** This platform accepts a **bounded revocation window** of **330
+seconds** — the access-token lifetime of 300, stated normatively in
+[§11.3](11-identity-authorization.md), plus the 30-second `ClockSkew` a
+lifetime check adds to `exp`. Both settings are part of the bound, and only
+one of them is the realm's. There is no token denylist and no
 introspection call: a service validates signature, issuer, audience and
 lifetime locally and consults nothing else. [ADR-006](#adr-006--redis-for-cache-and-coordination-never-as-a-store-of-record)'s
 listing of "the token denylist" among Redis's contents is withdrawn. The
@@ -1919,11 +1921,15 @@ take.
 
 **Consequences.** Logging a user out, disabling an account, or responding to a
 stolen token at Keycloak has no effect on an already-issued access token for up
-to 300 seconds. That is now a recorded number rather than a realm default
-nobody chose, and `RealmImportTests` pins it — the chapter's figure and the
-realm's are two statements about one fact, and the test is what keeps them from
-drifting apart. Shortening the window is a realm edit plus a chapter edit,
-together. **This is the whole of the revocation story**, so a future denylist
+to 330 seconds. That is now a recorded number rather than a realm default
+nobody chose, and `RealmImportTests` pins the lifetime half of it — the
+chapter's figure and the realm's are two statements about one fact, and the
+test is what keeps them from drifting apart. **Shortening the window is a realm
+edit, a chapter edit and possibly a `ClockSkew` edit**, because the bound is a
+sum: 300 from the realm and 30 from `TokenValidationParameters`, and cutting
+the lifetime alone leaves the skew where it is.
+
+**This is the whole of the revocation story**, so a future denylist
 is a decision that supersedes this record rather than a gap someone may quietly
 fill: it would owe a producer, a consumer reachable from every host including
 the two with no Redis today, and a fan-out rule across per-service keyspaces.
@@ -1946,7 +1952,7 @@ it survives until the refresh token's own expiry. The realm's settings made
 that concrete rather than theoretical: `revokeRefreshToken: false` and
 `refreshTokenMaxReuse: 0` against an `ssoSessionMaxLifespan` of 36,000 seconds
 meant a browser-held refresh token was reusable, never rotated, for up to ten
-hours. Removing it collapses the exposure to ADR-033's 300 seconds.
+hours. Removing it collapses the exposure to ADR-033's 330 seconds.
 
 **Terminating the flow in `Web.Bff` is the stronger answer and is not this
 one.** Holding the tokens server-side behind a `HttpOnly; Secure; SameSite`
@@ -1962,10 +1968,12 @@ is its own client secret stays correct under this decision and would not survive
 that one.
 
 **Consequences.** The browser re-authenticates against the authorization
-endpoint every 300 seconds; where the SSO session has ended, the user sees a
-login. The residual is stated rather than closed: an XSS still yields an access
-token valid for up to 300 seconds, and §11 says so instead of implying
-otherwise. Local development is unaffected — the realm keeps
+endpoint every 300 seconds — the token's own lifetime, which is the renewal
+clock rather than ADR-033's 330-second acceptance bound; where the SSO session
+has ended, the user sees a login. The residual is stated rather than closed: an
+XSS still yields an access token a service will accept for up to 330 seconds,
+and §11 says so instead of implying otherwise. Local development is
+unaffected — the realm keeps
 `directAccessGrantsEnabled` on `web-app` so a developer can obtain a token with
 `curl`, which §14.1 documents as a local affordance and §11.2 now names rather
 than leaving to a realm-file description.
@@ -2002,6 +2010,34 @@ Shipping's own PR.
 > carries linkable identifiers, so a consumer that independently resolves
 > `CustomerId` re-creates the problem in its own store, and §11.7's rules for
 > consumers are what bind it — unbuilt, like the rest of that section.
+
+> **This removal may not ride a rolling deployment, and that is
+> [ADR-026](#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)'s
+> rule rather than a new one.** `ShippingAddress` was `required`, and
+> `System.Text.Json` refuses a payload missing a required member — the same
+> mechanism §9.2 records in the *adding* direction, where a new build faults
+> every message an old build staged. Retirement is its mirror. Ordering is
+> itself a consumer here: §9.6's saga binds `Event<OrderConfirmed>`, so it
+> deserialises the whole contract even though its transition reads only
+> `OrderId`. During an overlapping rollout a new replica's `OrderConfirmed`
+> reaches an old replica that still declares the member, the message faults
+> through §9.8's retries into the error queue, and §13.6 pages.
+>
+> **So the change takes one of the two shapes ADR-026 already allows**: a
+> cutover with no overlap — which that record is careful to say is not a canary
+> and must not be called one — or a two-release retirement, the first making
+> the member optional everywhere and the second removing it. Either is a
+> deployment decision rather than a code one, which is why it is recorded here
+> and not solved above.
+>
+> **It is taken in place now because there is nothing deployed to break.** No
+> cluster has ever run this platform — the charts, the alert rules and the
+> canary are all artefacts no cluster has seen — so there is no old replica to
+> hand a reduced payload to, and the cheapest moment to change a contract's
+> shape is before anything runs it. **That is a fact with an expiry date**: the
+> first deployment ends it, and after that a comparable removal owes one of the
+> two shapes above. Recorded rather than left implicit, because "no consumer"
+> was true of *other services* and was never true of Ordering.
 
 **Why.** §9.1 argued the address onto the contract on "fat enough" grounds —
 Shipping cannot act without one and should not call back to get it — while

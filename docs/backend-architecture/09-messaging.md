@@ -263,13 +263,31 @@ architecture exists to avoid.
 > other direction: the PR that becomes a contract's first producer is the last
 > one that can fix its shape for free.
 >
-> **Both conditions were met once, and naming the case is what the second one
-> is for.** `OrderConfirmed` dropped its shipping address under exactly this
-> rule: no service consumed the version — Shipping and Notifications are
-> unbuilt, and Ordering's own saga reads only the `OrderId` — and
+> **The rule has been used once, and the case is worth reading carefully
+> because the first condition was met in spirit rather than to the letter.**
+> `OrderConfirmed` dropped its shipping address, and
 > [ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
-> records it. It is also an instance of the harmful-window class below rather
-> than merely a cheap edit, which is why it did not take a V2.
+> is the record the second condition demands. It is also an instance of the
+> harmful-window class below rather than merely a cheap edit, which is why it
+> did not take a V2.
+>
+> **"No service consumes the version" was true of every service that ships on
+> its own schedule and false of Ordering.** Shipping and Notifications are
+> unbuilt, so neither could be stranded — but §9.6's saga binds
+> `Event<OrderConfirmed>`, which makes Ordering a registered consumer of a
+> contract Ordering also produces. It reads only the `OrderId`, and that is
+> beside the point: a bound consumer deserialises the whole payload, so a
+> `required` member's removal faults it whatever the transition reads.
+>
+> **What the condition is actually protecting is a deployable on an
+> independent schedule**, and Ordering is not one of those with respect to
+> itself — producer and consumer ship in the same build. What that costs
+> instead is the *overlap within one service's own rollout*, which is
+> [ADR-026](appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)'s
+> subject rather than this section's, and ADR-035 records the deployment shape
+> the removal therefore owes. Reading the condition as satisfied without
+> naming that would have hidden a live-rollout fault behind a rule about
+> version bumps.
 >
 > **For one class of change the deprecation window is not merely useless but
 > harmful**, and it is worth naming because it inverts the rule's intent. When
