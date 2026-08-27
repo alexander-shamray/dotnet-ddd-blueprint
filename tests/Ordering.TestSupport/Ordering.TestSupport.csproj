@@ -40,6 +40,11 @@
          named here because this assembly uses the types itself, which is the
          register's honesty rule rather than a restore requirement. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <!-- InboxCleanupService<T>, which OrderingApiFactory removes from the test
+         host on the same argument it removes the outbox dispatcher and the
+         retention purge (ADR-032). Named here for the reason above: the type
+         is used by this assembly, so the reference is this assembly's. -->
+    <PackageReference Include="MassTransit.EntityFrameworkCore" />
   </ItemGroup>
 
   <ItemGroup>

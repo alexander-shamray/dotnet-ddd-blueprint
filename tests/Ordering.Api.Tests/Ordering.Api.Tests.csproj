@@ -31,6 +31,13 @@
          MassTransit.RabbitMQ: the harness swaps the transport out, and a test
          project that uses no transport must not claim one. -->
     <PackageReference Include="MassTransit" />
+    <!-- ADR-032's outbox registration test names InboxCleanupService<T> and
+         IBusOutboxNotification by hand, so this assembly pays for the package
+         rather than riding in on Ordering.Api's graph — the same rule
+         Ordering.Infrastructure states one file over, and the reason a
+         production reference the tests silently depend on is not a reference
+         at all. Copilot raised it on #154. -->
+    <PackageReference Include="MassTransit.EntityFrameworkCore" />
     <!-- One substitute, for one assertion: capturing the IPipe<PublishContext>
          the outbox dispatcher hands IPublishEndpoint, so §9.1's single-identity
          rule can be checked on the transport rather than inferred. Writing that

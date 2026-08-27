@@ -421,8 +421,12 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     [Fact]
     public async Task The_sagas_sends_are_committed_with_its_instance_rather_than_buffered()
     {
-        // **#128 and ADR-032, and the only place in the solution where the
-        // mechanism is observable at all.** The saga used to send through
+        // **#128 and ADR-032, and the only place the mechanism is observable
+        // in its effect rather than its wiring.** `IBus.GetProbeResult()` also
+        // exposes this endpoint's filter scopes, which would settle that the
+        // filter is configured without a broker round trip — a cheaper test of
+        // a weaker claim, and worth having; it is not this one. The saga used
+        // to send through
         // UseInMemoryOutbox, which buffers in the process and flushes AFTER
         // EntityFrameworkRepository has committed the instance. A crash in that
         // window left the order advanced with its commands never sent — and for
@@ -446,7 +450,7 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
         // rows exist and delivery never ran — and the first of those is the
         // regression #128 is about.
         var orderId = Guid.CreateVersion7();
-        Guid placedId = Guid.CreateVersion7();
+        var placedId = Guid.CreateVersion7();
 
         await PublishPlacedAsync(orderId, placedId);
 
@@ -455,10 +459,11 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
             expected: 1,
             because: "the arrange half — nothing below can be true before the transition has run");
 
-        // Anti-vacuity, and it is not decoration: the two assertions differ by
-        // one predicate, so without this one a WHERE that matched nothing at
-        // all would read exactly like a delivery that had not happened yet, and
-        // this test would fail for the wrong reason for thirty seconds.
+        // Anti-vacuity, and it is not decoration: the narrow assertion below
+        // adds one predicate to this one, so without this one a WHERE that
+        // matched nothing at all would read exactly like a delivery that had
+        // not happened yet, and this test would fail for the wrong reason for
+        // thirty seconds.
         await Eventually(
             () => TransactionalInboxRowsAsync(placedId, deliveredOnly: false),
             expected: 1,
@@ -484,12 +489,16 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
     /// Narrows to rows whose staged messages have been sent. The saga's
     /// endpoint is the only one that stages any, so on this endpoint the
     /// narrowed count is the mechanism and the wide one is only its record.
+    /// <c>LastSequenceNumber</c> alone, without a <c>Consumed IS NOT NULL</c>
+    /// beside it: the sequence number is stamped only after the row is marked
+    /// consumed, so the second predicate narrowed nothing and made the pair of
+    /// queries above look as though they differed by more than they do.
     /// </param>
     private Task<int> TransactionalInboxRowsAsync(Guid messageId, bool deliveredOnly) =>
         fixture.ScalarAsync<int>(
             deliveredOnly
                 ? "SELECT Value = COUNT(*) FROM ordering.InboxState " +
-                    "WHERE MessageId = {0} AND Consumed IS NOT NULL AND LastSequenceNumber IS NOT NULL"
+                    "WHERE MessageId = {0} AND LastSequenceNumber IS NOT NULL"
                 : "SELECT Value = COUNT(*) FROM ordering.InboxState WHERE MessageId = {0}",
             messageId);
 

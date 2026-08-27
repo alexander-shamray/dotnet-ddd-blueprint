@@ -4,6 +4,8 @@ using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
 using Common.Infrastructure.Redis;
 using Common.Web;
+using MassTransit.EntityFrameworkCoreIntegration;
+using Ordering.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -134,6 +136,37 @@ public class OrderingApiFactory(
                 services.Remove(purge);
 
                 services.AddSingleton<RetentionPurgeService>();
+
+                // ADR-032's third background writer, removed on the two
+                // arguments above rather than on a new one.
+                // AddEntityFrameworkOutbox registers a hosted
+                // InboxCleanupService<OrderingDbContext> that polls
+                // ordering.InboxState and deletes delivered rows past the
+                // duplicate-detection window. Left running it is a fourth
+                // writer to a table this suite asserts over, on a timer no test
+                // drives — the same shape as the two above.
+                //
+                // **It was not removed first, and what it cost is worth
+                // recording.** The branch that added the outbox left it in and
+                // met an intermittent SqlException 1205 out of Respawn's
+                // ResetAsync: two multi-table deletes over one schema in
+                // different orders, deadlocking in whichever test happened to
+                // reset next — a command-endpoint test with nothing to do with
+                // sagas, which passed on re-run and read as a flake. The first
+                // answer was a bounded retry in the fixture. This is the
+                // better one, and it is this file's own precedent rather than
+                // a new idea: remove the race instead of surviving it. Copilot
+                // and a review pass both pointed at the precedent.
+                //
+                // No coverage is lost. Nothing asserts on a cleanup pass, and
+                // the window it prunes past is thirty minutes against a
+                // collection that runs in about eighty seconds — so in a test
+                // run this service has never had a row it was allowed to
+                // delete.
+                ServiceDescriptor inboxCleanup = services.Single(d =>
+                    d.ServiceType == typeof(IHostedService) &&
+                    d.ImplementationType == typeof(InboxCleanupService<OrderingDbContext>));
+                services.Remove(inboxCleanup);
 
                 // §9.4. Adding, not replacing: the production assemblies stay,
                 // so a test cannot stage a type the real host would refuse.
