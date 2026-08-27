@@ -3022,6 +3022,54 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertRefused(command)
 
+    def test_a_flags_value_is_data_and_not_an_argument_list(self):
+        # **The guard refused its own commit**, which is the most useful thing
+        # it did, and it is reproduced here rather than quietly fixed. A commit
+        # body arguing ABOUT the run-a-command transport is one argv element
+        # after `-m`; a substring check that does not know `-m` takes a value
+        # cannot tell prose about the transport from a command that uses it.
+        # The rest are the same defect reaching the flag checks, where the
+        # element simply *is* the message.
+        #
+        # One tool's "valid" is not the next tool's, and this is the gap where
+        # a value crosses between them: git reads the element as a message, and
+        # a guard written for flags read it as an argument list.
+        for command in (
+            "git commit -m 'about ext:: transports'",
+            "git commit -m '--output is bad'",
+            "git commit -m 'fix --exec-path handling'",
+            "git commit -F /tmp/body.txt",
+            "git log --grep='--output'",
+            "git commit --author='--upload-pack'",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_the_transport_check_is_scoped_to_repository_subcommands(self):
+        # The other half of the same fix, and it reaches past commit messages:
+        # any command may carry a branch name or a path containing the
+        # sequence, and only a subcommand that takes a REPOSITORY can be talked
+        # into using it as one.
+        for command in (
+            "git log --oneline origin/feature-ext::thing",
+            "git branch --list 'ext::*'",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_scoping_the_transport_check_did_not_delete_it(self):
+        # The positive control for the case above. Narrowing a check is exactly
+        # how a guard stops covering the thing it was written for, and this
+        # repository's most-repeated failure is the silent version of it.
+        for command in (
+            "git fetch ext::sh -c id",
+            "git clone ext::sh -c id",
+            "git pull --ff-only ext::sh -c id",
+            "git remote add evil ext::sh -c id",
+        ):
+            with self.subTest(command=command):
+                self.assertIn("ext::", self.assertRefused(command))
+
     def test_unparseable_quoting_is_refused_rather_than_guessed_at(self):
         # Fails closed. A guard that cannot resolve the argv has established
         # nothing about it, and the shell would fail on this input anyway.
