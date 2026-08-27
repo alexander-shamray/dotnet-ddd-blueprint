@@ -1,3 +1,4 @@
+using System.Data;
 using Common.Application;
 using Common.Contracts.Catalog.V1;
 using Common.Contracts.Inventory.V1;
@@ -170,14 +171,52 @@ public static class DependencyInjection
             // adding it would put a third staging mechanism on a path that has
             // no dual write.
             //
-            // The honest cost is a second retention policy: InboxCleanupService
-            // prunes MassTransit's tables and §9.9's RetentionPurgeService
-            // prunes ours, which is the exact shape §9.3 warns about. It is
-            // taken rather than dodged, because folding MassTransit's tables
-            // into our purge would mean deleting an InboxState row whose outbox
-            // messages have not been delivered — turning a retention job into
-            // the message loss this whole change exists to close.
-            x.AddEntityFrameworkOutbox<OrderingDbContext>(o => o.UseSqlServer());
+            // The honest cost is a second retention policy, and it is one table
+            // rather than three. InboxCleanupService prunes ordering.InboxState
+            // and nothing else — the package documents it as "responsible for
+            // removing InboxState entries after the expiration window timeout
+            // has elapsed" — while ordering.OutboxMessage is drained by the
+            // outbox middleware itself as each message reaches the transport,
+            // on delivery rather than on a timer. ordering.OutboxState is
+            // touched by NOTHING here: it is the bus-side outbox's table, and
+            // UseBusOutbox() is not called, so the migration creates it purely
+            // because OutboxMessage.OutboxId carries a foreign key to it and
+            // the model would not build otherwise. An operator finding it
+            // permanently empty is looking at the design, not at a fault.
+            //
+            // So the shape §9.3 warns about is still here — that cleanup timer
+            // beside §9.9's RetentionPurgeService, which prunes ours and reads
+            // none of the three. It is taken rather than dodged, because
+            // folding InboxState into our purge would mean deleting a row whose
+            // outbox messages have not been delivered — turning a retention job
+            // into the message loss this whole change exists to close.
+            x.AddEntityFrameworkOutbox<OrderingDbContext>(o =>
+            {
+                o.UseSqlServer();
+
+                // **Serializable, because this transaction stopped being the
+                // saga repository's and took its isolation level with it.**
+                // ConcurrencyMode.Pessimistic above exists so that two events
+                // arriving concurrently for one CorrelationId serialise, and it
+                // delivered that through a transaction the repository opened
+                // itself, at Serializable. Under this filter the outbox opens
+                // the transaction first and the repository joins it — which is
+                // the whole mechanism — so the level in force is the one set
+                // here, and MassTransit's default for it is RepeatableRead.
+                // Measured over a real ServiceCollection, and pinned by a test:
+                // without this line the option reads RepeatableRead.
+                //
+                // The row-lock hint does not cover the gap. A pessimistic read
+                // takes UPDLOCK on a row that EXISTS, and the case Pessimistic
+                // is written for is two deliveries both taking the Initially
+                // branch for a CorrelationId with no row yet — where what is
+                // needed is a key-range lock, and only SERIALIZABLE takes one.
+                // Without it both find nothing, both insert, and one loses on
+                // the primary key. Recoverable, since the outbox rolls back and
+                // the endpoint retries; a fault where there was none, on the
+                // exact property the concurrency mode was chosen for.
+                o.IsolationLevel = IsolationLevel.Serializable;
+            });
 
             // The scheduler §9.6's four Schedule declarations need, and the
             // thing no chapter specified until ADR-021. This half registers
