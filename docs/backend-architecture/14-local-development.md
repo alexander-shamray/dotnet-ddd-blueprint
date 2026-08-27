@@ -283,9 +283,9 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 > interface the control standing in front of them — Compose's short syntax
 > with no host-IP prefix publishes on every interface, so `docker compose up`
 > on a café or office network offers `sa`, two passwordless Redis instances,
-> two service accounts and Keycloak's admin console to every peer on it. Every URL
-> in the table is already a `localhost` one, so the prefix takes nothing away
-> from the workflow this chapter documents.
+> two service accounts and Keycloak's admin console to every peer on it.
+> Every URL in the table is already a `localhost` one, so the prefix takes
+> nothing away from the workflow this chapter documents.
 
 The realm's own logins are `demo/demo`, which holds every permission a shipped
 endpoint requires — `deploy/compose/README.md` carries the current list rather

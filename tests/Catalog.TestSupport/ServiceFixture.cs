@@ -134,12 +134,28 @@ public sealed class ServiceFixture : IAsyncLifetime
     {
         // §14.1's broker image, built from the repository's own Dockerfile so
         // this container carries definitions.json — the per-service accounts
-        // and their permissions. Same name and same WithCleanUp(false) as
-        // Ordering's fixture, so the two share one image per machine.
+        // and their permissions. WithCleanUp(false) keeps Ryuk from removing
+        // it, so the plugin is downloaded once per machine.
         IFutureDockerImage broker = new ImageFromDockerfileBuilder()
             .WithDockerfileDirectory(BrokerContextPath())
             .WithDockerfile("Dockerfile")
-            .WithName("ashamray-test-broker:4.1-delayed")
+            // ONE NAME PER FIXTURE, and the reason is a FILE rather than a
+            // tag. Testcontainers writes the build context to a tar named after
+            // the image — `ashamray-test-broker-4-1-delayed.tar` under the temp
+            // root — so two suites building the same name concurrently do not
+            // race on Docker at all: they race on that file, and the loser dies
+            // with "The process cannot access the file … because it is being
+            // used by another process".
+            //
+            // Measured, and both ways round: under `dotnet test Platform.slnx`
+            // whichever fixture started second failed EVERY one of its tests in
+            // under 100 ms, while each passed alone — a fixture fault wearing a
+            // suite-wide failure, which is why the count is the tell and the
+            // duration is the proof.
+            //
+            // The two images share every layer but the tag, so the second build
+            // is a cache hit and not a second plugin download.
+            .WithName("ashamray-test-broker-catalog:4.1-delayed")
             .WithCleanUp(false)
             .Build();
 

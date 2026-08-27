@@ -5140,6 +5140,24 @@ It exercises `configure` and `read` — the half that rots as endpoints are adde
 — and not `write`. The negative property rests on the direct measurement and on
 `check_permissions.py`, and the ADR now says so in those words.
 
+### The fixture race the second suite paid for
+
+Making Catalog's fixture build the broker image — it had used the stock tag,
+which carries no definitions — gave both suites the same image name, on the
+reasoning that sharing one image per machine beat dragging a second onto every
+runner. Docker would have been fine with that. **Testcontainers writes the
+build context to a tar named after the image**, so the two raced on
+`ashamray-test-broker-4-1-delayed.tar` and the loser threw *the process cannot
+access the file*.
+
+**The symptom named neither the file nor the fixture.** Whichever suite started
+second failed EVERY test in under 100 ms while passing alone, and it was not
+always the same suite — a fixture fault wearing a suite-wide failure. The tell
+is arithmetic rather than a message: a failure count equal to the suite's size,
+at a duration too short to have run anything. One image name per fixture fixes
+it, and costs a tag rather than a download, since the two share every layer
+below it.
+
 ### What is owed
 
 Three residuals, stated in ADR-036 rather than implied. `configure` cannot be
