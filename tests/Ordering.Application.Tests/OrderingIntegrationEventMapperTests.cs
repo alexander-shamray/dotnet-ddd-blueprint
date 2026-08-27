@@ -122,25 +122,41 @@ public class OrderingIntegrationEventMapperTests
         // ShippingAddress by hand would miss.
         string payload = JsonSerializer.Serialize(confirmed);
 
-        // Matched as QUOTED JSON tokens, which is what lets all five
-        // components be checked. The bare forms cannot be: Country is "FR" and
-        // Currency serialises as EUR, so a substring search for FR reports an
-        // address that is not there. Quoting settles it — "EUR" does not
-        // contain "FR" once the delimiters are part of the pattern — and the
-        // earlier version of this test dropped Country instead, which left the
-        // one component a reintroduced field could carry unnoticed while the
-        // test still promised that no part of the address reaches the wire.
+        // Four components are matched as BARE substrings and only the country
+        // as a quoted token, and the split is the point rather than an
+        // inconsistency.
         //
-        // Case-sensitive for the same reason: a JSON string token is compared
-        // to itself, and loosening it only widens what can collide.
+        // Bare is what catches a shape nobody has written yet. A quoted-token
+        // search asserts only that a component is its own JSON string, so an
+        // address concatenated into one value —
+        // "12 Rue de la Paix|Appartement 4|Paris|75002|FR" — contains none of
+        // the quoted patterns and would pass with the whole address on the
+        // wire. An earlier version of this test quoted all five and its comment
+        // claimed to cover exactly that case; it did not.
+        //
+        // The country is the one that cannot go bare: Currency serialises as
+        // EUR, so a bare FR matches inside it and the check fails over an
+        // address that is not there. Quoting is what separates them, since
+        // "EUR" does not contain "FR" once the delimiters are part of the
+        // pattern — and dropping the country instead, which this test also did
+        // once, leaves the one component a reintroduced field could carry
+        // unnoticed.
+        //
+        // Case-sensitive throughout: these are compared against the serialiser's
+        // own output, and loosening only widens what can collide.
         foreach (string component in (string[])
-            ["12 Rue de la Paix", "Appartement 4", "Paris", "75002", "FR"])
+            ["12 Rue de la Paix", "Appartement 4", "Paris", "75002"])
         {
             payload.ShouldNotContain(
-                $"\"{component}\"",
+                component,
                 Case.Sensitive,
                 $"§11.7: no part of the delivery address may reach the wire, and '{component}' did");
         }
+
+        payload.ShouldNotContain(
+            "\"FR\"",
+            Case.Sensitive,
+            "§11.7: no part of the delivery address may reach the wire, and the country did");
 
         ConfirmedLine line = confirmed.Lines.ShouldHaveSingleItem();
         line.ProductId.ShouldBe(Product.Value);

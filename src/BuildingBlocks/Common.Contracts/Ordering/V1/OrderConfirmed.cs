@@ -2,7 +2,9 @@ namespace Common.Contracts.Ordering.V1;
 
 /// <summary>
 /// An order was confirmed — payment authorised, stock held (§3.2). Shipping
-/// consumes it, and what it consumes is identifiers.
+/// consumes it, and what it consumes is order facts and identifiers: the
+/// lines, the total and the currency, keyed by <c>OrderId</c> and
+/// <c>CustomerId</c>. No delivery address, and no other personal data.
 /// </summary>
 /// <remarks>
 /// <b>Identifiers, not personal data (§11.7).</b> This contract used to carry

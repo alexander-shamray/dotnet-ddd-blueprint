@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Shouldly;
 using Xunit;
@@ -231,10 +232,27 @@ public class RealmImportTests
         // asserted rather than assumed.
         foreach (JsonElement client in Root.GetProperty("clients").EnumerateArray())
         {
+            string id = client.GetProperty("clientId").GetString()!;
+
             client.GetProperty("implicitFlowEnabled").GetBoolean().ShouldBeFalse(
-                $"'{client.GetProperty("clientId").GetString()}' enables the implicit flow, " +
-                "whose tokens live for accessTokenLifespanForImplicitFlow and not for the " +
-                "lifetime §11.3 states");
+                $"'{id}' enables the implicit flow, whose tokens live for " +
+                "accessTokenLifespanForImplicitFlow and not for the lifetime §11.3 states");
+
+            // A client attribute beats the realm setting, so the realm value
+            // alone does not pin the window. Measured against Keycloak 26.0
+            // with this realm: adding access.token.lifespan "900" to web-app
+            // returns expires_in 900 while the realm still reads 300 — and
+            // every other assertion in this file stays green, which is what
+            // makes it worth a check rather than a sentence.
+            if (client.TryGetProperty("attributes", out JsonElement attributes) &&
+                attributes.TryGetProperty("access.token.lifespan", out JsonElement over))
+            {
+                over.GetString().ShouldBe(
+                    statedLifetimeSeconds.ToString(CultureInfo.InvariantCulture),
+                    $"'{id}' overrides the access-token lifetime, and an override that " +
+                    "disagrees with §11.3 moves the window without moving the realm value " +
+                    "this test otherwise reads");
+            }
         }
     }
 
@@ -258,6 +276,17 @@ public class RealmImportTests
             .GetProperty("clients")
             .EnumerateArray()
             .Single(c => c.GetProperty("clientId").GetString() == TokenClient);
+
+        // The positive half, and it is what stops the assertion below being
+        // satisfied by a client that issues the browser nothing at all. With
+        // standardFlowEnabled off there is no authorization-code flow, so
+        // there is no refresh token and no access token either — §11.2's flow
+        // would not exist, and "no refresh token reaches the browser" would be
+        // true for the wrong reason. A negative assertion about a flow is also
+        // an assertion that the flow is there.
+        tokenClient.GetProperty("standardFlowEnabled").GetBoolean().ShouldBeTrue(
+            $"'{TokenClient}' is §11.2's authorization-code client, and the refresh-token " +
+            "assertion below says nothing about a client that runs no such flow");
 
         tokenClient
             .GetProperty("attributes")
