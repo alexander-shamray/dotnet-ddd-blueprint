@@ -146,17 +146,25 @@ public class OrderingApiFactory(
                 // writer to a table this suite asserts over, on a timer no test
                 // drives — the same shape as the two above.
                 //
-                // **It was not removed first, and what it cost is worth
-                // recording.** The branch that added the outbox left it in and
-                // met an intermittent SqlException 1205 out of Respawn's
-                // ResetAsync: two multi-table deletes over one schema in
-                // different orders, deadlocking in whichever test happened to
-                // reset next — a command-endpoint test with nothing to do with
-                // sagas, which passed on re-run and read as a flake. The first
-                // answer was a bounded retry in the fixture. This is the
-                // better one, and it is this file's own precedent rather than
-                // a new idea: remove the race instead of surviving it. Copilot
-                // and a review pass both pointed at the precedent.
+                // **This removal is right and it is NOT what closed the
+                // deadlock, which is the half worth recording.** The branch
+                // that added the outbox left this service in and met an
+                // intermittent SqlException 1205 out of Respawn's ResetAsync.
+                // Removing it here looked like the fix — this file's own
+                // precedent, applied to a third service — and a revision of the
+                // fixture deleted its retry on the strength of that, saying
+                // "there is no second deleter to race". **The deadlock
+                // reproduced with this service gone**, on the second of six
+                // runs. A deadlock needs two transactions taking locks in
+                // opposing order, not two deleters, and what Respawn actually
+                // races is whatever consume transaction is still committing —
+                // longer and multi-table since ADR-032. The retry is back and
+                // ServiceFixture.ResetAsync carries the corrected argument.
+                //
+                // So this line stands on the precedent alone, which is enough:
+                // a background writer nothing drives is a writer that makes
+                // "the pass never happened" and "the pass spared the row" the
+                // same green, whether or not it is also deadlocking.
                 //
                 // No coverage is lost. Nothing asserts on a cleanup pass, and
                 // the window it prunes past is thirty minutes against a

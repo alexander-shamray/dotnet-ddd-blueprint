@@ -4564,7 +4564,19 @@ one whose outbox is not the in-memory one:
 ```csharp
 // Bus-level, beside AddSagaStateMachine (§9.6). Without it the endpoint call
 // below has no store to write to.
-x.AddEntityFrameworkOutbox<OrderingDbContext>(o => o.UseSqlServer());
+x.AddEntityFrameworkOutbox<OrderingDbContext>(o =>
+{
+    o.UseSqlServer();
+
+    // Serializable, and load-bearing rather than tuning. This filter opens
+    // the consume transaction and §9.6's saga repository joins it, so the
+    // level in force is the one set here — and MassTransit defaults it to
+    // RepeatableRead. ConcurrencyMode.Pessimistic does not cover the gap:
+    // its row lock needs a row that exists, and the case it was chosen for
+    // is two deliveries both taking the Initially branch for a
+    // CorrelationId with none yet, where only a key-range lock helps.
+    o.IsolationLevel = IsolationLevel.Serializable;
+});
 
 cfg.ReceiveEndpoint(
     "ordering-fulfilment-saga",

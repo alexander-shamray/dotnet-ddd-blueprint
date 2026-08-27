@@ -158,19 +158,44 @@ Server picks a victim — error **1205**, surfacing out of
 `OrderingCommandEndpointTests.InitializeAsync`, *a test with nothing to do with
 sagas*. It presented as a flake and passed on re-run, which is how it would
 have gone on presenting; capturing the exception is what named it.
-`ServiceFixture.ResetAsync` now retries 1205 and nothing else, three attempts,
-with the argument on the method. **Ignoring MassTransit's tables in the reset
-was the tidier fix and was refused**: it leaves rows standing between tests and
-makes the next whole-table assertion over them wrong for a reason nobody would
-find. This cannot happen in production — nothing there deletes a schema — so
-the fixture is where a fixture's race is answered.
+**The first answer was a bounded retry on 1205 in `ResetAsync`. Review found a
+better argument, the branch acted on it, and the better argument was wrong
+about the mechanism.** `OrderingApiFactory` already takes the outbox dispatcher
+and the retention purge out of the test host, on the ground that a background
+writer racing an assertion makes "the pass never happened" and "the pass spared
+the row" the same green — so the cleanup service belonged on that list, and
+the file's own precedent was an argument nobody had reached for. The branch
+removed the writer **and deleted the retry**, on a sentence that read well:
+*there is no second deleter to race*.
 
-**The registration this most wanted to assert is not public.** What the filter
-resolves is `IOutboxContextFactory<OrderingDbContext>`, and at the 8.5.3 pin it
-cannot be named from a test assembly, so the subject is
-`InboxCleanupService<OrderingDbContext>` — registered by the same call, public,
-and closed over this service's own `DbContext`, so it cannot be satisfied by
-some other context's outbox. The negative test beside it, that
+**It reproduced with the cleanup service gone, on the second of six runs.** A
+deadlock needs two transactions taking locks in opposing order, not two
+deleters. What Respawn races is whatever consume transaction is still
+committing when the next test resets — and ADR-032 made the saga's longer,
+multi-table and `Serializable`, so this decision widened a hazard the fixture
+already documented as one it cannot close. The removal stands on the precedent,
+which is enough on its own; the retry is back, and both comments now say which
+of the two does which job.
+
+**That is the third time on this branch that a claim was reasoned rather than
+run, and the only one whose reasoning was the branch's own rather than
+inherited.** The API name came from an issue and so did the signal; this came
+from a sentence written while deleting the code that contradicted it. Six runs
+cost twelve minutes. Ignoring MassTransit's tables in the reset was the third option
+and stays refused — it leaves rows standing between tests and makes the next
+whole-table assertion over them wrong for a reason nobody would find.
+
+**The registration this most wanted to assert was said not to be public, and
+that was a failed `using` directive written up as a property of the library.**
+`IOutboxContextFactory<OrderingDbContext>` is what the filter resolves, it is
+public, and it lives in `MassTransit.Middleware` rather than the
+`MassTransit.Middleware.Outbox` the first attempt guessed at. Compiling it is
+what settled it. **The correction is not cosmetic**: the subject that claim
+settled for, `InboxCleanupService<OrderingDbContext>`, is registered behind a
+flag `o.DisableInboxCleanupService()` clears, so the gate would have gone red on
+a change leaving the outbox entirely intact — a gate keyed on the wrong thing,
+which is this repository's most-repeated failure wearing its opposite face. The
+negative test beside it, that
 `IBusOutboxNotification` is **not** registered, pins a decision rather than
 catching a defect, and it is not left on its own: a negative assertion passes
 when the name it looks for stops existing, so the positive test is its control
@@ -373,15 +398,10 @@ staged messages permanently — **the one path this decision exists to make
 survivable is also the one that leaks**. It is stated in ADR-032 rather than
 closed, with the error-queue alarm named as what stands in front of it.
 
-**The fixture, which is the entry's own lesson arriving late.** The branch's
-first answer to the deadlock its new background writer caused was a bounded
-retry. `OrderingApiFactory` already removes two hosted services for the stated
-reason that a background writer racing an assertion makes "the pass never
-happened" and "the pass spared the row" the same green. The third one belonged
-on that list, and removing the writer is what the file's own precedent asked
-for. The retry survived the collision; this removes it. **A retry left in front
-of a race that can no longer happen is a comment that will be wrong before
-anybody reads it.**
+**The fixture**, argued under #128 above. The short form: the branch answered a
+race with a retry, review pointed at a better-looking answer, the branch took
+it and deleted the retry — and the race was not the one either of them had
+named. Both changes are in; only one of them was the fix.
 
 **What the reviews did not find is worth as much.** Both central mechanical
 claims held under a decompiler: the outbox filter really does enlist the saga

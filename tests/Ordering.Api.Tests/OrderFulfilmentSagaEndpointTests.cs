@@ -478,6 +478,60 @@ public sealed class OrderFulfilmentSagaEndpointTests(ServiceFixture fixture) : I
                 "process-local buffer that a crash would have discarded (#128, ADR-032)");
     }
 
+    [Fact]
+    public async Task The_scheduled_timeout_keeps_its_delay_through_the_outbox()
+    {
+        // **The half `LastSequenceNumber` cannot see, and Copilot named it.**
+        // The test above proves the saga's sends were staged in
+        // ordering.OutboxMessage and delivered from there. It does not prove
+        // the SCHEDULED one kept its delay: a replay that stripped or shortened
+        // it would stage a row, deliver it, stamp LastSequenceNumber, and leave
+        // that assertion green while every newly placed order expired its stock
+        // reservation within seconds of being placed.
+        //
+        // The delay is carried as a message property and re-applied at
+        // delivery, so it survives the outbox by a route nothing else here
+        // exercises. What makes it observable is the saga's own reaction:
+        // StockReservationExpired arriving in AwaitingStock is handled — it
+        // releases and moves on — so an unarmed or zero delay takes the
+        // instance out of AwaitingStock almost at once.
+        //
+        // **This proves less than it looks and never fails spuriously**, which
+        // is the same shape as the cancellation test above. It establishes that
+        // the timeout did not fire within the wait; it cannot establish that it
+        // will fire at five minutes rather than four, and waiting out §9.6's
+        // real delay is not a price a suite pays. A slow runner makes it prove
+        // less, never fail.
+        var orderId = Guid.CreateVersion7();
+
+        await PublishPlacedAsync(orderId, Guid.CreateVersion7());
+
+        await Eventually(
+            () => SagaRowsAsync(orderId),
+            expected: 1,
+            because: "the arrange half — the schedule is armed by the transition into AwaitingStock");
+
+        await Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Anti-vacuity before the negative, and not decoration: a finalised
+        // instance has no row at all, so a state assertion alone would read a
+        // deleted instance as "not AwaitingStock" and a missing one as the same
+        // failure — while ScalarAsync throws on an empty result rather than
+        // answering, which would fail this for the wrong reason.
+        (await SagaRowsAsync(orderId)).ShouldBe(
+            1,
+            "the instance must still exist for the state below to mean anything");
+
+        (await fixture.ScalarAsync<string>(
+            "SELECT Value = CurrentState FROM ordering.OrderFulfilmentStates WHERE CorrelationId = {0}",
+            orderId))
+            .ShouldBe(
+                "AwaitingStock",
+                "§9.6 arms StockTimeout at five minutes on this transition. Still AwaitingStock after " +
+                    "five seconds is what says the delay crossed the outbox — a stripped or zeroed one " +
+                    "delivers StockReservationExpired at once, and this state handles it");
+    }
+
     /// <summary>
     /// Rows in MassTransit's own inbox for one message —
     /// <c>ordering.InboxState</c>, which is ADR-032's table and not §9.5's

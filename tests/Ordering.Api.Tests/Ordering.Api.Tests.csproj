@@ -31,12 +31,16 @@
          MassTransit.RabbitMQ: the harness swaps the transport out, and a test
          project that uses no transport must not claim one. -->
     <PackageReference Include="MassTransit" />
-    <!-- ADR-032's outbox registration test names InboxCleanupService<T> and
-         IBusOutboxNotification by hand, so this assembly pays for the package
-         rather than riding in on Ordering.Api's graph — the same rule
-         Ordering.Infrastructure states one file over, and the reason a
-         production reference the tests silently depend on is not a reference
-         at all. Copilot raised it on #154. -->
+    <!-- EntityFrameworkOutboxOptions<OrderingDbContext>, and that type alone:
+         the assertion that ADR-032's outbox transaction is Serializable
+         resolves those options directly. The other two MassTransit types this
+         suite names are core rather than persistence —
+         IOutboxContextFactory<T> is MassTransit.Middleware's and
+         IBusOutboxNotification is MassTransit.Middleware.Outbox's, both in the
+         MassTransit assembly, so neither is what this row pays for. Carried
+         transitively by the project reference to Ordering.Api below; named
+         here because this assembly uses the type itself, which is the
+         register's honesty rule rather than a restore requirement. -->
     <PackageReference Include="MassTransit.EntityFrameworkCore" />
     <!-- One substitute, for one assertion: capturing the IPipe<PublishContext>
          the outbox dispatcher hands IPublishEndpoint, so §9.1's single-identity

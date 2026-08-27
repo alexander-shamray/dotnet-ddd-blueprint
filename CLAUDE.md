@@ -531,7 +531,7 @@ the size of the diff but whether a rule moved — ADR-032 took an exception to
 rest on. A fix that moves no rule is a commit body, not a row.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,050 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,051 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -1163,18 +1163,28 @@ own line rather than sending a reader to a file that does not hold it.
   restated-total failure appearing inside the lesson about it.
   [`docs/pr-decision-log.md`](docs/pr-decision-log.md) keeps the inventory;
   this bullet keeps the rule.
-- **A registration can add a background writer, and a background writer is a
-  new participant in every lock the test fixture already takes.** ADR-032's one
-  added line brought a hosted `InboxCleanupService` with it, which prunes its
-  own tables on a timer for as long as the host is up. Respawn's `ResetAsync`
-  deletes every row in the schema in its own dependency order, so two
-  concurrent multi-table deletes met and SQL Server picked a victim —
-  surfacing as an intermittent error 1205 in a command-endpoint test *with
-  nothing to do
-  with sagas*, which passed on re-run and therefore read as a flake. The
-  container half of a change reaches tests that never name it, and the only
-  thing that found this was capturing the exception rather than re-running
-  until it went green.
+- **A change that makes a transaction longer, wider or stricter is a change to
+  every lock ordering it participates in**, and the test fixture is where that
+  surfaces first. ADR-032 turned one endpoint's consume into a three-table
+  `Serializable` transaction; Respawn's `ResetAsync` deletes every row in the
+  schema in its own dependency order while a consumer from the previous test may
+  still be committing, and two multi-table transactions taking locks in opposing
+  order deadlock. It surfaced as an intermittent error 1205 in a
+  command-endpoint test *with nothing to do with sagas*, and passed on re-run,
+  so it read as a flake. **Capturing the exception is what named it; re-running
+  until green would never have.**
+- **Removing one participant from a race is not removing the race, and the
+  tidier story is the one to distrust.** The same change also registered a
+  background writer, and taking that out of the test host was right on its own
+  merits — a writer nothing drives makes "the pass never happened" and "the
+  pass spared the row" the same green. It was then written up as the fix, and the
+  bounded retry was deleted on the sentence *there is no second deleter to
+  race*. **A deadlock needs two transactions with opposing lock order, not two
+  deleters.** It reproduced with the writer gone, on the second of six runs.
+  Both changes are right and only one of them was the fix — and the sentence
+  that got it wrong was written while deleting the code that contradicted it,
+  which is the most expensive moment to reason instead of run. Six runs cost
+  twelve minutes.
 - **An API name nobody has run travels further than a number nobody has
   recomputed.** #128's fix was recorded as `AddEntityFrameworkOutbox` with
   `UseBusOutbox`, and that name reached §9.6's callout, two entries in
@@ -1206,7 +1216,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 846 of 1,050, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 846 of 1,051, no daemon
 ```
 
 `docs/testing.md` is the operational reference — the filters, what needs
@@ -1367,8 +1377,8 @@ defect in the branch.
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
 category runs a smaller suite and says which. `Category!=Integration` is 846 of
-the 1,050 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 204, needing the daemon
+the 1,051 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 205, needing the daemon
 exactly as before.
 
 **The integration half read 187 for two branches and the arithmetic never
@@ -1379,7 +1389,7 @@ against the branch's own CI run rather than recomputed — `gh run view <id>
 this file names for exactly this case.
 
 **Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (828) and integration (204), which is the 846 above split at the
+(18), unit (828) and integration (205), which is the 846 above split at the
 seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
 boundary would mean shipping the build output between runners to keep
 `--no-build` honest, and the coverage figure is the union of the last two.

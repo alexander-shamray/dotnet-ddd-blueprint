@@ -1677,9 +1677,14 @@ something it will execute.
 takes MassTransit's Entity Framework outbox —
 `AddEntityFrameworkOutbox<OrderingDbContext>` with
 `UseEntityFrameworkOutbox<OrderingDbContext>(context)` on the endpoint — in
-place of `UseInMemoryOutbox`. It brings three tables into the `ordering` schema
-(`InboxState`, `OutboxState`, `OutboxMessage`), which is a **second outbox
-table set** and therefore an exception to §9.3's prohibition on one. The
+place of `UseInMemoryOutbox`. The bus-level call sets
+`IsolationLevel = IsolationLevel.Serializable`, which is part of the mechanism
+rather than a tuning knob: the outbox opens the consume transaction and the
+saga repository joins it, so the level in force is this one and no longer the
+`Serializable` the repository used to open for itself, and MassTransit's
+default here is `RepeatableRead`. It brings three tables into the `ordering`
+schema (`InboxState`, `OutboxState`, `OutboxMessage`), which is a **second
+outbox table set** and therefore an exception to §9.3's prohibition on one. The
 exception is this endpoint and no other; the platform's other three receive
 endpoints keep the in-memory outbox, and every application-level integration
 event still goes through §9.4's `ordering.OutboxMessages` and its dispatcher.
@@ -1836,6 +1841,20 @@ Retiring either one costs a guarantee the other never made.
   contrasts MassTransit's inbox with §9.5's seven-day retention. Neither is
   tuned here because nothing has measured what they should be; naming them is
   what stops the next reader assuming they were chosen.
+- **The saga's consume transaction is longer, wider and stricter than it was,
+  and §12.4's fixture is where that shows.** It now spans `InboxState`,
+  `OutboxMessage` and the instance, at `Serializable`, and holds through a
+  broker publish. Nothing in production deletes a schema, so nothing there
+  meets it the way a test does — but Respawn's reset deletes every row in the
+  `ordering` schema while a consumer from the previous test may still be
+  committing, and two multi-table transactions taking locks in opposing order
+  deadlock. That hazard predates this decision and the fixture already
+  documented it; what this decision did was widen it, from a single-row write
+  to a three-table `Serializable` one. `ServiceFixture.ResetAsync` retries
+  error 1205 and carries the argument. **Recorded here rather than only there,
+  because the branch tried to close it by removing a background service and
+  the deadlock reproduced anyway** — a fixture retry answers a property of this
+  decision, not a property of that service.
 - **The pre-flush window stops existing; the catch-all does not come back.**
   #117 removed an `OnUnhandledEvent(x => x.Ignore())` because three arrivals
   reached it and it could not tell them apart — a post-flush duplicate, a

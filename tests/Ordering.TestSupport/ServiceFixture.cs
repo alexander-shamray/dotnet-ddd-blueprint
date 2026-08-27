@@ -101,6 +101,21 @@ public sealed class ServiceFixture : IAsyncLifetime
     private Respawner? _respawner;
 
     /// <summary>
+    /// SQL Server's "chosen as the deadlock victim" error, the only fault
+    /// <see cref="ResetAsync"/> retries — the argument is on that method. Named
+    /// rather than written as a literal in the filter, because a bare
+    /// <c>e.Number == 1205</c> reads as a magic number in the one place it most
+    /// needs to be obvious that a narrow fault is being caught and not a broad
+    /// one.
+    /// </summary>
+    private const int DeadlockVictim = 1205;
+
+    /// <summary>
+    /// Attempts, not retries — two attempts is one retry.
+    /// </summary>
+    private const int ResetAttempts = 3;
+
+    /// <summary>
     /// The connection each §7.1 identity would hold, pointed at Ordering's own
     /// database rather than the container's <c>master</c>.
     /// </summary>
@@ -238,24 +253,46 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// was judged too expensive for the hazard.
     /// </para>
     /// <para>
-    /// <b>It raced a background service for one revision of this branch, and
-    /// what fixed it was removing the writer rather than surviving it.</b>
-    /// ADR-032's <c>AddEntityFrameworkOutbox</c> registers a hosted
-    /// <c>InboxCleanupService&lt;OrderingDbContext&gt;</c> that prunes
-    /// <c>ordering.InboxState</c> on a timer. Respawn deletes every row in the
-    /// schema in its own dependency order, so two multi-table deletes ran
-    /// concurrently over the same tables and SQL Server picked a victim — an
-    /// intermittent <c>SqlException</c> 1205 out of this method, in whichever
-    /// test happened to reset next and therefore in tests with nothing to do
-    /// with sagas. It passed on re-run, which is how it read as a flake.
+    /// <b>It deadlocks against whatever is still consuming, and the retry below
+    /// is the only honest answer this fixture has.</b> Respawn deletes every
+    /// row in the <c>ordering</c> schema in its own dependency order while a
+    /// consumer from the previous test may still be committing — and since
+    /// ADR-032 the saga's consume transaction is longer, multi-table
+    /// (<c>InboxState</c>, <c>OutboxMessage</c>, <c>OrderFulfilmentStates</c>)
+    /// and <c>Serializable</c>. Two multi-table transactions taking locks in
+    /// different orders is a deadlock, and SQL Server picks a victim:
+    /// <c>SqlException</c> 1205 out of this method, in whichever test happened
+    /// to reset next and therefore in tests with nothing to do with sagas.
     /// <para>
-    /// The first answer was a bounded retry here. It is gone:
-    /// <see cref="OrderingApiFactory"/> now removes that hosted service on the
-    /// same argument it already removed the outbox dispatcher and the retention
-    /// purge, so there is no second deleter to race. A retry would have
-    /// survived the collision; this removes it, and a retry left in front of a
-    /// race that can no longer happen is a comment that will be wrong before
-    /// anybody reads it.
+    /// <b>Two things were tried and only one of them was the fix, which is
+    /// worth recording because the wrong one was argued convincingly.</b>
+    /// ADR-032 also registers a hosted
+    /// <c>InboxCleanupService&lt;OrderingDbContext&gt;</c>, and
+    /// <see cref="OrderingApiFactory"/> now removes it on the same argument it
+    /// already removed the outbox dispatcher and the retention purge. That
+    /// removal is right and it is <b>not</b> what closes this: the deadlock
+    /// reproduced with the cleanup service gone. A revision of this comment
+    /// claimed "there is no second deleter to race" and deleted the retry on
+    /// the strength of it — **a deadlock needs two transactions with opposing
+    /// lock order, not two deleters**, and the claim was reasoned rather than
+    /// run. Six runs of the suite reproduced it on the second.
+    /// </para>
+    /// <para>
+    /// So the retry stays, bounded, on 1205 and nothing else. <b>This
+    /// particular</b> race cannot happen in production — nothing there deletes
+    /// a schema — so a fixture's race is answered in the fixture, by rerunning,
+    /// which is what SQL Server's own message asks for. That is narrower than
+    /// "deadlocks cannot happen in production", which nothing here establishes
+    /// and a review pass declined to let this comment claim: MassTransit's own
+    /// cleanup deletes <c>InboxState</c> while a consume transaction locks a
+    /// row there and then inserts into <c>OutboxMessage</c>, which is an
+    /// opposing order. What differs is the consequence — a faulted message the
+    /// endpoint retries, rather than a reset that fails a test.
+    /// <para>
+    /// Draining harder is the alternative and does not reach it: a test can
+    /// wait for the deliveries it published, and the saga's own sends are
+    /// second-order deliveries it never named.
+    /// </para>
     /// </para>
     /// </para>
     /// </summary>
@@ -273,7 +310,24 @@ public sealed class ServiceFixture : IAsyncLifetime
                 SchemasToInclude = ["ordering"]
             });
 
-        await _respawner.ResetAsync(connection);
+        // Bounded, and small on purpose: a reset that loses twice in a row is
+        // not the race this handles and should be seen. Rethrowing on the last
+        // attempt keeps the original exception rather than a wrapper naming the
+        // retry instead of the deadlock.
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await _respawner.ResetAsync(connection);
+                return;
+            }
+            catch (SqlException e) when (e.Number == DeadlockVictim && attempt < ResetAttempts)
+            {
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(100 * attempt),
+                    TestContext.Current.CancellationToken);
+            }
+        }
     }
 
     /// <summary>

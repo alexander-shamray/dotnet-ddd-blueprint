@@ -1280,10 +1280,11 @@ EF Core minor versions and behave differently under identical code.
          which is the same package and the same DbContext. Same version and
          same release as the two rows above: a saga repository a minor behind
          the state machine it stores is not a combination anyone tests.
-         Referenced by Ordering.Infrastructure, which holds the only saga,
-         and by Ordering.Api.Tests, which names the types ADR-032's
-         registration test asserts on rather than riding in on the production
-         graph. -->
+         Referenced by Ordering.Infrastructure, which holds the only saga;
+         by Ordering.Api.Tests, for the EntityFrameworkOutboxOptions<T> its
+         Serializable assertion resolves; and by Ordering.TestSupport, for the
+         InboxCleanupService<T> OrderingApiFactory removes from the test host.
+         Enumerated rather than counted, on Appendix B's terms. -->
     <PackageVersion Include="MassTransit.EntityFrameworkCore" Version="8.5.3" />
     <PackageVersion Include="StackExchange.Redis" Version="2.9.11" />
     <PackageVersion Include="FluentValidation" Version="12.0.0" />
