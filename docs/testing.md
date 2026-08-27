@@ -177,23 +177,33 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
 > twenty-six tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-one — 97 in total, with no
+> `Category!=Integration` selects the other seventy — 96 in total, with no
 > third state and nothing counted twice. Those figures read ten/81, then
-> twenty/91, then twenty-three/94, then twenty-four/95, and every retake was
-> the suite growing while the callout did not — the drift the paragraph below
-> is about, arriving in the paragraph above it. **How many retakes is not
-> written down**, for the reason the figures keep demonstrating.
+> twenty/91, then twenty-three/94, then twenty-four/95, then twenty-six/71, and
+> every retake up to that one was the suite growing while the callout did not —
+> the drift the paragraph below is about, arriving in the paragraph above it.
+> **How many retakes is not written down**, for the reason the figures keep
+> demonstrating.
+>
+> **This retake is the first that goes down, and the direction matters more
+> than the number.** ADR-033 withdrew the token-denylist claim, so
+> `RedisKeys.Denylist` and the case pinning its shape are gone and the fast
+> half is seventy where it was seventy-one. A figure that has only ever grown
+> trains the next reader to check whether it is *behind*; one that can move
+> either way has to be re-measured rather than reasoned about, which is what
+> the paragraph below asks for and what this line exists to stop anyone
+> assuming past.
 >
 > **Those are the runner's numbers, and `--list-tests` answers a different
 > question.** For this project the two now agree — discovery and execution both
-> report 97, measured rather than assumed — and they have not always: the gap
+> report 96, measured rather than assumed — and they have not always: the gap
 > was 82 against 81 when this callout was written, and mixing a partition
 > quoted from `--list-tests` with a total from `dotnet test` is how it first
-> came to claim 72 and 82. The 1,051 is summed from `dotnet test` output, so
+> came to claim 72 and 82. The 1,052 is summed from `dotnet test` output, so
 > quote what ran. **Agreement today is a measurement and not a guarantee** —
 > which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **846 and 205 of 1,051**, and the fast half
+> Across the solution the split is **847 and 205 of 1,052**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -229,7 +239,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **828** and **205**, summing to the 1,051
+on this repository they are **18**, **829** and **205**, summing to the 1,052
 the whole suite runs — which is the arithmetic the callout below asks for.
 
 ```bash
@@ -260,8 +270,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 846 and 205 summing to
-> 1,051 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 847 and 205 summing to
+> 1,052 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

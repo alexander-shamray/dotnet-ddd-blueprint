@@ -303,7 +303,7 @@ and so **nothing writes, reads or prunes it in this deployment.** It exists
 because `OutboxMessage.OutboxId` carries a foreign key to it. An empty
 `ordering.OutboxState` is the design; do not spend an incident on it.
 
-§9.9's `RetentionPurgeService` — which prunes *our* tables — reads none of
+§9.4's `RetentionPurgeService` — which prunes *our* tables — reads none of
 the three. What this repository has no query for, it also has no opinion
 about: read the library's schema before drawing a conclusion from a column.
 What is settled here is *which* table to open. **Before ADR-032 there

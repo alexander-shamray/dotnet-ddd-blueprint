@@ -68,6 +68,181 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## The controls that were only ever written down (#45, #46, #49, #139)
+
+Three security claims and one style rule, and the shape they share is that
+**each was stated somewhere and enforced nowhere**. A denylist that no code
+reads. A refresh token the chapter drew arriving at a browser it should never
+have reached. An erasure rule contradicted by the platform's most widely
+consumed contract. A continuation rule the corpus disagreed with in one file.
+None of the four was found by a test going red, because in each case the thing
+that would have gone red is what was missing.
+
+**The tell they share is that reading either side alone leaves you satisfied.**
+§11.3 said outright that no deny list exists; ADR-006, §8.1 and `RedisKeys`
+said one did. §11.7 named an `OrderConfirmed` carrying personal data as the
+forbidden case; §9.1 shipped exactly that and argued for it. In both, the
+inconsistency was invisible from either end and only a reader holding both at
+once could see it — which is the one rule's whole subject, arriving three times
+in one branch.
+
+### The keyspace nobody read (#46)
+
+`RedisKeys.Denylist` existed. §8.1 gave `{service}:denylist:` the strictest
+eviction policy in the platform and argued for it on the grounds that a
+revoked-token entry must never be silently evicted. ADR-006 recorded the
+denylist among Redis's decided uses. Tests pinned the key's shape. **Nothing
+ever wrote or read it**, and §11.3 said so in a sentence nobody reconciled with
+the other three.
+
+[ADR-033](backend-architecture/appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+withdraws the claim rather than building the consumer, and the four
+measurements behind that choice are in the record. The one worth repeating
+here: **two of the four hosts have no Redis at all**, and one of them is the
+gateway — the edge every external request enters. A `JwtBearerEvents` handler
+resolves per request, so `ValidateOnBuild` cannot see the gap; the gateway
+would have thrown on its first authenticated request, and the obvious remedy of
+making the lookup optional would have meant the edge silently never checking.
+That is the fail-open shape, reached by trying to close a hole.
+
+**The access-token lifetime was the other half and was never stated at all.**
+The realm ran `accessTokenLifespan: 300` and no chapter said so, which left the
+exposure window a realm default nobody had chosen. §11.3 now states it
+normatively and `RealmImportTests` pins the realm against it. **The coincidence
+that nearly hid it**: §11.3 already reasoned about "five minutes" — but that
+was `ClockSkew`'s default, a different quantity that happens to share a number,
+and the section read as though the lifetime were covered because a five appeared
+in it.
+
+**A plausible cause you can see beats an actual cause you have not looked
+for.** This log already carries that lesson from the HybridCache meter, where a
+registration stood in for a signal. The denylist is the same failure one level
+up: not a name registered against nothing, but a *decision record* standing in
+for a mechanism. Asking "is revocation handled" returned three yeses and one
+no, and the three were louder because they were the ones written like answers.
+
+### The token that outlived the session (#49)
+
+§11.2's flow delivered a refresh token to the browser. The realm was not merely
+permitting that, it was configured for it: `revokeRefreshToken` off,
+`refreshTokenMaxReuse` zero, `ssoSessionMaxLifespan` ten hours — so the token
+was reusable, never rotated, for as long as the session lived, and with no
+revocation path (#46, above) nothing could cut it short.
+
+**#49's cheap option was unreachable until #46 was answered, which is why they
+landed together.** "SPA-held tokens, stated honestly" needs a stated lifetime
+and a stated revocation posture; without those, the residual it records is
+unbounded and the honesty is decorative. Ranking the two issues independently
+would have priced #49 wrong — this repository's own rule that two open
+questions can decide each other, arriving for the third time.
+
+**The fix was verified before it was written, and both directions were
+measured.** `use.refresh.tokens` is documented as a client attribute; what was
+not established is that it does anything for this client, on this realm, on the
+Keycloak version §14.1 pins. Run against `quay.io/keycloak/keycloak:26.0` with
+this realm file: unmodified, `web-app` is issued a `refresh_token` with
+`refresh_expires_in` 1800; with the attribute, there is no `refresh_token` key
+at all and `refresh_expires_in` is 0. **The control was the same client, not a
+different one** — a first pass compared `web-app` against `admin-cli`, which
+would have established only that the two clients differ.
+
+**What was deliberately not done.** Terminating the flow in `Web.Bff` is the
+stronger answer and is
+[ADR-034](backend-architecture/appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)'s
+stated runner-up: an OIDC handler, a cookie stack, antiforgery on every
+state-changing route, a realm change and a gateway route change. §11.5's
+account of the BFF holding exactly one credential is correct today and would
+not survive it. That is an Appendix C row, not an edit.
+
+### The address that could not be erased (#45)
+
+`OrderConfirmed` carried a `ShippingAddressV1`. §9.1 argued it in on
+"fat enough" grounds; §11.7 named that exact contract as the counter-example of
+what must never happen. The contradiction is what made it worth filing, because
+a reviewer reading either chapter alone concluded the rule held.
+
+**What settled it is that every escape route is one-way.** The payload is
+serialised into `ordering.OutboxMessages`, whose purge deletes only rows with
+`ProcessedAt IS NOT NULL` — deliberately, so §13.6's alert can see abandoned
+rows — so an abandoned row keeps the address indefinitely and a test guarantees
+it. It sits in the broker, for which no chapter sets a retention bound. It is
+copied into every consuming store, and §3.2 gives the event to Notifications,
+which has no use for an address. §13.4's redactor matches key names and none
+covers an address — and `SensitiveKeysTests` held a **green test asserting
+`ShippingAddress` must not be redacted**, so the platform did not merely fail to
+protect the field, it pinned that it exported it.
+
+**Amending §11.7 instead was refused, and the reasoning generalises.** Defining
+an erasure procedure for event-borne personal data looks free because it touches
+no code. It is not: it needs an erasure-triggered outbox purge that cannot reuse
+the retention purge whose predicate is load-bearing, a consumer-side obligation
+binding services that do not exist, and a broker retention bound nothing sets.
+It would also have to reverse §11.7's own sentence — "which is not practically
+possible" — into a procedure nobody can run. **That converts an honest
+contradiction into a dishonest resolution**, which is worse than the
+contradiction, because the contradiction is at least visible to anyone holding
+both chapters.
+
+**The field had no consumer, which is the only reason this was cheap.**
+Shipping and Notifications are unbuilt and §9.6's saga reads only the `OrderId`,
+so §9.2's two conditions for an in-place change were both met and
+[ADR-035](backend-architecture/appendix-a-adrs.md#adr-035--a-broadcast-integration-event-carries-no-personal-data)
+is the record the second condition demands. Every hour Shipping does not exist
+is an hour this removal stays free; the same edit after Shipping ships is a
+version bump with a consumer on the other side.
+
+**The domain event keeps its `Address`, and the asymmetry is the decision.**
+`OrderConfirmedDomainEvent` never crosses a service boundary and
+`ordering.Orders` legitimately stores the address of the order it describes —
+§11.7 governs what travels, not what a service holds about its own data.
+**A comment written for that asymmetry had to be corrected before it shipped**:
+a first draft explained that the domain event "travels the Local lane, in
+process, to a projection reading a table". `DomainEventDispatcher` stages on
+the Local lane only where `projections.HasHandler`, and Ordering registers no
+domain-event handler at all — so the mechanism named was one nothing runs. The
+claim was plausible, adjacent to real code, and would have shipped as the
+file's own explanation of itself.
+
+### The rule the corpus disagreed with (#139)
+
+`CLAUDE.md` puts a broken fluent chain's continuations at head + 4.
+`OrderFulfilmentSagaTests.cs` used head + 8 for one shape — and held nine sites
+at +4 in the same file, so it was neither the repository's form nor its own.
+§12.5's sample followed the minority form, which is the half that mattered:
+the chapter is the specification, so a service built from it inherits the
+contradiction.
+
+**The count had grown between filing and fixing** — 22 sites became 34 — which
+is the ordinary fate of a style issue left open, and the reason the issue argued
+for a sweep rather than a drive-by. What made the sweep safe was that the two
+populations were separable by column: every +8 site sat at indent 20 with its
+head at 12, and every already-correct site at 16. That was checked before a
+line moved, because a transformation keyed on the wrong predicate would have
+dedented nine correct sites into being wrong.
+
+**No new rule, and that is the point.** #139 is the one issue in this branch
+where the specification was already right and only the corpus was wrong, so the
+fix is a sweep and a chapter edit with nothing to record beyond having done it.
+
+### What this branch measured about itself
+
+**The suite total went *down* for the first time.** Withdrawing the denylist
+took `RedisKeys.Denylist` and the case pinning its shape with it, so
+`Common.Infrastructure.Tests` reads seventy on the fast side where it read
+seventy-one, and `docs/testing.md`'s retake series — which had only ever grown —
+now runs in both directions. That is recorded there rather than only here,
+because a figure that has only ever grown trains the next reader to check
+whether it is *behind* rather than whether it is *wrong*.
+
+**Both new realm facts were checked against the wrong answer before being
+trusted.** Flipping `accessTokenLifespan` to 900 and `use.refresh.tokens` to
+`true`, **rebuilding**, and observing two failures is what establishes they are
+gates rather than green decoration — and the rebuild is load-bearing, since the
+realm file is copied to the test output and `--no-build` would have run the
+stale copy and reported a pass. This log already carries that lesson from a
+counterfactual that did not rebuild; it applies to a content file exactly as it
+does to an assembly.
+
 ## The mechanism a word stood in for (#128, #137, #62)
 
 Three issues, and each is a word that had been read as a mechanism for long
