@@ -77,7 +77,7 @@ ceiling=$(sed -n 's/^CEILING=\([1-9][0-9]*\)$/\1/p' "$ledger" | head -1)
 slot="$1"
 mode="$2"
 [[ "$slot" =~ ^[1-9][0-9]*$ ]] && [ "$slot" -le "$ceiling" ] ||
-  { echo "slot must be 1..$ceiling — the ceiling ship.md states: $slot" >&2; exit 2; }
+  { echo "slot must be 1..$ceiling — the ceiling grok-ledger.sh declares: $slot" >&2; exit 2; }
 case "$mode" in
   full|recheck) ;;
   *) echo "mode must be full or recheck: $mode" >&2; exit 2 ;;

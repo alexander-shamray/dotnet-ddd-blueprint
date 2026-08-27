@@ -2570,8 +2570,13 @@ two different mechanisms, which an earlier revision of this paragraph ran
 together.**
 
 **Since #30 it is also closed on a third mechanism, and that one is not a rule.**
-`.claude/hooks/guard-git-argv.py` refuses any argv element containing `ext::`
-inside a `git` invocation. A hook is not bound by the pattern grammar at all,
+`.claude/hooks/guard-git-argv.py` refuses an argv element containing `ext::` on
+a git subcommand that takes a **repository** — `fetch`, `clone`, `pull`,
+`push`, `remote` and their neighbours. **Not every element after `git`**, which
+is what this sentence said until the scoping landed and did not reconcile it:
+the transport is only meaningful where git expects a repository, and judging it
+everywhere made a branch name or a path carrying the sequence indistinguishable
+from a use of it — a commit body arguing about the transport included. A hook is not bound by the pattern grammar at all,
 which is why it can express what `Bash(...)` provably cannot — and the whole
 argument below about which grant pins what remains worth reading, because a
 hook is one file and defence in depth is the reason the allow side was narrowed

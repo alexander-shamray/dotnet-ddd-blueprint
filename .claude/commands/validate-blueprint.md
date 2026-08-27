@@ -2,7 +2,7 @@
 description: Multi-pass self-consistency audit of the blueprint, its roadmap and docs/testing.md, and of the code against them
 argument-hint: "[chapter file or topic to focus on — omit for a full sweep]"
 allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
-disallowed-tools: Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(deploy/**), Edit(./deploy/**), Edit(tools/**), Edit(./tools/**), Edit(.github/**), Edit(./.github/**), Edit(.config/**), Edit(./.config/**)
+disallowed-tools: Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
 Audit `docs/backend-architecture/` for internal contradictions — and, once the
@@ -205,7 +205,13 @@ widening to removing `Edit`. That had never been verified in this repository,
 and guessing at permission syntax is the `Write(...)`-versus-`Edit(...)` class
 of error this repo has paid for twice.
 
-**A tree not on that list is editable**, so the list is a deny-list and rots
-the way every deny-list here has. `test_grok_helpers.py` asserts it covers
-every tracked top-level tree, which is what turns adding one into a red build
-rather than a silent widening.
+**Every tracked file at the repository root is denied too**, and that was the
+hole in the first version: denying directories alone left `CLAUDE.md`,
+`global.json`, `Directory.Build.props` and `Platform.slnx` writable — a
+boundary with a gap exactly where this repository keeps its build inputs.
+Raised in review. Neither is in this command's scope; it audits chapters.
+
+**A path not on that list is editable**, so the list is a deny-list and rots
+the way every deny-list here has. `test_grok_helpers.py` reads both sets from
+`git ls-files` and asserts each is denied, which is what turns adding a tree or
+a root file into a red build rather than a silent widening.

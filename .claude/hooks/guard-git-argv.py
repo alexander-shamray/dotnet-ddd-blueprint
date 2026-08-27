@@ -75,8 +75,21 @@ FORBIDDEN_SUBSTRINGS = ("ext::",)
 # what is refused is a *destination* of main, a force in any spelling, and a
 # delete in any spelling — three properties, rather than the six spellings that
 # happened to be noticed.
-PUSH_FORCE_FLAGS = {"-f", "--force", "--force-with-lease", "--force-if-includes"}
-PUSH_DELETE_FLAGS = {"-d", "--delete"}
+# **Judged by NAME and by PREFIX, not by set membership**, and both halves were
+# holes. `--force-with-lease=feature` is not equal to `--force-with-lease`, so a
+# set test admitted it; and git accepts any unambiguous abbreviation of a long
+# option, so `--for` is a force push a full-spelling list never sees.
+#
+# `--all` and `--mirror` are here because they need no refspec at all: `--all`
+# updates every branch the remote shares with this one, `main` included, and
+# `--mirror` force-updates and deletes. A loop that inspects refspecs cannot see
+# either — there is nothing for it to inspect. `--prune` deletes remote branches
+# for the same reason.
+PUSH_DANGEROUS_SHORT = {"-f", "-d"}
+PUSH_DANGEROUS_LONG = (
+    "force", "force-with-lease", "force-if-includes",
+    "delete", "all", "mirror", "prune",
+)
 PROTECTED_BRANCHES = {"main"}
 
 # Where one command ends and the next begins. A flag belongs to the `git` that
@@ -115,9 +128,21 @@ REPOSITORY_SUBCOMMANDS = {
 # value, so skipping one means skipping two elements — and getting that wrong is
 # how `git -C <dir> push` reached the push guard with `-C` in the subcommand
 # position and was waved through.
+# Taken from git's own synopsis rather than from the options this file happened
+# to hit — which is how `-C` was missed in the first place, and how
+# `--attr-source` was missed in the fix for it. `--super-prefix` is gone: it is
+# `unknown option` to the git on this host, so its presence was evidence the
+# list had been written from memory.
+#
+# **This list still trails git's globals, and that is stated rather than
+# implied** — a hardcoded skip-list is the same shape as the push deny-list this
+# branch refused to extend, and pretending otherwise would be the exact mistake
+# #23 is about. It is load-bearing only for the transport check now: the push
+# check below no longer depends on it, because an unknown global must not be
+# able to hide a force push the way `-C` and `--attr-source` both did.
 GLOBAL_VALUE_FLAGS = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
-    "--super-prefix",
+    "--attr-source",
 }
 
 
@@ -153,6 +178,37 @@ def after_global_options(segment):
     return segment[index:]
 
 
+def dangerous_push_flag(element):
+    """The long option `element` names, if it is a push flag that must refuse.
+
+    Three normalisations, each of which was a hole:
+
+      * `--flag=value` is split, so `--force-with-lease=feature` is judged as
+        `--force-with-lease` rather than failing a set-membership test;
+      * an ABBREVIATION is matched, because git accepts any unambiguous prefix
+        of a long option — so `--for` is a force push that a list of full
+        spellings never sees. A stem is dangerous when it is a prefix of a
+        dangerous option, which is deliberately the same test git applies; and
+      * the short forms are named separately, since `-f` is a prefix of nothing.
+
+    `--follow-tags` is the case that shows the prefix test is the right way
+    round: `"force".startswith("follow-tags")` is false, so it passes, while
+    `--fo` is refused exactly as git would refuse it for being ambiguous.
+    """
+    if element in PUSH_DANGEROUS_SHORT:
+        return element.lstrip("-")
+    name = element.split("=", 1)[0]
+    if not name.startswith("--"):
+        return None
+    stem = name[2:]
+    if not stem:
+        return None
+    for full in PUSH_DANGEROUS_LONG:
+        if full.startswith(stem):
+            return full
+    return None
+
+
 def push_offence(segment):
     """The reason to refuse a `git push`, or None. `segment` is argv after `git`.
 
@@ -160,14 +216,45 @@ def push_offence(segment):
     for the reason #23 gives: a deny-list of spellings trails the grammar
     forever, and the grammar is not going to stop growing.
     """
-    segment = after_global_options(segment)
-    if not segment or segment[0] != "push":
+    # **The push check does NOT ask where the subcommand is**, and that is the
+    # fix for the second miss rather than the first. `-C` was closed by
+    # `after_global_options`, and then `--attr-source HEAD push …` walked
+    # through the same door, because the skip-list had been written from the
+    # options this file happened to hit. A list that trails git's globals is the
+    # deny-list shape #23 exists to refuse; making the check depend on it just
+    # moves the enumeration.
+    #
+    # So `push` is LOCATED instead: the first bare `push` element, whatever
+    # precedes it. An unknown global cannot hide it, because the guard no longer
+    # needs to recognise the global at all.
+    #
+    # Safe against a ref that happens to be called `push` — `git log push`
+    # slices to `["push"]`, which carries no dangerous flag and no refspec after
+    # the remote, so nothing refuses it. The values of value-taking flags are
+    # skipped first, so `git commit -m push` never reaches this.
+    skip = False
+    start = None
+    for index, element in enumerate(segment):
+        if skip:
+            skip = False
+            continue
+        if element in VALUE_FLAGS:
+            skip = True
+            continue
+        if element == "push":
+            start = index
+            break
+    if start is None:
         return None
-    flags = {a for a in segment[1:] if a.startswith("-")}
-    if flags & PUSH_FORCE_FLAGS:
-        return "a force push is a decision, not a step; run it yourself"
-    if flags & PUSH_DELETE_FLAGS:
-        return "deleting a remote branch is a decision, not a step; run it yourself"
+    segment = segment[start:]
+    for element in segment[1:]:
+        dangerous = dangerous_push_flag(element)
+        if dangerous is not None:
+            return (
+                f"`git push --{dangerous}` rewrites or removes what is already "
+                "published, in every spelling and abbreviation; that is a "
+                "decision, not a step — run it yourself"
+            )
 
     positional = [a for a in segment[1:] if not a.startswith("-")]
     # positional[0] is the remote; everything after it is a refspec.
@@ -197,7 +284,21 @@ def push_offence(segment):
 def offence(command):
     """The reason to refuse `command`, or None to allow it."""
     try:
-        tokens = shlex.split(command, posix=True)
+        # **`shlex.split` does not tokenise shell operators**, and that was a
+        # complete bypass: `git log --oneline&&git push origin +HEAD:main`
+        # yields `--oneline&&git` as ONE element, so `git_segments` never starts
+        # a second segment, the push check sees the subcommand `log`, and the
+        # protected push is admitted. `git status;git push …` the same.
+        #
+        # Only whitespace-separated operators were ever recognised, which is the
+        # `SEPARATORS` set below doing exactly what it says and nothing more.
+        # `punctuation_chars=True` makes the lexer split `();<>|&` off as tokens
+        # of their own, so an operator without spaces around it separates
+        # commands here the way it does in the shell — while quoted content is
+        # untouched, which is what keeps `git commit -m 'a && b'` one element.
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
     except ValueError:
         # **Unparseable is not the same as hostile, and refusing it outright was
         # wrong.** The first version returned a refusal here on the reasoning

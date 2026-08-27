@@ -75,10 +75,31 @@ CEILING=6
 # arriving through its own fix. So every denominator this ledger has ever
 # written stays readable forever, and only the write moves.
 #
-# The numerator stays 1..12 on the read for the same reason: a `9/12` row posted
-# under the old ceiling is still a slot that was spent, and refusing to see it
-# would hand it back.
-LEDGER_DENOMINATORS='6|12'
+# **Only RETIRED denominators are listed here; the current one is DERIVED.**
+# This read `'6|12'`, which restated the ceiling thirteen lines below its
+# declaration — and a second literal of the bound is the whole of #140
+# reappearing inside its own fix. Move `CEILING` to 4 and the write becomes
+# `n/4` while the read still accepts only 6 and 12, so every reservation this
+# file posts is invisible to `count`: the cap re-arms on a pull request that is
+# actively spending it, one edit away, with nothing red. Raised in review
+# against exactly this line.
+#
+# So a future ceiling change is one edit that cannot fail in that direction:
+# move `CEILING`, and append the value it replaced to the retired list.
+LEDGER_RETIRED_DENOMINATORS='12'
+LEDGER_DENOMINATORS="$CEILING|$LEDGER_RETIRED_DENOMINATORS"
+
+# Every slot this ledger could ever have WRITTEN, which is 1..12 while twelve is
+# the largest denominator above. **A ceiling above twelve has to widen this in
+# the same edit**, or its own rows stop matching — the third thing to move, and
+# the reason the instruction above says "append the value it replaced" rather
+# than "change the number".
+#
+# It is deliberately not `[1-9][0-9]*`. That was tried and reverted: it admits
+# `13/12`, a shape the write side has never been able to produce, and a row this
+# file did not write is not this file's state — the same rule the anchored jq
+# filter exists for, one field along. Widening it would let a write-verified
+# author inflate the count past any ceiling that has ever existed.
 LEDGER_READ_SLOTS='[1-9]|1[0-2]'
 
 usage() {
@@ -205,7 +226,7 @@ fi
 # existed, and refusing to WRITE a seventh is a different act from refusing to
 # SEE a ninth that was already spent.
 [[ "$n" =~ ^[1-9][0-9]*$ ]] && [ "$n" -le "$CEILING" ] ||
-  { echo "slot must be 1..$CEILING — the ceiling ship.md states: $n" >&2; usage; }
+  { echo "slot must be 1..$CEILING — the ceiling grok-ledger.sh declares: $n" >&2; usage; }
 
 case "$op" in
   reserve)

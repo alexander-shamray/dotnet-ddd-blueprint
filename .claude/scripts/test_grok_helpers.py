@@ -694,9 +694,13 @@ class LedgerStub:
     """
 
     def __init__(self, rows=None, permissions=None, poster="self", poster_id=900,
-                 comments=None):
+                 comments=None, script=None):
         if (rows is None) == (comments is None):
             raise AssertionError("supply exactly one of rows= or comments=")
+        # `script=` lets a case drive a MODIFIED copy of the ledger — the
+        # moved-ceiling round trip needs one, because the property under test is
+        # what a write and a read agree on after `CEILING` moves.
+        self.script = script or LEDGER
         self.dir = tempfile.mkdtemp(prefix="ledger-stub-")
         permissions = permissions or {}
         rows_file = Path(self.dir) / "rows"
@@ -789,7 +793,7 @@ class LedgerStub:
         env = dict(os.environ)
         env["PATH"] = self.dir + os.pathsep + env["PATH"]
         return subprocess.run(
-            [BASH, str(LEDGER), *args],
+            [BASH, str(self.script), *args],
             capture_output=True,
             text=True,
             env=env,
@@ -1144,6 +1148,23 @@ class TheCeilingBindsAndTheReadStaysWider(unittest.TestCase):
         )
         self.assertEqual("0", stub.run("42", "count").stdout.strip())
 
+    @staticmethod
+    def declared_in_ledger(name, script=None):
+        """One declaration's VALUE, as bash composes it.
+
+        Evaluated rather than pattern-matched, because `LEDGER_DENOMINATORS` is
+        now derived from `$CEILING` and a regex over the source would be reading
+        the expression instead of the value — which is the whole subject of the
+        review finding these cases exist for.
+        """
+        path = (script or LEDGER).as_posix()
+        out = run_bash(
+            'eval "$(grep -E \'^(CEILING|LEDGER_)[A-Z_]*=\' "$L")"; '
+            'printf %s "${!N}"',
+            L=path, N=name,
+        )
+        return out.stdout
+
     def test_the_read_pattern_is_declared_once_and_actually_wired_in(self):
         # SOURCE_INPUTS discipline on a pair of scalars: declared away from the
         # code that applies them, and asserted to reach it. A denominator list
@@ -1153,26 +1174,90 @@ class TheCeilingBindsAndTheReadStaysWider(unittest.TestCase):
         for name in ("LEDGER_READ_SLOTS", "LEDGER_DENOMINATORS"):
             with self.subTest(name=name):
                 self.assertEqual(
-                    1, len(re.findall(rf"^{name}='[^']*'$", text, re.MULTILINE)),
+                    1,
+                    len(re.findall(rf"^{name}=\S", text, re.MULTILINE)),
                     f"{name} is not declared exactly once",
                 )
                 self.assertIn(f'\'"${name}"\'', text, f"{name} is declared and unused")
 
-    def test_the_denominator_alternation_admits_both_and_nothing_else(self):
-        # Run on the same engine the script does, over the declared value rather
-        # than a restatement of it. `6|12` matching "1" or "2" would widen the
-        # shape filter to bodies this ledger never wrote.
-        found = re.findall(
-            r"^LEDGER_DENOMINATORS='([^']*)'$",
-            LEDGER.read_text(encoding="utf-8"), re.MULTILINE,
+    def test_the_current_denominator_is_derived_and_not_restated(self):
+        # **The second literal of the bound, raised in review.** This read
+        # `LEDGER_DENOMINATORS='6|12'` — the ceiling restated thirteen lines
+        # below its own declaration, which is #140 reappearing inside its own
+        # fix. Only RETIRED denominators are listed now; the current one comes
+        # from `$CEILING`.
+        text = LEDGER.read_text(encoding="utf-8")
+        ceiling = self.declared_in_ledger("CEILING")
+        retired = self.declared_in_ledger("LEDGER_RETIRED_DENOMINATORS")
+        self.assertNotIn(
+            ceiling, retired,
+            "the current ceiling is listed as retired; it must be derived",
         )
-        pattern = f"^({found[0]})$"
+        # `re.MULTILINE`, because `assertRegex` searches without it and `^` would
+        # anchor at the start of the whole file rather than at a line.
+        self.assertTrue(
+            re.search(r'^LEDGER_DENOMINATORS="\$CEILING\|', text, re.MULTILINE),
+            "the readable set must be composed from $CEILING, not restated",
+        )
+
+    def test_the_denominator_alternation_admits_both_and_nothing_else(self):
+        # Run on the same engine the script does, over the value bash composes
+        # rather than a restatement of it.
+        pattern = f"^({self.declared_in_ledger('LEDGER_DENOMINATORS')})$"
         for good in ("6", "12"):
             with self.subTest(value=good):
                 self.assertTrue(grep_matches(pattern, good))
         for bad in ("1", "2", "7", "60", "126", ""):
             with self.subTest(value=bad):
                 self.assertFalse(grep_matches(pattern, bad))
+
+    def test_moving_the_ceiling_keeps_the_write_readable(self):
+        # **The round trip the review asked for: a write followed by a read.**
+        # With the denominator restated, moving `CEILING` to 4 made the write
+        # `n/4` while the read still accepted only 6 and 12 — so every
+        # reservation the file posts becomes invisible to `count`, and the cap
+        # re-arms on a pull request that is actively spending it. One edit away,
+        # with nothing red.
+        #
+        # Asserting the composed pattern is not enough here; this reserves
+        # through the moved ledger and then counts through it.
+        scratch = Path(tempfile.mkdtemp(prefix="ceiling-rt-"))
+        self.addCleanup(shutil.rmtree, scratch, True)
+        moved = 4
+        self.assertNotEqual(moved, self.ceiling())
+        script = scratch / LEDGER.name
+        script.write_text(
+            re.sub(
+                r"^CEILING=[1-9][0-9]*$", f"CEILING={moved}",
+                LEDGER.read_text(encoding="utf-8"), count=1, flags=re.MULTILINE,
+            ),
+            encoding="utf-8",
+        )
+        stub = self.raw([], {"self": "write"}, script=script)
+        reserved = stub.run("42", "reserve", "3", "full")
+        self.assertEqual(0, reserved.returncode, reserved.stderr)
+        self.assertIn(f"3/{moved}", reserved.stdout)
+        # The read half. Against the restated denominator this answered 0.
+        self.assertEqual("3", stub.run("42", "count").stdout.strip())
+
+    def test_moving_the_ceiling_still_keeps_retired_rows_spent(self):
+        # And the migration property has to survive the move as well, or the
+        # fix for one re-arm introduces another.
+        scratch = Path(tempfile.mkdtemp(prefix="ceiling-rt-"))
+        self.addCleanup(shutil.rmtree, scratch, True)
+        script = scratch / LEDGER.name
+        script.write_text(
+            re.sub(
+                r"^CEILING=[1-9][0-9]*$", "CEILING=4",
+                LEDGER.read_text(encoding="utf-8"), count=1, flags=re.MULTILINE,
+            ),
+            encoding="utf-8",
+        )
+        stub = self.raw(
+            [self.comment(101, "alice", "Grok check 9/12 — reserved (full)")],
+            {"alice": "write"}, script=script,
+        )
+        self.assertEqual("9", stub.run("42", "count").stdout.strip())
 
     def test_the_write_never_emits_a_retired_denominator(self):
         # The other direction: reading `/12` forever is deliberate, writing it
@@ -2646,15 +2731,52 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
                         "a Write(path) rule is never consulted; use Edit(path)",
                     )
 
-    def test_the_repository_root_stays_writable(self):
-        # `suggestions.md` lives at the root and is `/review-branch`'s one
-        # legitimate output, so no rule may reach a bare root path. A blanket
-        # `Edit(**)` would take the command's own deliverable with it.
+    @classmethod
+    def tracked_root_files(cls):
+        """Every tracked file at the repository root, read from git."""
+        out = subprocess.run(
+            [GIT, "ls-files"], cwd=str(SCRIPTS.parent.parent),
+            capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            raise AssertionError(f"git ls-files failed: {out.stderr}")
+        return {line for line in out.stdout.splitlines() if line and "/" not in line}
+
+    def test_the_root_file_listing_is_not_vacuous(self):
+        # The positive control for the case below.
+        files = self.tracked_root_files()
+        self.assertGreater(len(files), 4)
+        for expected in ("CLAUDE.md", "Platform.slnx", "global.json"):
+            self.assertIn(expected, files)
+
+    def test_every_tracked_root_file_is_denied_in_both_spellings(self):
+        # **Denying directories left every root file writable**, which a review
+        # raised against the first version of this list: `CLAUDE.md`,
+        # `global.json`, `Directory.Build.props` and `Platform.slnx` all sit at
+        # the root, so a command promising not to fix findings could still apply
+        # one to root configuration. A tree-only deny is a boundary with a hole
+        # exactly where this repository keeps its build inputs.
+        for name in self.SUBJECTS:
+            rules = self.disallowed(name)
+            for path in self.tracked_root_files():
+                for prefix in ("", "./"):
+                    with self.subTest(command=name, path=path, prefix=prefix):
+                        self.assertIn(f"Edit({prefix}{path})", rules)
+
+    def test_the_one_legitimate_output_stays_writable(self):
+        # The other side, and the reason the root is enumerated rather than
+        # denied wholesale. `suggestions.md` is `/review-branch`'s only output
+        # and is UNTRACKED, so denying every tracked root file leaves it alone —
+        # where a blanket `Edit(**)` or a `/*` root pattern would take the
+        # command's own deliverable with it.
+        self.assertNotIn("suggestions.md", self.tracked_root_files())
         for name in self.SUBJECTS:
             for rule in self.disallowed(name):
                 with self.subTest(command=name, rule=rule):
-                    self.assertNotIn("Edit(**)", rule)
-                    self.assertNotIn("Edit(./**)", rule)
+                    self.assertNotIn("suggestions.md", rule)
+                    self.assertNotEqual("Edit(**)", rule)
+                    self.assertNotEqual("Edit(./**)", rule)
+                    self.assertNotEqual("Edit(/*)", rule)
 
 
 class SuppressionStub:
@@ -3021,6 +3143,90 @@ class TheGitArgvGuard(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertRefused(command)
+
+    def test_an_operator_without_spaces_still_separates_commands(self):
+        # **`shlex.split` does not tokenise shell operators**, so
+        # `git log --oneline&&git push origin +HEAD:main` yielded
+        # `--oneline&&git` as ONE element: no second segment, the push check saw
+        # the subcommand `log`, and the protected push was admitted. Raised in
+        # review; verified allowed against the guard as shipped.
+        #
+        # The `SEPARATORS` set was doing exactly what it said — matching tokens
+        # that ARE an operator — and nothing more. Recognising an operator only
+        # when someone typed spaces around it is not a parse.
+        for command in (
+            "git log --oneline&&git push origin +HEAD:main",
+            "git status;git push origin +HEAD:main",
+            "git status;git push origin --mirror",
+            "true||git push origin :branch",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_quoted_operators_are_still_one_element(self):
+        # The control on that fix. Splitting on punctuation must not reach
+        # inside quotes, or every commit body containing `&&` becomes two
+        # commands and the guard is back to reading prose as an argument list.
+        self.assertAdmitted("git commit -m 'a && b'")
+        self.assertAdmitted("git commit -m 'push origin +HEAD:main'")
+
+    def test_the_dangerous_push_flags_are_matched_by_name_and_prefix(self):
+        # Three holes in one check, all raised in review:
+        #   * `--force-with-lease=feature` is not EQUAL to the set entry, so a
+        #     membership test admitted it;
+        #   * git accepts any unambiguous abbreviation, so `--for` is a force
+        #     push a list of full spellings never sees; and
+        #   * `--all`, `--mirror` and `--prune` need no refspec at all, so the
+        #     loop that inspects refspecs had nothing to inspect — `--all`
+        #     updates every shared branch including `main`, `--mirror`
+        #     force-updates and deletes.
+        for command in (
+            "git push origin feature --force-with-lease=feature",
+            "git push origin feature --force-with-lease=main:abc123",
+            "git push origin --for",
+            "git push origin --all",
+            "git push origin --mirror",
+            "git push origin --prune",
+            "git push origin -d some-branch",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_legitimate_push_flag_that_merely_looks_similar_is_admitted(self):
+        # `--follow-tags` is what shows the prefix test is the right way round:
+        # `"force".startswith("follow-tags")` is false, so it passes, while
+        # `--fo` is refused exactly as git refuses it for being ambiguous.
+        self.assertAdmitted("git push origin feature --follow-tags")
+        self.assertAdmitted("git push origin feature --set-upstream")
+
+    def test_an_unknown_global_option_cannot_hide_a_push(self):
+        # **The second miss, and why the push check no longer asks where the
+        # subcommand is.** `-C` was closed with a skip-list of value-taking
+        # globals; `git --attr-source HEAD push …` then walked through the same
+        # door, because that list had been written from the options this file
+        # happened to hit. A list that trails git's globals is the deny-list
+        # shape #23 exists to refuse, and making the check depend on it just
+        # moves the enumeration.
+        #
+        # `push` is LOCATED now, whatever precedes it — so an option nobody has
+        # heard of, including one git has not shipped yet, cannot hide it.
+        for command in (
+            "git --attr-source HEAD push origin +HEAD:main",
+            "git --some-future-global X push origin +HEAD:main",
+            "git --attr-source=HEAD push origin --mirror",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_ref_named_push_is_not_a_push(self):
+        # The control on locating rather than positioning. `push` as a ref or a
+        # message carries no dangerous flag and no refspec after a remote, so
+        # nothing refuses it — and a value-taking flag's value never reaches the
+        # search at all.
+        for command in ("git log push", "git commit -m push",
+                        "git branch --list push", "git checkout push"):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
 
     def test_a_global_option_does_not_hide_the_subcommand(self):
         # **`git -C <dir> push …` was a complete bypass of the push guard.**

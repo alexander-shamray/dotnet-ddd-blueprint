@@ -2,7 +2,7 @@
 description: Review branch vs main for contradictions; recheck suggestions.md when it already exists
 argument-hint: "[recheck | full | --local]"
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(dotnet test:*), Bash(dotnet build:*), Bash(rm suggestions.md)
-disallowed-tools: Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(docs/**), Edit(./docs/**), Edit(deploy/**), Edit(./deploy/**), Edit(tools/**), Edit(./tools/**), Edit(.github/**), Edit(./.github/**), Edit(.config/**), Edit(./.config/**)
+disallowed-tools: Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(docs/**), Edit(./docs/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
 Review uncommitted or branch work for **contradictions and self-consistency
@@ -179,8 +179,22 @@ declared "do not fix" while holding `Write` and `Edit` over every path
 `.claude/settings.json` did not deny — a read-only claim resting on prose while
 the grant permits writing everywhere, which for a review command is the worse
 failure. The frontmatter's `disallowed-tools` path-scopes `Edit` away from
-every tracked tree, `docs/` included, leaving the repository root writable
-because `suggestions.md` is this command's one legitimate output.
+every tracked tree, `docs/` included, **and from every tracked file at the
+repository root**.
+
+**The root files were the hole in the first version of this**, raised in review
+and worth stating rather than quietly patching: denying directories alone left
+`CLAUDE.md`, `global.json`, `Directory.Build.props` and `Platform.slnx`
+writable, which is a boundary with a gap exactly where this repository keeps
+its build inputs. A command promising not to fix findings could still apply one
+to root configuration.
+
+They are **enumerated** rather than denied wholesale, and `suggestions.md` is
+why: it lives at the root, it is this command's one legitimate output, and it
+is untracked — so denying every *tracked* root file leaves it alone, where a
+blanket `Edit(**)` or a `/*` root pattern would take the deliverable with it.
+`test_grok_helpers.py` reads the tracked set from `git ls-files` and asserts
+each is denied, so a new root file is a red build rather than a silent gap.
 
 **Two limits, both stated rather than glossed.**
 
