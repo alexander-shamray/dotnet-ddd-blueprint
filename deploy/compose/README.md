@@ -50,7 +50,9 @@ docker compose exec rabbitmq rabbitmqctl list_permissions
 
 [`runbooks/error-queue.md`](../../docs/runbooks/error-queue.md) drives the
 Management API rather than these, and it is written against a **deployed**
-broker whose operator credential comes from the vault — not against this one. **Every port here and below is
+broker whose operator credential comes from the vault — not against this one.
+
+**Every port here and below is
 published on `127.0.0.1` rather than on every interface**, which is the
 control standing in front of those defaults — `localhost` is what each recipe
 in this file already types, so the bind costs them nothing and keeps the stack
