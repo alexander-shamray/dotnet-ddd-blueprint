@@ -1929,23 +1929,33 @@ edit, a chapter edit and possibly a `ClockSkew` edit**, because the bound is a
 sum: 300 from the realm and 30 from `TokenValidationParameters`, and cutting
 the lifetime alone leaves the skew where it is.
 
-> **Both halves of that number are pinned in the *local* realm and in no
-> other, and the scope is part of the decision rather than a caveat on it.**
-> `RealmImportTests` reads `deploy/compose/keycloak/realm-export.json`, which
-> is [§14.1](14-local-development.md)'s Compose realm. Every chart points at
-> `https://id.example.com/realms/commerce` — an externally provisioned realm
+> **The two halves of that number are enforced in different places, and only
+> one of them travels.** `ClockSkew` is `Common.Web`'s, set in code and pinned
+> by `JwtAuthenticationTests`, so every host that composes
+> `AddCommonWebDefaults` carries the 30 wherever it is deployed. The lifetime
+> is the realm's, and the realm this repository owns is
+> `deploy/compose/keycloak/realm-export.json` — [§14.1](14-local-development.md)'s
+> Compose realm, which is what `RealmImportTests` reads. Every chart points at
+> `https://id.example.com/realms/commerce`, an externally provisioned realm
 > this repository holds no configuration for and runs no deploy-time check
-> against — so a deployed realm can issue five-hour access tokens while every
+> against, so a deployed realm can issue five-hour access tokens while every
 > sentence here still reads 300 seconds.
 >
-> **That is the same division §15.4 already draws for every Secret**, and it is
-> stated rather than closed for the same reason: the charts create no Secrets
-> and provision no realm, so the platform's identity provider is somebody's
-> operational input and not this repository's artefact. What this repository
-> can honestly claim is the *shape* — the settings that must hold, the number
-> they must hold at, and a test proving the one realm it owns holds them. A
-> deployed realm owes `accessTokenLifespan` 300, a `ClockSkew` of 30 and no
-> client-level `access.token.lifespan` override, and nothing here verifies it.
+> **So the bound is half-guaranteed rather than local**, and saying "both
+> halves are local" — as an earlier draft of this callout did — contradicts
+> the Decision above, which is careful to say only one of the two settings is
+> the realm's.
+>
+> **That division is the one §15.4 already draws for every Secret**, and the
+> realm half is stated rather than closed for the same reason: the charts
+> create no Secrets and provision no realm, so the platform's identity provider
+> is somebody's operational input and not this repository's artefact. What this
+> repository can honestly claim is the *shape* — the settings that must hold,
+> the number they must hold at, and a test proving the one realm it owns holds
+> them. **A deployed realm owes `accessTokenLifespan` 300 and no client-level
+> `access.token.lifespan` override**; it owes no `ClockSkew`, which is not a
+> realm setting at all and is why telling an operator to configure one would
+> send them looking for something that does not exist.
 > [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
 > carries that gap and the three shapes a fix could take, because a gap this
 > record merely described would be the TODO nothing re-checks.

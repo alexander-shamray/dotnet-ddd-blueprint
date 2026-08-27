@@ -101,9 +101,16 @@ Validation is cheap; assume the network is hostile.
 > local affordance, documented in `deploy/compose/README.md`. It is a local
 > convenience with a real cost if it ever travelled: anything holding a
 > username and password could mint tokens directly, bypassing PKCE and the
-> browser flow entirely. A deployed realm turns it off, and stating it here is
-> what makes that a decision somebody can check rather than a default nobody
-> read.
+> browser flow entirely.
+>
+> **A deployed realm must turn it off, and nothing here establishes that one
+> has.** That is a requirement rather than a description — this repository
+> owns the Compose realm and no other, so the sentence above states an
+> obligation on whoever provisions the deployed one, exactly as the lifetime
+> and the refresh-token attribute do. It is listed with them in
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157);
+> writing it as a fact would have been the third security property in this
+> chapter to read as enforced while being true only locally.
 
 ## 11.3 Service configuration
 

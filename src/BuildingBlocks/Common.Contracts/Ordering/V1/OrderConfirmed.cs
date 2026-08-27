@@ -16,8 +16,11 @@ namespace Common.Contracts.Ordering.V1;
 /// whatever a consumer persists from what it received — a projection, a read
 /// model, a log or a trace. An erasure request would have to reach all of
 /// those, and §11.7's choreography reaches none of them, which is why that
-/// section names an <c>OrderConfirmed</c> carrying personal data as its
-/// counter-example and why this one no longer is it.
+/// section names an <c>OrderConfirmed</c> carrying a customer's name and
+/// email as its counter-example. This one carries neither, nor any other
+/// directly identifying or free-text personal data — which is the property
+/// that matters and is narrower than "no personal data", since
+/// <c>CustomerId</c> is personal data and stays.
 /// <para>
 /// <b>The inbox is not one of those paths, and saying so is the point.</b>
 /// <c>InboxMessage</c> records a message id, an endpoint and a handling time
