@@ -1,0 +1,46 @@
+{
+  "rabbit_version": "4.1.0",
+  "rabbitmq_version": "4.1.0",
+  "users": [
+    {
+      "name": "catalog-svc",
+      "password_hash": "Gis8TWNPw9V+0FH08dWzdHRgokLa+Rri2WPKq9fyFKKqImc8",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    },
+    {
+      "name": "ordering-svc",
+      "password_hash": "Xm96izB7BOqJM5z1OlKgMzMOlEHtqvzPTo72fDhpbM8IiDqr",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "catalog-svc",
+      "vhost": "/",
+      "configure": "^(Common\\.Contracts(\\.Catalog\\.V1:|:)|MassTransit:)",
+      "write": "^(Common\\.Contracts(\\.Catalog\\.V1:|:)|MassTransit:)",
+      "read": "^(Common\\.Contracts\\.Catalog\\.V1:|MassTransit:)"
+    },
+    {
+      "user": "ordering-svc",
+      "vhost": "/",
+      "configure": "^(ordering-|inventory-commands|payments-commands|Common\\.Contracts|Ordering\\.Infrastructure\\.Messaging:|MassTransit:)",
+      "write": "^(ordering-|inventory-commands|payments-commands|Common\\.Contracts(\\.Ordering\\.V1:|:)|Ordering\\.Infrastructure\\.Messaging:|MassTransit:)",
+      "read": "^(ordering-|inventory-commands|payments-commands|Common\\.Contracts|Ordering\\.Infrastructure\\.Messaging:|MassTransit:)"
+    }
+  ],
+  "topic_permissions": [],
+  "parameters": [],
+  "global_parameters": [],
+  "policies": [],
+  "queues": [],
+  "exchanges": [],
+  "bindings": []
+}

@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Images;
 using Respawn;
 using Testcontainers.MsSql;
@@ -160,6 +161,69 @@ public sealed class ServiceFixture : IAsyncLifetime
             $"No Platform.slnx above {AppContext.BaseDirectory}; the broker image cannot be built.");
     }
 
+    /// <summary>
+    /// Widens <c>ordering-svc</c>'s <c>write</c> for the duration of the suite,
+    /// because this harness stands in for services that do not exist yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// §9.6's saga is driven by events Inventory, Payments, Shipping and
+    /// Catalog publish, and none of those services has been built — so the
+    /// tests publish them through the host's own <c>IBus</c>, as
+    /// <c>ordering-svc</c>. Under ADR-036's production permissions that is
+    /// refused, correctly: Ordering must not be able to forge a
+    /// <c>StockReservationFailed</c>.
+    /// </para>
+    /// <para>
+    /// **The widening is here rather than in <c>definitions.json</c> on
+    /// purpose.** That file is the deployed artefact and a gate holds it to
+    /// the code; loosening it so a test can pass would make the gate agree
+    /// with a permission set nothing deploys, which is the "double cannot
+    /// disagree with itself" failure one artefact over. Doing it in the
+    /// harness keeps the production shape honest and puts the exception where
+    /// a reader of the suite can see it.
+    /// </para>
+    /// <para>
+    /// **So be precise about what `dotnet test` proves and what it does not.**
+    /// <c>configure</c> and <c>read</c> are untouched, so a receive endpoint or
+    /// a peer queue this service is not permitted to declare or bind still
+    /// fails here — which is the half that rots as endpoints are added.
+    /// ADR-036's *negative* property is NOT exercised by this suite; it is
+    /// exercised by <c>check_permissions.py</c>, which asserts no service may
+    /// write another's resources, and it was measured directly against a
+    /// running broker as <c>catalog-svc</c>.
+    /// </para>
+    /// <para>
+    /// This shrinks to nothing as the platform grows: each of those events
+    /// gains a real publisher with its own account, and the day the last one
+    /// does, this method deletes itself.
+    /// </para>
+    /// </remarks>
+    private async Task WidenWriteForTheHarnessAsync()
+    {
+        const string scope =
+            "^(ordering-|inventory-commands|payments-commands|Common\\.Contracts|" +
+            "Ordering\\.Infrastructure\\.Messaging:|MassTransit:)";
+
+        ExecResult result = await _rabbit!.ExecAsync(
+            [
+                "rabbitmqctl", "set_permissions", "-p", "/", "ordering-svc",
+                scope, scope, scope
+            ],
+            TestContext.Current.CancellationToken);
+
+        // A silent failure here is the worst outcome available: every saga test
+        // would then fail on a publish, twenty minutes later, naming a message
+        // rather than a permission. Measured — that is exactly how this was
+        // found, as a suite that retried a refused publish until it timed out.
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Could not widen ordering-svc's broker permissions for the harness "
+                + $"(exit {result.ExitCode}). stdout: {result.Stdout} stderr: {result.Stderr}");
+        }
+    }
+
     // ValueTask, not Task: xUnit v3 redefined IAsyncLifetime (§12.4).
     public async ValueTask InitializeAsync()
     {
@@ -181,7 +245,24 @@ public sealed class ServiceFixture : IAsyncLifetime
         // above both run earlier and both can throw, which is why the teardown
         // is null-safe as well. Two guards, because the field is assigned in
         // the middle of a method that can fail on either side of it.
-        _rabbit = new RabbitMqBuilder().WithImage(broker).Build();
+        // The service's OWN broker account, not `guest` (#44). The image above
+        // carries definitions.json, so this container starts with exactly the
+        // permissions §14.1's broker grants `ordering-svc` — which is what
+        // makes the ACL something `dotnet test` exercises rather than something
+        // only a Compose stack has ever run under. A permission too narrow for
+        // a receive endpoint fails HERE, on the branch that narrowed it.
+        //
+        // These two literals and deploy/compose/rabbitmq/definitions.json are
+        // one credential in two files, which is the shape this repository
+        // otherwise refuses. It is accepted for the reason §14.1 accepts
+        // `guest`/`guest`: a local-development default is not a secret, and
+        // the alternative — reading the hash out of the definitions file —
+        // cannot recover a password from it anyway.
+        _rabbit = new RabbitMqBuilder()
+            .WithImage(broker)
+            .WithUsername("ordering-svc")
+            .WithPassword("local-dev-ordering")
+            .Build();
 
         await broker.CreateAsync(TestContext.Current.CancellationToken);
 
@@ -196,6 +277,8 @@ public sealed class ServiceFixture : IAsyncLifetime
             _rabbit.StartAsync(TestContext.Current.CancellationToken),
             _redisCache.StartAsync(TestContext.Current.CancellationToken),
             _redisCoordination.StartAsync(TestContext.Current.CancellationToken));
+
+        await WidenWriteForTheHarnessAsync();
 
         // The container hands out a connection to master; Ordering owns a
         // database of its own (§7.1), and MigrateAsync is what creates it.

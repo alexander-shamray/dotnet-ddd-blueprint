@@ -222,7 +222,16 @@ deploy/compose/              §14.1's infrastructure, plus one application pair
                              migrator beside it because the edge owns no database.
                              `rabbitmq/` is the one infrastructure image that is
                              BUILT — ADR-021's delayed-exchange plugin — so a
-                             seventh build rides on the compose smoke
+                             seventh build rides on the compose smoke. Since
+                             ADR-036 it also carries `definitions.json`, the
+                             per-service broker accounts, and
+                             `check_permissions.py`, which derives what each
+                             service may touch from that service's own source.
+                             `guest` is NOT among the accounts, and the
+                             mechanism matters: RabbitMQ seeds the default user
+                             only on an empty database and skips it when
+                             definitions are imported, so a stale volume keeps
+                             it and `down -v` is what makes the removal true
 deploy/helm/                 §15.3's charts since PR-23. `common/` is a LIBRARY
                              chart holding every template once; Catalog,
                              Ordering and the BFF are values plus one-line
@@ -458,7 +467,7 @@ rm -rf src/Services/Yankee tests/Yankee.*
 git checkout -- Platform.slnx deploy/compose/
 ```
 
-The scaffold edits five tracked files as well as creating its own, so the
+The scaffold edits six tracked files as well as creating its own, so the
 `git checkout` is part of the procedure rather than tidying after it. **Commit
 before dogfooding**, though, if the PR itself changes `deploy/compose/` — that
 cleanup reverts the tree's own changes, and it has cost work once.
@@ -511,6 +520,19 @@ plan named: PactNet cannot express gRPC at all
 ([ADR-023](docs/backend-architecture/appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)),
 so the property is taken and the machinery is not — one file, linked into both
 suites, exactly as `pricing.proto` is.
+PR-31 is **the security control the plan never rowed**, and it is PR-28's shape
+rather than PR-30's: nothing here corrects a specification, because §9.4
+described `CommandOrigin` accurately — including its own callout that queue
+arrival "is only as restrictive as the broker's authorisation" and that "this
+chapter does not specify one". The chapter was right, the code matched it, and
+the control it named as absent stayed absent. The broker now has a per-service
+identity ([ADR-036](docs/backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)),
+`guest` is gone, and a gate derives each account's permissions from that
+service's own source. **Three residuals are stated rather than closed** —
+`configure` cannot be exclusive, `read` on a peer's command endpoint grants the
+consume along with the bind, and provisioning a deployed broker is an
+obligation nothing here checks.
+
 PR-28 is **not in the original plan and had to be added to it**, which is a
 different thing from a PR being late: §8.5 specified six types, four chapters
 cited them, and `grep -in "idempotenc"` over Appendix C's twenty-seven rows
@@ -1158,6 +1180,27 @@ own line rather than sending a reader to a file that does not hold it.
   time. A fallback policy reaches every host that will ever compose
   `AddCommonWebDefaults` and fails at the request. Where a rule has to survive
   code nobody has written yet, put it where that code cannot avoid it.
+- **A runtime capture shows what RAN, not what CAN run.** The broker topology
+  behind ADR-036's permissions was read off a live stack with both services
+  connected and an order placed — and still missed two resources, in opposite
+  ways. `MassTransit:ReceiveFault` is declared only when a consumer faults, so
+  no capture of a *healthy* system contains it; `payments-commands` is reached
+  only after a stock reservation that no Inventory service exists to answer.
+  Both are in `Endpoints.cs` and in the framework's contract, where a reader
+  can find them. **The code is the inventory and the broker is a sample of
+  it** — so derive the list from source and use the running system to falsify
+  the derivation, never as the derivation.
+- **A negative test that cannot observe the negative reports the property as
+  absent.** The probe that attempted #44's exploit reported all four forbidden
+  publishes ACCEPTED while the broker's own log showed four refusals:
+  `basic_publish` on AMQP 0-9-1 is fire-and-forget, so the refusal arrives as a
+  channel exception after the call returns and a probe that publishes and
+  closes never sees it. One line — `confirm_delivery()` — is the difference
+  between a measurement and a rumour. It failed in the loud direction here,
+  which is luck rather than design: the same blindness in a test asserting a
+  publish SUCCEEDS would have passed. **Ask what the tool does with the answer
+  before believing either outcome**, and pair the negative with a positive
+  control so "refused everything" and "credential is broken" cannot read alike.
 - **A rule is reversed everywhere it is stated, or nowhere — and do not
   write down how many places that is.** §10.2 said three times that naming no
   authorization policy was the only correct way to declare a route public, and
@@ -1253,6 +1296,7 @@ bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SD
 HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
 
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
+py -3.12 deploy/compose/rabbitmq/check_permissions.py   # ADR-036's broker ACL
 
 (cd .github/licence-gate && py -3.12 -m unittest)  # then licence_gate.py
 
@@ -2190,7 +2234,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-036) and keep the
+  (currently ADR-037) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

@@ -107,10 +107,23 @@ database:
     name: ordering-migrator-secret
     key: connection-string
 
+# The bus (§9). ONE SECRET PER SERVICE since #44, where both charts named
+# `commerce-rabbitmq` and therefore one broker account. That account was
+# `guest` locally — tagged administrator and reachable from any container —
+# and a single shared principal is what made queue arrival a boundary in name
+# only (§9.4): anything able to reach the broker could publish onto
+# `ordering-commands` and be mapped as system-initiated.
+#
+# The Secret this names must carry a connection string for the `ordering-svc`
+# account, whose permissions deploy/compose/rabbitmq/definitions.json declares
+# and `check_permissions.py` holds to the code. **Provisioning those accounts
+# on a deployed broker is an obligation this repository states and does not
+# check** — the same division §15.4 draws for every Secret, and the same one
+# ADR-033 draws for the realm.
 broker:
   enabled: true
   secretRef:
-    name: commerce-rabbitmq
+    name: ordering-rabbitmq
     key: connection-string
 
 # §8.1's two Redis connections. Required together: AddRedisConnections is one

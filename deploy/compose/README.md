@@ -13,7 +13,7 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 | SQL Server | 1433 | `sa` / `Local_Dev_Pa55w0rd!` — override with `SQL_PASSWORD` |
 | Redis (cache) | 6379 | — |
 | Redis (coordination) | 6380 | — |
-| RabbitMQ | 5672, management http://localhost:15672 | guest/guest |
+| RabbitMQ | 5672, management http://localhost:15672 | **no login ships** — see below |
 | Keycloak | http://localhost:8080 | admin/admin |
 | OTel collector | 4317 (OTLP gRPC), 4318 (OTLP HTTP) | — |
 | Grafana | http://localhost:3000 | — |
@@ -21,7 +21,36 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 The credentials are development defaults, documented deliberately (§14.1);
 every deployed environment takes its secrets from a vault
 ([§15.4](../../docs/backend-architecture/15-cicd-deployment.md)). Copy
-`.env.example` to `.env` to override one. **Every port here and below is
+`.env.example` to `.env` to override one.
+
+**The broker's row is the one that changed, and the management console is the
+visible cost.** Since
+[ADR-036](../../docs/backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+each service authenticates as itself — `catalog-svc` and `ordering-svc`, whose
+passwords are in `docker-compose.yml` beside every other local default — and
+**`guest` is not created at all**. RabbitMQ seeds that account only when it
+boots with an empty database and skips it when definitions are imported, which
+`rabbitmq/20-commerce.conf` arranges. Note the consequence of a stale volume:
+importing definitions does not *delete* a `guest` that already exists, so
+`docker compose down -v` is what makes the removal true on a stack that ran
+before this landed.
+
+Neither service account carries a tag, so **nothing here can log into
+http://localhost:15672**, and that is the design rather than an oversight —
+`administrator` on a shared account is what
+[#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44) was
+about. Inspect the local broker through the container instead, which needs no
+account at all:
+
+```bash
+docker compose exec rabbitmq rabbitmqctl list_queues name messages
+docker compose exec rabbitmq rabbitmqctl list_exchanges name type
+docker compose exec rabbitmq rabbitmqctl list_permissions
+```
+
+[`runbooks/error-queue.md`](../../docs/runbooks/error-queue.md) drives the
+Management API rather than these, and it is written against a **deployed**
+broker whose operator credential comes from the vault — not against this one. **Every port here and below is
 published on `127.0.0.1` rather than on every interface**, which is the
 control standing in front of those defaults — `localhost` is what each recipe
 in this file already types, so the bind costs them nothing and keeps the stack
@@ -97,7 +126,7 @@ fallback and answers 401. The route says what it means instead — which is the
 same reason the OpenAPI documents above changed and this one did not.
 
 The realm ships two logins, both development defaults in the sense §14.1
-already uses for `admin/admin` and `guest/guest`:
+already uses for `admin/admin` and the broker's service accounts:
 
 | User | Password | Holds |
 |---|---|---|
@@ -130,10 +159,27 @@ product listing does not:
 ```bash
 curl -X POST http://localhost:5101/v1/orders \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-    -d '{"items":[{"productId":"00000000-0000-0000-0000-000000000001","quantity":1}],
+    -d '{"commandId":"'"$(uuidgen)"'",
+         "items":[{"productId":"00000000-0000-0000-0000-000000000001","quantity":1}],
          "shippingAddress":{"line1":"1 Test Street","city":"Almaty","postalCode":"050000","country":"KZ"},
          "currency":"EUR"}'
 ```
+
+**`commandId` is required and this recipe did not carry it**, which is a defect
+found by running the block rather than by reading it: the call answered 400
+with `'Command Id' must not be empty.` `PlaceOrderCommand` opted into
+[§8.5](../../docs/backend-architecture/08-caching-redis.md)'s
+`IIdempotentCommand` when that behaviour landed, and a client-generated id is
+what makes a retried order one order. A fresh one per *intent* — reusing it is
+how a retry is recognised, so `uuidgen` belongs on the line that means "place
+this order", not on the retry.
+
+**The product id above is a placeholder and the call will answer 422 for it**
+(`order.products_unavailable`): §6.6's projection fills `ordering.ProductPrices`
+from Catalog's `PriceChanged`, so the id has to be one the publish call above
+actually returned, and the event has to have been consumed. That is the
+broker path working end to end — and, since ADR-036, Ordering consuming an
+event Catalog published under a different account than its own.
 
 **No cancel call here, deliberately, because there is no id to cancel with.**
 The obvious next line — capture the response and interpolate it into
@@ -179,7 +225,7 @@ reads eagerly (§11.3). Same values, host names in place of service names:
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Catalog='Server=localhost;Database=Catalog;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
-export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
+export ConnectionStrings__RabbitMq='amqp://ordering-svc:local-dev-ordering@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
 # Catalog is the ONE service that pins its own ports, and on the host they
 # have to move. Its appsettings.json declares two Kestrel endpoints — 8080 for
@@ -209,7 +255,7 @@ never Catalog's, because `AddOrderingInfrastructure` reads its own name and
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Ordering='Server=localhost;Database=Ordering;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
-export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
+export ConnectionStrings__RabbitMq='amqp://ordering-svc:local-dev-ordering@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
 dotnet run --project src/Services/Ordering/Ordering.Api
 ```

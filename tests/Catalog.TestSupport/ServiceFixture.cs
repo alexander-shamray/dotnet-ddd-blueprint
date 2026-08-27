@@ -11,6 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Respawn;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Images;
 using Testcontainers.MsSql;
 using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
@@ -71,15 +73,17 @@ public sealed class ServiceFixture : IAsyncLifetime
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
         .Build();
 
-    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
-        // 4.1, not a floating 4: this is the base tag §14.1's Dockerfile
-        // builds from (ADR-021 pins the minor, because the plugin refuses a
-        // broker line it was not built against). Matching it is what makes
-        // the summary above true, and it shares the pulled layers with
-        // Ordering's fixture rather than dragging a second broker image onto
-        // every runner.
-        .WithImage("rabbitmq:4.1-management-alpine")
-        .Build();
+    // Assigned in InitializeAsync rather than here, because the image has to
+    // be BUILT and a field initialiser cannot await. It used to be the stock
+    // `rabbitmq:4.1-management-alpine` on the argument that Catalog needs no
+    // plugin and sharing the base tag was cheaper than a second image.
+    //
+    // #44 ended that: §14.1's broker image is where definitions.json lives, so
+    // the stock image is a broker with ONE administrator account and no
+    // permissions at all — the state this suite is now meant to prove Catalog
+    // works without. Ordering's fixture already builds this image and names it
+    // the same, so the cost is a cache hit rather than a second download.
+    private RabbitMqContainer? _rabbit;
 
     private Respawner? _respawner;
 
@@ -94,9 +98,62 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// <summary>The exit code of the first real migration run.</summary>
     public int FirstRunExitCode { get; private set; } = -1;
 
+    /// <summary>
+    /// The directory holding §14.1's broker Dockerfile, found by walking up to
+    /// <c>Platform.slnx</c>.
+    /// </summary>
+    /// <remarks>
+    /// A second copy of Ordering.TestSupport's helper, deliberately. §4.3
+    /// permits exactly one assembly to cross a service boundary and a test
+    /// helper is not it — the same rule that gives the gateway suite its own
+    /// <c>TestAuthHandler</c>.
+    /// </remarks>
+    private static string BrokerContextPath()
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!File.Exists(Path.Combine(dir.FullName, "Platform.slnx")))
+                continue;
+
+            string context = Path.Combine(dir.FullName, "deploy", "compose", "rabbitmq");
+            if (!File.Exists(Path.Combine(context, "Dockerfile")))
+            {
+                throw new InvalidOperationException(
+                    $"Found the solution at {dir.FullName} but no Dockerfile at {context} (§14.1, ADR-021).");
+            }
+
+            return context;
+        }
+
+        throw new InvalidOperationException(
+            $"No Platform.slnx above {AppContext.BaseDirectory}; the broker image cannot be built.");
+    }
+
     // ValueTask, not Task: xUnit v3 redefined IAsyncLifetime (§12.4).
     public async ValueTask InitializeAsync()
     {
+        // §14.1's broker image, built from the repository's own Dockerfile so
+        // this container carries definitions.json — the per-service accounts
+        // and their permissions. Same name and same WithCleanUp(false) as
+        // Ordering's fixture, so the two share one image per machine.
+        IFutureDockerImage broker = new ImageFromDockerfileBuilder()
+            .WithDockerfileDirectory(BrokerContextPath())
+            .WithDockerfile("Dockerfile")
+            .WithName("ashamray-test-broker:4.1-delayed")
+            .WithCleanUp(false)
+            .Build();
+
+        // Catalog's OWN account (#44). Its permissions cover its own contracts
+        // and nothing else, so a Catalog change that starts publishing another
+        // context's events fails in this suite rather than in a cluster.
+        _rabbit = new RabbitMqBuilder()
+            .WithImage(broker)
+            .WithUsername("catalog-svc")
+            .WithPassword("local-dev-catalog")
+            .Build();
+
+        await broker.CreateAsync(TestContext.Current.CancellationToken);
+
         // Together, §12.4's printed shape — the broker's start hides inside
         // SQL Server's, which is the slower of the two by some margin.
         await Task.WhenAll(
@@ -402,7 +459,11 @@ public sealed class ServiceFixture : IAsyncLifetime
             {
                 try
                 {
-                    await _rabbit.DisposeAsync();
+                    // Null-safe on Ordering's fixture's argument: the image
+                    // build and the builder chain both run before the field is
+                    // assigned, and either can throw.
+                    if (_rabbit is not null)
+                        await _rabbit.DisposeAsync();
                 }
                 finally
                 {

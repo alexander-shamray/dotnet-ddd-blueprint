@@ -149,10 +149,18 @@ restart, verify readiness (`/health/ready` covers SQL —
 
 ### A broker credential
 
-`ConnectionStrings__RabbitMq`. A rotation that reaches the vault and not the pod
-presents as [`runbooks/outbox-broker.md`](runbooks/outbox-broker.md) — the
-broker lane stalls with authentication failures in the log — which is worth
-knowing before rotating rather than during.
+`ConnectionStrings__RabbitMq`, and there is **one per service** since
+[ADR-036](backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+— `catalog-rabbitmq` and `ordering-rabbitmq`, never a shared Secret. That is
+the half of the rotation worth knowing first: rotating the broker is now N
+rotations rather than one, and rotating *one* affects exactly one service.
+
+A rotation that reaches the vault and not the pod presents as
+[`runbooks/outbox-broker.md`](runbooks/outbox-broker.md) — the broker lane
+stalls with authentication failures in the log — which is worth knowing
+before rotating rather than during. **The permissions are not the vault's to
+rotate**: they are declared in `deploy/compose/rabbitmq/definitions.json` for
+the local broker, and are an obligation on whoever provisions a deployed one.
 
 ## Local development is a deliberate exception
 
@@ -164,7 +172,7 @@ to be tidied away:
 | SQL Server | `${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}` |
 | BFF client secret | `${BFF_CLIENT_SECRET:-local-dev-secret}` |
 | Keycloak admin | `admin` / `admin` |
-| RabbitMQ | `guest` / `guest` |
+| RabbitMQ | `catalog-svc` / `local-dev-catalog`, `ordering-svc` / `local-dev-ordering` |
 
 These defaults are what make `docker compose up` work with no prior setup, and
 **the environment variable in front of each is the seam** that keeps them out of

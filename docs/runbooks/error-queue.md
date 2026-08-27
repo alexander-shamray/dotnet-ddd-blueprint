@@ -46,10 +46,16 @@ metadata and counts — they do not return a message body or a header, which is
 everything the steps below need. Use the Management API's `get` with
 `ackmode=ack_requeue_true`, which reads the message and puts it back:
 
-**The credentials are not `guest/guest`.** That is §14.1's Compose default; a
-deployed broker's are supplied by External Secrets
-([§15.4](../backend-architecture/15-cicd-deployment.md)), and reaching for the
-local default here authenticates as an account that does not exist.
+**The credentials are not `guest/guest`, and since
+[ADR-036](../backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+that account exists nowhere.** It was §14.1's Compose default until the broker
+gained per-service identities; a deployed broker's credentials are supplied by
+External Secrets ([§15.4](../backend-architecture/15-cicd-deployment.md)), one
+Secret per service. **A service account will not do either**: this procedure
+needs the Management API and the shovel, and a `*-svc` account carries no tags
+at all — deliberately, since `administrator` is what made the shared account
+worth stealing. Whoever runs this needs an operator credential from the vault,
+not a copy of a service's.
 
 **Keep them out of `argv`.** Anything passed as `curl -u` or `-d` is visible in
 the process list to every user on the box, and an incident is exactly when a

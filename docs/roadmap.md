@@ -274,13 +274,15 @@ decision rather than a gap.**
 | **28** | `feat(common): §8.5's idempotency behaviour and Redis store` | — | — | — |
 | **29** | `feat(ci): §15.1's secret scan, the other half of the first node` | — | — | — |
 | **30** | `fix(ordering): the saga's transactional outbox` | — | — | — |
+| **31** | `fix(messaging): the broker has a per-service identity` | — | — | — |
 
 **Nothing in this file would produce a number for them.** Every estimate above
 was quoted before any code existed, against a specification that was already
 finished, and *What these numbers are* says outright that none has since been
-re-priced against a pull request that has actually landed. **Not one of these
-three was priced before it was built** — PR-28 and PR-29 were rowed after they
-landed, and PR-30 is rowed by the pull request doing the work — so a figure
+re-priced against a pull request that has actually landed. **Not one of them
+was priced before it was built** — PR-28 and PR-29 were rowed after they
+landed, and PR-30 and PR-31 are each rowed by the pull request doing the
+work — so a figure
 here would be either invented, which the *Basis* section's own terms forbid
 because an invented day is not an argument about relative size, or an actual
 restated as a forecast, which makes the column mean two different things

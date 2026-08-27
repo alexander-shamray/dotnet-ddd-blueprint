@@ -1745,16 +1745,37 @@ public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, Cance
 }
 ```
 
-> **Queue arrival is a weaker boundary than it reads as.** No part of the
-> payload can claim `System` — that is the whole reason the contract has no
-> origin field — but what *earns* the stamp is arrival on `ordering-commands`,
-> and that is only as restrictive as the broker's authorisation. Today there is
-> none to speak of: one shared principal, `guest/guest` locally ([§14.1](14-local-development.md)),
-> so any service that can reach the broker can publish onto that queue and be
-> mapped as system-initiated. `CommandOrigin` therefore **narrows** §11.4's
-> failure rather than closing it — it stops a caller-less command inheriting an
-> owner's privileges, and says nothing about who may publish. Per-service
-> broker identity is what closes it, and this chapter does not specify one.
+> **Queue arrival is exactly as strong a boundary as the broker's
+> authorisation.** No part of the payload can claim `System` — that is the whole
+> reason the contract has no origin field — but what *earns* the stamp is
+> arrival on `ordering-commands`, so the stamp is worth whatever the broker's
+> permissions are worth. Until
+> [#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44)
+> that was nothing: one shared principal, `guest/guest` locally
+> ([§14.1](14-local-development.md)), tagged `administrator` and — measured on
+> the base image, which ships `loopback_users.guest = false` — reachable from
+> any container. Anything that could reach the broker could publish onto that
+> queue and be mapped as system-initiated.
+>
+> **Each service now authenticates as itself, and `write` is scoped to what its
+> own code addresses** ([ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)).
+> `catalog-svc` has no `write` matching `ordering-commands` or
+> `Common.Contracts.Ordering.V1:*`, so a compromised Catalog can neither send
+> `ConfirmOrder` nor forge an `OrderPlaced` — verified by attempting all four
+> as that account and reading the broker's refusal, with a positive control
+> proving the credential itself works. `CommandOrigin` therefore closes §11.4's
+> failure rather than narrowing it: it stops a caller-less command inheriting
+> an owner's privileges, and the broker now says who may publish.
+>
+> **What it does not buy is `configure` exclusivity**, and that is structural
+> rather than an omission. A consumer declares the exchange it binds, so
+> Ordering's `configure` reaches `Common.Contracts.*` including Catalog's, and
+> it could delete an exchange it does not own. Closing that needs a topology
+> where producers pre-declare and consumers only bind, which MassTransit does
+> not offer. **Nor is `read` on a peer's command endpoint avoidable**: a send
+> to `queue:inventory-commands` declares and binds it, `queue.bind` takes
+> `read` on the exchange, and a RabbitMQ permission pattern cannot tell a queue
+> from an exchange — so granting the bind grants the consume.
 
 **A command reachable both ways has exactly two mappings of its origin**, and
 both are literals: `CommandOrigin.User` at the endpoint, `CommandOrigin.System`

@@ -1539,9 +1539,12 @@ validation, both images ([§15.2](15-cicd-deployment.md)) and
 `AddOutbox`, `AddInbox` and `AddOutboxRetentionIndex` — the messaging tables
 ship with the dispatcher that reads them, because a service carrying the
 dispatcher without its table logs a failed claim twice a second from its first
-boot. It then edits five shared files: `Platform.slnx`, the Compose pair and
-its `infra-only` exclusion, `.env.example`, and the ports table in
-`deploy/compose/README.md` ([§14.1](14-local-development.md)). The new service
+boot. It then edits six shared files: `Platform.slnx`, the Compose pair and
+its `infra-only` exclusion, `.env.example`, the ports table in
+`deploy/compose/README.md` ([§14.1](14-local-development.md)), and the broker
+definitions that grant the new service an account of its own — without which it
+renders a service that starts and cannot authenticate, since the broker has
+held no shared principal since #44. The new service
 builds and its **sixty** tests pass before a line of it is written, **thirty**
 of them against real SQL Server and RabbitMQ containers — counts measured
 against a rendered service, by PR-18 when they read forty-one and sixteen three

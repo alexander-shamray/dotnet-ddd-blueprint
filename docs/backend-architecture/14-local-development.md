@@ -142,7 +142,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       # Runtime identity (DML only) — never the migrator connection.
       ConnectionStrings__Ordering: "${ORDERING_CONNECTION:-Server=sql;Database=Ordering;User Id=sa;Password=${SQL_PASSWORD:-Local_Dev_Pa55w0rd!};TrustServerCertificate=True}"
-      ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
+      ConnectionStrings__RabbitMq: "amqp://catalog-svc:local-dev-catalog@rabbitmq:5672"
       # The authority, to validate inbound tokens (§11.2). No Identity__Client__*:
       # Ordering calls no peer synchronously — prices come from a local
       # projection (§6.4) and the rest goes over the broker. Only the BFF holds
@@ -275,7 +275,7 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 |---|---|
 | Gateway | http://localhost:5000 |
 | Keycloak | http://localhost:8080 (admin/admin) |
-| RabbitMQ management | http://localhost:15672 (guest/guest) |
+| RabbitMQ management | http://localhost:15672 — **no login ships**; see below |
 | Grafana | http://localhost:3000 |
 
 > **Every published port binds `127.0.0.1`, not `0.0.0.0`.** The credentials
@@ -283,7 +283,7 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait
 > interface the control standing in front of them — Compose's short syntax
 > with no host-IP prefix publishes on every interface, so `docker compose up`
 > on a café or office network offers `sa`, two passwordless Redis instances,
-> `guest`/`guest` and Keycloak's admin console to every peer on it. Every URL
+> two service accounts and Keycloak's admin console to every peer on it. Every URL
 > in the table is already a `localhost` one, so the prefix takes nothing away
 > from the workflow this chapter documents.
 
@@ -389,7 +389,7 @@ second Redis instance, the port — because the compose file publishes each one:
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__Ordering='Server=localhost;Database=Ordering;User Id=sa;Password=Local_Dev_Pa55w0rd!;TrustServerCertificate=True'
-export ConnectionStrings__RabbitMq='amqp://guest:guest@localhost:5672'
+export ConnectionStrings__RabbitMq='amqp://ordering-svc:local-dev-ordering@localhost:5672'
 export Identity__Authority='http://localhost:8080/realms/commerce'
 export ConnectionStrings__RedisCache='localhost:6379'
 export ConnectionStrings__RedisCoordination='localhost:6380'

@@ -5053,3 +5053,101 @@ after:
   its commands section — it has grown twice since PR-08, and this entry records
   the decision rather than the tally.
 
+---
+
+## The boundary that was only ever a sentence (#44)
+
+**Decision.** The broker is an authorisation boundary. Each service
+authenticates as its own account and its `write` is scoped to what its own
+source addresses, declared in `deploy/compose/rabbitmq/definitions.json`,
+imported at broker start and held to the code by a gate
+([ADR-036](backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)).
+`guest` is not created.
+
+**Why.** [§9.4](backend-architecture/09-messaging.md) stamps a broker-borne
+command `CommandOrigin.System` because it arrived on the service's own command
+queue, and §11.4 skips the ownership check for one. The chapter's own callout
+said the quiet part — arrival "is only as restrictive as the broker's
+authorisation", and "this chapter does not specify one" — so the platform had a
+control whose strength was documented as zero and left there.
+
+**Measuring it made it worse than the issue claimed.** #44 said "one shared
+principal". Read off the image rather than assumed: `guest` is tagged
+`administrator`, and `rabbitmq:4.1-management-alpine` ships
+`loopback_users.guest = false` under the comment *"allow access to the guest
+user from anywhere on the network"*. `rabbitmqctl environment` reported
+`{loopback_users,[]}` and both services connected from container addresses. One
+principal, administrator, reachable from anywhere on the network.
+
+### What building it cost, and every bit of it was a measurement
+
+**The permissions were wrong three times, and each correction came from running
+it rather than reading it.**
+
+The first was one token too strict. `Common\.Contracts\.` misses
+`Common.Contracts:IIntegrationEvent` — MassTransit's polymorphic exchange,
+which every publisher declares — because that name has a colon where the
+pattern wanted a dot. **It was in the topology capture the whole time and got
+read past.** The lesson this repository already carries about a pattern one
+token too strict, arriving through a permission instead of a metric name.
+
+The second is the sharper one. `MassTransit:ReceiveFault` never appears on a
+healthy stack, so no capture of a working system could show it — it surfaced
+only because a deliberately forged message faulted a consumer. **A runtime
+capture shows what RAN, not what CAN run.** That is also why
+`payments-commands` is derived from `Endpoints.cs` and not from a broker: the
+saga never reached the payment step, because there is no Inventory service to
+answer the stock reservation that precedes it. **The code is the inventory; the
+broker is a sample of it.**
+
+The third was a verb. `queue.bind` takes `read` on the destination exchange, so
+sending to a peer's queue needs more than `write` — found as a refusal with
+`write` already granted.
+
+**The exploit was attempted rather than argued, and the first attempt lied.**
+As `catalog-svc`: `ConfirmOrder` onto `ordering-commands`, a forged
+`OrderPlaced`, a `ReserveStock`, a forged `PaymentAuthorised`. The probe
+reported all four ACCEPTED. They were not — the broker log showed four
+refusals. `basic_publish` on AMQP 0-9-1 is fire-and-forget, so a refusal
+arrives as a channel exception *after* the publish returns, and a probe that
+publishes and closes cannot see it. `confirm_delivery()` is what makes the
+measurement a measurement. **A negative test that cannot observe the negative
+reports the property as absent** — and it fails in the direction that reads as
+a security hole, which is at least the loud direction.
+
+A positive control ships with it, because a probe that is refused everything
+because the credential is broken proves nothing.
+
+### The suite found the thing the design had not
+
+Running `Ordering.Api.Tests` produced exactly the failure mode ADR-036's own
+Dockerfile comment describes: a refused publish, retried for ever, with the
+suite healthy and silent until it timed out forty minutes later naming a
+message rather than a permission. The cause is that **the harness impersonates
+services that do not exist** — §9.6's saga is driven by Inventory, Payments,
+Shipping and Catalog events, and the tests publish them through the host's own
+bus, as `ordering-svc`.
+
+**The widening went into the harness and not into `definitions.json`**, and the
+reason is one this repository already paid for elsewhere: loosening the
+deployed artefact so a test can pass leaves the gate agreeing with a permission
+set nothing deploys, which is a double that cannot disagree with itself. So the
+production shape stays honest and the exception is visible in the fixture.
+
+**What that costs is a claim, and the claim was narrowed rather than kept.** An
+earlier draft of ADR-036 said `dotnet test` "exercises the real permission set".
+It exercises `configure` and `read` — the half that rots as endpoints are added
+— and not `write`. The negative property rests on the direct measurement and on
+`check_permissions.py`, and the ADR now says so in those words.
+
+### What is owed
+
+Three residuals, stated in ADR-036 rather than implied. `configure` cannot be
+exclusive, because a consumer declares the exchange it binds. `read` on a
+peer's command endpoint grants the consume along with the bind, because a
+RabbitMQ permission pattern cannot tell a queue from an exchange of the same
+name — so Ordering can consume Inventory's commands, and only Inventory
+existing makes that observable. And provisioning the accounts on a deployed
+broker is an obligation this repository states and does not check, on
+[§15.4](backend-architecture/15-cicd-deployment.md)'s own terms and
+ADR-033's.

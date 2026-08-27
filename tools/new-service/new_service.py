@@ -2072,6 +2072,69 @@ def update_env_example(repo_root: Path, names: Names) -> str:
     return restore(text.rstrip("\n") + "\n\n" + block + "\n", newline)
 
 
+def update_broker_definitions(repo_root: Path, names: Names) -> str:
+    """A broker account for the new service (#44).
+
+    Since per-service identity, a service that reaches the broker as nobody in
+    `definitions.json` cannot connect AT ALL — and the compose block this
+    script already renders names `{service}-svc`. So the account is not an
+    optional extra: without it the scaffolded service starts and then fails
+    authentication against a broker that has never heard of it.
+
+    Catalog's entry is the template, exactly as it is everywhere else here, so
+    the permissions a new service gets are a PUBLISHER's: its own contracts,
+    the framework's fault exchanges, and nothing of anybody else's. A service
+    that grows a receive endpoint widens its own entry in the same change, and
+    `deploy/compose/rabbitmq/check_permissions.py` is what says so — it derives
+    what each service needs from the code and fails when the grant is short.
+
+    The password is `local-dev-{service}`, on §14.1's terms for every other
+    credential here, and the hash is computed rather than copied: RabbitMQ
+    stores `base64(salt || sha256(salt || utf8(password)))`, so a copied hash
+    would authenticate the template's password under the new name.
+    """
+    import base64
+    import hashlib
+    import json
+
+    relative = "deploy/compose/rabbitmq/definitions.json"
+    text, newline = read(repo_root, relative)
+    definitions = json.loads(text)
+
+    user = f"{names.lower}-svc"
+    if any(entry["name"] == user for entry in definitions["users"]):
+        raise ScaffoldError(f"{relative}: a broker user named {user} already exists")
+
+    template_user = f"{TEMPLATE.lower()}-svc"
+    template_permission = next(
+        (entry for entry in definitions["permissions"] if entry["user"] == template_user),
+        None)
+    if template_permission is None:
+        raise ScaffoldError(
+            f"{relative}: no permissions for {template_user} to copy (§14.1, #44)")
+
+    # A deterministic salt per service, so re-rendering the same name twice
+    # produces the same file and a reviewer can recompute the hash.
+    salt = hashlib.sha256(user.encode()).digest()[:4]
+    digest = hashlib.sha256(salt + f"local-dev-{names.lower}".encode()).digest()
+
+    definitions["users"].append({
+        "name": user,
+        "password_hash": base64.b64encode(salt + digest).decode(),
+        "hashing_algorithm": "rabbit_password_hashing_sha256",
+        "tags": [],
+    })
+    definitions["permissions"].append({
+        "user": user,
+        "vhost": template_permission["vhost"],
+        "configure": names.rename(template_permission["configure"]),
+        "write": names.rename(template_permission["write"]),
+        "read": names.rename(template_permission["read"]),
+    })
+
+    return restore(json.dumps(definitions, indent=2) + "\n", newline)
+
+
 def update_ports_readme(repo_root: Path, names: Names, port: int) -> str:
     """One row in the application-services table — the keyboard inventory (§14.1)."""
     text, newline = read(repo_root, "deploy/compose/README.md")
@@ -2224,6 +2287,8 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
             "deploy/compose/docker-compose.infra-only.yml": update_infra_only(repo_root, names),
             "deploy/compose/.env.example": update_env_example(repo_root, names),
             "deploy/compose/README.md": update_ports_readme(repo_root, names, port),
+            "deploy/compose/rabbitmq/definitions.json":
+                update_broker_definitions(repo_root, names),
         },
     )
 
