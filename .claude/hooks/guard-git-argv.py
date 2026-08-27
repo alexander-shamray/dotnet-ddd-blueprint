@@ -111,6 +111,15 @@ REPOSITORY_SUBCOMMANDS = {
     "archive", "bundle",
 }
 
+# Git's own options, which sit BEFORE the subcommand. These take a separate
+# value, so skipping one means skipping two elements — and getting that wrong is
+# how `git -C <dir> push` reached the push guard with `-C` in the subcommand
+# position and was waved through.
+GLOBAL_VALUE_FLAGS = {
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
+    "--super-prefix",
+}
+
 
 def git_segments(tokens):
     """Yield the argv slice of every `git` invocation in a compound command."""
@@ -125,6 +134,25 @@ def git_segments(tokens):
         yield segment
 
 
+def after_global_options(segment):
+    """`segment` from its SUBCOMMAND onward, with git's global options dropped.
+
+    **`git -C <dir> push …` put `-C` where the subcommand goes**, so a check
+    written as `segment[0] != "push"` never fired — a complete bypass of the
+    push guard, found by writing a `git -C` command against the guard's own
+    branch. Every global option is a way to say the same thing, which is the
+    lesson #23 is about arriving one token earlier: the subcommand has to be
+    *found*, not assumed to be first.
+    """
+    index = 0
+    while index < len(segment) and segment[index].startswith("-"):
+        if segment[index] in GLOBAL_VALUE_FLAGS:
+            index += 2
+        else:
+            index += 1
+    return segment[index:]
+
+
 def push_offence(segment):
     """The reason to refuse a `git push`, or None. `segment` is argv after `git`.
 
@@ -132,6 +160,7 @@ def push_offence(segment):
     for the reason #23 gives: a deny-list of spellings trails the grammar
     forever, and the grammar is not going to stop growing.
     """
+    segment = after_global_options(segment)
     if not segment or segment[0] != "push":
         return None
     flags = {a for a in segment[1:] if a.startswith("-")}
@@ -199,20 +228,13 @@ def offence(command):
         refusal = push_offence(segment)
         if refusal is not None:
             return refusal
-        # The subcommand is the first element that is not a global option, and
-        # a global option may itself take a value.
-        subcommand = ""
-        skip = False
-        for element in segment:
-            if skip:
-                skip = False
-                continue
-            if element in VALUE_FLAGS:
-                skip = True
-                continue
-            if not element.startswith("-"):
-                subcommand = element
-                break
+        # The subcommand, found the same way the push check finds it — through
+        # one helper rather than two loops that can disagree. The inline version
+        # this replaces knew `-C` only because it happens to also be a
+        # value-taking flag of `commit`, and would have read
+        # `git --git-dir /x fetch …` as having the subcommand `/x`.
+        stripped = after_global_options(segment)
+        subcommand = stripped[0] if stripped else ""
         skip = False
         for element in segment:
             # A value belongs to the flag before it and is judged as data. This

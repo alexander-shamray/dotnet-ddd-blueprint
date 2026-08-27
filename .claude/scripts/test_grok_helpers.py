@@ -3022,6 +3022,48 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertRefused(command)
 
+    def test_a_global_option_does_not_hide_the_subcommand(self):
+        # **`git -C <dir> push …` was a complete bypass of the push guard.**
+        # The check read `segment[0] != "push"`, and `-C` sits exactly where the
+        # subcommand goes, so none of #23's refspec parsing ever ran. Found by
+        # writing a `git -C` command against this guard's own branch — which is
+        # the only reason it was found, because nothing else in the suite used
+        # one.
+        #
+        # It is #23's own lesson arriving a token earlier: every global option is
+        # another way to say the same thing, so the subcommand has to be FOUND
+        # rather than assumed to be first.
+        for command in (
+            "git -C /tmp/x push origin +HEAD:main",
+            "git -C /tmp/x push origin main",
+            "git -c user.name=x push origin :branch",
+            "git --git-dir /x push origin feature --force",
+            "git --work-tree /x push origin HEAD:refs/heads/main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_global_option_does_not_break_an_ordinary_push(self):
+        # The positive control, and it is the command this session actually
+        # needed: pushing a worktree's branch is `git -C <path> push -u origin
+        # <branch>`, so a fix that refused every `-C` push would have broken the
+        # flow that found the bug.
+        for command in (
+            "git -C /tmp/x push origin feature",
+            "git -C /tmp/x push -u origin fix/some-branch",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_a_global_option_does_not_hide_a_repository_subcommand_either(self):
+        # The same fix reaching the transport check, which had its own inline
+        # copy of the subcommand search. That copy knew `-C` only because `-C`
+        # happens also to be a value-taking flag of `commit`, and would have read
+        # `git --git-dir /x fetch …` as having the subcommand `/x`, skipping the
+        # check entirely. Two loops that could disagree became one helper.
+        self.assertRefused("git --git-dir /x fetch ext::sh -c id")
+        self.assertRefused("git -C /tmp/x clone ext::sh -c id")
+
     def test_a_flags_value_is_data_and_not_an_argument_list(self):
         # **The guard refused its own commit**, which is the most useful thing
         # it did, and it is reproduced here rather than quietly fixed. A commit

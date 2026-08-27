@@ -787,7 +787,15 @@ own line rather than sending a reader to a file that does not hold it.
   after one of those is data and no amount of care about the flag list fixes
   it. It refused its own commit, which is the loud version; the quiet version
   is a guard that has been silently reading somebody's prose as commands.
-  **Then it refused a second one, on the other end of the same mistake**:
+  **And the quiet version happened too, in the same file, on the same
+  premise about position**: `git -C <dir> push …` puts `-C` where the
+  subcommand goes, so a check written as `segment[0] != "push"` never fired and
+  every refspec rule was bypassed. Nothing reported anything; it was found only
+  because pushing a worktree's branch *is* a `git -C` command, so the guard's
+  own branch happened to exercise it. **A subcommand has to be found, not
+  assumed to be first** — and the general form is the one worth carrying: a
+  parser that assumes a position is a parser that a prefix argument walks past.
+  **Then it refused a second commit, on the other end of the same mistake**:
   `shlex` is a word splitter and not a shell, so it knows nothing about
   heredocs, and `git commit -F - <<'EOF'` with an apostrophe in the body is
   unbalanced to it and perfectly valid to bash. The guard had been written to
