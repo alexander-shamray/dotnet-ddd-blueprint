@@ -2003,7 +2003,7 @@ public void Every_metrics_type_is_forced_or_has_a_stated_reason_not_to_be()
 
 ### Four of them have no signal yet
 
-PR-24 wrote all twelve conditions out as Prometheus rules and found that **four
+PR-24 wrote every condition above out as Prometheus rules and found that **four
 of them read an instrument nothing publishes**. That is this section's own
 callout coming true, at the moment the alerts stopped being a table and became
 files — and it is recorded here rather than resolved by quietly shipping rules
@@ -2258,9 +2258,9 @@ attached is a page to somebody who will have to reason from scratch.
 | `docs/runbooks/redis-cold.md` | Cache-loss load spike on the databases, and how to shed load while it warms |
 
 Write each one when the corresponding alert is created, not after it first
-fires. All twelve landed with PR-24 — including the four whose alert cannot fire
-yet, because a procedure whose queries read tables that already exist is useful
-before its pager is.
+fires. Every row above landed with PR-24 — including the four whose alert cannot
+fire yet, because a procedure whose queries read tables that already exist is
+useful before its pager is.
 
 **The pairing is a gate, not a convention.** `deploy/observability/check.py`
 fails the build on an alert whose `runbook_url` names a file that is not there,

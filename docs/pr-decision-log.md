@@ -1863,6 +1863,22 @@ from an exporter"; CLAUDE.md said twelve runbooks. The first is now named
 rather than counted, on this file's usual terms; the second is a tree listing
 where the number is the point, so it moved to thirteen.
 
+**The second half of that sentence was true of one site and read as true of
+the file, and [#155](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/155)
+is what it cost.** CLAUDE.md said twelve runbooks in *three* places; the edit
+reached the tree listing and left the PR-24 narrative saying twelve twice
+over, so this entry recorded a reconciliation that had covered a third of its
+subject. That is the multi-target lesson this repository already carries —
+**a multi-target edit that aborts has applied a prefix of its changes** — with
+no abort to make it visible: nothing failed, the count that was checked was
+correct, and the two that were not went unread for as long as nobody counted
+them. **Resume from the list, not from the site you happened to fix**, and
+where the list is prose in five files, the honest fix is to stop restating the
+number at all. #155 dropped it everywhere but here and the tree listing, and
+gave the predicate a gate — check 9 reads §13.6's and §13.9's tables against
+`docs/runbooks` — so the one number that survives is now one a build
+recomputes.
+
 ---
 
 ## The state that waits on two services (#124)
@@ -3127,14 +3143,14 @@ ADR-022 records it as owed.
 ## PR-24 — the runbooks, and the four alerts that could not fire
 
 PR-24 delivered [Appendix C](backend-architecture/appendix-c-delivery-plan.md)'s
-ops row: [§13.9](backend-architecture/13-observability.md)'s twelve runbooks,
+ops row: [§13.9](backend-architecture/13-observability.md)'s runbooks,
 §13.6's per-lane outbox alerts, `docs/secrets.md`, §13.8's dashboards as code,
 and §13.7's k6 SLO run. It also built the code those alerts read —
 `OutboxMetrics`, `IOutboxStats`/`OutboxStats` and `MetricsInitialiser` — which
 §13.6 had specified since PR-14 deferred it by name and nobody had written.
 
 **Decision — the alerts split into two files, and only one of them is
-loaded.** Writing §13.6's twelve conditions out as Prometheus rules established
+loaded.** Writing §13.6's conditions out as Prometheus rules established
 that **four of them read an instrument nothing publishes**: the saga age and the
 review queue have no gauge over their tables, `orders.placed` waits on
 `OrderMetrics` and §6.6's `OrderSummaries` projection, and the cache ratio waits
@@ -3154,14 +3170,14 @@ removed once the package was actually read. See the fourth finding below.
 **Why.** §13.6 spends a callout on exactly this: *"Two of the alerts in this
 document were written against signals that did not exist, and both looked
 correct: the dashboard is empty either way, whether the system is healthy or the
-metric was never published."* Shipping all twelve as loaded rules would have
+metric was never published."* Shipping every rule as loaded would have
 made that sentence true again, in files, at the moment it was being quoted.
 A rule that cannot fire is not a weak alert — it is a silent one, and silence
 reads as health.
 
-**Consequences.** `platform-alerts.yaml` holds the eight that can fire;
-`awaiting-signal.yaml` holds the four that cannot and is not loaded. All twelve
-runbooks exist either way, because §13.9 asks for the procedure to be written
+**Consequences.** `platform-alerts.yaml` holds the rules whose signal exists;
+`awaiting-signal.yaml` holds the four that cannot fire and is not loaded. Every
+runbook exists either way, because §13.9 asks for the procedure to be written
 when the alert is created and every query in those four reads a table that
 exists today. The cost is a second file to notice, paid down by the gate below.
 

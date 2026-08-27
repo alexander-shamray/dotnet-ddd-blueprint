@@ -88,10 +88,17 @@ docs/secrets.md              how a secret reaches a pod and how each kind is
                              rotated — the operational half of §15.4 on
                              testing.md's exact terms, and §15.4 keeps the
                              inventory and wins any disagreement
-docs/runbooks/               thirteen, one per §13.6 alert, since PR-24. Plus a
-                             README that is EXCLUDED from the pairing by name —
-                             one declared exception, so a second non-runbook
-                             file has to be argued for
+docs/runbooks/               thirteen since PR-24, and NOT one per alert — the
+                             rule files declare fourteen, because §13.8's
+                             ownership split makes error rate two rules over
+                             one procedure. That is the only sharer and it is
+                             declared, with its reason, in check.py's
+                             SHARED_RUNBOOKS. Plus a README that is EXCLUDED
+                             from the pairing by name — one declared exception,
+                             so a second non-runbook file has to be argued for.
+                             The number survives here because check 9 now reads
+                             §13.6's and §13.9's tables and fails when they and
+                             the directory disagree
 docs/superpowers/            one frozen spec + plan per PR, written before it
 
 global.json                  SDK pin (§4.4)
@@ -483,8 +490,8 @@ repository that **cannot be verified by anything the solution builds** — no
 project references it, `dotnet test` says nothing about it, and its gate is a
 shell script over `helm template`. PR-24 gave §13.6's alerts their signals —
 `OutboxMetrics` and the `MetricsInitialiser` that forces every metrics type to
-exist — plus the twelve runbooks, `docs/secrets.md`, the dashboards and the k6
-SLO run. It also found that **four of §13.6's twelve alerts read an instrument
+exist — plus the runbooks, `docs/secrets.md`, the dashboards and the k6
+SLO run. It also found that **four of §13.6's alerts read an instrument
 nothing publishes**, which is that section's own callout coming true the moment
 the alerts stopped being a table and became files; those four ship unloaded and
 a gate keeps the list honest.
