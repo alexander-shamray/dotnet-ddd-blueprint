@@ -2,6 +2,7 @@
 description: Review branch vs main for contradictions; recheck suggestions.md when it already exists
 argument-hint: "[recheck | full | --local]"
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(dotnet test:*), Bash(dotnet build:*), Bash(rm suggestions.md)
+disallowed-tools: Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(docs/**), Edit(./docs/**), Edit(deploy/**), Edit(./deploy/**), Edit(tools/**), Edit(./tools/**), Edit(.github/**), Edit(./.github/**), Edit(.config/**), Edit(./.config/**)
 ---
 
 Review uncommitted or branch work for **contradictions and self-consistency
@@ -172,3 +173,27 @@ Always end with:
 
 Do not fix the findings in this command unless the user explicitly asks to
 apply them after the review.
+
+**That is enforced now, and used to be prose alone (#60).** This command
+declared "do not fix" while holding `Write` and `Edit` over every path
+`.claude/settings.json` did not deny — a read-only claim resting on prose while
+the grant permits writing everywhere, which for a review command is the worse
+failure. The frontmatter's `disallowed-tools` path-scopes `Edit` away from
+every tracked tree, `docs/` included, leaving the repository root writable
+because `suggestions.md` is this command's one legitimate output.
+
+**Two limits, both stated rather than glossed.**
+
+`disallowed-tools` binds the Claude Code host path — `/review-branch` run here,
+including `--local`. It says nothing about the containerised run: inside
+`grok-review.sh` this file is read by **grok**, a different CLI, under
+`--permission-mode bypassPermissions`, and nothing has established that grok
+honours a `disallowed-tools` key at all. There the only thing keeping the
+reviewer from rewriting the branch it is reviewing is the container's
+disposability — a property of the sandbox, not of this grant. Do not read the
+frontmatter as reaching that run.
+
+And the list is a deny-list, so a tree added later is editable until someone
+adds it. `test_grok_helpers.py` asserts the list covers every tracked
+top-level tree, which is what makes that a red build instead of a quiet
+widening.
