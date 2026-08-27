@@ -56,6 +56,31 @@ What is under test, and which issue each half closes:
   #57   the sweeps' de-duplication gate treated any open issue as tracking, so
         a stranger could suppress a finding and end the sweep. The cases cover
         both copies of the gate and every phrasing it has retired.
+  #140  the Grok ceiling was six in `ship.md` and twelve in both helpers, so
+        nothing refused a seventh paid check. The cases cover the declared
+        ceiling, that `grok-review.sh` DERIVES it rather than restating it, and
+        the migration — a row posted under the old ceiling is still read as
+        spent, which is what stops the fix re-arming the cap it tightens.
+  #60   two commands stated editing boundaries their grants did not enforce.
+        The cases read every tracked tree and every tracked root file from
+        `git ls-files` and assert each is denied, because the alternative is a
+        list that rots the way every deny-list here has.
+  #30   `git log --output=` is an arbitrary file write that reads as
+        inspection, and the settings deny matches only the unquoted spelling.
+  #23   the push deny-list enumerated spellings, and git's refspec grammar is
+        larger than any list. Both are the argv guard's, and its cases are the
+        longest set here because two review rounds took the first design apart:
+        bundled shorts, abbreviations, wildcard destinations, pushes naming no
+        destination, heredoc bodies read as arguments, command substitutions
+        read as inert.
+  #150  what suppresses a sweep finding was prose in two files. The cases cover
+        the helper's three exit codes, that neither sweep can read an issue's
+        author at all, and that the one legitimate output stays writable.
+
+**This inventory is a fourth copy of a list `ci.yml`, `docs/testing.md` and
+`CLAUDE.md` also keep, and it went stale exactly as a fourth copy does** — it
+ended at #57 while the classes closing five more sat in this file. Reconcile it
+with those three, or the next reader of the suite gets the shortest version.
 
 Two rules the suite is written to, both of them this repository's:
 
@@ -102,6 +127,7 @@ COMMANDS = SCRIPTS.parent / "commands"
 DROP = SCRIPTS / "git-worktree-drop.sh"
 HOOK = SCRIPTS.parent / "hooks" / "guard-git-argv.py"
 SUPPRESSES = SCRIPTS / "gh-issue-suppresses.sh"
+ISSUE_TEXT = SCRIPTS / "gh-issue-text.sh"
 
 BASH = shutil.which("bash")
 GREP = shutil.which("grep")
@@ -1122,6 +1148,34 @@ class TheCeilingBindsAndTheReadStaysWider(unittest.TestCase):
         )
         self.assertEqual("0", stub.run("42", "count").stdout.strip())
 
+    def test_a_slot_above_its_own_denominator_is_not_state(self):
+        # **The shape filter admits the CROSS-PRODUCT of the two alternations**,
+        # so `9/6` matches — and no writer of this file has ever been able to
+        # emit it, because the write side caps a slot at its own ceiling.
+        # Raised in review. A trusted-looking manual row would otherwise make
+        # `count` report 9 and jam the six-slot cap.
+        #
+        # Checked in arithmetic rather than as paired regex ranges, which would
+        # need one alternation per retired ceiling and would rot with the next.
+        stub = self.raw(
+            [
+                self.comment(101, "alice", "Grok check 9/6 — reserved (full)"),
+                self.comment(102, "alice", "Grok check 12/6 — reserved (full)"),
+                self.comment(103, "alice", "Grok check 2/6 — reserved (full)"),
+            ],
+            {"alice": "write"},
+        )
+        self.assertEqual("2", stub.run("42", "count").stdout.strip())
+
+    def test_an_impossible_pair_cannot_win_an_election_either(self):
+        # The same guard on the other consumer. A row `count` refuses to see
+        # must not be able to take a slot from a legitimate claimant.
+        stub = self.raw(
+            [self.comment(101, "alice", "Grok check 5/4 — reserved (full)")],
+            {"alice": "write", "self": "write"},
+        )
+        self.assertEqual(0, stub.run("42", "reserve", "5", "full").returncode)
+
     def test_a_ledger_line_inside_a_longer_comment_is_not_state(self):
         # The anchored `test()` the filter has always carried, exercised for the
         # first time: the stub that existed before #140 handed back rows the
@@ -1204,11 +1258,19 @@ class TheCeilingBindsAndTheReadStaysWider(unittest.TestCase):
         # Run on the same engine the script does, over the value bash composes
         # rather than a restatement of it.
         pattern = f"^({self.declared_in_ledger('LEDGER_DENOMINATORS')})$"
-        for good in ("6", "12"):
+        # Derived, not restated: this case listed `6` and `12` as literals,
+        # which is a third copy of the very numbers the change exists to stop
+        # copying. Raised in review.
+        accepted = {self.declared_in_ledger("CEILING")} | set(
+            self.declared_in_ledger("LEDGER_RETIRED_DENOMINATORS").split("|")
+        )
+        self.assertGreater(len(accepted), 1, "the accepted set is not vacuous")
+        for good in accepted:
             with self.subTest(value=good):
                 self.assertTrue(grep_matches(pattern, good))
         for bad in ("1", "2", "7", "60", "126", ""):
             with self.subTest(value=bad):
+                self.assertNotIn(bad, accepted)
                 self.assertFalse(grep_matches(pattern, bad))
 
     def test_moving_the_ceiling_keeps_the_write_readable(self):
@@ -2651,14 +2713,27 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
     """
 
     # The one tree each command's job IS, exempt because denying it would break
-    # the command rather than bound it. `.claude` is exempt for a different
-    # reason and is checked separately: `settings.json` denies it globally, so a
-    # per-command rule would be a second copy of a control that already holds.
+    # the command rather than bound it.
+    #
+    # **`.claude` used to be exempt here too, on a premise that was false.** The
+    # comment said `settings.json` denies it globally, so a per-command rule
+    # would be a second copy of a control that already holds. It does not:
+    # settings denies specific CHILDREN — `scripts/**`, `commands/**`,
+    # `hooks/**` and the rest — and this suite asserts `Edit(.claude/**)` is
+    # *absent* from settings, because `.claude/worktrees/` must stay writable.
+    # Every tracked file happened to sit in one of those children, so the gate
+    # was green; a new `.claude/policies.md` would have been editable by both
+    # commands with nothing noticing, because the whole tree was subtracted
+    # before the assertion ran. Raised in review — the gate-coverage lesson
+    # applied to an exemption this branch had just written.
+    #
+    # Closed by denying `.claude/**` in the two COMMANDS rather than in
+    # settings, which leaves the worktree root alone.
     SUBJECTS = {
         "validate-blueprint.md": {"docs"},
         "review-branch.md": set(),
     }
-    GLOBALLY_DENIED = {".claude"}
+    GLOBALLY_DENIED = frozenset()
 
     @classmethod
     def tracked_trees(cls):
@@ -2924,6 +2999,46 @@ class WhatSuppressesIsDecidedByCodeNow(unittest.TestCase):
                 self.assertIn(
                     "Bash(bash .claude/scripts/gh-issue-suppresses.sh:*)", text
                 )
+
+    def test_neither_sweep_can_read_an_issues_author_at_all(self):
+        # **Dropping `author` from the listing was only half a control**, and
+        # the other half was one command over: both sweeps kept an unrestricted
+        # `Bash(gh issue view:*)`, which returns `author` to the same session.
+        # The decision the helper exists to take was still takeable, and the
+        # listing-line assertion below could not see it. Raised in review.
+        #
+        # This is #56 one command along — a helper that fixes its field set does
+        # not bind a caller who still holds the raw grant and can choose fields.
+        # Matching genuinely needs the body, which is an argument for a second
+        # fixed-field helper rather than for keeping the grant.
+        for name in ("security-sweep.md", "bug-sweep.md"):
+            with self.subTest(command=name):
+                frontmatter = (COMMANDS / name).read_text(
+                    encoding="utf-8"
+                ).split("---")[1]
+                self.assertNotIn("Bash(gh issue view:*)", frontmatter)
+                self.assertIn(
+                    "Bash(bash .claude/scripts/gh-issue-text.sh:*)", frontmatter
+                )
+
+    def test_the_text_helper_withholds_the_one_field_that_decides(self):
+        # The field set is fixed, and `author` is the field it exists to
+        # withhold — a caller that could choose fields could choose that one.
+        code = "\n".join(code_lines(ISSUE_TEXT.read_text(encoding="utf-8")))
+        self.assertIn("--json number,title,state,body", code)
+        self.assertNotIn("author", code)
+        self.assertNotIn("--repo", code)
+        self.assertEqual(1, code.count('[ "$#" -eq 1 ]'))
+
+    def test_the_text_helper_takes_one_issue_number_and_nothing_else(self):
+        for args in ((), ("1", "2"), ("0",), ("-1",), ("abc",),
+                     ("--json author",), ("",)):
+            with self.subTest(args=args):
+                result = subprocess.run(
+                    [BASH, str(ISSUE_TEXT), *args],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(2, result.returncode)
 
     def test_neither_sweep_still_holds_the_grant_the_helper_replaced(self):
         # Moving a decision into a script is what lets a grant SHRINK rather
@@ -3192,6 +3307,61 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertRefused(command)
 
+    def test_a_push_is_refused_unless_every_part_is_recognised(self):
+        # **The check is an ALLOW-list now, and these are why.** Two review
+        # rounds took the deny-list apart, each finding a form nobody had
+        # listed — which is #23's own conclusion arriving in parser form. Every
+        # one of these was verified allowed against the shipped guard:
+        #
+        #   `-fv`          bundled shorts; not equal to `-f`
+        #   `--branches`   git's synonym for `--all`
+        #   `refs/heads/*` a wildcard destination that INCLUDES `main` and
+        #                  equals nothing, so an equality test never fires
+        #
+        # A deny-list would now need four more entries and would be wrong again
+        # next round. This asks the opposite question, so a spelling nobody has
+        # thought of is refused for being unrecognised rather than admitted for
+        # being unlisted.
+        for command in (
+            "git push origin feature -fv",
+            "git push origin --branches",
+            "git push origin 'refs/heads/*:refs/heads/*'",
+            "git push origin 'refs/heads/fix/*:refs/heads/fix/*'",
+            "git push origin --some-option-git-adds-next-year",
+            "git push origin feature extra-refspec",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_push_naming_no_destination_is_refused(self):
+        # The case `--all` already named, arriving as a MISSING refspec rather
+        # than as a flag: `git push origin` with an upstream of `origin/main`
+        # updates `main`, and `git push origin HEAD` updates whatever branch you
+        # are standing on. Neither names a destination, so neither can be shown
+        # not to be protected — and a hook is given no repository state to
+        # resolve them against. Raised in review; both verified allowed.
+        for command in (
+            "git push origin",
+            "git push origin HEAD",
+            "git push origin @",
+            "git push -u origin",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_the_pushes_ship_makes_survive_the_allow_list(self):
+        # The control that matters operationally, and it is why the allow-list
+        # is pinned rather than trusted: an allow-list that is one entry short
+        # breaks the delivery chain, and it would break it at the worst moment.
+        for command in (
+            "git push -u origin fix/some-branch",
+            "git push origin fix/some-branch",
+            "git push origin HEAD:refs/heads/fix/some-branch",
+            "git -C /tmp/x push -u origin fix/some-branch",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
     def test_a_legitimate_push_flag_that_merely_looks_similar_is_admitted(self):
         # `--follow-tags` is what shows the prefix test is the right way round:
         # `"force".startswith("follow-tags")` is false, so it passes, while
@@ -3338,9 +3508,44 @@ class TheGitArgvGuard(unittest.TestCase):
         # settings deny already performs — never weaker than the status quo the
         # hook was added to improve on, and never a silent pass.
         self.assertRefused('git log --output="/tmp/unbalanced')
-        self.assertRefused(
-            f"git commit -F - <<'EOF'{NEWLINE}don't --output=/tmp/x{NEWLINE}EOF"
-        )
+
+    def test_a_heredoc_body_is_data_even_when_it_names_a_command(self):
+        # **This case previously asserted the opposite, and the assertion was
+        # the defect.** A heredoc body mentioning `--output` or a protected push
+        # was refused, because the body was tokenised as a command line — and
+        # the earlier heredoc case only passed at all because an apostrophe
+        # forced the fallback path, so a body that happened to tokenise cleanly
+        # was still read as arguments. Raised in review.
+        #
+        # Heredoc bodies are stripped before anything is parsed now. They are
+        # what a command is GIVEN, not another command, and this repository
+        # writes its commit bodies that way.
+        for body in (
+            "don't --output=/tmp/x",
+            "see git push origin +HEAD:main for context",
+            "the guard's own body, with apostrophes and a don't",
+            "ext:: is a transport worth explaining",
+        ):
+            with self.subTest(body=body):
+                self.assertAdmitted(
+                    f"git commit -F - <<'EOF'{NEWLINE}{body}{NEWLINE}EOF"
+                )
+
+    def test_a_command_substitution_is_a_command(self):
+        # `shlex` hands a double-quoted `$(...)` back as ONE token, and the
+        # shell executes it — so `git log "$(git push origin +HEAD:main)"`
+        # contained no standalone `git` for the segment scan to find, and the
+        # protected push was admitted. Raised in review; verified allowed
+        # against the guard as shipped. Substitutions are extracted and judged
+        # in their own right now, backticks included.
+        for command in (
+            'git log "$(git push origin +HEAD:main)"',
+            "git log `git push origin +HEAD:main`",
+            'echo "$(git log -1 --output=/tmp/x)"',
+            'git log "$(git fetch ext::sh -c id)"',
+        ):
+            with self.subTest(command=command):
+                self.assertIn("substitution", self.assertRefused(command))
 
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated

@@ -103,8 +103,9 @@ number both helpers enforce and that a row posted under the old ceiling is
 still read as spent; **#60**, that the two commands stating editing boundaries
 path-scope `Edit` away from every tracked tree while each keeps its own subject
 editable; **#30** and **#23**, the argv guard — the `--output` write primitive
-in every spelling including the quoted one, `ext::`, and every push refspec
-that reaches `main`, forces or deletes; and **#150**, that what suppresses a
+in every spelling including the quoted one, `ext::`, command substitution, and
+a push allow-list that refuses anything but one remote, one refspec naming a
+destination, and options from a fixed set; and **#150**, that what suppresses a
 sweep finding is decided by a helper rather than by a reader.
 
 **Two of those took their counterfactual somewhere other than the previous

@@ -192,6 +192,15 @@ if [ "$op" = "count" ]; then
     {
       split($2, a, "/")
       sub(/^Grok check /, "", a[1])
+      den = a[2]
+      sub(/[^0-9].*$/, "", den)
+      # **The slot and denominator alternations are independent, so the shape
+      # filter admits their CROSS-PRODUCT** — `9/6` matches, and no writer of
+      # this file has ever been able to emit it. Raised in review. A row this
+      # file did not write is not this file'"'"'s state, so the pairing is checked
+      # here in arithmetic rather than spelled as paired regex ranges, which
+      # would need one alternation per retired ceiling.
+      if (a[1] + 0 > den + 0) next
       state[a[1] + 0] = ($2 ~ /released/) ? "released" : "reserved"
     }
     END {
@@ -279,7 +288,14 @@ if [ "$op" = "reserve" ]; then
         slot = $2
         sub(/^Grok check /, "", slot)
         sub(/\/.*$/, "", slot)
+        den = $2
+        sub(/^Grok check [0-9]*\//, "", den)
+        sub(/[^0-9].*$/, "", den)
       }
+      # The same cross-product guard `count` applies: a row pairing a slot with
+      # a denominator below it was never written by this file, so it must not
+      # win an election either.
+      slot + 0 > den + 0 { next }
       slot + 0 != n + 0 { next }
       index($2, " — released") { cand = "" }
       index($2, " — reserved") && cand == "" { cand = $1 }

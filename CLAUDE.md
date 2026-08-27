@@ -1359,8 +1359,9 @@ posted under the old ceiling is still read as spent. **#60** — that the two
 commands stating editing boundaries now path-scope `Edit` away from every
 tracked tree, and that each command's own subject stays editable. **#30** and
 **#23** — the argv guard: the `--output` write primitive in every spelling
-including the quoted one, `ext::`, and every push refspec that reaches `main`,
-forces or deletes. **#150** — that what suppresses a sweep finding is decided
+including the quoted one, `ext::`, command substitution, and — since the push
+check became an ALLOW-list — every push that is not one remote, one refspec
+naming a destination, and options from a fixed set. **#150** — that what suppresses a sweep finding is decided
 by a helper, and that neither sweep still holds the field it would decide with.
 
 **Two of the five are worth knowing for how their counterfactual had to be
@@ -2536,7 +2537,8 @@ noting and not evidence. It is evidence now, and it says the deny was genuinely
 defeatable rather than theoretically so.
 
 **What closed it is the second of the two things named here as owed: a rule
-over the executed argv rather than the typed string.** `.claude/hooks/guard-git-argv.py`
+over the executed argv rather than the typed string.**
+`.claude/hooks/guard-git-argv.py`
 is a `PreToolUse` hook on `Bash` that `shlex.split`s the command — the same
 quote removal the shell performs — and judges the resolved argv, so the
 fragments are rejoined before anything is compared and the dodge stops working.
@@ -2554,9 +2556,18 @@ speed bump is no longer the only thing there.
 **The hook's own residual, stated rather than left to be found:** `shlex`
 resolves quoting and not expansion, so a flag assembled at run time —
 `F=--output=x; git log $F` — arrives as the token `$F` and is not seen. Closing
-that needs the argv after expansion, which no hook is given. The bound is: it
-refuses every spelling a caller can type literally, quoted however they like,
-and not one the shell computes.
+that needs the argv after expansion, which no hook is given.
+
+**This paragraph once claimed more than that, and a reviewer was right to say
+so.** "Every spelling a caller can type literally" was false while
+`git log "$(git push origin +HEAD:main)"` was one `shlex` token and two commands
+to the shell — a command substitution is *executed*, not quoted away, and
+calling it inert because it survived tokenisation intact is the same mistake as
+reading a heredoc body as an argument list. Both are closed now: substitutions
+are extracted and judged in their own right, heredoc bodies are stripped as the
+data they are. **The bound is expansion alone** — what the shell computes rather
+than what a caller writes — which is narrow enough to be worth stating exactly
+rather than rounding up to "literal".
 
 **The `::` in a value collides with the `:*` suffix syntax, and the collision
 fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
@@ -2576,7 +2587,8 @@ a git subcommand that takes a **repository** — `fetch`, `clone`, `pull`,
 is what this sentence said until the scoping landed and did not reconcile it:
 the transport is only meaningful where git expects a repository, and judging it
 everywhere made a branch name or a path carrying the sequence indistinguishable
-from a use of it — a commit body arguing about the transport included. A hook is not bound by the pattern grammar at all,
+from a use of it — a commit body arguing about the transport included. A hook
+is not bound by the pattern grammar at all,
 which is why it can express what `Bash(...)` provably cannot — and the whole
 argument below about which grant pins what remains worth reading, because a
 hook is one file and defence in depth is the reason the allow side was narrowed
@@ -2787,9 +2799,15 @@ does not look, `origin HEAD:refs/heads/main` is the fully-qualified spelling,
 `origin feature --force` puts the flag where a leading-flag deny cannot reach.
 **Adding four more denies was refused.** Deny-list enumeration trails git's
 refspec grammar forever, and the grammar keeps growing — which is the issue's
-own conclusion. The hook parses the refspec and judges three *properties*
-instead: a destination of `main`, a force in any spelling, a delete in any
-spelling. Its suite carries the six the issue listed and six it did not, plus
+own conclusion — and judging three *properties* instead was not enough either.
+Two review rounds took that apart: `--force-with-lease=<ref>` is not equal to a
+set entry, git accepts `--for` as an abbreviation, `-fv` bundles, `--branches`
+and `--all` and `--mirror` carry no refspec to inspect, `refs/heads/*` includes
+`main` while equalling nothing, and bare `git push origin` names no destination
+at all. That is the deny-list trailing the grammar in parser form. **The
+question is inverted now**: a push is refused unless every part of it is
+recognised, so the spelling nobody has listed is refused for being
+unrecognised rather than admitted for being unlisted. Its suite carries the six the issue listed and six it did not, plus
 the three pushes `/ship` actually makes, because over-reach here breaks the
 delivery chain and would be found at the worst moment.
 
