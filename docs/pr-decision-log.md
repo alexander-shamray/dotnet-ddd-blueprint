@@ -327,16 +327,9 @@ executed.
 **The API name.** Covered above, and it is the cheapest instance: four sites,
 months, no compiler.
 
-**The signal.** This entry's first draft said the crash window left "a log line
-nothing alerts on". It came from #128's own body, which describes #117 as
-having replaced the fault with an `Ignore()` and a log line. #117 tried that and
-**removed** it. `Ignore(StockReserved)` is declared `During(Compensating)` and
-nowhere else, so the redelivery is genuinely unhandled: the default raises, five
-retries are spent, and the message reaches the error queue §13.6 pages on. The
-window was **observable and not repairable**, which is a materially better story
-than the one the issue told — a page is not a repair, and nothing in the error
-queue recreates the `AuthorisePayment` that was never sent. Reading the issue
-instead of the state machine is how it got in.
+**The signal**, argued in full under #128 above and not repeated here. The
+short form: the window was observable, a draft said it was silent, and the
+draft had read the issue rather than the state machine.
 
 **The reason for a mapping.** Four documents said
 `AddTransactionalOutboxEntities()` was used because
