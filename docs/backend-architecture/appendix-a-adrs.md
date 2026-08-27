@@ -1929,6 +1929,27 @@ edit, a chapter edit and possibly a `ClockSkew` edit**, because the bound is a
 sum: 300 from the realm and 30 from `TokenValidationParameters`, and cutting
 the lifetime alone leaves the skew where it is.
 
+> **Both halves of that number are pinned in the *local* realm and in no
+> other, and the scope is part of the decision rather than a caveat on it.**
+> `RealmImportTests` reads `deploy/compose/keycloak/realm-export.json`, which
+> is [§14.1](14-local-development.md)'s Compose realm. Every chart points at
+> `https://id.example.com/realms/commerce` — an externally provisioned realm
+> this repository holds no configuration for and runs no deploy-time check
+> against — so a deployed realm can issue five-hour access tokens while every
+> sentence here still reads 300 seconds.
+>
+> **That is the same division §15.4 already draws for every Secret**, and it is
+> stated rather than closed for the same reason: the charts create no Secrets
+> and provision no realm, so the platform's identity provider is somebody's
+> operational input and not this repository's artefact. What this repository
+> can honestly claim is the *shape* — the settings that must hold, the number
+> they must hold at, and a test proving the one realm it owns holds them. A
+> deployed realm owes `accessTokenLifespan` 300, a `ClockSkew` of 30 and no
+> client-level `access.token.lifespan` override, and nothing here verifies it.
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> carries that gap and the three shapes a fix could take, because a gap this
+> record merely described would be the TODO nothing re-checks.
+
 **This is the whole of the revocation story**, so a future denylist
 is a decision that supersedes this record rather than a gap someone may quietly
 fill: it would owe a producer, a consumer reachable from every host including
@@ -1966,6 +1987,15 @@ longer carry. That is an Appendix C row, and this decision is deliberately the
 smaller one that can land now. §11.5's statement that the BFF's only credential
 is its own client secret stays correct under this decision and would not survive
 that one.
+
+> **`use.refresh.tokens` is set in the local realm and in no other**, on
+> exactly ADR-033's terms: `RealmImportTests` pins the Compose realm, every
+> chart points at an externally provisioned authority, and nothing in this
+> repository validates that one. A deployed realm that leaves the attribute at
+> its default issues the browser a refresh token while this record says it does
+> not. What is decided here is that the browser must not hold one; enforcing it
+> where the realm is actually provisioned is an operational obligation this
+> repository states and cannot check.
 
 **Consequences.** The browser re-authenticates against the authorization
 endpoint every 300 seconds — the token's own lifetime, which is the renewal

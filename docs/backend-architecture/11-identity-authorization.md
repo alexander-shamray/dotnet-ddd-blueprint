@@ -73,7 +73,10 @@ Validation is cheap; assume the network is hostile.
 > records the removal, and `web-app`'s `use.refresh.tokens: "false"` is what
 > enforces it — pinned by `RealmImportTests`, because a realm attribute is
 > exactly the kind of setting that gets changed back by someone debugging a
-> logout.
+> logout. **In the local realm**: the charts point at an externally
+> provisioned authority, so a deployed realm owes the same attribute and
+> nothing here checks that it has it. ADR-034 states the obligation and its
+> limit.
 >
 > **Continuity is a silent renewal against the authorization endpoint**, bounded
 > by the SSO session, so the user sees a login when that session has ended
@@ -245,6 +248,19 @@ listing of a token denylist among Redis's contents.
 > number in this chapter still read 300 — the value would not have changed,
 > the *path* would — so the suite asserts that no client enables it, alongside
 > the lifetime itself. A premise a number depends on is part of the number.
+> A client-level `access.token.lifespan` overrides the realm outright, so the
+> suite checks for that too; both were found by review rather than by design.
+>
+> **Every one of those checks reads the local realm, and none reads a deployed
+> one.** `RealmImportTests` parses [§14.1](14-local-development.md)'s
+> `realm-export.json`; the charts point at an externally provisioned authority
+> this repository holds no configuration for. So the number above is normative
+> for the platform and *verified* only where the platform provisions its own
+> identity provider, which is locally. A deployed realm owes the same
+> settings, and
+> [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+> records that obligation as one this repository states and cannot check —
+> the division §15.4 already draws for every Secret, applied to the realm.
 
 **The authority is read eagerly and the throw names the key**, which is the
 posture `AddSqlServer` and `AddMassTransitMessaging` already take: a host that

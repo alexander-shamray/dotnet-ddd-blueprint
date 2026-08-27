@@ -11,6 +11,16 @@ namespace Common.Web.Tests;
 /// configuration, not code, which is exactly why it earns a test rather than a
 /// paragraph — nothing in the solution compiles differently when the audience
 /// mapper is missing."
+/// <para>
+/// <b>The realm this reads is §14.1's Compose realm, and there is no other in
+/// this repository.</b> Every chart points at an externally provisioned
+/// authority, so the security properties asserted below — the access-token
+/// lifetime, the absence of a client override, the absence of a refresh token
+/// — are verified for the realm the platform provisions itself and stated as
+/// obligations for one it does not. ADR-033 and ADR-034 carry that division;
+/// it is the same one §15.4 draws for every Secret. Read a green run here as
+/// "the local realm holds the shape", never as "the platform does".
+/// </para>
 /// </summary>
 /// <remarks>
 /// Here rather than in a service's suite because both halves of the agreement
