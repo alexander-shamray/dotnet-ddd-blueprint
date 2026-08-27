@@ -45,10 +45,15 @@ namespace Common.Contracts.Ordering.V1;
 /// </para>
 /// <para>
 /// <b>How Shipping obtains an address is open, and is Shipping's PR to
-/// decide.</b> The field had no consumer when it left — Shipping and
-/// Notifications do not exist, and §9.6's saga never read it — so nothing is
-/// owed a migration and this was the cheapest moment the removal will ever
-/// have. What replaces it is a choice between an explicit, auditable read back
+/// decide.</b> No consumer ever <i>read</i> the field — Shipping and
+/// Notifications do not exist, and §9.6's saga never touched it — so nothing
+/// downstream is owed a migration, and with no cluster having run this
+/// platform there was no old replica to hand a reduced payload to either.
+/// That second half is the one doing the work: the saga <i>binds</i> this
+/// contract, so it deserialises the whole payload whatever it reads, and
+/// §9.2's "no service consumes the version" condition was therefore not met.
+/// <c>ADR-035</c> records what a comparable removal owes once something is
+/// deployed. What replaces it is a choice between an explicit, auditable read back
 /// to Ordering, recorded as the ADR-017 exception such a hop has to be, and a
 /// despatch-time lookup against whatever store owns the address by then.
 /// Choosing before a consumer exists to state its needs is exactly the guessing

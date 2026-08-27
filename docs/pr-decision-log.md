@@ -185,13 +185,31 @@ contradiction into a dishonest resolution**, which is worse than the
 contradiction, because the contradiction is at least visible to anyone holding
 both chapters.
 
-**The field had no consumer, which is the only reason this was cheap.**
-Shipping and Notifications are unbuilt and §9.6's saga reads only the `OrderId`,
-so §9.2's two conditions for an in-place change were both met and
+**Nothing is deployed, which is the only reason this was cheap — and that is
+not the same as the field having had no consumer.**
 [ADR-035](backend-architecture/appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
-is the record the second condition demands. Every hour Shipping does not exist
-is an hour this removal stays free; the same edit after Shipping ships is a
-version bump with a consumer on the other side.
+is the record §9.2's second condition demands. Its first condition was **not**
+met, and three separate places said it was before review caught the last of
+them: Shipping and Notifications are unbuilt, so no independently scheduled
+service could be stranded, but §9.6's saga binds `Event<OrderConfirmed>` and a
+bound consumer deserialises the whole payload however little its transition
+reads. "The saga reads only the `OrderId`" is true and answers a different
+question — it is about what the transition uses, where the removal is about
+what the deserialiser requires.
+
+**What made it safe is that no cluster has ever run this platform**, so there
+is no old replica to hand a reduced payload to. Every hour Shipping does not
+exist is an hour this removal stays free; the same edit after Shipping ships is
+a version bump with a consumer on the other side, and the same edit after the
+*first deployment* owes ADR-026's no-overlap cutover or a two-release
+retirement even without one.
+
+**Three copies of one wrong sentence, corrected in three different rounds, is
+the finding rather than the sentence.** The claim was written once and restated
+in §9.2's callout, in ADR-035's own argument and here; each round's fix reached
+the copy that had been quoted at it and left the others standing. A reconciled
+claim is only reconciled where somebody greps, and the grep has to be for the
+*claim* rather than for the site under discussion.
 
 **The domain event keeps its `Address`, and the asymmetry is the decision.**
 `OrderConfirmedDomainEvent` never crosses a service boundary and

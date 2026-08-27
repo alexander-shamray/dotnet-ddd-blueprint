@@ -2092,13 +2092,26 @@ which cover an address.
 **Removed rather than versioned**, on §9.2's own carve-out: where the point of
 a change is that a value must not be on the wire, publishing V1 alongside V2
 keeps the offending shape consumable for the length of the window, so the
-standard remedy would re-arm the defect. §9.2's two conditions for changing a
-contract in place were both met and are recorded here so a later reader can
-check rather than take it on trust: **no service consumed the version** —
-Shipping and Notifications are unbuilt, and §9.6's saga reads only the
-`OrderId` — and this ADR is the record. [ADR-028](#adr-028--a-money-movement-command-carries-no-subject)
-is the worked precedent, on the same reasoning: removing the field removes the
-possibility rather than guarding against it.
+standard remedy would re-arm the defect. §9.2's second condition is met by this
+record existing, so that a later reader can check rather than take it on trust.
+
+**Its first condition — that no service consumes the version — was not met,
+and an earlier draft of this paragraph said it was.** Shipping and
+Notifications are unbuilt, so no service on an independent release schedule
+could be stranded; but §9.6's saga binds `Event<OrderConfirmed>`, which makes
+Ordering a registered consumer, and a bound consumer deserialises the whole
+payload however little its transition reads. "The saga reads only the
+`OrderId`" is true and answers a different question.
+
+**So the justification is not the condition; it is that nothing is deployed.**
+No cluster has ever run this platform, so there is no old replica to hand a
+reduced payload to — and the rollout callout above records what that costs
+later, in full, because the exemption expires at the first deployment while the
+rule does not. Stating the condition as met would have hidden a live-rollout
+fault behind a rule about version bumps, which is exactly what that callout
+exists to prevent. [ADR-028](#adr-028--a-money-movement-command-carries-no-subject)
+remains the worked precedent for the removal itself, on the same reasoning:
+removing the field removes the possibility rather than guarding against it.
 
 **Consequences.** Shipping's PR inherits an open question and the context to
 answer it: an explicit, auditable read back to Ordering, recorded as the
