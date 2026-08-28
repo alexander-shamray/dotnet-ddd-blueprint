@@ -1,5 +1,6 @@
 using Ordering.TestSupport;
 using Ordering.TestSupport.Outbox;
+using Common.Infrastructure.Idempotency;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
@@ -212,11 +213,14 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_pass_purges_both_tables()
+    public async Task A_pass_purges_every_table()
     {
-        // §9.5 asks for one hosted service covering both, and the alternative
-        // is two schedules with one of them being the one nobody notices has
-        // stopped. Asserting the pair in one pass is what that costs.
+        // §9.5 asks for one hosted service covering all of them, and the
+        // alternative is a schedule each with one of them being the one nobody
+        // notices has stopped. Asserting the set in one pass is what that
+        // costs — and the third table joined it with §8.5's durable marker,
+        // whose rows are the only ones here that carry a correctness property
+        // rather than a debugging record.
         OutboxMessage row = OutboxRows.Healthy(fixture);
         await fixture.StageOutboxAsync(row);
         await fixture.SetOutboxProcessedAtAsync(row.MessageId, LongAgo);
@@ -224,6 +228,9 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
         await fixture.StageInboxAsync(
             new InboxMessage(Guid.CreateVersion7(), "ordering-inventory-events", LongAgo));
 
-        (await fixture.PurgeRetentionAsync()).ShouldBe((Outbox: 1, Inbox: 1));
+        await fixture.StageIdempotencyMarkersAsync(
+            new IdempotencyMarker($"{Guid.CreateVersion7()}:tests.purge:{Guid.CreateVersion7()}", LongAgo));
+
+        (await fixture.PurgeRetentionAsync()).ShouldBe((Outbox: 1, Inbox: 1, Idempotency: 1));
     }
 }

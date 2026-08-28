@@ -1,3 +1,4 @@
+using Common.Infrastructure.Idempotency;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +39,17 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     /// the way they read the other one.
     /// </summary>
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+
+    /// <summary>
+    /// §8.5's durable idempotency markers. Declared on the same terms as the
+    /// two above and read by nothing in production: <c>EfIdempotencyMarkerStore</c>
+    /// is common code and reaches the entity through
+    /// <c>Set&lt;IdempotencyMarker&gt;()</c>, which is what lets one store serve
+    /// every service. The property is here so this context states its whole
+    /// model, and so §12.4's tests can read the table the way they read the
+    /// other two.
+    /// </summary>
+    public DbSet<IdempotencyMarker> IdempotencyMarkers => Set<IdempotencyMarker>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -48,11 +48,15 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
 
         // Named and ordered, not merely counted: the migrator's job is to
         // apply every migration in sequence, and a count alone would pass on
-        // a shorter prefix of them applied twice. The first four are what a
-        // scaffolded service starts with — the schema, then §9.4's outbox
-        // table, §9.5's inbox and the index the retention purge deletes
+        // a shorter prefix of them applied twice. What a scaffolded service
+        // starts with is named rather than counted — the schema, then §9.4's
+        // outbox table, §9.5's inbox and the index the retention purge deletes
         // through — all of them wiring every service has rather than anything
-        // this one chose. The rest are Ordering's own — no count, because the
+        // this one chose. §8.5's marker table is that wiring too and is NOT in
+        // that prefix here: it was added to the template after Ordering
+        // existed, so a rendered service applies it fifth and this one applies
+        // it last. The order below is this database's history, not the
+        // template's shape. The rest are Ordering's own — no count, because the
         // sentence has outlived two of them already: the aggregate's
         // tables, §6.4's price projection — a read model whose schema landed a
         // PR ahead of its producer, because its reader needed it — and the
@@ -95,7 +99,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
             "_AddSagaPaymentVerdictJoin",
             "_DefaultSagaCustomerIdForRemoval",
             "_AddSagaCancellationObserved",
-            "_AddTransactionalOutbox"
+            "_AddTransactionalOutbox",
+            "_AddIdempotencyMarkers"
         ];
 
         string[] applied = await fixture.AppliedMigrationsAsync();
@@ -222,7 +227,11 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
         IDomainEventDispatcher dispatcher =
             scope.ServiceProvider.GetRequiredService<IDomainEventDispatcher>();
 
-        TransactionBehavior<ProbeCommand, Result> behaviour = new(unitOfWork, dispatcher);
+        TransactionBehavior<ProbeCommand, Result> behaviour = new(
+            unitOfWork,
+            dispatcher,
+            scope.ServiceProvider.GetRequiredService<IIdempotencyMarkerStore>(),
+            scope.ServiceProvider.GetRequiredService<IdempotencyContext>());
         CancellationToken ct = TestContext.Current.CancellationToken;
 
         Result result = await behaviour.HandleAsync(

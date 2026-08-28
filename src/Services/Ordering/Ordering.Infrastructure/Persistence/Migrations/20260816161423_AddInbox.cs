@@ -12,10 +12,11 @@ namespace Ordering.Infrastructure.Persistence.Migrations;
 /// <remarks>
 /// <b>The table arrives before the first consumer, deliberately.</b> A service
 /// that binds no receive endpoint writes no row here — but
-/// <c>RetentionPurgeService</c> runs from first boot and purges both tables,
-/// and a purge against a table that is not there logs a failure every pass.
-/// That is the same argument that keeps the outbox migration here, inverted:
-/// the dispatcher would fail a claim, this would fail a delete.
+/// <c>RetentionPurgeService</c> runs from first boot and deletes from every
+/// table it was given, and a purge against a table that is not there logs a
+/// failure every pass. That is the same argument that keeps the outbox
+/// migration here, inverted: the dispatcher would fail a claim, this would fail
+/// a delete.
 /// <para>
 /// <b><c>Endpoint</c> carries a binary collation because it is half a key.</b>
 /// SQL Server's default is case-insensitive and a broker's queue names are

@@ -141,6 +141,28 @@ public class DependencyInjectionTests
     }
 
     [Fact]
+    public void AddCatalogApplication_registers_the_key_carrier_the_two_behaviours_share()
+    {
+        // §8.5's behaviour builds the key and §6.3's transaction writes the
+        // durable marker under it, and the carrier between them is a plain
+        // scoped class rather than an interface — so nothing fails at startup
+        // if it is missing. ValidateOnBuild never constructs an open generic,
+        // so the omission surfaces as a TransactionBehavior that cannot be
+        // resolved on the first command this service dispatches.
+        ServiceCollection services = new();
+
+        services.AddCatalogApplication();
+
+        ServiceDescriptor carrier = services
+            .Where(d => d.ServiceType == typeof(IdempotencyContext))
+            .ShouldHaveSingleItem();
+
+        carrier.Lifetime.ShouldBe(
+            ServiceLifetime.Scoped,
+            "a singleton would carry one command's key into every other command in the process");
+    }
+
+    [Fact]
     public void AddCatalogApplication_registers_the_command_validator()
     {
         // ValidationBehavior takes IEnumerable<IValidator<T>>, so a missing
