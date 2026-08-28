@@ -62,8 +62,11 @@ SOLUTION = ROOT / "Platform.slnx"
 # totals — 18 + 671 + 188 = 877 when PR-25 set these floors.
 #
 # The integration figure read 187 until it was checked against CI rather than
-# against the previous copy of itself, and 18 + 649 + 187 does not make the
-# 854 the same three files carried. A restated number is a claim to reconcile.
+# against the previous copy of itself: 18 + 649 + 187 IS 854, and 854 is not
+# the 855 the suites actually summed to. A restated number is a claim to
+# reconcile — and this comment spent that whole time saying the sum "does not
+# make" a figure it makes exactly, which is the arithmetic error the sentence
+# was written to warn about.
 #
 # **So this comment no longer says what CLAUDE.md and docs/testing.md carry**,
 # and the removal is the point rather than tidying. It used to, and the sentence
