@@ -1,8 +1,8 @@
 ---
 description: Review branch vs main for contradictions; recheck suggestions.md when it already exists
 argument-hint: "[recheck | full | --local]"
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(dotnet test:*), Bash(dotnet build:*), Bash(rm suggestions.md)
-disallowed-tools: Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(docs/**), Edit(./docs/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(bash .claude/scripts/dotnet-test.sh:*), Bash(rm suggestions.md)
+disallowed-tools: Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(docs/**), Edit(./docs/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
 Review uncommitted or branch work for **contradictions and self-consistency
@@ -106,7 +106,8 @@ spread-over-`.ToArray()` when the corpus is already clean).
    and `src/` / `tests/` / `deploy/` for every claim the change touches.
 3. **Run cheap gates when the range touches them.**
    - Packages / Appendix B: `python .github/licence-gate/licence_gate.py`
-   - Tests / counts CLAUDE asserts: `dotnet test Platform.slnx` when useful
+   - Tests / counts CLAUDE asserts:
+     `bash .claude/scripts/dotnet-test.sh [all|fast]` when useful
 
    **In the sandbox the second one is not available**, and that is deliberate
    rather than an oversight: `dotnet test` has needed a Docker daemon since
@@ -211,3 +212,28 @@ And the list is a deny-list, so a tree added later is editable until someone
 adds it. `test_grok_helpers.py` asserts the list covers every tracked
 top-level tree, which is what makes that a red build instead of a quiet
 widening.
+
+**That test can never see the case that mattered, and the reason is
+structural.** It reads `git ls-files`, so it enumerates what EXISTS; the
+dangerous file is one that does not. MSBuild imports `Directory.Build.targets`
+into every build of every project beneath it, and this command was granted
+`Write` and `dotnet build` at once — so creating a root file the enumeration
+could not contain, and then running the build the command already had, was host
+code execution. Measured: an `Exec` in an auto-imported `.targets` runs, and
+`dotnet build` reports success. Raised in review against the list as shipped.
+
+Two changes close it, and they close different halves. The executor is now
+`dotnet-test.sh`, which fixes the solution and the flags — `dotnet build` was a
+grant this command never used, and `dotnet test:*` admitted both an arbitrary
+project path and `/p:CustomBeforeMicrosoftCommonTargets=<file>`, which imports
+whatever it is pointed at, `suggestions.md` included. And the auto-import
+surface itself is denied: every name MSBuild reads without being asked, in the
+exact spelling this file already uses, plus `**/*.targets`, `**/*.props`,
+`**/*.rsp`, `**/*.csproj`, `**/*.sln` and `**/*.slnx` for the class.
+
+**Which half is measured is worth saying.** The exact-filename form is the one
+this file has always used and the one the suite reads. The `**/` globs are the
+documented gitignore-style syntax and are **not** measured here — they are
+belt to the exact names' braces, so if that syntax turned out inert in a
+`disallowed-tools` value the demonstrated vector would still be closed. Do not
+read them as the control; read the names as the control.

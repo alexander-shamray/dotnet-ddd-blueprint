@@ -2875,6 +2875,79 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
                     with self.subTest(command=name, path=path, prefix=prefix):
                         self.assertIn(f"Edit({prefix}{path})", rules)
 
+    # Every name MSBuild reads without being asked. Finite and documented,
+    # unlike git's refspec grammar — which is what makes an enumeration the
+    # right shape here and the wrong one there.
+    AUTO_IMPORTED = (
+        "Directory.Build.props",
+        "Directory.Build.targets",
+        "Directory.Build.rsp",
+        "Directory.Packages.props",
+        "Directory.Solution.props",
+        "Directory.Solution.targets",
+        "MSBuild.rsp",
+        "nuget.config",
+        "NuGet.config",
+        "NuGet.Config",
+        "global.json",
+    )
+
+    def test_the_msbuild_auto_import_surface_is_denied(self):
+        # **The tracked enumeration could never have covered this, and that is
+        # structural rather than an oversight.** `tracked_root_files` reads
+        # `git ls-files`, so it enumerates what EXISTS; the dangerous file is
+        # one that does not. MSBuild imports `Directory.Build.targets` into
+        # every build of every project beneath it, and `/review-branch` held
+        # `Write` and `dotnet build` at once — so creating a root file no
+        # enumeration could contain and then running the build the command
+        # already had was host code execution.
+        #
+        # Measured before the fix: an `Exec` in an auto-imported `.targets`
+        # runs and `dotnet build` reports success. Raised in review.
+        for name in self.SUBJECTS:
+            rules = self.disallowed(name)
+            for target in self.AUTO_IMPORTED:
+                with self.subTest(command=name, target=target):
+                    self.assertIn(f"Edit({target})", rules)
+                    self.assertIn(f"Edit(./{target})", rules)
+
+    def test_the_auto_imported_names_are_not_all_tracked(self):
+        # The positive control for the case above, and the point of it: at
+        # least one auto-imported name is absent from the repository, so a test
+        # built on `git ls-files` cannot reach it. If every name here became
+        # tracked this assertion would fail, which is the signal to re-derive
+        # the list rather than to delete this test.
+        tracked = self.tracked_root_files()
+        absent = [n for n in self.AUTO_IMPORTED if n not in tracked]
+        self.assertIn("Directory.Build.targets", absent)
+
+    def test_no_command_grants_a_free_form_dotnet(self):
+        # `dotnet build:*` was a grant `/review-branch` never used, and
+        # `dotnet test:*` admitted an arbitrary project path AND
+        # `/p:CustomBeforeMicrosoftCommonTargets=<file>`, which imports
+        # whatever it points at — `suggestions.md`, which this command writes,
+        # being a legal target. The executor is `dotnet-test.sh` now, whose
+        # only variable is one word out of two.
+        #
+        # Asserted over EVERY command rather than the one that had it, because
+        # the last time a grant was withdrawn from the two files an issue named
+        # a third that a whole-frontmatter test found.
+        for path in sorted(COMMANDS.glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            granted = re.findall(r"^allowed-tools:\s*(.+)$", text, re.MULTILINE)
+            for line in granted:
+                with self.subTest(command=path.name):
+                    self.assertNotIn("Bash(dotnet ", line)
+
+    def test_the_test_runner_helper_takes_no_free_parameter(self):
+        # And the helper it was replaced by leaves nothing to steer: the
+        # solution, the filter and the flags are literals, and the one argument
+        # is matched against a fixed case rather than passed on.
+        source = (SCRIPTS / "dotnet-test.sh").read_text(encoding="utf-8")
+        self.assertIn("dotnet test Platform.slnx", source)
+        self.assertNotIn('"$@"', source)
+        self.assertNotIn("$mode\"", source.replace('"$mode" in', ""))
+
     def test_the_one_legitimate_output_stays_writable(self):
         # The other side, and the reason the root is enumerated rather than
         # denied wholesale. `suggestions.md` is `/review-branch`'s only output

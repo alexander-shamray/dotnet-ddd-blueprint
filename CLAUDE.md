@@ -2862,6 +2862,35 @@ six the issue listed and six it did not, plus the three pushes `/ship`
 actually makes, because over-reach here breaks the delivery chain and would
 be found at the worst moment.
 
+**The ninth is `/review-branch`'s pair of `dotnet` grants, and what makes it
+worth its own entry is that the enumeration guarding it could never have
+worked.** That command holds `Write` and held `Bash(dotnet build:*)` and
+`Bash(dotnet test:*)`; its `disallowed-tools` denies every tracked root file,
+read from `git ls-files` by a test so a new one is a red build. But MSBuild
+imports `Directory.Build.targets` into every build of every project beneath it,
+and that file **does not exist in this repository** — so it is on no list read
+from what exists, and no care about that test could have put it there. Write it,
+run the build the command already had, and an `Exec` in it runs. Measured, in a
+scratch tree: the target fires and `dotnet build` reports success. Raised in
+review.
+
+`dotnet build` was a grant the command never used — its body names
+`dotnet test` alone — and `dotnet test:*` bought two things beyond the run it
+was added for: any project path, and `/p:CustomBeforeMicrosoftCommonTargets=`,
+which imports whatever file it names, `suggestions.md` among them. Both are
+gone, replaced by `dotnet-test.sh`, whose only variable is one word out of two.
+**The helper closes the executor and not the import**, so the auto-imported
+names are denied as well — in **both** commands that state editing boundaries,
+because the artefact outlives the command that writes it and only one of the
+two had an executor. A `Directory.Build.targets` written by
+`/validate-blueprint` is executed by the next thing that builds.
+
+**Which half is measured is recorded rather than rounded up.** The exact
+filenames are the spelling both files already used and the suite reads. The
+`**/*.targets`-style globs beside them are the documented gitignore syntax and
+are **not** measured in a `disallowed-tools` value — belt to the names' braces,
+and not the control.
+
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an
 attacker can reach; `/bug-sweep` files what is wrong on its own terms. Both
