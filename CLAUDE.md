@@ -5,9 +5,18 @@ Guidance for Claude Code when working in this repository.
 **Four long sections of this file now live beside it under `docs/`.** Every
 landed PR appended its findings here and nothing was ever consolidated, so a
 file loaded into every session's context had grown past three thousand lines.
-Those blocks moved out **verbatim in their arguments**: not one was shortened,
-because a summary of an argument is how a rule gets "corrected" back. Each
-destination's own header lists what *was* edited on the way out.
+
+**Three of the four were extractions and the fourth was a fold, and the
+difference decides what you can expect to find at the far end.** The
+extractions — the decision log, the lessons, the harness boundaries — moved out
+**verbatim in their arguments**: not one was shortened, because a summary of an
+argument is how a rule gets "corrected" back, and each of those three headers
+lists what *was* edited on the way out. `docs/testing.md` is the fold: it
+already carried nearly all of *The commands*, so moving that section verbatim
+would have made a third copy of a list that already had two. Only what was
+uniquely here went, the short form stayed, and that file's header describes its
+split with §12 rather than an extraction — correctly, because nothing was
+extracted into it.
 
 | | |
 |---|---|
@@ -765,8 +774,9 @@ exactly as Appendix C wins over the roadmap.
 
 **Three runners, and only one of them is `dotnet test`.** The scaffold's tests
 are Python, the chart gate is bash over `helm template`, and the licence gate,
-the secret scan, the observability gate, the pipeline gate, the coverage
-reporter, the canary, the closure gate and the review helpers are Python again;
+the secret scan, the observability gate, ADR-036's broker ACL, the pipeline
+gate, the coverage reporter, the canary, the closure gate and the review
+helpers are Python again;
 none is in `Platform.slnx`, so a green solution says nothing about any of them.
 **Each of them is tested and then run**, which is the pattern every gate here
 follows — the licence gate was once left out of this list on the reasoning that
@@ -776,7 +786,16 @@ a gate is not a suite, and it is both.
 recount.** It said seven, then ten, and #61's secret scan made it eleven inside
 the pull request that was correcting the sentence around it. What a reader can
 check is whether that enumeration matches `docs/testing.md`'s block and the
-jobs in `ci.yml`; that check needs no numeral in front of it.
+workflows that run them; that check needs no numeral in front of it.
+
+**"The workflows", not "`ci.yml`", and the correction is the enumeration's own
+lesson arriving one entry late.** ADR-036's broker ACL runs in
+`broker-permissions.yml` and `ci.yml` names no `rabbitmq` job at all, so a
+check written against that one file failed on both legs: the suite was missing
+from the enumeration *and* absent from the workflow the check pointed at. It is
+the licence gate's omission again — a gate left out on the reasoning that a
+gate is not a suite, and it is both — this time with an explicit "compare
+these" instruction aimed straight at the gap.
 
 **`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12 and the
 default interpreter here is 3.14 — a *newer* one is the hazard, because it
@@ -1653,7 +1672,7 @@ Content:
 
 | | |
 |---|---|
-| `/validate-blueprint` | Multi-pass self-consistency audit across the blueprint and `docs/roadmap.md`; also code ↔ docs drift once `src/` exists |
+| `/validate-blueprint` | Multi-pass self-consistency audit across the blueprint, `docs/roadmap.md` and `docs/testing.md`; also code ↔ docs drift once `src/` exists |
 | `/check-links` | Link, cross-reference and nav-footer integrity |
 | `/new-chapter` | Scaffold a chapter and rewire its neighbours |
 | `/new-adr` | Append an ADR in the established form |

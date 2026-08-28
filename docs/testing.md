@@ -13,10 +13,17 @@ flag belongs here and changes nothing about the strategy. **Where the two
 disagree, §12 wins**, and the disagreement is a bug report against one of them.
 
 > **This file is outside the blueprint tree, so nothing structural catches its
-> drift.** It is in no index and behind no nav footer, exactly like
-> `roadmap.md` and `pr-decision-log.md`. `/check-links` does not reach it and
-> `/validate-blueprint` reaches it only because it is named in that command's
-> scope. The one rule in `CLAUDE.md` covers it, and that is all that does.
+> drift.** It is in no index and behind no nav footer, like every document
+> under `docs/` that is not the blueprint tree. `/check-links` does not reach
+> it, and `/validate-blueprint` reaches it only because it is named in that
+> command's scope — which makes this file and `roadmap.md` the two exceptions
+> among those siblings rather than one of a set. The one rule in `CLAUDE.md`
+> covers the rest, and that is all that does.
+>
+> **The siblings are described rather than listed on purpose.** Three copies of
+> this callout named three different sets the moment two new files arrived,
+> which is what a list with no code to check it against does. The predicate
+> holds however many there are.
 
 ## The suites
 
@@ -24,8 +31,11 @@ Three runners, and `dotnet test` says nothing about any suite but its own.
 **No count opens this sentence**, and its removal is the fix rather than a
 recount: it said seven, then ten, and #61's secret scan made it eleven inside
 the pull request correcting the sentence around it. What a reader can check is
-whether this block matches the jobs in `ci.yml` and the enumeration in
-`CLAUDE.md`, which needs no numeral.
+whether this block matches the enumeration in `CLAUDE.md` and the workflows
+that run them, which needs no numeral. **Workflows, plural, and not `ci.yml`
+alone** — ADR-036's broker ACL runs in `broker-permissions.yml`, so a check
+aimed at the one file misses a suite that is in this block and was, until
+recently, missing from `CLAUDE.md`'s enumeration as well.
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/

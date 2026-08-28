@@ -64,10 +64,15 @@ mention the sentence it is covering is the same shape as an unstated one.**
 > **deny**.
 
 > **This file is outside the blueprint tree, so nothing structural catches its
-> drift.** It is in no index and behind no nav footer, exactly like
-> `roadmap.md`, `testing.md`, `lessons.md` and `pr-decision-log.md`.
-> `/check-links` does not reach it and `/validate-blueprint` does not name it.
-> The one rule in `CLAUDE.md` covers it, and that is all that does.
+> drift.** It is in no index and behind no nav footer, like every document
+> under `docs/` that is not the blueprint tree. `/check-links` does not reach
+> it and `/validate-blueprint` does not name it — `testing.md` and
+> `roadmap.md` are the only two of those siblings it does. The one rule in
+> `CLAUDE.md` covers this file, and that is all that does.
+>
+> **The siblings are described rather than listed on purpose.** Three copies of
+> this callout named three different sets the moment two new files arrived,
+> which is what a list with no code to check it against does.
 
 ---
 
