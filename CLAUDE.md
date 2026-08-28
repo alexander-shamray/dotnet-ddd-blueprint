@@ -1135,6 +1135,21 @@ own line rather than sending a reader to a file that does not hold it.
   caller share one implementation of the part that disagrees, and pin the
   agreement with cases in both directions.
 
+- **`git checkout <commit> -- <path>` writes the INDEX as well as the working
+  tree, and a green suite says nothing about what is staged.** Taking a
+  counterfactual means swapping an older file in, running the new cases against
+  it, and putting the current one back — and putting it back with `cp` restores
+  the working tree only. The reverted version stays staged. It is harmless for
+  as long as the next commit happens to `git add` that same path, which is why
+  it survived a dozen counterfactuals here before the one commit that added
+  only a test file shipped a guard eleven fixes old beside it. **The suite that
+  ran before that commit read the working tree and passed**, so nothing about
+  the run was a warning. Restore with `git checkout HEAD -- <path>`, which
+  moves both, and read `git show --stat` after committing rather than the test
+  output before it — a green run and a correct commit are two claims, and only
+  one of them was checked. CI went red, which is the gate earning its keep, and
+  is also the reason this is a lesson rather than a defect that shipped.
+
 - **Every exemption owes an exact boundary; a guard with no exemption owes
   none.** The argv hook was over-refusing `echo git push …`, so a data-only
   exemption was added — correctly, and it immediately produced two bypasses
