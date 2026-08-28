@@ -129,10 +129,18 @@ removed from the deny list. A case whose counterfactual is not the previous
 commit needs saying so, or the next reader assumes none was taken.
 
 **No count opens that list any more**, here or in `.github/workflows/ci.yml` or
-`CLAUDE.md`, and the three enumerations are what a reader compares instead. The
-numeral said four, then five, then six, and was stale again inside the pull
-request that added two subjects — a figure restated in three files goes stale in
-all three at once. The regression
+`.claude/scripts/test_grok_helpers.py`, and those three enumerations are what a
+reader compares instead. The numeral said four, then five, then six, and was
+stale again inside the pull request that added two subjects — a figure restated
+in three files goes stale in all three at once.
+
+**`CLAUDE.md` was the third holder and no longer is**, which is why the trio
+above names the suite's own docstring in its place: the extraction folded that
+file's commands section into this one, and the issue-by-issue subjects came
+with it. This sentence went on naming `CLAUDE.md` for a round after `ci.yml`
+and the docstring had both been corrected — a three-site reconciliation that
+landed on two, which is the prefix a multi-target edit leaves behind when the
+follow-up is resumed from the report rather than from the list. The regression
 negatives are paired with positive controls, and those are not decoration: a
 negative that passes because the pattern matches *nothing* is indistinguishable
 from one that works, so the accepted values and the limit pattern's status
@@ -158,7 +166,7 @@ every gate here follows, across `ci.yml` and the path-filtered workflows
 beside it — so a green suite says the gate works and not that this checkout
 passes it. The block above already runs the observability gate, the broker ACL,
 the secret scan and the chart gate; these are the gate invocations it does
-**not** carry:
+**not** carry, and all four need no daemon, no SDK and no network:
 
 ```bash
 (cd .github/licence-gate && py -3.12 licence_gate.py)    # from its own directory
@@ -166,6 +174,27 @@ py -3.12 .github/pipeline-gate/pipeline_gate.py filters
 py -3.12 .github/pipeline-gate/pipeline_gate.py images
 py -3.12 deploy/canary/canary.py check
 ```
+
+**The Compose smoke is the fifth and is fenced apart from them, because it is
+the one gate here that needs a running daemon and the one whose run changes the
+machine it runs on.** `compose.yml` drives three commands against §14.1's file,
+and the third is not tidying: RabbitMQ seeds its default user only on an empty
+database, so ADR-036's removal of `guest` is true after a `down -v` and false
+after a plain `down`. The teardown is part of what the gate asserts, which is
+why it is listed here rather than left to the reader.
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml config -q
+docker compose -f deploy/compose/docker-compose.yml up -d --wait --quiet-pull
+docker compose -f deploy/compose/docker-compose.yml down -v
+```
+
+`config -q` runs first so that a YAML error costs no image download to find,
+and `up --wait` is the assertion rather than the setup — it exits non-zero if a
+healthcheck never passes, and a one-shot that another service gates on with
+`service_completed_successfully` satisfies it by exiting 0, so the migrators'
+exit codes are part of what this proves. `rabbitmq` is built rather than
+pulled, so an image build rides on the `up`.
 
 **`HELM=` is an override, not a gate run**, so it is documented here rather
 than listed above: the chart gate is already invoked in the suite block, and
