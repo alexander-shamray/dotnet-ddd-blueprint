@@ -457,6 +457,24 @@ def substitutions(command, quotes=True):
             found.append(command[index + 2:end])
             index = end + 1
             continue
+        if command.startswith("${", index) and command[index + 2:index + 3] in (
+                " ", "\t", "\n", "|"):
+            # **bash 5.3's function substitution runs a command**, where every
+            # other `${…}` expands a parameter and runs nothing. `${ cmd; }`
+            # and `${| cmd; }` are the two spellings, and the character after
+            # the brace is what separates them from `${VAR}`.
+            #
+            # **This host is 5.2.26 and does not support it** — measured,
+            # `bad substitution` — so it is closed BEFORE it is reachable
+            # rather than after. An exemption resting on a version is one that
+            # expires silently, and this file already carries that lesson about
+            # a hook directory that was safe until it was not.
+            end = _closing_brace(command, index + 2)
+            if end is None:
+                break
+            found.append(command[index + 2:end].lstrip("| \t\n"))
+            index = end + 1
+            continue
         if char == "`":
             end = command.find("`", index + 1)
             if end == -1:
@@ -466,6 +484,43 @@ def substitutions(command, quotes=True):
             continue
         index += 1
     return found
+
+
+def _closing_brace(command, start):
+    """Index of the `}` closing a function substitution, or None.
+
+    The same quote-and-escape tracking `_closing_paren` does, one bracket over.
+    Written as its own function rather than parameterised, because the two
+    differ in what nests inside them and a shared one would have to be told.
+    """
+    depth, index = 1, start
+    single = double = False
+    while index < len(command):
+        char = command[index]
+        if single:
+            if char == "'":
+                single = False
+        elif double:
+            if char == "\\" and index + 1 < len(command):
+                index += 2
+                continue
+            if char == '"':
+                double = False
+        elif char == "\\" and index + 1 < len(command):
+            index += 2
+            continue
+        elif char == "'":
+            single = True
+        elif char == '"':
+            double = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if not depth:
+                return index
+        index += 1
+    return None
 
 
 def _closing_paren(command, start):

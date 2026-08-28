@@ -4516,6 +4516,41 @@ class TheGitArgvGuard(unittest.TestCase):
             f"git commit -F - <<EOF{NEWLINE}$(git push origin +HEAD:main)"
             f"{NEWLINE}EOF")
 
+    def test_a_function_substitution_is_a_command(self):
+        # **Closed before it is reachable, which is the unusual part.** bash
+        # 5.3 added function substitution: `${ cmd; }` and `${| cmd; }` RUN a
+        # command, where every other `${…}` expands a parameter and runs
+        # nothing. This host is 5.2.26 and answers `bad substitution` —
+        # measured — so nothing here can execute one today.
+        #
+        # It is handled anyway, because the alternative is an exemption
+        # resting on a version, and this file already carries what those cost:
+        # `.claude/hooks/**` was off the deny list on the written grounds that
+        # no hook was configured, which was true until a hook landed and
+        # nothing re-read the condition. A shell upgrade is that same silent
+        # change.
+        #
+        # The character after the brace is what separates the two forms from
+        # `${VAR}`, and the controls below are the whole reason this is safe to
+        # add: every ordinary parameter expansion has to keep working.
+        for command in (
+            "echo ${ git push origin +HEAD:main; }",
+            "echo ${| git push origin +HEAD:main; }",
+            'git log "${ git push origin +HEAD:main; }"',
+            "echo ${ echo ${X}; git push origin +HEAD:main; }",
+        ):
+            with self.subTest(command=command):
+                self.assertIn("substitution", self.assertRefused(command))
+
+        for command in (
+            "git log ${BRANCH}",
+            "git log ${BRANCH:-main}",
+            "echo ${#arr[@]}",
+            "git log ${BRANCH//x/y}",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an
