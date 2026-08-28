@@ -4213,6 +4213,23 @@ class TheGitArgvGuard(unittest.TestCase):
         # silently weaker than its main path is one nobody knows the reach of.
         self.assertAdmitted('git log --out""put=/tmp/x "unbalanced')
 
+    def test_what_the_shell_computes_is_the_residual(self):
+        # **The bound, asserted rather than described.** This hook resolves
+        # quoting; it does not evaluate. A command the shell COMPUTES is
+        # therefore out of reach, in both of its shapes — a flag assembled from
+        # a variable, and a substitution whose OUTPUT becomes the command line.
+        # Both run under bash and both are admitted here.
+        #
+        # Written as a passing test on purpose, the way the degraded-check case
+        # below is: a residual nobody can run is one the next reader assumes
+        # was closed. If either of these starts being refused, this test fails
+        # and the paragraph in `CLAUDE.md` that names the bound is what needs
+        # rewriting.
+        self.assertAdmitted("F='git push origin +HEAD:main'; $F")
+        self.assertAdmitted("F=--output=/tmp/x; git log $F")
+        self.assertAdmitted(
+            'sh -c "$(echo \'git push origin +HEAD:main\')"')
+
     def test_a_non_bash_tool_is_not_judged(self):
         self.assertIsNone(self.judge("git push origin +HEAD:main", tool="Read"))
 

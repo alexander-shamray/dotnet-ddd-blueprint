@@ -2641,11 +2641,18 @@ turned off. Enumerating the executing keys would be the deny-list this file
 already refuses twice over.
 
 **So state the bound as what has been looked for, not as what is left.** The
-residual named today is parameter expansion — `F=--output=x; git log $F`, what
-the shell computes rather than what a caller writes. Three earlier versions of
-that sentence were each falsified by a spelling nobody had gone looking for,
-and the pattern is that the bound gets narrower every time somebody probes
-rather than reasons. It is a claim about the last search, not a proof.
+residual named today is what the shell **computes** rather than what a caller
+writes, and it has two measured shapes: a flag or command assembled from a
+variable (`F=--output=x; git log $F`), and a substitution whose OUTPUT becomes
+the command line (`sh -c "$(echo 'git push origin +HEAD:main')"`). Closing
+either needs the argv after expansion, which no hook is given. Both are pinned
+as **admitted** in the suite, on the same argument as the degraded-check case:
+a residual nobody can run is one the next reader assumes was closed.
+
+Three earlier versions of that sentence were each falsified by a spelling
+nobody had gone looking for, and the pattern is that the bound gets narrower
+every time somebody probes rather than reasons. **It is a claim about the last
+search, not a proof.**
 
 **The `::` in a value collides with the `:*` suffix syntax, and the collision
 fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
