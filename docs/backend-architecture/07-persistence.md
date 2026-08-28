@@ -22,7 +22,7 @@ different rights, used by different processes:
 
 | Identity | Used by | Rights | Rationale |
 |---|---|---|---|
-| **Runtime** | The API and worker pods | `SELECT`/`INSERT`/`UPDATE`/`DELETE` on business, outbox and inbox tables. **No DDL.** | The application never alters schema, so it should be unable to. A SQL injection flaw or a compromised pod cannot drop a table |
+| **Runtime** | The API and worker pods | `SELECT`/`INSERT`/`UPDATE`/`DELETE` on business tables and on every technical one §7.4 lists — the outbox, the inbox and §8.5's idempotency markers. **No DDL.** | The application never alters schema, so it should be unable to. A SQL injection flaw or a compromised pod cannot drop a table |
 | **Migrator** | The `*.Migrator` job only | DDL on its own database | Elevated rights exist for the seconds the job runs, in a process with no network listener and no user input |
 
 The role grants are the same either way; **how the principal is created is not**,

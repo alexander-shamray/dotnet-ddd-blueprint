@@ -666,7 +666,7 @@ retires the exception in §8.5's opening guarantee — which is what a row recor
 and a commit body cannot.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,083 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,085 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -814,7 +814,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 868 of 1,083, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 868 of 1,085, no daemon
 ```
 
 **[`docs/testing.md`](docs/testing.md) is the operational reference and this is
@@ -866,8 +866,8 @@ defect in the branch.
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
 category runs a smaller suite and says which. `Category!=Integration` is 868 of
-the 1,083 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 215, needing the daemon
+the 1,085 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 217, needing the daemon
 exactly as before.
 
 Adding a migration needs the pinned tool and a startup project:

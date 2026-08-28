@@ -626,6 +626,17 @@ public sealed class ServiceFixture : IAsyncLifetime
             .ToListAsync(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>Every idempotency marker, untracked, for asserting over (§8.5).</summary>
+    public async Task<IReadOnlyList<IdempotencyMarker>> IdempotencyMarkersAsync()
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        return await db.IdempotencyMarkers
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
     /// <summary>
     /// Writes inbox rows directly, for tests about the purge rather than the
     /// filter. The filter's own tests go through a consume pipeline, because
