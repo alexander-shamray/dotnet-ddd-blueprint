@@ -471,11 +471,17 @@ git checkout -- Platform.slnx deploy/compose/
 work you did *during* the dogfood**, and the warning below about committing
 first does not cover it. A fix made because the render exposed something — the
 case that actually happens — is in that tree and is reverted by the cleanup,
-leaving a commit whose message describes it and whose diff does not. Copy those
-files aside first, restore them after, and read `git show --stat` rather than
-your intent. Measured twice in one session, the second time while writing this
-sentence: the restore also brings the render's OWN edits back, so the
-`| Yankee API |` row returns with them.
+leaving a commit whose message describes it and whose diff does not. It cost a
+gate fix exactly that way.
+
+**Commit the fix before the cleanup; do not copy the file aside and restore
+it.** Copying back is the obvious repair and it is wrong, because by then the
+file also holds what the scaffold wrote — restoring it returns the
+`| Yankee API |` row along with the fix, and that is how probe output reaches a
+commit. `git add -p` the intentional hunks and commit them, then run the
+`git checkout` against what is left. Both halves were measured in one session:
+the revert first, and then the restore bringing the render back while the
+sentence recording the revert was being written.
 
 **A rendered service also cannot be committed as it stands
 ([#161](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/161)).**

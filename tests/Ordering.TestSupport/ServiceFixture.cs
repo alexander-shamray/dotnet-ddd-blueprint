@@ -270,10 +270,17 @@ public sealed class ServiceFixture : IAsyncLifetime
         //
         // These two literals and deploy/compose/rabbitmq/definitions.json are
         // one credential in two files, which is the shape this repository
-        // otherwise refuses. It is accepted for the reason §14.1 accepts
-        // `guest`/`guest`: a local-development default is not a secret, and
-        // the alternative — reading the hash out of the definitions file —
-        // cannot recover a password from it anyway.
+        // otherwise refuses. It is accepted on §14.1's local-development
+        // exception — the same one carrying `admin`/`admin` for Keycloak: a
+        // documented local default is not a secret. **Not "the reason §14.1
+        // accepts `guest`/`guest`", which is what this comment said until
+        // ADR-036 deleted that account** — a source comment resting on a
+        // rationale the blueprint has since reversed is the one-rule failure
+        // at its quietest, because nothing compiles a comment.
+        //
+        // The alternative is unavailable rather than merely worse: the
+        // definitions file holds a salted hash, so nothing can recover the
+        // password from it to hand to the container.
         _rabbit = new RabbitMqBuilder()
             .WithImage(broker)
             .WithUsername("ordering-svc")
