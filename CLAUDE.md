@@ -99,7 +99,7 @@ forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..032),
+                             15-cicd-deployment, appendix A (ADR-001..037),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -203,7 +203,13 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              not protected today
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/secret-scan/         §15.1's other half since #61 — twelve rules, an
-                             allow-list of fingerprints, and its tests
+                             allow-list of fingerprints, and its tests. Since
+                             #161 it has a second caller: §4.5's scaffold
+                             imports `secret_scan.py`, runs it over what it
+                             rendered, and appends the accepted-finding lines
+                             that render needs — so this gate is a library as
+                             well as a job, and its matching has exactly one
+                             implementation
 .github/closure-gate/        what a pull request SAYS it closes, against what
                              merging it WILL close. Three statements — the
                              `| Closes |` row, GitHub's own
@@ -290,15 +296,18 @@ deploy/observability/        §13.8's dashboards, §13.6's alert rules and
 src/BuildingBlocks/          all five, and complete since PR-15
   Common.Domain/               Entity<TId>, AggregateRoot<TId>, IDomainEvent
                                and friends — no packages
-  Common.Application/          Result and Error; §6.2's dispatcher; three of
-                               §6.3's four behaviours; §6.5's CursorPage<T>;
-                               §7.5's ports
+  Common.Application/          Result and Error; §6.2's dispatcher; all
+                               of §6.3's behaviours; §6.5's CursorPage<T>;
+                               §7.5's ports; and §8.5's marker port and its
+                               scoped key carrier, added by PR-32
   Common.Contracts/            §4.3's one assembly that crosses a service
                                boundary. No packages and no project references,
                                and both absences are the point — anything this
                                referenced would travel into every service
-  Common.Infrastructure/       §8's Redis helpers, §9's outbox, inbox,
-                               consumers and retention purge
+  Common.Infrastructure/       §8's Redis helpers and §8.5's durable
+                               idempotency marker, §9's outbox, inbox,
+                               consumers and the retention purge that now
+                               covers all three tables
   Common.Web/                  §10.4, §10.5, §10.6, §11.3, §11.4, §13.2, §13.4
                                and §13.5, and nothing else — the only building
                                block with a FrameworkReference
@@ -509,12 +518,13 @@ cleanup half exists only here, because the runner discards its checkout.
 python tools/new-service/new_service.py Yankee --port 5199
 dotnet build tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj
 rm -rf src/Services/Yankee tests/Yankee.*
-git checkout -- Platform.slnx deploy/compose/
+git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed-secrets.txt
 ```
 
-**That `git checkout` reverts uncommitted work in `deploy/compose/`, including
-work you did *during* the dogfood**, and the warning below about committing
-first does not cover it. A fix made because the render exposed something — the
+**That `git checkout` reverts uncommitted work in `deploy/compose/` and in the
+allow-list, including work you did *during* the dogfood**, and the warning
+below about committing first does not cover it. A fix made because the render
+exposed something — the
 case that actually happens — is in that tree and is reverted by the cleanup,
 leaving a commit whose message describes it and whose diff does not. It cost a
 gate fix exactly that way.
@@ -528,18 +538,26 @@ commit. `git add -p` the intentional hunks and commit them, then run the
 the revert first, and then the restore bringing the render back while the
 sentence recording the revert was being written.
 
-**A rendered service also cannot be committed as it stands
-([#161](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/161)).**
-It carries seven credential-shaped literals and no
-`.github/secret-scan/allowed-secrets.txt` entries, so the mandatory secret scan
-refuses it. Five of the seven predate ADR-036 — measured by rendering `Yankee`
-at both commits — so this is the scaffold's gap rather than the broker's, and
-the dogfood above is unaffected because it deletes what it rendered.
+**A rendered service carries credential-shaped literals, and since
+[#161](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/161)
+the scaffold writes their allow-list entries itself.** §15.1's secret scan
+reads the working tree, so a render with no
+`.github/secret-scan/allowed-secrets.txt` entries beside it could not be
+committed at all — it used to leave seven findings and no reasons. The scaffold
+now **loads the real scanner**, runs it over what it has just rendered, and
+appends one `path | rule | fingerprint | reason` line per distinct finding. The
+fingerprints are the gate's own: a scaffold computing them would be a second
+implementation of which substring each rule matches, and a fingerprint matching
+nothing is a stale entry the scanner fails the build on. **It writes nothing
+where `.github/secret-scan/` is absent**, which is the scaffold suite's
+synthetic root — a degraded path that suite therefore cannot assert.
 
-The scaffold edits six tracked files as well as creating its own, so the
-`git checkout` is part of the procedure rather than tidying after it. **Commit
-before dogfooding**, though, if the PR itself changes `deploy/compose/` — that
-cleanup reverts the tree's own changes, and it has cost work once.
+The scaffold edits seven tracked files as well as creating its own — the
+allow-list is the seventh, which is why the `git checkout` above names a third
+path — so that cleanup is part of the procedure rather than tidying after it.
+**Commit before dogfooding**, though, if the PR itself changes
+`deploy/compose/` or that allow-list — the cleanup reverts the tree's own
+changes, and it has cost work once.
 
 **The probe is `Yankee` at 5199, and must not be a real service's name.** It
 used to be `Ordering` at 5103; PR-18 made Ordering real, so the create refuses
@@ -611,25 +629,44 @@ seat, and found that **`AddRedisConnections` had no caller anywhere in `src/`**:
 PR-12 built §8's whole stack and wired it into no host, so §8's deployment
 wiring — Compose, both charts, both API fixtures — came with it.
 
+PR-32 pays that row's own named debt, which makes it **the first *After the
+plan* row a row above it predicted**. §8.5's claim was released on every fault
+out of `next()`, including the one raised over work that already committed —
+a lost commit acknowledgement — so the retry wrote it twice, a race recorded as
+knowingly open since PR-09. The fix is a marker row written inside §6.3's
+transaction and read at the top of it (ADR-037), which retires §8.5's stated
+exception and moves its bound off a Redis TTL onto a retention window with a
+floor. Every service gains a table, a migration and a third purge; §10.5 gains
+a third producer of its 409; and §4.5's scaffold gains a seventh shared file,
+because the same PR closed #161 — the scaffold now runs the real secret scanner
+over what it renders and writes the allow-list entries a rendered service needs
+in order to be committable at all.
+
 **Every mandatory PR in the plan has landed, the one optional PR has landed,
 and Appendix C now carries an "After the plan" section.** So "there is no next
 PR" is no longer the right sentence: the plan being finished is not the same as
 the blueprint being built, and a deferral to a complete plan is a dead
 reference rather than a schedule.
 
-**That section now holds more than one kind of row, and the third kind is the
-one to read before adding a fourth.** PR-28 was a mechanism the plan never
-rowed and PR-29 was half a node it split without saying who owned the other
-half — both gaps in coverage. PR-30 is neither: §9.8 printed
+**That section holds several kinds of row, and the kinds — not their number —
+are what to read before adding another.** PR-28 was a mechanism the plan never
+rowed, PR-29 was half a node it split without saying who owned the other
+half, and PR-31 was a control the plan never claimed to close — all three gaps
+in coverage. PR-30 is neither: §9.8 printed
 `e.UseInMemoryOutbox(context)` on the saga endpoint, PR-21 built exactly that,
 and the plan delivered what it specified. **The specification was wrong.** So a
 row can now record a correction to a landed row, and what earns it one is not
 the size of the diff but whether a rule moved — ADR-032 took an exception to
 §9.3's prohibition on a second outbox table set, which is a rule four chapters
-rest on. A fix that moves no rule is a commit body, not a row.
+rest on. A fix that moves no rule is a commit body, not a row. **PR-32 is a
+kind again**: it is neither a gap nor a correction, but a residual PR-28's own
+row *names as owed*, so the debt was declared in the section and the only thing
+missing was a row saying who would pay it. It passes the same test — ADR-037
+retires the exception in §8.5's opening guarantee — which is what a row records
+and a commit body cannot.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,052 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,083 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -650,7 +687,7 @@ its own figure for the same reason. **The owner is now a different file,
 which makes the point rather than weakening it**: a count restated across a
 file boundary goes stale on the far side's clock and reads as authoritative on
 this one. That first one: `py -3.12 -m unittest` in
-`tools/new-service` runs 84, and CI has a `scaffold` job for them beside
+`tools/new-service` runs 99, and CI has a `scaffold` job for them beside
 `licence-gate` — plus `scaffold-build`, which compiles what they only read.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
@@ -698,6 +735,21 @@ cost; the instrument is **owed**.
 neighbours are load-bearing: inside Validation, so a malformed command is
 refused without burning the caller's `CommandId` for a day; outside
 Transaction, so the claim is held before any work starts.
+
+**Since PR-32 those two behaviours are one mechanism split across the seat
+boundary, and neither half is complete alone.** §8.5's claim is the fast,
+atomic exclusion that makes a concurrent duplicate fail early; §6.3 writes a
+durable marker under the same key *inside* the transaction and reads it at the
+top of it, which is what makes the ambiguous case — a commit whose
+acknowledgement was lost — decidable at all
+([ADR-037](docs/backend-architecture/appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+The key crosses on `IdempotencyContext`, a scoped carrier, because §6.3 is
+constrained to neither `IIdempotentCommand` nor `ICurrentUser` and rebuilding
+it there would be a second specification of a value §8.5 spends three callouts
+arguing. **§6.3 reads that carrier once, before anything runs** — a nested
+dispatch would overwrite it mid-transaction — and the marker's own retention
+window is the only one of the three with a floor, because purging it early
+re-opens the duplicate at a boundary set by a housekeeping setting.
 
 **Two commands opt in and the third is a decision, not an omission.**
 `PlaceOrderCommand` and `PublishProductCommand` carry a `CommandId` and
@@ -762,7 +814,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 847 of 1,052, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 868 of 1,083, no daemon
 ```
 
 **[`docs/testing.md`](docs/testing.md) is the operational reference and this is
@@ -813,9 +865,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 847 of
-the 1,052 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 205, needing the daemon
+category runs a smaller suite and says which. `Category!=Integration` is 868 of
+the 1,083 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 215, needing the daemon
 exactly as before.
 
 Adding a migration needs the pinned tool and a startup project:
@@ -885,7 +937,7 @@ the flake, where the assembly-wide attribute leaves nothing to forget.
 
 ## The one rule that matters
 
-**The blueprint must not contradict itself.** It is ~14,900 lines that describe
+**The blueprint must not contradict itself.** It is ~24,600 lines that describe
 one coherent system; the failure mode is a statement in §9 that quietly
 disagrees with §6, or an appendix that lists a package no chapter uses. Most of
 the work done in this repo has been finding and closing those gaps.
@@ -1594,7 +1646,7 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-037) and keep the
+  (currently ADR-038) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

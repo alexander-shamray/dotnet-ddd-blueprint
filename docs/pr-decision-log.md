@@ -2778,6 +2778,152 @@ miniature, committed by the change that fixes it.
 
 ---
 
+## PR-32 — the marker inside the transaction, and a memorised migration name
+
+**PR-32 pays the debt PR-28's own row names**, which makes it the first row in
+Appendix C's *After the plan* section that a row above it predicted. §8.5's
+`IdempotencyBehavior` releases its Redis claim on every exception out of
+`next()`, and one of those exceptions is raised over work that **already
+committed** — a `CommitAsync` that succeeded on the server whose acknowledgement
+was lost. Releasing there frees the key for a command that ran, so the retry
+writes it twice: the outcome the behaviour exists to prevent, arriving on the
+one path it cannot see. The race has been recorded as knowingly open since
+PR-09 and stated as an exception in §8.5's opening sentence ever since.
+
+**The fix is a row in the command's own transaction**
+([ADR-037](backend-architecture/appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)):
+`IIdempotencyMarkerStore` in `Common.Application`, `EfIdempotencyMarkerStore`
+over the service's own `DbContext` in `Common.Infrastructure`, written inside
+[§6.3](backend-architecture/06-cqrs.md)'s transaction and read at the top of it.
+The Redis claim keeps its job — the fast, atomic exclusion that makes a
+concurrent duplicate fail early — and the row is what makes the *ambiguous*
+case decidable, which is the half Redis structurally cannot do.
+
+### Holding the claim is not the fix — it only postpones the duplicate
+
+The obvious repair is to stop releasing on the `catch` path: if the claim is
+never freed, no retry can take it. §8.5's own release table already says what
+that buys. **Every Redis entry has a TTL**, so a held key expires and the
+attempt after that claims a free key and runs the command a second time — the
+duplicate is moved to the retention boundary, not removed, and it arrives at the
+least visible moment there is. It would also cost **every ordinary fault its
+retry for a day**, which is a large availability price for a postponement: a
+transient deadlock, a dropped connection, a validation exception thrown deeper
+than it should be, all of them answered with "this key is taken" for
+twenty-four hours.
+
+A row has no TTL. It survives until something deletes it, and what deletes it is
+a retention window this repository chooses — which is why
+`RetentionPolicy.IdempotencyWindow` is the one window of the three with a
+**floor**, and why the floor is read from `IdempotencyRetention.Window` rather
+than restated: a 24 written in two files agrees until one of them is edited.
+
+**So the release stays, and it is now a decision rather than a default.** The
+retry it admits meets the marker, and is refused with
+`CommandAlreadyCommittedException` before a handler runs.
+
+### The scaffold had memorised the name of the last migration
+
+`snapshot_from_designer` in `tools/new-service/new_service.py` hard-coded
+`AddOutboxRetentionIndex` — the class name of what was, when it was written,
+the last template migration. This PR adds a fifth. That literal then named the
+**second-to-last** migration, so every anchor in the function missed at once and
+the run stopped.
+
+**It stopped loudly, and that was luck rather than design.** The scaffold's rule
+is that every anchor must match exactly once and a miss raises `ScaffoldError`
+naming the file, so the failure was the good kind — but nothing in the function
+said it depended on being the last, and a hard-coded name that *had* matched
+something would have rendered a service with the wrong snapshot in silence. It
+derives the name from the file the caller already holds now, which is the same
+fix shape as every other "a list drifts exactly as a number does" entry in this
+log: the value is read from the thing it describes rather than restated beside
+it.
+
+### The build is the counterfactual for half of this, and only half
+
+Two of the changes cannot be got wrong without the compiler saying so, and
+saying so is worth writing down because it decides which tests were owed a
+measured counterfactual.
+
+- Deleting `idempotency.Claim(key)` from `IdempotencyBehavior` leaves an unread
+  primary-constructor parameter, which is **CS9113** — an error under
+  [ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input).
+- A `Claim` that assigns nothing is **CA2245** (assignment to itself) or
+  **CA1822** (a member that does not use instance state), depending on how it
+  is broken.
+
+**And the restore that makes such a measurement possible is where the time
+went.** A counterfactual is taken by putting the broken version back, running,
+and putting the good one back again; restoring it with `shutil.copy2` restores
+the file's **mtime** along with its bytes, so MSBuild saw nothing newer than the
+outputs and rebuilt nothing, and the next `--no-build` run executed the assembly
+compiled from the *broken* version. Five tests were reported as failing against
+source that was already correct. This repository's existing rule is that a
+counterfactual which does not rebuild reports the old behaviour as the new one;
+this is the converse — the *restore* which does not rebuild reports the new
+behaviour as still broken — and it is the more expensive direction, because the
+red result reads as a finding rather than as a tooling artefact.
+
+So *is the key published at all* has the build as its counterfactual, and no
+test needs to reproduce it. What the compiler cannot see is **where** each call
+sits — `Claim` after the successful `TryClaimAsync` rather than beside the key,
+the marker read before `next()`, the marker write after the failure guard and
+after §2.3's aggregate-count check — and those are exactly the assertions that
+were observed red against the moved call. **The distinction matters because a
+test whose counterfactual is the compiler is a test that would have passed
+against every version of the code that exists**, which reads as coverage and
+is not.
+
+### It also closes #161, because one pull request is one row
+
+A rendered service could not be committed: it carries credential-shaped literals
+under its own name, and §15.1's secret scan reads the working tree. The scaffold
+now **loads the real scanner**, runs it over what it has just rendered, and
+appends one `path | rule | fingerprint | reason` line per distinct finding to
+`.github/secret-scan/allowed-secrets.txt` — the seventh shared file it edits.
+
+**The fingerprints have to be the gate's own.** A scaffold computing
+`sha256(matched-secret)[:12]` itself would be a second implementation of which
+substring each rule matches, and being wrong there is silent in the worst
+direction: a fingerprint matching nothing is a stale entry, which the scanner
+reports and fails the build on. A developer tool importing a CI gate is a real
+coupling and it is the only shape with one implementation of the matching.
+
+It writes nothing where `.github/secret-scan/` is absent, which is the case in
+the scaffold suite's synthetic root — **a degraded path the suite cannot then
+assert**, stated here and in the script's own docstring rather than discovered
+from a green run.
+
+### Left owed
+
+PR-28's *second* residual is untouched: the stored payload still carries an
+implicit schema for the whole retention, so changing an idempotent command's
+result shape is still a migration.
+
+And the refusal is a **409 and not a replay**, which costs more than it first
+reads. Two paths reach it: the lost acknowledgement, where the attempt threw
+before recording an outcome, and — the commoner one — a command that succeeded
+and recorded its payload, whose Redis entry expired at `Retention` while the
+marker lived on. So the response says the result is *no longer available*
+rather than never recorded, because naming a cause would be wrong on the path
+most callers take.
+
+**That second path is a behaviour change nobody asked for, and it is the price
+of the guarantee rather than an oversight.** While §8.5's promise ended at
+`Retention`, a retry after the claim expired re-ran the command by design — the
+expiry and the exception in that sentence were one fact, so removing the
+exception removes the re-run with it. A caller retrying a succeeded command
+between the claim's expiry and the marker's purge — six days on the shipped
+windows — now meets a 409 where it used to get a fresh execution. Setting
+`IdempotencyWindow` to the claim's own length would close the lost
+acknowledgement without widening that refusal at all, and the floor permits
+exactly that; the default declines it, because the question the marker answers
+is "did this already commit" and a wider window is the more conservative answer
+to it. A client that needs the outcome reads the resource.
+
+---
+
 ## PR-28 — the section the plan forgot, and the registration nothing called
 
 **PR-28 is not in Appendix C's original twenty-seven and had to be added to
@@ -2868,6 +3014,9 @@ The SQL-side marker that closes the lost commit acknowledgement is still §8.5's
 debt (#113), and the stored payload still carries an implicit schema for the
 whole retention — so **changing an idempotent command's result shape is a
 migration**, on the terms a rename used to be and no longer is.
+
+**PR-32 paid the first of those**, and the second stands. That the debt was
+named here is what let the next PR be a row rather than a rediscovery.
 
 ---
 
@@ -5027,6 +5176,9 @@ delivery §9.4 promises and §9.5's inbox is built to absorb — a duplicate
 rather than an invisible double-apply. The SQL-side marker is still the fix
 for the *command*, and it belongs with §8.5's `IdempotencyBehavior`, whose
 seat between Validation and Transaction is already reserved.
+**PR-32 wrote it** — the marker lands in §6.3's own transaction and is read at
+the top of it (#113, ADR-037), so the race this paragraph leaves open is closed
+and the paragraph stands as the record of how long it was open.
 
 ## PR-08 — the persistence layer
 

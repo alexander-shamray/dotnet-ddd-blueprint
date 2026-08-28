@@ -1103,7 +1103,7 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > Measured rather than assumed, because that propagation is load-bearing: on
 > `Common.Infrastructure.Tests`, `Category=Integration` selects the
 > twenty-six tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy — 96 as the runner
+> `Category!=Integration` selects the other seventy-two — 98 as the runner
 > counts them, with no third state and nothing counted twice. Those figures
 > read ten/81, then twenty/91, then twenty-three/94, then twenty-four/95, then
 > twenty-six/97, and every retake up to that one was the suite growing while
@@ -1112,10 +1112,13 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > at each of them. What a reader can check is whether this pair matches
 > `docs/testing.md` and a run.
 >
-> **The latest retake is the first that goes *down*, and the direction is
-> worth naming.** ADR-033 withdrew the token-denylist claim, so
+> **One retake was the first to go *down*, and the direction is worth
+> naming.** ADR-033 withdrew the token-denylist claim, so
 > `RedisKeys.Denylist` and the case pinning its shape went with it and the
-> fast half is seventy where it was seventy-one. A figure that has only ever
+> fast half was seventy where it had been seventy-one. It went back up on the
+> next branch: [ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)'s
+> floor on `RetentionPolicy.IdempotencyWindow` brought cases of its own, and
+> the pair above is what a run reports now. A figure that has only ever
 > grown teaches the next reader to check whether it is *behind*; one that
 > moves both ways has to be re-measured instead.
 >
@@ -2491,7 +2494,7 @@ stored one, formatted amounts at the test's scale rather than the column's
 > `Ordinal` left every one of that suite's 62 pre-PR tests that need no
 > container green, over a change that would answer 500 to every lower-case
 > currency a customer typed. That is the fast half rather than the whole
-> suite, which was 66 before this PR and is 77 after it; the four that want
+> suite, which was 66 before this PR and is 81 after it; the four that want
 > a Keycloak were not run.
 
 So the consumer writes down what it needs, and the provider is verified against

@@ -1084,10 +1084,11 @@ value instead:
 namespace Common.Infrastructure;
 
 /// <summary>
-/// The one place a schema is checked and delimited. Two registered values need
-/// it — OutboxTable and §9.5's InboxTable — and a second copy of the pattern is
-/// a second answer to "what is a legal schema here", which is not a question
-/// that gets to have two.
+/// The one place a schema is checked and delimited. Every registered table
+/// value needs it — OutboxTable, §9.5's InboxTable and §8.5's
+/// IdempotencyMarkerTable — and a second copy of the pattern is a second answer
+/// to "what is a legal schema here", which is not a question that gets to have
+/// two.
 /// </summary>
 internal static partial class SqlSchema
 {
@@ -1142,13 +1143,16 @@ public sealed class OutboxTable
 ```
 
 > **The check is shared, and that is the whole reason it is a separate type.**
-> §9.5's `InboxTable` is this class with one word changed, so a reader who
-> copies the constructor above rather than calling `SqlSchema` gets two answers
-> to one question — the 128-character bound, the reserved-word argument and the
-> bracket-quoting, maintained twice. Each service builds both tables from
-> **one** schema literal (§4.2), which is what keeps the pair from naming
-> different schemas; sharing the guard is what keeps them from disagreeing
-> about what a schema may be.
+> §9.5's `InboxTable` is this class with one word changed, and
+> [§8.5](08-caching-redis.md)'s `IdempotencyMarkerTable` is a third with one
+> more, so a reader who copies the constructor above rather than calling
+> `SqlSchema` gets several answers to one question — the 128-character bound,
+> the reserved-word argument and the bracket-quoting, maintained once per copy.
+> Each service builds **every** one of them from **one** schema literal (§4.2),
+> which is what keeps them from naming different schemas; sharing the guard is
+> what keeps them from disagreeing about what a schema may be. **The count is
+> not written here on purpose** — this callout said "both tables" and "the
+> pair" while there were two, and §8.5's marker made it three.
 
 > **The alternative is a dispatcher per service, and that is §9.3's prohibition
 > on a second outbox table set arriving by the back door.** Two dispatchers
@@ -1943,8 +1947,9 @@ broker's longest possible redelivery delay, including time a message spends in
 the error queue before being replayed. Seven days is a starting point to check
 against RabbitMQ's configured limits, not a default to accept.
 
-**Both purges — inbox and outbox (§9.4) — run from the same hosted service, and
-they are not every messaging table in the database.** Ordering's saga endpoint
+**The purges — inbox, outbox (§9.4) and §8.5's idempotency markers — run from
+the same hosted service, and they are not every messaging table in the
+database.** Ordering's saga endpoint
 takes MassTransit's own outbox
 ([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)),
 whose three tables are kept in three different ways and not one of them is
@@ -1981,6 +1986,19 @@ statements above from the registered `OutboxTable` and `InboxTable`, takes its
 windows and its batch size from a registered `RetentionPolicy`, and exposes
 `PurgeAsync` publicly so tests drive one pass rather than racing a timer — the
 seam `OutboxDispatcher.ProcessBatchAsync` already offers, for the same reason.
+
+**It purges a third table, and that one is not housekeeping.**
+[§8.5](08-caching-redis.md)'s `IdempotencyMarkers` is the durable half of the
+command idempotency key, composed against a registered `IdempotencyMarkerTable`
+on the same terms as the pair above, and deleted on age alone with no predicate
+to get wrong — every row there records work that finished. What it costs to
+purge is different in kind: a purged outbox row loses a debugging record and a
+purged inbox row loses a suppression the broker will not exercise again, where
+a purged marker loses the row that refuses a retry of a command that already
+committed. That is why `RetentionPolicy.IdempotencyWindow` is the one window
+with a **floor** — it may not be shorter than the Redis claim it backs up, or
+the duplicate returns at a boundary set by a retention setting
+([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
 
 Two of its details are decisions rather than defaults. It **logs and swallows**
 a failed pass, because an exception out of `ExecuteAsync` stops the host and a
