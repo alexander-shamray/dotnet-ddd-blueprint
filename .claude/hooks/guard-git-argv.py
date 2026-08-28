@@ -197,12 +197,20 @@ def shell_positions(command):
         index += 1
 
 
-def strip_heredocs(command):
-    """`command` with every heredoc BODY removed, delimiters included.
+def heredoc_spans(command):
+    """Every heredoc body in `command`, as `(start, end, expands)`.
 
-    A heredoc body is an argument, and parsing it as a command line is how the
-    guard came to refuse an honest commit that quoted a push. The introducer is
-    left in place so the rest of the line still tokenises.
+    `start` is just past the introducer and `end` just past the closing
+    delimiter line, so `command[start:end]` is everything the shell hands over
+    as data rather than reading as a command line.
+
+    **`expands` is the half this used to throw away**, and throwing it away was
+    a bypass rather than an imprecision. `<<'EOF'` and `<<"EOF"` hand the body
+    over verbatim; a bare `<<EOF` performs substitution and parameter expansion
+    on it first. A guard that treats both as inert misses a live
+    `$(git push origin +HEAD:main)` in the second, and a guard that treats both
+    as executable refuses an honest commit quoting one in the first. Only the
+    delimiter's quoting tells them apart, and `HEREDOC` has always captured it.
 
     **An opener is only an opener in executable position.** A `<<EOF` inside a
     comment or inside quotes is text, and treating it as an operator let
@@ -216,31 +224,98 @@ def strip_heredocs(command):
         if command.startswith("<<", index) and (not openers or index >= openers[-1][1]):
             match = HEREDOC.match(command, index)
             if match:
-                openers.append((match.start(), match.end(), match.group(2)))
+                openers.append((match.end(), match.group(1), match.group(2)))
 
-    out, cursor = [], 0
-    for start, end, delimiter in openers:
+    spans, cursor = [], 0
+    for start, quote, delimiter in openers:
         if start < cursor:
             continue
-        out.append(command[cursor:end])
-        after = command[end:]
+        after = command[start:]
         closing = re.search(rf"^\s*{re.escape(delimiter)}\s*$", after, re.MULTILINE)
         if closing is None:
-            # Unterminated: the whole tail is body. Dropping it is right — an
-            # unterminated heredoc is not a command line either.
-            return "".join(out)
-        cursor = end + closing.end()
+            # Unterminated: the whole tail is body. Treating it as one is right
+            # — an unterminated heredoc is not a command line either.
+            spans.append((start, len(command), not quote))
+            break
+        cursor = start + closing.end()
+        spans.append((start, cursor, not quote))
+    return spans
+
+
+def strip_heredocs(command):
+    """`command` with every heredoc BODY removed, delimiters included.
+
+    A heredoc body is an argument, and parsing it as a command line is how the
+    guard came to refuse an honest commit that quoted a push. The introducer is
+    left in place so the rest of the line still tokenises.
+    """
+    out, cursor = [], 0
+    for start, end, _expands in heredoc_spans(command):
+        out.append(command[cursor:start])
+        cursor = end
     out.append(command[cursor:])
     return "".join(out)
 
 
-def substitutions(command):
+def strip_comments(command):
+    """`command` with every shell COMMENT removed, newlines kept.
+
+    **bash's rule, not `shlex`'s, and the difference is a force push.**
+    `shlex.shlex` sets `commenters = "#"` and honours it at any character
+    position, so `git log --grep=#x ; git push origin +HEAD:main` tokenised to
+    three tokens and the push vanished with the rest of the line — admitted, and
+    verified running under bash, which starts a comment only where `#` begins a
+    word. The lexer's comment handling is switched off in `offence` and this
+    runs instead, over the scanner that already implements that rule for
+    heredoc openers.
+    """
+    return "".join(
+        command[index]
+        for index, _in_quotes, in_comment in shell_positions(command)
+        if not in_comment
+    )
+
+
+def expandable_regions(command):
+    """Every part of `command` the shell would expand, as `(text, quotes)`.
+
+    Substitution extraction used to run over the raw string with a quote tracker
+    of its own and no notion of heredocs or comments, which made it disagree
+    with the rest of the guard in both directions at once — verified, both ways:
+
+    | Command | bash | the guard was |
+    |---|---|---|
+    | `git commit -F - <<'EOF'` … `$(git push origin +HEAD:main)` | does not expand | refusing |
+    | `git commit -F - <<EOF` … `don't $(git push origin +HEAD:main)` | expands | admitting |
+
+    The second is the one that matters: an apostrophe in the body is a quote to
+    a raw scanner and a character to bash, so the live substitution was skipped
+    and the push ran. `quotes` is what carries that — inside a heredoc body
+    there are no quotes to honour, only expansions to perform.
+
+    The command line itself arrives with bodies and comments already gone, so a
+    `$(…)` the shell would never reach cannot be judged as though it would.
+    """
+    line, regions, cursor = [], [], 0
+    for start, end, expands in heredoc_spans(command):
+        line.append(command[cursor:start])
+        if expands:
+            regions.append((command[start:end], False))
+        cursor = end
+    line.append(command[cursor:])
+    return [(strip_comments("".join(line)), True)] + regions
+
+
+def substitutions(command, quotes=True):
     """Every `$(...)` and backtick body in `command`, innermost included.
 
     These are COMMANDS the shell executes, and `shlex` hands them back as one
     quoted token — so `git log "$(git push origin +HEAD:main)"` contains no
     standalone `git` for the segment scan to find. Extracted and judged in
     their own right.
+
+    `quotes` is false for a heredoc body, where `'` is an ordinary character
+    rather than a quote. See `expandable_regions` for what that cost.
     """
     found = []
     index = 0
@@ -254,9 +329,15 @@ def substitutions(command):
                 in_single = False
             index += 1
             continue
-        if char == "'":
+        if char == "'" and quotes:
             in_single = True
             index += 1
+            continue
+        if char == "\\":
+            # `\$(x)` is a literal `$(` to bash, on the command line and in an
+            # unquoted heredoc body alike. Skipping the escaped character keeps
+            # the guard off a substitution the shell will never perform.
+            index += 2
             continue
         if command.startswith("$(", index):
             end = _closing_paren(command, index + 2)
@@ -430,19 +511,26 @@ def push_offence(segment):
 
 def offence(command):
     """The reason to refuse `command`, or None to allow it."""
-    for inner in substitutions(command):
-        refusal = offence(inner)
-        if refusal is not None:
-            return f"inside a command substitution: {refusal}"
+    for text, quotes in expandable_regions(command):
+        for inner in substitutions(text, quotes=quotes):
+            refusal = offence(inner)
+            if refusal is not None:
+                return f"inside a command substitution: {refusal}"
 
     # Stripped once, and used by BOTH paths below. The fallback used to scan the
     # raw `command`, which put the heredoc false positive straight back: a body
-    # that mentions `--output` would be refused on the raw string the moment
-    # anything else in the line failed to tokenise. A body is data on every
-    # path, not only on the one that parses.
-    stripped = strip_heredocs(command)
+    # that mentions a forbidden flag would be refused on the raw string the
+    # moment anything else in the line failed to tokenise. A body is data on
+    # every path, not only on the one that parses — and so is a comment, which
+    # is why `strip_comments` runs here rather than being left to the lexer.
+    stripped = strip_comments(strip_heredocs(command))
     try:
         lexer = shlex.shlex(stripped, posix=True, punctuation_chars=True)
+        # Comments are already gone, and `shlex` would take a second, wider view
+        # of them: its `commenters` fires mid-word, where bash's fires only at
+        # the start of one. Left on, `--grep=#x ; git push origin +HEAD:main`
+        # lost the push to the lexer.
+        lexer.commenters = ""
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:

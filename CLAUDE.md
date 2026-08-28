@@ -1101,6 +1101,20 @@ own line rather than sending a reader to a file that does not hold it.
   match the *basename*, which cannot be talked past because a basename contains
   no `/`. The general form: **a glob's alphabet is not the shell's, and a
   pattern is not a parser.**
+- **A guard that models another parser needs ONE model of it, in one place.**
+  The argv hook has now been defeated five times by the same shape: a function
+  that knew a rule and a neighbouring function that did not. A heredoc opener
+  was recognised inside a comment; a paren counter balanced quoted characters;
+  the parse-failure fallback scanned the raw string the parse path had
+  stripped; the substitution extractor ran ahead of the stripper with a quote
+  tracker of its own; and `shlex`'s `commenters` disagreed with bash about
+  where a comment starts. Each fix was correct, and each left the next copy of
+  the model standing. **Two of the five were fail-open** — a force push to
+  `main` admitted, twice — because a model that merely *differs* from the
+  shell's is wrong in whichever direction the difference falls, and only one of
+  those directions is loud. Where a tool has to agree with another parser, make
+  every caller share one implementation of the part that disagrees, and pin the
+  agreement with cases in both directions.
 - **A helper whose stdout is its return value owes every subcommand a
   redirection.** `git worktree add` writes "Preparing worktree" to stderr and
   `HEAD is now at <sha> <subject>` to *stdout*, so a helper that printed a path
@@ -2576,11 +2590,33 @@ so.** "Every spelling a caller can type literally" was false while
 `git log "$(git push origin +HEAD:main)"` was one `shlex` token and two commands
 to the shell — a command substitution is *executed*, not quoted away, and
 calling it inert because it survived tokenisation intact is the same mistake as
-reading a heredoc body as an argument list. Both are closed now: substitutions
-are extracted and judged in their own right, heredoc bodies are stripped as the
-data they are. **The bound is expansion alone** — what the shell computes rather
-than what a caller writes — which is narrow enough to be worth stating exactly
-rather than rounding up to "literal".
+reading a heredoc body as an argument list.
+
+**That sentence then said both were closed, and they were closed in two
+functions that disagreed with each other.** The stripper knew a heredoc body
+was data; the extractor ran on the raw string ahead of it, with a quote tracker
+of its own and no notion of heredocs or comments. So a substitution inside a
+`<<'EOF'` body was refused although the shell never expands one there, and a
+substitution inside a bare `<<EOF` body was **admitted** although it does — an
+apostrophe in the body being an opening quote to the extractor and an ordinary
+character to bash. Raised in review; both directions verified against the guard
+as shipped, and the bash behaviour measured rather than argued.
+
+**A second one was found while fixing it, one layer down and the same shape.**
+`shlex.shlex` sets `commenters = "#"` and honours it at any character position,
+where bash starts a comment only where `#` begins a word — so
+`git log --grep=#x ; git push origin +HEAD:main` tokenised to three tokens, the
+push left with the comment, and the hook reported no offence at all. Measured
+under bash with a `git` shim: both invocations run.
+
+Both are closed by giving the guard **one** model of where the shell expands
+things — `expandable_regions`, over the quote-and-comment-aware scanner the
+heredoc opener already used — rather than a second model per function.
+**The bound is parameter expansion alone**: `F=--output=x; git log $F`, what
+the shell computes rather than what a caller writes, which is narrow enough to
+be worth stating exactly rather than rounding up to "literal". Command
+substitution is now judged wherever bash would perform it and nowhere else —
+a stronger claim than the one this paragraph made before it was true.
 
 **The `::` in a value collides with the `:*` suffix syntax, and the collision
 fails silent in one direction and loud in the other.** `Bash(git *ext::*)`

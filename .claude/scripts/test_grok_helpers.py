@@ -3689,6 +3689,78 @@ class TheGitArgvGuard(unittest.TestCase):
         body = "a body naming --out" + "put=/tmp/x and an unbalanced \" quote"
         self.assertAdmitted(f"git commit -F - <<'EOF'{NEWLINE}{body}{NEWLINE}EOF")
 
+    def test_a_heredoc_bodys_quoting_decides_whether_it_expands(self):
+        # **The stripper knew a body was data and the substitution extractor did
+        # not**, so the two halves of one rule disagreed in both directions at
+        # once. `substitutions()` ran on the RAW command with a quote tracker of
+        # its own, before the strip and with no notion of heredocs. Raised in
+        # review; both directions verified against the guard as shipped.
+        #
+        # A quoted delimiter hands the body over verbatim, so a substitution
+        # inside it is text and refusing it is the false positive this branch
+        # has now fired on itself twice.
+        self.assertAdmitted(
+            f"git commit -F - <<'EOF'{NEWLINE}$(git push origin +HEAD:main){NEWLINE}EOF"
+        )
+
+        # A bare delimiter expands it, and that is the half that matters: the
+        # push RAN. Measured under bash, not reasoned about — `cat <<U` with
+        # `don't $(echo X)` in the body prints the expansion, apostrophe and
+        # all. To the old scanner that apostrophe was an opening quote, so the
+        # live substitution was skipped and the force push walked through.
+        for body in (
+            f"don't $(git push origin +HEAD:main)",
+            f"see $(git push origin +HEAD:main)",
+        ):
+            with self.subTest(body=body):
+                self.assertIn(
+                    "substitution",
+                    self.assertRefused(
+                        f"git commit -F - <<EOF{NEWLINE}{body}{NEWLINE}EOF"
+                    ),
+                )
+
+        # The case that must not move. A body naming a push as prose is still
+        # data whichever delimiter carries it, which is what establishes the fix
+        # reached the extractor rather than the stripper.
+        self.assertAdmitted(
+            f"git commit -F - <<EOF{NEWLINE}see git push origin +HEAD:main for context{NEWLINE}EOF"
+        )
+
+    def test_a_comment_is_not_an_executable_position(self):
+        # The smaller, fail-closed face of the same gap: the extractor could not
+        # see comments either, so an honest `git status # $(git push …)` was
+        # refused for a substitution the shell never performs. The
+        # quote-and-comment-aware scanner decides this now, as it already did
+        # for heredoc openers.
+        self.assertAdmitted(f"git status # $(git push origin +HEAD:main)")
+
+    def test_a_hash_mid_word_does_not_hide_the_rest_of_the_line(self):
+        # **Found here rather than in review, and it was a second live force
+        # push to `main`.** `shlex.shlex` sets `commenters = "#"` and fires on a
+        # hash at ANY character position; bash starts a comment only where `#`
+        # begins a word. So `--grep=#x` opened a comment to the lexer, the rest
+        # of the line went with it, and the guard returned None.
+        #
+        # Measured both ways: the tokens were `['git', 'log', '--grep=']`, and
+        # bash with a `git` shim printed two invocations — the push among them.
+        # `commenters` is off now and `strip_comments` runs instead.
+        self.assertRefused(f"git log --grep=#x ; git push origin +HEAD:main")
+        self.assertRefused(f"git commit -m 'a # hash' && git push origin +HEAD:main")
+
+        # The control. A hash that IS a comment still hides what follows it on
+        # its own line, because bash hides it too.
+        self.assertAdmitted(f"git status # git push origin +HEAD:main")
+
+    def test_an_escaped_substitution_is_not_a_substitution(self):
+        # `\$(x)` is a literal `$(` to bash, on the command line and inside an
+        # unquoted heredoc body alike — measured, since the body is the case
+        # where it decides anything: without the escape the same body is
+        # refused, one assertion up.
+        self.assertAdmitted(
+            f"git commit -F - <<EOF{NEWLINE}\\$(git push origin +HEAD:main){NEWLINE}EOF"
+        )
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an
