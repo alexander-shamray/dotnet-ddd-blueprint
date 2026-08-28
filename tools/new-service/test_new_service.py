@@ -1539,6 +1539,28 @@ class RefusesToRun(unittest.TestCase):
                 render(repo_root=root)
             self.assertIn("different fingerprints", str(raised.exception))
 
+    def test_a_gate_in_the_target_that_is_not_the_one_this_script_shipped_with(self):
+        # `load_scan_gate` EXECUTES this file, and `--repo-root` chooses which
+        # tree it comes out of — so rendering into an unreviewed checkout used
+        # to run that checkout's Python with the developer's privileges.
+        # Reading a repository's source is not a reason to execute it, and the
+        # docstring that admitted the exposure argued it away as "not new".
+        #
+        # Loading TOOL_ROOT's copy instead would be the wrong repair: the
+        # entries carry the scanner's own fingerprints and the scanner that
+        # verifies them is the target's, so the two have to be one file rather
+        # than a choice. A target whose gate differs is therefore refused, and
+        # the refusal is what this pins — the marker below is inert Python, so
+        # a run that reaches execution succeeds and proves nothing.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+            gate = root / SCAN_GATE
+            gate.write_bytes(gate.read_bytes() + b"\nSCAFFOLD_TRUST_PROBE = 1\n")
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("shipped", str(raised.exception))
+
     def test_an_allow_list_that_does_not_parse(self):
         # This script appends to that file, so it reads it first — and a file
         # the gate already rejects is not one to append to: the run would
@@ -1575,9 +1597,17 @@ class RefusesToRun(unittest.TestCase):
         # to leave the run as an uncaught SyntaxError — past `main`'s
         # `except ScaffoldError` and out as a traceback, from a script whose
         # stated contract is one line on stderr and exit 1.
+        #
+        # TOOL_ROOT IS POINTED AT THE SAME ROOT, so the trust check next door
+        # passes and this one is what answers. Without that the two refusals
+        # race and the earlier wins, leaving this test green about a message it
+        # never reaches — the gate here is malformed AND differs from the
+        # shipped copy, and only one of those can be the subject.
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy_with_gate(Path(directory))
             (root / SCAN_GATE).write_bytes(b"def (\n")
+            self.addCleanup(setattr, new_service, "TOOL_ROOT", new_service.TOOL_ROOT)
+            new_service.TOOL_ROOT = root
 
             with self.assertRaises(ScaffoldError) as raised:
                 render(repo_root=root)
@@ -1587,9 +1617,15 @@ class RefusesToRun(unittest.TestCase):
         # A module that imports is not a module that is the gate. Without this
         # the failure is an AttributeError three frames later, naming a symbol
         # rather than the file the caller pointed at.
+        #
+        # TOOL_ROOT is pointed at the same root for the reason above: this
+        # asserts the MEMBER check, which only runs on a gate the trust check
+        # has already admitted.
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy_with_gate(Path(directory))
             (root / SCAN_GATE).write_bytes(b"RULES = []\n")
+            self.addCleanup(setattr, new_service, "TOOL_ROOT", new_service.TOOL_ROOT)
+            new_service.TOOL_ROOT = root
 
             with self.assertRaises(ScaffoldError) as raised:
                 render(repo_root=root)

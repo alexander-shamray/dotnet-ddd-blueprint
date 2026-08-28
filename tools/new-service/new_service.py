@@ -1553,6 +1553,12 @@ HOST_IP = r"\d+\.\d+\.\d+\.\d+"
 SCAN_GATE = ".github/secret-scan/secret_scan.py"
 SCAN_ALLOW_LIST = ".github/secret-scan/allowed-secrets.txt"
 
+# The repository this script was checked out of, as opposed to the one it has
+# been pointed at. They are the same thing whenever `--repo-root` is left alone,
+# and the distinction only matters where trust does — `load_scan_gate` compares
+# the gate it is about to execute against the copy here.
+TOOL_ROOT = Path(__file__).resolve().parents[2]
+
 # Everything this script calls on the module it loads. Named so a file that
 # imports cleanly and is not the gate fails here, against the path the caller
 # supplied, rather than three frames later against a symbol.
@@ -2435,11 +2441,31 @@ def load_scan_gate(repo_root: Path) -> ModuleType | None:
     way, and so does `.claude/scripts/test_grok_helpers.py`; what is new is
     only the directory being crossed.
 
-    **This executes a file chosen by `--repo-root`**, which is worth saying
-    outright in a docstring that argues the loading strategy at length. It is
-    the same trust a developer tool already extends to the repository it is
-    pointed at — the template it copies is source, and `apply` writes into that
-    tree — so the exposure is not new; it is simply no longer unstated.
+    **This executes a file chosen by `--repo-root`, and it is checked against
+    the copy this script shipped with before it runs.** An earlier revision
+    said the exposure "is not new" because the tool already reads the target's
+    source and writes into its tree, and that was wrong in the way that
+    matters: copying text is not running it, and a tool that renders a service
+    into a checkout does not thereby earn the right to execute that checkout's
+    Python with the developer's privileges.
+
+    **Loading it from `TOOL_ROOT` instead was the obvious repair and it breaks
+    a correctness invariant.** The entries written here carry the SCANNER'S
+    fingerprints, and the scanner that will later verify them is the one in the
+    tree being rendered into, because that is the checkout CI runs from. Two
+    different implementations agreeing today is not the property needed; the
+    entries have to be computed by the same code that checks them, or a
+    fingerprint matching nothing becomes a stale entry and the build stops on
+    it.
+
+    So the two are reconciled by requiring them to be the SAME FILE rather than
+    choosing between them: the target's gate is executed, and only after its
+    bytes are established to be the ones here. Identical bytes make the
+    invariant and the trust boundary the same statement. A target whose scanner
+    differs is refused rather than run, which is also the honest answer for
+    rendering at all — the template anchors this script matches are that
+    repository's too.
+
     `secret_scan.py` is stdlib-only and guards its own entry point, so loading
     the file this repository ships runs no scan and touches nothing.
     """
@@ -2458,6 +2484,30 @@ def load_scan_gate(repo_root: Path) -> ModuleType | None:
             f"{SCAN_GATE} is here and {SCAN_ALLOW_LIST} is not. The scan reads that "
             f"file to know what it may ignore, and this script appends to it."
         )
+
+    # Executed only if it is the file this script shipped with. Compared as
+    # bytes rather than trusted, because the next statement runs it: `--repo-root`
+    # is caller-supplied, and reading a checkout's source is not a reason to
+    # execute it. Loading TOOL_ROOT's copy instead would be the wrong repair —
+    # the fingerprints written here must come from the scanner that will later
+    # verify them, which is the target's. Requiring one file satisfies both.
+    trusted = TOOL_ROOT / SCAN_GATE
+    if gate.resolve() != trusted.resolve():
+        if not trusted.is_file():
+            raise ScaffoldError(
+                f"{TOOL_ROOT} carries no {SCAN_GATE}, so there is nothing to check "
+                f"{repo_root}'s copy against, and this script will not execute an "
+                f"unverified one."
+            )
+        if gate.read_bytes() != trusted.read_bytes():
+            raise ScaffoldError(
+                f"{repo_root}/{SCAN_GATE} is not the secret scan this script shipped "
+                f"with, and this script executes it. Refusing rather than running a "
+                f"copy it cannot vouch for — and the entries it would write carry that "
+                f"scanner's fingerprints, so a different implementation is also the "
+                f"wrong thing to compute them with. Render from a checkout whose gate "
+                f"matches, or update this tool alongside it."
+            )
 
     specification = importlib.util.spec_from_file_location("scaffold_secret_scan", gate)
     if specification is None or specification.loader is None:
