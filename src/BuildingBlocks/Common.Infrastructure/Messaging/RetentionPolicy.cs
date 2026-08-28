@@ -83,15 +83,15 @@ public sealed record RetentionPolicy
     /// lost.
     /// <para>
     /// <b>Matching the claim exactly does not close that gap, which is why the
-    /// floor is not simply <see cref="IdempotencyRetention.Window"/>.</b>
-    /// <c>CompleteAsync</c> re-arms the claim's expiry at the commit, so both
-    /// windows start at the same event and equality aims both expiries at one
-    /// nominal instant. They are then counted by different clocks — Redis's for
-    /// the claim, and for the marker the purging pod's clock against a
-    /// timestamp the writing pod stamped, across three replicas — so any skew
-    /// in the wrong direction purges the marker first.
-    /// <see cref="IdempotencyRetention.SkewAllowance"/> is what turns the
-    /// knife-edge into a margin, and argues its own width.
+    /// floor is not simply <see cref="IdempotencyRetention.Window"/>.</b> Two
+    /// independent things reorder the expiries. The windows do not start at the
+    /// same event — <c>CommittedAt</c> is stamped inside the transaction and
+    /// the claim is re-armed after it commits, so the claim's starts later by
+    /// the commit's tail — and they are not counted by the same clock, the
+    /// marker's age being the purging pod's against a timestamp the writing
+    /// pod stamped, across three replicas.
+    /// <see cref="IdempotencyRetention.MarkerLeadAllowance"/> bounds their sum,
+    /// and argues its own width.
     /// </para>
     /// <para>
     /// Read rather than restated, for the reason
@@ -202,16 +202,17 @@ public sealed record RetentionPolicy
                 member,
                 value,
                 $"{member} must be at least {floor} — how long §8.5's Redis claim survives, " +
-                "plus a clock-skew allowance — and the order of the two expiries is the whole " +
-                "of why. A shorter window purges the marker first; the claim then expires with " +
-                "nothing left to remember the commit, so the next retry claims a free key and " +
-                "runs the command a second time. The allowance is in the floor because the two " +
-                "expiries are timed by different clocks: the claim's is re-armed at the commit " +
-                "and counted by Redis, while the marker's age is the purging pod's clock minus " +
-                "a timestamp the writing pod stamped. Matching the claim exactly aims both at " +
-                "one instant with no margin, so any skew deletes the marker first and the write " +
-                "this platform guarantees happens once happens twice at a boundary set by a " +
-                "retention setting.");
+                "plus the margin its expiry has to lead by — and the order of the two expiries " +
+                "is the whole of why. A shorter window purges the marker first; the claim then " +
+                "expires with nothing left to remember the commit, so the next retry claims a " +
+                "free key and runs the command a second time. Matching the claim exactly is " +
+                "refused rather than admitted as the exact fit, because two things reorder the " +
+                "expiries: the marker is stamped inside the transaction and the claim re-armed " +
+                "after it commits, so the claim's window starts later by the commit's tail; and " +
+                "the marker's age is the purging pod's clock minus a timestamp the writing pod " +
+                "stamped, so any skew between them moves it again. Either one deletes the marker " +
+                "first, and the write this platform guarantees happens once happens twice at a " +
+                "boundary set by a retention setting.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

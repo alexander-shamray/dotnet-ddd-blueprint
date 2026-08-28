@@ -1018,20 +1018,31 @@ it: two 24s in two files agree until one of them is edited.
 
 > **The floor is the claim's window *plus* an allowance, and matching the claim
 > exactly is refused.** It reads as the exact fit with no waste in it, and it is
-> a knife-edge: `CompleteAsync` re-arms the claim's expiry at the commit — the
-> same event that stamps `CommittedAt` — so equality aims both expiries at one
-> nominal instant with no margin at all. The two are then counted by different
-> clocks. Redis measures the claim as a duration; the marker's age is the
+> a knife-edge, because two independent things reorder the expiries.
+>
+> **The windows do not start at the same event.** §6.3 stamps `CommittedAt`
+> *inside* the transaction, before the commit; §8.5 re-arms the claim in
+> `CompleteAsync` only after that transaction has returned. So the claim's
+> window starts later than the marker's by the commit's own tail — milliseconds
+> ordinarily, and unbounded in principle, since a stall between those points
+> stretches it — and Redis outlives the marker by exactly that lag even with
+> perfect clocks.
+>
+> **And they are not counted by the same clock.** The marker's age is the
 > purging pod's clock minus a timestamp the writing pod stamped, and §15.3 runs
-> three replicas of each service. A purger leading the writer by δ deletes the
-> marker δ early, the claim expires into a table that has forgotten the commit,
-> and the next retry runs the command again. `IdempotencyRetention.SkewAllowance`
-> is five minutes, chosen for the asymmetry of being wrong rather than from a
+> three replicas of each service; a purger leading the writer by δ deletes the
+> marker δ early. Either term alone lets the claim expire into a table that has
+> forgotten the commit, and the next retry runs the command again.
+>
+> `IdempotencyRetention.MarkerLeadAllowance` is five minutes and bounds their
+> **sum**, chosen for the asymmetry of being wrong rather than from a
 > measurement — too generous costs a row kept longer, too mean is the duplicate.
-> **It bounds the skew rather than removing it**, which
-> [#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)
-> is owed: stamping and ageing the row from the database's clock would leave no
-> skew term to allow for.
+> **It bounds both terms rather than removing either, and they need different
+> fixes**: ageing the row from the database's clock removes the skew
+> ([#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)),
+> while not re-arming the claim at completion removes the lag
+> ([#168](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168))
+> at the cost of what §8.5 promises about how long an outcome stays replayable.
 
 > **The uniqueness of the key is a backstop and not the mechanism.** Two
 > attempts that somehow reach the write concurrently produce a constraint

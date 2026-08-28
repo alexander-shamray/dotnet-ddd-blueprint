@@ -2339,15 +2339,18 @@ deletes it is a retention window this repository chooses.
   below the Redis claim's life leaves a stretch in which the key is claimable
   again and nothing remembers the commit, so `RetentionPolicy` reads
   `IdempotencyRetention.MarkerFloor` and refuses anything shorter rather than
-  restating the number. **The floor is the claim's window plus a skew
-  allowance, and equality is refused rather than admitted as the exact fit.**
-  `CompleteAsync` re-arms the claim at the commit that stamps `CommittedAt`, so
-  matching it aims both expiries at one instant; the claim is then counted by
-  Redis and the marker's age by the purging pod's clock against the writing
-  pod's timestamp, across three replicas, and any skew purges the marker first.
-  Five minutes bounds that rather than removing it —
+  restating the number. **The floor is the claim's window plus
+  `MarkerLeadAllowance`, and equality is refused rather than admitted as the
+  exact fit.** Two things reorder the expiries: the marker is stamped inside
+  the transaction while the claim is re-armed after it commits, so the claim's
+  window starts later by the commit's tail; and the marker's age is the purging
+  pod's clock against the writing pod's timestamp, across three replicas, so
+  skew moves it again. Five minutes bounds their sum rather than removing
+  either, and the two need different fixes —
   [#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)
-  is the database-clock fix that would.
+  for the clocks and
+  [#168](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168)
+  for the lag.
 - **The uniqueness of the key is a backstop and not the mechanism.** Two
   attempts that reach the write concurrently produce a constraint violation
   rather than two rows; what makes that case rare is the Redis claim, and what
