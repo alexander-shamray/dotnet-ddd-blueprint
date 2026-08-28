@@ -4624,6 +4624,47 @@ class TheGitArgvGuard(unittest.TestCase):
             "git log \"`printf \\`; git push origin +HEAD:main`\"")
         self.assertRefused("git log `git push origin +HEAD:main`")
 
+    def test_the_multi_line_scripts_this_repository_writes_are_admitted(self):
+        # The corpus test's other half. `separate_lines` changed how EVERY
+        # multi-line command is parsed, so the single-line corpus stopped being
+        # enough on its own — and over-reach here breaks the delivery chain at
+        # the worst moment, which is `#23`'s own conclusion.
+        #
+        # These are the shapes this session and `/ship` actually produce: a
+        # `cd` and a command, a commit sequence, a heredoc commit body with a
+        # blank line in it, a quoted multi-line message, a continued command,
+        # a leading comment, and shell constructs whose bodies span lines.
+        for command in (
+            f"cd /c/dev/harness-bounds{NEWLINE}git status --short",
+            f"git add -A{NEWLINE}git commit -F /tmp/msg.txt"
+            f"{NEWLINE}git push origin fix/x",
+            f"echo building{NEWLINE}git log --oneline -5{NEWLINE}echo done",
+            f"git commit -F - <<'EOF'{NEWLINE}fix: a thing{NEWLINE}"
+            f"{NEWLINE}Body line.{NEWLINE}EOF",
+            f'git commit -m "line one{NEWLINE}{NEWLINE}line two"',
+            f"git log --oneline \\{NEWLINE}    --all \\{NEWLINE}    -5",
+            f"# a comment line{NEWLINE}git status",
+            f"set -u{NEWLINE}git fetch origin{NEWLINE}git pull --ff-only",
+            f"for f in a b; do{NEWLINE}  git log -1 $f{NEWLINE}done",
+            f"if git diff --quiet; then{NEWLINE}  echo clean{NEWLINE}fi",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+        # And the refusals that make those admissions mean something: a second
+        # line is a second command whatever led the first, and a heredoc's
+        # terminator ends the body rather than the script.
+        for command in (
+            f"echo hi{NEWLINE}git push origin +HEAD:main",
+            f"git status{NEWLINE}git push origin +HEAD:main",
+            f"echo hi{NEWLINE}bash -c 'git push origin +HEAD:main'",
+            f"# comment{NEWLINE}git push origin +HEAD:main",
+            f"git commit -F - <<'EOF'{NEWLINE}body{NEWLINE}EOF"
+            f"{NEWLINE}git push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an
