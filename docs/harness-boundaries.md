@@ -44,14 +44,18 @@ chance to get each of them wrong, in files the harness denies this session an
 edit to anyway. **A new residual is stated here**, and `CLAUDE.md` carries the
 pointer rather than a second copy.
 
-**No count of those citations appears here, and the first draft of this
-paragraph is why.** It said "nine command files" — wrong on both halves, since
-there are three such files and they carry eleven mentions between them, of
-which only some are the sandbox residual. A reviewer caught it. The restated
-total failing inside the file whose own inventory paragraph refuses to state
-one is the joke this repository keeps writing; the predicate a reader can check
-is `grep -l 'CLAUDE.md' .claude/commands/`, which needs no numeral in front of
-it.
+**The files are named rather than counted, and two drafts of this paragraph are
+why.** The first said "nine command files" — wrong on both halves, since the
+files are `ship.md`, `security-sweep.md` and `bug-sweep.md`, and they carry
+several mentions each of which only some are the sandbox residual. The second
+tried to repair that with a command a reader could run,
+`grep -l 'CLAUDE.md' .claude/commands/` — which returns **eleven** files,
+because most commands mention `CLAUDE.md` for reasons that have nothing to do
+with this residual. **A check offered as the fix for a miscount, that counts
+something else, is the miscount with a shell prompt in front of it.** Both were
+caught by review. What a reader can check is the three names above; naming a
+small fixed set is not a total, and it cannot go stale without one of those
+files being deleted.
 
 **One of those citations is named rather than left to the general clause,
 because it claims more than the others do.** `ship.md`'s grants callout says
