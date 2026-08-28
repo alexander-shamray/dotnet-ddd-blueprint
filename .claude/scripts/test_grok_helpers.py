@@ -4205,6 +4205,53 @@ class TheGitArgvGuard(unittest.TestCase):
         # that EXECUTES is still reached.
         self.assertRefused('echo "$(git push origin +HEAD:main)"')
 
+    def test_a_forbidden_option_is_reachable_by_abbreviation(self):
+        # **git accepts any unambiguous abbreviation of a long option**, so a
+        # canonical-prefix test reads less than it looks like it does.
+        # Measured against a real remote in a scratch pair of repositories:
+        # `git fetch --upload-p=<cmd> origin` and `--upl=<cmd>` are both
+        # accepted and the command RUNS — the error that comes back is from
+        # trying to execute it. `--u` is refused, and for being ambiguous
+        # between `--unshallow` and `--update-shallow` rather than unknown.
+        # Raised in review.
+        for command in (
+            "git fetch origin --upload-p=/tmp/evil",
+            "git fetch origin --upl=/tmp/evil",
+            "git push origin fix/x --receive-p=/tmp/evil",
+            "git log --exe=/tmp/evil",
+            "git log --out=/tmp/x",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The control. An option that merely SHARES a prefix is not an
+        # abbreviation of anything forbidden, and `--oneline` is the one a
+        # careless implementation takes with it.
+        self.assertAdmitted("git log --oneline")
+        self.assertAdmitted("git commit --amend")
+        self.assertAdmitted("git status --short")
+
+        # **This is the abbreviation lesson arriving a second time.** `#23`
+        # already recorded that `--for` is an abbreviation git accepts, and
+        # that argument is what turned the push check into an allow-list. The
+        # flag check beside it stayed a prefix test for another six rounds.
+
+    def test_an_evaluator_named_as_data_is_not_an_invocation(self):
+        # The data-only boundary applied to `git_segments` and not to the
+        # evaluator pass beside it, so `echo bash -c '<script>'` was refused
+        # for quoting a command. Raised in review — the same false-positive
+        # class the boundary was added to close, left standing one function
+        # over, which is this repository's most-repeated shape.
+        self.assertAdmitted("echo bash -c 'git push origin +HEAD:main'")
+        self.assertAdmitted("printf '%s' sh -c 'git push origin +HEAD:main'")
+        self.assertAdmitted("echo eval git push origin +HEAD:main")
+
+        # The controls: a real evaluator is still caught, and a separator
+        # starts a run the printer does not cover.
+        self.assertRefused("bash -c 'git push origin +HEAD:main'")
+        self.assertRefused("echo hi; bash -c 'git push origin +HEAD:main'")
+        self.assertRefused("timeout 5 bash -c 'git push origin +HEAD:main'")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an

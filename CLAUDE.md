@@ -1115,19 +1115,36 @@ own line rather than sending a reader to a file that does not hold it.
   been written by someone thinking in POSIX on a machine that answers to both.
 
 - **A guard that models another parser needs ONE model of it, in one place.**
-  The argv hook has now been defeated five times by the same shape: a function
-  that knew a rule and a neighbouring function that did not. A heredoc opener
-  was recognised inside a comment; a paren counter balanced quoted characters;
-  the parse-failure fallback scanned the raw string the parse path had
-  stripped; the substitution extractor ran ahead of the stripper with a quote
-  tracker of its own; and `shlex`'s `commenters` disagreed with bash about
-  where a comment starts. Each fix was correct, and each left the next copy of
-  the model standing. **Two of the five were fail-open** — a force push to
-  `main` admitted, twice — because a model that merely *differs* from the
-  shell's is wrong in whichever direction the difference falls, and only one of
-  those directions is loud. Where a tool has to agree with another parser, make
-  every caller share one implementation of the part that disagrees, and pin the
+  The argv hook keeps being defeated by one shape: a function that knew a rule
+  and a neighbouring function that did not. **No count here on purpose** — the
+  first draft of this bullet said five and was made false twice in the same
+  branch, which is this file's own restated-total failure appearing inside a
+  lesson about carefulness. The enumeration is the checkable part. A heredoc
+  opener was recognised inside a comment; a paren counter balanced quoted
+  characters; the parse-failure fallback scanned the raw string the parse path
+  had stripped; the substitution extractor ran ahead of the stripper with a
+  quote tracker of its own; `shlex`'s `commenters` disagreed with bash about
+  where a comment starts; the escape handling in `_closing_paren` covered
+  double quotes and not the unquoted state; and the `DATA_ONLY_COMMANDS`
+  boundary was applied to the `git` scan and not to the evaluator pass one
+  function below it. Each fix was correct, and each left the next copy of the
+  model standing. **Several were fail-open** — a force push to `main` admitted,
+  more than once — because a model that merely *differs* from the shell's is
+  wrong in whichever direction the difference falls, and only one of those
+  directions is loud. Where a tool has to agree with another parser, make every
+  caller share one implementation of the part that disagrees, and pin the
   agreement with cases in both directions.
+
+- **An abbreviation is a spelling, and this repository has now missed it
+  twice.** #23 recorded that git accepts `--for` for `--force-with-lease`, and
+  that argument is what turned the push check into an allow-list. The forbidden
+  *flag* check beside it stayed a canonical-prefix test for six review rounds
+  after that — and `git fetch --upl=<cmd> origin` runs `<cmd>`, measured
+  against a real remote. Only `--u` is refused, for being ambiguous rather than
+  unknown. **The lesson landing in one function and not its neighbour is the
+  bullet above; what this one adds is that a rule you have already written down
+  is not thereby applied.** When a fix rests on how a tool parses its input,
+  grep for every other place that parses the same input, in the same change.
 - **A helper whose stdout is its return value owes every subcommand a
   redirection.** `git worktree add` writes "Preparing worktree" to stderr and
   `HEAD is now at <sha> <subject>` to *stdout*, so a helper that printed a path

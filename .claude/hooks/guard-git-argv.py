@@ -512,16 +512,6 @@ def program_name(token):
     return name
 
 
-def _argv_after(tokens, index):
-    """The argv slice following `tokens[index]`, up to the next separator."""
-    argv = []
-    for following in tokens[index + 1:]:
-        if following in SEPARATORS:
-            break
-        argv.append(following)
-    return argv
-
-
 def evaluated_scripts(tokens):
     """Every token a shell evaluator in `tokens` will execute as a command.
 
@@ -531,23 +521,32 @@ def evaluated_scripts(tokens):
     the segment scan found no `git`, and the push ran. Raised in review;
     verified allowed, and the bash behaviour measured with a `git` shim.
 
+    **The data-only boundary applies here too**, and it did not at first: a run
+    led by `echo` is text, so `echo bash -c \'git push …\'` was refused for
+    quoting a command. Raised in review — the same false-positive class the
+    boundary was added to close, left standing in the pass beside it, which is
+    this repository\'s most-repeated shape.
+
     **The bound: a script this hook can READ.** `bash script.sh` runs a file,
     and a hook is handed an argv rather than a filesystem — that is outside what
     any argv guard can see, and it is the same shape as the parameter-expansion
     residual rather than a new one.
     """
-    for index, token in enumerate(tokens):
-        name = program_name(token)
-        if name in EVALUATORS:
-            argv = _argv_after(tokens, index)
-            for position, element in enumerate(argv):
-                if SCRIPT_FLAG.match(element) and position + 1 < len(argv):
-                    yield argv[position + 1]
-                    break
-        elif name == "eval":
-            argv = _argv_after(tokens, index)
-            if argv:
-                yield " ".join(argv)
+    for run in command_runs(tokens):
+        if not run or program_name(run[0]) in DATA_ONLY_COMMANDS:
+            continue
+        for index, token in enumerate(run):
+            name = program_name(token)
+            if name in EVALUATORS:
+                argv = run[index + 1:]
+                for position, element in enumerate(argv):
+                    if SCRIPT_FLAG.match(element) and position + 1 < len(argv):
+                        yield argv[position + 1]
+                        break
+            elif name == "eval":
+                argv = run[index + 1:]
+                if argv:
+                    yield " ".join(argv)
 
 
 # Commands whose arguments are text and never a command line.
@@ -791,13 +790,28 @@ def offence(command, depth=0):
             if element in value_flags:
                 skip = True
                 continue
+            # **git accepts any unambiguous ABBREVIATION of a long option**,
+            # so a canonical-prefix test reads less than it looks like it does.
+            # Measured against a real remote: `--upload-p=<cmd>` and even
+            # `--upl=<cmd>` are accepted by `git fetch` and the command RUNS;
+            # only `--u` is refused, and for being ambiguous rather than
+            # unknown. Raised in review.
+            #
+            # So the test runs both ways — the element starting with a
+            # forbidden flag, and a forbidden flag starting with the element.
+            # An abbreviation of something harmless that happens to prefix one
+            # of these is refused too; that is over-refusal, which is the
+            # direction to be wrong in, and `--u` was never going to work.
+            name = element.split("=", 1)[0]
+            abbreviation = name.startswith("--") and len(name) > 2
             for flag in FORBIDDEN_FLAGS:
-                if element.startswith(flag):
+                if element.startswith(flag) or (
+                        abbreviation and flag.startswith(name)):
                     return (
                         f"`git ... {flag}` is refused: it writes or executes "
                         "rather than inspects, and the settings deny it matches "
                         "only the unquoted spelling. This hook compares the "
-                        "resolved argv."
+                        "resolved argv, and any unambiguous abbreviation of it."
                     )
             if subcommand not in REPOSITORY_SUBCOMMANDS:
                 continue
