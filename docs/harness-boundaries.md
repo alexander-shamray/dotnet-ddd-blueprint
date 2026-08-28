@@ -44,6 +44,19 @@ get it wrong, in files the harness denies this session an edit to anyway. **A
 new residual is stated here**, and `CLAUDE.md` carries the pointer rather than
 a second copy.
 
+**One of those citations is named rather than left to the general clause,
+because it claims more than the others do.** `ship.md`'s grants callout says
+`CLAUDE.md` "keeps the count and the inventory" — a possessive claim, where the
+other nine only say a thing is *recorded* there. The inventory half resolves in
+one hop like the rest: `CLAUDE.md` forwards, and the numbered inventory is
+below. **The count half was already stale before this branch touched
+anything** — the headline figure was deliberately dropped after it read "six"
+and #56 closed the fourth, and the paragraph below says so — so a reader
+following that word finds nothing, and found nothing on `main` either. It is
+recorded here rather than fixed in place for the reason the clause above
+gives, and named here rather than covered silently: **a residual that does not
+mention the sentence it is covering is the same shape as an unstated one.**
+
 > **A grant is not a whitelist, and that is the trap under everything below.**
 > If you read one paragraph here, read the one beginning *A grant is not a
 > whitelist* — `allowed-tools` is an auto-approval list, so omitting a tool from

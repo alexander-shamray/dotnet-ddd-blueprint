@@ -54,7 +54,7 @@ CATALOG_FIXTURE = ROOT / "tests" / "Catalog.TestSupport" / "ServiceFixture.cs"
 # EVERY PATH OUTSIDE deploy/compose/rabbitmq THAT THIS SCRIPT READS, declared
 # once, on deploy/helm/smoke.sh's terms and check.py's. The workflow's filters
 # must cover each, or a change to one is a green pull request that skips the
-# gate watching it — and CLAUDE.md records that a fourth copy of this pattern
+# gate watching it — and docs/lessons.md records that a fourth copy of this pattern
 # arrives owing a test whose subject is the READS rather than the workflow,
 # because a list can only be compared for entries it already contains. That is
 # check 7 here.

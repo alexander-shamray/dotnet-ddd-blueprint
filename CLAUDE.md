@@ -26,11 +26,17 @@ and of `.claude/commands/*.md`, argued below. **No line count of this file
 appears in this paragraph on purpose**: a file that states its own length
 invalidates the claim with the next edit, including the edit that fixes it.
 
-**Each of those four is outside the blueprint tree**, so it is in no index,
-behind no nav footer, and reached by neither `/validate-blueprint` nor
-`/check-links` — except `testing.md` and `roadmap.md`, which the first names in
-its scope. The one rule below is what carries the others, and that is all that
-does.
+**Each of those four is outside the blueprint tree**, so each is in no index
+and behind no nav footer, and `/check-links` reaches none of them.
+`/validate-blueprint` reaches one — `testing.md`, which it names in its scope.
+For the other three the one rule below is all that carries them, and it is all
+that does.
+
+**`roadmap.md` is in that command's scope too and is not one of the four**,
+because it was never part of this file. The two claims meet only in
+`/validate-blueprint`'s scope list and are otherwise about different sets —
+running them together is how an except-clause ends up naming a file its own
+sentence never introduced.
 
 ## What this repo is
 

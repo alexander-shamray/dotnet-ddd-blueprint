@@ -340,8 +340,8 @@ done
 # contains, so a path this script reads and nobody declared is invisible from
 # both sides. `deploy/canary/canary.py` shipped exactly that — two entries
 # declared, three paths opened, trigger assertion green throughout — and
-# CLAUDE.md states the fix as owed by every copy of this pattern rather than by
-# the copy that was caught. This is that debt paid here.
+# docs/lessons.md states the fix as owed by every copy of this pattern rather
+# than by the copy that was caught. This is that debt paid here.
 #
 # The subject is this script's own source: every `$ROOT/…` path it names must
 # be covered by a declared entry — matched as the WHOLE entry or as a directory

@@ -141,8 +141,8 @@ def validate_tag(tag: str, job_prefix: str | None = None) -> None:
     alike. `commerce.tag`'s render-time validation passes, because by then the
     tag really is `deadbeef`; the injected key rode in beside it.
 
-    This is CLAUDE.md's own lesson about a value crossing between two systems'
-    alphabets, one release later: the tag is validated against Kubernetes'
+    This is docs/lessons.md's own lesson about a value crossing between two
+    systems' alphabets, one release later: the tag is validated against Kubernetes'
     alphabet at render time and reaches Helm's parser before that.
     **Validate against the intersection, at the boundary the value enters.**
 

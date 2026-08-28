@@ -2659,8 +2659,8 @@ stdout, so test what a caller captures, never what the code appears to print.**
 And on this host an argv element crossing into `bash.exe` is re-parsed, so a
 pattern containing `"` arrived with its quotes eaten and the suite reported a
 working allow-list as broken; environment variables and stdin are not re-parsed.
-That is the MSYS path divergence `CLAUDE.md` already records, one layer down —
-the argument rather than the path.
+That is the MSYS path divergence [`lessons.md`](lessons.md) already records,
+one layer down — the argument rather than the path.
 
 ## The closure gate — landed inside PR #117, and the plan has no row for it
 
@@ -5050,9 +5050,11 @@ after:
   true: Catalog gained a connection string and a real migrator run, so its
   container-backed suites cannot be satisfied by a fake. Each such suite owns
   its collection and therefore its own container set, which is §12.4's stated
-  price. **The live list of which projects need a daemon is `CLAUDE.md`'s**, in
-  its commands section — it has grown twice since PR-08, and this entry records
-  the decision rather than the tally.
+  price. **The live list of which projects need a daemon is
+  [`testing.md`](testing.md)'s** — it has grown twice since PR-08, and this
+  entry records the decision rather than the tally. It was `CLAUDE.md`'s
+  commands section until that section became a short form deferring to
+  `testing.md`, which is where the five projects are now named.
 
 ---
 
