@@ -560,11 +560,34 @@ def evaluated_scripts(tokens):
 DATA_ONLY_COMMANDS = {"echo", "printf", ":", "true", "false"}
 
 
+# `shlex(punctuation_chars=True)` emits a maximal RUN of these as ONE token, so
+# an operator can arrive glued to its neighbour and match no separator by name.
+PUNCTUATION = set("();<>|&")
+
+
+def is_boundary(token):
+    """Whether `token` ends the command run it appears in.
+
+    **`);` is one token, and it matched nothing.** So
+    `git log -1; (echo ok);git push origin +HEAD:main` left the push inside a
+    run still led by `echo`, the data-only exemption skipped it, and bash ran
+    it — measured with a `git` shim. Raised in review.
+
+    A token made entirely of shell punctuation is a boundary whatever it is
+    glued into, which also settles `<(`: a process substitution is executed
+    BEFORE the command it is an argument to, so the `git` inside one belongs to
+    no printer's run. `echo <(git push origin +HEAD:main)` ran the push too,
+    measured the same way, and both are one question about where a run ends.
+    """
+    return token in SEPARATORS or (
+        token != "" and all(char in PUNCTUATION for char in token))
+
+
 def command_runs(tokens):
     """`tokens` split into the separate commands the shell would run."""
     current = []
     for token in tokens:
-        if token in SEPARATORS:
+        if is_boundary(token):
             if current:
                 yield current
             current = []

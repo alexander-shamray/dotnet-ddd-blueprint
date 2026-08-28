@@ -1135,6 +1135,34 @@ own line rather than sending a reader to a file that does not hold it.
   caller share one implementation of the part that disagrees, and pin the
   agreement with cases in both directions.
 
+- **Every exemption owes an exact boundary; a guard with no exemption owes
+  none.** The argv hook was over-refusing `echo git push …`, so a data-only
+  exemption was added — correctly, and it immediately produced two bypasses
+  that the guard without it did not have. `shlex(punctuation_chars=True)` emits
+  a maximal run of punctuation as ONE token, so `);` matched no separator by
+  name and `git log -1; (echo ok);git push origin +HEAD:main` left the push
+  inside a run still led by `echo`; and `<(…)` is executed *before* the command
+  it is an argument to, so `echo <(git push …)` put the push inside a printer's
+  run that never runs it. Both measured with a `git` shim — the second needed a
+  marker file, because a process substitution's output goes into a FIFO nobody
+  can read from the terminal. **The exemption was the right fix and it cost two
+  rounds**, which is the trade to price in rather than avoid: narrowing a guard
+  to stop refusing honest traffic moves the difficulty from "what do I refuse"
+  to "where exactly does the thing I am exempting end", and the second question
+  has more edges. Where a guard gains an exemption, write the boundary cases in
+  the same change as the exemption.
+
+- **A gate built on `git ls-files` is blind to `.git` itself.** This is the
+  MSBuild auto-import lesson one directory over and it arrived from the same
+  reviewer two rounds later: `Directory.Build.targets` was invisible because it
+  did not exist, and `.git/config` is invisible because git never tracks it.
+  With an unrestricted `Edit`, a command could set `diff.external` there and
+  take host execution out of its own approved `git diff` — measured in a
+  scratch repository, the external command runs. **Ask what an inventory's
+  SOURCE cannot see, not only what the inventory is missing**; and note that a
+  worktree's `.git` is a file rather than a directory, so a boundary drawn at
+  it needs both spellings.
+
 - **An abbreviation is a spelling, and this repository has now missed it
   twice.** #23 recorded that git accepts `--for` for `--force-with-lease`, and
   that argument is what turned the push check into an allow-list. The forbidden

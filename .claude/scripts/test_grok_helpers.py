@@ -2990,6 +2990,29 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
                 for prefix in ("", "./"):
                     self.assertIn(f"Edit({prefix}docs/{entry}{suffix})", rules)
 
+    def test_gits_own_control_directory_is_denied(self):
+        # **`.git` is absent from `git ls-files`, so the coverage test cannot
+        # reach it** — the same shape as the MSBuild auto-imports, one
+        # directory over. With an unrestricted `Edit`, a command could write
+        # `.git/config`, set `diff.external`, and get host execution out of its
+        # own approved `git diff`. Measured in a scratch repository: the
+        # external command runs and prints. Raised in review.
+        #
+        # Denied as a tree AND as a file, because in a worktree `.git` is a
+        # file pointing at the real directory rather than the directory itself.
+        for name in self.SUBJECTS:
+            rules = self.disallowed(name)
+            for target in (".git/**", "./.git/**", ".git", "./.git"):
+                with self.subTest(command=name, target=target):
+                    self.assertIn(f"Edit({target})", rules)
+
+    def test_the_git_directory_is_not_tracked(self):
+        # The positive control, and the reason the case above cannot be folded
+        # into the tracked-file test: `git ls-files` never reports `.git`, so
+        # an inventory read from it is blind here by construction.
+        self.assertNotIn(".git", self.tracked_root_files())
+        self.assertNotIn(".git", self.tracked_trees())
+
     def test_the_one_legitimate_output_stays_writable(self):
         # The other side, and the reason the root is enumerated rather than
         # denied wholesale. `suggestions.md` is `/review-branch`'s only output
@@ -4302,6 +4325,50 @@ class TheGitArgvGuard(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertAdmitted(command)
+
+    def test_a_glued_operator_still_ends_a_run(self):
+        # **`shlex(punctuation_chars=True)` emits a maximal RUN of punctuation
+        # as ONE token**, so `);` arrived glued and matched no separator by
+        # name. `git log -1; (echo ok);git push origin +HEAD:main` therefore
+        # left the push inside a run still led by `echo`, the data-only
+        # exemption skipped it, and bash ran it — measured with a `git` shim.
+        # Raised in review.
+        #
+        # **Both of this round's guard findings are regressions from the fix
+        # one commit earlier**, which is the cost of an exemption: every
+        # exemption needs its boundary to be exactly right, where a guard with
+        # none does not.
+        for command in (
+            "git log -1; (echo ok);git push origin +HEAD:main",
+            "echo ok;git push origin +HEAD:main",
+            "(echo ok)&&git push origin +HEAD:main",
+            "echo ok|git push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_process_substitution_is_not_the_printers_argument(self):
+        # `<(…)` is executed BEFORE the command it is an argument to, so the
+        # `git` inside one belongs to no printer's run. `echo <(git push origin
+        # +HEAD:main)` ran the push — measured, with the shim appending to a
+        # marker file, because the substitution's own output goes into a FIFO
+        # and cannot be read from the terminal. Raised in review.
+        #
+        # One change closes this and the glued-operator case together: a token
+        # made entirely of shell punctuation ends a run, and `<(` is such a
+        # token.
+        for command in (
+            "echo <(git push origin +HEAD:main)",
+            "printf '%s' <(git push origin +HEAD:main)",
+            "git log -1; echo <(git push origin +HEAD:main)",
+            "echo >(git push origin +HEAD:main)",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the exemption still does its job for a printer's ordinary text.
+        self.assertAdmitted("echo git push origin +HEAD:main")
+        self.assertAdmitted("echo bash -c 'git push origin +HEAD:main'")
 
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
