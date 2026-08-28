@@ -449,7 +449,7 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// </summary>
     /// <remarks>
     /// Constructed rather than resolved, because the policy is a constructor
-    /// argument and the service composes its two statements from the same
+    /// argument and the service composes a statement per table from the same
     /// registered tables either way — so what varies is the batching and
     /// nothing else.
     /// </remarks>

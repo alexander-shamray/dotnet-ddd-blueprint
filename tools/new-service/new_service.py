@@ -1472,7 +1472,7 @@ OUTBOX_MIGRATION = re.compile(r"^\d{14}_AddOutbox(\.Designer)?\.cs$")
 # failed delete every pass. Consuming nothing does not exempt it — Catalog
 # itself consumes nothing and has the table for exactly this.
 INBOX_MIGRATION = re.compile(r"^\d{14}_AddInbox(\.Designer)?\.cs$")
-# The purge's index, and it travels for the same reason the two tables do: the
+# The purge's index, and it travels for the same reason the tables do: the
 # claim's index is filtered `WHERE ProcessedAt IS NULL` and so excludes every
 # row the purge deletes. A service scaffolded without this one scans its whole
 # outbox table hourly from its first boot — the same class of silent cost as a

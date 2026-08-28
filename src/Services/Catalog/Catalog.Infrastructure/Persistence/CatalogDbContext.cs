@@ -23,8 +23,9 @@ namespace Catalog.Infrastructure.Persistence;
 public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
 {
     /// <summary>
-    /// §9.4's outbox. The one <c>DbSet</c> here that is not an aggregate root,
-    /// and deliberately so: the row has to be written by the same context as
+    /// §9.4's outbox, and the first <c>DbSet</c> here that is not an aggregate
+    /// root — §9.5's inbox and §8.5's marker followed it, each for a version of
+    /// the same reason: the row has to be written by the same context as
     /// the aggregate to enlist in the same transaction, which is the entire
     /// mechanism. §12.4's tests read it through this property.
     /// </summary>

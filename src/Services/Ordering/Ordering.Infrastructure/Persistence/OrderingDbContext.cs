@@ -32,8 +32,9 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
     public DbSet<Order> Orders => Set<Order>();
 
     /// <summary>
-    /// §9.4's outbox. The one <c>DbSet</c> here that is not an aggregate root,
-    /// and deliberately so: the row has to be written by the same context as
+    /// §9.4's outbox, and the first <c>DbSet</c> here that is not an aggregate
+    /// root — §9.5's inbox and §8.5's marker followed it, each for a version of
+    /// the same reason: the row has to be written by the same context as
     /// the aggregate to enlist in the same transaction, which is the entire
     /// mechanism. §12.4's tests read it through this property.
     /// </summary>
@@ -115,9 +116,10 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
     /// landing them early: an unbounded <c>NVARCHAR(MAX)</c> is cheap to
     /// prevent and expensive to migrate, and a convention introduced after the
     /// first entity silently changes a column that already exists. They now
-    /// govern the orders, lines, product prices, inbox and outbox rows this
-    /// context maps — which is the outcome the timing bought, not a change of
-    /// purpose.
+    /// govern every row this context maps, business and technical alike —
+    /// which is the outcome the timing bought, not a change of purpose. Named
+    /// rather than listed since §8.5's marker joined them: an inventory here
+    /// is a second copy of the <c>DbSet</c>s above.
     /// </summary>
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

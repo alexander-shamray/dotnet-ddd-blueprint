@@ -1108,7 +1108,7 @@ internal static partial class SqlSchema
         // which would need extending with every release — and nothing needs
         // escaping inside them, because the pattern has already refused
         // everything but letters, digits and underscore. The table name is a
-        // literal supplied by the two types below, never by a caller.
+        // literal supplied by the table types below, never by a caller.
         return $"[{schema}].{table}";
     }
 
@@ -1981,9 +1981,9 @@ close.
 
 Both run on a
 slow schedule, batched so neither holds a long lock. `RetentionPurgeService` in
-`Common.Infrastructure.Messaging` is that service: it composes the two
-statements above from the registered `OutboxTable` and `InboxTable`, takes its
-windows and its batch size from a registered `RetentionPolicy`, and exposes
+`Common.Infrastructure.Messaging` is that service: it composes a statement per
+registered table — the two above, and the third the next paragraph adds — takes
+its windows and its batch size from a registered `RetentionPolicy`, and exposes
 `PurgeAsync` publicly so tests drive one pass rather than racing a timer — the
 seam `OutboxDispatcher.ProcessBatchAsync` already offers, for the same reason.
 

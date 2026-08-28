@@ -15,7 +15,7 @@ namespace Common.Infrastructure;
 /// <b>This is the only identifier in the codebase interpolated into SQL rather
 /// than parameterised</b>, because a schema cannot be a parameter — and a value
 /// that cannot be a parameter has to be a value the type refuses to hold
-/// wrongly. Both callers validate at construction, so a bad schema fails the
+/// wrongly. Every caller validates at construction, so a bad schema fails the
 /// host at registration rather than the first statement composed from it.
 /// </remarks>
 internal static partial class SqlSchema
@@ -44,7 +44,7 @@ internal static partial class SqlSchema
         // Nothing has to be escaped inside them. `]` is the only character that
         // would need doubling, and the pattern has already refused everything
         // but letters, digits and underscore. The table name is a literal
-        // supplied by the two types in this assembly and never by a caller.
+        // supplied by the table types in this assembly and never by a caller.
         return $"[{schema}].{table}";
     }
 

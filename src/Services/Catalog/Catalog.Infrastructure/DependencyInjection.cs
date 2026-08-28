@@ -96,7 +96,7 @@ public static class DependencyInjection
         services.AddSingleton(new InboxTable(schema));
         services.AddSingleton(new IdempotencyMarkerTable(schema));
 
-        // The retention windows of §9.4 and §9.5 at their defaults. Registered
+        // The retention windows of §9.4, §9.5 and §8.5 at their defaults. Registered
         // rather than const, because §9.5 tells the reader to check the inbox
         // window against the broker's configured redelivery limits — and a
         // number a chapter says to check has to be one the service can change.
@@ -185,7 +185,8 @@ public static class DependencyInjection
         // validator, bus, dispatcher.
         services.AddHostedService<OutboxDispatcher>();
 
-        // §9.4's and §9.5's retention, in the one hosted service §9.5 asks for.
+        // §9.4's, §9.5's and §8.5's retention, in the one hosted service §9.5
+        // asks for.
         // Registered last, so it is the first stopped: it is pure housekeeping,
         // and a deploy that interrupts a purge loses nothing an hour will not
         // redo — where the dispatcher stopping first is what keeps the

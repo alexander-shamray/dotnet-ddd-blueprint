@@ -507,17 +507,17 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
 
     def test_it_copies_the_inbox_migration_under_the_id_after_that(self):
         # §9.5's table travels for the mirror of the outbox's reason: the
-        # retention purge deletes from both tables from first boot, so a
-        # service carrying the purge without this table logs a failed delete
-        # every pass. Consuming nothing does not exempt it — the template
-        # itself consumes nothing and has the table for exactly this.
+        # retention purge deletes from every table it was given from first
+        # boot, so a service carrying the purge without this table logs a
+        # failed delete every pass. Consuming nothing does not exempt it —
+        # the template itself consumes nothing and has the table for this.
         migration = f"{self.prefix}/{INBOX_MIGRATION_ID}_AddInbox.cs"
         self.assertIn(migration, self.rendered.created)
         self.assertIn('name: "InboxMessages"', self.rendered.created[migration])
         self.assertLess(OUTBOX_MIGRATION_ID, INBOX_MIGRATION_ID)
 
     def test_it_copies_the_retention_index_under_the_id_after_that(self):
-        # The purge's index travels for the same reason the two tables do, and
+        # The purge's index travels for the same reason the tables do, and
         # its absence is the quietest of the three: the claim's index is
         # filtered `WHERE ProcessedAt IS NULL`, so it excludes every row the
         # purge deletes and the hourly pass scans the whole outbox table. A

@@ -10,10 +10,11 @@ using Xunit;
 namespace Ordering.Api.Tests;
 
 /// <summary>
-/// §9.4's and §9.5's retention purges, driven a pass at a time against the real
-/// tables. The predicate that separates them is the whole subject: the outbox
-/// deletes on <c>ProcessedAt IS NOT NULL</c> <em>and</em> age, the inbox on age
-/// alone, and getting the first one wrong is silent, permanent data loss.
+/// §9.4's, §9.5's and §8.5's retention purges, driven a pass at a time against
+/// the real tables. The predicate that separates them is the whole subject: the
+/// outbox deletes on <c>ProcessedAt IS NOT NULL</c> <em>and</em> age, the inbox
+/// and the marker on age alone, and getting the first one wrong is silent,
+/// permanent data loss.
 /// </summary>
 [Collection(nameof(IntegrationCollection))]
 public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime

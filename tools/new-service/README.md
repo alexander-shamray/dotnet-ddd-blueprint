@@ -12,7 +12,7 @@ python tools/new-service/new_service.py Yankee --port 5199
 |---|---|
 | `name` | The service, PascalCase. It becomes the namespace root, the project names, the database, the SQL schema, both connection-string keys and both Compose service names |
 | `--port` | The host port the API publishes. **Required** — a port is an allocation recorded in [§14.1](../../docs/backend-architecture/14-local-development.md) and in `deploy/compose/README.md`, and a script that derived one would quietly disagree with a printed chapter. The run refuses a port another service already publishes |
-| `--migration-id` | The `InitialCreate` id, and the base for the outbox migration one minute after it. Defaults to the current UTC timestamp; the tests pass a fixed one |
+| `--migration-id` | The `InitialCreate` id, and the base every later template migration is spaced from — one minute per entry in `TEMPLATE_MIGRATIONS`, in the order they apply. Defaults to the current UTC timestamp; the tests pass a fixed one |
 | `--repo-root` | Defaults to this script's repository |
 
 It creates a tree under `src/Services/<Name>` and `tests/<Name>.*`, and it

@@ -671,9 +671,20 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 >   the collision described above is fully reachable *between anonymous
 >   callers*, which is the defect the subject segment was added to close,
 >   surviving inside the fix for it.
-> - **The message path shares one bucket by construction**, because §9.4's
->   broker has a single principal. Every sender of every command type claims
->   under `"system"`. That is not made worse by anything here, and
+> - **The message path shares one bucket, and the reason is no longer the one
+>   this bullet used to give.** Every sender of every command type claims under
+>   `"system"` because `ICurrentUser.IsAuthenticated` is false on that path —
+>   not because the broker has one principal. It had one when this was written;
+>   [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+>   gave each service its own account and the bucket did not move, because
+>   nothing binds a broker identity into `ICurrentUser`. **A cause that is
+>   fixed while its effect survives is the most misleading kind of stale
+>   sentence**, and this one also pointed at
+>   [#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44)
+>   in the future tense for a split that issue landed without performing.
+>   Splitting the bucket means binding the consumer's authenticated identity
+>   into the port §11.4 implements, which no chapter specifies today.
+>   That is not made worse by anything here, and
 >   [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
 >   does not make it better either, which is worth stating precisely because
 >   that ADR *did* settle what §11.4 used to leave open. It rules that a
@@ -683,9 +694,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 >   different quantity: it identifies *the claimant* at the near end, and on
 >   this path there is still exactly one. Naming a fixed segment remains the
 >   smallest thing that keeps a principal-less command from claiming under no
->   subject at all, and per-service broker identity
->   ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44))
->   is what would ever split this bucket.
+>   subject at all.
 
 > **Trap — JSON round-tripping the `Result` itself.** It is the obvious body for
 > both halves and it cannot work in either direction. `System.Text.Json`
