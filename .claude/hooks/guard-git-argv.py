@@ -387,6 +387,44 @@ def strip_comments(command):
     )
 
 
+def separate_lines(command):
+    """`command` with every unquoted newline turned into a `;`.
+
+    **A newline separates commands, and `shlex` made it disappear.** With
+    `whitespace_split=True` a newline is whitespace: it is never emitted as a
+    token, so the `"\n"` in `SEPARATORS` matched nothing and every line of a
+    script joined the run before it. Harmless while a `git` token anywhere was
+    an invocation — and a bypass the moment `DATA_ONLY_COMMANDS` arrived, since
+
+        echo hi
+        git push origin +HEAD:main
+
+    became one `echo`-led run and the push was exempt. Found while fixing a
+    narrower case from review; the reported input was a comment inside a
+    substitution, and this is why closing that one was not enough.
+
+    A newline inside quotes is data and stays — `git commit -m "a<newline>b"`
+    is one argument. So is one after a backslash, which is a line continuation
+    bash removes rather than a separator.
+    """
+    out, escaped = [], None
+    for index, in_quotes, in_comment in shell_positions(command):
+        char = command[index]
+        if index == escaped:
+            out.append(char)
+            escaped = None
+            continue
+        if char == "\\" and not in_quotes and not in_comment:
+            escaped = index + 1
+            out.append(char)
+            continue
+        if char == "\n" and not in_quotes and not in_comment:
+            out.append(";")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
 def expandable_regions(command):
     """Every part of `command` the shell would expand, as `(text, quotes)`.
 
@@ -476,8 +514,22 @@ def substitutions(command, quotes=True):
             index = end + 1
             continue
         if char == "`":
-            end = command.find("`", index + 1)
-            if end == -1:
+            # `find` ignored escapes, and a `\`` is a literal backtick to bash
+            # rather than a terminator. Raised in review. **The reported
+            # example is a bash SYNTAX ERROR** — measured, `unexpected EOF
+            # while looking for matching` — so it was never a live bypass; the
+            # scan is corrected anyway, because agreeing with the shell about
+            # where a substitution ends is the property, not the one input that
+            # exposed it.
+            end = index + 1
+            while end < len(command):
+                if command[end] == "\\" and end + 1 < len(command):
+                    end += 2
+                    continue
+                if command[end] == "`":
+                    break
+                end += 1
+            if end >= len(command):
                 break
             found.append(command[index + 1:end])
             index = end + 1
@@ -533,9 +585,21 @@ def _closing_paren(command, start):
     review; verified allowed.
     """
     depth, index = 1, start
-    single = double = False
+    single = double = comment = False
+    at_word_start = True
     while index < len(command):
         char = command[index]
+        if comment:
+            # **A substitution's body is a command list, so `#` opens a comment
+            # inside it and a `)` in that comment closes nothing.**
+            # `git log "$(echo ok # )` / `git push origin +HEAD:main)"` ended
+            # extraction at the commented paren and left the push in the outer
+            # token — measured, bash runs it. Raised in review.
+            if char == "\n":
+                comment = False
+                at_word_start = True
+            index += 1
+            continue
         if single:
             if char == "'":
                 single = False
@@ -553,11 +617,18 @@ def _closing_paren(command, start):
             # review; the bash behaviour measured — `printf` receives the paren
             # and the push runs.
             index += 2
+            at_word_start = False
+            continue
+        elif char == "#" and at_word_start:
+            comment = True
+            index += 1
             continue
         elif char == "'":
             single = True
+            at_word_start = False
         elif char == '"':
             double = True
+            at_word_start = False
         elif command.startswith("$(", index):
             depth += 1
             index += 2
@@ -568,6 +639,8 @@ def _closing_paren(command, start):
             depth -= 1
             if not depth:
                 return index
+        if not (single or double):
+            at_word_start = char in METACHARACTERS
         index += 1
     return None
 
@@ -577,9 +650,12 @@ def _closing_paren(command, start):
 # one rather than as data.
 EVALUATORS = {"bash", "sh", "dash", "zsh", "ksh"}
 
-# `-c`, and the bundles that carry it — `bash -xc <script>`. A long option is
-# never the script introducer, so `--` forms are left alone.
-SCRIPT_FLAG = re.compile(r"^-[A-Za-z]*c$")
+# `-c`, and the bundles that carry it — `bash -xc <script>` and `bash -cx
+# <script>` alike. **`c` need not come last**, which the first version of this
+# required: `bash -cx 'git push origin +HEAD:main'` runs the push, measured,
+# and matched nothing. Raised in review. A long option is never the script
+# introducer, so `--` forms are left alone.
+SCRIPT_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
 
 
 # Windows resolves `git.exe`, `GIT.EXE` and `C:/Git/bin/git.exe` to one
@@ -858,7 +934,7 @@ def offence(command, depth=0):
     # moment anything else in the line failed to tokenise. A body is data on
     # every path, not only on the one that parses — and so is a comment, which
     # is why `strip_comments` runs here rather than being left to the lexer.
-    stripped = strip_comments(strip_heredocs(command))
+    stripped = separate_lines(strip_comments(strip_heredocs(command)))
     try:
         lexer = shlex.shlex(stripped, posix=True, punctuation_chars=True)
         # Comments are already gone, and `shlex` would take a second, wider view

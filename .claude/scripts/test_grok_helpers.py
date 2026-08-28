@@ -4551,6 +4551,79 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertAdmitted(command)
 
+    def test_a_newline_separates_commands(self):
+        # **`shlex` made the newline disappear, and nothing noticed for six
+        # rounds.** With `whitespace_split=True` a newline is whitespace: it is
+        # never emitted as a token, so the `"\n"` sitting in `SEPARATORS`
+        # matched nothing and every line of a script joined the run before it.
+        #
+        # That was harmless while a `git` token anywhere was an invocation, and
+        # a bypass the moment `DATA_ONLY_COMMANDS` arrived — a script whose
+        # first line is `echo` exempted every line after it. Found while
+        # fixing a NARROWER case from review (a comment inside a substitution),
+        # which is why closing that one alone did not work.
+        for command in (
+            f"echo hi{NEWLINE}git push origin +HEAD:main",
+            f"true{NEWLINE}git push origin +HEAD:main",
+            f"echo ok # x{NEWLINE}git push origin +HEAD:main",
+            f"printf '%s' a{NEWLINE}git log --output=/tmp/x",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # A newline inside quotes is DATA and must survive — this repository
+        # writes multi-line commit messages, and turning that newline into a
+        # separator would refuse every one of them.
+        self.assertAdmitted(f'git commit -m "line1{NEWLINE}line2"')
+        self.assertAdmitted(
+            f'git commit -m "see git push origin +HEAD:main{NEWLINE}ok"')
+
+        # And a newline after a backslash is a line continuation bash removes,
+        # not a separator.
+        self.assertAdmitted(f"git log --oneline \\{NEWLINE}--all")
+
+    def test_a_comment_inside_a_substitution_hides_no_paren(self):
+        # A substitution's body is a command list, so `#` opens a comment
+        # inside it and a `)` in that comment closes nothing. Extraction ended
+        # at the commented paren and left the push in the outer token —
+        # measured, bash runs it. Raised in review.
+        self.assertRefused(
+            f'git log "$(echo ok # ){NEWLINE}git push origin +HEAD:main)"')
+
+        # The control: a `#` that is part of a VALUE inside the substitution is
+        # not a comment, and the substitution still ends where it should.
+        self.assertAdmitted('git log "$(git log --grep=#x)"')
+
+    def test_the_script_flag_need_not_end_the_bundle(self):
+        # `bash -cx '<script>'` runs the script; the bundle pattern required
+        # `c` to come last, so it matched nothing. Measured — `+ git push
+        # origin +HEAD:main` under xtrace, and the shim recorded the run.
+        # Raised in review.
+        for command in (
+            "bash -cx 'git push origin +HEAD:main'",
+            "bash -xc 'git push origin +HEAD:main'",
+            "bash -c 'git push origin +HEAD:main'",
+            "sh -ec 'git push origin +HEAD:main'",
+        ):
+            with self.subTest(command=command):
+                self.assertIn("evaluator", self.assertRefused(command))
+
+        # A long option is never the script introducer.
+        self.assertAdmitted("bash --noprofile -i")
+
+    def test_an_escaped_backtick_does_not_close_a_substitution(self):
+        # `find` ignored escapes, and `\`` is a literal backtick to bash rather
+        # than a terminator. Raised in review.
+        #
+        # **The reported example is a bash SYNTAX ERROR** — measured,
+        # `unexpected EOF while looking for matching`, and the push did not
+        # run — so this was never a live bypass. Corrected anyway: agreeing
+        # with the shell about where a substitution ends is the property, and
+        # the one input that exposed it is not.
+        self.assertRefused(
+            "git log \"`printf \\`; git push origin +HEAD:main`\"")
+        self.assertRefused("git log `git push origin +HEAD:main`")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an

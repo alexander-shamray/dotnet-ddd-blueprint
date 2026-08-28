@@ -1423,8 +1423,11 @@ that the one bounded read of it cannot be widened. **#57** — that both sweeps
 still state who may suppress a finding, and that neither has drifted back to
 the unconditional rule.
 
-**Five more arrived together, and they are the first entries whose subject is a
-BOUND rather than a feed.** **#140** — that the Grok ceiling is one declared
+**More arrived together, and they are the first entries whose subject is a
+BOUND rather than a feed. No count opens this paragraph**, for the reason the
+one above it gives about itself — this sentence said five, two files over from
+two others that had just dropped their own numerals for going stale. Raised in
+review. **#140** — that the Grok ceiling is one declared
 number, that a slot above it is refused by both helpers, that `grok-review.sh`
 *derives* it rather than restating it, and — the load-bearing half — that a row
 posted under the old ceiling is still read as spent. **#60** — that the two
