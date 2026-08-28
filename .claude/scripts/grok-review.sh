@@ -14,10 +14,23 @@
 # still passed and is no longer the risk it was — the blast radius is the
 # container, which is the whole reason to have one.
 #
-# Egress is NOT restricted, and that is the remaining residual, recorded rather
+# Egress is NOT restricted, and that is one of two residuals, recorded rather
 # than hidden. Confining it to api.x.ai needs an allow-list proxy on an internal
 # network; Docker alone offers "all" or "none", and "none" stops the review too.
-# The credential half is what the finding named, and it is what this closes.
+#
+# **The credential half is NARROWED, not closed, and this header said "closed"
+# for months (#58).** No gh token, no SSH keys and no host filesystem beyond the
+# clone — all three genuinely absent. But the fallback path below copies
+# ~/.grok/auth.json in, and that file carries a REFRESH-TOKEN-BEARING OAuth
+# session for the x.ai account: anything inside can read it and, given the
+# unrestricted egress above, post it anywhere. **The two residuals are therefore
+# not independent** — the open one is what makes the credential that crosses
+# exploitable — and writing them as separate bullet points is what let the
+# second one read as settled.
+#
+# XAI_API_KEY is the documented posture: scoped, revocable, and no file crosses
+# at all. The OAuth mount is a fallback, and the ordering below is that posture
+# rather than an implementation convenience.
 #
 # This helper also OWNS the ledger slot it spends. ship.md used to specify the
 # accounting as prose — "reserve, then invoke the review helper" — over two
@@ -31,9 +44,24 @@
 # `release` spellings to the session that invokes it.
 set -euo pipefail
 
+# The ledger, resolved early because the ceiling below is READ out of it rather
+# than restated here. #140 was exactly this number living in two files at two
+# values — ship.md said six, both helpers accepted twelve — and a second literal
+# in this file would be that defect again with a smaller gap. Declared once,
+# beside the code that enforces it, which is the SOURCE_INPUTS discipline the
+# deploy/** gates arrived at, applied to a scalar.
+#
+# **Fails closed.** An unreadable ceiling refuses every slot rather than
+# admitting all of them: the failure mode of a cap is the direction that must
+# never be the quiet one.
+ledger="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/grok-ledger.sh"
+ceiling=$(sed -n 's/^CEILING=\([1-9][0-9]*\)$/\1/p' "$ledger" | head -1)
+[[ "$ceiling" =~ ^[1-9][0-9]*$ ]] ||
+  { echo "could not read CEILING from $ledger; refusing to reserve a check" >&2; exit 2; }
+
 # The slot this review spends and which kind of check it is. Validated to the
 # ledger's own vocabulary rather than passed through, because a slot outside
-# 1..12 is a claim about a cap that does not exist.
+# 1..$ceiling is a claim about a cap that does not exist.
 #
 # **The PR is NOT an argument, and it was one in the first version of this
 # change.** A caller-supplied number is a free parameter aimed at the one thing
@@ -45,11 +73,11 @@ set -euo pipefail
 # than the thing it accounts for. Resolved below from the branch instead, which
 # makes the slot and the review provably the same subject.
 [ "$#" -eq 2 ] ||
-  { echo "usage: grok-review.sh <slot 1-12> <full|recheck>" >&2; exit 2; }
+  { echo "usage: grok-review.sh <slot 1-$ceiling> <full|recheck>" >&2; exit 2; }
 slot="$1"
 mode="$2"
-[[ "$slot" =~ ^([1-9]|1[0-2])$ ]] ||
-  { echo "slot must be 1..12 — the ledger's whole vocabulary: $slot" >&2; exit 2; }
+[[ "$slot" =~ ^[1-9][0-9]*$ ]] && [ "$slot" -le "$ceiling" ] ||
+  { echo "slot must be 1..$ceiling — the ceiling grok-ledger.sh declares: $slot" >&2; exit 2; }
 case "$mode" in
   full|recheck) ;;
   *) echo "mode must be full or recheck: $mode" >&2; exit 2 ;;
@@ -418,17 +446,20 @@ fi
 # read the state is exactly what is not known, and releasing on it would hand a
 # slot back on the strength of a lookup that did not complete, which is the
 # fail-open this file spent a branch closing. The cost is at most one wasted
-# check out of twelve, and it is bounded; guessing the other way is not.
+# check out of $ceiling, and it is bounded; guessing the other way is not.
 #
 # So the contract is: a slot is spent if the review's model call was launched,
 # and may also be spent when the ledger could not finish settling its own
 # election. A lost election does *not* add a spend — `count` folds duplicate
 # rows for a slot into one — so this exception is the failed-read case alone.
-ledger="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/grok-ledger.sh"
+#
+# `$ledger` was resolved at the head of this file, where the ceiling is read out
+# of it. It is deliberately not recomputed here: two spellings of one path is
+# the same class of duplication as two spellings of one bound.
 ledger_rc=0
 bash "$ledger" "$pr" reserve "$slot" "$mode" >&2 || ledger_rc=$?
 [ "$ledger_rc" -eq 0 ] ||
-  { echo "could not reserve check $slot/12 on PR $pr (ledger exit $ledger_rc); the review did not run" >&2; exit 13; }
+  { echo "could not reserve check $slot/$ceiling on PR $pr (ledger exit $ledger_rc); the review did not run" >&2; exit 13; }
 
 set +e
 docker run --rm \

@@ -13,7 +13,7 @@
 # invokes it from rewriting it first.
 #
 # The read lives here for a different reason: PR comments are unauthenticated
-# state. On a public PR anyone can post "Grok check 12/12 — reserved (full)"
+# state. On a public PR anyone can post "Grok check 6/6 — reserved (full)"
 # to jam the cap shut, or a released line to hold it open, so a reader that
 # greps arbitrary comments is counting an attacker's arithmetic. `count`
 # accepts only whole bodies matching the two exact shapes this file writes,
@@ -60,6 +60,48 @@
 # folds duplicates for a slot into one spend, so the noise costs nothing.
 set -euo pipefail
 
+# The ceiling, declared once and enforced here rather than stated in ship.md
+# and enforced at twice the value. #140: ship.md said six, both helpers still
+# accepted twelve, so `grok-review.sh 7 full` reserved a seventh paid check and
+# left this file's validation green — a bound an agent obeys is not a limit a
+# machine imposes.
+CEILING=6
+
+# **Reading is deliberately wider than writing, and that asymmetry is the whole
+# migration.** `/12` was never only a bound: it is part of the comment shape
+# `count` folds on, so narrowing the READ to the new ceiling would stop matching
+# every row already posted — `count` reads zero and the cap RE-ARMS on a PR that
+# has already spent it, which is the exact fail-open this file exists to refuse,
+# arriving through its own fix. So every denominator this ledger has ever
+# written stays readable forever, and only the write moves.
+#
+# **Only RETIRED denominators are listed here; the current one is DERIVED.**
+# This read `'6|12'`, which restated the ceiling thirteen lines below its
+# declaration — and a second literal of the bound is the whole of #140
+# reappearing inside its own fix. Move `CEILING` to 4 and the write becomes
+# `n/4` while the read still accepts only 6 and 12, so every reservation this
+# file posts is invisible to `count`: the cap re-arms on a pull request that is
+# actively spending it, one edit away, with nothing red. Raised in review
+# against exactly this line.
+#
+# So a future ceiling change is one edit that cannot fail in that direction:
+# move `CEILING`, and append the value it replaced to the retired list.
+LEDGER_RETIRED_DENOMINATORS='12'
+LEDGER_DENOMINATORS="$CEILING|$LEDGER_RETIRED_DENOMINATORS"
+
+# Every slot this ledger could ever have WRITTEN, which is 1..12 while twelve is
+# the largest denominator above. **A ceiling above twelve has to widen this in
+# the same edit**, or its own rows stop matching — the third thing to move, and
+# the reason the instruction above says "append the value it replaced" rather
+# than "change the number".
+#
+# It is deliberately not `[1-9][0-9]*`. That was tried and reverted: it admits
+# `13/12`, a shape the write side has never been able to produce, and a row this
+# file did not write is not this file's state — the same rule the anchored jq
+# filter exists for, one field along. Widening it would let a write-verified
+# author inflate the count past any ceiling that has ever existed.
+LEDGER_READ_SLOTS='[1-9]|1[0-2]'
+
 usage() {
   echo "usage: grok-ledger.sh <pr-number> reserve <n> <full|recheck>" >&2
   echo "       grok-ledger.sh <pr-number> release <n>" >&2
@@ -74,8 +116,9 @@ op="${2:-}"
 n="${3:-}"
 mode="${4:-}"
 
-# The PR number keeps gh pointed at an explicit target, and N's domain is the
-# ledger's whole vocabulary: twelve checks, so 1..12 and nothing else.
+# The PR number keeps gh pointed at an explicit target. N's domain is checked
+# further down, against $CEILING for a write and against $LEDGER_READ_SLOTS for
+# a read — the two are no longer one number.
 [[ "$pr" =~ ^[0-9]+$ ]] || usage
 
 # One fixed read, shared by count and the election: whole comment bodies that
@@ -87,11 +130,11 @@ mode="${4:-}"
 # jq string spends one level on its own escaping: \\( reaches the regex
 # engine as \(, where a bare \( would be jq's interpolation syntax.
 ledger_rows() {
-  local id login body verdict perm out
+  local id login body verdict perm out row_slot row_den
   declare -A seen=()
   gh api "repos/{owner}/{repo}/issues/$pr/comments" --paginate \
     --jq '.[]
-      | select(.body | test("^Grok check ([1-9]|1[0-2])/12 — (reserved \\((full|recheck)\\)|released: skipped on limits|converged: loop clean)$"))
+      | select(.body | test("^Grok check ('"$LEDGER_READ_SLOTS"')/('"$LEDGER_DENOMINATORS"') — (reserved \\((full|recheck)\\)|released: skipped on limits|converged: loop clean)$"))
       | "\(.id)\t\(.user.login)\t\(.body)"' |
   while IFS=$'\t' read -r id login body; do
     verdict="${seen[$login]:-}"
@@ -111,6 +154,19 @@ ledger_rows() {
       seen[$login]=$verdict
     fi
     [ "$verdict" = trusted ] || continue
+    # **The pairing check lives HERE, in the shared reader, and it did not at
+    # first.** The slot and denominator alternations are independent, so the jq
+    # filter admits their cross-product — `9/6` matches and no writer of this
+    # file can emit it. That was closed in `count` and in the election, and
+    # `status` was missed: a trusted `Grok check 9/6 — converged: loop clean`
+    # still reported `converged`, so a resumed run skipped review entirely.
+    # Raised in review. Three consumers meant three places to remember; one
+    # reader means none.
+    row_slot="${body#Grok check }"
+    row_den="${row_slot#*/}"
+    row_slot="${row_slot%%/*}"
+    row_den="${row_den%% *}"
+    [ "$row_slot" -le "$row_den" ] || continue
     printf '%s\t%s\n' "$id" "$body"
   done
 }
@@ -177,7 +233,13 @@ if [ "$op" = "status" ]; then
   exit 0
 fi
 
-[[ "$n" =~ ^([1-9]|1[0-2])$ ]] || usage
+# The write side, and the ONLY place the ceiling binds. A slot above it is
+# refused here, which is what makes the bound a limit rather than a rule: the
+# rows above it that the read still honours were posted before this line
+# existed, and refusing to WRITE a seventh is a different act from refusing to
+# SEE a ninth that was already spent.
+[[ "$n" =~ ^[1-9][0-9]*$ ]] && [ "$n" -le "$CEILING" ] ||
+  { echo "slot must be 1..$CEILING — the ceiling grok-ledger.sh declares: $n" >&2; usage; }
 
 case "$op" in
   reserve)
@@ -185,18 +247,18 @@ case "$op" in
       full|recheck) ;;
       *) usage ;;
     esac
-    body="Grok check $n/12 — reserved ($mode)"
+    body="Grok check $n/$CEILING — reserved ($mode)"
     ;;
   release)
     [ -z "$mode" ] || usage
-    body="Grok check $n/12 — released: skipped on limits"
+    body="Grok check $n/$CEILING — released: skipped on limits"
     ;;
   converge)
     # Spend alone cannot distinguish a loop that converged on its last
     # allowed check from one the ceiling cut off — both read as N spent.
     # The marker says which; any later reservation supersedes it.
     [ -z "$mode" ] || usage
-    body="Grok check $n/12 — converged: loop clean"
+    body="Grok check $n/$CEILING — converged: loop clean"
     ;;
   *) usage ;;
 esac
@@ -215,12 +277,25 @@ if [ "$op" = "reserve" ]; then
   # reservation after it takes the slot; later claims lose.
   read_rows ||
     { echo "the ledger's trust check failed after posting; slot $n stands as reserved" >&2; exit 3; }
+  #
+  # **The slot is parsed, not string-matched against a denominator**, which is
+  # `count`'s own technique and is what makes the election survive the
+  # migration. Keying on the literal prefix `Grok check $n/12 — reserved `
+  # would make a row posted under the old ceiling invisible to an election run
+  # under the new one — so two runs mid-flight across the change could both
+  # believe they had won slot 3, which is precisely the double-spend this
+  # election exists to refuse. `index()` rather than a regex because the
+  # separator is an em dash and this stays POSIX awk.
   winner=$(emit_rows |
-    awk -F'\t' \
-      -v r="Grok check $n/12 — reserved " \
-      -v x="Grok check $n/12 — released" '
-      index($2, x) == 1 { cand = "" }
-      index($2, r) == 1 && cand == "" { cand = $1 }
+    awk -F'\t' -v n="$n" '
+      {
+        slot = $2
+        sub(/^Grok check /, "", slot)
+        sub(/\/.*$/, "", slot)
+      }
+      slot + 0 != n + 0 { next }
+      index($2, " — released") { cand = "" }
+      index($2, " — reserved") && cand == "" { cand = $1 }
       END { print cand }')
   if [ "$winner" != "$mine" ]; then
     echo "slot $n was claimed first by comment $winner — a concurrent run is mid-check on this PR; stop this loop and let it finish" >&2

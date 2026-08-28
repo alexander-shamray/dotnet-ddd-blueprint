@@ -60,10 +60,18 @@ actually about before deciding whether it is true.
 
 **This command triages a review that already ran; it does not invoke Grok and
 consumes no Grok usage.** So the usage-limit preflight (skip when out of limits)
-and the twelve-checks-per-PR cap live where Grok is actually run and looped —
+and the per-PR check cap live where Grok is actually run and looped —
 `grok-review.sh` (the preflight, exit 12 = skip) and `/ship` step 5 (the cap and
 the skip handling) — not here. Looking for either in this file is looking one
 step too late.
+
+**The cap's value is deliberately not written here.** It is `CEILING` in
+`grok-ledger.sh`, declared once and read by `grok-review.sh`. This sentence
+said "the twelve-checks-per-PR cap" for as long as the value was twelve and
+kept saying it after #140 made it six — in a file the branch that moved the
+ceiling never opened. That is the one rule catching a present-tense numeral in
+prose: the point here is *where* the cap lives, and naming the number is how a
+pointer becomes a third copy of it.
 
 ## Method
 

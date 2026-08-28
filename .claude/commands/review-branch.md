@@ -1,7 +1,8 @@
 ---
 description: Review branch vs main for contradictions; recheck suggestions.md when it already exists
 argument-hint: "[recheck | full | --local]"
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(dotnet test:*), Bash(dotnet build:*), Bash(rm suggestions.md)
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(bash .claude/scripts/dotnet-test.sh:*), Bash(rm suggestions.md)
+disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(docs/**), Edit(./docs/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
 Review uncommitted or branch work for **contradictions and self-consistency
@@ -105,7 +106,8 @@ spread-over-`.ToArray()` when the corpus is already clean).
    and `src/` / `tests/` / `deploy/` for every claim the change touches.
 3. **Run cheap gates when the range touches them.**
    - Packages / Appendix B: `python .github/licence-gate/licence_gate.py`
-   - Tests / counts CLAUDE asserts: `dotnet test Platform.slnx` when useful
+   - Tests / counts CLAUDE asserts:
+     `bash .claude/scripts/dotnet-test.sh [all|fast]` when useful
 
    **In the sandbox the second one is not available**, and that is deliberate
    rather than an oversight: `dotnet test` has needed a Docker daemon since
@@ -172,3 +174,66 @@ Always end with:
 
 Do not fix the findings in this command unless the user explicitly asks to
 apply them after the review.
+
+**That is enforced now, and used to be prose alone (#60).** This command
+declared "do not fix" while holding `Write` and `Edit` over every path
+`.claude/settings.json` did not deny — a read-only claim resting on prose while
+the grant permits writing everywhere, which for a review command is the worse
+failure. The frontmatter's `disallowed-tools` path-scopes `Edit` away from
+every tracked tree, `docs/` included, **and from every tracked file at the
+repository root**.
+
+**The root files were the hole in the first version of this**, raised in review
+and worth stating rather than quietly patching: denying directories alone left
+`CLAUDE.md`, `global.json`, `Directory.Build.props` and `Platform.slnx`
+writable, which is a boundary with a gap exactly where this repository keeps
+its build inputs. A command promising not to fix findings could still apply one
+to root configuration.
+
+They are **enumerated** rather than denied wholesale, and `suggestions.md` is
+why: it lives at the root, it is this command's one legitimate output, and it
+is untracked — so denying every *tracked* root file leaves it alone, where a
+blanket `Edit(**)` or a `/*` root pattern would take the deliverable with it.
+`test_grok_helpers.py` reads the tracked set from `git ls-files` and asserts
+each is denied, so a new root file is a red build rather than a silent gap.
+
+**Two limits, both stated rather than glossed.**
+
+`disallowed-tools` binds the Claude Code host path — `/review-branch` run here,
+including `--local`. It says nothing about the containerised run: inside
+`grok-review.sh` this file is read by **grok**, a different CLI, under
+`--permission-mode bypassPermissions`, and nothing has established that grok
+honours a `disallowed-tools` key at all. There the only thing keeping the
+reviewer from rewriting the branch it is reviewing is the container's
+disposability — a property of the sandbox, not of this grant. Do not read the
+frontmatter as reaching that run.
+
+And the list is a deny-list, so a tree added later is editable until someone
+adds it. `test_grok_helpers.py` asserts the list covers every tracked
+top-level tree, which is what makes that a red build instead of a quiet
+widening.
+
+**That test can never see the case that mattered, and the reason is
+structural.** It reads `git ls-files`, so it enumerates what EXISTS; the
+dangerous file is one that does not. MSBuild imports `Directory.Build.targets`
+into every build of every project beneath it, and this command was granted
+`Write` and `dotnet build` at once — so creating a root file the enumeration
+could not contain, and then running the build the command already had, was host
+code execution. Measured: an `Exec` in an auto-imported `.targets` runs, and
+`dotnet build` reports success. Raised in review against the list as shipped.
+
+Two changes close it, and they close different halves. The executor is now
+`dotnet-test.sh`, which fixes the solution and the flags — `dotnet build` was a
+grant this command never used, and `dotnet test:*` admitted both an arbitrary
+project path and `/p:CustomBeforeMicrosoftCommonTargets=<file>`, which imports
+whatever it is pointed at, `suggestions.md` included. And the auto-import
+surface itself is denied: every name MSBuild reads without being asked, in the
+exact spelling this file already uses, plus `**/*.targets`, `**/*.props`,
+`**/*.rsp`, `**/*.csproj`, `**/*.sln` and `**/*.slnx` for the class.
+
+**Which half is measured is worth saying.** The exact-filename form is the one
+this file has always used and the one the suite reads. The `**/` globs are the
+documented gitignore-style syntax and are **not** measured here — they are
+belt to the exact names' braces, so if that syntax turned out inert in a
+`disallowed-tools` value the demonstrated vector would still be closed. Do not
+read them as the control; read the names as the control.
