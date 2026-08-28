@@ -905,12 +905,13 @@ same argument as never calling a branch clean because asking failed.
      that the loop ended on its ceiling rather than on convergence, because
      those are different states and only one of them is evidence.
 
-     **Step 5's six is a count of Grok checks per PR, not per session**, and
-     the two loops no longer share a number: this one carries six, step 6 still
-     carries twelve. Every
+     **Step 5's ceiling is a count of Grok checks per PR, not per session**,
+     and the two loops no longer share a number: this one carries `CEILING`
+     from `grok-ledger.sh`, step 6 carries its own. Every
      `grok-review.sh` invocation is one check — a full review and a recheck
-     count the same — and this loop's ceiling is **no more than six of them
-     against one PR**, carried across resumed `/ship` runs rather than reset
+     count the same — and this loop's ceiling is **no more of them against one
+     PR than the ledger declares**, carried across resumed `/ship` runs rather
+     than reset
      each time the chain re-enters. A skip on limits (exit 12) is not a check
      and does not count; a review that ran and reported does.
 
@@ -984,7 +985,7 @@ same argument as never calling a branch clean because asking failed.
      post exactly the lines above to a PR of this repository, and is
      edit-denied to the session that invokes it. Keep the running count in
      the report as well — the report line is for the reader, the ledger is
-     for the machine — and when the sixth is spent, stop and say the PR
+     for the machine — and when the last slot is spent, stop and say the PR
      reached its Grok ceiling. When the loop ends clean instead, say so on
      the ledger — `grok-ledger.sh <n> converge <N>` — because a resumed run
      reading bare spend at the ceiling cannot tell convergence from
@@ -1031,19 +1032,26 @@ same argument as never calling a branch clean because asking failed.
      before the budget is gone. Report which of the two ended the loop, and
      never round a ceiling up into convergence.
 
-     **The enforcement half says six too now (#140), and this file is no
-     longer the thing that binds it.** `grok-ledger.sh` declares `CEILING=6`
-     once and refuses a reservation above it; `grok-review.sh` **reads that
+     **The enforcement half binds it now (#140), and this file is no longer
+     the thing that does.** `grok-ledger.sh` declares `CEILING` once and
+     refuses a reservation above it; `grok-review.sh` **reads that
      declaration** rather than restating it, so there is no second literal to
-     drift. A hand-typed `grok-review.sh 7 full` is refused by both, before
-     anything is asked of GitHub. This paragraph used to say the opposite and
-     is the record of the gap closing, not of it standing.
+     drift. A slot above it is refused by both, before anything is asked of
+     GitHub. This paragraph used to say the opposite and is the record of the
+     gap closing, not of it standing.
 
      **Do not restate the number here.** The one thing this file must not
-     become again is a second copy of the bound — that *was* #140, six here
-     against twelve there, and the fix was to give the value one home. Six is
-     named in the prose above because the argument is about its size; the
-     enforcement is `CEILING` and nothing else.
+     become again is a second copy of the bound — that *was* #140, one figure
+     here against another there, and the fix was to give the value one home.
+
+     **This paragraph quoted it anyway, in the sentence forbidding the quote.**
+     It read ``declares `CEILING=6` once``, and the operational lines around it
+     counted in sixes — "this one carries six", "when the sixth is spent",
+     "six for Grok". Raised in review, and it is the restated-total failure
+     this repository keeps recording, arriving inside the rule against it. The
+     enforcement is `CEILING`, and the loop's stop condition is whatever
+     `grok-ledger.sh <n> count` returns against it — read them, do not carry
+     them.
 
      **The migration is why reading and writing are not symmetric, and a later
      change to the ceiling has to keep it that way.** `/12` is part of the
@@ -1354,8 +1362,8 @@ same argument as never calling a branch clean because asking failed.
    it — so a stale checkout means Grok reviewed commits the PR no longer has
    and reported on a branch that does not exist upstream. The fetch and a
    `git pull --ff-only` therefore belong **before step 5**, not only here:
-   reviewing the wrong tree is a wasted round of somebody's budget, and there
-   are six of them.
+   reviewing the wrong tree is a wasted round of somebody's budget, and the
+   budget is small.
 
    **A fast-forward that will not fast-forward is divergence**, which is
    another session's history against this one's, and it stops the chain for
@@ -1364,8 +1372,8 @@ same argument as never calling a branch clean because asking failed.
 
    **Non-empty is not a stop, because there is an obvious right answer.** The
    run goes back: commit — **scoped**, always — push, and re-enter both review
-   loops for whatever each has left of its own ceiling — six for Grok, twelve
-   for Copilot — then return to the **top of
+   loops for whatever each has left of its own ceiling — `CEILING` for Grok,
+   step 6's own for Copilot — then return to the **top of
    this step**, not to this gate. The top is where `suggestions.md` is
    removed, and re-entering the Grok loop is exactly what puts it back. That
    is what a resumed `/ship` would do from the *on a branch with an open PR*
@@ -1552,7 +1560,8 @@ Then one line per step: done, skipped and why, or stopped and what is needed —
 including the push, which reports which of its three states it found even when
 that state was "nothing to do". Each review loop reports one line per round —
 findings raised, findings fixed, and what each round pushed — its running
-check count against its own ceiling — six for Grok, twelve for Copilot — (the
+check count against its own ceiling, each read from where that ceiling is
+declared rather than restated here (the
 PR carries the durable copy: step 5's
 ledger comments, step 6's timeline events; the report line is the
 human-readable echo), and how it ended, in that loop's own vocabulary: step 5

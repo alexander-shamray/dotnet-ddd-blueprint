@@ -4047,6 +4047,59 @@ class TheGitArgvGuard(unittest.TestCase):
             f"{NEWLINE}{tab}A"
         )
 
+    def test_git_config_options_are_refused(self):
+        # **`git -c` is arbitrary command execution, and it was admitted.**
+        # Setting configuration for one invocation reaches a long list of keys
+        # git EXECUTES — `alias.*`, `core.pager`, `core.editor`,
+        # `core.sshCommand`, `core.hooksPath`, `diff.external`,
+        # `credential.helper`, `uploadpack.packObjectsHook`. Measured in a
+        # scratch repository rather than argued:
+        # `git -c "alias.x=!echo PWNED" x` prints PWNED.
+        #
+        # Found by probing, not by review, and it falsified a sentence in
+        # `CLAUDE.md`: the hook was said to refuse "every spelling a caller can
+        # type literally". This is one, it is typed literally, and it ran.
+        #
+        # Enumerating the executing keys would be the deny-list this repository
+        # has now refused twice — git's list grows on git's schedule — so the
+        # OPTION goes, which is affordable because nothing here passes one.
+        for command in (
+            "git -c core.pager=id log",
+            "git -c core.sshCommand=id fetch origin",
+            "git -c core.hooksPath=/tmp/evil commit",
+            "git -c diff.external=id diff",
+            "git -c alias.x='!id' x",
+            "git -c credential.helper='!id' fetch origin",
+            "git -c uploadpack.packObjectsHook=id log",
+            "git --config-env=alias.x=EVIL x",
+            # And a harmless key, because the option is what is refused —
+            # judging the value is the enumeration this avoids.
+            "git -c user.name=Someone commit -m x",
+        ):
+            with self.subTest(command=command):
+                self.assertIn("config", self.assertRefused(command))
+
+    def test_a_dash_c_after_the_subcommand_is_not_a_config_option(self):
+        # **Position is how git tells them apart, so it is how this does.**
+        # `-c` before the subcommand is configuration; `-c` after `commit` is
+        # "reuse this commit's message", and `-c` on `log` or `show` selects a
+        # merge diff format. Refusing those would break ordinary work, which is
+        # the failure mode an over-broad guard is turned off for.
+        for command in (
+            "git commit -c HEAD",
+            "git commit -C HEAD~1",
+            "git commit --reuse-message=HEAD",
+            "git log -c",
+            "git show -c HEAD",
+            "git commit -m \"use git -c carefully\"",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+        # And the two together: a global `-c` is still caught when a
+        # subcommand-level `-c` stands beside it.
+        self.assertRefused("git -c alias.x=@ commit -c HEAD")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an

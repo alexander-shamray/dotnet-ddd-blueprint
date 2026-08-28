@@ -86,6 +86,21 @@ FORBIDDEN_FLAGS = ("--output", "--upload-pack", "--receive-pack", "--exec")
 # repository — a branch name, a path or a commit body may carry the sequence
 # without using it as a transport.
 FORBIDDEN_SUBSTRINGS = ("ext::",)
+
+# `git -c <key>=<value>` sets configuration for one invocation, and a long list
+# of config keys are EXECUTED by git: `alias.*`, `core.pager`, `core.editor`,
+# `core.sshCommand`, `core.hooksPath`, `diff.external`, `diff.*.textconv`,
+# `filter.*.clean`, `credential.helper`, `sequence.editor`, `gpg.program`,
+# `uploadpack.packObjectsHook`. Measured, not reasoned about:
+# `git -c "alias.x=!echo PWNED" x` prints PWNED.
+#
+# **Enumerating the executing keys is the deny-list this repository has refused
+# twice**, and git's list grows on git's schedule rather than on ours. So the
+# OPTION is refused instead of its values being judged — nothing in this
+# repository passes `-c` or `--config-env` to git, which is what makes that
+# affordable. If a caller ever needs one, the honest change is an allow-list of
+# keys, not a list of the dangerous ones.
+CONFIG_OPTIONS = ("-c", "--config-env")
 REPOSITORY_SUBCOMMANDS = {
     "fetch", "clone", "pull", "push", "remote", "submodule", "ls-remote",
     "archive", "bundle",
@@ -526,6 +541,20 @@ def after_global_options(segment):
     return segment[index:]
 
 
+def global_options(segment):
+    """`segment`'s leading global options — everything before the subcommand.
+
+    The position is the whole point: `-c` before the subcommand is git's
+    configuration option, and `-c` after `commit` is "reuse this commit's
+    message". Refusing the second would break an ordinary commit, so the two
+    are told apart the way git tells them apart — by where they stand.
+    """
+    stripped = after_global_options(segment)
+    if not stripped:
+        return segment
+    return segment[:len(segment) - len(stripped)]
+
+
 def subcommand_of(segment):
     stripped = after_global_options(segment)
     return stripped[0] if stripped else ""
@@ -677,6 +706,17 @@ def offence(command, depth=0):
         refusal = push_offence(segment)
         if refusal is not None:
             return refusal
+
+        for element in global_options(segment):
+            if element in CONFIG_OPTIONS or any(
+                    element.startswith(option + "=") for option in CONFIG_OPTIONS):
+                return (
+                    "`git -c` / `--config-env` sets configuration for one "
+                    "invocation, and git EXECUTES several config keys — "
+                    "`alias.*`, `core.pager`, `core.sshCommand`, "
+                    "`core.hooksPath` and more. Nothing here passes one, so "
+                    "the option is refused rather than its value guessed at."
+                )
 
         subcommand = subcommand_of(segment)
         value_flags = VALUE_FLAGS_BY_SUBCOMMAND.get(subcommand, frozenset())

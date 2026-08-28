@@ -2624,12 +2624,28 @@ under bash with a `git` shim: both invocations run.
 
 Both are closed by giving the guard **one** model of where the shell expands
 things — `expandable_regions`, over the quote-and-comment-aware scanner the
-heredoc opener already used — rather than a second model per function.
-**The bound is parameter expansion alone**: `F=--output=x; git log $F`, what
-the shell computes rather than what a caller writes, which is narrow enough to
-be worth stating exactly rather than rounding up to "literal". Command
-substitution is now judged wherever bash would perform it and nowhere else —
-a stronger claim than the one this paragraph made before it was true.
+heredoc opener already used — rather than a second model per function. Command
+substitution is now judged wherever bash would perform it and nowhere else.
+
+**And then the bound was wrong for a fourth reason, which had nothing to do
+with the shell at all.** Every version of this paragraph has named the residual
+in shell terms — quoting, then expansion — while `git -c` sat one layer up:
+`git -c "alias.x=!echo PWNED" x` runs the echo, and git executes a long list of
+config keys besides — `core.pager`, `core.editor`, `core.sshCommand`,
+`core.hooksPath`, `diff.external`, `credential.helper`. Measured in a scratch
+repository. The hook admitted every one of them, because they are ordinary
+arguments to an ordinary `git`, and nothing about the SHELL is involved. The
+option is refused outright now, in the global position only, since `-c` after
+`commit` means "reuse this message" and breaking that is how a guard gets
+turned off. Enumerating the executing keys would be the deny-list this file
+already refuses twice over.
+
+**So state the bound as what has been looked for, not as what is left.** The
+residual named today is parameter expansion — `F=--output=x; git log $F`, what
+the shell computes rather than what a caller writes. Three earlier versions of
+that sentence were each falsified by a spelling nobody had gone looking for,
+and the pattern is that the bound gets narrower every time somebody probes
+rather than reasons. It is a claim about the last search, not a proof.
 
 **The `::` in a value collides with the `:*` suffix syntax, and the collision
 fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
@@ -2775,11 +2791,30 @@ chooses fields can choose `reviews`.
 second one in this repository to be rewritten that way.** Its first version
 banned `gh pr view` by name and passed while three files still granted
 `gh pr list` — a deny-list passing every spelling nobody thought of, which is
-exactly what the Grok verdict check did before it was inverted. `gh issue view`
-and `gh issue list` stay admitted on a measurement rather than an assumption:
-`gh issue view <pr-number> --json comments` returns an empty array, because
-`gh` keeps issues and pull requests distinct even though GitHub's model does
-not. `ship.md`'s review-body and inline
+exactly what the Grok verdict check did before it was inverted.
+
+**This paragraph used to name `gh issue view` and `gh issue list` as still
+admitted, and #150 removed both.** The measurement it rested on is unchanged
+and was never the thing in question — `gh issue view <pr-number> --json
+comments` does return an empty array, because `gh` keeps issues and pull
+requests distinct even though GitHub's model does not. Membership of the
+allow-list is a different fact, and it moved: `gh issue view` returns `author`
+to the same session, and `gh issue list` returns `author` **and every issue
+body** at once. Both went, and `gh repo view` with them.
+
+**Two paragraphs in this file disagreed about one gate, and the stale one was
+the dangerous half** — a reader reconciling a new grant against "stay admitted"
+would have put back exactly what #150 closed. Raised in review, against the
+branch that closed it: the record of the removal was written a thousand lines
+earlier, and the rule nobody re-read was not.
+
+**The set itself is deliberately not written here**, which is the fix rather
+than an omission — it is `GH_GRANTS_THAT_CANNOT_REACH_A_FEED` in
+`test_grok_helpers.py`, beside the assertion that reads it, and a copy in this
+file is what went stale. This paragraph carries the argument for why a
+subcommand joins or leaves that set; the set carries the membership.
+
+`ship.md`'s review-body and inline
 reads go through the same feed helpers `/review-copilot` uses, so the two
 commands share one list instead of holding two prose rules that disagreed.
 
