@@ -10,12 +10,18 @@ the .github/**-gate suites are already written to. One subject is the
 exception and is marked as such: the label helper's confinement never shipped
 wrong, and its cases keep a closed grant closed rather than catching anything.
 
-**No count opens this list, in this file or in the three that mirror it.**
-`.github/workflows/ci.yml`, `docs/testing.md` and `CLAUDE.md` enumerate the
-same subjects, and the numeral that used to lead all four said four, then five,
-then six, and was stale again inside the pull request that added the last of
-them. A figure restated in four places goes stale in all four at once; the
+**No count opens this list, in this file or in the two that mirror it.**
+`.github/workflows/ci.yml` and `docs/testing.md` enumerate the same subjects,
+and the numeral that used to lead all of them said four, then five, then six,
+and was stale again inside the pull request that added the last of them. A
+figure restated in several places goes stale in all of them at once; the
 enumerations are what a reader compares.
+
+**`CLAUDE.md` was a holder of this list and no longer is.** The extraction
+folded its commands section into `docs/testing.md`, which carries the
+issue-by-issue subjects alone now — measured, `CLAUDE.md` contains none of
+them. One fewer copy to drift, and one fewer file to send a reader to for a
+list that is not there.
 
 **The regression negatives are paired with positive controls, and those are not
 decoration.** A negative that passes because a pattern matches *nothing* is
@@ -77,10 +83,13 @@ What is under test, and which issue each half closes:
         the helper's three exit codes, that neither sweep can read an issue's
         author at all, and that the one legitimate output stays writable.
 
-**This inventory is a fourth copy of a list `ci.yml`, `docs/testing.md` and
-`CLAUDE.md` also keep, and it went stale exactly as a fourth copy does** — it
-ended at #57 while the classes closing five more sat in this file. Reconcile it
-with those three, or the next reader of the suite gets the shortest version.
+**This inventory is a third copy of a list `ci.yml` and `docs/testing.md` also
+keep, and it went stale exactly as a redundant copy does** — it ended at #57
+while the classes closing five more sat in this file. Reconcile it with those
+two, or the next reader of the suite gets the shortest version. It was a fourth
+copy until the extraction folded `CLAUDE.md`'s commands section into
+`docs/testing.md`; removing a copy is the only fix for this shape that does not
+itself need maintaining.
 
 Two rules the suite is written to, both of them this repository's:
 
@@ -3339,7 +3348,8 @@ class TheGitArgvGuard(unittest.TestCase):
     with five more. Enumeration trails git's refspec grammar forever, so the
     guard parses the refspec and judges three properties instead.
 
-    **The hook is the mechanism `CLAUDE.md` named as owed** — "a rule over the
+    **The hook is the mechanism `docs/harness-boundaries.md` names as owed** —
+    "a rule over the
     executed argv rather than the typed string" — and the cases below are what
     establish it is looking at anything. Measured in the harness too: the hook
     fires for `git log`, which the harness treats as a promptless read-only
@@ -4765,8 +4775,8 @@ class TheGitArgvGuard(unittest.TestCase):
         # Written as a passing test on purpose, the way the degraded-check case
         # below is: a residual nobody can run is one the next reader assumes
         # was closed. If either of these starts being refused, this test fails
-        # and the paragraph in `CLAUDE.md` that names the bound is what needs
-        # rewriting.
+        # and the paragraph in `docs/harness-boundaries.md` that names the
+        # bound is what needs rewriting.
         self.assertAdmitted("F='git push origin +HEAD:main'; $F")
         self.assertAdmitted("F=--output=/tmp/x; git log $F")
         self.assertAdmitted(
