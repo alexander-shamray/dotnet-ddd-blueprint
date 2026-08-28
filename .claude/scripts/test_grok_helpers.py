@@ -4252,6 +4252,57 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertRefused("echo hi; bash -c 'git push origin +HEAD:main'")
         self.assertRefused("timeout 5 bash -c 'git push origin +HEAD:main'")
 
+    def test_the_git_this_repository_actually_runs_is_admitted(self):
+        # **The other half of every refusal in this class.** A guard is judged
+        # on what it lets through as much as on what it stops, and this file
+        # has produced four false positives across the review rounds — a
+        # commit body, a heredoc body, `echo git push …`, and
+        # `echo bash -c '<script>'`. Each was found by a reviewer rather than
+        # by the suite, because the suite was made of refusals.
+        #
+        # So this is the corpus: the git commands `/ship`, the two sweeps, the
+        # helpers in `.claude/scripts/` and an ordinary session actually run.
+        # Over-reach here breaks the delivery chain, and `#23`'s own conclusion
+        # is that it would be found at the worst possible moment.
+        #
+        # The abbreviation check added last is the reason this is worth having
+        # now rather than later: it refuses any long option that PREFIXES a
+        # forbidden one, which is deliberately over-broad, and this is what
+        # bounds that.
+        for command in (
+            "git status --short",
+            "git log --oneline -20",
+            "git log --format=%s -1",
+            "git diff --stat",
+            "git diff origin/main...HEAD",
+            "git show --stat HEAD",
+            "git branch --show-current",
+            "git branch -a",
+            "git merge-base origin/main HEAD",
+            "git rev-parse --show-toplevel",
+            "git rev-list --count origin/main..HEAD",
+            "git fetch origin",
+            "git pull --ff-only",
+            "git add -A",
+            "git commit -m 'a message'",
+            "git commit -F /tmp/message.txt",
+            "git commit --amend",
+            "git push -u origin fix/harness-prose-bounds",
+            "git push origin fix/harness-prose-bounds",
+            "git worktree list --porcelain",
+            "git worktree add /tmp/wt fix/x",
+            "git worktree remove /tmp/wt",
+            "git checkout HEAD -- .claude/hooks/guard-git-argv.py",
+            "git switch main",
+            "git ls-files docs/",
+            "git config user.name",
+            "git remote -v",
+            "git restore --staged file",
+            "git clean -nd",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an
