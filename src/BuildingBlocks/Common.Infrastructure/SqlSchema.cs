@@ -3,10 +3,13 @@ using System.Text.RegularExpressions;
 namespace Common.Infrastructure;
 
 /// <summary>
-/// The one place a schema is checked and delimited. Two registered values need
-/// it — <see cref="Outbox.OutboxTable"/> and <see cref="Inbox.InboxTable"/> —
-/// and a second copy of the pattern is a second answer to "what is a legal
-/// schema here", which is not a question that gets to have two.
+/// The one place a schema is checked and delimited. Every registered table
+/// value needs it — <see cref="Outbox.OutboxTable"/>, §9.5's
+/// <see cref="Inbox.InboxTable"/> and §8.5's
+/// <see cref="Idempotency.IdempotencyMarkerTable"/> — and a second copy of the
+/// pattern is a second answer to "what is a legal schema here", which is not a
+/// question that gets to have two. No count in that sentence: it said two while
+/// there were two, and the marker made it three.
 /// </summary>
 /// <remarks>
 /// <b>This is the only identifier in the codebase interpolated into SQL rather

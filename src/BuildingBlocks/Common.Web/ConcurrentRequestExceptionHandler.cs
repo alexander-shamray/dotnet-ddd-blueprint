@@ -8,8 +8,8 @@ namespace Common.Web;
 /// <summary>
 /// §8.5's contention answer, and the second producer of §10.5's 409 row.
 /// <see cref="ConcurrentRequestException"/> is raised beside the handler by
-/// <c>IdempotencyBehavior</c>, so — exactly like the 400 and the other 409 —
-/// it is not a response until something translates it, and
+/// <c>IdempotencyBehavior</c>, so — exactly like the 400 and the two other
+/// 409s — it is not a response until something translates it, and
 /// <c>UseExceptionHandler</c>'s fallback answers 500.
 /// </summary>
 /// <remarks>

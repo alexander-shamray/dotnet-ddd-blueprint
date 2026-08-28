@@ -36,6 +36,12 @@ internal static class TestContainer
         services.AddScoped<PipelineLog>();
         services.AddScoped<ScopeMarker>();
 
+        // §8.5's key carrier, here rather than beside the behaviours because a
+        // service registers it in Add<Service>Application beside them and this
+        // builder is what stands in for that method. It is empty unless a test
+        // claims a key, which is what a command that did not opt in looks like.
+        services.AddScoped<IdempotencyContext>();
+
         // Behaviours last and by hand, because registration order is pipeline
         // order (§6.3) and each test declares the pipeline it is about.
         behaviours?.Invoke(services);

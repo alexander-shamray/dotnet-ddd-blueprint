@@ -21,10 +21,20 @@ namespace Common.Application;
 /// </para>
 /// <para>
 /// <b>Every method here is outside the command's transaction</b>, and that is
-/// the constraint the whole of §8.5's residual section is about rather than an
+/// a constraint on what this port can be asked to decide rather than an
 /// implementation detail. No ordering of a claim in this store against a SQL
-/// commit is atomic, so the guarantee is bounded — at most one commit per key
-/// within the retention, except across a lost commit acknowledgement.
+/// commit is atomic, so nothing here can tell a fault that rolled back from one
+/// raised over work that committed and lost its acknowledgement.
+/// </para>
+/// <para>
+/// <b>That case is answered one port over.</b>
+/// <see cref="IIdempotencyMarkerStore"/> writes a row inside the transaction
+/// and §6.3 reads it before the handler runs, which is what took the exception
+/// out of this section's guarantee — at most one commit per key while the
+/// marker survives, rather than within this store's retention and only then.
+/// This store keeps the half it is good at: the atomic claim that makes a
+/// concurrent duplicate fail early, and the recorded outcome a replay hands
+/// back.
 /// </para>
 /// </remarks>
 public interface IIdempotencyStore

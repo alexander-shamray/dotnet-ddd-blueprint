@@ -1,10 +1,14 @@
 using System.Runtime.CompilerServices;
+using Common.Application;
 
 namespace Common.Infrastructure.Messaging;
 
 /// <summary>
-/// How long processed outbox rows and handled inbox rows are kept, and how the
-/// purge that deletes them is paced (§9.4, §9.5). A registered value for
+/// How long processed outbox rows, handled inbox rows and §8.5's committed
+/// idempotency markers are kept, and how the purge that deletes them is paced
+/// (§9.4, §9.5, §8.5). Two of those windows are housekeeping and the third is
+/// a correctness setting — see <see cref="IdempotencyWindow"/>, which is the
+/// only one here with a floor. A registered value for
 /// <see cref="Outbox.OutboxTable"/>'s reason one indirection over: the numbers
 /// are a service's to choose, and a <c>const</c> in common code is a choice made
 /// once for everybody.
@@ -41,6 +45,7 @@ public sealed record RetentionPolicy
 {
     private readonly TimeSpan _outboxWindow = TimeSpan.FromDays(7);
     private readonly TimeSpan _inboxWindow = TimeSpan.FromDays(7);
+    private readonly TimeSpan _idempotencyWindow = TimeSpan.FromDays(7);
     private readonly TimeSpan _interval = TimeSpan.FromHours(1);
     private readonly int _batchSize = 5000;
     private readonly int _maxBatchesPerPass = 20;
@@ -57,6 +62,32 @@ public sealed record RetentionPolicy
     {
         get => _inboxWindow;
         init => _inboxWindow = InRange(value, MaxWindow);
+    }
+
+    /// <summary>
+    /// Idempotency markers committed longer ago than this are deleted, and
+    /// this window <em>is</em> §8.5's guarantee rather than a housekeeping
+    /// setting.
+    /// </summary>
+    /// <remarks>
+    /// <b>It has a floor the other two do not, and the floor is
+    /// <see cref="IdempotencyRetention.Window"/>.</b> The marker is what refuses
+    /// a retry of a command that committed, and the Redis claim it backs up
+    /// expires after that window — so purging markers sooner leaves a stretch
+    /// in which the key is claimable again and nothing remembers the commit.
+    /// The duplicate write §8.5 exists to prevent would then arrive at a
+    /// boundary set by a retention number, which is the least visible place a
+    /// correctness property could be lost.
+    /// <para>
+    /// Read rather than restated, for the reason
+    /// <see cref="IdempotencyRetention"/> exists: two 24s in two files agree
+    /// until one of them is edited.
+    /// </para>
+    /// </remarks>
+    public TimeSpan IdempotencyWindow
+    {
+        get => _idempotencyWindow;
+        init => _idempotencyWindow = AtLeast(InRange(value, MaxWindow), IdempotencyRetention.Window);
     }
 
     /// <summary>
@@ -146,6 +177,19 @@ public sealed record RetentionPolicy
                 $"{member} must be positive and at most {maximum}. A retention setting outside " +
                 "that range does not fail where it is set — it deletes rows that were just " +
                 "written, purges nothing at all, or throws where the exception is swallowed.");
+
+    private static TimeSpan AtLeast(
+        TimeSpan value,
+        TimeSpan floor,
+        [CallerMemberName] string member = "") =>
+        value >= floor ? value
+            : throw new ArgumentOutOfRangeException(
+                member,
+                value,
+                $"{member} must be at least {floor}, which is how long §8.5's Redis claim " +
+                "survives. A shorter window deletes the marker that refuses a duplicate while " +
+                "the key it backs up is still claimable, so the write this platform guarantees " +
+                "happens once happens twice — at a boundary set by a retention setting.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

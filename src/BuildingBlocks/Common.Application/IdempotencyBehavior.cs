@@ -6,10 +6,18 @@ namespace Common.Application;
 /// <summary>
 /// §8.5's claim-before-work protection, seated between
 /// <see cref="ValidationBehavior{TCommand,TResult}"/> and
-/// <see cref="TransactionBehavior{TCommand,TResult}"/> (§6.3). What it buys is
-/// <b>at most one commit per key within <see cref="Retention"/>, except across
-/// a lost commit acknowledgement</b> — both halves of that sentence are
-/// load-bearing and are argued in §8.5.
+/// <see cref="TransactionBehavior{TCommand,TResult}"/> (§6.3). What §8.5 buys
+/// is <b>at most one commit per key while the marker survives</b>, and only
+/// part of that is this type's doing: the claim below is the atomic exclusion
+/// that makes a concurrent duplicate fail early, and the durable half is
+/// <see cref="IIdempotencyMarkerStore"/>, written and read by §6.3 inside the
+/// transaction ([ADR-037]).
+/// <para>
+/// That sentence used to end <i>within <see cref="Retention"/>, except across a
+/// lost commit acknowledgement</i>, and both qualifiers were this behaviour's.
+/// The marker retired them together, because a row outlives the claim and can
+/// be read where no Redis entry can be trusted.
+/// </para>
 /// </summary>
 /// <remarks>
 /// <b>Constrained to <see cref="IIdempotentCommand"/>, so it fails open.</b> A
@@ -33,18 +41,22 @@ namespace Common.Application;
 /// and the operation name, and neither looked at the return type.
 /// </para>
 /// </remarks>
-public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore store, ICurrentUser currentUser)
+public sealed class IdempotencyBehavior<TCommand, TResult>(
+    IIdempotencyStore store,
+    ICurrentUser currentUser,
+    IdempotencyContext idempotency)
     : IPipelineBehavior<TCommand, TResult>
     where TCommand : ICommand<TResult>, IIdempotentCommand
     where TResult : Result
 {
     /// <summary>
-    /// How long a claim survives. The guarantee is bounded in time rather than
-    /// absolute: every entry expires, completed and in progress alike, so a
-    /// retry arriving after this claims a free key and commits again with
-    /// nothing having gone wrong.
+    /// How long a claim survives, from <see cref="IdempotencyRetention"/>.
+    /// Every entry expires, completed and in progress alike, so a retry
+    /// arriving after this claims a free key — and what stops it committing a
+    /// second time is the durable marker §6.3 writes, whose own window is
+    /// required to be at least this long.
     /// </summary>
-    private static readonly TimeSpan Retention = TimeSpan.FromHours(24);
+    private static readonly TimeSpan Retention = IdempotencyRetention.Window;
 
     // "null" and not the empty string. IdempotencyEntry carries a Payload the
     // store has to tell apart from the in-progress marker it wrote on the
@@ -103,6 +115,13 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             return Replay(existing.Payload!);
         }
 
+        // Handed to §6.3, which writes the durable marker under this key inside
+        // the transaction and reads it back before anything runs. Set after the
+        // claim rather than beside the key, so a command that lost the race and
+        // is about to replay never hands a key to a transaction it will not
+        // open.
+        idempotency.Claim(key);
+
         TResult result;
 
         try
@@ -114,11 +133,30 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             // Release for a fault raised INSIDE next(), and nowhere else.
             // §6.3's ExecuteAsync disposes the transaction on the way out,
             // which rolls it back — for every fault this in-process code can
-            // tell apart. The one it cannot is the lost commit acknowledgement:
-            // there the work IS durable and this line permits the duplicate.
-            // Releasing is the right default and not a proof.
+            // tell apart. The one it cannot is the lost commit acknowledgement,
+            // where the work IS durable and this line frees the key for it.
+            //
+            // Releasing is still the right answer, and it is now a decision
+            // rather than a default: the retry it admits meets the durable
+            // marker §6.3 wrote in that same transaction and is refused with
+            // CommandAlreadyCommittedException before a handler runs. Holding
+            // instead would buy nothing and cost the ordinary fault its retry
+            // for a day — and it would not close the case either, because a
+            // held entry expires and the attempt after that finds a free key.
             await store.ReleaseAsync(key, claim, CancellationToken.None);
             throw;
+        }
+        finally
+        {
+            // The key lives for exactly the dispatch that claimed it. A scope
+            // is not promised to serve one command — an endpoint or an
+            // integration-event handler may dispatch twice — and a key left
+            // standing is captured by the NEXT command's transaction, which
+            // either refuses a command nobody protected or writes a marker
+            // naming the wrong command's work. Neither is reachable today,
+            // which is what makes it worth closing here rather than relying on
+            // a premise the next caller falsifies.
+            idempotency.Clear();
         }
 
         if (result.IsFailure)
