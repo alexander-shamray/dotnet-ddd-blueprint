@@ -3975,6 +3975,78 @@ class TheGitArgvGuard(unittest.TestCase):
         reason = self.assertRefused("echo " + command)
         self.assertIn("nests", reason)
 
+    def test_the_program_is_named_the_way_this_platform_names_it(self):
+        # **Every case in this file had been written in POSIX spelling, on a
+        # machine that answers to both.** The segment scan matched the literal
+        # `git` and a `/git` suffix, so `git.exe push origin +HEAD:main` walked
+        # past it — and the evaluator scan had the same hole, so did
+        # `bash.exe -c`. Verified on this host: `git.exe --version` prints
+        # `git version 2.45.1.windows.1` and `bash.exe -c` runs.
+        #
+        # Found by probing adjacent shapes, not by review. The platform is the
+        # part worth carrying: a guard written for one spelling of a program
+        # name is a guard for one operating system, and this repository is
+        # developed on the other one.
+        for command in (
+            "git.exe push origin +HEAD:main",
+            "GIT.EXE push origin +HEAD:main",
+            "C:/Git/bin/git.exe push origin +HEAD:main",
+            "git.exe log -1 --output=/tmp/x",
+            "bash.exe -c 'git push origin +HEAD:main'",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The control: a program whose name merely ENDS in the one being
+        # matched is a different program.
+        self.assertAdmitted("mygit push origin +HEAD:main")
+        self.assertAdmitted("gitk --all")
+
+    def test_an_evaluator_is_found_wherever_it_stands(self):
+        # `bash -c` is caught by the token, not by its position, so a prefix
+        # command or a pipeline does not hide it. And the flag is matched as a
+        # bundle — `-lc` carries `c` — while a long option never introduces the
+        # script.
+        #
+        # **A PIN, not a regression case.** These pass against 8b690f8, where
+        # the evaluator scan landed; what they hold still is its reach, which
+        # nothing else states. Said out loud because a case whose
+        # counterfactual is not the previous commit otherwise reads as one
+        # nobody took.
+        for command in (
+            "bash -lc 'git push origin +HEAD:main'",
+            "bash --login -c 'git push origin +HEAD:main'",
+            "env bash -c 'git push origin +HEAD:main'",
+            "ls | bash -c 'git push origin +HEAD:main'",
+        ):
+            with self.subTest(command=command):
+                self.assertIn("evaluator", self.assertRefused(command))
+
+        # The one that keeps this from reading a commit message as a command:
+        # a quoted mention is one token, and one token is not an invocation.
+        self.assertAdmitted(
+            "git commit -m \"bash -c 'git push origin +HEAD:main'\"")
+        self.assertAdmitted("bash --noprofile -i")
+
+    def test_a_tab_stripping_heredoc_is_still_a_heredoc(self):
+        # `<<-` strips leading tabs from the body AND from the terminator, so
+        # the delimiter search has to tolerate the indent. Its quoting decides
+        # expansion exactly as `<<` does.
+        #
+        # **A PIN, not a regression case** — this has always worked, because
+        # `HEREDOC` takes `<<-?` and the terminator search allows leading
+        # whitespace. Both were incidental rather than argued, and an
+        # incidental property with no test is one the next edit removes.
+        tab = chr(9)
+        self.assertAdmitted(
+            f"git commit -F - <<-'A'{NEWLINE}{tab}git push origin +HEAD:main"
+            f"{NEWLINE}{tab}A"
+        )
+        self.assertRefused(
+            f"git commit -F - <<-A{NEWLINE}{tab}$(git push origin +HEAD:main)"
+            f"{NEWLINE}{tab}A"
+        )
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an

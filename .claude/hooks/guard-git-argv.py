@@ -442,6 +442,31 @@ EVALUATORS = {"bash", "sh", "dash", "zsh", "ksh"}
 SCRIPT_FLAG = re.compile(r"^-[A-Za-z]*c$")
 
 
+# Windows resolves `git.exe`, `GIT.EXE` and `C:/Git/bin/git.exe` to one
+# program, and this repository is developed on Windows.
+EXECUTABLE_SUFFIXES = (".exe", ".cmd", ".bat", ".com")
+
+
+def program_name(token):
+    """The program `token` names, normalised for comparison.
+
+    **The segment scan matched the literal `git` and a `/git` suffix**, so
+    `git.exe push origin +HEAD:main` walked straight past it — and so did
+    `bash.exe -c`. Verified on this host: `git.exe --version` and
+    `bash.exe -c` both run. Found by probing the shapes adjacent to a fix,
+    which is also how the platform came up: every case in this file had been
+    written in POSIX spelling on a machine that answers to both.
+
+    Lower-cased because Windows paths are case-insensitive. On a system where
+    they are not, `GIT` names nothing and refusing it costs nothing.
+    """
+    name = re.split(r"[\\/]", token)[-1].lower()
+    for suffix in EXECUTABLE_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def _argv_after(tokens, index):
     """The argv slice following `tokens[index]`, up to the next separator."""
     argv = []
@@ -467,7 +492,7 @@ def evaluated_scripts(tokens):
     residual rather than a new one.
     """
     for index, token in enumerate(tokens):
-        name = token.rsplit("/", 1)[-1]
+        name = program_name(token)
         if name in EVALUATORS:
             argv = _argv_after(tokens, index)
             for position, element in enumerate(argv):
@@ -483,7 +508,7 @@ def evaluated_scripts(tokens):
 def git_segments(tokens):
     """Yield the argv slice of every `git` invocation in a compound command."""
     for index, token in enumerate(tokens):
-        if token != "git" and not token.endswith("/git"):
+        if program_name(token) != "git":
             continue
         segment = []
         for following in tokens[index + 1:]:

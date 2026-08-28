@@ -1101,6 +1101,19 @@ own line rather than sending a reader to a file that does not hold it.
   match the *basename*, which cannot be talked past because a basename contains
   no `/`. The general form: **a glob's alphabet is not the shell's, and a
   pattern is not a parser.**
+- **A program has more than one name on this platform, and every guard here
+  was written with one of them.** The argv hook matched the literal `git` and a
+  `/git` suffix; `git.exe push origin +HEAD:main` is the same command to
+  Windows and walked straight past it, as did `bash.exe -c`. Measured rather
+  than assumed — `git.exe --version` prints `git version 2.45.1.windows.1` on
+  this host. It is the POSIX-spelling divergence already recorded for paths and
+  for argv, arriving a third time at the *program name*, and the general form is
+  worth more than the instance: **a comparison against a name is a comparison
+  against a spelling**, so normalise to what the operating system resolves —
+  basename, both separators, executable suffix, case — before matching. The
+  tell is that every test in the file agreed with the code, because both had
+  been written by someone thinking in POSIX on a machine that answers to both.
+
 - **A guard that models another parser needs ONE model of it, in one place.**
   The argv hook has now been defeated five times by the same shape: a function
   that knew a rule and a neighbouring function that did not. A heredoc opener
