@@ -2,7 +2,7 @@
 description: Multi-pass self-consistency audit of the blueprint, its roadmap and docs/testing.md, and of the code against them
 argument-hint: "[chapter file or topic to focus on — omit for a full sweep]"
 allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
-disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(docs/superpowers/**), Edit(./docs/superpowers/**), Edit(docs/runbooks/**), Edit(./docs/runbooks/**), Edit(docs/pr-decision-log.md), Edit(./docs/pr-decision-log.md), Edit(docs/secrets.md), Edit(./docs/secrets.md), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
+disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(docs/superpowers/**), Edit(./docs/superpowers/**), Edit(docs/runbooks/**), Edit(./docs/runbooks/**), Edit(docs/pr-decision-log.md), Edit(./docs/pr-decision-log.md), Edit(docs/secrets.md), Edit(./docs/secrets.md), Edit(docs/lessons.md), Edit(./docs/lessons.md), Edit(docs/harness-boundaries.md), Edit(./docs/harness-boundaries.md), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
 Audit `docs/backend-architecture/` for internal contradictions — and, once the
@@ -219,10 +219,22 @@ record and names as outside this command's scope in as many words, plus
 audit. All four were editable here because the exemption was written at the
 tree. They are denied by name now. Raised in review.
 
+**The list has since grown to six, and it grew the way the mechanism intends
+rather than the way the four arrived.** `lessons.md` and
+`harness-boundaries.md` were extracted from `CLAUDE.md`; both say in their own
+headers that they are outside this command's scope, and both are denied by
+name. The difference worth keeping is that the original four were *found*
+editable in review, where these two were refused by a red build before they
+could ever be written to — which is the check below doing its job, once.
+
 `test_grok_helpers.py` reads the entries under `docs/` from `git ls-files` and
 asserts each is either in the audited scope or denied, so **a new file under
 `docs/` is a decision this command forces** rather than a path that quietly
 becomes writable — the shape `tools/new-service` already uses on Catalog.
+
+**Its enumeration comes from the index, not the working tree**, which is the
+one way to be misled by it: two untracked files are two subtests that do not
+exist, so the suite reports a pass it never tested. Commit, then run it.
 
 **A path not on that list is editable**, so the list is a deny-list and rots
 the way every deny-list here has. `test_grok_helpers.py` reads both sets from

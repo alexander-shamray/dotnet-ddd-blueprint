@@ -785,6 +785,28 @@ own line rather than sending a reader to a file that does not hold it.
   Where an exemption has a condition, the condition needs a test, exactly as a
   list of things known to be missing needs a gate asserting they are still
   missing.
+- **A permission lift has to happen in the copy of `settings.json` the session
+  actually reads, and in a worktree-per-PR layout that is not the one in the
+  main checkout.** `.claude/settings.json` is tracked, so every worktree
+  carries its own; a lift applied at `C:/dev/<repo>` while the session runs at
+  `C:/dev/<repo>-<slug>` looks identical from the outside — same repository,
+  same path suffix, same bytes edited — and the deny stays live exactly where
+  the work is. This is *verify a restore by reading the file* with a second
+  failure mode attached: **reading the wrong copy passes just as
+  convincingly**, so the check is `grep` in the session's own working
+  directory, never in the repository generally.
+- **The lift lags the same way the lock does, so a refusal immediately after
+  one is early rather than evidence it failed.** `CLAUDE.md` records the lock
+  direction — a deny written back is not enforced at the instant it is
+  written — and this is its converse, measured on the branch that extracted
+  this file: with the deny genuinely gone from the only settings file in play,
+  the very next `Edit` was still refused with *"File is in a directory that is
+  denied by your permission settings"*, and the same edit succeeded after a
+  few minutes with nothing else changed. **The danger is the diagnosis, not
+  the wait**: the refusal reads as "the lift did not take", which sends you
+  editing settings files that were already correct, or concluding the harness
+  cannot do what it can. Confirm the lift by reading the file, then retry the
+  edit rather than re-cutting the permission.
 - **A replacement narrower than the thing it replaces is a regression wearing a
   fix's clothes.** The argv guard was written to close what
   `Bash(git *--output*)` could not, and its first form matched a flag exactly or
