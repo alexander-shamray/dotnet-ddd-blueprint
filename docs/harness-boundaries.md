@@ -10,17 +10,25 @@ a permanent seat in every session's context.
 
 **The content is verbatim in its arguments**, on
 [`pr-decision-log.md`](pr-decision-log.md)'s terms and for its reason: a summary
-of an argument is how a rule gets "corrected" back. Three edits were made on the
+of an argument is how a rule gets "corrected" back. Four edits were made on the
 way out, and naming them is cheaper than a claim that does not survive a grep.
 The `### What cuts across them` heading became this file's title. One paragraph
 arrived from `CLAUDE.md`'s *The commands* section — the one recording that
 #150's suppression clause moved three grants along before it stuck — because
 its subject is a grant and not a command; its opening was rebased from "That
-last clause", which pointed at a paragraph that did not travel with it. And one
-**self-reference** was rebased the same way: the grant inventory's count of
-rotted totals said "in this file" of `CLAUDE.md` and named two siblings that now
-live in two other files. Not one argument was shortened, and no paragraph was
-dropped.
+last clause", which pointed at a paragraph that did not travel with it. And
+**two self-references** were rebased the same way: the grant inventory's count
+of rotted totals said "in this file" of `CLAUDE.md` and named two siblings that
+now live in two other files, and the sandbox residual said the commands cite
+"this file" — true while it sat in `CLAUDE.md`, and a contradiction of the
+paragraph below the moment it moved. Not one argument was shortened, and no
+paragraph was dropped.
+
+**The second of those was found by review rather than by the move**, which is
+worth recording where the edits are listed: a self-reference that stays *true
+of its old home* reads correctly in isolation and only contradicts something
+two screens away. Grep for "this file" after extracting prose, not just for
+links.
 
 **No headings were introduced.** The section is one long run of bold-led
 paragraphs and it stays that way — inventing headings would mean deciding where
@@ -159,7 +167,9 @@ authenticates against a team with no credits, so the fallback is the path that
 actually runs.
 
 Stated here as well as in the script because `/ship` and both
-sweeps cite this file as where the boundary and its residuals are recorded. The
+sweeps cite `CLAUDE.md` as where the boundary and its residuals are recorded,
+and it forwards here — the residual this file's header argues, not a second
+claim about it. The
 reviewer also has **no .NET SDK**, so `dotnet test` is this host's gate and
 never the review's.
 

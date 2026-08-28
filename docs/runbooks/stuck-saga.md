@@ -223,9 +223,9 @@ than pulled. Three ways that breaks, all of which look like a hung saga:
    startup fails at the first message, not at boot — `ValidateOnBuild` never
    constructs an open generic and no host resolves a scheduler while it boots,
    so the service connects, declares, and reports ready with no scheduler at
-   all. This is recorded in `CLAUDE.md` as a lesson because it cost a debugging
-   session: the symptom is timeouts that never arrive and a log that says
-   nothing.
+   all. This is recorded in [`docs/lessons.md`](../lessons.md) as a lesson
+   because it cost a debugging session: the symptom is timeouts that never
+   arrive and a log that says nothing.
 
 3. **The broker lost its delayed messages.** A delayed exchange holds them in a
    node-local store; a node that was rebuilt loses whatever was pending. Nothing

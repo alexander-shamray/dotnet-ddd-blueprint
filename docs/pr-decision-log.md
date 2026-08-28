@@ -2922,7 +2922,8 @@ contracts travel as a shared assembly both ends compile
 round-trips each one, the gateway is a reverse proxy with no semantic contract,
 and the BFF's own HTTP API has no consumer in this repository. **The plan was
 written against the tool's reputation rather than its surface**, which is the
-lesson `CLAUDE.md` now carries: a capability present in a project's Rust core,
+lesson [`lessons.md`](lessons.md) now carries: a capability present in a
+project's Rust core,
 its JVM binding and its marketing is not thereby present in the one language
 this repository compiles.
 

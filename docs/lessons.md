@@ -71,6 +71,21 @@ own line rather than sending a reader to a file that does not hold it.
   six fail. Read the build result before reading the test result — a green
   counterfactual is the outcome that should be checked hardest, because it is
   the one that says the tests are worthless.
+- **A suite that enumerates from `git ls-files` is blind to the work you have
+  not committed, so a green run taken before `git add` says nothing about the
+  state you are about to commit.** Measured on the branch that extracted this
+  file: `test_validate_blueprint_may_only_edit_what_it_audits` reads
+  `git ls-files docs/` and requires every entry a command does not audit to be
+  denied to it. Two new files sat untracked while the suite ran, so the
+  subtests that would have failed **did not exist**, and it reported 248 green;
+  the same suite on the same content failed twice in CI one commit later. The
+  failure is silent in the worst direction — a smaller enumeration is not a
+  smaller *result*, it is the same "OK" with the cases removed. This is the
+  gate-coverage lesson at the top of this file with the clock moved: not a gate
+  that stopped covering a surface, but one whose subject **had not arrived
+  yet**. Where a check derives its cases from the index rather than the working
+  tree, commit first and then run it — and treat a pre-commit pass as
+  provisional whatever it prints.
 - **A measurement says what the code *does*; it never says what it *may* do.**
   Fetch the specification section and paste the sentence.
 - **A field a caller chooses cannot answer a question about provenance**,
