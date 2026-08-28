@@ -679,7 +679,7 @@ public class ContractTests
     /// <b>The subject rule is a deny-list and this is the allow-list beside
     /// it.</b> <see cref="SubjectSpellings"/> rejects six substrings, so
     /// <c>OwnerId</c> or <c>AccountHolderId</c> walks past it — the failure
-    /// mode <c>CLAUDE.md</c> records against the Grok verdict check, which
+    /// mode <c>docs/lessons.md</c> records against the Grok verdict check, which
     /// refused a list of terminal states and passed every state nobody had
     /// thought of. Enumerating what is acceptable is what closed that one.
     /// <para>

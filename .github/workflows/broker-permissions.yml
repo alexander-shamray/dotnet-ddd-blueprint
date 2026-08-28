@@ -15,9 +15,10 @@ name: Broker permissions
 # The filter reaches outside deploy/compose on purpose, and the list is NOT
 # maintained here: check_permissions.py declares it as SOURCE_INPUTS beside the
 # reads and asserts that both of this workflow's triggers cover every entry.
-# CLAUDE.md records that a fourth copy of that pattern arrives owing a test
-# whose subject is the READS rather than the workflow, because a list can only
-# be compared for entries it already contains — that is check 7 in the script.
+# docs/lessons.md records that a fourth copy of that pattern arrives owing a
+# test whose subject is the READS rather than the workflow, because a list can
+# only be compared for entries it already contains — that is check 7 in the
+# script.
 #
 #   - src/Services/**, because every service's `Messaging` directory decides
 #     what its own account must be allowed to do: `Endpoints.cs` names the peer

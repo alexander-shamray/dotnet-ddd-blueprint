@@ -800,8 +800,8 @@ def check_source_inputs_covers_reads() -> None:
     two paths declared, three opened, and its trigger assertion green
     throughout.
 
-    CLAUDE.md states the fix as owed by every copy of this pattern rather than
-    by the copy that was caught, so this is that debt paid here. The subject is
+    docs/lessons.md states the fix as owed by every copy of this pattern rather
+    than by the copy that was caught, so this is that debt paid here. The subject is
     this file's own source: every `ROOT / "…"` construction outside
     deploy/observability must be declared.
     """

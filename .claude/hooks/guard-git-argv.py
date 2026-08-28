@@ -8,9 +8,12 @@ spelling and nothing more: the shell reassembles adjacent quoted fragments
 before `exec`, so `--out''put=<path>` reaches git as `--output=<path>` while
 never presenting the matcher with a contiguous `--output`. Measured, not
 reasoned about — `printf '%s' --out''put=/tmp/x` prints `--output=/tmp/x`.
-`CLAUDE.md` recorded that as an accepted limit and named the fix: "a helper that
-spells its own flags, or a rule over the executed argv rather than the typed
-string". This is the second.
+`docs/harness-boundaries.md` records that as an accepted limit and names the
+fix: "a helper that spells its own flags, or a rule over the executed argv
+rather than the typed string". This is the second. It was `CLAUDE.md`'s
+paragraph until the extraction; the pointer moved with the argument, because
+this comment names the file to rewrite when the bound changes rather than
+merely citing one.
 
 It also closes one thing the rule system provably cannot express. `Bash(git
 *ext::*)` passes settings validation and then matches NOTHING — the trailing

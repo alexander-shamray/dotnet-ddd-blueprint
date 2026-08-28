@@ -13,10 +13,25 @@ flag belongs here and changes nothing about the strategy. **Where the two
 disagree, §12 wins**, and the disagreement is a bug report against one of them.
 
 > **This file is outside the blueprint tree, so nothing structural catches its
-> drift.** It is in no index and behind no nav footer, exactly like
-> `roadmap.md` and `pr-decision-log.md`. `/check-links` does not reach it and
-> `/validate-blueprint` reaches it only because it is named in that command's
-> scope. The one rule in `CLAUDE.md` covers it, and that is all that does.
+> drift.** `/check-links` checks `docs/backend-architecture/` and the root
+> README's entry point into it, so a file anywhere else is outside its scope
+> whatever links it. `/validate-blueprint` reaches this one only because it is
+> named in that command's scope — which makes this file and `roadmap.md` the
+> two exceptions among those siblings rather than one of a set. The one rule in
+> `CLAUDE.md` covers the rest, and that is all that does.
+>
+> **The siblings are described rather than listed on purpose.** Three copies of
+> this callout named three different sets the moment two new files arrived,
+> which is what a list with no code to check it against does. The predicate
+> holds however many there are.
+>
+> **A predicate is only better than a list if it is true.** These three
+> callouts first said this file is in no index “like every document under
+> `docs/` that is not the blueprint tree”, which is false twice over:
+> `docs/runbooks/README.md` is an index of the runbooks beside it, and the
+> root `README.md` links `docs/roadmap.md`. Scope is the durable fact and
+> being unindexed never was — a false predicate is a stale list with an
+> argument in front of it.
 
 ## The suites
 
@@ -24,8 +39,11 @@ Three runners, and `dotnet test` says nothing about any suite but its own.
 **No count opens this sentence**, and its removal is the fix rather than a
 recount: it said seven, then ten, and #61's secret scan made it eleven inside
 the pull request correcting the sentence around it. What a reader can check is
-whether this block matches the jobs in `ci.yml` and the enumeration in
-`CLAUDE.md`, which needs no numeral.
+whether this block matches the enumeration in `CLAUDE.md` and the workflows
+that run them, which needs no numeral. **Workflows, plural, and not `ci.yml`
+alone** — ADR-036's broker ACL runs in `broker-permissions.yml`, so a check
+aimed at the one file misses a suite that is in this block and was, until
+recently, missing from `CLAUDE.md`'s enumeration as well.
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -119,10 +137,18 @@ removed from the deny list. A case whose counterfactual is not the previous
 commit needs saying so, or the next reader assumes none was taken.
 
 **No count opens that list any more**, here or in `.github/workflows/ci.yml` or
-`CLAUDE.md`, and the three enumerations are what a reader compares instead. The
-numeral said four, then five, then six, and was stale again inside the pull
-request that added two subjects — a figure restated in three files goes stale in
-all three at once. The regression
+`.claude/scripts/test_grok_helpers.py`, and those three enumerations are what a
+reader compares instead. The numeral said four, then five, then six, and was
+stale again inside the pull request that added two subjects — a figure restated
+in three files goes stale in all three at once.
+
+**`CLAUDE.md` was the third holder and no longer is**, which is why the trio
+above names the suite's own docstring in its place: the extraction folded that
+file's commands section into this one, and the issue-by-issue subjects came
+with it. This sentence went on naming `CLAUDE.md` for a round after `ci.yml`
+and the docstring had both been corrected — a three-site reconciliation that
+landed on two, which is the prefix a multi-target edit leaves behind when the
+follow-up is resumed from the report rather than from the list. The regression
 negatives are paired with positive controls, and those are not decoration: a
 negative that passes because the pattern matches *nothing* is indistinguishable
 from one that works, so the accepted values and the limit pattern's status
@@ -141,6 +167,66 @@ Each has its own reference for what it asserts and — more usefully — what it
 does not: `deploy/helm/README.md`, since that gate reaches no cluster, and
 `deploy/observability/README.md`, since that one reaches no Prometheus and does
 not validate rule syntax.
+
+**Running a gate is the other half, and the block above carries some of those
+runs but not all of them.** Each gate is tested and then run — the pattern
+every gate here follows, across `ci.yml` and the path-filtered workflows
+beside it — so a green suite says the gate works and not that this checkout
+passes it. The block above already runs the observability gate, the broker ACL,
+the secret scan and the chart gate; these are the gate invocations it does
+**not** carry, and all four need no daemon, no SDK and no network:
+
+```bash
+(cd .github/licence-gate && py -3.12 licence_gate.py)    # from its own directory
+py -3.12 .github/pipeline-gate/pipeline_gate.py filters
+py -3.12 .github/pipeline-gate/pipeline_gate.py images
+py -3.12 deploy/canary/canary.py check
+```
+
+**The Compose smoke is the fifth and is fenced apart from them, because it is
+the one gate here that needs a running daemon and the one whose run changes the
+machine it runs on.** `compose.yml` drives three commands against §14.1's file,
+and the third is not tidying: RabbitMQ seeds its default user only on an empty
+database, so ADR-036's removal of `guest` is true after a `down -v` and false
+after a plain `down`. The teardown is part of what the gate asserts, which is
+why it is listed here rather than left to the reader.
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml config -q
+docker compose -f deploy/compose/docker-compose.yml up -d --wait --quiet-pull
+docker compose -f deploy/compose/docker-compose.yml down -v
+```
+
+`config -q` runs first so that a YAML error costs no image download to find,
+and `up --wait` is the assertion rather than the setup — it exits non-zero if a
+healthcheck never passes, and a one-shot that another service gates on with
+`service_completed_successfully` satisfies it by exiting 0, so the migrators'
+exit codes are part of what this proves. `rabbitmq` is built rather than
+pulled, so an image build rides on the `up`.
+
+**`HELM=` is an override, not a gate run**, so it is documented here rather
+than listed above: the chart gate is already invoked in the suite block, and
+this only tells it where the executable is when `helm` is not on `PATH`.
+
+```bash
+HELM=/path/to/helm bash deploy/helm/smoke.sh
+```
+
+**`pipeline_gate.py stages` is the one that cannot be run on its own**: it
+reads what the three test steps wrote, so it needs a `dotnet test` per stage
+into `./TestResults/{architecture,unit,integration}` first. Those three
+commands are under *Categories* below, and the gate invocation sits with them.
+
+**The chart gate runs `helm dependency update` itself** before it can render
+anything — `file://` dependencies resolve from disk, so there is no network
+step and no chart repository.
+
+`deploy/canary/README.md` is that tree's operational reference, on
+`deploy/observability/README.md`'s terms: what the gate asserts, and — more
+usefully — the things it does not, of which the load-bearing one is that
+**nothing has established a replica ratio is a traffic ratio**. kube-proxy
+spreads connections rather than requests, and no render-time check reaches
+that.
 
 **`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12, and a
 newer interpreter is the hazard — it accepts APIs 3.12 does not, so the local
@@ -266,6 +352,15 @@ the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
 on this repository they are **18**, **829** and **205**, summing to the 1,052
 the whole suite runs — which is the arithmetic the callout below asks for.
+
+**The integration figure read 187 for two branches and the arithmetic never
+closed**, which is `CLAUDE.md`'s own rule about restated numbers catching one:
+18 + 649 + 187 is 854 where the suites summed to 855. What settled it was
+**reconciling against the branch's own CI run rather than recomputing** —
+`gh run view <id> --log`, summed over the per-project totals of each stage.
+That is the cheap check whenever a count here and a count elsewhere disagree:
+the run already happened, and it beats arithmetic that would otherwise have to
+guess which side is wrong.
 
 ```bash
 dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests" \

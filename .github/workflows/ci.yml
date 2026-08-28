@@ -111,10 +111,15 @@ jobs:
   # then six again while this pull request added two more subjects. A number
   # restated in three files goes stale in all three at once; what a reviewer
   # can actually check is whether the ENUMERATION here matches the one in
-  # `CLAUDE.md` and `docs/testing.md`, and that check does not need a numeral
-  # in front of it. This repository has already dropped a total for this exact
-  # reason three times: its callout counts, its residual-grant count, and its
-  # own line count.
+  # `docs/testing.md`, and that check does not need a numeral in front of it.
+  # This repository has already dropped a total for this exact reason three
+  # times: its callout counts, its residual-grant count, and its own line
+  # count.
+  #
+  # `CLAUDE.md` was a third holder of this list and no longer is: the
+  # extraction folded its commands section into `docs/testing.md`, which now
+  # carries the issue-by-issue subjects alone. One fewer copy to drift, and one
+  # fewer place a reader is sent to look for a list that is not there.
   #
   # Beside the licence gate rather than inside `build`, on its argument: stdlib
   # Python over text and a few `bash` fragments, so it needs no restore, no
