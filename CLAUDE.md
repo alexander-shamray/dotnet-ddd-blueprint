@@ -1595,6 +1595,22 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   against what the merge *will do*, on every push and on every description
   edit. **It does not require a commit to repeat a closure the description
   makes** — that pairing is deliberately absent and a test pins the absence.
+- **Every issue carries a kind label and a severity label, whatever filed
+  it.** `security` or `bug`, plus one of `critical`, `high`, `medium`, `low` —
+  the six `.claude/scripts/gh-label-ensure.sh` will create, and no others. Both
+  sweeps make this step 4 of their loop, so the route that has been getting it
+  wrong is the other one: an issue filed by hand out of a review triage or a
+  measurement taken mid-PR, where no command's checklist is being followed.
+  #161 is that gap — its body argues **Medium** under a `## Severity` heading
+  of its own and it shipped labelled `bug` and nothing else, with the severity
+  stated in prose nothing can filter on. **A severity in the body and a
+  severity on the issue are two statements, and the label is the one every
+  consumer reads**: `/pr`'s `| Closes | #88 (high) |` row quotes it, both
+  sweeps enumerate the tracker to de-duplicate against it, and a triage sorted
+  by severity sees only the label. So the two are reconciled in the same act as
+  everything else here — if the body's `## Severity` section and the label
+  disagree, one of them is a bug report against the other, and the fix is not
+  finished until both say it.
 - **Uncommitted work in the tree belongs in the PR being worked on.** When a
   change appears that nobody in the current task wrote — an edit made directly
   by the repo owner, most often — it is not stray churn to be reverted or left
