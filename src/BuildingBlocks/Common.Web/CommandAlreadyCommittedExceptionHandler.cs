@@ -33,10 +33,12 @@ namespace Common.Web;
 /// a conflict the client can act on.
 /// </para>
 /// <para>
-/// <b>It is distinguishable from its neighbour only by <c>Detail</c>, and that
-/// is deliberate</b> — the two say different things about what the client
-/// should do next, and 409 is the statement they share. "Retry" is right for a
-/// request that is merely in flight; it is wrong here, and the text says so.
+/// <b>It shares 409 with two other producers and is told apart from them
+/// twice over, once per reader.</b> <c>Detail</c> carries the difference for a
+/// person — "retry" is right for a request merely in flight and wrong here,
+/// and the text says so — and <c>code</c> carries it for a client, because RFC
+/// 9457 makes <c>detail</c> human-readable and a caller switching on English
+/// prose breaks on a reword. §10.5 records the three values.
 /// </para>
 /// </remarks>
 internal sealed class CommandAlreadyCommittedExceptionHandler(IProblemDetailsService problemDetails)

@@ -19,7 +19,11 @@ namespace Common.Application;
 /// <see cref="Error"/> because the domain decided something, and no handler
 /// ran. It shares that exception's 409, because the statement is the same one
 /// — this request conflicts with work already done — and the two are told apart
-/// by their <c>Detail</c>, which is all a client needs.
+/// by their <c>Detail</c> for a person and by §10.5's <c>code</c> for a client.
+/// <c>Detail</c> alone was the answer until this type existed: the other
+/// producers of that status all said <i>retry</i>, and this is the first that
+/// says the opposite, which is what made a machine-readable discriminator
+/// worth its line.
 /// </para>
 /// <para>
 /// <b>What the caller does not get is a replay, and there are two ways to

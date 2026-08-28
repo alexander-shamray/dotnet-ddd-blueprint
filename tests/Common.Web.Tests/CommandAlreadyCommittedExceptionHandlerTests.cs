@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Common.Application;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -109,10 +110,16 @@ public class CommandAlreadyCommittedExceptionHandlerTests
         // nothing asserts is one that drifts back into agreement.
         string committed = await CodeOfAsync(new CommandAlreadyCommittedException(Key));
         string inProgress = await CodeOfAsync(new ConcurrentRequestException(Guid.CreateVersion7()));
+        string conflict = await CodeOfAsync(new DbUpdateConcurrencyException("stale"));
 
         committed.ShouldBe("command.already_committed");
         inProgress.ShouldBe("request.in_progress");
-        committed.ShouldNotBe(inProgress);
+        conflict.ShouldBe("request.concurrency_conflict");
+
+        // Distinctness as a set, not pairwise: the name says three and two of
+        // the three would satisfy any pair of assertions, which is how a gate
+        // ends up covering less than it claims.
+        new[] { committed, inProgress, conflict }.Distinct().Count().ShouldBe(3);
     }
 
     private static async Task<string> CodeOfAsync(Exception exception)
