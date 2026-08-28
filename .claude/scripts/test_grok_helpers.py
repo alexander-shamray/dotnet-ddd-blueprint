@@ -4417,6 +4417,37 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertRefused("echo '&&' git push origin +HEAD:main")
         self.assertRefused("echo '|' git push origin +HEAD:main")
 
+    def test_an_escaped_space_does_not_begin_a_word(self):
+        # **A `#` starts a comment where a WORD starts, and the scanner was
+        # inferring that from the previous character.** `command[index - 1] in
+        # " \t…"` cannot tell a separating space from an escaped one, so in
+        # `git log --grep=foo\ #bar;git push origin +HEAD:main` bash keeps
+        # `#bar` inside the `--grep` argument and runs the push, while the
+        # guard read a comment and stripped from the hash onward. Measured with
+        # a `git` shim: two invocations run, the second being the push. Raised
+        # in review.
+        #
+        # The scanner tracks word-start state now, and an unquoted backslash
+        # consumes the character after it.
+        self.assertRefused(
+            "git log --grep=foo\\ #bar;git push origin +HEAD:main")
+        self.assertRefused(
+            "git log --grep=a\\ b\\ #c && git push origin +HEAD:main")
+
+        # The controls, and they are the ones that make this a word-start test
+        # rather than a licence to ignore comments. An UNescaped space before
+        # the hash is a real comment, and bash runs nothing after it on that
+        # line — measured in the same script.
+        self.assertAdmitted("git status # git push origin +HEAD:main")
+        self.assertAdmitted("git log --grep=#topic")
+        self.assertAdmitted("git commit -m 'uses # hash'")
+        self.assertAdmitted("git log --grep=foo\\ bar")
+
+        # And a comment ends at its newline, so the next line is a command
+        # again.
+        self.assertRefused(
+            f"git status # note{NEWLINE}git push origin +HEAD:main")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an

@@ -191,12 +191,21 @@ def shell_positions(command):
     rule, and the reason `git log --grep=#x` is not a comment.
     """
     single = double = comment = False
+    # **Whether a `#` begins a WORD, tracked rather than inferred from the
+    # previous character.** The old test read `command[index - 1] in " \t…"`,
+    # which cannot tell a separating space from an escaped one: in
+    # `git log --grep=foo\\ #bar;git push origin +HEAD:main` bash keeps
+    # `#bar` inside the `--grep` argument and runs the push, while the guard
+    # read a comment and stripped the lot. Measured with a `git` shim. Raised
+    # in review.
+    at_word_start = True
     index = 0
     while index < len(command):
         char = command[index]
         if comment:
             if char == "\n":
                 comment = False
+                at_word_start = True
             else:
                 yield index, False, True
                 index += 1
@@ -220,15 +229,30 @@ def shell_positions(command):
                     continue
                 if char == '"':
                     double = False
+            elif char == "\\" and index + 1 < len(command):
+                # An unquoted backslash escapes the next character, so that
+                # character is ordinary text — a space included, and an escaped
+                # space separates nothing.
+                yield index, False, False
+                yield index + 1, False, False
+                index += 2
+                at_word_start = False
+                continue
             elif char == "'":
                 single = True
+                at_word_start = False
             elif char == '"':
                 double = True
-            elif char == "#" and (index == 0 or command[index - 1] in " \t\n;&|("):
+                at_word_start = False
+            elif char == "#" and at_word_start:
                 comment = True
                 yield index, False, True
                 index += 1
                 continue
+            elif char in METACHARACTERS:
+                at_word_start = True
+            else:
+                at_word_start = False
         yield index, single or double, comment
         index += 1
 
@@ -563,6 +587,12 @@ DATA_ONLY_COMMANDS = {"echo", "printf", ":", "true", "false"}
 # `shlex(punctuation_chars=True)` emits a maximal RUN of these as ONE token, so
 # an operator can arrive glued to its neighbour and match no separator by name.
 PUNCTUATION = set("();<>|&")
+
+# What bash treats as a word separator when unquoted. **Not the same set as
+# PUNCTUATION**, which is `shlex`'s: this one carries the whitespace, because
+# the question it answers is where a WORD begins rather than where a token
+# does.
+METACHARACTERS = set("|&;()<> \t\n")
 
 
 def is_boundary(token):

@@ -1085,7 +1085,7 @@ same argument as never calling a branch clean because asking failed.
    |---|---|
    | Clean, on two consecutive passes | Convergence, the outcome the loop is for |
    | Skipped on limits | Quota, not a verdict; reported as skipped, and final |
-   | Unconverged at the sixth check | A budget ran out, which is not a reason to withhold the second reviewer |
+   | Unconverged at the ceiling | A budget ran out, which is not a reason to withhold the second reviewer |
 
    **The third row was missing and step 7 asserted it anyway.** That step opens
    by saying both loops have finished — *clean, all-resolved, skipped on
