@@ -100,6 +100,7 @@ and no SDK. `git` because one case drives a real worktree round trip, and
 `jq` because the did-it-run verdict is parsed rather than matched.
 """
 
+import importlib.util
 import json
 import os
 import re
@@ -3816,6 +3817,90 @@ class TheGitArgvGuard(unittest.TestCase):
         # that could take it away.
         self.assertRefused("git log <(git push origin +HEAD:main)")
         self.assertRefused("git log >(git push origin +HEAD:main)")
+
+    def guard_module(self):
+        """The hook imported directly.
+
+        Every other case here goes through `judge`, which is the right default —
+        a verdict is what the harness acts on. One property cannot be reached
+        that way: whether the scanner hands the later stages back the command it
+        was given, unedited. Two bugs cancelling is still two bugs, and only a
+        direct read separates them.
+        """
+        spec = importlib.util.spec_from_file_location("guard_git_argv", HOOK)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_scanner_does_not_edit_the_command(self):
+        # **`strip_comments` DELETED the character after a backslash**, because
+        # `shell_positions` yielded the backslash and skipped its escapee. So
+        # `git log "$(printf \); git push …)"` lost its `)` on the way through
+        # the guard and arrived at the tokeniser as a different command.
+        #
+        # It was refused anyway — the deletion happened to expose the push to
+        # the outer scan while the paren matcher was closing early on the same
+        # `)`. Two defects cancelling, and a verdict cannot tell that from a
+        # guard that works. This asserts the property the verdict hid.
+        guard = self.guard_module()
+        for command in (
+            'git log "$(printf \\); git push origin +HEAD:main)"',
+            'git commit -m "he said \\"go\\""',
+            'git log "a\\$b"',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(command, guard.strip_comments(command))
+
+        # And it still removes what it is for.
+        self.assertEqual(
+            "git status ", guard.strip_comments("git status # a comment"))
+
+    def test_an_escaped_paren_does_not_close_a_substitution(self):
+        # The paren matcher skipped escapes inside double quotes and nowhere
+        # else, so an unquoted `\)` — a literal paren to bash — closed
+        # extraction early and hid the rest of the substitution in the outer
+        # token. Raised in review; the bash behaviour measured with a `git`
+        # shim, which shows `printf` receiving the paren and the push running.
+        for command in (
+            'git log "$(printf \\); git push origin +HEAD:main)"',
+            'git log "$(echo \\); git fetch ext::sh -c id)"',
+        ):
+            with self.subTest(command=command):
+                self.assertIn("substitution", self.assertRefused(command))
+
+    def test_a_shell_evaluators_argument_is_a_command(self):
+        # **`shlex` hands a quoted script back as one data token**, exactly as
+        # it does a substitution — so the inner pass of
+        # `git log "$(bash -c 'git push origin +HEAD:main')"` saw `bash`, `-c`
+        # and one opaque string, found no `git`, and admitted a force push that
+        # bash runs. Raised in review; verified allowed against the guard as
+        # shipped, and measured with a `git` shim on PATH.
+        for command in (
+            "bash -c 'git push origin +HEAD:main'",
+            "sh -c 'git push origin +HEAD:main'",
+            "bash -xc 'git push origin +HEAD:main'",
+            "/bin/bash -c 'git log --output=/tmp/x'",
+            "eval git push origin +HEAD:main",
+            'git log "$(bash -c \'git push origin +HEAD:main\')"',
+        ):
+            with self.subTest(command=command):
+                self.assertIn("evaluator", self.assertRefused(command))
+
+        # The control, and it is the one that keeps this from being a ban on
+        # shells: an evaluator running something harmless is still admitted.
+        self.assertAdmitted("bash -c 'ls -la'")
+        self.assertAdmitted("bash -c 'git status'")
+
+    def test_nesting_deeper_than_the_guard_follows_is_refused(self):
+        # A guard that dies is a guard whose verdict nobody gets, so the
+        # recursion is capped and the cap refuses rather than returning None.
+        # `judge` asserts the hook exited 0, which is the half that matters:
+        # this must come back as a decision, not as a traceback.
+        command = "git status"
+        for _ in range(40):
+            command = "$(" + command + ")"
+        reason = self.assertRefused("echo " + command)
+        self.assertIn("nests", reason)
 
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated

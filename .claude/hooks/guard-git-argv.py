@@ -179,7 +179,15 @@ def shell_positions(command):
                     single = False
             elif double:
                 if char == "\\" and index + 1 < len(command):
+                    # **Both characters, because a consumer rebuilds text from
+                    # these positions.** Yielding only the backslash made
+                    # `strip_comments` DELETE the escaped character, so
+                    # `git log "$(printf \); git push …)"` lost its `)` and
+                    # changed shape on its way through the guard. A scanner that
+                    # silently edits its input is worse than one that misreads
+                    # it, because every later stage inherits the edit.
                     yield index, True, False
+                    yield index + 1, True, False
                     index += 2
                     continue
                 if char == '"':
@@ -397,6 +405,15 @@ def _closing_paren(command, start):
                 continue
             if char == '"':
                 double = False
+        elif char == "\\" and index + 1 < len(command):
+            # An unquoted `\)` is a literal paren to bash, so counting it closed
+            # the substitution early and hid the rest of it in the outer token:
+            # `git log "$(printf \); git push origin +HEAD:main)"`. The escape
+            # was handled inside double quotes and nowhere else. Raised in
+            # review; the bash behaviour measured — `printf` receives the paren
+            # and the push runs.
+            index += 2
+            continue
         elif char == "'":
             single = True
         elif char == '"':
@@ -413,6 +430,54 @@ def _closing_paren(command, start):
                 return index
         index += 1
     return None
+
+
+# A shell invoked with `-c` runs its argument as a command line, and `eval` runs
+# the concatenation of its own. Both hand the guard a command it must read as
+# one rather than as data.
+EVALUATORS = {"bash", "sh", "dash", "zsh", "ksh"}
+
+# `-c`, and the bundles that carry it — `bash -xc <script>`. A long option is
+# never the script introducer, so `--` forms are left alone.
+SCRIPT_FLAG = re.compile(r"^-[A-Za-z]*c$")
+
+
+def _argv_after(tokens, index):
+    """The argv slice following `tokens[index]`, up to the next separator."""
+    argv = []
+    for following in tokens[index + 1:]:
+        if following in SEPARATORS:
+            break
+        argv.append(following)
+    return argv
+
+
+def evaluated_scripts(tokens):
+    """Every token a shell evaluator in `tokens` will execute as a command.
+
+    **`shlex` hands a quoted script back as one data token**, exactly as it does
+    a command substitution — so `git log "$(bash -c 'git push origin
+    +HEAD:main')"` reached the inner pass as `bash`, `-c` and one opaque string,
+    the segment scan found no `git`, and the push ran. Raised in review;
+    verified allowed, and the bash behaviour measured with a `git` shim.
+
+    **The bound: a script this hook can READ.** `bash script.sh` runs a file,
+    and a hook is handed an argv rather than a filesystem — that is outside what
+    any argv guard can see, and it is the same shape as the parameter-expansion
+    residual rather than a new one.
+    """
+    for index, token in enumerate(tokens):
+        name = token.rsplit("/", 1)[-1]
+        if name in EVALUATORS:
+            argv = _argv_after(tokens, index)
+            for position, element in enumerate(argv):
+                if SCRIPT_FLAG.match(element) and position + 1 < len(argv):
+                    yield argv[position + 1]
+                    break
+        elif name == "eval":
+            argv = _argv_after(tokens, index)
+            if argv:
+                yield " ".join(argv)
 
 
 def git_segments(tokens):
@@ -527,11 +592,23 @@ def push_offence(segment):
     return None
 
 
-def offence(command):
+# Substitutions and evaluators both recurse, and a crafted nest of either would
+# otherwise reach Python's own limit — where the hook dies with a traceback
+# rather than a verdict, which is the one direction a guard must not fail in.
+MAX_NESTING = 24
+
+
+def offence(command, depth=0):
     """The reason to refuse `command`, or None to allow it."""
+    if depth > MAX_NESTING:
+        return (
+            "this command nests shells or substitutions more deeply than the "
+            "guard will follow; refusing rather than reading part of it."
+        )
+
     for text, quotes in expandable_regions(command):
         for inner in substitutions(text, quotes=quotes):
-            refusal = offence(inner)
+            refusal = offence(inner, depth + 1)
             if refusal is not None:
                 return f"inside a command substitution: {refusal}"
 
@@ -565,6 +642,11 @@ def offence(command):
                     "check the settings deny already performs."
                 )
         return None
+
+    for script in evaluated_scripts(tokens):
+        refusal = offence(script, depth + 1)
+        if refusal is not None:
+            return f"inside a shell evaluator: {refusal}"
 
     for segment in git_segments(tokens):
         refusal = push_offence(segment)
