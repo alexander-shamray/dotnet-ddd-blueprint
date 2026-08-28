@@ -3985,6 +3985,16 @@ class TheGitArgvGuard(unittest.TestCase):
             'git log "$(printf \\); git push origin +HEAD:main)"',
             'git commit -m "he said \\"go\\""',
             'git log "a\\$b"',
+            # The UNQUOTED backslash arrived later, with the word-start
+            # tracking, and it is the same property one state over: the
+            # scanner consumes the escape, so it has to hand BOTH characters
+            # back or it edits the command again — which is the defect this
+            # case exists for, in its other spelling.
+            'git log --grep=foo\\ #bar',
+            'git log \\$(x)',
+            "git log 'a'#b",
+            'git log a\\\\b',
+            'git log \\',
         ):
             with self.subTest(command=command):
                 self.assertEqual(command, guard.strip_comments(command))
@@ -4447,6 +4457,22 @@ class TheGitArgvGuard(unittest.TestCase):
         # again.
         self.assertRefused(
             f"git status # note{NEWLINE}git push origin +HEAD:main")
+
+        # The edges of "where does a word begin", each checked against what
+        # bash does rather than against what reads naturally. A CLOSING quote
+        # does not end a word — `'a'#b` is the single word `a#b` — so a hash
+        # after one is not a comment, and what follows the `;` is a command.
+        self.assertRefused("git log 'a'#b; git push origin +HEAD:main")
+
+        # Every metacharacter does begin one, whitespace included, and a hash
+        # at position zero begins the first word there is.
+        for prefix in ("git log; ( ", "git status \t", "git status  ", ""):
+            with self.subTest(prefix=prefix):
+                self.assertAdmitted(f"{prefix}# git push origin +HEAD:main")
+
+        # A trailing backslash has nothing to escape and must not read past
+        # the end of the string.
+        self.assertAdmitted("git log \\")
 
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
