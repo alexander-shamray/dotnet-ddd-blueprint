@@ -152,10 +152,12 @@ does not: `deploy/helm/README.md`, since that gate reaches no cluster, and
 `deploy/observability/README.md`, since that one reaches no Prometheus and does
 not validate rule syntax.
 
-**Running a gate is the other half, and the block above is only the suites.**
-`ci.yml` tests each gate and then runs it — the pattern every gate here
-follows — so a green suite says the gate works and not that this checkout
-passes it. The runs the block above does not already carry:
+**Running a gate is the other half, and the block above carries some of those
+runs but not all of them.** Each gate is tested and then run — the pattern
+every gate here follows, across `ci.yml` and the path-filtered workflows
+beside it — so a green suite says the gate works and not that this checkout
+passes it. The block above already runs the observability gate, the broker ACL
+and the secret scan; these are the gate invocations it does **not** carry:
 
 ```bash
 (cd .github/licence-gate && py -3.12 licence_gate.py)    # from its own directory

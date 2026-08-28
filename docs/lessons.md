@@ -19,6 +19,15 @@ reader greps for. And one **self-reference** was rebased: the string-match entry
 cited "the C# style section below", which did not travel and would otherwise now
 point at nothing. Not one argument was shortened, and no entry was dropped.
 
+**Three lines were also rewrapped**, on `pr-decision-log.md`'s precedent — it
+reflowed one 136-column line on the way out and said so. Three entries here ran
+to 116, 91 and 81 columns against the 80 this repository wraps prose at; they
+were over on `main` too, inside `CLAUDE.md`, where nothing had caught them.
+Rewrapping moves whitespace and no words, so the verbatim claim above survives
+it — but it is declared rather than left to be discovered, because "verbatim"
+and "I reflowed three lines" are exactly the pair a reader deserves to be told
+about rather than to diff for.
+
 **Read this before working in an area an entry covers**, exactly as you would
 read the decision log. `CLAUDE.md` keeps the rules an agent needs in order to
 *act*; this file keeps the measurements those rules were bought with. Where one
@@ -408,11 +417,12 @@ own line rather than sending a reader to a file that does not hold it.
   the ledger settles its election *after* posting, so a failed read there leaves
   a slot spent with nothing launched. That case is kept deliberately, because
   after a failed read the state is what is not known; the point is that a claim
-  has to be the ordering the code guarantees, not the tidier one beside it. **And one operation is not enough if the
-  operation can be aimed elsewhere** — the first version of that fix took the
-  pull request number as an argument while cloning the *current branch*, so a
-  typo or a substituted number spent someone else's slot and left this branch's
-  cap re-armed, with both halves looking correct in isolation. Resolve the
+  has to be the ordering the code guarantees, not the tidier one beside it.
+  **And one operation is not enough if the operation can be aimed
+  elsewhere** — the first version of that fix took the pull request number as
+  an argument while cloning the *current branch*, so a typo or a substituted
+  number spent someone else's slot and left this branch's cap re-armed, with
+  both halves looking correct in isolation. Resolve the
   subject from the thing being acted on rather than accepting it:
   `gh pr list --head "$branch"` beside the clone of `$branch`, the same way
   `gh-label-ensure.sh` resolves the repository from the checkout.
@@ -626,11 +636,12 @@ own line rather than sending a reader to a file that does not hold it.
   worth knowing why rather than re-deriving it: a late `StockReserved` can only
   reach `Compensating` through the `AwaitingStock` door, which never sent an
   `AuthorisePayment`, so no verdict is ever outstanding on the one path this
-  argument is about.) **Two open questions were being weighed independently and one decided
-  the other.** Before ranking options by cost, ask whether each can still run
-  once its neighbours are settled. **It has now happened twice, which is what
-  makes it a rule rather than an anecdote**: #141 ranked "make `ReleaseStock`
-  the only trigger" as its cleanest option while #143 was open beside it, and
+  argument is about.) **Two open questions were being weighed independently and
+  one decided the other.** Before ranking options by cost, ask whether each can
+  still run once its neighbours are settled. **It has now happened twice, which
+  is what makes it a rule rather than an anecdote**: #141 ranked "make
+  `ReleaseStock` the only trigger" as its cleanest option while #143 was open
+  beside it, and
   answering #143 deleted that option — the second producer #141 would remove
   is the only evidence #143's fix reads.
 - **Where two mechanisms answer one question and only one of them is editable,
@@ -752,8 +763,8 @@ own line rather than sending a reader to a file that does not hold it.
   tidier story is the one to distrust.** The same change also registered a
   background writer, and taking that out of the test host was right on its own
   merits — a writer nothing drives makes "the pass never happened" and "the
-  pass spared the row" the same green. It was then written up as the fix, and the
-  bounded retry was deleted on the sentence *there is no second deleter to
+  pass spared the row" the same green. It was then written up as the fix, and
+  the bounded retry was deleted on the sentence *there is no second deleter to
   race*. **A deadlock needs two transactions with opposing lock order, not two
   deleters.** It reproduced with the writer gone, on the second of six runs.
   Both changes are right and only one of them was the fix — and the sentence
