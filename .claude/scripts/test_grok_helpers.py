@@ -4370,6 +4370,53 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("echo git push origin +HEAD:main")
         self.assertAdmitted("echo bash -c 'git push origin +HEAD:main'")
 
+    def test_every_real_operator_ends_a_run(self):
+        # The boundary predicate from both directions, because a predicate that
+        # has only been checked on the case that motivated it is the shape this
+        # branch keeps paying for. Every one of these is a genuine operator and
+        # every one leaves a printer's run.
+        for command in (
+            "echo hi & git push origin +HEAD:main",
+            "echo hi > f && git push origin +HEAD:main",
+            "echo hi 2>&1; git push origin +HEAD:main",
+            "echo hi|git push origin +HEAD:main",
+            "echo hi&&git push origin +HEAD:main",
+            "echo a;;git push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the other end: ordinary git carrying punctuation in a VALUE is
+        # not carrying an operator. `--format='%h|%s'` is the one that would
+        # break first if the predicate ever ran over characters rather than
+        # over whole tokens.
+        for command in (
+            "git log --format='%h|%s' -5",
+            "git log -- .",
+            "git diff HEAD~1..HEAD",
+            "git commit -m 'fix: a) thing'",
+            "git log --grep='&&'",
+            "git log --pretty=format:'%h %s'",
+            "git log 2>/dev/null",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_a_quoted_operator_is_refused_and_that_is_the_only_answer(self):
+        # **A limit, pinned as a passing test rather than described.**
+        # `shlex` discards quoting, so `echo '&&' git push origin +HEAD:main`
+        # and `echo && git push origin +HEAD:main` produce the SAME token list
+        # — and the second runs the push. The guard cannot tell them apart and
+        # refuses both.
+        #
+        # That is a false positive on the first, and there is no version of
+        # this that is not: the information needed to separate them is gone
+        # before the run splitting happens. Refusing is the only answer that is
+        # wrong in the safe direction. Stated here so the next reader does not
+        # take it for a bug and "fix" it by admitting both.
+        self.assertRefused("echo '&&' git push origin +HEAD:main")
+        self.assertRefused("echo '|' git push origin +HEAD:main")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an
