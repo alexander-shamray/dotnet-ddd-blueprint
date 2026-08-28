@@ -687,7 +687,7 @@ its own figure for the same reason. **The owner is now a different file,
 which makes the point rather than weakening it**: a count restated across a
 file boundary goes stale on the far side's clock and reads as authoritative on
 this one. That first one: `py -3.12 -m unittest` in
-`tools/new-service` runs 99, and CI has a `scaffold` job for them beside
+`tools/new-service` runs 102, and CI has a `scaffold` job for them beside
 `licence-gate` — plus `scaffold-build`, which compiles what they only read.
 
 **§4.2's architecture rules are a build failure, not a review comment.** Each
